@@ -39,15 +39,19 @@ Device and public refresh codes are single-use. Once an exchange succeeds,
 retain the new token pair in relay memory if local persistence fails, then retry
 storage without repeating the exchange with the consumed code. Publish the new
 connection only after persistence. A process restart before successful storage
-requires reconnection. Separate pending approval attempts from the active
-connection, so cancelled or late responses cannot replace a working setup or
-revive a disconnected connection.
+resumes the refresh with the staged pair (see the rotation contract below).
+Separate pending approval attempts from the active connection, so cancelled or
+late responses cannot replace a working setup or revive a disconnected
+connection.
 
 Polling intervals, approval expiry, refresh scheduling and backoff use monotonic
-time. Honor pending/slow-down responses; Twitch's documented pending payload is
-HTTP 400 with `message: authorization_pending`. Accept a token success only after
-validating its complete shape and identity. Expose fixed safe diagnostics rather
-than raw OAuth error bodies.
+time; token expiry additionally honors the wall clock (see Timing). Honor
+pending/slow-down responses; Twitch's documented pending payload is HTTP 400
+with `message: authorization_pending`. An ambiguous device-code exchange failure
+(5xx, timeout, reset, malformed or lost body) keeps polling the same code until
+Twitch returns tokens or rejects the code, or the code expires. Accept a token
+success only after validating its complete shape and identity. Expose fixed safe
+diagnostics rather than raw OAuth error bodies.
 
 ## Metric semantics
 
@@ -93,27 +97,51 @@ reset manual goals or control capture, chat, scenes, audio or feed ingest.
 
 ## Credential rotation and restart contract
 
-Before exchanging an active one-use refresh token, atomically persist a private
-`refreshing` phase bound to the public connection identity. If this write fails,
-do not exchange. If exchange succeeds but saving the new pair fails, keep the new
-pair in RAM and retry local persistence only. Rolling back a failed public commit
-must restore the `refreshing` phase, never an old ready consumed token. A restarted
-process encountering this phase requires authorization again. A lost exchange
-response is ambiguous and likewise requires reconnecting. Generation checks drop
-late responses after disconnect, cancellation or replacement.
+Producer decision (#954): recover automatically wherever Twitch allows it, so
+the producer acts only when Twitch itself requires a new approval. This replaces
+the earlier rule that an ambiguous exchange or a restart mid-refresh demands
+reconnecting. Retrying a possibly consumed one-use refresh token cannot make
+anything worse: Twitch either accepts it (it was never processed) or rejects it
+with HTTP 400, which ends in exactly the reconnect the old rule required up
+front. The token is only ever sent to Twitch's fixed token endpoint from the
+producer's machine, so a retry exposes nothing new.
 
-Exchange failures are classified by whether Twitch can have consumed the token:
+Before exchanging an active one-use refresh token, atomically persist a private
+`refreshing` phase bound to the public connection identity, keeping the pair in
+the same private file. If this write fails, do not exchange. If exchange succeeds
+but saving the new pair fails, keep the new pair in RAM and retry local
+persistence only. Rolling back a failed public commit restores the `refreshing`
+phase with its pair, never a `ready` phase. A restarted process encountering a
+`refreshing` phase with a valid pair resumes the rotation without staging again
+and without serving metrics from the unvalidated old access token; a
+`refreshing` file without a usable pair (the earlier format) still requires
+authorization again. Persisting a rotated pair replaces the staged file.
+Generation checks drop late responses after disconnect, cancellation or
+replacement.
+
+Exchange failures are classified by whether Twitch answered definitively:
 
 | Failure | Token consumed? | Handling |
 | --- | --- | --- |
 | HTTP 429 (`rate_limit`) | No, rejected before processing | Keep the pair, stay `refreshing`, retry after Retry-After |
 | DNS failure or refused TCP connect (`unsent`) | No, no request byte was sent | Keep the pair, stay `refreshing`, retry after 60 s |
-| 5xx, timeout, reset, malformed or lost body | Possibly | Reconnect |
-| 400/401/403 | Rejected or revoked | Reconnect |
+| 5xx, timeout, reset, malformed or lost body, other non-auth failure | Possibly | Keep the pair, stay `refreshing`, retry the same token after the provider delay or 60 s (bounded 5..900 s) |
+| 400/401/403 (`auth`) | Rejected, spent or revoked | Reconnect: only a new device approval helps |
 
-While a retry waits, the unspent pair keeps serving metrics until its own expiry;
-the durable `refreshing` phase is written once and not staged again, so a restart
-during the wait still requires reconnecting.
+After a successful exchange, a non-transient rejection of the fresh access token
+(or its expiry before validation or saving) rotates again with the fresh, unspent
+refresh token. A validation that names another account or client is an identity
+change and requires reconnecting; a malformed validation body is retried.
+
+While a retry waits, the validated old access token keeps serving metrics until
+its own expiry, unless Twitch rejects it (401), which stops polling until the
+rotation completes. The durable `refreshing` phase is written once per rotation
+and not staged again; a restart during the wait resumes the rotation.
+
+Every remaining manual step names the Control Center action: open **Twitch
+connection**, press **Start Twitch authorization**, approve the code on Twitch,
+then **Activate verified channel** (`audience_twitch.reauthorize`). It affects
+only Twitch values; other audience widgets keep running.
 
 A separate temporary-file experiment exercised phase-before-exchange, failed
 public commit/rollback, no exchange after a failed phase write, RAM-only persistence
@@ -127,14 +155,20 @@ session, including when no widget needs provider metrics. A ready connection
 rotates proactively shortly before its local expiry (five minutes, or a tenth of
 the issued lifetime for short tokens). Routine rollover keeps cached samples, so
 the shared stale hold bridges the brief polling pause and widgets on air do not
-blank. Twitch's reactive 401 guidance remains the fallback for refresh; a 401
-before local expiry still means a revoked session and requires reconnecting.
-Distinguish expired authorization from revoked sessions and metric-specific
-permission failures. Helix 429s pause both metrics (one rate-limit bucket); other
+blank. Following Twitch's reactive 401 guidance, a 401 on a metric or validation
+triggers a refresh, before or after local expiry, and the rejected metric call
+is retried once with the new token in the same worker tick. Only a rejected
+refresh means a revoked session and requires reconnecting. Distinguish expired
+authorization from revoked sessions and metric-specific permission failures. Helix 429s pause both metrics (one rate-limit bucket); other
 transient metric failures back off only the failing metric, and a later success
 clears that metric's status error. Use monotonic deadlines for polling,
 approval expiry, validation and backoff, and include response/RPC/lock time in
-sample age. No failed read or refresh can extend the original cache deadline.
+sample age. Token expiry is the earlier of the monotonic and the wall-clock
+deadline (`expiresAtWall`), applied to local expiry, the proactive rotation lead
+and rotated-pair checks: CLOCK_MONOTONIC stops during system sleep on
+macOS/Linux, so after a wake only the wall clock shows that a token expired. A
+wall-clock jump can only make a rotation earlier. No failed read or refresh can
+extend the original cache deadline.
 
 The requested scope is only `channel:read:subscriptions`. Granted validation
 scopes and the authenticated user ID determine actual subscription capability.
@@ -166,7 +200,10 @@ selection, documented request forms, scope/count semantics, bounded transport,
 redirect refusal and safe rate-limit diagnostics. Device/rotation/storage tests
 exercise one-use exchanges, cancellation, expiry, permission and phase contracts.
 `test_audience_twitch_connection.py` adds real-file restart, rollback, refresh
-backoff, cache age, public bundle import and concurrent generation fixtures.
+backoff, cache age, public bundle import and concurrent generation fixtures, plus
+the #954 recovery paths: 401 before expiry refreshes and retries, a rejected
+refresh reconnects, wall-clock jumps (sleep) rotate or expire while monotonic
+time stands still, and a restart resumes a staged refresh.
 
 `test_audience_twitch_http.py` uses actual loopback HTTP and valid Console roles;
 `test_audience_twitch_ui.py` checks producer callbacks, origin refusal and cached

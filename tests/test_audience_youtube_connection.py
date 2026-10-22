@@ -373,10 +373,21 @@ def t_resource_denial_is_independent_but_auth_failure_invalidates_all_metrics():
         clock.advance(30)
         service.tick()
         assert not any(metric(cache, name)["available"] for name in connection.METRICS)
+        error = service.status()["error"]
+        assert "Verify selected targets" in error and "Activate verified targets" in error, (
+            "A rejected API key does not name the Control Center buttons"
+        )
         calls = len(api.calls)
-        clock.advance(900)
+        clock.advance(899)
         service.tick()
-        assert len(api.calls) == calls
+        assert len(api.calls) == calls, "A rejected API key was retried too soon"
+        # The producer fixes the key's restrictions in Google Cloud: the slow
+        # re-probe recovers without any racecast action.
+        del api.failures["videos"]
+        clock.advance(1)
+        service.tick()
+        assert len(api.calls) > calls, "A rejected API key was never re-checked"
+        assert metric(cache, "likes")["available"] and not service.status()["error"]
 
 
 def t_poll_disconnect_fences_late_success_and_restart_uses_only_paired_credentials():

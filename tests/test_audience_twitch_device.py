@@ -48,6 +48,8 @@ class API:
                 raise tw.APIError(answer, "fixture private error", True, 5)
             if answer == "lost":
                 raise TimeoutError(PRIVATE)
+            if answer == "denied":  # Twitch 400: spent, denied or unknown code.
+                raise tw.APIError("denied", PRIVATE)
             return {
                 "access_token": ACCESS,
                 "refresh_token": REFRESH,
@@ -202,20 +204,44 @@ def t_cancel_during_exchange_discards_late_credentials_before_validation():
     )
 
 
-def t_expired_or_ambiguous_device_exchange_is_not_polled_again():
+def t_expired_device_exchange_is_not_polled_again():
     attempt, api, now = fixture()
     attempt.step()
     now[0] = 1800
     attempt.step()
     assert attempt.status()["phase"] == "expired" and len(api.calls) == 1
+
+
+def t_ambiguous_device_exchange_polls_the_same_code_until_twitch_answers():
     attempt, api, now = fixture()
-    api.answers = ["lost"]
+    api.answers = ["lost", "approved"]
     attempt.step()
     now[0] = 5
     attempt.step()
-    assert attempt.status()["phase"] == "failed" and PRIVATE not in str(
-        attempt.status()
+    status = attempt.status()
+    assert status["phase"] == "pending", (
+        "A lost device exchange response ended the approval instead of polling again"
     )
+    assert "retry" in status["error"].lower() and PRIVATE not in str(status)
+    now[0] = 9
+    attempt.step()
+    assert len(api.calls) == 2, "Retry ignored the polling interval"
+    now[0] = 10
+    attempt.step()
+    attempt.step()
+    attempt.step()
+    assert attempt.status()["phase"] == "verified", attempt.status()
+
+
+def t_definitive_device_exchange_rejection_fails_the_attempt():
+    attempt, api, now = fixture()
+    api.answers = ["denied"]
+    attempt.step()
+    now[0] = 5
+    attempt.step()
+    status = attempt.status()
+    assert status["phase"] == "failed" and PRIVATE not in str(status)
+    assert "Start Twitch authorization" in status["error"], status["error"]
     now[0] = 10
     attempt.step()
     assert len(api.calls) == 2

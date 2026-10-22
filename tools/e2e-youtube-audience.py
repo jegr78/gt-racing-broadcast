@@ -82,8 +82,10 @@ def main():
                 patch.object(
                     m,
                     "_audience_provider_client",
-                    side_effect=lambda profile: audience_proxy.Client(
-                        profile, relay.server_address[1]
+                    side_effect=lambda profile, provider="youtube": (
+                        audience_proxy.Client(
+                            profile, relay.server_address[1], provider=provider
+                        )
                     ),
                 ),
                 patch.object(http_util, "open_url", side_effect=local_only),

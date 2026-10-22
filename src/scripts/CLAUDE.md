@@ -292,12 +292,21 @@ shared cache and provider admin/proxy. `audience_twitch_device.Attempt` keeps
 public approval and private device codes separate and requires explicit
 activation after account/target validation. `audience_twitch_refresh.Rotation`
 serializes one-use exchanges; `audience_twitch_storage.CredentialFiles` atomically
-writes a connection-bound refreshing phase before exchange, removing old saved
-tokens. Failed persistence retries the new RAM pair without repeating exchange;
-interrupted/lost exchanges require reconnect, while refused (429) or unsent
-(DNS/refused connect) exchanges keep the unspent pair and retry. Ready tokens
-rotate proactively before expiry without blanking cached samples. Validation is
-startup/hourly even when unused; all scheduling, expiry and backoff use monotonic time. Viewers need
+writes a connection-bound refreshing phase (keeping the pair) before exchange.
+Recovery is automatic wherever Twitch allows it (#954): a 401 on a metric or
+validation triggers a refresh and one retry of the call; every exchange failure
+except a definitive refresh rejection (`auth`: 400/401/403) retries the SAME
+refresh token with bounded backoff; a restart mid-refresh resumes the staged
+pair; a rejected fresh token rotates again with its unspent refresh token.
+Reconnect remains only for a rejected refresh token, an identity change or a
+staged file without a pair, and its text names the Control Center buttons
+(`tw.reauthorize`). Failed persistence retries the new RAM pair without
+repeating exchange. Ready tokens rotate proactively before expiry without
+blanking cached samples. Validation is startup/hourly even when unused;
+scheduling and backoff use monotonic time, token expiry is the earlier of the
+monotonic and wall-clock deadline (monotonic stops in macOS/Linux sleep). The
+device-code poll retries ambiguous exchange failures until the code expires.
+YouTube re-checks a rejected API key every 15 minutes. Viewers need
 valid authorization; subscriptions additionally require the granted scope and
 selected broadcaster ownership. Count subscriptions.total, never page length or
 points. Source identities contain canonical channel ID/metric only. Provider

@@ -11,6 +11,16 @@ from audience_widgets import MetricCache, Sample, Store, normalize
 import audience_youtube as yt
 
 METRICS = ("likes", "viewers", "subscribers")
+# A rejected API key (invalid, restricted, API not enabled) is re-checked this
+# often, so a fix made in Google Cloud recovers without any racecast action.
+AUTH_RECHECK = 900
+# The one manual step: only the producer can create or enter an API key, and
+# the key never travels with a profile.
+REKEY = (
+    "open YouTube connection in the Control Center, enter the API key, press "
+    "Verify selected targets, then press Activate verified targets. Other "
+    "audience widgets keep running"
+)
 
 
 def _targets(data):
@@ -84,7 +94,7 @@ class Service:
         )
         self.storage_error = ""
         self.due = {"videos": 0, "channels": 0}
-        self.backoff, self.auth_failed = 0, False
+        self.backoff = 0
         public = self.files.read_public()
         if public and (
             public.get("enabled") is True
@@ -94,7 +104,10 @@ class Service:
             try:
                 self.targets = _targets(public)
                 if public.get("enabled") is True:
-                    self.error = "Enter a local API key to reconnect these imported or unpaired targets"
+                    self.error = (
+                        "No local API key for these imported or unpaired targets: "
+                        + REKEY
+                    )
             except ValueError:
                 self.error = "Saved targets are invalid; select them again"
         loaded = self.files.load()
@@ -103,7 +116,7 @@ class Service:
                 targets = _targets(loaded[0])
                 key = yt.api_key(loaded[1].get("key"))
             except ValueError:
-                self.error = "Saved connection is invalid; reconnect"
+                self.error = "Saved YouTube connection is invalid: " + REKEY
             else:
                 self.targets, self.key, self.connected = targets, key, True
                 self.error = ""
@@ -217,7 +230,7 @@ class Service:
                     raise
                 self.storage_error = ""
                 self.targets, self.key = self.setup["targets"], self.setup["key"]
-                self.connected, self.auth_failed = True, False
+                self.connected = True
                 self.generation += 1
                 self.setup_generation += 1
                 self.setup = None
@@ -342,7 +355,13 @@ class Service:
             if failure:
                 self.error = str(failure)
                 if failure.code == "auth":
-                    self.auth_failed = True
+                    # Pause every request with this key, then re-check it.
+                    self.error = (
+                        str(failure)
+                        + ". Rechecked every 15 minutes; for a new key, "
+                        + REKEY
+                    )
+                    self.backoff = max(self.backoff, self.monotonic() + AUTH_RECHECK)
                     self._invalidate(self.error)
                 elif failure.transient:
                     self.backoff = max(
@@ -411,7 +430,6 @@ class Service:
                     if (
                         self.stop.is_set()
                         or not self.connected
-                        or self.auth_failed
                         or not target
                         or not wanted.intersection(demand)
                         or now < max(self.backoff, self.due[resource])

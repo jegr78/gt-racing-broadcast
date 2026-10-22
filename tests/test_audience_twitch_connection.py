@@ -36,6 +36,10 @@ class Clock:
         self.wall += seconds
         self.ticks += seconds
 
+    def sleep(self, seconds):
+        # System sleep: wall time moves, CLOCK_MONOTONIC (macOS/Linux) does not.
+        self.wall += seconds
+
 
 class API:
     def __init__(self):
@@ -51,6 +55,7 @@ class API:
         self.block = ""
         self.entered = threading.Event()
         self.release = threading.Event()
+        self.consumed = set()
 
     def __call__(self, operation, client, **values):
         assert client == CLIENT
@@ -78,7 +83,10 @@ class API:
                 "expires_in": self.expires,
             }
         if operation == "refresh":
-            assert values["refresh"] == REFRESH, "Consumed refresh token was reused"
+            # Twitch answers a spent one-use refresh token with HTTP 400.
+            if values["refresh"] in self.consumed:
+                raise tw.APIError("auth", "Fixture consumed refresh token")
+            self.consumed.add(values["refresh"])
             return {
                 "access_token": NEWACCESS,
                 "refresh_token": NEWREFRESH,
@@ -331,7 +339,7 @@ def t_startup_validates_before_metrics_and_imported_or_interrupted_credentials_d
             other.close()
 
 
-def t_revoked_unexpired_token_requires_reconnect_while_scope_changes_preserve_viewers():
+def t_revoked_grant_reconnects_after_the_refresh_is_rejected_while_scope_changes_preserve_viewers():
     with fixture() as (service, clock, api, _cache, _definitions):
         connect(service, clock)
         service.tick()
@@ -343,15 +351,15 @@ def t_revoked_unexpired_token_requires_reconnect_while_scope_changes_preserve_vi
             and not metric(service, "subscriptions")["available"]
         )
         api.failures["validate"] = tw.APIError("auth", "fixture-private-revoked")
+        api.failures["refresh"] = tw.APIError("auth", "fixture-private-revoked")
         service.validation_due = 0
         service.tick()
-        assert (
-            service.status()["phase"] == "reconnect"
-            and not service.status()["connected"]
-        )
+        status = service.status()
+        assert status["phase"] == "reconnect" and not status["connected"], status
+        assert "Start Twitch authorization" in status["error"], status["error"]
         assert not metric(service, "viewers")["available"]
-        assert not any(call[0] == "refresh" for call in api.calls), (
-            "Revoked unexpired credentials were refreshed"
+        assert len([call for call in api.calls if call[0] == "refresh"]) == 1, (
+            "A 401 before local expiry did not try exactly one refresh"
         )
 
 
@@ -392,7 +400,7 @@ def t_refresh_stages_before_exchange_and_disk_retry_never_reuses_consumed_token(
             if operation == "refresh":
                 state = json.loads(service.files.secret.read_text())["credentials"]
                 stages.append(state)
-                assert state == {"phase": "refreshing"}, state
+                assert state["phase"] == "refreshing", state
             return original_fetch(operation, client, **values)
 
         service.fetch = fetch
@@ -409,11 +417,12 @@ def t_refresh_stages_before_exchange_and_disk_retry_never_reuses_consumed_token(
         service.tick()
         service.tick()
         assert (
-            stages == [{"phase": "refreshing"}]
+            [stage["phase"] for stage in stages] == ["refreshing"]
             and service.status()["phase"] == "storage_error"
         ), service.status()
-        assert service.files.load()[1] == {"phase": "refreshing"}, (
-            "Rollback revived the consumed token"
+        staged = service.files.load()[1]
+        assert staged["phase"] == "refreshing" and staged["pair"]["refresh"] == REFRESH, (
+            "Rollback did not restore the staged refreshing phase with its pair"
         )
         restarted = connection.Service(
             service.files.public.parent,
@@ -426,16 +435,17 @@ def t_refresh_stages_before_exchange_and_disk_retry_never_reuses_consumed_token(
         try:
             before = len(api.calls)
             restarted.tick()
-            assert (
-                len(api.calls) == before and restarted.status()["phase"] == "reconnect"
-            )
+            # The restored pair's token was already spent: Twitch rejects the
+            # resumed exchange definitively and only then is reconnect needed.
+            assert [call[0] for call in api.calls[before:]] == ["refresh"]
+            assert restarted.status()["phase"] == "reconnect"
         finally:
             restarted.close()
         service.files.writer = original_writer
         clock.advance(5)
         service.tick()
         assert service.status()["connected"] and service.pair["refresh"] == NEWREFRESH
-        assert len([call for call in api.calls if call[0] == "refresh"]) == 1, (
+        assert len([call for call in api.calls if call[0] == "refresh"]) == 2, (
             "Storage retry repeated consumed refresh"
         )
         assert service.files.load()[1]["pair"]["refresh"] == NEWREFRESH
@@ -571,21 +581,22 @@ def t_profile_bundle_contains_selection_and_baseline_without_local_credentials()
                 other.close()
 
 
-def t_metric_401_revalidates_immediately_without_refreshing_revoked_unexpired_tokens():
+def t_metric_401_revalidates_and_reconnects_only_after_the_refresh_is_rejected():
     with fixture() as (service, clock, api, cache, _definitions):
         connect(service, clock)
         api.failures["viewers"] = tw.APIError("auth", "fixture-private")
         api.failures["validate"] = tw.APIError("auth", "fixture-private")
+        api.failures["refresh"] = tw.APIError("auth", "fixture-private")
         before = len(api.calls)
         service.tick()
         assert service.status()["phase"] == "reconnect", (
             "Metric authorization failure was not immediately revalidated"
         )
-        assert not [
-            call
-            for call in api.calls[before:]
-            if call[0] in ("refresh", "subscriptions")
-        ]
+        assert [call[0] for call in api.calls[before:]] == [
+            "viewers",
+            "validate",
+            "refresh",
+        ], api.calls[before:]
         assert all(
             cache.read("twitch", name).availability == "unavailable"
             for name in connection.METRICS
@@ -633,13 +644,12 @@ def t_disconnect_during_refresh_cannot_recreate_private_files_after_exchange_ret
         connect(service, clock)
         api.expires = 0
         clock.advance(10)
-        service.tick()
         api.block = "refresh"
         worker = threading.Thread(target=service.tick)
         worker.start()
         try:
             assert api.entered.wait(2)
-            assert service.files.load()[1] == {"phase": "refreshing"}
+            assert service.files.load()[1]["phase"] == "refreshing"
             command(service, "disconnect")
             assert not service.files.secret.exists()
         finally:
@@ -737,7 +747,7 @@ def t_token_expiring_during_validation_can_refresh_after_reactive_401():
         service.fetch = delayed
         service.validation_due = 0
         service.tick()
-        assert service.status()["phase"] == "refreshing", (
+        assert service.status()["phase"] != "reconnect", (
             "Expiry during validation incorrectly required manual reconnection"
         )
         service.tick()
@@ -822,9 +832,18 @@ def t_rate_limited_refresh_retries_after_retry_after_with_the_unconsumed_token()
         clock.advance(1)
         service.tick()
         service.tick()
-        assert service.status()["phase"] == "reconnect", (
-            "An ambiguous lost refresh response reused a possibly consumed token"
+        status = service.status()
+        assert status["phase"] == "refreshing" and status["connected"], (
+            "An ambiguous lost refresh response required reconnect instead of retrying"
         )
+        del api.failures["refresh"]
+        clock.advance(60)
+        service.tick()
+        assert service.status()["phase"] == "ready"
+        assert [c[1]["refresh"] for c in api.calls if c[0] == "refresh"] == [
+            REFRESH,
+            REFRESH,
+        ], "The retry did not reuse the same refresh token"
 
 
 def t_metric_failure_message_clears_after_a_successful_poll():
@@ -857,6 +876,174 @@ def t_metric_backoff_is_independent_per_metric():
             "A subscriptions failure paused viewer polling"
         )
         assert metric(service, "viewers")["availability"] == "available"
+
+
+def _reject_old_access(service, api):
+    """Twitch revokes the old access token early; everything else works."""
+    original = service.fetch
+
+    def fetch(operation, client, **values):
+        if values.get("access") == ACCESS and operation != "refresh":
+            api.calls.append((operation, dict(values)))
+            raise tw.APIError("auth", "fixture-private-revoked-access")
+        return original(operation, client, **values)
+
+    service.fetch = fetch
+
+
+def t_metric_401_before_expiry_refreshes_and_retries_the_call_without_reconnect():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        _reject_old_access(service, api)
+        clock.advance(30)
+        before = len(api.calls)
+        service.tick()
+        status = service.status()
+        assert status["phase"] == "ready" and status["connected"], status
+        assert not status["error"], status["error"]
+        calls = [
+            (call[0], call[1].get("access") or call[1].get("refresh"))
+            for call in api.calls[before:]
+        ]
+        assert calls[:4] == [
+            ("viewers", ACCESS),
+            ("validate", ACCESS),
+            ("refresh", REFRESH),
+            ("validate", NEWACCESS),
+        ], calls
+        assert ("viewers", NEWACCESS) in calls, (
+            "The rejected metric call was not retried with the refreshed token"
+        )
+        assert metric(service, "viewers")["available"]
+        assert service.files.load()[1]["pair"]["refresh"] == NEWREFRESH
+
+
+def t_wall_clock_jump_triggers_proactive_rotation_while_monotonic_stood_still():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        clock.sleep(14400 - 100)  # Asleep; only wall time moved.
+        service.tick()
+        assert [c[1]["refresh"] for c in api.calls if c[0] == "refresh"] == [
+            REFRESH
+        ], "Wake from sleep did not rotate the token that is near its wall expiry"
+        assert service.status()["phase"] == "ready"
+        assert service.pair["refresh"] == NEWREFRESH
+
+
+def t_wall_clock_jump_past_expiry_stops_metrics_before_any_call():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        clock.sleep(14400 + 10)
+        assert not service.status()["connected"], (
+            "A token past its wall-clock expiry still looked valid after sleep"
+        )
+        assert not metric(service, "viewers")["available"]
+        api.failures["refresh"] = tw.APIError("unsent", "fixture-private", True, 60)
+        before = len(api.calls)
+        service.tick()
+        assert [call[0] for call in api.calls[before:]] == ["refresh"], (
+            "An expired token was used for a metric call after sleep"
+        )
+        assert not service.status()["connected"]
+
+
+def _restart(service, api, clock, definitions):
+    return connection.Service(
+        service.files.public.parent,
+        service.files.secret.parent,
+        definitions=lambda: definitions,
+        fetch=api,
+        clock=clock.time,
+        monotonic=clock.mono,
+    )
+
+
+def t_restart_during_refresh_resumes_the_rotation_with_the_staged_pair():
+    with fixture() as (service, clock, api, _cache, definitions):
+        connect(service, clock)
+        service.files.stage_refresh(service.connection_id)
+        other = _restart(service, api, clock, definitions)
+        try:
+            assert other.status()["phase"] != "reconnect", other.status()
+            before = len(api.calls)
+            other.tick()
+            status = other.status()
+            assert status["phase"] == "ready" and status["connected"], status
+            assert [c[0] for c in api.calls[before:]][:2] == ["refresh", "validate"], (
+                "Resume did not exchange the staged refresh token first"
+            )
+            saved = other.files.load()[1]
+            assert saved["phase"] == "ready" and saved["pair"]["refresh"] == NEWREFRESH
+            assert metric(other, "viewers")["available"]
+        finally:
+            other.close()
+
+
+def t_restart_with_old_format_staged_file_still_requires_reconnect():
+    with fixture() as (service, clock, api, _cache, definitions):
+        connect(service, clock)
+        secret = json.loads(service.files.secret.read_text())
+        secret["credentials"] = {"phase": "refreshing"}
+        service.files.secret.write_text(json.dumps(secret))
+        other = _restart(service, api, clock, definitions)
+        try:
+            before = len(api.calls)
+            other.tick()
+            status = other.status()
+            assert len(api.calls) == before and status["phase"] == "reconnect"
+            assert "Start Twitch authorization" in status["error"], status["error"]
+        finally:
+            other.close()
+
+
+def t_resumed_refresh_never_serves_the_unvalidated_old_token_while_retrying():
+    with fixture() as (service, clock, api, _cache, definitions):
+        connect(service, clock)
+        service.files.stage_refresh(service.connection_id)
+        api.failures["refresh"] = tw.APIError("unsent", "fixture-private", True, 60)
+        other = _restart(service, api, clock, definitions)
+        try:
+            before = len(api.calls)
+            other.tick()
+            status = other.status()
+            assert status["phase"] == "refreshing" and not status["connected"], status
+            assert [call[0] for call in api.calls[before:]] == ["refresh"], (
+                "A resumed refresh used the unvalidated saved access token"
+            )
+        finally:
+            other.close()
+
+
+def t_token_rejected_while_a_refresh_waits_stops_polling_until_rotation_completes():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        api.failures["refresh"] = tw.APIError("rate_limit", "fixture-private", True, 60)
+        _near_expiry(service, clock, 290)
+        clock.advance(1)
+        service.tick()
+        assert service.status()["connected"]  # The old token still serves.
+        _reject_old_access(service, api)
+        clock.advance(30)
+        service.tick()
+        assert not service.status()["connected"]
+        before = len(api.calls)
+        clock.advance(30)  # The refresh retry is rate limited again.
+        service.tick()
+        assert [call[0] for call in api.calls[before:]] == ["refresh"]
+        clock.advance(30)
+        service.tick()
+        assert not [
+            call for call in api.calls[before:] if call[0] in connection.METRICS
+        ], "A token Twitch rejected served metrics again while the refresh waited"
+        assert not service.status()["connected"]
+        del api.failures["refresh"]
+        clock.advance(60)
+        service.tick()
+        assert service.status()["connected"] and service.pair["refresh"] == NEWREFRESH
 
 
 if __name__ == "__main__":
