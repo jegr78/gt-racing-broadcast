@@ -69,9 +69,9 @@ async def main():
                 assert await page.locator('#race-position').inner_text() == 'P15/15', 'measured race position missing'
                 assert 'finish P3/15' in await page.evaluate('() => lapLabel({lap:2,state:"confirmed",time_s:20,line_position:3,line_car_count:15,comparison_eligible:true})'), 'lap option lost line position'
                 await page.wait_for_function('() => EngineerDesk.state.historyRevision !== null')
-                # Follow live compares the live lap with the lap just completed, not the fastest.
+                # Follow live compares the live lap with the best lap of the session.
                 previous=next(r['id'] for r in fixture.live.snapshot()['laps'] if r['lap']==4)
-                await page.wait_for_function('(id) => EngineerDesk.state.a === id',arg=previous,timeout=5000)
+                await page.wait_for_function('(id) => EngineerDesk.state.a === id && EngineerDesk.state.aKind === "best"',arg=fixture.live.snapshot()['best_id'],timeout=5000)
                 assert 'Mitsubishi Lancer Evolution IX' in await page.locator('#session option:checked').inner_text(), 'session car name missing'
                 fallback = await page.evaluate('() => {const saved=EngineerDesk.state.sessions;EngineerDesk.state.sessions=saved.map(r=>({...r,car:null}));selections();const label=document.querySelector("#session option:checked").textContent;EngineerDesk.state.sessions=saved;selections();return label;}')
                 assert 'car 3424' in fallback, 'unknown car name did not fall back to id'
@@ -175,7 +175,7 @@ async def main():
                     fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), fixture.live._receipt[1]+.01)
                     assert fixture.live.flush(10)
                     await page.wait_for_function('() => document.getElementById("race-position").textContent === "P15/15"')
-                    # Earlier steps changed A; show the Follow live default (the lap just completed).
+                    # Earlier steps changed A; show lap 4 as the engineer's own pick.
                     await page.locator('#lap-a').select_option(previous)
                     await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id',arg=previous)
                     await page.locator('.mini-details summary').click()

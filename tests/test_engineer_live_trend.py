@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Race Engineer desk: the per-lap automatic reference (B = live lap, A = the lap just
-completed), the live-delta trend arrow, the steering readout and the input-trace
+"""Race Engineer desk: the reference precedence (shared source, personal pick, shared
+pin, best lap), the delta label naming it, the live-delta trend arrow, the steering readout and the input-trace
 markup. The JS checks run under node when it is installed (skipped otherwise).
 Run: python3 tests/test_engineer_live_trend.py"""
 import os
@@ -54,8 +54,8 @@ const document = {querySelectorAll: () => []};
 const options = () => {}, carLabel = r => String(r.car_id), referenceLabel = r => 'ref';
 const num = (v, d = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : 'Unavailable';
 const state = {follow: true, snapshot: null, laps: [], sessions: [], refs: [], refLaps: [],
-  refSource: '', a: '', b: '', session: '', rejected: new Set(), newLaps: 0, liveLap: null,
-  autoA: null, trend: {key: '', rows: []}};
+  refSource: '', a: '', b: '', session: '', rejected: new Set(), newLaps: 0,
+  pick: null, aKind: '', trend: {key: '', rows: []}};
 const lap = (n, time, eligible = true) => ({id: 'L' + n, session_id: 'S', lap: n, state: 'confirmed',
   time_s: time, comparison_eligible: eligible, car_id: 1, track_id: 'T'});
 const live = n => ({id: 'L' + n, session_id: 'S', lap: n, state: 'provisional',
@@ -78,26 +78,83 @@ console.log([0, .004, 3599.9996, null, NaN, Infinity, -1].map(lapTime).join('|')
             '0:00.000|0:00.004|60:00.000|Unavailable|Unavailable|Unavailable|Unavailable']
 
 
-def t_follow_live_compares_each_lap_with_the_lap_just_completed():
+def _reference_src(h):
+    return "\n".join(_func_src(h, n) for n in ("lapTime", "lapLabel", "sameCohort", "comparable",
+                                              "usableRefs", "selections", "referenceText", "pinControls"))
+
+
+def t_reference_prefers_source_pick_pin_then_best():
     h = _html()
-    src = "\n".join([_const_src(h, "AUTO_A_WAIT_MS")] + [_func_src(h, n) for n in
-                    ("lapTime", "lapLabel", "sameCohort", "comparable", "selections")])
-    out = _run_js(_HARNESS + src + """
-const seen = [];
-state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {current: live(5)};
-selections(); seen.push(state.a);                      // page opened mid-lap: A = lap 4, not the fastest
-state.a = 'L3'; state.autoA = null; selections(); seen.push(state.a);   // engineer override holds
-state.snapshot = {current: live(6)}; selections(); seen.push(state.a || '-');   // lap 5 not in history yet
-state.laps.push(lap(5, 95)); selections(); seen.push(state.a);          // arrives: A = lap 5
-state.snapshot = {current: live(7)}; state.laps.push(lap(6, 99, false)); selections(); seen.push(state.a);
-state.snapshot = {current: live(8)}; selections(); seen.push(state.a || '-');
-now = 9000; selections(); seen.push(state.a);          // lap 7 never arrived: fall back to fastest
-state.refSource = 'R'; state.a = 'r:x'; state.snapshot = {current: live(9)}; selections(); seen.push(state.a);
-state.refSource = ''; state.follow = false; state.a = 'L4'; state.snapshot = {current: live(10)};
-selections(); seen.push(state.a + '/' + state.b);
+    out = _run_js(_HARNESS + _reference_src(h) + """
+const seen = [], show = () => { selections(); seen.push(state.a + '/' + state.aKind); };
+state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {current: live(5), pin: null, pin_revision: 0}; show();
+state.pick = {id: 'L4', best: 'L3', pinRev: 0}; show();                        // personal pick
+state.laps.push(lap(5, 95)); state.snapshot = {current: live(6), pin: null, pin_revision: 0}; show();
+state.laps.push(lap(6, 88)); state.snapshot = {current: live(7), pin: null, pin_revision: 0}; show();  // new best drops the pick
+const pin = {lap_id: 'L4', session_id: 'S', lap: 4};
+state.snapshot = {current: live(7), pin, pin_revision: 1}; show();
+state.laps.push(lap(7, 85)); state.snapshot = {current: live(8), pin, pin_revision: 1}; show();     // a pin outlasts a new best
+state.pick = {id: 'L5', best: 'L7', pinRev: 1}; show();
+state.snapshot = {current: live(8), pin: null, pin_revision: 2}; show();                          // a pin change drops the pick
+state.follow = false; state.session = 'S0'; state.b = 'S0L1';
+state.laps.push({...lap(1, 80), id: 'S0L1', session_id: 'S0'}, {...lap(2, 79), id: 'S0L2', session_id: 'S0'});
+state.pick = {id: 'L5', best: 'L7', pinRev: 2}; show();                                        // a pick from another session
+state.refSource = 'R'; state.a = 'r:x'; state.laps.push({...lap(3, 70), id: 'S0L3', session_id: 'S0'}); show();
+console.log(seen.join('|'));
+state.refSource = ''; state.follow = true; state.pick = null; state.laps = [lap(3, 90), lap(4, 92)];
+state.snapshot = {current: live(5), pin: {lap_id: 'L2', session_id: 'S', lap: 2, by: 'Alex'}, pin_revision: 3};
+selections(); console.log(state.a + '/' + state.aKind + '|' + referenceText() + '|' + $('pin-note').textContent);""")
+    if out is not None:
+        lines = out.splitlines()
+        assert lines[0] == ("L3/best|L4/pick|L4/pick|L6/best|L4/pinned|L4/pinned|L5/pick|L7/best|"
+                            "S0L2/best|r:x/source"), out
+        assert lines[1] == "L2/pinned|Against pinned · Lap 2|Pinned lap detail no longer kept", out   # case gone
+
+
+def t_old_snapshot_without_pin_keys_reads_as_no_pin():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {current: live(5)}; selections();
+const before = state.a + '/' + state.aKind;
+state.pick = {id: 'L4', best: 'L3', pinRev: 0}; selections();
+console.log(before + '|' + state.a + '/' + state.aKind);""")
+    if out is not None:
+        assert out.strip() == "L3/best|L4/pick", out
+
+
+def t_pin_controls_follow_the_pin_and_the_eligible_reference():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+const seen = [], show = () => { selections(); const b = $('pin-toggle');
+  seen.push(b.textContent + '/' + (b.disabled ? 'off' : 'on') + '/' + $('pin-note').textContent); };
+const ready = (n, t) => ({...lap(n, t), detail_state: 'ready'});
+state.laps = [ready(3, 90), ready(4, 92)]; state.snapshot = {session_id: 'S', current: live(5), pin: null, pin_revision: 0}; show();
+state.snapshot = {...state.snapshot, pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 1}; show();
+state.laps[0].detail_state = 'evicted'; show();
+state.snapshot = {session_id: 'S', current: live(5), pin: null, pin_revision: 2}; state.pinFail = 2; show();
+state.pinFail = null; state.laps = [ready(3, 90)]; state.snapshot = {...state.snapshot, current: live(1)};
+state.laps[0].comparison_eligible = false; show();                                         // no eligible A
 console.log(seen.join('|'));""")
     if out is not None:
-        assert out.strip() == "L4|L3|-|L5|L3|-|L3|r:x|L4/L9", out
+        assert out.strip() == ("Pin lap A/on/|Unpin lap 3/on/Pinned by Alex · Lap 3|"
+                               "Unpin lap 3/on/Pinned lap detail no longer kept|"
+                               "Pin lap A/on/Pin could not be saved|Pin lap A/off/"), out
+
+
+def t_delta_label_names_the_reference():
+    h = _html()
+    src = "\n".join([_const_src(h, "TREND_S")] + [_func_src(h, n) for n in ("trend", "referenceText", "showDelta")])
+    out = _run_js(_HARNESS + "const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);\n" + src + """
+const seen = [];
+state.snapshot = {current: live(30)};
+state.laps = [lap(17, 90)]; state.a = 'L17'; state.aKind = 'pinned'; showDelta(1.234, 430); seen.push($('delta-note').textContent);
+state.laps = [lap(23, 88)]; state.a = 'L23'; state.aKind = 'best'; showDelta(null); seen.push($('delta-note').textContent);
+state.refLaps = [{...lap(3, 80), id: 'r:x', session_id: 'r:R:1'}]; state.a = 'r:x'; state.aKind = 'source'; showDelta(null);
+seen.push($('delta-note').textContent);
+console.log(seen.join('|'));""")
+    if out is not None:
+        assert out.strip() == ("Against pinned · Lap 17 · through 430 m|Against best · Lap 23|"
+                               "Against ref · Lap 3"), out
 
 
 def t_delta_trend_arrow_follows_the_hud_rule():

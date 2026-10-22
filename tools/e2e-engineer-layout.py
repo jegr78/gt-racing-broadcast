@@ -130,7 +130,7 @@ async def main():
                         assert re.search(r'\d+ diagnostic mini-sectors',card['text']), f'section card lacked its mini-sector count: {card}'
                         if card['expected']:
                             assert card['expected'] in card['text'] and 'Not yet driven' not in card['text'], f'section progress was not distinguished: {card}'
-                    assert re.fullmatch(r'Against A · through \d+ m', measured['deltaReference']), f'live delta lacked its reference distance: {json.dumps(measured)}'
+                    assert re.fullmatch(r'Against (best|pinned|your pick) · Lap \d+ · through \d+ m', measured['deltaReference']), f'live delta lacked its reference distance: {json.dumps(measured)}'
                     assert re.fullmatch(r'Lap \d+ · this session',await page.locator('#best + small').inner_text()), 'best lap lacked its lap number'
                     assert await page.locator('#larger-sectors [data-section]').count() == 3, 'reviewed sections were not grouped'
                     detail=page.locator('#larger-sectors [data-section]').first.locator('details')
