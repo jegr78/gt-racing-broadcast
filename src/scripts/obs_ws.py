@@ -1125,6 +1125,12 @@ def refresh_browser_inputs(needle="127.0.0.1:8088", host="127.0.0.1", port=None,
     used after a shipped overlay page changed. OBS's CEF caches the page JS until
     then. press=False only lists the matching sources (an Apply preflight).
 
+    Pressing also switches off 'Refresh browser when scene becomes active' on those
+    sources (#956): a collection imported before the shipped flag changed would
+    otherwise keep blanking relay pages on every scene cut until a re-import. The
+    write rebuilds the page, which the refresh does anyway. OBS omits settings left
+    at their default (off), so only an explicit True is written.
+
     Returns (refreshed_input_names, note). Best effort like release_feed_inputs():
     any failure yields ([], reason), never an exception.
     """
@@ -1138,12 +1144,19 @@ def refresh_browser_inputs(needle="127.0.0.1:8088", host="127.0.0.1", port=None,
         inputs = session.request("GetInputList",
                                  {"inputKind": "browser_source"}).get("inputs", [])
 
+        settings = {}
+
         def get_settings(name):
-            return session.request("GetInputSettings",
-                                   {"inputName": name}).get("inputSettings", {})
+            settings[name] = session.request(
+                "GetInputSettings", {"inputName": name}).get("inputSettings", {})
+            return settings[name]
 
         names = browser_input_names(inputs, get_settings, needle)
         for name in names if press else ():
+            if settings.get(name, {}).get("restart_when_active") is True:
+                session.request("SetInputSettings", {"inputName": name,
+                                                     "inputSettings": {"restart_when_active": False},
+                                                     "overlay": True})
             session.request("PressInputPropertiesButton",
                             {"inputName": name, "propertyName": "refreshnocache"})
         return names, ""

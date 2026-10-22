@@ -87,7 +87,9 @@ all collections (#956, guarded by `tests/test_split_layouts.py`). `true` blanks 
 on air and rebuilds its state at each cut (with two HUD sources, on every STINT/SPLIT
 handover). The pages poll the relay for their data, and the relay's `refreshnocache`
 hook on relay/event start (and `racecast obs refresh`) reloads them all, which also
-heals a page OBS loaded before the relay was up. The dedicated Split HUD CSS
+heals a page OBS loaded before the relay was up. That same refresh switches the flag off in
+place on an older imported collection (`obs_ws.refresh_browser_inputs`), so the fix
+needs no re-import. The dedicated Split HUD CSS
 route falls back to `hud.css` until `layout-splitscreen.json` exists, then uses the
 independent `splitscreen.css`. The label page uses that same Split stylesheet.
 
