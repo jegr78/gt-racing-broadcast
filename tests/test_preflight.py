@@ -82,6 +82,19 @@ def t_classify_disk_boundaries():
 def t_classify_swap_boundaries():
     assert m.classify_swap(0.5).level == "PASS"
     assert m.classify_swap(2).level == "WARN"
+    # Swap use proves past memory pressure, not how long ago the machine booted.
+    assert "fresh boot" not in m.classify_swap(2).detail
+
+
+def t_windows_swap_counts_page_file_pages_in_use_not_the_commit_charge():
+    # SYSTEM_PAGEFILE_INFORMATION entries: NextEntryOffset, TotalSize, TotalInUse,
+    # PeakUsage (ULONG pages), then the file name. Two page files, 6483 + 100 pages
+    # in use. The commit charge (RAM + page file) is never part of the reading.
+    import struct
+    first = struct.pack("<4I", 48, 524288, 6483, 6483) + b"\0" * 32
+    second = struct.pack("<4I", 0, 262144, 100, 200) + b"\0" * 32
+    assert m.pagefile_in_use_bytes(first + second, 4096) == (6483 + 100) * 4096
+    assert m.pagefile_in_use_bytes(b"", 4096) == 0
 
 
 def t_readers_return_sane_values():
