@@ -91,13 +91,13 @@ function resetGeneration(snap){const generation=snap.generation;if(state.generat
  // A source switch also starts a new generation; shared references do not depend on it.
  say(now&&!was?'Replay started. Live laps received meanwhile are not shown until it ends.':was&&!now?'Replay ended. Live telemetry resumed; the replay laps are no longer listed.':now?'A different replay started. The previous replay laps are no longer listed.':'Relay restarted. A new live generation is active; previous recordings remain history.');}state.generation=generation;}
 function options(id,rows,selected,empty){const el=$(id);el.replaceChildren();if(empty!==undefined){const o=document.createElement('option');o.value='';o.textContent=empty;el.append(o);}for(const row of rows){const o=document.createElement('option');o.value=row.id;o.textContent=row.label;el.append(o);}if(selected&&!rows.some(r=>r.id===selected)){const o=document.createElement('option');o.value=selected;o.textContent=NA;el.append(o);}el.value=selected;}
-function lapLabel(r){if(r.lap<=0)return 'Out lap · not timed';return `Lap ${r.lap} · ${r.state==='provisional'?'in progress':r.time_s==null?'Not timed':lapTime(r.time_s)}${r.line_position!=null&&r.line_car_count!=null?' · finish P'+r.line_position+'/'+r.line_car_count:''}${r.detail_state==='evicted'?' · detail no longer kept':''}${!r.comparison_eligible&&r.state!=='provisional'?' · excluded from best':''}`;}
+function lapLabel(r){if(r.lap<=0)return 'Out lap · not timed';return `Lap ${r.lap} · ${r.state==='provisional'?'in progress':r.time_s==null?NA:lapTime(r.time_s)}${r.line_position!=null&&r.line_car_count!=null?' · finish P'+r.line_position+'/'+r.line_car_count:''}${r.detail_state==='evicted'?' · detail no longer kept':''}${!r.comparison_eligible&&r.state!=='provisional'?' · excluded from best':''}`;}
 // The automatic reference follows gt7_laps.pool: same car, same track, or the same session while the track is unknown.
 function sameCohort(r,b){return !!b&&r.car_id===b.car_id&&(b.track_id?r.track_id===b.track_id:!r.track_id&&r.session_id===b.session_id);}
 function comparable(row){return !!row&&(row.state==='provisional'?row.provisional_comparison_eligible:row.comparison_eligible)!==false;}
 // Only the first timed lap of a session can still gain a track when it completes.
 function recognising(row){return row?.state==='provisional'&&!row.track_id&&state.snapshot?.track_recognition!==false&&!state.laps.some(r=>r.session_id===row.session_id&&r.lap>=1&&r.state!=='provisional');}
-function carLabel(row){return row.car||('car '+(row.car_id??'unknown'));}
+function carLabel(row){return row.car||('car '+(row.car_id??NA));}
 function referenceLabel(row){const source=row.session_id?.split(':')[1];return state.refs.find(r=>r.id===source)?.label||'Shared reference';}
 // Reference A candidates for the selected B: eligible laps of its pool, the usable ones of its cohort, the fastest.
 function usableRefs(){const current=state.snapshot?.current,lapB=state.laps.concat(state.refLaps,current?[current]:[]).find(r=>r.id===state.b),pool=state.refSource?state.refLaps:state.laps.filter(r=>r.session_id===state.session),eligible=pool.filter(r=>r.comparison_eligible),usable=eligible.filter(r=>sameCohort(r,lapB)&&!state.rejected.has(r.id+'|'+state.b));
@@ -107,8 +107,8 @@ function selections(){
  // Follow live keeps B on the live lap; A follows the reference precedence below.
  if(state.follow&&current){state.b=current.id;state.session=current.session_id;}
  if(!state.b){const rows=all.filter(r=>!state.session||r.session_id===state.session);if(rows.length){state.b=rows.at(-1).id;state.session=rows.at(-1).session_id;}}
- const sessions=state.sessions.map(s=>({id:s.id,label:`${s.track||'Unknown track'} · ${carLabel(s)} · ${s.laps} laps`}));
- for(const r of state.refLaps)if(!sessions.some(s=>s.id===r.session_id))sessions.push({id:r.session_id,label:`${referenceLabel(r)} · session ${r.session_id.split(':').at(-1)} · ${state.refLaps.find(l=>l.session_id===r.session_id&&l.track)?.track||'Unknown track'} · ${carLabel(r)} · ${state.refLaps.filter(l=>l.session_id===r.session_id).length} laps`});
+ const sessions=state.sessions.map(s=>({id:s.id,label:`${s.track||NA} · ${carLabel(s)} · ${s.laps} laps`}));
+ for(const r of state.refLaps)if(!sessions.some(s=>s.id===r.session_id))sessions.push({id:r.session_id,label:`${referenceLabel(r)} · session ${r.session_id.split(':').at(-1)} · ${state.refLaps.find(l=>l.session_id===r.session_id&&l.track)?.track||NA} · ${carLabel(r)} · ${state.refLaps.filter(l=>l.session_id===r.session_id).length} laps`});
  options('session',sessions,state.session,'Waiting for session');
  options('lap-b',all.filter(r=>r.session_id===state.session).map(r=>({id:r.id,label:lapLabel(r)})),state.b,'Choose lap');
  // A, highest first: a shared reference source (kept as chosen), the engineer's own pick (until
@@ -141,7 +141,7 @@ function instruments(snap){const v=snap.instruments||{};$('race-position').textC
  const bestLap=snap.best_s==null?null:state.laps.find(r=>r.session_id===snap.session_id&&r.comparison_eligible&&r.state==='confirmed'&&r.time_s===snap.best_s);$('best-note').textContent=bestLap?`Lap ${bestLap.lap} · this session`:'Eligible completed laps';
  const steer=Number.isFinite(v.steer_rad)?v.steer_rad*180/Math.PI:null;$('steer').textContent=steer==null?NA:Math.abs(steer)<.5?'0°':`${Math.abs(steer).toFixed(0)}° ${steer>0?'L':'R'}`;
  const tyres=v.tyres_c||[];const pair=(a,b)=>Number.isFinite(a)||Number.isFinite(b)?num(a,0)+' / '+num(b,0):NA;$('tyres-front').textContent=pair(tyres[0],tyres[1]);$('tyres-rear').textContent=pair(tyres[2],tyres[3]);for(const unit of document.querySelectorAll('[data-unit-for]'))unit.hidden=$(unit.dataset.unitFor).textContent===NA;
- $('source-state').textContent=snap.current?`${snap.current.track||(snap.track_recognition===false?'Unknown track · track recognition data not loaded':'Unknown track')} · ${snap.current.car||'Unknown car'} · lap ${snap.current.lap} · lap in progress`:'Waiting for a lap';
+ $('source-state').textContent=snap.current?`${snap.current.track||(snap.track_recognition===false?`${NA} · track recognition data not loaded`:NA)} · ${snap.current.car||NA} · lap ${snap.current.lap} · lap in progress`:'Waiting for a lap';
  $('history-state').textContent=snap.replay?.active?'Replay pool. Live laps received during replay are absent here.':snap.replay?.live_gap?'Live laps driven during replay are absent from this pool. Recorded laps can be recovered from their recording; unrecorded laps are lost.':snap.history==='recording-backed'?'Recorded history available. Older lap details are loaded when selected.':'History is kept while the relay runs. Some older lap details may no longer be available.';
 }
 function age(){if(state.stopped||!state.snapshot)return;const r=state.snapshot.receipt||{},since=(performance.now()-state.received)/1000,packetAge=r.packet_age_s==null?null:r.packet_age_s+since;

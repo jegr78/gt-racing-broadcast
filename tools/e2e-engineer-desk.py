@@ -175,9 +175,6 @@ async def main():
                     fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), fixture.live._receipt[1]+.01)
                     assert fixture.live.flush(10)
                     await page.wait_for_function('() => document.getElementById("race-position").textContent === "P15/15"')
-                    # Earlier steps changed A; show lap 4 as the engineer's own pick.
-                    await page.locator('#lap-a').select_option(previous)
-                    await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id',arg=previous)
                     await page.locator('.mini-details summary').click()
                     # The fixture has no OBS: give the program still a synthetic frame.
                     await page.route('**/cockpit/program?*', lambda route: route.fulfill(
@@ -193,6 +190,10 @@ async def main():
                     await page.wait_for_function('() => EngineerDesk.trc.rows.length > 100')
                     # The live delta grows between the fixture's two samples: losing time now.
                     await page.wait_for_function('() => document.getElementById("delta-trend").textContent === "\\u25b2"')
+                    # A new A restarts the trend, so show lap 4 as the engineer's own pick only after it.
+                    # Earlier steps changed A; show lap 4 as the engineer's own pick.
+                    await page.locator('#lap-a').select_option(previous)
+                    await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id',arg=previous)
                     # No cached vehicle source in the fixture: a synthetic reference and upshifts.
                     async def shift_points(route):
                         response = await route.fetch(); data = await response.json()

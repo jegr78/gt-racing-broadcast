@@ -230,6 +230,14 @@ renderShifts({shifts: null}); console.log(show());""")
         assert none.endswith("Waiting for a car"), none
 
 
+def t_duration_rounds_to_whole_seconds_and_switches_to_hours():
+    h = _html()
+    out = _run_js(_HARNESS + _func_src(h, "duration") + """
+console.log([59.6, 3599.6, 3600, 42, -1, NaN, null].map(duration).join('|'));""")
+    if out is not None:
+        assert out.strip() == "1:00|1:00:00|1:00:00|0:42|N/A|N/A|N/A", out
+
+
 def t_desk_shows_na_for_every_missing_value():
     h = _html()
     for prose in ("Shared reference unavailable", "Live analysis unavailable", "Analysis temporarily unavailable",
@@ -238,6 +246,8 @@ def t_desk_shows_na_for_every_missing_value():
     assert "Unavailable" not in h.replace("SourceUnavailable", ""), "a missing value still reads Unavailable"
     assert h.count(">N/A<") >= 14, h.count(">N/A<")
     assert "const NA='N/A'" in h
+    for stale in ("Unknown track", "Unknown car", "'unknown'", "'Not timed'"):
+        assert stale not in h, f"{stale} stands in for a missing value"
     assert "button:disabled{opacity:.5;cursor:default}" in h, "a disabled button must look disabled"
 
 

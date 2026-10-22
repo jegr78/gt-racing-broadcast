@@ -234,11 +234,11 @@ async def main():
                 await page.evaluate('() => instruments({instruments:{},current:{lap:3,track:null,car:"Car"},track_recognition:false})')
                 assert all(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units stayed beside unavailable values'
                 assert [await page.locator(t).inner_text() for t in ('#tyres-front','#tyres-rear')] == ['N/A','N/A'], 'unavailable tyre pairs repeated the placeholder'
-                assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · track recognition data not loaded'), 'missing recognition data was not named'
+                assert (await page.locator('#source-state').inner_text()).startswith('N/A · track recognition data not loaded'), 'missing recognition data was not named'
                 await page.evaluate('() => instruments({instruments:{speed_kmh:120,rpm:5000,throttle:40,brake:0,tyres_c:[80,null,null,null]},current:{lap:3,track:null,car:"Car"},track_recognition:true})')
                 assert not any(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units were hidden beside measured values'
                 assert await page.locator('#tyres-front').inner_text() == '80 / N/A', 'a partly measured tyre pair lost its value'
-                assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · Car'), 'recognisable data still blamed the track data'
+                assert (await page.locator('#source-state').inner_text()).startswith('N/A · Car'), 'recognisable data still blamed the track data'
                 await page.evaluate('() => clearPlots()')
                 assert not await page.locator('#larger-sectors').is_visible(), 'an empty section card stayed visible'
                 await page.evaluate('() => {state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();}')
