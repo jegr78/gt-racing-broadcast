@@ -47,6 +47,7 @@ def t_confirmed_matches_offline_and_provisional_stays_observed():
             assert shifts['lap'] == snap['current']['lap'] and shifts['reference']['kind'] == 'unavailable', \
                 'without a cached vehicle source the desk names no shift target'
             assert snap['fuel_avg_laps'] == 0 and snap['fuel_avg_l'] is None, 'zero-use laps are no fuel measurement'
+            assert snap['lap_avg_s'] is not None and snap['lap_avg_s'] > 0
 
 
 def t_average_fuel_uses_completed_eligible_laps_of_the_live_session():
@@ -58,6 +59,16 @@ def t_average_fuel_uses_completed_eligible_laps_of_the_live_session():
     assert live.fuel_average(rows, 'A') == (3.1, 2)
     assert live.fuel_average(rows, None) == (None, 0)
     assert live.fuel_average([lap(1, 3.0, eligible=False)], 'A') == (None, 0)
+
+
+def t_average_lap_time_uses_completed_eligible_laps_of_the_live_session():
+    def lap(n, t, sid='A', state='confirmed', eligible=True):
+        return {'lap': n, 'session_id': sid, 'state': state, 'comparison_eligible': eligible, 'time_s': t}
+    rows = [lap(1, 99.0, eligible=False), lap(2, 90.0), lap(3, 92.0), lap(4, None),
+            lap(5, 80.0, state='unconfirmed'), lap(6, 70.0, sid='B')]
+    assert live.lap_time_average(rows, 'A') == 91.0
+    assert live.lap_time_average(rows, None) is None
+    assert live.lap_time_average([lap(1, 90.0, eligible=False)], 'A') is None
 
 
 def _shift_packets():

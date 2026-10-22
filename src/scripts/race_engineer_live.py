@@ -153,6 +153,15 @@ def fuel_average(laps, session_id):
     return (round(sum(used) / len(used), 3), len(used)) if used else (None, 0)
 
 
+def lap_time_average(laps, session_id):
+    """Mean lap time (s) over the live session's completed eligible laps, else None."""
+    times = [r["time_s"] for r in laps
+             if session_id is not None and r.get("session_id") == session_id
+             and r.get("state") == "confirmed" and r.get("comparison_eligible")
+             and _finite(r.get("time_s")) is not None and r["time_s"] > 0]
+    return round(sum(times) / len(times), 3) if times else None
+
+
 def instruments(pkt):
     """Only measured channels; a missing/nonfinite channel stays unavailable."""
     x, z = _finite(pkt.pos_x), _finite(pkt.pos_z)
@@ -458,6 +467,7 @@ class Store:
             "shifts": None,
             "fuel_avg_l": None,
             "fuel_avg_laps": 0,
+            "lap_avg_s": None,
             "theoretical_s": None,
             "history": (
                 "recording-backed"
@@ -892,6 +902,7 @@ class Store:
             shifts=self._shifts.snapshot(),
             fuel_avg_l=fuel_avg,
             fuel_avg_laps=fuel_laps,
+            lap_avg_s=lap_time_average(self._summaries.values(), sid),
             theoretical_s=gt7_laps.theoretical_best(eligible),
             warnings=[self._context_error] if self._context_error else [],
         )
