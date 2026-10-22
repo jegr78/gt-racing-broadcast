@@ -80,7 +80,6 @@ def t_provider_preflight_rejects_absent_process_and_display_name_as_profile_slug
 
 
 def t_actual_ui_twitch_route_rejects_foreign_origins_before_callbacks():
-    import json
     import urllib.request
     import urllib.error
     import test_ui_server as ui
