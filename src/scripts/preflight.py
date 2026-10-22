@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -112,8 +113,8 @@ def classify_disk(gb):
 def classify_swap(gb):
     if gb > 1:
         return Result(WARN, "Swap in use",
-                      f"{gb:.1f} GB swapped, so this is not a fresh boot or the "
-                      f"machine is under memory pressure; reboot before the event")
+                      f"{gb:.1f} GB swapped: RAM ran short at some point since the "
+                      f"last boot; close memory-heavy programs or reboot before the event")
     return Result(PASS, "Swap in use", f"{gb:.1f} GB swapped")
 
 
@@ -169,9 +170,53 @@ def read_swap_used_bytes():
                     free = int(line.split()[1]) * 1024
         return max(0, total - free)
     if sys.platform.startswith("win"):
-        stat = _win_memstatus()
-        return max(0, stat.ullTotalPageFile - stat.ullAvailPageFile)
+        return _win_pagefile_used_bytes()
     return 0
+
+
+def pagefile_in_use_bytes(raw, page_size):
+    """Bytes in use across the SYSTEM_PAGEFILE_INFORMATION entries in *raw*. Each
+    entry starts with NextEntryOffset, TotalSize, TotalInUse, PeakUsage (ULONG
+    pages); NextEntryOffset 0 ends the list."""
+    used, offset = 0, 0
+    while offset + 16 <= len(raw):
+        nxt, _total, in_use, _peak = struct.unpack_from("<4I", raw, offset)
+        used += in_use * page_size
+        if not nxt:
+            break
+        offset += nxt
+    return used
+
+
+class _SYSTEM_INFO(ctypes.Structure):
+    _fields_ = [("wProcessorArchitecture", ctypes.c_ushort),
+                ("wReserved", ctypes.c_ushort),
+                ("dwPageSize", ctypes.c_ulong),
+                ("lpMinimumApplicationAddress", ctypes.c_void_p),
+                ("lpMaximumApplicationAddress", ctypes.c_void_p),
+                ("dwActiveProcessorMask", ctypes.c_size_t),
+                ("dwNumberOfProcessors", ctypes.c_ulong),
+                ("dwProcessorType", ctypes.c_ulong),
+                ("dwAllocationGranularity", ctypes.c_ulong),
+                ("wProcessorLevel", ctypes.c_ushort),
+                ("wProcessorRevision", ctypes.c_ushort)]
+
+
+def _win_pagefile_used_bytes():
+    """Page-file pages actually in use (what Task Manager's paging-file usage and
+    Win32_PageFileUsage.CurrentUsage report). GlobalMemoryStatusEx's
+    ullTotalPageFile - ullAvailPageFile is the commit charge (RAM + page file),
+    which counts every committed allocation and reads many GB on an idle, freshly
+    booted machine."""
+    info = _SYSTEM_INFO()
+    ctypes.windll.kernel32.GetSystemInfo(ctypes.byref(info))
+    buf = ctypes.create_string_buffer(64 * 1024)
+    size = ctypes.c_ulong()
+    status = ctypes.windll.ntdll.NtQuerySystemInformation(
+        18, buf, len(buf), ctypes.byref(size))  # 18 = SystemPageFileInformation
+    if status != 0:
+        return 0
+    return pagefile_in_use_bytes(buf.raw[:size.value], info.dwPageSize or 4096)
 
 
 def disk_free_bytes(path):
