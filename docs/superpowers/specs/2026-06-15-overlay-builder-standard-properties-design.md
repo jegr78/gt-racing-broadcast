@@ -87,6 +87,13 @@ KIND_PROPS = { "text": TEXT_PROPS, "box": BOX_PROPS }
 `team*-name` additionally carries `teamNameMax`/`teamNameMin` (auto-fit, issue
 #136) — expressed as a per-slot **extra** on top of its kind, not a new kind.
 
+Update (#957): every text slot (any slot offering `fontSize`, whether through the kind,
+an explicit `data-edit-props` list or the default set) also offers the generic
+auto-fit bounds `fitMax`/`fitMin` (→ `--fit-max`/`--fit-min`, 1..500 px), added by
+`extract_slots`. A slot that carries the team-name pair drops the generic one, so a
+slot never shows two max/min controls. The pages fit generically through the shared
+`src/ui/overlay-fit.js`.
+
 ## Architecture (additive — relay untouched)
 
 ```

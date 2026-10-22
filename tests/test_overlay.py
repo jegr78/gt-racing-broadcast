@@ -210,8 +210,9 @@ def t_ob_extract_slots_kind_derives_props():
     by = {s["id"]: s for s in ob.extract_slots(html)}
     assert by["a"]["props"] == list(ob.KIND_TEXT)
     assert by["b"]["props"] == list(ob.KIND_BOX)
-    assert by["c"]["props"] == list(ob.KIND_TEXT) + ["teamNameMax", "teamNameMin"], \
-        "extras are appended after the kind set, de-duplicated"
+    # the team-name pair replaces the generic fit pair (#957): one max/min per slot
+    assert by["c"]["props"] == [p for p in ob.KIND_TEXT if p not in ob.FIT_PROPS] + [
+        "teamNameMax", "teamNameMin"], "extras are appended after the kind set, de-duplicated"
     # no kind + explicit props -> the explicit list (back-compat fallback)
     assert by["d"]["props"] == ["left", "top"]
 
@@ -273,7 +274,7 @@ def t_ob_extract_slots_from_real_hud():
     assert "fontSize" in by_id["stint"]["props"]
     assert "teamNameMax" not in by_id["stint"]["props"]
     # team name slot: the text kind plus the auto-fit extras (#136)
-    assert by_id["team1-name"]["props"] == list(ob.KIND_TEXT) + [
+    assert by_id["team1-name"]["props"] == [p for p in ob.KIND_TEXT if p not in ob.FIT_PROPS] + [
         "teamNameMax", "teamNameMin"]
     # team number slot: the full text kind (standard props for all slots)
     assert by_id["team1-num"]["props"] == list(ob.KIND_TEXT)
@@ -1144,7 +1145,7 @@ def t_control_center_has_preview_data_panel():
     html = _read(ROOT, "src", "ui", "control-center.html")
     for needle in ('id="ov-preview-states"', 'id="ov-preview-fields"',
                    'ovState.preview', 'function ovFillSample',
-                   'function ovPreviewReset', 'function ovFitName',
+                   'function ovPreviewReset', 'function ovRefit',
                    'flagPresets', "'overlay-preview:'"):
         assert needle in html, "control-center.html missing: %s" % needle
 
@@ -1416,55 +1417,17 @@ def t_round_title_offers_and_compiles_the_fit_bounds():
             assert name not in css, (prop, bad, css)
 
 
-def t_builder_canvas_mirrors_the_fit_with_the_text_measure():
-    # #944: the canvas previews what OBS renders: the round title fits there too, and
-    # both fits measure the text (a centred/right-aligned overflow is outside scrollWidth).
-    import shutil, subprocess
-    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
-        html = f.read()
-    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
-    assert "ovRefit(" in fill, "the canvas must fit opted-in slots"
-    fns = html[html.index("function ovFitName("):html.index("// Session-only preview model")]
-    assert "scrollWidth" not in fns, "measure the text, not scrollWidth"
-    node = shutil.which("node")
-    if not node:
-        print("  (node not installed, JS check skipped)")
-        return
-    script = r"""
-let vars = {};
-let zoom = 1;  // the canvas is CSS-scaled: client rects shrink, offsetWidth does not
-const el = {style: {fontSize: ''}, clientWidth: 714, offsetWidth: 714, textContent: '',
-  getBoundingClientRect() { return {width: 714 * zoom}; }};
-const getComputedStyle = () => ({getPropertyValue: k => vars[k] || '', paddingLeft: '0px', paddingRight: '0px'});
-const document = {createRange: () => ({selectNodeContents() {}, getBoundingClientRect() {
-  return {width: el.textContent.length * parseFloat(el.style.fontSize || '40') * .567 * zoom};}})};
-""" + fns + r"""
-el.textContent = 'TEC 21 - Round 2 - Trial Mountain';
-ovFitText(el); const off = el.style.fontSize || 'css';
-vars = {'--fit-max': '40', '--fit-min': '26'}; ovFitText(el);
-const full = parseFloat(el.style.fontSize);
-zoom = 0.5; ovFitText(el);
-console.log(off + ',' + full + ',' + parseFloat(el.style.fontSize));"""
-    out = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace", check=True).stdout.strip()
-    off, fitted, zoomed = out.split(",")
-    assert off == "css" and 26 <= float(fitted) < 40, out
-    assert zoomed == fitted, "a zoomed canvas must fit to the same size as OBS: " + out
-
-
 def t_builder_field_edit_refits_the_canvas_text():
     # An inline font size from the last fit outranks the CSS variable, so typing an
     # Auto-fit/Name max or min (or any style that changes the text width) must refit at
-    # once; otherwise the canvas shows the old size until the next sample fill.
+    # once; otherwise the canvas shows the old size until the next sample fill. The fit
+    # itself is the live pages' shared one (tests/test_overlay_fit.py).
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
         html = f.read()
     set_prop = html[html.index("function ovSetProp("):]
     set_prop = set_prop[:set_prop.index("\n}\n")]
     assert "ovRefit(" in set_prop, "ovSetProp must refit the edited slot"
-    refit = html[html.index("function ovRefit("):]
-    refit = refit[:refit.index("\n}\n")]
-    assert "ovFitName" in refit and "ovFitText" in refit and "fitMax" in refit, refit
-    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
+    fill = html[html.index("function ovFillSample()"):html.index("function ovRefit(")]
     assert fill.count("ovRefit(") >= 2, "fill and the webfont pass share the same refit"
 
 
