@@ -6760,6 +6760,15 @@ def cockpit_display_name(rows, me_key):
     return me_key
 
 
+def engineer_display_name(members, subject):
+    """The first crew member name whose asset_key == subject, so the shared
+    reference pin names a human-readable engineer. Falls back to subject. Pure."""
+    for member in members:
+        if asset_key(member[0]) == subject:
+            return member[0]
+    return subject
+
+
 def cockpit_own_stints(rows, me_key):
     """The schedule rows belonging to *me_key* (asset_key match) as a list of
     {"row": <1-based schedule index>, "stint": <label>, "has_link": bool, "url": str},
@@ -11670,6 +11679,35 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             self.end_headers(); self.wfile.write(body)
             return None
 
+        def _engineer_pin(self, subject):
+            """POST /console/race-engineer/pin: set ({"lap_id": "<id>"}) or clear
+            ({"lap_id": null}) the shared reference pin. The caller already passed
+            the gate's identity, policy and Engineer access checks."""
+            service = getattr(getattr(telemetry_store, "engineer", None), "api", None)
+            if service is None:
+                return self._send({"error": {"code": "analysis_unavailable", "message": "Live analysis is unavailable"}}, 503)
+            invalid = {"error": {"code": "invalid_body", "message": "Expected a JSON object with lap_id"}}
+            lengths = self.headers.get_all("Content-Length", [])
+            if (self.headers.get_content_type() != "application/json" or self.headers.get("Transfer-Encoding")
+                    or len(lengths) != 1 or not lengths[0].isdigit() or not 0 < int(lengths[0]) <= 4096):
+                return self._send(invalid, 400)       # do_POST drains a bounded body
+            raw = self.rfile.read(int(lengths[0]))
+            self._body_consumed = True
+            try:
+                body = json.loads(raw)
+            except (ValueError, RecursionError):   # defensive: deep nesting on older parsers
+                return self._send(invalid, 400)
+            if not isinstance(body, dict) or "lap_id" not in body or not (
+                    body["lap_id"] is None or isinstance(body["lap_id"], str)):
+                return self._send(invalid, 400)
+            members = crew_source.get_members() if crew_source is not None and hasattr(crew_source, "get_members") else []
+            try:
+                return self._send(service.pin(body["lap_id"], engineer_display_name(members, subject)))
+            except race_engineer_live.PinError as exc:
+                return self._send({"error": {"code": exc.code, "message": str(exc)}}, 409)
+            except (OSError, ValueError, TypeError):
+                return self._send({"error": {"code": "analysis_unavailable", "message": "Analysis is temporarily unavailable"}}, 503)
+
         def _buttons_health(self):
             """Director-gated availability probe for the launcher: is Companion up and new
             enough (>= 4.1.0) to serve under the /console/buttons sub-path? (#236)"""
@@ -12030,11 +12068,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send_file(path, ctype)
                 return None
             if sub and sub[0]=="race-engineer":
-                if method != "GET" or not (
+                is_pin = method == "POST" and sub == ["race-engineer", "pin"]
+                if not is_pin and (method != "GET" or not (
                     sub == ["race-engineer"]
                     or len(sub) == 2
                     and sub[1] in race_engineer_api.ROUTES | {"access"}
-                ):
+                )):
                     return self._send(
                         {
                             "error": {
@@ -12056,6 +12095,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 except race_engineer_access.AccessError as exc:
                     status=403 if exc.code in ("feature_disabled","forbidden") else 503
                     return self._send({"error":{"code":exc.code,"message":str(exc)}},status)
+                if is_pin:
+                    return self._engineer_pin(subject)
                 if sub==["race-engineer","access"]:
                     return self._send(dict(access, analysis_available=bool(telemetry_store and getattr(getattr(telemetry_store, "engineer", None), "api", None))))
                 if len(sub) == 2:

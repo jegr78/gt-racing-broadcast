@@ -114,6 +114,9 @@ def min_capability(segments, method="GET"):
 
     if method == "GET" and (p == ["race-engineer"] or len(p) == 2 and p[0] == "race-engineer" and p[1] in ("access", "snapshot", "history", "lap", "reference", "compare", "trace")):
         return Requirement(RACE_ENGINEER,False)
+    # The one shared write on the Engineer desk: the reference pin.
+    if method == "POST" and p == ["race-engineer", "pin"]:
+        return Requirement(RACE_ENGINEER, False)
 
     # Race control: the page, its redacted-schedule data endpoint, and the
     # quick-note send plus presets (#244, #376). The desk reuses the ANY cockpit

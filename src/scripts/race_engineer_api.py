@@ -405,6 +405,14 @@ class Service:
             return self.reference(source, reference(source))
         return self.compare(query["a"][0], query["b"][0], reference)
 
+    def pin(self, lap_id, by):
+        """Set the shared reference pin, or clear it for ``None``. A lap the live
+        store refuses raises ``race_engineer_live.PinError``."""
+        if lap_id is None:
+            self.live.clear_pin()
+            return {"ok": True, "pin": None}
+        return {"ok": True, "pin": self.live.set_pin(lap_id, by)}
+
     def close(self):
         self._stop.set()
         self._worker.join(timeout=5)
