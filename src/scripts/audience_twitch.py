@@ -22,6 +22,24 @@ class APIError(Exception):
         self.code, self.transient, self.retry_after = code, transient, retry_after
 
 
+class IdentityError(ValueError):
+    """A definitive answer that the token belongs to another client or account."""
+
+
+# The one manual step Twitch requires: approving a new grant with the device
+# code. Status texts name the exact Control Center controls for it.
+REAUTHORIZE = (
+    "open Twitch connection in the Control Center, press Start Twitch "
+    "authorization, approve the code on Twitch, then press Activate verified "
+    "channel. Other audience widgets keep running"
+)
+
+
+def reauthorize(cause):
+    """Fixed operator text for a state only a new device approval can fix."""
+    return cause + ". Reconnect Twitch: " + REAUTHORIZE
+
+
 def _text(value, limit=2048):
     if (
         not isinstance(value, str)
@@ -148,6 +166,8 @@ def validation_snapshot(payload, client):
     if not isinstance(payload, dict):
         raise ValueError("Invalid Twitch authorization")
     ident, login = payload.get("user_id"), payload.get("login")
+    if isinstance(payload.get("client_id"), str) and payload["client_id"] != client:
+        raise IdentityError("Twitch authorization identity mismatch")
     if (
         payload.get("client_id") != client
         or not isinstance(ident, str)
@@ -155,7 +175,7 @@ def validation_snapshot(payload, client):
         or not isinstance(login, str)
         or not LOGIN.fullmatch(login)
     ):
-        raise ValueError("Twitch authorization identity mismatch")
+        raise ValueError("Invalid Twitch authorization identity")
     return {
         "id": ident,
         "login": login.lower(),

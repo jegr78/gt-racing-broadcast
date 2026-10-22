@@ -6,6 +6,13 @@ from audience_connections import ConnectionFiles, StorageError
 
 class CredentialFiles(ConnectionFiles):
     def stage_refresh(self, expected_id):
+        """Mark the saved pair as refreshing, atomically, before the one-use POST.
+
+        The pair stays in the private file next to the phase, so a process that
+        restarts mid-refresh resumes the rotation with the same refresh token:
+        Twitch either accepts it (it was never consumed) or rejects it with HTTP
+        400, which ends in the same reconnect a lost pair would have needed. The
+        token never leaves this machine either way."""
         loaded = self.load()
         if (
             not loaded
@@ -19,7 +26,7 @@ class CredentialFiles(ConnectionFiles):
             "version": 1,
             "profile": self.owner,
             "connectionId": expected_id,
-            "credentials": {"phase": "refreshing"},
+            "credentials": {**loaded[1], "phase": "refreshing"},
         }
         try:
             body = json.dumps(private, allow_nan=False, sort_keys=True).encode("utf-8")

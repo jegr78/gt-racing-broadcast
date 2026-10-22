@@ -92,6 +92,11 @@ class Service:
         self.pair = self.account = None
         self.connection_id = None
         self.ready = False
+        # trusted: the held access token was validated by this process and not
+        # rejected since; only then may it serve metrics during a rotation.
+        self.trusted = False
+        # resume: the saved credentials are mid-refresh from an earlier process.
+        self.resume = False
         self.error = self.storage_error = ""
         self.phase = "disconnected"
         self.stream_state = "unknown"
@@ -104,7 +109,12 @@ class Service:
             try:
                 self.client, self.target = selection(public)
                 if public.get("enabled") is True:
-                    self.error = "Reconnect Twitch on this machine to use imported or unpaired targets"
+                    # Tokens never travel with a profile, so only a new device
+                    # approval on this machine can authorize these targets.
+                    self.error = tw.reauthorize(
+                        "Twitch is not authorized on this machine for these "
+                        "imported or unpaired targets"
+                    )
             except ValueError:
                 self.error = "Saved Twitch target is invalid; select it again"
         loaded = self.files.load()
@@ -112,8 +122,11 @@ class Service:
             try:
                 client, target = selection(loaded[0])
                 private = loaded[1]
-                if private.get("phase") != "ready":
-                    raise ValueError("Interrupted refresh")
+                # "refreshing" with its pair: a restart interrupted a rotation;
+                # resume it with the same refresh token. An old-format staged
+                # file without a pair cannot be resumed (fails below).
+                if private.get("phase") not in ("ready", "refreshing"):
+                    raise ValueError("Unknown saved phase")
                 raw = private.get("pair", {})
                 pair = tw.token_snapshot({
                     "access_token": raw.get("access"),
@@ -151,9 +164,14 @@ class Service:
                 )
                 self.connection_id = loaded[0]["connectionId"]
                 self.phase, self.error = "validating", ""
+                if private["phase"] == "refreshing":
+                    self.resume, self.phase = True, "refreshing"
+                    self.error = "Resuming an interrupted Twitch token refresh"
             except (ValueError, TypeError, AttributeError):
-                self.error = (
-                    "Saved Twitch authorization is incomplete or interrupted; reconnect"
+                # No usable token pair survived (old staged format or damaged
+                # file): nothing is left to refresh, Twitch needs a new grant.
+                self.error = tw.reauthorize(
+                    "Saved Twitch authorization is incomplete or interrupted"
                 )
                 self.phase = "reconnect"
 
@@ -163,12 +181,19 @@ class Service:
                 "twitch", metric, Sample(availability="unavailable", reason=reason)
             )
 
+    def _remaining(self, account):
+        """Seconds until the earliest of the monotonic and wall-clock deadlines.
+
+        CLOCK_MONOTONIC stops during system sleep on macOS/Linux, so after a
+        wake a token can look valid by monotonic time although it expired by
+        the wall clock. A wall-clock jump can only make expiry earlier."""
+        return min(
+            account["expiresAtMono"] - self.monotonic(),
+            account["expiresAtWall"] - self.clock(),
+        )
+
     def _expire_authorization(self):
-        if (
-            self.ready
-            and self.account
-            and self.monotonic() >= self.account["expiresAtMono"]
-        ):
+        if self.ready and self.account and self._remaining(self.account) <= 0:
             self.ready, self.phase = False, "validating"
             self._invalidate("Twitch authorization expired; waiting for validation")
 
@@ -268,9 +293,10 @@ class Service:
                     target,
                     client,
                 )
-                self.ready, self.phase = True, "ready"
+                self.ready = self.trusted = True
+                self.phase = "ready"
                 self.validation_due = self.monotonic() + min(
-                    3600, max(1, account["expiresAtMono"] - self.monotonic())
+                    3600, max(1, self._remaining(account))
                 )
                 self.setup.cancel()
                 self.setup = None
@@ -301,7 +327,7 @@ class Service:
             self.rotation.cancel()
         self.rotation = None
         self.pair = self.account = None
-        self.ready = False
+        self.ready = self.trusted = self.resume = False
         self.due = {metric: 0 for metric in METRICS}
         self.backoff = {metric: 0 for metric in METRICS}
         self.metric_failed = set()
@@ -316,7 +342,7 @@ class Service:
         self.phase, self.error = "reconnect", reason
         self._invalidate(reason)
 
-    def _new_rotation(self, proactive=False):
+    def _new_rotation(self, proactive=False, staged=False):
         client, target = self.client, deepcopy(self.target)
         deadline = [0]
 
@@ -344,7 +370,7 @@ class Service:
             }
 
         def persist(pair, account):
-            if account["expiresAtMono"] <= self.monotonic():
+            if self._remaining(account) <= 0:
                 raise tw.APIError("auth", "Rotated authorization expired before saving")
             activated = self.files.activate(
                 {"clientId": client, "target": target}, credentials(pair, account)
@@ -359,6 +385,7 @@ class Service:
             validate=validate,
             persist=persist,
             lock=self.lock,
+            staged=staged,
         )
         self.ready = False
         self.phase = "refreshing"
@@ -372,61 +399,32 @@ class Service:
             self._expire_authorization()
             if self.stop.is_set() or self.monotonic() < self.retry_due:
                 return
-            rotation = self.rotation
+            rotation, generation = self.rotation, self.generation
             if rotation is None:
                 if self.pair is None:
                     return
-                if self.ready and self.monotonic() >= self.account[
-                    "expiresAtMono"
-                ] - refresh_lead(self.pair):
-                    self._new_rotation(proactive=True)
+                remaining = self._remaining(self.account)
+                if self.resume:
+                    # A restart interrupted a refresh: finish it without asking.
+                    self.resume = False
+                    self._new_rotation(staged=True)
+                elif remaining <= 0 or (
+                    self.ready and remaining <= refresh_lead(self.pair)
+                ):
+                    # Routine rollover, or a token that expired locally (also
+                    # by wall clock after a sleep): validating it is pointless.
+                    self._new_rotation(proactive=self.ready)
+                elif self.monotonic() < self.validation_due:
                     return
-                if self.monotonic() < self.validation_due:
-                    return
-                generation = self.generation
-                pair, client, owner = (
-                    deepcopy(self.pair),
-                    self.client,
-                    self.account["id"],
-                )
-            else:
-                generation = self.generation
+                rotation = self.rotation
+                if rotation is None:
+                    pair, client, owner = (
+                        deepcopy(self.pair),
+                        self.client,
+                        self.account["id"],
+                    )
         if rotation:
-            rotation.step()
-            with self.lock:
-                if not self._current(generation) or self.rotation is not rotation:
-                    return
-                current = rotation.current()
-                state = rotation.status()
-                if state["phase"] == "ready" and current:
-                    pair, account = current
-                    if account["expiresAtMono"] <= self.monotonic():
-                        self._reconnect(
-                            "Rotated Twitch authorization expired; reconnect"
-                        )
-                        return
-                    self.pair, self.account = pair, account
-                    self.rotation = None
-                    self.ready, self.phase = True, "ready"
-                    self.error = self.storage_error = ""
-                    self.validation_due = min(
-                        self.monotonic() + 3600, account["expiresAtMono"]
-                    )
-                    self.due = {metric: 0 for metric in METRICS}
-                elif state["phase"] == "reconnect":
-                    self._reconnect(state["error"])
-                else:
-                    self.phase, self.error = state["phase"], state["error"]
-                    if state["phase"] == "storage_error":
-                        self.storage_error = state["error"]
-                    if current and current[1]["expiresAtMono"] > self.monotonic():
-                        # Rotation still holds the old pair only while its refresh
-                        # token is unspent (refused/unsent exchange, failed stage);
-                        # its access token is valid, so keep serving metrics.
-                        self.ready = True
-                    self.retry_due = self.monotonic() + max(
-                        5, min(900, state["retryAfter"])
-                    )
+            self._step(rotation, generation)
             return
         started = self.monotonic()
         failure = None
@@ -435,7 +433,7 @@ class Service:
                 self.fetch("validate", client, access=pair["access"]), client
             )
             if account["id"] != owner:
-                raise ValueError("Account changed")
+                raise tw.IdentityError("Account changed")
             limit = started + account["expires"]
             if limit <= self.monotonic():
                 raise tw.APIError(
@@ -447,20 +445,37 @@ class Service:
             )
         except tw.APIError as error:
             failure = error
+        except tw.IdentityError:
+            failure = tw.APIError("identity", "Twitch authorization changed account")
         except Exception:
-            failure = tw.APIError("auth", "Twitch authorization is invalid; reconnect")
+            # Malformed validation body: ambiguous, so validate again later.
+            failure = tw.APIError("temporary", "Invalid Twitch validation", True, 60)
         with self.lock:
             if not self._current(generation):
                 return
             if failure:
-                expired = self.monotonic() >= self.account["expiresAtMono"]
-                if failure.code == "auth" and expired:
+                if failure.code == "identity":
+                    # The token now belongs to another account or client: only
+                    # a new device approval can select the right one.
+                    self._reconnect(
+                        tw.reauthorize(
+                            "The Twitch authorization changed account or application"
+                        )
+                    )
+                    return
+                if failure.code == "auth":
+                    # Twitch rejected the access token, before or after its
+                    # local expiry (revoked or re-issued, or the clock drifted).
+                    # Its refresh token may still be good: refresh first; only a
+                    # rejected refresh needs the producer (see Rotation).
+                    self.trusted = False
                     self._new_rotation()
-                    self.retry_due = 0
-                elif failure.transient:
+                    rotation = self.rotation
+                else:
+                    expired = self._remaining(self.account) <= 0
                     self.error = "Could not validate Twitch authorization; retrying"
                     self.retry_due = self.monotonic() + max(
-                        5, min(900, failure.retry_after)
+                        5, min(900, failure.retry_after or 60)
                     )
                     if expired or not self.ready:
                         self.ready = False
@@ -468,19 +483,58 @@ class Service:
                     else:
                         for metric in METRICS:
                             self.cache.fail("twitch", metric, self.error)
-                else:
-                    self._reconnect(
-                        "Twitch authorization was revoked or changed; reconnect"
+                    return
+            else:
+                self.account = account
+                self.ready = self.trusted = True
+                self.phase = "ready"
+                self.validation_due = self.monotonic() + min(
+                    3600, max(1, self._remaining(account))
+                )
+                self.error = ""
+                if not self._permissions()["subscriptions"]:
+                    self._invalidate(
+                        "Subscription permission or broadcaster ownership is missing",
+                        ("subscriptions",),
                     )
                 return
-            self.account = account
-            self.ready, self.phase = True, "ready"
-            self.validation_due = min(self.monotonic() + 3600, account["expiresAtMono"])
-            self.error = ""
-            if not self._permissions()["subscriptions"]:
-                self._invalidate(
-                    "Subscription permission or broadcaster ownership is missing",
-                    ("subscriptions",),
+        self._step(rotation, generation)
+
+    def _step(self, rotation, generation):
+        rotation.step()
+        with self.lock:
+            if not self._current(generation) or self.rotation is not rotation:
+                return
+            current = rotation.current()
+            state = rotation.status()
+            if state["phase"] == "ready" and current:
+                self.pair, self.account = current
+                self.rotation = None
+                self.error = self.storage_error = ""
+                if self._remaining(self.account) <= 0:
+                    # Expired before it could be used (for example a sleep
+                    # mid-rotation); its refresh token is saved and unspent.
+                    self.ready = self.trusted = False
+                    self._new_rotation()
+                    return
+                self.ready = self.trusted = True
+                self.phase = "ready"
+                self.validation_due = self.monotonic() + min(
+                    3600, max(1, self._remaining(self.account))
+                )
+                self.due = {metric: 0 for metric in METRICS}
+            elif state["phase"] == "reconnect":
+                self._reconnect(state["error"])
+            else:
+                self.phase, self.error = state["phase"], state["error"]
+                if state["phase"] == "storage_error":
+                    self.storage_error = state["error"]
+                if current and self.trusted and self._remaining(self.account) > 0:
+                    # While the rotation still holds a pair (its exchange waits
+                    # for a retry), the validated access token keeps serving.
+                    self.ready = True
+                self.retry_due = self.monotonic() + max(
+                    5, min(900, state["retryAfter"])
                 )
 
     def _poll(self, metric, generation, client, pair, target):
@@ -506,8 +560,16 @@ class Service:
                 return False
             if failure:
                 if failure.code == "auth":
-                    self._invalidate("Twitch authorization needs validation", (metric,))
-                    self.validation_due = 0
+                    self.trusted = False
+                    if self.rotation is not None:
+                        # A refresh is already under way; stop using this token.
+                        self.ready = False
+                        self._invalidate("Refreshing Twitch authorization")
+                    else:
+                        self._invalidate(
+                            "Twitch authorization needs validation", (metric,)
+                        )
+                        self.validation_due = 0
                 elif failure.transient:
                     # Helix rate limits are one bucket per client/token, so a 429
                     # pauses every metric; other transient failures (5xx, invalid
@@ -543,6 +605,27 @@ class Service:
             )
         return False
 
+    def _claim(self, metric, cadence, wanted):
+        """Reserve one due metric request, or None when it must not run now."""
+        with self.lock:
+            self._expire_authorization()
+            now = self.monotonic()
+            if (
+                self.stop.is_set()
+                or not self.ready
+                or metric not in wanted
+                or not self._permissions()[metric]
+                or now < max(self.backoff[metric], self.due[metric])
+            ):
+                return None
+            self.due[metric] = now + cadence
+            return (
+                self.generation,
+                self.client,
+                deepcopy(self.pair),
+                deepcopy(self.target),
+            )
+
     def tick(self):
         if not self.work.acquire(blocking=False):
             return
@@ -561,26 +644,15 @@ class Service:
             except Exception:
                 wanted = set()
             for metric, cadence in (("viewers", 30), ("subscriptions", 60)):
-                with self.lock:
-                    self._expire_authorization()
-                    now = self.monotonic()
-                    if (
-                        self.stop.is_set()
-                        or not self.ready
-                        or metric not in wanted
-                        or not self._permissions()[metric]
-                        or now < max(self.backoff[metric], self.due[metric])
-                    ):
-                        continue
-                    generation, client, pair, target = (
-                        self.generation,
-                        self.client,
-                        deepcopy(self.pair),
-                        deepcopy(self.target),
-                    )
-                    self.due[metric] = now + cadence
-                if self._poll(metric, generation, client, pair, target):
-                    self._maintain()
+                claim = self._claim(metric, cadence, wanted)
+                if claim is None or not self._poll(metric, *claim):
+                    continue
+                # Twitch rejected the access token: validate, refresh if needed,
+                # and retry the rejected call once with the refreshed token (a
+                # completed rotation resets the schedule; otherwise no claim).
+                self._maintain()
+                claim = self._claim(metric, cadence, wanted)
+                if claim is None or self._poll(metric, *claim):
                     break
         finally:
             self.work.release()

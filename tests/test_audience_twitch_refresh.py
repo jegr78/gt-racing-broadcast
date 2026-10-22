@@ -99,20 +99,29 @@ def t_staging_precedes_one_exchange_and_storage_retry_never_repeats_it():
     assert rotation.current() == (NEW, META) and backend.phase == "ready"
 
 
-def t_failed_stage_or_lost_response_never_reuses_a_consumed_refresh():
+def t_failed_stage_never_exchanges_and_lost_response_retries_without_restaging():
     backend = Backend()
     backend.fail = "stage"
     rotation = manager(backend)
     assert rotation.step() is False and backend.events == ["stage"]
     assert rotation.current() == (OLD, META) and backend.phase == "ready"
     backend.fail = "exchange"
-    assert rotation.step() is False and rotation.status()["phase"] == "reconnect"
+    assert rotation.step() is False and rotation.status()["phase"] == "refreshing"
     assert backend.phase == "refreshing" and backend.events == [
         "stage",
         "stage",
         "exchange",
     ]
-    assert rotation.step() is False and backend.events == ["stage", "stage", "exchange"]
+    backend.fail = ""
+    assert rotation.step() is True
+    assert backend.events == [
+        "stage",
+        "stage",
+        "exchange",
+        "exchange",
+        "validate",
+        "persist",
+    ], backend.events
     assert "fixture-private" not in str(rotation.status())
 
 
@@ -156,20 +165,34 @@ def t_disconnect_during_exchange_discards_late_pair_without_persistence():
     assert rotation.current() is None and rotation.status()["phase"] == "disconnected"
 
 
-def t_expired_pending_credentials_require_reconnect_instead_of_endless_storage_retry():
+def t_expired_pending_credentials_rotate_again_instead_of_endless_storage_retry():
     backend = Backend()
     rotation = manager(backend)
+    expired = [True]
+    tokens = []
 
-    def expired(pair, identity):
-        raise tw.APIError("auth", "Pending credentials expired")
+    def exchange(token):
+        tokens.append(token)
+        return dict(NEW) if token == OLD["refresh"] else {
+            **NEW, "access": "fixture-access-third", "refresh": "fixture-refresh-third"
+        }
 
-    rotation.persist = expired
+    def validate(pair):
+        return dict(META)
+
+    def persist(pair, identity):
+        if expired[0]:
+            expired[0] = False
+            raise tw.APIError("auth", "Pending credentials expired")
+
+    rotation.exchange, rotation.validate, rotation.persist = exchange, validate, persist
     assert not rotation.step()
-    assert rotation.status()["phase"] == "reconnect", (
-        "Expired credentials were treated as a retryable disk error"
+    assert rotation.status()["phase"] == "refreshing", (
+        "Expired credentials were treated as a retryable disk error or a reconnect"
     )
-    assert rotation.current() is None
-    assert not rotation.step() and backend.events.count("exchange") == 1
+    assert rotation.current()[0] == NEW, "The unspent new pair was not kept"
+    assert rotation.step() is True
+    assert tokens == [OLD["refresh"], NEW["refresh"]], tokens
 
 
 def t_refused_or_unsent_exchange_keeps_the_unconsumed_pair_and_retries_later():
@@ -195,19 +218,101 @@ def t_refused_or_unsent_exchange_keeps_the_unconsumed_pair_and_retries_later():
         ], backend.events  # The durable refreshing phase is staged once.
 
 
-def t_ambiguous_exchange_failures_still_require_reconnect():
+def t_ambiguous_exchange_failures_retry_the_same_token_until_twitch_answers():
     for failure in (
         tw.APIError("temporary", "fixture-private-token", True, 60),
-        tw.APIError("auth", "fixture-private-token"),
+        TimeoutError("fixture-private-token"),
         ValueError("fixture-private-token"),
     ):
         backend = Backend()
         backend.fail = failure
         rotation = manager(backend)
         assert rotation.step() is False
-        assert rotation.status()["phase"] == "reconnect", (failure, rotation.status())
-        assert rotation.current() is None
-        assert rotation.step() is False and backend.events.count("exchange") == 1
+        state = rotation.status()
+        assert state["phase"] == "refreshing", (failure, state)
+        assert 5 <= state["retryAfter"] <= 900, state
+        assert "retry" in state["error"].lower() and "fixture-private" not in str(state)
+        assert rotation.current() == (OLD, META), (
+            "An ambiguous exchange failure discarded the pair instead of retrying"
+        )
+        backend.fail = ""
+        assert rotation.step() is True and rotation.current() == (NEW, META)
+        assert backend.events == [
+            "stage",
+            "exchange",
+            "exchange",
+            "validate",
+            "persist",
+        ], backend.events  # Same token retried; the phase is staged once.
+
+
+def t_definitive_refresh_rejection_still_requires_reconnect():
+    backend = Backend()
+    backend.fail = tw.APIError("auth", "fixture-private-token")
+    rotation = manager(backend)
+    assert rotation.step() is False
+    state = rotation.status()
+    assert state["phase"] == "reconnect", state
+    assert "Start Twitch authorization" in state["error"], (
+        "The manual step does not name the Control Center button"
+    )
+    assert rotation.current() is None
+    assert rotation.step() is False and backend.events.count("exchange") == 1
+
+
+def t_resumed_rotation_does_not_stage_again():
+    backend = Backend()
+    backend.phase = "refreshing"  # Staged by the interrupted previous process.
+    rotation = refresh.Rotation(
+        OLD,
+        META,
+        stage=backend.stage,
+        exchange=backend.exchange,
+        validate=backend.validate,
+        persist=backend.persist,
+        staged=True,
+    )
+    assert rotation.step() is True and rotation.current() == (NEW, META)
+    assert backend.events == ["exchange", "validate", "persist"], backend.events
+
+
+def t_rejected_fresh_access_token_rotates_again_with_its_unspent_refresh_token():
+    backend = Backend()
+    seen, rejected = [], [True]
+
+    def exchange(token):
+        seen.append(token)
+        assert backend.phase == "refreshing"
+        if token == OLD["refresh"]:
+            return dict(NEW)
+        assert token == NEW["refresh"], token
+        return {**NEW, "access": "fixture-access-third", "refresh": "fixture-refresh-third"}
+
+    def validate(pair):
+        if rejected[0]:
+            rejected[0] = False
+            raise tw.APIError("auth", "fixture-private-token")
+        return dict(META)
+
+    def persist(pair, identity):
+        backend.events.append(("persist", pair["refresh"]))
+
+    rotation = refresh.Rotation(
+        OLD,
+        META,
+        stage=backend.stage,
+        exchange=exchange,
+        validate=validate,
+        persist=persist,
+    )
+    assert rotation.step() is False
+    state = rotation.status()
+    assert state["phase"] == "refreshing", (
+        "A rejected fresh access token required reconnect although its refresh token is unspent"
+    )
+    assert rotation.step() is True
+    assert seen == [OLD["refresh"], NEW["refresh"]], seen
+    assert backend.events == ["stage", ("persist", "fixture-refresh-third")]
 
 
 if __name__ == "__main__":

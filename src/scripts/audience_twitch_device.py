@@ -106,6 +106,19 @@ class Attempt:
                     if error.code == "rate_limit"
                     else ""
                 )
+            elif operation == "exchange" and not (
+                isinstance(error, tw.APIError) and not error.transient
+            ):
+                # Ambiguous (5xx, timeout, reset, malformed or lost body): poll
+                # the same device code again. Twitch either returns the tokens
+                # or rejects a spent code definitively; the approval code stays
+                # valid until it expires, so no manual restart is needed.
+                self._phase = "pending"
+                retry = error.retry_after if isinstance(error, tw.APIError) else 0
+                self._next = self.monotonic() + max(
+                    self._interval, min(900, retry or self._interval)
+                )
+                self._error = "Twitch approval check did not complete; retrying"
             elif (
                 operation in ("validate", "user")
                 and isinstance(error, tw.APIError)
@@ -114,10 +127,15 @@ class Attempt:
                 self._next = self.monotonic() + max(5, min(900, error.retry_after))
                 self._error = "Could not validate Twitch account or output; retrying"
             else:
+                # Definitive: Twitch denied or spent the device code, or the
+                # application/account/output is wrong. Approving a new code is
+                # a user action Twitch requires.
                 message = (
-                    "Twitch approval exchange failed or its response was lost; start authorization again"
+                    "Twitch rejected the approval; press Start Twitch authorization "
+                    "to get a new code"
                     if operation == "exchange"
-                    else "Could not verify Twitch application, account or selected output"
+                    else "Could not verify Twitch application, account or selected "
+                    "output; check them and press Start Twitch authorization again"
                 )
                 self._clear("failed", message)
 

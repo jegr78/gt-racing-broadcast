@@ -382,7 +382,11 @@ not add provider requests. Quota/rate errors back off. A transient failure can
 hold a last-good automatic value for at most 120 seconds from its successful
 observation. The value then hides, including when the relay is unavailable.
 Invalid authorization, disconnect, changed targets and missing/hidden counts hide
-values immediately. A real zero remains visible.
+values immediately. A real zero remains visible. If YouTube rejects the API key
+(invalid key, restrictions, or the Data API not enabled), the relay checks it
+again every 15 minutes, so a fix in Google Cloud recovers without any racecast
+step. Only a new key needs you: enter it and choose **Verify selected targets**,
+then **Activate verified targets**.
 
 Concurrent viewers are available only while the selected broadcast is live.
 Upcoming, ended and inaccessible broadcasts have no viewer count, even if an old
@@ -448,10 +452,20 @@ Rate limits and temporary failures back off. A last-good transiently stale value
 hides at its original 120-second deadline. Offline, missing permission, revoked
 authorization and disconnect hide affected values immediately. Tokens are
 validated on startup and at least hourly, including when no widget is using
-Twitch. Expired tokens can rotate locally. Interrupted or ambiguous one-use token
-exchanges require authorization again. If saving a new pair fails, the relay
-retries local storage without reusing the consumed refresh token. Fix reported
-storage errors before restarting.
+Twitch. The relay renews authorization by itself: shortly before expiry, after
+the producer PC wakes from sleep, and whenever Twitch rejects a token early. It
+retries the rejected request with the renewed token. A token refresh that
+times out or fails on Twitch's side is retried with the same refresh token
+until Twitch answers, and a relay restart during a refresh finishes it. If
+saving a new pair fails, the relay retries local storage without reusing the
+consumed refresh token.
+
+Twitch needs you only when it rejects the refresh token itself (access revoked,
+password changed, or the token was already used) or the authorization now
+belongs to another account. The dialog then says so: choose **Start Twitch
+authorization**, approve the new code on Twitch, and choose **Activate verified
+channel**. Other audience widgets keep running meanwhile. During approval, a
+lost or failed check of the code is retried until the code expires.
 
 **Disconnect and remove tokens** immediately disables Twitch values and removes
 local credentials without resetting manual goals. Durable cleanup failures are
