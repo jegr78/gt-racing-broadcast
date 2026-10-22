@@ -237,6 +237,7 @@ def main():
         "telemetry workspace shipped": all(os.path.isfile(os.path.join(PKG,"ui",name)) for name in ("telemetry.html","telemetry-shell.js","telemetry-workspace.js","ui-base.css")),
         "audience resources shipped": all(os.path.isfile(os.path.join(PKG, *parts)) for parts in
             (("scripts", "audience_widgets.py"), ("ui", "audience.js"))),
+        "overlay fit script shipped": os.path.isfile(os.path.join(PKG, "ui", "overlay-fit.js")),
         "ui page shipped": os.path.isfile(os.path.join(PKG, "ui", "control-center.html")),
         "slides director deck shipped": os.path.isfile(
             os.path.join(PKG, "docs", "slides", "director.html")),

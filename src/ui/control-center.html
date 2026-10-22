@@ -887,6 +887,7 @@
   </form>
 </dialog>
 <script src="/audience.js"></script>
+<script src="/overlay-fit.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let jobES = null, logES = null;
@@ -3626,7 +3627,9 @@ function ovFillSample() {
       el.textContent = v;
       el.classList.toggle('empty', !v);
       // Filled while the canvas is hidden, the text measures 0 wide; fit once laid out.
-      if (ovRefit(s.id, el) && !el._fitObserver) {
+      // Every text slot is observed: its fit can be switched on later by an edit.
+      ovRefit(s.id, el);
+      if (!el._fitObserver) {
         el._fitObserver = new ResizeObserver(() => ovRefit(s.id, el));
         el._fitObserver.observe(el);
       }
@@ -3654,42 +3657,12 @@ function ovFillSample() {
   }));
 }
 
-// Mirror hud.html's auto-fits: team names always, other slots (#944, the round title)
-// when they offer fitMax; ovFitText leaves the CSS size while it is unset. Returns
-// whether the slot has a fit at all.
+// The live pages' auto-fit (/overlay-fit.js, shared): any slot whose CSS sets
+// --fit-max, the team names through their --team-name-max/min, shrinks a long text so
+// the canvas previews what OBS renders. Generic: no slot list. A slot without
+// --fit-max gets its CSS size back. Returns whether the slot carries a fit.
 function ovRefit(id, el) {
-  if (!el) return false;
-  if (/^team\d-name$/.test(id)) { ovFitName(el); return true; }
-  if (!(el.dataset && el.dataset.editProps || '').split(',').includes('fitMax')) return false;
-  ovFitText(el);
-  return true;
-}
-
-// Mirrors of hud.html::fitName/fitText/shrinkToFit, so the canvas previews a long text
-// the way the live overlay renders it rather than as raw overflow.
-function ovFitName(el) {
-  const cs = getComputedStyle(el);
-  const max = parseFloat(cs.getPropertyValue('--team-name-max')) || 30;
-  const min = parseFloat(cs.getPropertyValue('--team-name-min')) || 16;
-  ovShrinkToFit(el, cs, max, min);
-}
-function ovFitText(el) {
-  const cs = getComputedStyle(el);
-  const max = parseFloat(cs.getPropertyValue('--fit-max'));
-  if (!max) { el.style.fontSize = ''; return; }
-  ovShrinkToFit(el, cs, max, parseFloat(cs.getPropertyValue('--fit-min')) || Math.min(max, 12));
-}
-// Measures the text itself: a centred or right-aligned flex item overflows outside
-// the scroll width, which once let the canvas show a clipped name as fitting.
-function ovShrinkToFit(el, cs, max, min) {
-  const text = document.createRange();
-  text.selectNodeContents(el);
-  const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-  // The canvas is zoomed with a CSS transform: client rects are scaled, layout widths not.
-  const zoom = (el.getBoundingClientRect().width / el.offsetWidth) || 1;
-  let size = Math.min(max, 500);     // hud.html's cap (overlay_build.FIT_SIZE_MAX)
-  el.style.fontSize = size + 'px';
-  while (size > min && text.getBoundingClientRect().width / zoom > width) { size -= 1; el.style.fontSize = size + 'px'; }
+  return RacecastFit.fit(el, {scale: ovState.scale || 1});
 }
 
 // Session-only preview model: an editable copy of the server SAMPLE defaults,
@@ -4526,7 +4499,8 @@ function ovRenderPanel() {
     panel.appendChild(g);
   }
   if (has('fitMax') || has('fitMin')) {
-    // #944: empty max = fixed font size; set = shrink a long text down to min.
+    // #944/#957: every text slot; empty max = fixed font size, set = shrink a long
+    // text down to min. The team names show their own Name max/min pair instead.
     const g = grid();
     if (has('fitMax')) g.appendChild(ovNumField('fitMax', 'Auto-fit max (px)', ov));
     if (has('fitMin')) g.appendChild(ovNumField('fitMin', 'Auto-fit min (px)', ov));

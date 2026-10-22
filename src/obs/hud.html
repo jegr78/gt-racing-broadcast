@@ -39,7 +39,8 @@
 
   /* Team podium row: each car is three independently positionable slots, the
      brand logo, the number badge and the auto-fit name (#136). The overlay builder
-     places and restyles each on its own; --team-name-max/min bound the auto-fit. */
+     places and restyles each on its own; --team-name-max/min bound the auto-fit,
+     always on: they feed the generic --fit-max/min (/overlay-fit.js, #957). */
   .team-logo { height: 50px; width: 54px; justify-content: center; }
   /* object-fit: contain keeps the logo's aspect ratio instead of filling the box,
      so the box's justify-content/align-items position it and the builder's
@@ -48,6 +49,7 @@
   .team-num { width: 54px; height: 48px; background: #12161c; color: #fff;
     font-size: 20px; padding: 4px; border-radius: 3px; justify-content: center; }
   .team-name { height: 56px; --team-name-max: 30px; --team-name-min: 16px;
+    --fit-max: var(--team-name-max); --fit-min: var(--team-name-min);
     overflow: hidden; white-space: nowrap; font-size: var(--team-name-max); }
   /* Podium row: logo centred in its chip, fixed number box, aligned names. */
   #team1-logo { left: 324px; top: 1013px; }
@@ -264,11 +266,13 @@
 <body>
   <!-- data-edit="<label>" marks a builder slot; data-edit-kind="text|box" picks
        its property set (KIND_PROPS in overlay_build.py, the single source).
-       data-edit-props adds slot-specific extras, e.g. team-name auto-fit. -->
+       data-edit-props adds slot-specific extras, e.g. team-name auto-fit. Every
+       text slot also offers the auto-fit bounds (--fit-max/--fit-min), applied by
+       the shared fit script after each data change. -->
   <div id="stint" class="el white" data-edit="Stint banner" data-edit-kind="text"></div>
   <div id="session" class="el black" data-edit="Session" data-edit-kind="text"></div>
   <div id="streamer" class="el black" data-edit="Streamer" data-edit-kind="text"></div>
-  <div id="round-top" class="el white" data-edit="Round title" data-edit-kind="text" data-edit-props="fitMax,fitMin"></div>
+  <div id="round-top" class="el white" data-edit="Round title" data-edit-kind="text"></div>
   <div id="round-flag" class="el" data-edit="Round flag" data-edit-kind="box"><img alt=""></div>
   <div id="round-country" class="el white" data-edit="Round country" data-edit-kind="text"></div>
   <div id="team1-bar" class="el team-bar" data-edit="Team 1 bar" data-edit-kind="box"></div>
@@ -334,6 +338,7 @@
   <div id="tyres-capture" class="el" data-edit="Tyres/Fuel capture" data-edit-kind="box"></div>
   <div id="clock" class="el white" data-edit="Clock" data-edit-kind="text"></div>
 
+<script src="/overlay-fit.js" data-fit-live></script>
 <script>
   const POLL_MS = 2500;
   const TIMER_POLL_MS = 2000, TIMER_TICK_MS = 250;
@@ -395,37 +400,6 @@
     if (key) { img.src = `/hud/assets/${sub}/${key}`; el.classList.remove("empty"); }
     else { img.removeAttribute("src"); el.classList.add("empty"); }
   }
-  function fitName(el) {
-    const cs = getComputedStyle(el);
-    const max = parseFloat(cs.getPropertyValue("--team-name-max")) || 30;
-    const min = parseFloat(cs.getPropertyValue("--team-name-min")) || 16;
-    shrinkToFit(el, cs, max, min);
-  }
-  // Optional auto-fit of any other text slot (#944, the round title): opt-in through
-  // the profile's --fit-max/--fit-min. Without --fit-max the slot keeps the font size
-  // its CSS sets, so profiles without the builder props render as before.
-  function fitText(el) {
-    const cs = getComputedStyle(el);
-    const max = parseFloat(cs.getPropertyValue("--fit-max"));
-    if (!max) { el.style.fontSize = ""; return; }
-    const min = parseFloat(cs.getPropertyValue("--fit-min")) || Math.min(max, 12);
-    shrinkToFit(el, cs, max, min);
-  }
-  // Largest size in [min, max] at which the text fits the slot's inner width. Measures
-  // the text itself: a centred or right-aligned flex item overflows outside scrollWidth.
-  function shrinkToFit(el, cs, max, min) {
-    const text = document.createRange();
-    text.selectNodeContents(el);
-    const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-    // A hand-written huge max would never step down (1e300 - 1 == 1e300); the compiler
-    // drops such bounds, the page caps them (overlay_build.FIT_SIZE_MAX).
-    let size = Math.min(max, 500);
-    el.style.fontSize = size + "px";
-    while (size > min && text.getBoundingClientRect().width > width) {
-      size -= 1;
-      el.style.fontSize = size + "px";
-    }
-  }
   // Per-tile colours (#555) are published as custom properties on the tile's own
   // slots, so one generic profile rule serves all three tiles. Set via
   // style.setProperty, never string concatenation into CSS text, so a sheet value
@@ -465,7 +439,6 @@
     const img = logoEl.querySelector("img");
     if (team && team.brandKey) { img.src = `/hud/assets/brands/${team.brandKey}`; logoEl.classList.remove("empty"); }
     else { img.removeAttribute("src"); logoEl.classList.add("empty"); }
-    fitName(nameEl);
   }
 
   // Solo-mode telemetry (#324): self-gating on /telemetry/data 200 vs 404, so it
@@ -658,7 +631,6 @@
       setText("session", d.session);
       setText("streamer", d.streamer);
       setText("round-top", d.round && d.round.top);
-      fitText(document.getElementById("round-top"));
       setText("round-country", d.round && d.round.country);
       setImg("round-flag", d.round && d.round.flagKey, "flags");
       // Always process all three team slots, not just the present ones: an absent

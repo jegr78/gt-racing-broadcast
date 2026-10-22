@@ -31,8 +31,8 @@ _PX_PROPS = {
     "padding": "padding", "borderRadius": "border-radius",
     "letterSpacing": "letter-spacing",
 }
-# Auto-fit bounds (team names, #944 opt-in text slots). hud.html shrinks 1px per step
-# from max, so a huge max would never finish; the page caps at the same FIT_SIZE_MAX.
+# Auto-fit bounds (team names, every text slot since #957). overlay-fit.js shrinks 1px per
+# step from max, so a huge max would never finish; the page caps at the same FIT_SIZE_MAX.
 _FIT_BOUND_PROPS = frozenset({"teamNameMax", "teamNameMin", "fitMax", "fitMin"})
 FIT_SIZE_MAX = 500
 _TEXT_PROPS = {"color": "color", "background": "background",
@@ -68,10 +68,17 @@ PROP_ORDER = ("left", "top", "offsetRight", "offsetTop", "width", "height", "pad
 KIND_BOX = ("left", "top", "width", "height", "padding",
             "background", "borderWidth", "borderStyle", "borderColor",
             "borderRadius", "slant", "opacity", "rotation", "shear", "visible")
+# The auto-fit bounds (#957) belong to every text slot: --fit-max/--fit-min shrink a
+# long text between them (src/ui/overlay-fit.js), unset keeps the fixed font size.
+FIT_PROPS = ("fitMax", "fitMin")
 KIND_TEXT = KIND_BOX + ("fontSize", "lineHeight", "letterSpacing",
                         "fontFamily", "fontWeight", "fontStyle", "color",
-                        "align", "valign", "textTransform", "textShadow")
+                        "align", "valign", "textTransform", "textShadow") + FIT_PROPS
 KIND_PROPS = {"text": KIND_TEXT, "box": KIND_BOX}
+# A slot that names its own fit pair keeps it instead of the generic one, so it never
+# shows two competing max/min controls. The team names (#136) predate the generic
+# pair; their page CSS feeds --team-name-max/min into --fit-max/min.
+FIT_ALIASES = ("teamNameMax", "teamNameMin")
 
 # A structured value must never close the rule or inject extra CSS; the only
 # verbatim path is customCss. Reject anything carrying CSS-structural characters.
@@ -309,8 +316,8 @@ def extract_slots(html):
     Each is {id, label, props}. props is the KIND_PROPS set for the element's
     data-edit-kind, with any data-edit-props appended as extras; the explicit
     data-edit-props comma list when no kind is given, for back-compat; else
-    DEFAULT_PROPS. The markup is the single source of truth, so there is no
-    hardcoded slot list to drift."""
+    DEFAULT_PROPS. Every text slot then gets the fit bounds (_with_fit). The markup
+    is the single source of truth, so there is no hardcoded slot list to drift."""
     slots = []
     for tag in re.finditer(r"<[^>]*\bdata-edit=\"[^\"]*\"[^>]*>", html):
         text = tag.group(0)
@@ -328,8 +335,19 @@ def extract_slots(html):
             props = extras                                   # back-compat
         else:
             props = list(DEFAULT_PROPS)
-        slots.append({"id": mid.group(1), "label": label, "props": props})
+        slots.append({"id": mid.group(1), "label": label, "props": _with_fit(props)})
     return slots
+
+
+def _with_fit(props):
+    """*props* with the generic fit pair on every text slot (one that offers a font
+    size), whatever declared its props: a kind, an explicit list or the default. A
+    slot carrying its own aliased pair (the team names) drops the generic one."""
+    if any(p in props for p in FIT_ALIASES):
+        return [p for p in props if p not in FIT_PROPS]
+    if "fontSize" in props:
+        return props + [p for p in FIT_PROPS if p not in props]
+    return props
 
 
 def base_style(html):

@@ -11310,6 +11310,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     audience_runtime = audience_runtime or audience_widgets.Runtime(
         os.path.join(os.path.dirname(overlay_dir), "audience.json") if overlay_dir else None)
     audience_script = os.path.join(_SRC_BASE, "ui", "audience.js")
+    # Shared text auto-fit of the overlay pages and the builder canvas (#957).
+    fit_script = os.path.join(_SRC_BASE, "ui", "overlay-fit.js")
 
     # Shared across all H instances (one limiter per relay). The CHAT limiter is
     # keyed on the authenticated streamer (per-commentator). The AUTH-FAILURE
@@ -12351,6 +12353,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send(audience_runtime.data())
                 if p == ["audience.js"]:
                     return self._send_file(audience_script, "application/javascript; charset=utf-8")
+                if p == ["overlay-fit.js"]:
+                    return self._send_file(fit_script, "application/javascript; charset=utf-8")
                 if p == ["hud"]:
                     if not (hud_source and hud_path):
                         return self._send({"error": "hud disabled"}, 404)
