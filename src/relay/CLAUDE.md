@@ -390,8 +390,10 @@ stays in the local Control Center; `/console` exposes no audience mutation.
 
 **Asset aliases (#936).** `list_graphics` keeps canonical name/file fields and
 optionally adds displayName after Internal/placeholder filtering. `asset_labels`
-provides only public cached aliases; `/obs/asset-labels` is director-gated under
-the existing obs policy, and native Companion polls its trusted-network root.
+provides the crew map (public cached aliases only); `director=True` adds internal
+graphics and clips (#955) and feeds only the director surfaces: `/obs/asset-labels`
+(director-gated under the existing obs policy; native Companion polls its
+trusted-network root) and the Director Panel's `/obs/graphics` take list.
 Take views attach labels only to allowed controls. Requests retain the first
 server-resolved displayName while canonical source controls rights, deduplication
 and OBS routing. Request views carry requestDisplayName for the pending snapshot;

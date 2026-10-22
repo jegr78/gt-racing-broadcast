@@ -1767,10 +1767,18 @@ def list_graphics(graphics_dir):
     return out
 
 
-def asset_labels(graphics_dir, media_dir=None):
-    """Public display-only map, after graphic visibility and placeholder filtering."""
-    labels = {row["name"]: row["displayName"] for row in list_graphics(graphics_dir)
-              if "displayName" in row}
+def asset_labels(graphics_dir, media_dir=None, director=False):
+    """Canonical asset name -> league alias, for display only.
+
+    The default is the crew map: after graphic visibility and placeholder filtering,
+    so an internal (OBS-only) asset's alias never reaches a /console crew page.
+    director=True is the map for the director surfaces (Director Panel, Companion):
+    internal graphics and clips are operated there, so they keep their alias (#955)."""
+    if director:
+        labels = _director_graphic_labels(graphics_dir)
+    else:
+        labels = {row["name"]: row["displayName"] for row in list_graphics(graphics_dir)
+                  if "displayName" in row}
     if media_dir is None and graphics_dir:
         media_dir = os.path.join(os.path.dirname(graphics_dir), "media")
     if media_dir:
@@ -1780,10 +1788,29 @@ def asset_labels(graphics_dir, media_dir=None):
                 continue
             if meta is None:
                 meta = asset_metadata.read(media_dir)
-            label = asset_metadata.display_name(media_dir, canonical, public=True,
-                                                data=meta)
+            label = asset_metadata.display_name(media_dir, canonical,
+                                                public=not director, data=meta)
             if label != canonical:
                 labels[canonical] = label
+    return labels
+
+
+def _director_graphic_labels(graphics_dir):
+    """Aliases of every downloaded still-graphic, internal ones included."""
+    if not graphics_dir:
+        return {}
+    try:
+        names = os.listdir(graphics_dir)
+    except OSError:
+        return {}
+    meta = asset_metadata.read(graphics_dir)
+    labels = {}
+    for fn in names:
+        if fn.lower().endswith(".png"):
+            name = fn[:-4]
+            label = asset_metadata.display_name(graphics_dir, name, data=meta)
+            if label != name:
+                labels[name] = label
     return labels
 
 
@@ -12572,13 +12599,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send(setup_ctl.set_field(p[2].lower(), ""))
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p == ["obs", "asset-labels"]:
-                    return self._send(asset_labels(graphics_dir))
+                    return self._send(asset_labels(graphics_dir, director=True))
                 if p == ["obs", "graphics"]:
                     # The panel's graphic list; director-gated under /console.
                     return self._send(graphic_takes_view(
                         relay, relay._obs if _obs_ws is not None else None,
                         _take_modes.snapshot(), None, _crew_takes, flag_graphic_store,
-                        _takes_read_state, labels=asset_labels(graphics_dir)))
+                        _takes_read_state, labels=asset_labels(graphics_dir, director=True)))
                 if p == ["obs", "graphics", "requests"]:
                     # The panel's request queue and modes, without an OBS read.
                     now = time.time()
