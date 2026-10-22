@@ -52,7 +52,8 @@ const mk = () => ({textContent: '', className: '', attrs: {}, checked: false,
 const els = {}; const $ = id => els[id] || (els[id] = mk());
 const document = {querySelectorAll: () => []};
 const options = () => {}, carLabel = r => String(r.car_id), referenceLabel = r => 'ref';
-const num = (v, d = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : 'Unavailable';
+const NA = 'N/A';
+const num = (v, d = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : NA;
 const state = {follow: true, snapshot: null, laps: [], sessions: [], refs: [], refLaps: [],
   refSource: '', a: '', b: '', session: '', rejected: new Set(), newLaps: 0,
   pick: null, aKind: '', trend: {key: '', rows: []}};
@@ -75,7 +76,7 @@ console.log([0, .004, 3599.9996, null, NaN, Infinity, -1].map(lapTime).join('|')
     if out is not None:
         assert out.splitlines() == [
             '2:05.678|1:02.345|1:00.000', 'Lap 2 · 1:02.345',
-            '0:00.000|0:00.004|60:00.000|Unavailable|Unavailable|Unavailable|Unavailable']
+            '0:00.000|0:00.004|60:00.000|N/A|N/A|N/A|N/A']
 
 
 def _reference_src(h):
@@ -183,21 +184,23 @@ for (const steer_rad of [0.2, -0.2, 0.001, null]) {
   instruments({instruments: {steer_rad}}); seen.push($('steer').textContent); }
 console.log(seen.join('|'));""")
     if out is not None:
-        assert out.strip() == "11° L|11° R|0°|Unavailable", out
+        assert out.strip() == "11° L|11° R|0°|N/A", out
 
 
 def t_average_fuel_estimates_the_laps_left_on_the_current_fuel():
     h = _html()
     assert 'id="fuel-avg"' in h and h.index('id="instruments"') < h.index('id="fuel-avg"') < h.index('id="input-trace"')
-    out = _run_js(_HARNESS + _func_src(h, "lapTime") + _func_src(h, "instruments") + """
+    out = _run_js(_HARNESS + _func_src(h, "lapTime") + _func_src(h, "duration") + _func_src(h, "instruments") + """
 const seen = [];
-for (const [avg, laps, fuel] of [[3.0612, 12, 85.7], [3.0612, 12, null], [null, 0, 40], [2.5, 3, 0]]) {
-  instruments({instruments: {fuel_l: fuel}, fuel_avg_l: avg, fuel_avg_laps: laps});
-  seen.push($('fuel-avg').textContent + '/' + $('fuel-avg-note').textContent); }
+for (const [avg, laps, fuel, lapAvg] of [[3.0612, 12, 85.7, 90], [3.0612, 12, null, 90], [null, 0, 40, 90],
+                                         [1.0, 3, 100, 90], [2.5, 3, 40, null]]) {
+  instruments({instruments: {fuel_l: fuel}, fuel_avg_l: avg, fuel_avg_laps: laps, lap_avg_s: lapAvg});
+  seen.push($('fuel-avg').textContent + '/' + $('fuel-avg-note').textContent + '/' + $('fuel-time-note').textContent); }
 console.log(seen.join('|'));""")
     if out is not None:
-        assert out.strip() == ("3.06/≈ 28.0 laps left|3.06/Fuel level unavailable|"
-                               "Unavailable/No eligible lap with fuel use|2.50/≈ 0.0 laps left"), out
+        assert out.strip() == ("3.06/≈ 28.0 laps left/≈ 42:00 time left|3.06/N/A/N/A|"
+                               "N/A/No eligible lap with fuel use/N/A|1.00/≈ 100.0 laps left/≈ 2:30:00 time left|"
+                               "2.50/≈ 16.0 laps left/N/A"), out
 
 
 def t_shift_points_compare_the_lap_in_progress_with_the_vehicle_reference():
@@ -222,9 +225,20 @@ console.log(show());
 renderShifts({shifts: null}); console.log(show());""")
     if out is not None:
         first, missing, none = out.strip().split("\n")
-        assert first.startswith("1,6800,Unknown,—,1 / 2,7012,7100,+88,2 / 3,Unavailable,—,—,0"), first
+        assert first.startswith("1,6800,N/A,N/A,1 / 2,7012,7100,+88,2 / 3,N/A,N/A,N/A,0"), first
         assert "Telemetry" in missing and "Data management" in missing and missing.startswith(" |"), missing
         assert none.endswith("Waiting for a car"), none
+
+
+def t_desk_shows_na_for_every_missing_value():
+    h = _html()
+    for prose in ("Shared reference unavailable", "Live analysis unavailable", "Analysis temporarily unavailable",
+                  "Telemetry source unavailable", "Program unavailable", "Crew chat temporarily unavailable"):
+        h = h.replace(prose, "")
+    assert "Unavailable" not in h.replace("SourceUnavailable", ""), "a missing value still reads Unavailable"
+    assert h.count(">N/A<") >= 14, h.count(">N/A<")
+    assert "const NA='N/A'" in h
+    assert "button:disabled{opacity:.5;cursor:default}" in h, "a disabled button must look disabled"
 
 
 def t_input_trace_sits_with_the_live_values_and_uses_the_gated_route():

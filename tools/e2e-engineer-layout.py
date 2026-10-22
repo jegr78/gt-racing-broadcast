@@ -155,7 +155,7 @@ async def main():
                     assert all(a[0]['y'] < b[0]['y'] for a,b in zip(rows,rows[1:],strict=False)), f'{width}: headline rows overlap: {positions}'
                     if width <= 600:
                         assert positions[-1]['width'] > positions[0]['width'] * 1.9, 'phone fuel tile did not span the headline'
-                    assert await page.locator('#fuel-avg').inner_text() == 'Unavailable', 'synthetic laps without consumption invented a fuel average'
+                    assert await page.locator('#fuel-avg').inner_text() == 'N/A', 'synthetic laps without consumption invented a fuel average'
                     placement=await page.evaluate('''() => {
                         const box=id=>document.getElementById(id).getBoundingClientRect();
                         const p=box('program-card'),m=document.querySelector('.map-card').getBoundingClientRect(),h=box('instruments');
@@ -203,16 +203,16 @@ async def main():
                 assert 'gain' in (await page.locator('#delta').get_attribute('class') or '') and 'loss' not in (await page.locator('#delta').get_attribute('class') or ''), 'negative delta lost gain emphasis'
                 await page.evaluate('() => showDelta(.25)')
                 assert await page.locator('#delta').inner_text() == '+0.250', 'positive delta relied on color alone'
-                signed=await page.evaluate('() => {const td=document.createElement("td");cellValue(td,.5,false,"Unavailable",true);return td.textContent;}')
+                signed=await page.evaluate('() => {const td=document.createElement("td");cellValue(td,.5,false,"N/A",true);return td.textContent;}')
                 assert signed == '+0.500', 'positive sector difference relied on color alone'
                 assert 'loss' in (await page.locator('#delta').get_attribute('class') or '') and 'gain' not in (await page.locator('#delta').get_attribute('class') or ''), 'positive delta retained the previous gain'
                 await page.evaluate('() => showDelta(0)')
                 assert await page.locator('#delta').inner_text() == '0.000' and not (await page.locator('#delta').get_attribute('class') or ''), 'zero delta retained a gain or loss'
                 for invalid in ('Infinity','-Infinity'):
                     await page.evaluate('() => showDelta('+invalid+')')
-                    assert await page.locator('#delta').inner_text() == 'Unavailable' and not (await page.locator('#delta').get_attribute('class') or ''), 'nonfinite delta claimed a gain or loss'
+                    assert await page.locator('#delta').inner_text() == 'N/A' and not (await page.locator('#delta').get_attribute('class') or ''), 'nonfinite delta claimed a gain or loss'
                 await page.evaluate('() => showDelta(null)')
-                assert await page.locator('#delta').inner_text() == 'Unavailable' and not (await page.locator('#delta').get_attribute('class') or ''), 'missing delta retained gain/loss emphasis'
+                assert await page.locator('#delta').inner_text() == 'N/A' and not (await page.locator('#delta').get_attribute('class') or ''), 'missing delta retained gain/loss emphasis'
                 observed=await page.evaluate('() => state.detail.trace.at(-1).d')
                 ahead=await page.evaluate('(d) => (state.detail.corner_metrics||[]).filter(c=>c.apex_m>d).map(c=>"T"+c.number)',observed)
                 labels=await page.locator('#map [data-turn]').all_text_contents()
@@ -233,11 +233,11 @@ async def main():
                 assert (await page.locator('#notice').inner_text()).startswith('Relay restarted.') and await page.evaluate('() => state.a') == '', 'a relay restart kept a live reference'
                 await page.evaluate('() => instruments({instruments:{},current:{lap:3,track:null,car:"Car"},track_recognition:false})')
                 assert all(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units stayed beside unavailable values'
-                assert [await page.locator(t).inner_text() for t in ('#tyres-front','#tyres-rear')] == ['Unavailable','Unavailable'], 'unavailable tyre pairs repeated the placeholder'
+                assert [await page.locator(t).inner_text() for t in ('#tyres-front','#tyres-rear')] == ['N/A','N/A'], 'unavailable tyre pairs repeated the placeholder'
                 assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · track recognition data not loaded'), 'missing recognition data was not named'
                 await page.evaluate('() => instruments({instruments:{speed_kmh:120,rpm:5000,throttle:40,brake:0,tyres_c:[80,null,null,null]},current:{lap:3,track:null,car:"Car"},track_recognition:true})')
                 assert not any(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units were hidden beside measured values'
-                assert await page.locator('#tyres-front').inner_text() == '80 / Unavailable', 'a partly measured tyre pair lost its value'
+                assert await page.locator('#tyres-front').inner_text() == '80 / N/A', 'a partly measured tyre pair lost its value'
                 assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · Car'), 'recognisable data still blamed the track data'
                 await page.evaluate('() => clearPlots()')
                 assert not await page.locator('#larger-sectors').is_visible(), 'an empty section card stayed visible'

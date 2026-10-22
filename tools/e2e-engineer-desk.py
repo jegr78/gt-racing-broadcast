@@ -148,8 +148,8 @@ async def main():
                 await page.unroute('**/race-engineer/lap?*', outside_outline)
                 await page.unroute('**/race-engineer/compare?*', pending_pair)
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready" && EngineerDesk.state.pair?.delta?.length > 0')
-                assert await page.locator('#delta').inner_text() != 'Unavailable'
-                assert await page.locator('#sectors tbody tr').first.locator('td').nth(1).inner_text() != 'Unavailable'
+                assert await page.locator('#delta').inner_text() != 'N/A'
+                assert await page.locator('#sectors tbody tr').first.locator('td').nth(1).inner_text() != 'N/A'
                 # A detail can become ready between outline and compare reads.
                 selected_a = await page.evaluate('() => EngineerDesk.state.a')
                 missed = [False]
@@ -202,7 +202,7 @@ async def main():
                         await route.fulfill(json=data)
                     await page.route('**/race-engineer/snapshot', shift_points)
                     await page.wait_for_function('() => document.querySelectorAll("#shift-table tbody tr").length === 5')
-                    await page.wait_for_function('() => /laps left|Fuel level unavailable/.test(document.getElementById("fuel-avg-note").textContent)')
+                    await page.wait_for_function('() => /laps left|N[/]A/.test(document.getElementById("fuel-avg-note").textContent)')
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
@@ -238,7 +238,7 @@ async def main():
                 await page.route('**/race-engineer/snapshot', missing_car)
                 await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position === null')
                 assert await page.locator('#map circle').count() == 0, 'missing position retained a car marker'
-                assert await page.locator('#race-position').inner_text() == 'Unavailable', 'missing race position retained a place'
+                assert await page.locator('#race-position').inner_text() == 'N/A', 'missing race position retained a place'
                 await page.unroute('**/race-engineer/snapshot', missing_car)
                 async def another_track(route):
                     response = await route.fetch(); data = await response.json()
@@ -249,7 +249,7 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.snapshot?.current?.track_id === "unrelated-track"')
                 assert await page.locator('#map circle').count() == 0, 'unrelated historical map retained a current car'
                 await page.unroute('**/race-engineer/snapshot', another_track)
-                await page.wait_for_function('() => document.getElementById("delta").textContent !== "Unavailable"')
+                await page.wait_for_function('() => document.getElementById("delta").textContent !== "N/A"')
                 pair_entered, pair_release, pair_done = asyncio.Event(), asyncio.Event(), asyncio.Event()
                 async def held_manual_pair(route):
                     from urllib.parse import parse_qs, urlsplit
@@ -262,7 +262,7 @@ async def main():
                 await page.route('**/race-engineer/compare?*', held_manual_pair)
                 await asyncio.wait_for(pair_entered.wait(), timeout=5)
                 live_delta = await page.locator('#delta').inner_text()
-                assert live_delta != 'Unavailable', 'manual comparison had no live delta before snapshot'
+                assert live_delta != 'N/A', 'manual comparison had no live delta before snapshot'
                 before_snapshot = await page.evaluate('() => EngineerDesk.state.received')
                 await page.wait_for_function('(stamp) => EngineerDesk.state.received > stamp', arg=before_snapshot)
                 assert await page.locator('#delta').inner_text() == live_delta, 'snapshot marker update cleared a pending manual live delta'
@@ -302,7 +302,7 @@ async def main():
                 await page.wait_for_function('() => document.getElementById("status").textContent === "Game paused"')
                 fixture.live.put(packet._replace(rpm=float('nan'),on_track=False),fixture.live._receipt[1]+.1);fixture.live.flush()
                 await page.wait_for_function('() => document.getElementById("status").textContent === "Game menu"')
-                assert await page.locator('#rpm').inner_text() == 'Unavailable'
+                assert await page.locator('#rpm').inner_text() == 'N/A'
                 source=gate.m.gt7_context.source_identity(fixture.live_path)
                 fixture.access().update(grant=source,label='<img src=x onerror="window.injected=true">',expected=1)
                 await page.wait_for_function('(id) => [...document.getElementById("reference-source").options].some(o=>o.value===id)',arg=source)
@@ -382,7 +382,7 @@ async def main():
                 count=[];page.on('request',lambda r:count.append(r.url))
                 await asyncio.sleep(1.2)
                 assert not count, 'role removal did not stop protected polling'
-                assert not await page.locator('#chart path').count() and await page.locator('#speed').inner_text() == 'Unavailable'
+                assert not await page.locator('#chart path').count() and await page.locator('#speed').inner_text() == 'N/A'
                 fixture.crew.inject_row(1,race_engineer=True)
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_selector('#protected:not([hidden])')

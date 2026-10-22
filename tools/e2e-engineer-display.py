@@ -29,9 +29,9 @@ async def main():
                 assert await page.locator('#theory').inner_text() == '1:00.000', 'round milliseconds before splitting minutes'
                 assert '1:02.345' in await page.evaluate('() => lapLabel({lap:2,state:"confirmed",time_s:62.345,comparison_eligible:true})')
                 assert await page.evaluate('() => {const td=document.createElement("td");cellValue(td,4.125);return td.textContent;}') == '0:04.125'
-                assert await page.evaluate('() => {const td=document.createElement("td");cellValue(td,-.125,false,"Unavailable",true);return td.textContent;}') == '-0.125'
+                assert await page.evaluate('() => {const td=document.createElement("td");cellValue(td,-.125,false,"N/A",true);return td.textContent;}') == '-0.125'
                 assert await page.evaluate('() => [0,.004,3599.9996,null,NaN,Infinity,-1].map(lapTime)') == [
-                    '0:00.000','0:00.004','60:00.000','Unavailable','Unavailable','Unavailable','Unavailable']
+                    '0:00.000','0:00.004','60:00.000','N/A','N/A','N/A','N/A']
                 await page.evaluate('() => instruments(state.snapshot)')
                 await page.evaluate('() => {state.savedLaps=state.laps;state.laps=[{session_id:"previous",comparison_eligible:true}];instruments({...state.snapshot,current:{...state.snapshot.current,session_id:"new"},best_s:null,theoretical_s:null});}')
                 assert await page.locator('#best').inner_text() == 'No eligible lap', 'previous session hid the empty best state'
@@ -49,7 +49,7 @@ async def main():
                 assert 'not-driven' in (await cell.get_attribute('class') or ''), 'future sector was not muted'
                 assert await cell.evaluate('(el)=>getComputedStyle(el).color!==getComputedStyle(document.body).color'), 'future placeholder used the measured-value color'
                 out=await page.evaluate('() => lapLabel({lap:0,state:"confirmed",time_s:null,comparison_eligible:false})')
-                assert 'Out lap' in out and 'Unavailable' not in out and 'Lap 0' not in out, 'out lap read as missing timed lap'
+                assert 'Out lap' in out and 'N/A' not in out and 'Lap 0' not in out, 'out lap read as missing timed lap'
                 assert 'Out lap' in await page.evaluate('() => readableContext({lap:0,state:"confirmed"})'), 'out-lap context claimed a completed lap'
                 await page.evaluate('() => graph("delta-chart",[],"delta",170,0)')
                 empty=await page.locator('#delta-chart').text_content()
@@ -68,7 +68,7 @@ async def main():
                 last=await page.locator('#sectors tbody tr').last.locator('td').all_text_contents()
                 assert last == ['5–6','0:03.010','0:03.020','+0.010'], 'grouped tail lost formatted times or signed delta'
                 await page.evaluate('() => {state.pair.mini_sectors.b[5]=null;render();}')
-                assert await page.locator('#sectors tbody tr').last.locator('td').nth(2).inner_text() == 'Unavailable', 'missing tail produced a summed time'
+                assert await page.locator('#sectors tbody tr').last.locator('td').nth(2).inner_text() == 'N/A', 'missing tail produced a summed time'
                 # Only matching reviewed definitions may show a larger-sector delta.
                 await page.evaluate('''() => {const sections={reviewed:true,name:"Three race sections",names:["Opening","Middle","Closing"],bounds_m:[0,300,700,1003],times_s:[3,7,6],variant_id:"three"};state.detail={...state.detail,larger_sectors:sections,definition_fingerprint:"same",sector_variant_id:"three",corner_metrics:Array.from({length:8},(_,i)=>({number:i+1,apex_m:1003}))};state.pair={...state.pair,b:state.detail,a:{...state.detail,larger_sectors:{...sections,times_s:[4,6,6]}},definition_compatible:true};render();}''')
                 table=page.locator('#larger-sectors')
@@ -89,7 +89,7 @@ async def main():
                     await page.evaluate('() => {'+mutation+';render();}')
                     assert '-1.000' not in await page.locator('#larger-sectors').inner_text(), 'unmatched reference sections claimed a delta'
                     if 'times_s=[null' in mutation:
-                        assert await table.locator('[data-section]').first.locator('.section-delta').inner_text() == 'Unavailable', 'missing section time produced a delta'
+                        assert await table.locator('[data-section]').first.locator('.section-delta').inner_text() == 'N/A', 'missing section time produced a delta'
 
                     await page.evaluate('() => {'+restore+';render();}')
                 await page.evaluate('() => {state.pair.definition_compatible=false;render();}')
