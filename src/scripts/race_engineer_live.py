@@ -353,6 +353,15 @@ def _decorate(row, context, definitions, tracks):
     return result
 
 
+class PinError(ValueError):
+    """A rejected shared pin; the message is safe to show to an operator."""
+
+    code = "pin_rejected"
+
+    def __init__(self):
+        super().__init__("Only a completed eligible lap of the live session can be pinned")
+
+
 class Store:
     """All expensive work is shared. Readers receive copies of immutable publications."""
 
@@ -428,6 +437,8 @@ class Store:
         self._context = {"notes": [], "sessions": {}}
         self._context_error = None
         self._replay = self._new_replay()
+        # One shared reference pin per relay, scoped to the live session (under _lock).
+        self._pin, self._pin_revision = None, 0
         self._published = self._empty()
         self._refresh_definitions()
         self.refresh_enabled()
@@ -464,6 +475,9 @@ class Store:
             "sessions": [],
             "laps": [],
             "best_s": None,
+            "best_id": None,
+            "pin": None,  # the shared pin is filled in under _lock by the publishers
+            "pin_revision": self._pin_revision,
             "shifts": None,
             "fuel_avg_l": None,
             "fuel_avg_laps": 0,
@@ -519,6 +533,8 @@ class Store:
             self._inputs.clear()
         self._revision += 1
         with self._lock:
+            if self._pin is not None:  # a new generation never inherits the pin
+                self._pin, self._pin_revision = None, self._pin_revision + 1
             self._published = self._empty()
             self._detail_publication = {}
 
@@ -801,13 +817,20 @@ class Store:
                 )
             else:
                 self._sizes[lid] = size
+        with self._lock:
+            protected = {self._published.get("best_id")}
+            if self._pin is not None:
+                protected.add(self._pin["lap_id"])
         while (
             len(self._details) > self._details_max
             or sum(self._sizes.values()) > DETAIL_BYTES_MAX
         ):
+            candidates = [n for n in self._details if n not in protected]
+            if not candidates:
+                break  # only the pinned and best laps remain over the limit
             old = next(
-                (n for n, r in self._details.items() if r["session_id"] != sid),
-                next(iter(self._details)),
+                (n for n in candidates if self._details[n]["session_id"] != sid),
+                candidates[0],
             )
             del self._details[old]
             self._sizes.pop(old, None)
@@ -890,6 +913,7 @@ class Store:
             and gt7_context.compatible(current or {}, r)
         ]
         fuel_avg, fuel_laps = fuel_average(self._summaries.values(), sid)
+        best = min(eligible, key=lambda r: r["time_s"], default=None)
         doc.update(
             revision=self._revision,
             current=current,
@@ -898,7 +922,8 @@ class Store:
             receipt=self._receipt,
             sessions=list(self._sessions.values()),
             laps=list(self._summaries.values()),
-            best_s=min((r["time_s"] for r in eligible), default=None),
+            best_s=best["time_s"] if best else None,
+            best_id=best["id"] if best else None,
             shifts=self._shifts.snapshot(),
             fuel_avg_l=fuel_avg,
             fuel_avg_laps=fuel_laps,
@@ -916,8 +941,49 @@ class Store:
             self._history_hash = digest
         doc["history_revision"] = self._history_revision
         with self._lock:
+            if self._pin is not None and current and self._pin["session_id"] != sid:
+                self._pin, self._pin_revision = None, self._pin_revision + 1
+            doc.update(
+                pin=dict(self._pin) if self._pin else None,
+                pin_revision=self._pin_revision,
+            )
             self._published = doc
             self._detail_publication = dict(self._details)
+
+    def set_pin(self, lap_id, by):
+        """Pin a completed eligible lap of the live session for every desk; last write wins."""
+        with self._lock:
+            doc = self._published
+            sid = doc["session_id"]
+            row = next((r for r in doc["laps"] if r["id"] == lap_id), None)
+            if (
+                sid is None
+                or row is None
+                or row["session_id"] != sid
+                or row.get("state") != "confirmed"
+                or not row.get("comparison_eligible")
+            ):
+                raise PinError()
+            self._pin = {
+                "lap_id": row["id"],
+                "session_id": sid,
+                "lap": row["lap"],
+                "time_s": row["time_s"],
+                "by": by,
+            }
+            self._pin_revision += 1
+            self._published = dict(
+                doc, pin=dict(self._pin), pin_revision=self._pin_revision
+            )
+            return dict(self._pin)
+
+    def clear_pin(self):
+        """Remove the shared pin; every clear is a new pin revision."""
+        with self._lock:
+            self._pin, self._pin_revision = None, self._pin_revision + 1
+            self._published = dict(
+                self._published, pin=None, pin_revision=self._pin_revision
+            )
 
     def _record_inputs(self, pkt, mono):
         with self._lock:

@@ -145,7 +145,10 @@ def t_theory_keeps_early_sectors_after_default_detail_eviction():
             feed(store, path)
             snap = store.snapshot()
             best = next(r for r in snap['laps'] if r['lap'] == 2)
-            assert store.detail(best['id'])['state'] == 'evicted'
+            # The best lap keeps its detail; the other early laps are evicted.
+            assert store.detail(best['id'])['state'] == 'ready'
+            early = next(r for r in snap['laps'] if r['lap'] == 3)
+            assert store.detail(early['id'])['state'] == 'evicted'
             assert store.stats()['details'] <= live.DETAILS_MAX
             assert snap['best_s'] == 16.
             assert snap['theoretical_s'] == 16.
@@ -183,7 +186,8 @@ def t_theory_composes_evicted_and_retained_sectors_instead_of_only_clamping():
                         queue_max=4096, details_max=1) as store:
             feed(store, writer.path)
             snap = store.snapshot()
-            assert store.detail(next(r['id'] for r in snap['laps'] if r['lap'] == 2))['state'] == 'evicted'
+            # Lap 2 is the best lap and keeps its detail; lap 3's fast first sector is evicted.
+            assert store.detail(next(r['id'] for r in snap['laps'] if r['lap'] == 3))['state'] == 'evicted'
             assert snap['theoretical_s'] == expected
             assert snap['theoretical_s'] < snap['best_s']
 
