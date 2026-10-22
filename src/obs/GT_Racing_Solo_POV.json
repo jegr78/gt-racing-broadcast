@@ -1550,7 +1550,7 @@
                 "url": "http://127.0.0.1:8088/intermission",
                 "width": 1920,
                 "height": 1080,
-                "restart_when_active": true
+                "restart_when_active": false
             },
             "mixers": 255,
             "sync": 0,

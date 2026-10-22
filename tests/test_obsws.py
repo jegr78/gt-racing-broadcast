@@ -1119,6 +1119,49 @@ class _FakeSession:
         self.sent.append(("close", {}))
 
 
+class _BrowserSession(_FakeSession):
+    """Browser inputs with per-input settings, as GetInputSettings reports them: OBS
+    omits a setting left at its default, so restart_when_active may be absent."""
+    SETTINGS = {
+        "Intermission Chat": {"url": "http://127.0.0.1:8088/intermission",
+                              "restart_when_active": True},
+        "HUD Overlay": {"url": "http://127.0.0.1:8088/hud", "restart_when_active": False},
+        "Splitscreen Labels": {"url": "http://127.0.0.1:8088/splitscreen"},
+        "Docs Panel": {"url": "https://example.com/docs", "restart_when_active": True},
+    }
+
+    def request(self, request_type, request_data=None):
+        self.sent.append((request_type, request_data or {}))
+        if request_type == "GetInputList":
+            return {"inputs": [{"inputName": n, "inputKind": "browser_source"}
+                               for n in self.SETTINGS]}
+        if request_type == "GetInputSettings":
+            return {"inputSettings": dict(self.SETTINGS[request_data["inputName"]])}
+        return {}
+
+
+def t_refresh_browser_inputs_switches_off_reload_on_scene_activation():
+    # An OBS collection imported before #956 still reloads relay pages on every scene
+    # cut. The relay/event-start refresh turns that off in place, before it reloads,
+    # so no re-import is needed. Other browser sources are not the relay's business.
+    sess = _BrowserSession()
+    names, note = m.refresh_browser_inputs(session=sess)
+    assert note == "", note
+    writes = [rd for rt, rd in sess.sent if rt == "SetInputSettings"]
+    assert writes == [{"inputName": "Intermission Chat",
+                       "inputSettings": {"restart_when_active": False},
+                       "overlay": True}], writes
+    order = [(rt, rd.get("inputName")) for rt, rd in sess.sent
+             if rt in ("SetInputSettings", "PressInputPropertiesButton")]
+    assert order.index(("SetInputSettings", "Intermission Chat")) <         order.index(("PressInputPropertiesButton", "Intermission Chat")), order
+
+
+def t_refresh_browser_inputs_preflight_changes_no_settings():
+    sess = _BrowserSession()
+    m.refresh_browser_inputs(session=sess, press=False)
+    assert [rt for rt, _ in sess.sent if rt == "SetInputSettings"] == [], sess.sent
+
+
 # The commentary microphone of a local stint is live only while the on-air slot is
 # the local capture, and muted in every other state. (#593)
 MIC = "Commentary Mic Device"

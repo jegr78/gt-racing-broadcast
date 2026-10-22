@@ -57,7 +57,7 @@ def add_intermission_scene(d):
         "url":                CHAT_URL,
         "width":              1920,
         "height":             1080,
-        "restart_when_active": True,
+        "restart_when_active": False,   # never reload on scene-activate (#956)
     }
     srcs.append(chat_src)
 
