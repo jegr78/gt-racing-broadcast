@@ -137,7 +137,7 @@ opens the builder in a larger modal over the Control Center; **Save** writes the
 **Preview ↗** opens the live HUD preview at `/hud/preview` (the real base page with
 live Sheet data over your `Overlay.png` frame).
 
-![Control Center. Overlay Builder modal: drag/resize the HUD slots on a canvas over the Overlay.png frame, style them in the property panel](images/cc-overlay-builder.png)
+![Control Center. Overlay Builder modal: drag/resize the HUD slots on a canvas over the Overlay.png frame, style them in the property panel, here the Streamer box with its Auto-fit max/min](images/cc-overlay-builder.png)
 
 ### Splitscreen layouts
 

@@ -169,6 +169,10 @@ def main():
                 assert page.locator("#ov-frame-label").get_attribute("title") == "Overlay.png"
                 if args.shots:
                     page.locator("#overlay-popout").click()
+                    # Show the property panel with the auto-fit bounds every text box
+                    # offers (#957): an unsaved draft value fits the long sample text.
+                    page.evaluate("ovSelect('streamer'); ovSetProp('streamer', 'fitMax', 26);"
+                                  " ovSetProp('streamer', 'fitMin', 14)")
                     page.locator("#ov-modal .ovmodal-card").screenshot(
                         path=str(ROOT / "src/docs/wiki/images/cc-overlay-builder.png")
                     )
