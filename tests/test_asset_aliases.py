@@ -212,6 +212,62 @@ def t_live_gallery_alias_refresh_and_private_filtering():
             server.server_close()
 
 
+def t_director_labels_include_internal_assets_crew_labels_do_not():
+    # #955: internal (OBS-only) graphics are operated by the director, so the Director
+    # Panel and Companion show the league's alias for them too. The crew-facing map
+    # keeps them out, so an internal alias never reaches /console crew pages.
+    import test_console_gate as gate
+    import asset_metadata as am
+    import tempfile
+    import json
+
+    with tempfile.TemporaryDirectory() as td:
+        graphics, media = Path(td) / "graphics", Path(td) / "media"
+        graphics.mkdir()
+        media.mkdir()
+        for name in ("Standings", "Overlay"):
+            (graphics / (name + ".png")).write_bytes(b"real-graphic-fixture")
+        (media / "trailer.mp4").write_bytes(b"clip")
+        am.refresh(str(graphics), [["Name", "Alias", "URL", "Internal"],
+                                   ["Standings", "Sponsor board", DRIVE, "FALSE"],
+                                   ["Overlay", "League frame", DRIVE, "TRUE"]], "graphics")
+        am.refresh(str(media), [["Name", "Alias", "URL", "Internal"],
+                                ["Trailer Video", "Season film", "", "TRUE"]], "media")
+        director = {"Standings": "Sponsor board", "Overlay": "League frame",
+                    "Trailer Video": "Season film"}
+        assert gate.m.asset_labels(str(graphics), director=True) == director
+        assert gate.m.asset_labels(str(graphics)) == {"Standings": "Sponsor board"}
+
+        server = gate._serve(graphics_dir=str(graphics))
+        port = server.server_address[1]
+        try:
+            for path, token in (("/obs/asset-labels", None),
+                                ("/console/obs/asset-labels", gate._tok("bob"))):
+                code, body = gate._get(port, path, token)
+                assert code == 200 and json.loads(body) == director, (path, code, body)
+            code, body = gate._get(port, "/console/graphics", gate._tok("alice"))
+            assert code == 200 and "League frame" not in body, body
+            # The Director Panel's take list gets the director map; the crew take
+            # view (/console/cockpit/graphic-takes) keeps the crew map.
+            seen = {}
+            real_view = gate.m.graphic_takes_view
+
+            def spy(*args, labels=None, **kwargs):
+                seen["director" if args[3] is None else "crew"] = labels
+                return {"graphics": []}
+            gate.m.graphic_takes_view = spy
+            try:
+                gate._get(port, "/obs/graphics")
+                gate._get(port, "/console/cockpit/graphic-takes", gate._tok("alice"))
+            finally:
+                gate.m.graphic_takes_view = real_view
+            assert seen.get("director") == director, seen
+            assert seen.get("crew") == {"Standings": "Sponsor board"}, seen
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
 def t_request_snapshot_survives_alias_rename_and_deduplicates_source():
     import test_console_gate as gate
     import asset_metadata as am
