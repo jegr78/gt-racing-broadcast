@@ -999,6 +999,53 @@ def t_restart_with_old_format_staged_file_still_requires_reconnect():
             other.close()
 
 
+def t_resumed_refresh_never_serves_the_unvalidated_old_token_while_retrying():
+    with fixture() as (service, clock, api, _cache, definitions):
+        connect(service, clock)
+        service.files.stage_refresh(service.connection_id)
+        api.failures["refresh"] = tw.APIError("unsent", "fixture-private", True, 60)
+        other = _restart(service, api, clock, definitions)
+        try:
+            before = len(api.calls)
+            other.tick()
+            status = other.status()
+            assert status["phase"] == "refreshing" and not status["connected"], status
+            assert [call[0] for call in api.calls[before:]] == ["refresh"], (
+                "A resumed refresh used the unvalidated saved access token"
+            )
+        finally:
+            other.close()
+
+
+def t_token_rejected_while_a_refresh_waits_stops_polling_until_rotation_completes():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        api.failures["refresh"] = tw.APIError("rate_limit", "fixture-private", True, 60)
+        _near_expiry(service, clock, 290)
+        clock.advance(1)
+        service.tick()
+        assert service.status()["connected"]  # The old token still serves.
+        _reject_old_access(service, api)
+        clock.advance(30)
+        service.tick()
+        assert not service.status()["connected"]
+        before = len(api.calls)
+        clock.advance(30)  # The refresh retry is rate limited again.
+        service.tick()
+        assert [call[0] for call in api.calls[before:]] == ["refresh"]
+        clock.advance(30)
+        service.tick()
+        assert not [
+            call for call in api.calls[before:] if call[0] in connection.METRICS
+        ], "A token Twitch rejected served metrics again while the refresh waited"
+        assert not service.status()["connected"]
+        del api.failures["refresh"]
+        clock.advance(60)
+        service.tick()
+        assert service.status()["connected"] and service.pair["refresh"] == NEWREFRESH
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
