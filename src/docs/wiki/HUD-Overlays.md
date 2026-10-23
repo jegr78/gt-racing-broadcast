@@ -354,8 +354,7 @@ file and Look backups.
 
 In **Audience widgets**, choose a source: **YouTube video likes**, **YouTube
 concurrent viewers** or **YouTube channel subscribers**. Manual widgets continue
-to work without a connection. The builder shows sample values, including the
-approximate marker for rounded subscribers.
+to work without a connection. The builder shows sample values.
 
 Open **YouTube connection** while the relay is running for the active profile.
 Enable **YouTube Data API v3** in your Google Cloud project and enter its API key.
@@ -399,8 +398,9 @@ then **Activate verified targets**.
 Concurrent viewers are available only while the selected broadcast is live.
 Upcoming, ended and inaccessible broadcasts have no viewer count, even if an old
 API field remains. Likes can remain available after the broadcast ends. YouTube
-public subscriber counts are rounded to three significant figures and display
-`≈`. They do not support exact net goals. Video likes support **Net since
+public subscriber counts are rounded to three significant figures; the widget
+shows the number as YouTube reports it, without a marker. They do not support exact
+net goals. Video likes support **Net since
 captured baseline** after **Capture baseline / reset** deliberately captures a
 fresh exact cached value. A stale, missing or approximate value cannot become a
 baseline. Restarting does not recapture it.
