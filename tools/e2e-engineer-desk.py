@@ -191,7 +191,6 @@ async def main():
                     # The live delta grows between the fixture's two samples: losing time now.
                     await page.wait_for_function('() => document.getElementById("delta-trend").textContent === "\\u25b2"')
                     # A new A restarts the trend, so show lap 4 as the engineer's own pick only after it.
-                    # Earlier steps changed A; show lap 4 as the engineer's own pick.
                     await page.locator('#lap-a').select_option(previous)
                     await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id',arg=previous)
                     # No cached vehicle source in the fixture: a synthetic reference and upshifts.

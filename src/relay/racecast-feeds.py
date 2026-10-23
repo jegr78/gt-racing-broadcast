@@ -11682,14 +11682,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         def _engineer_pin(self, subject):
             """POST /console/race-engineer/pin: set ({"lap_id": "<id>"}) or clear
             ({"lap_id": null}) the shared reference pin. The caller already passed
-            the gate's identity, policy and Engineer access checks."""
+            the gate's identity, policy and Engineer access checks. Unlike the GET
+            routes there is no re-check afterwards: a reply can be withheld, a write
+            cannot be undone, so the check before the write is the boundary."""
             service = getattr(getattr(telemetry_store, "engineer", None), "api", None)
             if service is None:
                 return self._send({"error": {"code": "analysis_unavailable", "message": "Live analysis is unavailable"}}, 503)
             invalid = {"error": {"code": "invalid_body", "message": "Expected a JSON object with lap_id"}}
             lengths = self.headers.get_all("Content-Length", [])
             if (self.headers.get_content_type() != "application/json" or self.headers.get("Transfer-Encoding")
-                    or len(lengths) != 1 or not lengths[0].isdigit() or not 0 < int(lengths[0]) <= 4096):
+                    or len(lengths) != 1 or not (lengths[0].isascii() and lengths[0].isdigit())
+                    or not 0 < int(lengths[0]) <= 4096):
                 return self._send(invalid, 400)       # do_POST drains a bounded body
             raw = self.rfile.read(int(lengths[0]))
             self._body_consumed = True
@@ -11705,7 +11708,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._send(service.pin(body["lap_id"], engineer_display_name(members, subject)))
             except race_engineer_live.PinError as exc:
                 return self._send({"error": {"code": exc.code, "message": str(exc)}}, 409)
-            except (OSError, ValueError, TypeError):
+            except (OSError, ValueError, TypeError) as exc:
+                LOG.warning("Race Engineer pin not saved: %s", exc)
                 return self._send({"error": {"code": "analysis_unavailable", "message": "Analysis is temporarily unavailable"}}, 503)
 
         def _buttons_health(self):

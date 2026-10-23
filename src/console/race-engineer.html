@@ -74,7 +74,7 @@ function trend(value,distance){const el=$('delta-trend'),h=state.trend,key=state
  const diff=Number.isFinite(value)&&h.rows.length>1?h.rows.at(-1).v-h.rows[0].v:0,dir=diff>TREND_DEADBAND?'up':diff<-TREND_DEADBAND?'down':'';
  el.textContent=dir==='up'?'▲':dir==='down'?'▼':'';el.className='trend'+(dir?' '+dir:'');el.setAttribute('aria-label',dir==='up'?'Losing time now':dir==='down'?'Gaining time now':'No trend');}
 function clearPlots(clearOutline=true){if(clearOutline){state.sectionView='';state.sectionOpen.clear();state.sectionFocus=null;}else{const active=document.activeElement;state.sectionFocus=null;for(const details of $('larger-sectors').querySelectorAll('details[data-section-index]')){const index=details.dataset.sectionIndex;if(details.open)state.sectionOpen.add(index);else state.sectionOpen.delete(index);if(details.querySelector('summary')===active)state.sectionFocus=index;}}$('selection-summary').textContent=state.note||'Waiting for selected lap detail';state.mapFrame=null;$('map-turns').textContent='';if(clearOutline)state.outline=null;for(const id of ['chart','delta-chart','map'])$(id).replaceChildren();$('sectors').tBodies[0].replaceChildren();showDelta(null);$('context').textContent='No selected lap';$('notes').replaceChildren();$('limitations').textContent='';$('larger-sectors').replaceChildren();state.detail=null;state.pair=null;}
-function stop(message){state.stopped=true;pgmHalt();trc.rows=[];trc.offset=null;state.pick=null;state.aKind='';$('program').removeAttribute('src');$('program-frame').classList.remove('loaded');state.note='';state.epoch++;clearInterval(timer);for(const c of state.controllers)c.abort();state.controllers.clear();state.snapshot=null;state.laps=[];state.sessions=[];state.refs=[];state.refLaps=[];state.a=state.b=state.session=state.refSource='';state.zoom=null;state.known.clear();state.connected=false;clearPlots();$('protected').hidden=true;for(const id of ['references','notes','chatlog','larger-sectors','session','lap-a','lap-b','reference-source'])$(id).replaceChildren();for(const el of document.querySelectorAll('.value strong'))el.textContent=NA;$('best-note').textContent='Eligible completed laps';for(const id of ['source-state','history-state','new-laps'])$(id).textContent='';$('chatin').value='';$('context').textContent='';$('limitations').textContent='';$('receipt').textContent='';$('status').textContent=message;}
+function stop(message){state.stopped=true;state.pinFail=null;pgmHalt();trc.rows=[];trc.offset=null;state.pick=null;state.aKind='';$('program').removeAttribute('src');$('program-frame').classList.remove('loaded');state.note='';state.epoch++;clearInterval(timer);for(const c of state.controllers)c.abort();state.controllers.clear();state.snapshot=null;state.laps=[];state.sessions=[];state.refs=[];state.refLaps=[];state.a=state.b=state.session=state.refSource='';state.zoom=null;state.known.clear();state.connected=false;clearPlots();$('protected').hidden=true;for(const id of ['references','notes','chatlog','larger-sectors','session','lap-a','lap-b','reference-source'])$(id).replaceChildren();for(const el of document.querySelectorAll('.value strong'))el.textContent=NA;$('best-note').textContent='Eligible completed laps';for(const id of ['source-state','history-state','new-laps'])$(id).textContent='';$('chatin').value='';$('context').textContent='';$('limitations').textContent='';$('receipt').textContent='';$('status').textContent=message;}
 class AccessLost extends Error{}
 class ReferenceLost extends Error{}
 class SourceUnavailable extends Error{}
@@ -102,7 +102,9 @@ function carLabel(row){return row.car||('car '+(row.car_id??NA));}
 function referenceLabel(row){const source=row.session_id?.split(':')[1];return state.refs.find(r=>r.id===source)?.label||'Shared reference';}
 // Reference A candidates for the selected B: eligible laps of its pool, the usable ones of its cohort, the fastest.
 function usableRefs(){const current=state.snapshot?.current,lapB=state.laps.concat(state.refLaps,current?[current]:[]).find(r=>r.id===state.b),pool=state.refSource?state.refLaps:state.laps.filter(r=>r.session_id===state.session),eligible=pool.filter(r=>r.comparison_eligible),usable=eligible.filter(r=>sameCohort(r,lapB)&&!state.rejected.has(r.id+'|'+state.b));
- return {lapB,eligible,usable,best:usable.length?usable.reduce((a,b)=>a.time_s<b.time_s?a:b).id:''};}
+ // For the live lap, best is the relay's best_id (it also checks compound and settings), so A matches Best completed.
+ const server=lapB&&lapB.id===current?.id&&usable.find(r=>r.id===state.snapshot?.best_id);
+ return {lapB,eligible,usable,best:server?server.id:usable.length?usable.reduce((a,b)=>a.time_s<b.time_s?a:b).id:''};}
 function selections(){
  const current=state.snapshot?.current;const all=state.laps.concat(state.refLaps,current?[current]:[]);
  // Follow live keeps B on the live lap; A follows the reference precedence below.
@@ -125,8 +127,11 @@ function selections(){
 function referenceText(){const k=state.aKind,row=state.laps.concat(state.refLaps).find(r=>r.id===state.a),n=row?row.lap:k==='pinned'?state.snapshot?.pin?.lap:null;
  return k&&n!=null?`Against ${k==='source'?referenceLabel(row):{best:'best',pinned:'pinned',pick:'your pick'}[k]} · Lap ${n}`:'Against the selected reference';}
 // Pinning takes the lap shown as A; only a completed eligible lap of the live session qualifies.
-function pinControls(){const snap=state.snapshot,pin=snap?.pin,b=$('pin-toggle'),row=state.laps.find(r=>r.id===state.a),kept=pin&&state.laps.find(r=>r.id===pin.lap_id)?.detail_state==='ready';
- b.textContent=pin?`Unpin lap ${pin.lap}`:'Pin lap A';b.disabled=!pin&&!(row&&row.state==='confirmed'&&row.comparison_eligible&&row.session_id===snap?.session_id);
+// A pinnable A other than the pinned lap replaces the pin directly (last write wins).
+function pinnableA(){const snap=state.snapshot,row=state.laps.find(r=>r.id===state.a);
+ return !!row&&row.state==='confirmed'&&row.comparison_eligible&&row.session_id===snap?.session_id&&row.id!==snap?.pin?.lap_id;}
+function pinControls(){const snap=state.snapshot,pin=snap?.pin,b=$('pin-toggle'),kept=pin&&state.laps.find(r=>r.id===pin.lap_id)?.detail_state==='ready',pinnable=pinnableA();
+ b.textContent=pinnable||!pin?'Pin lap A':`Unpin lap ${pin.lap}`;b.disabled=!pinnable&&!pin;
  $('pin-note').textContent=state.pinFail===(snap?.pin_revision||0)?'Pin could not be saved':!pin?'':kept?`Pinned by ${pin.by} · Lap ${pin.lap}`:state.historyRevision==null?'':'Pinned lap detail no longer kept';}
 function renderShifts(snap){const s=snap.shifts,body=$('shift-table').tBodies[0];body.replaceChildren();
  if(!s){$('shift-note').textContent='Waiting for a car';return;}
@@ -230,14 +235,16 @@ async function refreshAnalysis(snap){if(state.analysisBusy||state.stopped)return
 function changed(){state.epoch++;state.note='';clearPlots();state.zoom=null;selections();tick();}
 $('session').addEventListener('change',()=>{state.follow=false;state.session=$('session').value;state.b='';state.a='';changed();});
 $('lap-b').addEventListener('change',()=>{state.follow=false;state.b=$('lap-b').value;if(state.b===state.snapshot?.current?.id||state.b===state.laps.at(-1)?.id)state.newLaps=0;changed();});
-$('lap-a').addEventListener('change',()=>{state.a=$('lap-a').value;state.pick=state.a?{id:state.a,best:usableRefs().best,pinRev:state.snapshot?.pin_revision||0}:null;changed();});
+function pickA(){state.a=$('lap-a').value;state.pick=state.a?{id:state.a,best:usableRefs().best,pinRev:state.snapshot?.pin_revision||0}:null;changed();}
+$('lap-a').addEventListener('change',pickA);
 $('reference-source').addEventListener('change',()=>{state.refSource=$('reference-source').value;state.refLaps=[];state.a='';changed();});
 $('follow').addEventListener('change',()=>{state.follow=$('follow').checked;if(state.follow)state.newLaps=0;changed();});
 $('channel').addEventListener('change',render);
 for(const id of ['zoom-from','zoom-to'])$(id).addEventListener('change',()=>{const a=Number($('zoom-from').value),b=Number($('zoom-to').value);if(Number.isFinite(a)&&Number.isFinite(b)&&a>=0&&b>a){state.zoom=[a,b];render();}});
 $('zoom-reset').addEventListener('click',()=>{state.zoom=null;render();});
 addEventListener('resize',()=>{cancelAnimationFrame(state.resizeFrame);state.resizeFrame=requestAnimationFrame(render);});
-$('pin-toggle').addEventListener('click',async()=>{if(state.stopped)return;const pin=state.snapshot?.pin;state.pinFail=null;try{await request('/race-engineer/pin',{},'POST',{lap_id:pin?null:state.a});tick();}catch(e){if(!(e instanceof AccessLost)){state.pinFail=state.snapshot?.pin_revision||0;pinControls();}}});
+async function togglePin(){if(state.stopped)return;const lapId=pinnableA()?state.a:null;state.pinFail=null;try{await request('/race-engineer/pin',{},'POST',{lap_id:lapId});tick();}catch(e){if(!(e instanceof AccessLost)){state.pinFail=state.snapshot?.pin_revision||0;pinControls();}}}
+$('pin-toggle').addEventListener('click',togglePin);
 $('chat-form').addEventListener('submit',async e=>{e.preventDefault();const text=$('chatin').value.trim();if(!text||state.stopped)return;try{await request('/chat/send',{},'POST',{text});$('chatin').value='';await chat();}catch(e){if(!(e instanceof AccessLost))$('chat-status').textContent='Crew message could not be sent';}});
 // Program still: cache-busted OBS stills from the cockpit endpoint, like Race Control. One
 // self-rescheduling probe; a generation bump drops a probe still in flight on Hide.

@@ -143,22 +143,25 @@ def _finite(value):
     return value if isinstance(value, (int, float)) and math.isfinite(value) else None
 
 
+def _session_measurements(laps, session_id, field):
+    """Positive finite *field* values of the live session's completed eligible laps.
+    A missing, zero or negative value is no measurement, never a zero."""
+    return [r[field] for r in laps
+            if session_id is not None and r.get("session_id") == session_id
+            and r.get("state") == "confirmed" and r.get("comparison_eligible")
+            and _finite(r.get(field)) is not None and r[field] > 0]
+
+
 def fuel_average(laps, session_id):
     """(mean litres per lap, lap count) over the live session's completed eligible laps.
     A missing or zero use is no measurement (no fuel use / refuel), never a zero average."""
-    used = [r["fuel_used_l"] for r in laps
-            if session_id is not None and r.get("session_id") == session_id
-            and r.get("state") == "confirmed" and r.get("comparison_eligible")
-            and _finite(r.get("fuel_used_l")) is not None and r["fuel_used_l"] > 0]
+    used = _session_measurements(laps, session_id, "fuel_used_l")
     return (round(sum(used) / len(used), 3), len(used)) if used else (None, 0)
 
 
 def lap_time_average(laps, session_id):
     """Mean lap time (s) over the live session's completed eligible laps, else None."""
-    times = [r["time_s"] for r in laps
-             if session_id is not None and r.get("session_id") == session_id
-             and r.get("state") == "confirmed" and r.get("comparison_eligible")
-             and _finite(r.get("time_s")) is not None and r["time_s"] > 0]
+    times = _session_measurements(laps, session_id, "time_s")
     return round(sum(times) / len(times), 3) if times else None
 
 
@@ -817,14 +820,18 @@ class Store:
                 )
             else:
                 self._sizes[lid] = size
-        with self._lock:
-            protected = {self._published.get("best_id")}
-            if self._pin is not None:
-                protected.add(self._pin["lap_id"])
+        # Never evict the pinned lap or the best lap. best_id is the previous publication's:
+        # a lap retained just now is the newest and so the last candidate anyway. The
+        # protected set is re-read per eviction, so a pin set meanwhile is honoured. With
+        # details_max=1 the only candidate can be the newest lap, whose detail then goes.
         while (
             len(self._details) > self._details_max
             or sum(self._sizes.values()) > DETAIL_BYTES_MAX
         ):
+            with self._lock:
+                protected = {self._published.get("best_id")}
+                if self._pin is not None:
+                    protected.add(self._pin["lap_id"])
             candidates = [n for n in self._details if n not in protected]
             if not candidates:
                 break  # only the pinned and best laps remain over the limit

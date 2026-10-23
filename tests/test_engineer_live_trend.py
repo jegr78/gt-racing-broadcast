@@ -81,7 +81,7 @@ console.log([0, .004, 3599.9996, null, NaN, Infinity, -1].map(lapTime).join('|')
 
 def _reference_src(h):
     return "\n".join(_func_src(h, n) for n in ("lapTime", "lapLabel", "sameCohort", "comparable",
-                                              "usableRefs", "selections", "referenceText", "pinControls"))
+                                              "usableRefs", "selections", "referenceText", "pinnableA", "pinControls"))
 
 
 def t_reference_prefers_source_pick_pin_then_best():
@@ -135,11 +135,58 @@ state.laps[0].detail_state = 'evicted'; show();
 state.snapshot = {session_id: 'S', current: live(5), pin: null, pin_revision: 2}; state.pinFail = 2; show();
 state.pinFail = null; state.laps = [ready(3, 90)]; state.snapshot = {...state.snapshot, current: live(1)};
 state.laps[0].comparison_eligible = false; show();                                         // no eligible A
+state.laps = [ready(3, 90), ready(4, 92)]; state.snapshot = {session_id: 'S', current: live(5),
+  pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 3};
+state.pick = {id: 'L4', best: 'L3', pinRev: 3}; show();                     // a pick other than the pin re-pins directly
 console.log(seen.join('|'));""")
     if out is not None:
         assert out.strip() == ("Pin lap A/on/|Unpin lap 3/on/Pinned by Alex · Lap 3|"
                                "Unpin lap 3/on/Pinned lap detail no longer kept|"
-                               "Pin lap A/on/Pin could not be saved|Pin lap A/off/"), out
+                               "Pin lap A/on/Pin could not be saved|Pin lap A/off/|"
+                               "Pin lap A/on/Pinned by Alex · Lap 3"), out
+
+
+def t_lap_a_choice_and_pin_button_send_the_shown_reference():
+    h = _html()
+    src = _reference_src(h) + "\n" + _func_src(h, "pickA") + "\n" + "async " + _func_src(
+        h.replace("\nasync function togglePin(", "\nfunction togglePin("), "togglePin")
+    out = _run_js(_HARNESS + "let changes = 0; const changed = () => changes++; let ticks = 0; const tick = () => ticks++;\n"
+                  + "class AccessLost extends Error {}\nconst sent = []; let fail = false;\n"
+                  + "const request = async (route, q, method, body) => { sent.push(method + ' ' + route + ' ' + JSON.stringify(body)); if (fail) throw new Error('409'); return {ok: true}; };\n"
+                  + src + """
+(async () => {
+  const seen = [];
+  state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {session_id: 'S', current: live(5), pin: null, pin_revision: 4};
+  selections();
+  $('lap-a').value = 'L4'; pickA(); seen.push(JSON.stringify(state.pick) + '/' + changes);
+  $('lap-a').value = ''; pickA(); seen.push(String(state.pick));
+  state.pick = null; selections(); await togglePin();                           // no pin: pin the best A
+  state.snapshot = {...state.snapshot, pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 5};
+  state.pick = {id: 'L4', best: 'L3', pinRev: 5}; selections(); await togglePin();   // re-pin your pick
+  state.pick = null; selections(); await togglePin();                           // A is the pin: unpin
+  fail = true; await togglePin(); seen.push(String(state.pinFail) + '/' + ticks);
+  console.log(seen.join('|')); console.log(sent.join('|'));
+})();""")
+    if out is not None:
+        first, second = out.splitlines()
+        assert first == '{"id":"L4","best":"L3","pinRev":4}/1|null|5/3', out
+        assert second == ('POST /race-engineer/pin {"lap_id":"L3"}|POST /race-engineer/pin {"lap_id":"L4"}|'
+                          'POST /race-engineer/pin {"lap_id":null}|POST /race-engineer/pin {"lap_id":null}'), out
+
+
+def t_live_best_follows_the_server_best_lap():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+const seen = [];
+state.laps = [lap(3, 90), lap(4, 92)];
+state.snapshot = {session_id: 'S', current: live(5), best_id: 'L4', pin: null, pin_revision: 0};
+selections(); seen.push(state.a + '/' + state.aKind);                // the server's compatible best, not the raw fastest
+state.snapshot = {...state.snapshot, best_id: 'gone'}; selections(); seen.push(state.a);     // unknown id: fastest usable
+state.snapshot = {...state.snapshot, best_id: 'L4'}; state.follow = false; state.b = 'L4'; selections();
+seen.push(state.a);                                                   // B is not the live lap: fastest of B's pool
+console.log(seen.join('|'));""")
+    if out is not None:
+        assert out.strip() == "L4/best|L3|L3", out
 
 
 def t_delta_label_names_the_reference():
@@ -287,6 +334,11 @@ def t_duration_rounds_to_whole_seconds_and_switches_to_hours():
 console.log([59.6, 3599.6, 3600, 42, -1, NaN, null].map(duration).join('|'));""")
     if out is not None:
         assert out.strip() == "1:00|1:00:00|1:00:00|0:42|N/A|N/A|N/A", out
+
+
+def t_stop_clears_a_pending_pin_failure():
+    body = _func_src(_html(), "stop")
+    assert "state.pinFail=null" in body, body[:200]
 
 
 def t_desk_shows_na_for_every_missing_value():

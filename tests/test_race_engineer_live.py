@@ -69,6 +69,8 @@ def t_average_lap_time_uses_completed_eligible_laps_of_the_live_session():
     assert live.lap_time_average(rows, 'A') == 91.0
     assert live.lap_time_average(rows, None) is None
     assert live.lap_time_average([lap(1, 90.0, eligible=False)], 'A') is None
+    assert live.lap_time_average([lap(1, 0.0), lap(2, -5.0), lap(3, 90.0)], 'A') == 90.0,         'a zero or negative time is no measurement'
+    assert live.lap_time_average([lap(1, float('nan')), lap(2, float('inf'))], 'A') is None
 
 
 def _shift_packets():

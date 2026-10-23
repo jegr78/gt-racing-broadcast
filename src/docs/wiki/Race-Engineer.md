@@ -75,9 +75,11 @@ Select **Session** and **Lap B** to inspect retained current or prior-session la
 Sessions show the track, vehicle name and lap count; unknown names fall back to
 the car ID. Shared session and reference-lap options include the producer's label.
 Lap A is chosen by this precedence, highest first: a producer-shared **Reference
-source**; your own pick in **Lap A**; the shared pin; the fastest eligible lap with the
-same car and track (or from the same session while the track is unknown), shown as
-the best. The line under the selection and the delta tile name which one applies:
+source**; your own pick in **Lap A**; the shared pin; the best lap. For the live lap the
+best is the lap the **Best completed** tile shows (same car and track, and no known
+compound or settings contradiction); for an older lap B it is the fastest eligible lap
+of B's session with the same car and track (or from the same session while the track
+is unknown). The line under the selection and the delta tile name which one applies:
 **Against best**, **Against pinned**, **Against your pick** or **Against** the
 reference source's label, followed by **Lap N** and the distance the delta covers
 (**· Lap N · through X m**).
@@ -87,8 +89,10 @@ a completed, comparison-eligible lap of the live session can be pinned. Race Eng
 crew and Producers can pin; the last write wins. The pin survives page reloads and ends
 with its session, and when a replay starts or stops. Its detail is protected from
 eviction; if the lap's detail is no longer kept the note reads **Pinned lap detail no
-longer kept**. The note under the button reads **Pinned by name · Lap N**, and the
-button becomes **Unpin lap**. A pin applies to Lap B in the pinned session.
+longer kept**. The note under the button reads **Pinned by name · Lap N**. While A is
+the pinned lap the button reads **Unpin lap N**; while A is another pinnable lap (your
+own pick) it reads **Pin lap A** and replaces the pin directly. A pin applies to Lap B
+in the pinned session.
 
 Your own pick is local to your browser. It is dropped when a new best lap appears, when
 the pin changes, when it is no longer usable for lap B, and on page reload; A then

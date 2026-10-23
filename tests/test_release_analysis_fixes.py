@@ -136,7 +136,7 @@ def t_recovered_stint_boundaries_match_archive_after_summary_eviction():
                 api.close()
 
 
-def t_theory_keeps_early_sectors_after_default_detail_eviction():
+def t_best_lap_detail_survives_default_eviction_and_backs_the_theory():
     with tempfile.TemporaryDirectory() as directory:
         times = (20., 16.) + tuple(20. + i * .1 for i in range(18))
         path = write_circle_recording(directory, lap_secs=times, n=200)

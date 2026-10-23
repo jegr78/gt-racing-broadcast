@@ -79,6 +79,7 @@ def t_pin_route_is_engineer_gated_and_validated():
     class FakeService:
         def pin(self,lap_id,by):
             if lap_id=='bad':raise race_engineer_live.PinError()
+            if lap_id=='boom':raise OSError('store unavailable')
             return {'ok':True,'pin':{'lap_id':lap_id,'by':by}}
     with tempfile.TemporaryDirectory() as d:
         store=access.Store(d,available=True)
@@ -117,6 +118,25 @@ def t_pin_route_is_engineer_gated_and_validated():
             assert request('engineer','pin','POST',b'['*2000+b']'*2000)[0]==400  # deeply nested, still not an object
             assert request('engineer','pin','POST',b'{')[0]==400
             assert request('engineer','other','POST',{})[1]['error']['code']=='not_found'
+            # A non-ASCII digit passes str.isdigit() but not int(): still a 400, never a 500.
+            import http.client
+            conn=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=5)
+            conn.putrequest('POST','/console/race-engineer/pin?t='+m.console_auth.mint_token(fixture.SECRET,'engineer'))
+            conn.putheader('Content-Type','application/json');conn.putheader('Content-Length','\xb2');conn.endheaders()
+            response=conn.getresponse()
+            assert response.status==400 and json.loads(response.read())['error']['code']=='invalid_body'
+            conn.close()
+            # A failed write answers 503 and leaves a WARNING for the producer.
+            import logging
+            seen=[]
+            class Catch(logging.Handler):
+                def emit(self,record):seen.append(record)
+            catch=Catch(logging.WARNING);m.LOG.addHandler(catch)
+            try:
+                status,body=request('engineer','pin','POST',{'lap_id':'boom'})
+            finally:m.LOG.removeHandler(catch)
+            assert status==503 and body['error']['code']=='analysis_unavailable',(status,body)
+            assert any('pin' in r.getMessage().lower() for r in seen),[r.getMessage() for r in seen]
             assert m.console_policy.decide({m.console_policy.RACE_ENGINEER},['race-engineer','pin'],'POST',False)==m.console_policy.ALLOW
             assert m.console_policy.decide({m.console_policy.RACE_ENGINEER},['race-engineer','snapshot'],'POST',False)!=m.console_policy.ALLOW
             assert m.console_policy.decide(set(),['race-engineer','pin'],'POST',False)!=m.console_policy.ALLOW
