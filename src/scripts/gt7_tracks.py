@@ -21,7 +21,8 @@ MAX_SCORE_M = 15.0
 AMBIGUOUS_M = 3.0
 # Layouts that share most of a lap (a chicane variant) can score within AMBIGUOUS_M on
 # the mean. A point this far from a candidate's line shows the lap never drove that
-# layout; among close candidates the one with the fewest such points wins.
+# layout; among close candidates the one with the fewest such points wins. A real tie
+# still names one layout (producer decision) and lists the others as alternatives.
 OFFLINE_M = 15.0
 GRID_M = 50.0
 LEARNED_FORMAT = "racecast-gt7-learned"
@@ -359,15 +360,20 @@ class TrackDB:
             return None
         best_id, best_score = min(scored.items(), key=lambda kv: kv[1])
         close = [oid for oid, s in scored.items() if s - best_score <= AMBIGUOUS_M]
+        alternatives = []
         if len(close) > 1:
-            fewest = min(offline[oid] for oid in close)
-            close = [oid for oid in close if offline[oid] == fewest]
-            if len(close) > 1:
-                return {"candidates": close}
-            best_id, best_score = close[0], scored[close[0]]
+            # The layout with the fewest off-line points; a real tie still names one
+            # (the closest line, then the lowest id), the rest stay as alternatives.
+            best_id = min(close, key=lambda oid: (offline[oid], scored[oid], oid))
+            best_score = scored[best_id]
+            alternatives = sorted(oid for oid in close if oid != best_id
+                                  and offline[oid] == offline[best_id])
         info = self.name(best_id)
         reverse = info["reverse"] if info is not None else best_id in via_reverse
         track = info["track"] if info is not None else best_id
         layout = info["layout"] if info is not None else ""
-        return {"id": best_id, "track": track, "layout": layout,
-                "reverse": reverse, "score_m": round(best_score, 2)}
+        found = {"id": best_id, "track": track, "layout": layout,
+                 "reverse": reverse, "score_m": round(best_score, 2)}
+        if alternatives:
+            found["alternatives"] = alternatives
+        return found

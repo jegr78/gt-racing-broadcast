@@ -89,11 +89,16 @@ def t_no_match_on_wrong_length_far_line_or_few_points():
         assert db.match(list(reversed(_lap(OVAL))), L) is None, "reverse without a twin row"
 
 
-def t_ambiguous_pair_yields_candidates():
+def t_a_true_tie_still_names_the_closest_layout():
+    # Producer decision: never leave the track unknown on a tie. The closest line wins;
+    # the other close layouts are kept as alternatives.
     with tempfile.TemporaryDirectory() as d:
         db = _db(d, [_row("aaa001", "Oval", OVAL), _row("ccc001", "Oval Twin", TWIN)])
-        m = db.match(_lap(OVAL, offset=2.5), _length(OVAL))
-        assert set(m["candidates"]) == {"aaa001", "ccc001"}, m
+        m = db.match(_lap(OVAL, offset=1.5), _length(OVAL))
+        assert "candidates" not in m and m["id"] == "aaa001", m
+        assert m["alternatives"] == ["ccc001"], m
+        m = db.match(_lap(TWIN, offset=-1.5), _length(TWIN))
+        assert m["id"] == "ccc001" and m["alternatives"] == ["aaa001"], m
 
 
 def _with_chicane(path, at=40, width=8, depth=30.0):
