@@ -126,7 +126,9 @@ def t_follow_hooks_filter_youtube_rows_and_refresh_rarely():
     now = [100.0]
     src = Src()
     tracker = types.SimpleNamespace(lookup=lambda ch: ["vidAAAAAAAA"])
-    hooks = m.audience_follow_hooks(src, tracker, None, clock=lambda: now[0])
+    spawned = []
+    hooks = m.audience_follow_hooks(src, tracker, None, clock=lambda: now[0],
+                                    spawn=lambda fn: (spawned.append(fn), fn()))
     want = ["@a", "UC" + "b" * 22]
     assert hooks["channels"]() == want
     assert hooks["channels"]() == want
@@ -140,6 +142,32 @@ def t_follow_hooks_filter_youtube_rows_and_refresh_rarely():
         assert hooks["channel_id_lookup"]("@a") == "ID:@a"
     finally:
         _restore(old)
+
+
+def t_follow_channels_never_waits_for_a_running_refresh():
+    started = []
+    class Src:
+        def refresh(self):
+            raise AssertionError("must not run inline")
+        def get(self):
+            return [("youtube", "@a")]
+    now = [0.0]
+    hooks = m.audience_follow_hooks(Src(), None, None, clock=lambda: now[0],
+                                    spawn=started.append)
+    assert hooks["channels"]() == ["@a"]     # cached rows, refresh only queued
+    assert len(started) == 1
+    now[0] += 100
+    assert hooks["channels"]() == ["@a"]     # still running -> no second one
+    assert len(started) == 1
+    class Quiet(Src):
+        def refresh(self):
+            pass
+    hooks2 = m.audience_follow_hooks(Quiet(), None, None, clock=lambda: now[0],
+                                     spawn=started.append)
+    hooks2["channels"](); started.pop()()    # run it to completion
+    now[0] += 100
+    hooks2["channels"]()
+    assert len(started) == 2                 # finished -> next stale call may start
 
 
 def t_follow_hooks_are_none_without_a_channel_tab():

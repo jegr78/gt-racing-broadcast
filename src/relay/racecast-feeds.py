@@ -3569,24 +3569,42 @@ def live_channel_source(channel_source, channel_csv_url, runtime):
 
 
 def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monotonic,
-                          refresh_every=30):
+                          refresh_every=30, spawn=None):
     """Keyword args for the YouTube audience Service's follow-live mode.
-    channels() is a cheap cached read (status polls it often): the source is
-    re-fetched at most every refresh_every seconds."""
+    channels() never waits on the network: it returns the cached rows at once
+    and, when they are older than refresh_every seconds, starts ONE background
+    refresh (single-flight). spawn(fn) starts it (default: a daemon thread)."""
     if live_channels is None:
         return {"channels": None, "live_lookup": None, "channel_id_lookup": None}
-    state = {"at": None}
+    if spawn is None:
+        def spawn(fn):
+            threading.Thread(target=fn, daemon=True).start()
+    state = {"at": None, "running": False}
     lock = threading.Lock()
 
+    def _refresh():
+        try:
+            live_channels.refresh()
+        except Exception:
+            pass  # best-effort: keep serving the cached rows
+        finally:
+            with lock:
+                state["running"] = False
+
     def channels():
+        start = False
         with lock:
             now = clock()
-            if state["at"] is None or now - state["at"] >= refresh_every:
+            if not state["running"] and (
+                    state["at"] is None or now - state["at"] >= refresh_every):
                 state["at"] = now
-                try:
-                    live_channels.refresh()
-                except Exception:
-                    pass  # best-effort: keep serving the cached rows
+                state["running"] = start = True
+        if start:
+            try:
+                spawn(_refresh)
+            except Exception:
+                with lock:
+                    state["running"] = False
         return [c for p, c in live_channels.get() if p == "youtube"]
 
     return {
