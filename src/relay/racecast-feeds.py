@@ -3557,6 +3557,45 @@ class ChannelSource:
             return list(self.rows)
 
 
+def live_channel_source(channel_source, channel_csv_url, runtime):
+    """The Channel-tab source the audience follow-live mode reads. Reuses the
+    broadcast-chat source when there is one, else builds its own so follow-live
+    works under --no-broadcast-chat too."""
+    if channel_source is not None:
+        return channel_source
+    if channel_csv_url:
+        return ChannelSource(channel_csv_url, os.path.join(runtime, "channel.cache.txt"))
+    return None
+
+
+def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monotonic,
+                          refresh_every=30):
+    """Keyword args for the YouTube audience Service's follow-live mode.
+    channels() is a cheap cached read (status polls it often): the source is
+    re-fetched at most every refresh_every seconds."""
+    if live_channels is None:
+        return {"channels": None, "live_lookup": None, "channel_id_lookup": None}
+    state = {"at": None}
+    lock = threading.Lock()
+
+    def channels():
+        with lock:
+            now = clock()
+            if state["at"] is None or now - state["at"] >= refresh_every:
+                state["at"] = now
+                try:
+                    live_channels.refresh()
+                except Exception:
+                    pass  # best-effort: keep serving the cached rows
+        return [c for p, c in live_channels.get() if p == "youtube"]
+
+    return {
+        "channels": channels,
+        "live_lookup": live_tracker.lookup if live_tracker is not None else None,
+        "channel_id_lookup": lambda text: yt_channel_id(text, cookies),
+    }
+
+
 class ProducerSource:
     """Reads the Sheet `Producer` tab (CSV) -> [{"part","producer","magicdns",
     "stream_key"}] via producer_mod.parse_producer_rows (pure). Same tolerant
@@ -14123,9 +14162,11 @@ def main():
     channel_source = None
     broadcast_chat_store = None
     if channel_csv_url and not args.no_broadcast_chat:
-        channel_cache = os.path.join(runtime, "channel.cache.txt")
-        channel_source = ChannelSource(channel_csv_url, channel_cache)
+        channel_source = live_channel_source(None, channel_csv_url, runtime)
         broadcast_chat_store = BroadcastChatStore()
+    # Audience follow-live reads the same Channel tab, independent of
+    # --no-broadcast-chat (it never feeds the broadcast-chat reader).
+    live_channels = live_channel_source(channel_source, channel_csv_url, runtime)
 
     # Broadcast Part control (#395): the Producer-tab Part list + the persisted
     # part.json pointer. Disabled under a custom --sheet-csv-url or --no-parts;
@@ -14421,10 +14462,12 @@ def main():
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
     # yt-dlp resolution is heavier than a CSV fetch. Best-effort daemon.
+    live_tracker = LiveVideoTracker(cookies) if live_channels is not None else None
     _bc_supervisor = None
     if broadcast_chat_store is not None and channel_source is not None:
         _bc_supervisor = BroadcastChatSupervisor(
-            broadcast_chat_store, channel_source, cookies, interval=30, logger=LOG)
+            broadcast_chat_store, channel_source, cookies, interval=30, logger=LOG,
+            tracker=live_tracker)
         threading.Thread(target=_bc_supervisor.run, daemon=True).start()
 
     # Commentator cockpit (#191): per-league secret (injected from profile.env,
@@ -14461,7 +14504,8 @@ def main():
     audience_runtime = audience_widgets.Runtime(
         os.path.join(os.path.dirname(args.overlay_dir), "audience.json") if args.overlay_dir else None)
     youtube_service = (audience_youtube_connection.Service(
-        os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)
+        os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache,
+        **audience_follow_hooks(live_channels, live_tracker, cookies))
         if args.overlay_dir else None)
     twitch_service = (audience_twitch_connection.Service(
         os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)

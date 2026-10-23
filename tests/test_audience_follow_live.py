@@ -115,6 +115,47 @@ def t_supervisor_uses_the_shared_tracker():
         _restore(old)
 
 
+def t_follow_hooks_filter_youtube_rows_and_refresh_rarely():
+    class Src:
+        def __init__(self):
+            self.refreshes = 0
+        def refresh(self):
+            self.refreshes += 1
+        def get(self):
+            return [("youtube", "@a"), ("twitch", "x"), ("youtube", "UC" + "b" * 22)]
+    now = [100.0]
+    src = Src()
+    tracker = types.SimpleNamespace(lookup=lambda ch: ["vidAAAAAAAA"])
+    hooks = m.audience_follow_hooks(src, tracker, None, clock=lambda: now[0])
+    want = ["@a", "UC" + "b" * 22]
+    assert hooks["channels"]() == want
+    assert hooks["channels"]() == want
+    assert src.refreshes == 1
+    now[0] += 31
+    assert hooks["channels"]() == want
+    assert src.refreshes == 2
+    assert hooks["live_lookup"] is tracker.lookup
+    old = _patch(yt_channel_id=lambda text, cookies, timeout=25: "ID:" + text)
+    try:
+        assert hooks["channel_id_lookup"]("@a") == "ID:@a"
+    finally:
+        _restore(old)
+
+
+def t_follow_hooks_are_none_without_a_channel_tab():
+    assert m.audience_follow_hooks(None, None, None) == {
+        "channels": None, "live_lookup": None, "channel_id_lookup": None}
+
+
+def t_follow_wiring_without_broadcast_chat():
+    existing = object()
+    assert m.live_channel_source(existing, "http://x", "rt") is existing
+    made = m.live_channel_source(None, "http://x/csv", "rt")
+    assert isinstance(made, m.ChannelSource) and made.csv_url == "http://x/csv"
+    assert made.cache_path == os.path.join("rt", "channel.cache.txt")
+    assert m.live_channel_source(None, None, "rt") is None
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
