@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Race Engineer desk: the per-lap automatic reference (B = live lap, A = the lap just
-completed), the live-delta trend arrow, the steering readout and the input-trace
+"""Race Engineer desk: the reference precedence (shared source, personal pick, shared
+pin, best lap), the delta label naming it, the live-delta trend arrow, the steering readout and the input-trace
 markup. The JS checks run under node when it is installed (skipped otherwise).
 Run: python3 tests/test_engineer_live_trend.py"""
 import os
@@ -52,10 +52,11 @@ const mk = () => ({textContent: '', className: '', attrs: {}, checked: false,
 const els = {}; const $ = id => els[id] || (els[id] = mk());
 const document = {querySelectorAll: () => []};
 const options = () => {}, carLabel = r => String(r.car_id), referenceLabel = r => 'ref';
-const num = (v, d = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : 'Unavailable';
+const NA = 'N/A';
+const num = (v, d = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : NA;
 const state = {follow: true, snapshot: null, laps: [], sessions: [], refs: [], refLaps: [],
-  refSource: '', a: '', b: '', session: '', rejected: new Set(), newLaps: 0, liveLap: null,
-  autoA: null, trend: {key: '', rows: []}};
+  refSource: '', a: '', b: '', session: '', rejected: new Set(), newLaps: 0,
+  pick: null, aKind: '', historyRevision: 1, trend: {key: '', rows: []}};
 const lap = (n, time, eligible = true) => ({id: 'L' + n, session_id: 'S', lap: n, state: 'confirmed',
   time_s: time, comparison_eligible: eligible, car_id: 1, track_id: 'T'});
 const live = n => ({id: 'L' + n, session_id: 'S', lap: n, state: 'provisional',
@@ -75,29 +76,184 @@ console.log([0, .004, 3599.9996, null, NaN, Infinity, -1].map(lapTime).join('|')
     if out is not None:
         assert out.splitlines() == [
             '2:05.678|1:02.345|1:00.000', 'Lap 2 · 1:02.345',
-            '0:00.000|0:00.004|60:00.000|Unavailable|Unavailable|Unavailable|Unavailable']
+            '0:00.000|0:00.004|60:00.000|N/A|N/A|N/A|N/A']
 
 
-def t_follow_live_compares_each_lap_with_the_lap_just_completed():
+def _reference_src(h):
+    return "\n".join(_func_src(h, n) for n in ("lapTime", "lapLabel", "sameCohort", "comparable",
+                                              "usableRefs", "selections", "referenceText", "pinnableA", "pinControls"))
+
+
+def t_reference_prefers_source_pick_pin_then_best():
     h = _html()
-    src = "\n".join([_const_src(h, "AUTO_A_WAIT_MS")] + [_func_src(h, n) for n in
-                    ("lapTime", "lapLabel", "sameCohort", "comparable", "selections")])
-    out = _run_js(_HARNESS + src + """
-const seen = [];
-state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {current: live(5)};
-selections(); seen.push(state.a);                      // page opened mid-lap: A = lap 4, not the fastest
-state.a = 'L3'; state.autoA = null; selections(); seen.push(state.a);   // engineer override holds
-state.snapshot = {current: live(6)}; selections(); seen.push(state.a || '-');   // lap 5 not in history yet
-state.laps.push(lap(5, 95)); selections(); seen.push(state.a);          // arrives: A = lap 5
-state.snapshot = {current: live(7)}; state.laps.push(lap(6, 99, false)); selections(); seen.push(state.a);
-state.snapshot = {current: live(8)}; selections(); seen.push(state.a || '-');
-now = 9000; selections(); seen.push(state.a);          // lap 7 never arrived: fall back to fastest
-state.refSource = 'R'; state.a = 'r:x'; state.snapshot = {current: live(9)}; selections(); seen.push(state.a);
-state.refSource = ''; state.follow = false; state.a = 'L4'; state.snapshot = {current: live(10)};
-selections(); seen.push(state.a + '/' + state.b);
+    out = _run_js(_HARNESS + _reference_src(h) + """
+const seen = [], show = () => { selections(); seen.push(state.a + '/' + state.aKind); };
+state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {current: live(5), pin: null, pin_revision: 0}; show();
+state.pick = {id: 'L4', best: 'L3', pinRev: 0}; show();                        // personal pick
+state.laps.push(lap(5, 95)); state.snapshot = {current: live(6), pin: null, pin_revision: 0}; show();
+state.laps.push(lap(6, 88)); state.snapshot = {current: live(7), pin: null, pin_revision: 0}; show();  // new best drops the pick
+const pin = {lap_id: 'L4', session_id: 'S', lap: 4};
+state.snapshot = {current: live(7), pin, pin_revision: 1}; show();
+state.laps.push(lap(7, 85)); state.snapshot = {current: live(8), pin, pin_revision: 1}; show();     // a pin outlasts a new best
+state.pick = {id: 'L5', best: 'L7', pinRev: 1}; show();
+state.snapshot = {current: live(8), pin: null, pin_revision: 2}; show();                          // a pin change drops the pick
+state.follow = false; state.session = 'S0'; state.b = 'S0L1';
+state.laps.push({...lap(1, 80), id: 'S0L1', session_id: 'S0'}, {...lap(2, 79), id: 'S0L2', session_id: 'S0'});
+state.pick = {id: 'L5', best: 'L7', pinRev: 2}; show();                                        // a pick from another session
+state.refSource = 'R'; state.a = 'r:x'; state.laps.push({...lap(3, 70), id: 'S0L3', session_id: 'S0'}); show();
+console.log(seen.join('|'));
+state.refSource = ''; state.follow = true; state.pick = null; state.laps = [lap(3, 90), lap(4, 92)];
+state.snapshot = {current: live(5), pin: {lap_id: 'L2', session_id: 'S', lap: 2, by: 'Alex'}, pin_revision: 3};
+selections(); console.log(state.a + '/' + state.aKind + '|' + referenceText() + '|' + $('pin-note').textContent);""")
+    if out is not None:
+        lines = out.splitlines()
+        assert lines[0] == ("L3/best|L4/pick|L4/pick|L6/best|L4/pinned|L4/pinned|L5/pick|L7/best|"
+                            "S0L2/best|r:x/source"), out
+        assert lines[1] == "L2/pinned|Against pinned · Lap 2|Pinned lap detail no longer kept", out   # case gone
+
+
+def t_old_snapshot_without_pin_keys_reads_as_no_pin():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {current: live(5)}; selections();
+const before = state.a + '/' + state.aKind;
+state.pick = {id: 'L4', best: 'L3', pinRev: 0}; selections();
+console.log(before + '|' + state.a + '/' + state.aKind);""")
+    if out is not None:
+        assert out.strip() == "L3/best|L4/pick", out
+
+
+def t_pin_controls_follow_the_pin_and_the_eligible_reference():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+const seen = [], show = () => { selections(); const b = $('pin-toggle');
+  seen.push(b.textContent + '/' + (b.disabled ? 'off' : 'on') + '/' + $('pin-note').textContent); };
+const ready = (n, t) => ({...lap(n, t), detail_state: 'ready'});
+state.laps = [ready(3, 90), ready(4, 92)]; state.snapshot = {session_id: 'S', current: live(5), pin: null, pin_revision: 0}; show();
+state.snapshot = {...state.snapshot, pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 1}; show();
+state.laps[0].detail_state = 'evicted'; show();
+state.snapshot = {session_id: 'S', current: live(5), pin: null, pin_revision: 2}; state.pinFail = 2; show();
+state.pinFail = null; state.laps = [ready(3, 90)]; state.snapshot = {...state.snapshot, current: live(1)};
+state.laps[0].comparison_eligible = false; show();                                         // no eligible A
+state.laps = [ready(3, 90), ready(4, 92)]; state.snapshot = {session_id: 'S', current: live(5),
+  pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 3};
+state.pick = {id: 'L4', best: 'L3', pinRev: 3}; show();                     // a pick other than the pin re-pins directly
 console.log(seen.join('|'));""")
     if out is not None:
-        assert out.strip() == "L4|L3|-|L5|L3|-|L3|r:x|L4/L9", out
+        assert out.strip() == ("Pin lap A/on/|Unpin lap 3/on/Pinned by Alex · Lap 3|"
+                               "Unpin lap 3/on/Pinned lap detail no longer kept|"
+                               "Pin lap A/on/Pin could not be saved|Pin lap A/off/|"
+                               "Pin lap A/on/Pinned by Alex · Lap 3"), out
+
+
+def t_lap_a_choice_and_pin_button_send_the_shown_reference():
+    h = _html()
+    src = _reference_src(h) + "\n" + _func_src(h, "pickA") + "\n" + "async " + _func_src(
+        h.replace("\nasync function togglePin(", "\nfunction togglePin("), "togglePin")
+    out = _run_js(_HARNESS + "let changes = 0; const changed = () => changes++; let ticks = 0; const tick = () => ticks++;\n"
+                  + "class AccessLost extends Error {}\nconst sent = []; let fail = false;\n"
+                  + "const request = async (route, q, method, body) => { sent.push(method + ' ' + route + ' ' + JSON.stringify(body)); if (fail) throw new Error('409'); return {ok: true}; };\n"
+                  + src + """
+(async () => {
+  const seen = [];
+  state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {session_id: 'S', current: live(5), pin: null, pin_revision: 4};
+  selections();
+  $('lap-a').value = 'L4'; pickA(); seen.push(JSON.stringify(state.pick) + '/' + changes);
+  $('lap-a').value = ''; pickA(); seen.push(String(state.pick));
+  state.pick = null; selections(); await togglePin();                           // no pin: pin the best A
+  state.snapshot = {...state.snapshot, pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 5};
+  state.pick = {id: 'L4', best: 'L3', pinRev: 5}; selections(); await togglePin();   // re-pin your pick
+  state.pick = null; selections(); await togglePin();                           // A is the pin: unpin
+  fail = true; await togglePin(); seen.push(String(state.pinFail) + '/' + ticks);
+  console.log(seen.join('|')); console.log(sent.join('|'));
+})();""")
+    if out is not None:
+        first, second = out.splitlines()
+        assert first == '{"id":"L4","best":"L3","pinRev":4}/1|null|5/3', out
+        assert second == ('POST /race-engineer/pin {"lap_id":"L3"}|POST /race-engineer/pin {"lap_id":"L4"}|'
+                          'POST /race-engineer/pin {"lap_id":null}|POST /race-engineer/pin {"lap_id":null}'), out
+
+
+def t_live_best_follows_the_server_best_lap():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+const seen = [];
+state.laps = [lap(3, 90), lap(4, 92)];
+state.snapshot = {session_id: 'S', current: live(5), best_id: 'L4', pin: null, pin_revision: 0};
+selections(); seen.push(state.a + '/' + state.aKind);                // the server's compatible best, not the raw fastest
+state.snapshot = {...state.snapshot, best_id: 'gone'}; selections(); seen.push(state.a);     // unknown id: fastest usable
+state.snapshot = {...state.snapshot, best_id: 'L4'}; state.follow = false; state.b = 'L4'; selections();
+seen.push(state.a);                                                   // B is not the live lap: fastest of B's pool
+console.log(seen.join('|'));""")
+    if out is not None:
+        assert out.strip() == "L4/best|L3|L3", out
+
+
+def t_delta_label_names_the_reference():
+    h = _html()
+    src = "\n".join([_const_src(h, "TREND_S")] + [_func_src(h, n) for n in ("trend", "referenceText", "showDelta")])
+    out = _run_js(_HARNESS + "const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);\n" + src + """
+const seen = [];
+state.snapshot = {current: live(30)};
+state.laps = [lap(17, 90)]; state.a = 'L17'; state.aKind = 'pinned'; showDelta(1.234, 430); seen.push($('delta-note').textContent);
+state.laps = [lap(23, 88)]; state.a = 'L23'; state.aKind = 'best'; showDelta(null); seen.push($('delta-note').textContent);
+state.refLaps = [{...lap(3, 80), id: 'r:x', session_id: 'r:R:1'}]; state.a = 'r:x'; state.aKind = 'source'; showDelta(null);
+seen.push($('delta-note').textContent);
+console.log(seen.join('|'));""")
+    if out is not None:
+        assert out.strip() == ("Against pinned · Lap 17 · through 430 m|Against best · Lap 23|"
+                               "Against ref · Lap 3"), out
+
+
+def t_pin_note_waits_for_the_first_history():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+state.historyRevision = null; state.snapshot = {current: live(5), pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 1};
+selections(); console.log(state.a + '/' + state.aKind + '|' + $('pin-note').textContent + '|');""")
+    if out is not None:
+        assert out.strip() == "L3/pinned||", out
+
+
+def t_incompatible_pinned_reference_is_kept_not_rejected():
+    h = _html()
+    src = _func_src(h.replace("\nasync function selection(", "\nfunction selection("), "selection")
+    out = _run_js(_HARNESS + _func_src(h, "comparable") + "\n" + """
+const notices = []; const say = t => notices.push(t); const recognising = () => false; const render = () => {};
+const clearPlots = () => {};
+const B = {...live(5), id: 'L5'}, A = lap(3, 90);
+let request = async (route, q) => route === '/race-engineer/compare'
+  ? {state: 'ready', compatible: false, a: A, b: B, delta: []} : {state: 'ready', lap: route === '/race-engineer/lap' && q.id === 'L5' ? B : A};
+""" + "async " + src + """
+(async () => {
+  state.laps = [A]; state.session = 'S'; state.b = 'L5'; state.a = 'L3'; state.aKind = 'pinned';
+  await selection();
+  const pinned = [state.a, state.rejected.size, notices.length, state.pair?.compatible].join('/');
+  state.aKind = 'best'; state.pair = null; await selection();
+  console.log(pinned + '|' + [state.a || '-', state.rejected.size, notices.length].join('/'));
+})();""")
+    if out is not None:
+        assert out.strip() == "L3/0/0/false|-/1/1", out
+
+
+def t_render_drops_a_pair_for_another_reference():
+    h = _html()
+    src = "\n".join([_const_src(h, "TREND_S")] + [_func_src(h, n) for n in (
+        "comparable", "trend", "referenceText", "showDelta", "render")])
+    out = _run_js(_HARNESS + """
+const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);
+const clearPlots = () => {}, graph = () => {}, renderMarker = () => {}, renderSections = () => {};
+const miniRows = () => [], fullSectors = () => ({}), readableContext = () => '', cellValue = () => {};
+for (const id of ['sectors']) els[id] = {tBodies: [{insertRow() {}}]};
+els.notes = {replaceChildren() {}, append() {}};
+""" + src + """
+const B = {...live(5), trace: [{d: 400}]}, pair = {compatible: true, a: {...lap(3, 90)}, b: B, delta: [{d: 400, delta: 0.5}]};
+state.snapshot = {current: live(5)}; state.laps = [lap(3, 90), lap(4, 88)]; state.detail = B;
+state.pair = pair; state.a = 'L3'; state.aKind = 'best'; render();
+const fresh = $('delta').textContent;
+state.pair = pair; state.a = 'L4'; render();
+console.log(fresh + '|' + $('delta').textContent + '|' + $('delta-note').textContent + '|' + (state.pair === null));""")
+    if out is not None:
+        assert out.strip() == "+0.500|N/A|Against best · Lap 4|true", out
 
 
 def t_delta_trend_arrow_follows_the_hud_rule():
@@ -126,21 +282,23 @@ for (const steer_rad of [0.2, -0.2, 0.001, null]) {
   instruments({instruments: {steer_rad}}); seen.push($('steer').textContent); }
 console.log(seen.join('|'));""")
     if out is not None:
-        assert out.strip() == "11° L|11° R|0°|Unavailable", out
+        assert out.strip() == "11° L|11° R|0°|N/A", out
 
 
 def t_average_fuel_estimates_the_laps_left_on_the_current_fuel():
     h = _html()
     assert 'id="fuel-avg"' in h and h.index('id="instruments"') < h.index('id="fuel-avg"') < h.index('id="input-trace"')
-    out = _run_js(_HARNESS + _func_src(h, "lapTime") + _func_src(h, "instruments") + """
+    out = _run_js(_HARNESS + _func_src(h, "lapTime") + _func_src(h, "duration") + _func_src(h, "instruments") + """
 const seen = [];
-for (const [avg, laps, fuel] of [[3.0612, 12, 85.7], [3.0612, 12, null], [null, 0, 40], [2.5, 3, 0]]) {
-  instruments({instruments: {fuel_l: fuel}, fuel_avg_l: avg, fuel_avg_laps: laps});
-  seen.push($('fuel-avg').textContent + '/' + $('fuel-avg-note').textContent); }
+for (const [avg, laps, fuel, lapAvg] of [[3.0612, 12, 85.7, 90], [3.0612, 12, null, 90], [null, 0, 40, 90],
+                                         [1.0, 3, 100, 90], [2.5, 3, 40, null]]) {
+  instruments({instruments: {fuel_l: fuel}, fuel_avg_l: avg, fuel_avg_laps: laps, lap_avg_s: lapAvg});
+  seen.push($('fuel-avg').textContent + '/' + $('fuel-avg-note').textContent + '/' + $('fuel-time-note').textContent); }
 console.log(seen.join('|'));""")
     if out is not None:
-        assert out.strip() == ("3.06/≈ 28.0 laps left|3.06/Fuel level unavailable|"
-                               "Unavailable/No eligible lap with fuel use|2.50/≈ 0.0 laps left"), out
+        assert out.strip() == ("3.06/≈ 28.0 laps left/≈ 42:00 time left|3.06/N/A/N/A|"
+                               "N/A/No eligible lap with fuel use/N/A|1.00/≈ 100.0 laps left/≈ 2:30:00 time left|"
+                               "2.50/≈ 16.0 laps left/N/A"), out
 
 
 def t_shift_points_compare_the_lap_in_progress_with_the_vehicle_reference():
@@ -165,9 +323,36 @@ console.log(show());
 renderShifts({shifts: null}); console.log(show());""")
     if out is not None:
         first, missing, none = out.strip().split("\n")
-        assert first.startswith("1,6800,Unknown,—,1 / 2,7012,7100,+88,2 / 3,Unavailable,—,—,0"), first
+        assert first.startswith("1,6800,N/A,N/A,1 / 2,7012,7100,+88,2 / 3,N/A,N/A,N/A,0"), first
         assert "Telemetry" in missing and "Data management" in missing and missing.startswith(" |"), missing
         assert none.endswith("Waiting for a car"), none
+
+
+def t_duration_rounds_to_whole_seconds_and_switches_to_hours():
+    h = _html()
+    out = _run_js(_HARNESS + _func_src(h, "duration") + """
+console.log([59.6, 3599.6, 3600, 42, -1, NaN, null].map(duration).join('|'));""")
+    if out is not None:
+        assert out.strip() == "1:00|1:00:00|1:00:00|0:42|N/A|N/A|N/A", out
+
+
+def t_stop_clears_a_pending_pin_failure():
+    body = _func_src(_html(), "stop")
+    assert "state.pinFail=null" in body, body[:200]
+
+
+def t_desk_shows_na_for_every_missing_value():
+    h = _html()
+    for prose in ("Shared reference unavailable", "Live analysis unavailable", "Analysis temporarily unavailable",
+                  "Telemetry source unavailable", "Program unavailable", "Crew chat temporarily unavailable"):
+        h = h.replace(prose, "")
+    assert "Unavailable" not in h.replace("SourceUnavailable", ""), "a missing value still reads Unavailable"
+    assert h.count(">N/A<") >= 14, h.count(">N/A<")
+    assert "const NA='N/A'" in h
+    assert "#fuel-avg-note,#fuel-time-note{display:block}" in h, "the fuel notes must stack on two lines"
+    for stale in ("Unknown track", "Unknown car", "'unknown'", "'Not timed'"):
+        assert stale not in h, f"{stale} stands in for a missing value"
+    assert "button:disabled{opacity:.5;cursor:default}" in h, "a disabled button must look disabled"
 
 
 def t_input_trace_sits_with_the_live_values_and_uses_the_gated_route():

@@ -130,7 +130,7 @@ async def main():
                         assert re.search(r'\d+ diagnostic mini-sectors',card['text']), f'section card lacked its mini-sector count: {card}'
                         if card['expected']:
                             assert card['expected'] in card['text'] and 'Not yet driven' not in card['text'], f'section progress was not distinguished: {card}'
-                    assert re.fullmatch(r'Against A · through \d+ m', measured['deltaReference']), f'live delta lacked its reference distance: {json.dumps(measured)}'
+                    assert re.fullmatch(r'Against (best|pinned|your pick) · Lap \d+ · through \d+ m', measured['deltaReference']), f'live delta lacked its reference distance: {json.dumps(measured)}'
                     assert re.fullmatch(r'Lap \d+ · this session',await page.locator('#best + small').inner_text()), 'best lap lacked its lap number'
                     assert await page.locator('#larger-sectors [data-section]').count() == 3, 'reviewed sections were not grouped'
                     detail=page.locator('#larger-sectors [data-section]').first.locator('details')
@@ -155,7 +155,7 @@ async def main():
                     assert all(a[0]['y'] < b[0]['y'] for a,b in zip(rows,rows[1:],strict=False)), f'{width}: headline rows overlap: {positions}'
                     if width <= 600:
                         assert positions[-1]['width'] > positions[0]['width'] * 1.9, 'phone fuel tile did not span the headline'
-                    assert await page.locator('#fuel-avg').inner_text() == 'Unavailable', 'synthetic laps without consumption invented a fuel average'
+                    assert await page.locator('#fuel-avg').inner_text() == 'N/A', 'synthetic laps without consumption invented a fuel average'
                     placement=await page.evaluate('''() => {
                         const box=id=>document.getElementById(id).getBoundingClientRect();
                         const p=box('program-card'),m=document.querySelector('.map-card').getBoundingClientRect(),h=box('instruments');
@@ -203,16 +203,16 @@ async def main():
                 assert 'gain' in (await page.locator('#delta').get_attribute('class') or '') and 'loss' not in (await page.locator('#delta').get_attribute('class') or ''), 'negative delta lost gain emphasis'
                 await page.evaluate('() => showDelta(.25)')
                 assert await page.locator('#delta').inner_text() == '+0.250', 'positive delta relied on color alone'
-                signed=await page.evaluate('() => {const td=document.createElement("td");cellValue(td,.5,false,"Unavailable",true);return td.textContent;}')
+                signed=await page.evaluate('() => {const td=document.createElement("td");cellValue(td,.5,false,"N/A",true);return td.textContent;}')
                 assert signed == '+0.500', 'positive sector difference relied on color alone'
                 assert 'loss' in (await page.locator('#delta').get_attribute('class') or '') and 'gain' not in (await page.locator('#delta').get_attribute('class') or ''), 'positive delta retained the previous gain'
                 await page.evaluate('() => showDelta(0)')
                 assert await page.locator('#delta').inner_text() == '0.000' and not (await page.locator('#delta').get_attribute('class') or ''), 'zero delta retained a gain or loss'
                 for invalid in ('Infinity','-Infinity'):
                     await page.evaluate('() => showDelta('+invalid+')')
-                    assert await page.locator('#delta').inner_text() == 'Unavailable' and not (await page.locator('#delta').get_attribute('class') or ''), 'nonfinite delta claimed a gain or loss'
+                    assert await page.locator('#delta').inner_text() == 'N/A' and not (await page.locator('#delta').get_attribute('class') or ''), 'nonfinite delta claimed a gain or loss'
                 await page.evaluate('() => showDelta(null)')
-                assert await page.locator('#delta').inner_text() == 'Unavailable' and not (await page.locator('#delta').get_attribute('class') or ''), 'missing delta retained gain/loss emphasis'
+                assert await page.locator('#delta').inner_text() == 'N/A' and not (await page.locator('#delta').get_attribute('class') or ''), 'missing delta retained gain/loss emphasis'
                 observed=await page.evaluate('() => state.detail.trace.at(-1).d')
                 ahead=await page.evaluate('(d) => (state.detail.corner_metrics||[]).filter(c=>c.apex_m>d).map(c=>"T"+c.number)',observed)
                 labels=await page.locator('#map [data-turn]').all_text_contents()
@@ -233,12 +233,12 @@ async def main():
                 assert (await page.locator('#notice').inner_text()).startswith('Relay restarted.') and await page.evaluate('() => state.a') == '', 'a relay restart kept a live reference'
                 await page.evaluate('() => instruments({instruments:{},current:{lap:3,track:null,car:"Car"},track_recognition:false})')
                 assert all(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units stayed beside unavailable values'
-                assert [await page.locator(t).inner_text() for t in ('#tyres-front','#tyres-rear')] == ['Unavailable','Unavailable'], 'unavailable tyre pairs repeated the placeholder'
-                assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · track recognition data not loaded'), 'missing recognition data was not named'
+                assert [await page.locator(t).inner_text() for t in ('#tyres-front','#tyres-rear')] == ['N/A','N/A'], 'unavailable tyre pairs repeated the placeholder'
+                assert (await page.locator('#source-state').inner_text()).startswith('N/A · track recognition data not loaded'), 'missing recognition data was not named'
                 await page.evaluate('() => instruments({instruments:{speed_kmh:120,rpm:5000,throttle:40,brake:0,tyres_c:[80,null,null,null]},current:{lap:3,track:null,car:"Car"},track_recognition:true})')
                 assert not any(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units were hidden beside measured values'
-                assert await page.locator('#tyres-front').inner_text() == '80 / Unavailable', 'a partly measured tyre pair lost its value'
-                assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · Car'), 'recognisable data still blamed the track data'
+                assert await page.locator('#tyres-front').inner_text() == '80 / N/A', 'a partly measured tyre pair lost its value'
+                assert (await page.locator('#source-state').inner_text()).startswith('N/A · Car'), 'recognisable data still blamed the track data'
                 await page.evaluate('() => clearPlots()')
                 assert not await page.locator('#larger-sectors').is_visible(), 'an empty section card stayed visible'
                 await page.evaluate('() => {state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();}')
@@ -266,7 +266,7 @@ async def main():
                 assert outcomes['conflict']['a'] == '' and outcomes['conflict']['rejected'] == ['r:ref:1:4|b3'], f'a real pool conflict kept or re-offered the reference: {outcomes["conflict"]}'
                 label=await page.evaluate('''() => {const saved={refs:state.refs,refLaps:state.refLaps,refSource:state.refSource},base={...state.snapshot.current,state:'confirmed',comparison_eligible:true,session_id:'r:ref:1'};state.refs=[{id:'ref',label:'Morning'}];state.refSource='ref';state.refLaps=[{...base,id:'r:ref:1:0',lap:0,track:'',track_id:null},{...base,id:'r:ref:1:1',lap:1,track:'Ring',track_id:'ring'}];selections();const text=[...$('session').options].map(o=>o.text).find(t=>t.startsWith('Morning'));Object.assign(state,saved);selections();return text;}''')
                 assert label and ' · Ring · ' in label, f'a shared session was named after its untracked out lap: {label}'
-                counts=await page.evaluate('''() => {const count=()=>[...document.querySelectorAll('#larger-sectors [data-section] summary')].map(n=>n.textContent);state.note='';state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();const full=count(),rows=$('sectors').tBodies[0].rows.length,outline=state.outline;state.outline=state.savedLayoutPair.a;state.pair=null;state.detail={...state.savedLayoutDetail,state:'provisional',sectors:state.savedLayoutDetail.sectors.slice(0,1),trace:state.savedLayoutDetail.trace.filter(p=>p.d<=200)};render();const partial=count(),partialRows=$('sectors').tBodies[0].rows.length,future=$('sectors').tBodies[0].rows[partialRows-1]?.cells[2].textContent;state.outline=outline;state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();return {full,partial,rows,partialRows,future};}''')
+                counts=await page.evaluate('''() => {const count=()=>[...document.querySelectorAll('#larger-sectors [data-section] summary')].map(n=>n.textContent),savedA=state.a;state.a=state.savedLayoutPair.a.id;state.note='';state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();const full=count(),rows=$('sectors').tBodies[0].rows.length,outline=state.outline;state.outline=state.savedLayoutPair.a;state.pair=null;state.detail={...state.savedLayoutDetail,state:'provisional',sectors:state.savedLayoutDetail.sectors.slice(0,1),trace:state.savedLayoutDetail.trace.filter(p=>p.d<=200)};render();const partial=count(),partialRows=$('sectors').tBodies[0].rows.length,future=$('sectors').tBodies[0].rows[partialRows-1]?.cells[2].textContent;state.outline=outline;state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();state.a=savedA;return {full,partial,rows,partialRows,future};}''')
                 assert counts['partial'] == counts['full'] and counts['partialRows'] == counts['rows'], f'mini-sector counts followed the driven distance: {counts}'
                 assert counts['future'] == 'Not yet driven', f'an undriven mini-sector was not marked: {counts}'
                 await page.locator('#channel').select_option('brake')

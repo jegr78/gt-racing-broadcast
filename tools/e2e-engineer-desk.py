@@ -69,9 +69,9 @@ async def main():
                 assert await page.locator('#race-position').inner_text() == 'P15/15', 'measured race position missing'
                 assert 'finish P3/15' in await page.evaluate('() => lapLabel({lap:2,state:"confirmed",time_s:20,line_position:3,line_car_count:15,comparison_eligible:true})'), 'lap option lost line position'
                 await page.wait_for_function('() => EngineerDesk.state.historyRevision !== null')
-                # Follow live compares the live lap with the lap just completed, not the fastest.
+                # Follow live compares the live lap with the best lap of the session.
                 previous=next(r['id'] for r in fixture.live.snapshot()['laps'] if r['lap']==4)
-                await page.wait_for_function('(id) => EngineerDesk.state.a === id',arg=previous,timeout=5000)
+                await page.wait_for_function('(id) => EngineerDesk.state.a === id && EngineerDesk.state.aKind === "best"',arg=fixture.live.snapshot()['best_id'],timeout=5000)
                 assert 'Mitsubishi Lancer Evolution IX' in await page.locator('#session option:checked').inner_text(), 'session car name missing'
                 fallback = await page.evaluate('() => {const saved=EngineerDesk.state.sessions;EngineerDesk.state.sessions=saved.map(r=>({...r,car:null}));selections();const label=document.querySelector("#session option:checked").textContent;EngineerDesk.state.sessions=saved;selections();return label;}')
                 assert 'car 3424' in fallback, 'unknown car name did not fall back to id'
@@ -148,8 +148,8 @@ async def main():
                 await page.unroute('**/race-engineer/lap?*', outside_outline)
                 await page.unroute('**/race-engineer/compare?*', pending_pair)
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready" && EngineerDesk.state.pair?.delta?.length > 0')
-                assert await page.locator('#delta').inner_text() != 'Unavailable'
-                assert await page.locator('#sectors tbody tr').first.locator('td').nth(1).inner_text() != 'Unavailable'
+                assert await page.locator('#delta').inner_text() != 'N/A'
+                assert await page.locator('#sectors tbody tr').first.locator('td').nth(1).inner_text() != 'N/A'
                 # A detail can become ready between outline and compare reads.
                 selected_a = await page.evaluate('() => EngineerDesk.state.a')
                 missed = [False]
@@ -175,9 +175,6 @@ async def main():
                     fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), fixture.live._receipt[1]+.01)
                     assert fixture.live.flush(10)
                     await page.wait_for_function('() => document.getElementById("race-position").textContent === "P15/15"')
-                    # Earlier steps changed A; show the Follow live default (the lap just completed).
-                    await page.locator('#lap-a').select_option(previous)
-                    await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id',arg=previous)
                     await page.locator('.mini-details summary').click()
                     # The fixture has no OBS: give the program still a synthetic frame.
                     await page.route('**/cockpit/program?*', lambda route: route.fulfill(
@@ -193,6 +190,9 @@ async def main():
                     await page.wait_for_function('() => EngineerDesk.trc.rows.length > 100')
                     # The live delta grows between the fixture's two samples: losing time now.
                     await page.wait_for_function('() => document.getElementById("delta-trend").textContent === "\\u25b2"')
+                    # A new A restarts the trend, so show lap 4 as the engineer's own pick only after it.
+                    await page.locator('#lap-a').select_option(previous)
+                    await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id',arg=previous)
                     # No cached vehicle source in the fixture: a synthetic reference and upshifts.
                     async def shift_points(route):
                         response = await route.fetch(); data = await response.json()
@@ -202,7 +202,7 @@ async def main():
                         await route.fulfill(json=data)
                     await page.route('**/race-engineer/snapshot', shift_points)
                     await page.wait_for_function('() => document.querySelectorAll("#shift-table tbody tr").length === 5')
-                    await page.wait_for_function('() => /laps left|Fuel level unavailable/.test(document.getElementById("fuel-avg-note").textContent)')
+                    await page.wait_for_function('() => /laps left|N[/]A/.test(document.getElementById("fuel-avg-note").textContent)')
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
@@ -238,7 +238,7 @@ async def main():
                 await page.route('**/race-engineer/snapshot', missing_car)
                 await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position === null')
                 assert await page.locator('#map circle').count() == 0, 'missing position retained a car marker'
-                assert await page.locator('#race-position').inner_text() == 'Unavailable', 'missing race position retained a place'
+                assert await page.locator('#race-position').inner_text() == 'N/A', 'missing race position retained a place'
                 await page.unroute('**/race-engineer/snapshot', missing_car)
                 async def another_track(route):
                     response = await route.fetch(); data = await response.json()
@@ -249,7 +249,7 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.snapshot?.current?.track_id === "unrelated-track"')
                 assert await page.locator('#map circle').count() == 0, 'unrelated historical map retained a current car'
                 await page.unroute('**/race-engineer/snapshot', another_track)
-                await page.wait_for_function('() => document.getElementById("delta").textContent !== "Unavailable"')
+                await page.wait_for_function('() => document.getElementById("delta").textContent !== "N/A"')
                 pair_entered, pair_release, pair_done = asyncio.Event(), asyncio.Event(), asyncio.Event()
                 async def held_manual_pair(route):
                     from urllib.parse import parse_qs, urlsplit
@@ -262,7 +262,7 @@ async def main():
                 await page.route('**/race-engineer/compare?*', held_manual_pair)
                 await asyncio.wait_for(pair_entered.wait(), timeout=5)
                 live_delta = await page.locator('#delta').inner_text()
-                assert live_delta != 'Unavailable', 'manual comparison had no live delta before snapshot'
+                assert live_delta != 'N/A', 'manual comparison had no live delta before snapshot'
                 before_snapshot = await page.evaluate('() => EngineerDesk.state.received')
                 await page.wait_for_function('(stamp) => EngineerDesk.state.received > stamp', arg=before_snapshot)
                 assert await page.locator('#delta').inner_text() == live_delta, 'snapshot marker update cleared a pending manual live delta'
@@ -302,7 +302,7 @@ async def main():
                 await page.wait_for_function('() => document.getElementById("status").textContent === "Game paused"')
                 fixture.live.put(packet._replace(rpm=float('nan'),on_track=False),fixture.live._receipt[1]+.1);fixture.live.flush()
                 await page.wait_for_function('() => document.getElementById("status").textContent === "Game menu"')
-                assert await page.locator('#rpm').inner_text() == 'Unavailable'
+                assert await page.locator('#rpm').inner_text() == 'N/A'
                 source=gate.m.gt7_context.source_identity(fixture.live_path)
                 fixture.access().update(grant=source,label='<img src=x onerror="window.injected=true">',expected=1)
                 await page.wait_for_function('(id) => [...document.getElementById("reference-source").options].some(o=>o.value===id)',arg=source)
@@ -382,7 +382,7 @@ async def main():
                 count=[];page.on('request',lambda r:count.append(r.url))
                 await asyncio.sleep(1.2)
                 assert not count, 'role removal did not stop protected polling'
-                assert not await page.locator('#chart path').count() and await page.locator('#speed').inner_text() == 'Unavailable'
+                assert not await page.locator('#chart path').count() and await page.locator('#speed').inner_text() == 'N/A'
                 fixture.crew.inject_row(1,race_engineer=True)
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_selector('#protected:not([hidden])')

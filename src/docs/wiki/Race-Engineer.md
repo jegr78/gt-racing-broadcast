@@ -29,7 +29,10 @@ Current lap, live delta, best completed time, race position and average fuel use
 the desk. **Avg fuel · L/lap** averages the completed, comparison-eligible laps of the
 live session (out, pit and partial laps excluded); a lap without a fuel reading is left
 out, never counted as zero. Below it, the tile estimates the laps left: the current fuel
-level divided by that average. Fuel, theoretical best and
+level divided by that average (**≈ n laps left**). A second line gives the time left
+(**≈ m:ss time left**, **h:mm:ss** from one hour): the laps left times the average lap
+time of the same eligible laps. Either line reads **N/A** when one of its inputs is
+missing. Fuel, theoretical best and
 tyres follow, then large speed/gear/RPM/throttle/brake/steering values.
 Select the comparison before inspecting the charts; channel and distance controls
 are attached to the chart. One line below the selection reports the comparison:
@@ -46,7 +49,7 @@ many upshifts were seen. The reference is the same full-throttle power-equality
 estimate as in the Telemetry workspace, from the machine-local entry for the car;
 ratios decoded from the car win over the stock source. It is not verified for the
 event, and an early shift can be intentional (fuel, traction). An upshift whose phase
-was not measurable reads **Unknown**, never a number. Without a local entry the desk
+was not measurable reads **N/A**, never a number. Without a local entry the desk
 names no target and points to **Telemetry → Data management → Shift references by
 car**; the desk itself never downloads anything.
 
@@ -60,10 +63,10 @@ fetched while the tile is open and the tab is visible, and it stops with the acc
 The desk reads the existing single GT7 source of a solo POV profile. Speed, gear,
 RPM, throttle/brake, steering angle (degrees with **L**/**R**), race position, observed lap time, fuel and tyre temperatures refresh roughly
 twice per second. Below them, an input trace draws throttle (green) and brake (red)
-over the last five seconds, like the HUD trace. Missing measurements say **Unavailable**, without their unit. The observed lap clock
+over the last five seconds, like the HUD trace. Every missing value reads **N/A**, without its unit; explanatory status sentences stay prose. The observed lap clock
 and live delta describe received data; neither advances without new packets.
 Race position reads **P15/15**, for example, from GT7's own-car position and field
-size. Missing or inconsistent readings remain unavailable. Completed lap options
+size. Missing or inconsistent readings read **N/A**. Completed lap options
 include the position measured at the line when GT7 provided it. No gaps to
 other cars are inferred. Receipt time (24-hour) and age of the last telemetry packet remain
 visible. During a replay the line shows the recorded time in UTC instead.
@@ -71,20 +74,38 @@ visible. During a replay the line shows the recorded time in UTC instead.
 Select **Session** and **Lap B** to inspect retained current or prior-session laps.
 Sessions show the track, vehicle name and lap count; unknown names fall back to
 the car ID. Shared session and reference-lap options include the producer's label.
-Select an eligible **Lap A** from the selected session, or choose a producer-shared
-**Reference source**. With **Follow live**, every new live lap becomes B and the lap
-just completed becomes A, so each lap is compared with the one before it. A lap you
-choose as A holds until the next lap starts. A selected shared reference source is
-kept. When the completed lap is not comparable, or has not arrived within a few
-seconds, the desk takes the fastest eligible lap with the same car and track, or from
-the same session while the track is unknown. While lap B is
+Lap A is chosen by this precedence, highest first: a producer-shared **Reference
+source**; your own pick in **Lap A**; the shared pin; the best lap. For the live lap the
+best is the lap the **Best completed** tile shows (same car and track, and no known
+compound or settings contradiction); for an older lap B it is the fastest eligible lap
+of B's session with the same car and track (or from the same session while the track
+is unknown). The line under the selection and the delta tile name which one applies:
+**Against best**, **Against pinned**, **Against your pick** or **Against** the
+reference source's label, followed by **Lap N** and the distance the delta covers
+(**· Lap N · through X m**).
+
+**Pin lap A** shares the lap currently shown as A with every Engineer on the desk. Only
+a completed, comparison-eligible lap of the live session can be pinned. Race Engineer
+crew and Producers can pin; the last write wins. The pin survives page reloads and ends
+with its session, and when a replay starts or stops. Its detail is protected from
+eviction; if the lap's detail is no longer kept the note reads **Pinned lap detail no
+longer kept**. The note under the button reads **Pinned by name · Lap N**. While A is
+the pinned lap the button reads **Unpin lap N**; while A is another pinnable lap (your
+own pick) it reads **Pin lap A** and replaces the pin directly. A pin applies to Lap B
+in the pinned session.
+
+Your own pick is local to your browser. It is dropped when a new best lap appears, when
+the pin changes, when it is no longer usable for lap B, and on page reload; A then
+falls back along the precedence above. With **Follow live**, every new live lap becomes
+B; A follows the precedence and is no longer set to the previous lap. When no
+comparable lap is available the desk shows **No reference**. While lap B is
 an out lap, pit lap or first lap of a stint, or while its track is still being
 recognised in the first lap of a session, it chooses none and says so; a chosen
-reference stays selected. The charts use the same validated distance stations, sector
+reference source stays selected. The charts use the same validated distance stations, sector
 and context rules as the local Telemetry workspace. Blue is A, orange is B, delta is
 B minus A. The current lap is provisional; future curve sections and incomplete
 200 m sectors say **Not yet driven** in muted text. Missing measurements remain
-**Unavailable**, and untimed lap zero reads **Out lap**. Confirmed best and theoretical values exclude it.
+**N/A**, and untimed lap zero reads **Out lap**. Confirmed best and theoretical values exclude it.
 While the lap grows, comparison retains the latest completed observed prefix and
 refreshes it in the background. Its displayed distance identifies that prefix.
 The map uses the complete selected reference lap as its outline, or the latest
@@ -109,7 +130,7 @@ analysis values are unchanged. Curves show their channel units, delta has a zero
 line, and an empty comparison has a message, retains known distance and omits artificial axes. Turn labels
 sit on the complete reference outline, also ahead of the car, avoid overlaps and have a textual legend. Declared settings and strategy use named
 values rather than raw JSON. When the producer's relay has no track recognition data yet, the
-desk says so next to **Unknown track**. Unknown tracks compare only within the same source and session; known
+desk says so next to the track, which reads **N/A**. Unknown tracks compare only within the same source and session; known
 car, compound or strategy contradictions prevent the default comparison.
 
 **Follow live** selects the newest active lap. Manually choosing a session or lap

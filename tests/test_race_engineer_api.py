@@ -552,6 +552,40 @@ def t_unknown_track_recovery_keeps_the_live_pool_without_relabeling_archive_rows
             assert not gt7_comparison.compare(archived,current)['compatible'], 'unknown archive sources must not enter the live pool'
 
 
+def t_pin_delegates_and_reports_rejection():
+    class FakeLive:
+        def __init__(self, reject=False):
+            self.calls, self.reject = [], reject
+        def set_pin(self, lap_id, by):
+            self.calls.append(('set', lap_id, by))
+            if self.reject:
+                raise live.PinError()
+            return {'lap_id': lap_id, 'session_id': 's1', 'lap': 3, 'time_s': 90.0, 'by': by}
+        def clear_pin(self):
+            self.calls.append(('clear',))
+    fake = FakeLive()
+    service = api.Service(fake)
+    try:
+        assert service.pin('L3', 'Alex') == {
+            'ok': True,
+            'pin': {'lap_id': 'L3', 'session_id': 's1', 'lap': 3, 'time_s': 90.0, 'by': 'Alex'},
+        }
+        assert service.pin(None, 'Alex') == {'ok': True, 'pin': None}
+        assert fake.calls == [('set', 'L3', 'Alex'), ('clear',)]
+    finally:
+        service.close()
+    service = api.Service(FakeLive(reject=True))
+    try:
+        try:
+            service.pin('bad', 'Alex')
+        except live.PinError as exc:
+            assert exc.code == 'pin_rejected'
+        else:
+            raise AssertionError('a rejected pin must propagate PinError')
+    finally:
+        service.close()
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn): fn(); print('PASS', name)

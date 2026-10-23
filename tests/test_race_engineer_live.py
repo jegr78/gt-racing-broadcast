@@ -47,6 +47,7 @@ def t_confirmed_matches_offline_and_provisional_stays_observed():
             assert shifts['lap'] == snap['current']['lap'] and shifts['reference']['kind'] == 'unavailable', \
                 'without a cached vehicle source the desk names no shift target'
             assert snap['fuel_avg_laps'] == 0 and snap['fuel_avg_l'] is None, 'zero-use laps are no fuel measurement'
+            assert snap['lap_avg_s'] is not None and snap['lap_avg_s'] > 0
 
 
 def t_average_fuel_uses_completed_eligible_laps_of_the_live_session():
@@ -58,6 +59,18 @@ def t_average_fuel_uses_completed_eligible_laps_of_the_live_session():
     assert live.fuel_average(rows, 'A') == (3.1, 2)
     assert live.fuel_average(rows, None) == (None, 0)
     assert live.fuel_average([lap(1, 3.0, eligible=False)], 'A') == (None, 0)
+
+
+def t_average_lap_time_uses_completed_eligible_laps_of_the_live_session():
+    def lap(n, t, sid='A', state='confirmed', eligible=True):
+        return {'lap': n, 'session_id': sid, 'state': state, 'comparison_eligible': eligible, 'time_s': t}
+    rows = [lap(1, 99.0, eligible=False), lap(2, 90.0), lap(3, 92.0), lap(4, None),
+            lap(5, 80.0, state='unconfirmed'), lap(6, 70.0, sid='B')]
+    assert live.lap_time_average(rows, 'A') == 91.0
+    assert live.lap_time_average(rows, None) is None
+    assert live.lap_time_average([lap(1, 90.0, eligible=False)], 'A') is None
+    assert live.lap_time_average([lap(1, 0.0), lap(2, -5.0), lap(3, 90.0)], 'A') == 90.0,         'a zero or negative time is no measurement'
+    assert live.lap_time_average([lap(1, float('nan')), lap(2, float('inf'))], 'A') is None
 
 
 def _shift_packets():
@@ -94,6 +107,102 @@ def t_new_session_clears_shifts_even_with_the_same_car_and_lap_number():
         assert store.flush()
         assert store._replay.eng.session == previous_session + 1, 'fixture must reset the GT7 session'
         assert store.snapshot()['shifts']['upshifts'] == [], 'new session inherited old lap upshifts'
+
+
+def _rejected(store, lap_id):
+    try:
+        store.set_pin(lap_id, 'Alex')
+    except live.PinError as exc:
+        assert exc.code == 'pin_rejected' and 'pinned' in str(exc)
+        return
+    raise AssertionError(f'pin accepted for {lap_id!r}')
+
+
+def t_pin_is_shared_validated_and_last_write_wins():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            feed(store, path)
+            snap = store.snapshot()
+            laps = {r['lap']: r for r in snap['laps']}
+            assert [n for n, r in sorted(laps.items()) if r['state'] == 'confirmed'] == [2, 3, 4]
+            assert snap['pin'] is None and snap['pin_revision'] == 0
+            assert next(r for r in snap['laps'] if r['id'] == snap['best_id'])['time_s'] == snap['best_s']
+            pin = store.set_pin(laps[3]['id'], 'Alex')
+            assert pin == {'lap_id': laps[3]['id'], 'session_id': snap['session_id'], 'lap': 3,
+                           'time_s': laps[3]['time_s'], 'by': 'Alex'}
+            assert store.snapshot()['pin'] == pin and store.snapshot()['pin_revision'] == 1
+            store.set_pin(laps[4]['id'], 'Sam')  # last write wins
+            assert store.snapshot()['pin']['lap'] == 4 and store.snapshot()['pin_revision'] == 2
+            assert not laps[1]['comparison_eligible'], 'fixture must keep an ineligible first lap'
+            for bad in (snap['current']['id'], 'nope', 'r:x:1:2', laps[1]['id']):
+                _rejected(store, bad)
+            assert store.snapshot()['pin_revision'] == 2, 'a rejected pin changed the shared pin'
+            assert store.snapshot()['pin']['lap'] == 4
+            store.clear_pin()
+            assert store.snapshot()['pin'] is None and store.snapshot()['pin_revision'] == 3
+
+
+def t_pin_clears_on_new_session_and_generation():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            last = None
+            for wall, _kind, plain in gr.Recording(path).packets():
+                last = (wall, tm.parse_packet(plain))
+                store.put(last[1], wall)
+            assert store.flush(10)
+            snap = store.snapshot()
+            lap = next(r for r in snap['laps'] if r['state'] == 'confirmed' and r['comparison_eligible'])
+            store.set_pin(lap['id'], 'Alex')
+            revision = store.snapshot()['pin_revision']
+            wall, packet = last
+            # A best lap that clears to -1 starts a new GT7 session (same car, same lap number).
+            assert store.put(packet._replace(best_ms=20000), wall + .05)
+            assert store.put(packet._replace(best_ms=-1), wall + .1)
+            assert store.flush(10)
+            after = store.snapshot()
+            assert after['session_id'] != snap['session_id'], 'fixture must start a new session'
+            assert after['pin'] is None, 'the pin outlived its session'
+            assert after['pin_revision'] > revision
+            fresh = next(r for r in after['laps'] if r['id'] == lap['id'])
+            _rejected(store, fresh['id'])  # an old-session lap is no longer pinnable
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            feed(store, path)
+            lap = next(r for r in store.snapshot()['laps'] if r['state'] == 'confirmed')
+            store.set_pin(lap['id'], 'Alex')
+            revision = store.snapshot()['pin_revision']
+            store._reset_generation(new_source=True)
+            store.flush()
+            assert store.snapshot()['pin'] is None, 'the pin survived a new live generation'
+            assert store.snapshot()['pin_revision'] > revision
+
+
+def t_pinned_and_best_laps_survive_detail_eviction():
+    # Lap 1 is the partial first lap, so lap 2 (15 s) is the first confirmed eligible lap
+    # and stays the best; lap 3 is pinned early; later laps are slower.
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d, lap_secs=(20.0, 15.0) + tuple(20.0 + i * .1 for i in range(1, 10)), n=100)
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), details_max=2,
+                        queue_max=4096) as store:
+            pinned = None
+            for i, (wall, _kind, plain) in enumerate(gr.Recording(path).packets()):
+                store.put(tm.parse_packet(plain), wall)
+                if pinned is None and i % 5 == 0:
+                    assert store.flush(10)
+                    lap3 = next((r for r in store.snapshot()['laps']
+                                 if r['lap'] == 3 and r['state'] == 'confirmed'), None)
+                    if lap3 is not None:
+                        pinned = store.set_pin(lap3['id'], 'Alex')['lap_id']
+            assert pinned is not None, 'lap 3 never confirmed'
+            assert store.flush(10)
+            snap = store.snapshot()
+            laps = {r['lap']: r for r in snap['laps']}
+            assert snap['best_id'] == laps[2]['id'] and snap['best_s'] == 15.0
+            assert store.detail(snap['best_id'])['state'] == 'ready', 'best lap evicted'
+            assert store.detail(pinned)['state'] == 'ready', 'pinned lap evicted'
+            assert store.detail(laps[4]['id'])['state'] == 'evicted'
+            assert store.stats()['details'] <= 3
 
 
 def t_stale_pause_generation_and_collection_switch():
