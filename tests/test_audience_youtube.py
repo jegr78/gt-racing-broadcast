@@ -282,6 +282,75 @@ def t_invalid_key_details_override_generic_request_error():
         raise AssertionError("Invalid key was accepted")
 
 
+def t_request_accepts_up_to_five_video_ids():
+    urls = []
+
+    def opener(url, **_options):
+        urls.append(url)
+        return Response(b'{"items":[]}')
+
+    key = "fixture-local-api-key"
+    yt.request("videos", {"id": "aaaaaaaaaaa,bbbbbbbbbbb"}, key, open_url=opener)
+    assert "id=aaaaaaaaaaa%2Cbbbbbbbbbbb" in urls[0]
+    five = ",".join(c * 11 for c in "abcde")
+    yt.request("videos", {"id": five}, key, open_url=opener)
+    assert len(urls) == 2
+    for bad in (",".join(c * 11 for c in "abcdef"), "aaaaaaaaaaa,", ""):
+        try:
+            yt.request("videos", {"id": bad}, key, open_url=opener)
+        except ValueError:
+            pass  # Rejected before any outbound work.
+        else:
+            raise AssertionError("Invalid video id list accepted: " + bad)
+    assert len(urls) == 2
+
+
+def _live_item(video_id, flag="live", start=None, end=None, title="T"):
+    details = {}
+    if start:
+        details["actualStartTime"] = start
+    if end:
+        details["actualEndTime"] = end
+    return {
+        "id": video_id,
+        "snippet": {"liveBroadcastContent": flag, "title": title + video_id[:1]},
+        "liveStreamingDetails": details,
+    }
+
+
+def t_newest_live_picks_the_later_start():
+    a, b = "A" * 11, "B" * 11
+    payload = {
+        "items": [
+            _live_item(a, start="2026-10-23T18:00:00Z"),
+            _live_item(b, start="2026-10-23T18:05:00Z"),
+        ]
+    }
+    assert yt.newest_live(payload, [a, b]) == (b, "TB")
+    assert yt.newest_live(payload, [a]) == (a, "TA")
+
+
+def t_newest_live_ignores_upcoming_and_ended():
+    a, b, c, d = "A" * 11, "B" * 11, "C" * 11, "D" * 11
+    upcoming = _live_item(a, flag="upcoming")
+    ended = _live_item(
+        b, start="2026-10-23T17:00:00Z", end="2026-10-23T17:30:00Z"
+    )
+    live = _live_item(c, start="2026-10-23T16:00:00Z")
+    stranger = _live_item(d, start="2026-10-23T19:00:00Z")
+    got = yt.newest_live({"items": [upcoming, ended, live, stranger]}, [a, b, c])
+    assert got == (c, "TC")
+    assert yt.newest_live({"items": [upcoming, ended]}, [a, b]) is None
+    assert yt.newest_live({"items": []}, [a]) is None
+    for bad in (None, {}, {"items": [1]}, {"items": [{"id": a, "snippet": 1}]}):
+        try:
+            yt.newest_live(bad, [a])
+        except ValueError:
+            pass  # Malformed payloads are rejected.
+        else:
+            raise AssertionError("Malformed payload accepted")
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
