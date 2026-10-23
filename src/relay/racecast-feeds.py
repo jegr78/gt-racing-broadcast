@@ -3350,13 +3350,16 @@ def _yt_run_json(cmd, timeout=30):
         return None
 
 
-def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
-    """Currently-live videoId(s) for one YouTube channel.
+def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
+    """Currently-live videoId(s) for one YouTube channel, telling failure from
+    "not live".
 
     Prefers the channel `/streams` tab so CONCURRENT live streams are all found
     (the producer-handover overlap); falls back to the `/live` shorthand (one
-    stream) when the tab enumeration yields nothing. Best-effort: any failure
-    returns []."""
+    stream) when the tab enumeration yields nothing. Returns the IDs; `[]` when
+    the lookup worked and nothing is live (the `/streams` JSON was read and
+    `/live` gave no ID); `None` when it failed (the JSON was unreadable and
+    `/live` gave no ID either)."""
     ids = []
     streams_cmd = ["yt-dlp", "--flat-playlist", "--no-warnings",
                    "--playlist-items", "1-15", "-J"]
@@ -3383,10 +3386,73 @@ def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
         if r.returncode == 0 and r.stdout.strip():
             return [r.stdout.strip().splitlines()[0]]
     except (OSError, subprocess.TimeoutExpired):
-        pass  # best-effort resolve; treat as "no live stream" and fall through
+        pass  # best-effort resolve; handled below
     if logger:
         logger.debug("no live stream resolved for channel %s", channel)
-    return []
+    return [] if data is not None else None
+
+
+def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
+    """Like yt_live_video_lookup but best-effort: any failure returns []."""
+    return yt_live_video_lookup(channel, cookies, timeout=timeout, logger=logger) or []
+
+
+_YT_CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
+
+
+def yt_channel_id(channel, cookies, timeout=25):
+    """The canonical `UC...` channel id of a YouTube channel (URL / @handle /
+    id), read quota-free from yt-dlp's playlist metadata. None on any failure."""
+    cmd = ["yt-dlp", "--flat-playlist", "--no-warnings", "--playlist-items", "0", "-J"]
+    if cookies:
+        cmd += ["--cookies", cookies]
+    cmd += ["--", broadcast_chat.channel_streams_url(channel)]
+    data = _yt_run_json(cmd, timeout=timeout)
+    cid = (data or {}).get("channel_id") if isinstance(data, dict) else None
+    if isinstance(cid, str) and _YT_CHANNEL_ID_RE.match(cid):
+        return cid
+    return None
+
+
+class LiveVideoTracker:
+    """Shared, short-lived cache of "which videos are live on this channel", so
+    the broadcast-chat supervisor and the audience worker resolve it once per
+    ~max_age instead of each running yt-dlp. Only successes are cached; a failed
+    lookup returns None and is retried on the next call."""
+
+    def __init__(self, cookies, lookup=yt_live_video_lookup, max_age=25,
+                 clock=time.monotonic):
+        self.cookies = cookies
+        self._lookup = lookup
+        self.max_age = max_age
+        self._clock = clock
+        self._guard = threading.Lock()
+        self._locks = {}       # channel -> resolve lock
+        self._cache = {}       # channel -> (stamp, ids)
+
+    def _fresh(self, channel):
+        hit = self._cache.get(channel)
+        if hit and self._clock() - hit[0] < self.max_age:
+            return list(hit[1])
+        return None
+
+    def lookup(self, channel):
+        with self._guard:
+            hit = self._fresh(channel)
+            if hit is not None:
+                return hit
+            lock = self._locks.setdefault(channel, threading.Lock())
+        with lock:                       # one resolve at a time per channel
+            with self._guard:
+                hit = self._fresh(channel)
+            if hit is not None:
+                return hit
+            ids = self._lookup(channel, self.cookies)
+            if ids is None:
+                return None
+            with self._guard:
+                self._cache[channel] = (self._clock(), list(ids))
+            return list(ids)
 
 
 class BroadcastChatStore:
@@ -3746,7 +3812,9 @@ class BroadcastChatSupervisor:
     that ended genuinely (stream over) is tombstoned until its videoId leaves the
     live set, so it is not restarted in a loop. Best-effort throughout."""
 
-    def __init__(self, store, channel_source, cookies, interval=30, logger=None):
+    def __init__(self, store, channel_source, cookies, interval=30, logger=None,
+                 tracker=None):
+        self.tracker = tracker
         self.store = store
         self.channel_source = channel_source
         self.cookies = cookies
@@ -3791,7 +3859,11 @@ class BroadcastChatSupervisor:
         desired = {}
         for platform, channel in self.channel_source.get():
             if platform == "youtube":
-                for vid in yt_live_video_ids(channel, self.cookies, logger=self.logger):
+                if self.tracker is not None:
+                    vids = self.tracker.lookup(channel) or []
+                else:
+                    vids = yt_live_video_ids(channel, self.cookies, logger=self.logger)
+                for vid in vids:
                     desired[vid] = (lambda v=vid: _BroadcastReader(v, self.store, self.logger))
             elif platform == "twitch":
                 login = broadcast_chat.twitch_login(channel)
