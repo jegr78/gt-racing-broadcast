@@ -19,6 +19,11 @@ LENGTH_TOL = 0.03
 BOX_MARGIN_M = 50.0
 MAX_SCORE_M = 15.0
 AMBIGUOUS_M = 3.0
+# Layouts that share most of a lap (a chicane variant) can score within AMBIGUOUS_M on
+# the mean. A point this far from a candidate's line shows the lap never drove that
+# layout; among close candidates the one with the fewest such points wins. A real tie
+# still names one layout (producer decision) and lists the others as alternatives.
+OFFLINE_M = 15.0
 GRID_M = 50.0
 LEARNED_FORMAT = "racecast-gt7-learned"
 _LEARN_LOCK = threading.Lock()   # TrackDBs of one process share learned-tracks.json
@@ -326,6 +331,7 @@ class TrackDB:
         if not points or len(points) < MIN_POINTS or not length_m:
             return None
         scored = {}              # official_id -> lowest score_m seen, forward or reverse
+        offline = {}             # official_id -> driven points farther than OFFLINE_M
         via_reverse = set()
         for row in self._rows.values():
             ref = row["length_m"]
@@ -349,15 +355,25 @@ class TrackDB:
                 continue
             if oid not in scored or score < scored[oid]:
                 scored[oid] = score
+                offline[oid] = sum(1 for _i, d, _s in located if d > OFFLINE_M)
         if not scored:
             return None
         best_id, best_score = min(scored.items(), key=lambda kv: kv[1])
         close = [oid for oid, s in scored.items() if s - best_score <= AMBIGUOUS_M]
+        alternatives = []
         if len(close) > 1:
-            return {"candidates": close}
+            # The layout with the fewest off-line points; a real tie still names one
+            # (the closest line, then the lowest id), the rest stay as alternatives.
+            best_id = min(close, key=lambda oid: (offline[oid], scored[oid], oid))
+            best_score = scored[best_id]
+            alternatives = sorted(oid for oid in close if oid != best_id
+                                  and offline[oid] == offline[best_id])
         info = self.name(best_id)
         reverse = info["reverse"] if info is not None else best_id in via_reverse
         track = info["track"] if info is not None else best_id
         layout = info["layout"] if info is not None else ""
-        return {"id": best_id, "track": track, "layout": layout,
-                "reverse": reverse, "score_m": round(best_score, 2)}
+        found = {"id": best_id, "track": track, "layout": layout,
+                 "reverse": reverse, "score_m": round(best_score, 2)}
+        if alternatives:
+            found["alternatives"] = alternatives
+        return found

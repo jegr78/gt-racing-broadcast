@@ -89,11 +89,45 @@ def t_no_match_on_wrong_length_far_line_or_few_points():
         assert db.match(list(reversed(_lap(OVAL))), L) is None, "reverse without a twin row"
 
 
-def t_ambiguous_pair_yields_candidates():
+def t_a_true_tie_still_names_the_closest_layout():
+    # Producer decision: never leave the track unknown on a tie. The closest line wins;
+    # the other close layouts are kept as alternatives.
     with tempfile.TemporaryDirectory() as d:
         db = _db(d, [_row("aaa001", "Oval", OVAL), _row("ccc001", "Oval Twin", TWIN)])
-        m = db.match(_lap(OVAL, offset=2.5), _length(OVAL))
-        assert set(m["candidates"]) == {"aaa001", "ccc001"}, m
+        m = db.match(_lap(OVAL, offset=1.5), _length(OVAL))
+        assert "candidates" not in m and m["id"] == "aaa001", m
+        assert m["alternatives"] == ["ccc001"], m
+        m = db.match(_lap(TWIN, offset=-1.5), _length(TWIN))
+        assert m["id"] == "ccc001" and m["alternatives"] == ["aaa001"], m
+
+
+def _with_chicane(path, at=40, width=8, depth=30.0):
+    """The same line with a short section pushed `depth` m outward: a chicane layout
+    that shares the rest of the lap with the plain one (like Barcelona GP vs No Chicane)."""
+    out = [list(p) for p in path]
+    for i in range(at, at + width):
+        x, z = out[i]
+        r = math.hypot(x, z)
+        out[i] = [x + depth * x / r, z + depth * z / r]
+    return out
+
+
+def t_a_layout_the_lap_never_drove_loses_the_tie():
+    # The mean distance of the two layouts differs by less than AMBIGUOUS_M, but only
+    # one of them has the driven chicane: the other leaves the line by 30 m there.
+    chicane = _with_chicane(OVAL)
+    catalog = [
+        {"official_id": "aaa001", "track": "Oval", "layout": "No Chicane", "reverse": False,
+         "official_name": "Oval No Chicane", "country": "X", "turns": 4, "length_m": 2900},
+        {"official_id": "ddd001", "track": "Oval", "layout": "Chicane", "reverse": False,
+         "official_name": "Oval Chicane", "country": "X", "turns": 6, "length_m": 2900}]
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [_row("aaa001", "Oval No Chicane", OVAL),
+                     _row("ddd001", "Oval Chicane", chicane)], catalog)
+        m = db.match(_lap(chicane, offset=1.0), _length(chicane))
+        assert m is not None and "candidates" not in m and m["id"] == "ddd001", m
+        m = db.match(_lap(OVAL, offset=1.0), _length(OVAL))
+        assert m is not None and "candidates" not in m and m["id"] == "aaa001", m
 
 
 def t_rows_without_path_are_skipped_and_bad_files_load_empty():
