@@ -50,15 +50,20 @@ def t_confirmed_matches_offline_and_provisional_stays_observed():
             assert snap['lap_avg_s'] is not None and snap['lap_avg_s'] > 0
 
 
-def t_average_fuel_uses_completed_eligible_laps_of_the_live_session():
-    def lap(n, fuel, sid='A', state='confirmed', eligible=True):
-        return {'lap': n, 'session_id': sid, 'state': state, 'comparison_eligible': eligible, 'fuel_used_l': fuel}
-    rows = [lap(1, 1.0, eligible=False),            # out lap
-            lap(2, 3.0), lap(3, 3.2), lap(4, None),  # missing measurement is not zero
-            lap(5, 2.9, state='unconfirmed'), lap(6, 9.0, sid='B'), lap(7, 0.0)]
-    assert live.fuel_average(rows, 'A') == (3.1, 2)
+def t_average_fuel_counts_first_and_pit_laps_by_their_burn():
+    """Producer decision: avg fuel from the first completed lap on, pit laps included.
+    A lap's use is its burned fuel (refuel does not cancel it); legacy rows fall back to
+    fuel_used_l."""
+    def lap(n, burn=None, used=None, sid='A', state='confirmed', eligible=False):
+        return {'lap': n, 'session_id': sid, 'state': state, 'comparison_eligible': eligible,
+                'fuel_burn_l': burn, 'fuel_used_l': used}
+    rows = [lap(0, 0.4, 0.4, state='unconfirmed'),           # out lap: no official time
+            lap(1, 3.0, 3.0),                                 # first lap, not comparable
+            lap(2, 3.2, -6.8),                                # pit lap with a refuel
+            lap(3, None, 2.8, eligible=True),                 # legacy row without burn
+            lap(4, 9.0, 9.0, sid='B'), lap(5, 0.0, 0.0)]
+    assert live.fuel_average(rows, 'A') == (3.0, 3)
     assert live.fuel_average(rows, None) == (None, 0)
-    assert live.fuel_average([lap(1, 3.0, eligible=False)], 'A') == (None, 0)
 
 
 def t_average_lap_time_uses_completed_eligible_laps_of_the_live_session():

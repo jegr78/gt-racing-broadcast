@@ -26,12 +26,15 @@ Lap and sector times use **m:ss.SSS** throughout the desk and Telemetry workspac
 (for example, **+0.125 s**).
 
 Current lap, live delta, best completed time, race position and average fuel use lead
-the desk. **Avg fuel · L/lap** averages the completed, comparison-eligible laps of the
-live session (out, pit and partial laps excluded); a lap without a fuel reading is left
-out, never counted as zero. Below it, the tile estimates the laps left: the current fuel
-level divided by that average (**≈ n laps left**). A second line gives the time left
-(**≈ m:ss time left**, **h:mm:ss** from one hour): the laps left times the average lap
-time of the same eligible laps. Either line reads **N/A** when one of its inputs is
+the desk. **Avg fuel · L/lap** averages every completed lap of the live session from
+the first lap on, pit laps included; only a lap without an official time (the out lap)
+is left out. A lap's use is the fuel it burned, so a refuel during a pit lap does not
+cancel it; a lap without a fuel reading is left out, never counted as zero. Below it,
+the tile estimates the laps left: the current fuel level divided by that average
+(**≈ n laps left**). A second line gives the time left (**≈ m:ss time left**,
+**h:mm:ss** from one hour): the laps left times the average lap time of the completed,
+comparison-eligible laps (out, pit and partial laps excluded, so a pit stop does not
+skew the pace). Either line reads **N/A** when one of its inputs is
 missing. Fuel, theoretical best and
 tyres follow, then large speed/gear/RPM/throttle/brake/steering values.
 Select the comparison before inspecting the charts; channel and distance controls

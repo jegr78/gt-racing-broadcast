@@ -25,7 +25,7 @@ button:disabled{opacity:.5;cursor:default}
 <div class="tile value delta-tile"><span>Live delta · s</span><b id="delta-trend" class="trend" role="img" aria-label="No trend"></b><strong id="delta">N/A</strong><small id="delta-note">Against the selected reference</small></div>
 <div class="tile value"><span>Best completed</span><strong id="best">N/A</strong><small id="best-note">Eligible completed laps</small></div>
 <div class="tile value"><span>Race position</span><strong id="race-position">N/A</strong><small>Measured by GT7</small></div>
-<div class="tile value"><span>Avg fuel · L/lap</span><strong id="fuel-avg">N/A</strong><small id="fuel-avg-note">No eligible lap with fuel use</small><small id="fuel-time-note">N/A</small></div>
+<div class="tile value"><span>Avg fuel · L/lap</span><strong id="fuel-avg">N/A</strong><small id="fuel-avg-note">No completed lap with fuel use</small><small id="fuel-time-note">N/A</small></div>
 </div>
 <div class="support"><div class="value"><span class="sub">Fuel · L </span><strong id="fuel">N/A</strong><span class="sub"> · theoretical best </span><strong id="theory">N/A</strong></div><div class="value"><span class="sub">Tyres FL / FR · °C </span><strong id="tyres-front">N/A</strong><span class="sub"> · RL / RR </span><strong id="tyres-rear">N/A</strong></div></div>
 
@@ -142,7 +142,7 @@ function renderShifts(snap){const s=snap.shifts,body=$('shift-table').tBodies[0]
 }
 function instruments(snap){const v=snap.instruments||{};$('race-position').textContent=v.race_position!=null&&v.car_count!=null?`P${v.race_position}/${v.car_count}`:NA;for(const [id,value,d] of [['speed',v.speed_kmh,0],['gear',v.gear,0],['rpm',v.rpm,0],['throttle',v.throttle,0],['brake',v.brake,0],['fuel',v.fuel_l,1]])$(id).textContent=num(value,d);for(const [id,value] of [['lap-time',snap.current?.elapsed_s],['best',snap.best_s],['theory',snap.theoretical_s]])$(id).textContent=lapTime(value);
  const avg=snap.fuel_avg_l,fuel=v.fuel_l,left=Number.isFinite(avg)&&avg>0&&Number.isFinite(fuel)?Math.max(0,fuel)/avg:null;
- $('fuel-avg').textContent=num(avg,2);$('fuel-avg-note').textContent=!snap.fuel_avg_laps?'No eligible lap with fuel use':left==null?NA:`≈ ${num(left,1)} laps left`;$('fuel-time-note').textContent=left!=null&&Number.isFinite(snap.lap_avg_s)?`≈ ${duration(left*snap.lap_avg_s)} time left`:NA;
+ $('fuel-avg').textContent=num(avg,2);$('fuel-avg-note').textContent=!snap.fuel_avg_laps?'No completed lap with fuel use':left==null?NA:`≈ ${num(left,1)} laps left`;$('fuel-time-note').textContent=left!=null&&Number.isFinite(snap.lap_avg_s)?`≈ ${duration(left*snap.lap_avg_s)} time left`:NA;
  for(const id of ['lap-time','best','theory'])$(id).classList.remove('not-driven');if(snap.current?.lap<=0){$('lap-time').textContent='Out lap';$('lap-time').classList.add('not-driven');}if(snap.current&&!state.laps.some(r=>r.session_id===snap.current.session_id&&r.comparison_eligible)){for(const [id,value]of [['best',snap.best_s],['theory',snap.theoretical_s]])if(value==null){$(id).textContent='No eligible lap';$(id).classList.add('not-driven');}}
  const bestLap=snap.best_s==null?null:state.laps.find(r=>r.session_id===snap.session_id&&r.comparison_eligible&&r.state==='confirmed'&&r.time_s===snap.best_s);$('best-note').textContent=bestLap?`Lap ${bestLap.lap} · this session`:'Eligible completed laps';
  const steer=Number.isFinite(v.steer_rad)?v.steer_rad*180/Math.PI:null;$('steer').textContent=steer==null?NA:Math.abs(steer)<.5?'0°':`${Math.abs(steer).toFixed(0)}° ${steer>0?'L':'R'}`;

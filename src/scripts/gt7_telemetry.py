@@ -292,7 +292,7 @@ class _LapAccumulator:
     the relay connects), True for accumulators opened at a real lap-change edge.
     Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
-                 "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s",
+                 "fuel_start", "fuel_end", "fuel_burn", "started_at_boundary", "pit", "stopped_s",
                  "why", "reasons", "top_speed", "points", "next_point_m", "max_packet_gap_s")
 
     def __init__(self, now, started_at_boundary=False):
@@ -304,6 +304,7 @@ class _LapAccumulator:
         self.last_t = now
         self.fuel_start = None
         self.fuel_end = None
+        self.fuel_burn = 0.0          # litres burned: decreases only, a refuel never cancels it
         self.started_at_boundary = started_at_boundary
         self.pit = False
         self.stopped_s = 0.0
@@ -355,6 +356,8 @@ class _LapAccumulator:
             self.samples.append((self.distance, self.elapsed))
         if self.fuel_start is None:
             self.fuel_start = pkt.fuel_level
+        if self.fuel_end is not None and pkt.fuel_level < self.fuel_end:
+            self.fuel_burn += self.fuel_end - pkt.fuel_level
         self.fuel_end = pkt.fuel_level
         if self.fuel_end > self.fuel_start + FUEL_RISE_L:  # refuel = pit lap
             self._reject("pit lap: refuel", pit=True)
@@ -542,6 +545,7 @@ class TelemetryEngine:
         record = {"session": self.session, "lap": self._lap_num, "start": acc.t0,
                   "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
                   "reason": reason, "fuel_used": fuel,
+                  "fuel_burn": acc.fuel_burn if acc.fuel_start is not None else None,
                   "fuel_start_l": acc.fuel_start, "fuel_end_l": acc.fuel_end,
                   "top_speed_mps": acc.top_speed,
                   "car_id": self._last.car_id if self._last is not None else None,
