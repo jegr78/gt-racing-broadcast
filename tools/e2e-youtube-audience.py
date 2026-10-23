@@ -225,8 +225,8 @@ def main():
                 preview = page.locator("#ov-stage").locator(
                     "#" + subscriber + " .audience-value"
                 )
-                assert preview.text_content().startswith("≈"), (
-                    "Offline preview claimed exact subscriber precision"
+                assert "≈" not in preview.text_content(), (
+                    "Subscribers show the plain number, without an approximate marker"
                 )
                 assert not ".000000" in preview.text_content(), (
                     "Offline preview invented decimal precision"

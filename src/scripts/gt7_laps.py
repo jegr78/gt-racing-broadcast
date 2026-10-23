@@ -497,6 +497,7 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
         "time_s": time_s,
         "status": lap["status"], "reason": lap["reason"],
         "fuel_used_l": None if lap["fuel_used"] is None else round(lap["fuel_used"], 2),
+        "fuel_burn_l": None if lap.get("fuel_burn") is None else round(lap["fuel_burn"], 2),
         "fuel_start_l": lap.get("fuel_start_l"), "fuel_end_l": lap.get("fuel_end_l"),
         "top_speed_kmh": round(lap["top_speed_mps"] * 3.6, 1),
         "line_position": lap.get("line_position"), "line_car_count": lap.get("line_car_count"),

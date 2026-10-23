@@ -75,7 +75,7 @@ def renderer_contracts():
             "window.pwned||false"
         )
         render([row(value=29500, target=30000, precision={"exact": False})])
-        assert page.locator("#" + A + " .audience-value").text_content() == "≈29,500"
+        assert page.locator("#" + A + " .audience-value").text_content() == "29,500"
         render([
             row(
                 value=29500,
@@ -83,7 +83,7 @@ def renderer_contracts():
                 precision={"exact": False, "significantDigits": 3},
             )
         ])
-        assert page.locator("#" + A + " .audience-value").text_content() == "≈29,500", (
+        assert page.locator("#" + A + " .audience-value").text_content() == "29,500", (
             "Rounded subscriber counts must not gain invented decimal precision"
         )
         page.locator("#" + A).evaluate("el=>el.style.display='none'")

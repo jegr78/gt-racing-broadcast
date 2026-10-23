@@ -3181,7 +3181,7 @@ async function youtubePoll(session,initial=false) {
     }
     if (targets?.video) lines.push('Video channel: '+targets.video.channelTitle+' ['+targets.video.channelId+']');
     if (result.connected) for (const [metric,row] of Object.entries(result.metrics || {})) {
-      const number = row.available ? ' · '+(row.precision?.exact === false ? '≈' : '')+new Intl.NumberFormat('en-US', row.precision?.significantDigits ? {maximumSignificantDigits:row.precision.significantDigits} : {maximumFractionDigits:0}).format(row.value) : '';
+      const number = row.available ? ' · '+new Intl.NumberFormat('en-US', row.precision?.significantDigits ? {maximumSignificantDigits:row.precision.significantDigits} : {maximumFractionDigits:0}).format(row.value) : '';
       lines.push(metric+': '+row.availability+number+(row.reason ? ' · '+row.reason : ''));
     }
     if (result.videoState && result.videoState !== 'unknown') lines.push('Broadcast: '+result.videoState);
