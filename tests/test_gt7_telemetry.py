@@ -767,6 +767,23 @@ def t_engine_pit_lap_via_fuel_rise_excluded():
     assert eng.snapshot()["has_reference"] is False
 
 
+def t_engine_lap_record_counts_burned_fuel_across_a_refuel():
+    """fuel_burn sums only decreases: a refuel in the lap does not cancel the burn."""
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=0, fuel_level=20.0)), 99.0)
+    t = 100.0
+    for i in range(100):           # burn 0.02 L per packet; the refuel packet (i == 50) burns none
+        fuel = 20.0 - 0.02 * i + (10.0 if i >= 50 else 0.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1, fuel_level=fuel)), t); t += 0.1
+    eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2, fuel_level=fuel)), t)
+    rec = next(r for r in laps if r["lap"] == 1)
+    assert rec["fuel_used"] < 0, rec["fuel_used"]                # start minus end: refuelled
+    # ~97 counted decrements of 0.02 L (float32 levels): about 2 L, never the -8 L balance.
+    assert 1.9 < rec["fuel_burn"] < 2.0, rec["fuel_burn"]
+
+
 def t_engine_brief_slowdown_not_pit():
     """False-positive guard: a short (<PIT_STOP_MIN_S) slow section is not a pit lap."""
     eng = tm.TelemetryEngine()

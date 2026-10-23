@@ -297,7 +297,7 @@ for (const [avg, laps, fuel, lapAvg] of [[3.0612, 12, 85.7, 90], [3.0612, 12, nu
 console.log(seen.join('|'));""")
     if out is not None:
         assert out.strip() == ("3.06/≈ 28.0 laps left/≈ 42:00 time left|3.06/N/A/N/A|"
-                               "N/A/No eligible lap with fuel use/N/A|1.00/≈ 100.0 laps left/≈ 2:30:00 time left|"
+                               "N/A/No completed lap with fuel use/N/A|1.00/≈ 100.0 laps left/≈ 2:30:00 time left|"
                                "2.50/≈ 16.0 laps left/N/A"), out
 
 

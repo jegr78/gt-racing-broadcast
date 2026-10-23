@@ -59,6 +59,7 @@ SUMMARY_FIELDS = frozenset((
     "length_m",
     "sectors",
     "fuel_used_l",
+    "fuel_burn_l",
     "top_speed_kmh",
     "line_position",
     "line_car_count",
@@ -153,9 +154,19 @@ def _session_measurements(laps, session_id, field):
 
 
 def fuel_average(laps, session_id):
-    """(mean litres per lap, lap count) over the live session's completed eligible laps.
-    A missing or zero use is no measurement (no fuel use / refuel), never a zero average."""
-    used = _session_measurements(laps, session_id, "fuel_used_l")
+    """(mean litres per lap, lap count) over the live session's completed laps, from the
+    first lap on and including pit laps (producer decision). A lap's use is its burned
+    fuel, which a refuel does not cancel; rows without it fall back to fuel_used_l. A
+    missing or zero use is no measurement, never a zero average."""
+    used = []
+    for r in laps:
+        if session_id is None or r.get("session_id") != session_id or r.get("state") != "confirmed":
+            continue
+        value = r.get("fuel_burn_l")
+        if _finite(value) is None:
+            value = r.get("fuel_used_l")
+        if _finite(value) is not None and value > 0:
+            used.append(value)
     return (round(sum(used) / len(used), 3), len(used)) if used else (None, 0)
 
 
