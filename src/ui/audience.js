@@ -34,15 +34,14 @@
         deadlines.delete(el);
         return;
       }
-      const approximate = row.precision && row.precision.exact === false ? '≈' : '';
       put(el,'.audience-label',typeof row.label === 'string' ? row.label : '');
-      put(el,'.audience-value',approximate + format(row.value,row.decimals,row.precision));
+      put(el,'.audience-value',format(row.value,row.decimals,row.precision));
       put(el,'.audience-unit',typeof row.unit === 'string' ? row.unit : '');
       const hasTarget = Number.isFinite(row.target);
       const target = put(el,'.audience-target',hasTarget ? ' / ' + format(row.target,row.decimals) : '');
       if (target) target.hidden = !hasTarget;
       const percentage = put(el,'.audience-percent',hasTarget && Number.isFinite(row.percentage)
-        ? approximate + format(row.percentage,0) + '%' : '');
+        ? format(row.percentage,0) + '%' : '');
       if (percentage) percentage.hidden = !hasTarget || !Number.isFinite(row.percentage);
       const track = el.querySelector('.audience-track');
       const fill = el.querySelector('.audience-fill');
