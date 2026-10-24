@@ -3210,8 +3210,12 @@ async function youtubeKeyHelp() {
 // Rebuild the Channel tab choice only when its rows change, so an open select
 // or a picked row survives the 1 s status poll. loaded === false: the relay
 // has not read the Channel tab yet, so its empty list says nothing; error is
-// the relay's last read error then. Returns the loading note ('' once loaded).
-function youtubeChannels(rows, loaded, preferred, error) {
+// the relay's last read error then; stale is the Sheet read error while the
+// relay serves its cached Channel tab. Returns the loading note ('' once loaded).
+function youtubeLoadingNote(error) {
+  return error ? 'Could not read the Sheet Channel tab ('+error+'); retrying' : 'Loading the Sheet Channel tab…';
+}
+function youtubeChannels(rows, loaded, preferred, error, stale) {
   const select = $('youtube-follow-channel');
   const list = Array.isArray(rows) ? rows : [];
   const now = [...select.options].map(option => option.value);
@@ -3226,9 +3230,10 @@ function youtubeChannels(rows, loaded, preferred, error) {
   const empty = !missing && !loading && list.length === 0;
   const note = $('youtube-follow-note');
   note.textContent = missing ? 'Follow mode needs the Sheet Channel tab'
-    : loading ? (error ? 'Could not read the Sheet Channel tab ('+error+'); retrying' : 'Loading the Sheet Channel tab…')
-    : 'No YouTube channel in the Sheet Channel tab';
-  note.hidden = !(missing || loading || empty);
+    : loading ? youtubeLoadingNote(error)
+    : empty ? 'No YouTube channel in the Sheet Channel tab'
+    : stale ? 'Sheet read failed ('+stale+'); using the cached Channel tab' : '';
+  note.hidden = !(missing || loading || empty || stale);
   $('youtube-mode-follow').disabled = missing || empty;
   if ((missing || empty) && youtubeMode() === 'follow' && youtubeSession && !youtubeSession.activeFollow) youtubeSetMode('video');
   return loading ? note.textContent : '';
@@ -3293,6 +3298,8 @@ async function youtubePoll(session,initial=false) {
     if (setup.error || result.error) lines.push(setup.error || result.error);
     // A "still loading" guard note is over once the Channel tab has loaded.
     if (session.actionIsNote && result.channelsLoaded !== false) { session.actionError = ''; session.actionIsNote = false; }
+    // While it shows, the guard note follows the loading state (loading -> read error).
+    else if (session.actionIsNote) session.actionError = youtubeLoadingNote(result.channelsError);
     if (session.actionError && !lines.includes(session.actionError)) lines.push(session.actionError);
     $('youtube-status').textContent = lines.join('\n');
     $('youtube-activate').disabled = !verified || session.busy || session.changed;
@@ -3304,7 +3311,7 @@ async function youtubePoll(session,initial=false) {
     // Keep the stored row until the Channel tab rows first arrive, so a
     // multi-row league does not silently fall back to the first row.
     const rows = result.channels ?? null;
-    session.channelsNote = youtubeChannels(rows, result.channelsLoaded, session.followPref, result.channelsError);
+    session.channelsNote = youtubeChannels(rows, result.channelsLoaded, session.followPref, result.channelsError, result.channelsStale);
     if (Array.isArray(rows) && result.channelsLoaded !== false) session.followPref = null;
     if (fresh) {
       $('youtube-video').value = targets?.video?.id || '';

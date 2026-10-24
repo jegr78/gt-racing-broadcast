@@ -376,6 +376,9 @@ def follow_pass(page, service, clock, api, sheet, shots):
     sheet.error = "HTTPError: HTTP Error 404: Not Found"
     failed = "Could not read the Sheet Channel tab (HTTPError: HTTP Error 404: Not Found); retrying"
     note_has(page, failed)
+    status_has(page, failed)   # the loading guard line follows the note
+    text = page.locator("#youtube-status").inner_text()
+    assert "Loading the Sheet Channel tab" not in text, ("Stale guard line", text)
     page.evaluate("() => youtubeAction('verify')")
     status_has(page, failed)
     sheet.error = None
@@ -390,6 +393,16 @@ def follow_pass(page, service, clock, api, sheet, shots):
     page.wait_for_function(
         "() => !document.getElementById('youtube-status').textContent"
         ".includes('Could not read the Sheet Channel tab')"
+    )
+    # Cached rows stand in for a failing Sheet read: say so, keep follow usable.
+    sheet.stale = "HTTPError: HTTP Error 404: Not Found"
+    note_has(page, "Sheet read failed (HTTPError: HTTP Error 404: Not Found); "
+             "using the cached Channel tab")
+    assert page.locator("#youtube-follow-note").is_visible()
+    assert not page.locator("#youtube-mode-follow").is_disabled()
+    sheet.stale = None
+    page.wait_for_function(
+        "() => document.getElementById('youtube-follow-note').hidden"
     )
     for live, rows, line in (
         ([], None, "Not live right now"),

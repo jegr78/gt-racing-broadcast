@@ -115,11 +115,9 @@ def _function(page, name):
 def t_youtube_dialog_handles_unloaded_and_empty_channel_tab():
     page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
     channels = _function(page, "youtubeChannels")
-    for needle in (
-        "No YouTube channel in the Sheet Channel tab",
-        "Loading the Sheet Channel tab",
-    ):
-        assert needle in channels, needle
+    assert "No YouTube channel in the Sheet Channel tab" in channels, channels
+    assert "youtubeLoadingNote(error)" in channels, channels
+    assert "Loading the Sheet Channel tab" in _function(page, "youtubeLoadingNote")
     poll = _function(page, "youtubePoll")
     # The stored follow row survives until the Channel tab rows first arrive.
     assert "result.channelsLoaded" in poll and "session.followPref" in poll, poll
@@ -130,8 +128,8 @@ def t_youtube_dialog_handles_unloaded_and_empty_channel_tab():
 
 def t_youtube_dialog_shows_the_channel_tab_read_error():
     page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
-    channels = _function(page, "youtubeChannels")
-    assert "Could not read the Sheet Channel tab" in channels, channels
+    note = _function(page, "youtubeLoadingNote")
+    assert "Could not read the Sheet Channel tab" in note, note
     poll = _function(page, "youtubePoll")
     assert "result.channelsError" in poll, poll
 
@@ -143,6 +141,21 @@ def t_youtube_verify_guard_says_loading_while_the_tab_loads():
     assert loading < action.index("Choose a YouTube channel from the Sheet Channel tab")
     poll = _function(page, "youtubePoll")
     assert "session.channelsNote" in poll, poll
+
+
+def t_youtube_dialog_says_when_the_channel_tab_comes_from_the_cache():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    channels = _function(page, "youtubeChannels")
+    assert "using the cached Channel tab" in channels, channels
+    poll = _function(page, "youtubePoll")
+    assert "result.channelsStale" in poll, poll
+
+
+def t_youtube_guard_note_follows_the_loading_state():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    poll = _function(page, "youtubePoll")
+    # While the guard note shows, it tracks the current note (loading -> error).
+    assert "session.actionError = youtubeLoadingNote(result.channelsError)" in poll, poll
 
 
 def t_youtube_live_line_omits_an_empty_title():
@@ -183,6 +196,8 @@ if __name__ == "__main__":
     t_youtube_dialog_shows_the_channel_tab_read_error()
     t_youtube_verify_guard_says_loading_while_the_tab_loads()
     t_youtube_live_line_omits_an_empty_title()
+    t_youtube_dialog_says_when_the_channel_tab_comes_from_the_cache()
+    t_youtube_guard_note_follows_the_loading_state()
     t_youtube_key_help_stays_hidden_without_a_wiki_url()
     t_wiki_documents_the_api_key_steps()
     print("PASS automatic cached baseline and provider preflight callbacks")
