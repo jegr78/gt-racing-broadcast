@@ -190,7 +190,7 @@ def t_follow_hooks_report_the_first_load():
             return list(self.rows)
     now = [0.0]
     src = Src()
-    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: now[0],
+    hooks = m.audience_follow_hooks(src, None, None, logger=_Log(), clock=lambda: now[0],
                                     spawn=lambda fn: fn())
     assert hooks["channels_loaded"]() is False
     assert hooks["channels"]() == [] and src.refreshes == 1
@@ -324,7 +324,7 @@ class _FailingTab:
 
 def t_follow_hooks_expose_the_channel_tab_read_error():
     src = _FailingTab()
-    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: 0.0,
+    hooks = m.audience_follow_hooks(src, None, None, logger=_Log(), clock=lambda: 0.0,
                                     spawn=lambda fn: fn())
     assert hooks["channels_error"]() is None
     hooks["channels"]()
@@ -340,7 +340,7 @@ def t_follow_hooks_expose_the_channel_tab_read_error():
 def t_follow_hooks_back_off_an_unloaded_retry():
     src = _FailingTab()
     now = [0.0]
-    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: now[0],
+    hooks = m.audience_follow_hooks(src, None, None, logger=_Log(), clock=lambda: now[0],
                                     spawn=lambda fn: fn())
     while now[0] <= 25:
         hooks["channels"]()
@@ -434,6 +434,7 @@ def t_channel_source_cache_write_is_atomic_under_a_lock():
             m.os.replace = crash   # a crash before the swap keeps the old file whole
             src._fetch_text = lambda timeout=15: "Platform,Channel\nYouTube,@b\nYouTube,@c\n"
             assert src.refresh() is True
+            assert not os.path.exists(cache + ".tmp")   # a failed swap leaves no tmp behind
         finally:
             m.os.replace = real_replace
         assert m.ChannelSource("http://x/csv", cache).get() == [("youtube", "@a")]

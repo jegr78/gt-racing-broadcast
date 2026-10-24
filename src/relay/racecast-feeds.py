@@ -3607,7 +3607,11 @@ class ChannelSource:
                         fh.write(text)
                     os.replace(tmp, self.cache_path)
                 except OSError:
-                    pass  # cache write is best-effort; the in-memory rows are current
+                    # cache write is best-effort; the in-memory rows are current
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass  # nothing left behind, or it is overwritten next time
         return True
 
     def get(self):
