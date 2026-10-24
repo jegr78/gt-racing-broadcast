@@ -364,6 +364,35 @@ def t_newest_live_skips_videos_of_another_channel():
     assert yt.newest_live({"items": [foreign]}, [b], channel=mine) is None
 
 
+def t_newest_live_rejects_a_bad_start_time():
+    a = "A" * 11
+    for bad in (1729700000, ["2026-10-23T18:00:00Z"], "yesterday", "2026-13-45T99:00"):
+        item = _live_item(a, start="2026-10-23T18:00:00Z")
+        item["liveStreamingDetails"]["actualStartTime"] = bad
+        try:
+            yt.newest_live({"items": [item]}, [a])
+        except ValueError as error:
+            assert str(error) == "Invalid YouTube video", error
+        else:
+            raise AssertionError("Bad actualStartTime accepted: %r" % (bad,))
+
+
+def t_newest_live_reads_a_naive_start_time_as_utc():
+    a, b = "A" * 11, "B" * 11
+    naive = _live_item(a, start="2026-10-23T18:30:00")
+    zoned = _live_item(b, start="2026-10-23T20:00:00+02:00")  # 18:00 UTC
+    assert yt.newest_live({"items": [naive, zoned]}, [a, b]) == (a, "TA")
+
+
+def t_newest_live_without_a_title_returns_an_empty_title():
+    a = "A" * 11
+    item = _live_item(a, start="2026-10-23T18:00:00Z")
+    del item["snippet"]["title"]
+    assert yt.newest_live({"items": [item]}, [a]) == (a, "")
+    item["snippet"]["title"] = 7
+    assert yt.newest_live({"items": [item]}, [a]) == (a, "")
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
