@@ -9223,6 +9223,10 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "log_sources": _log_sources(),
         "resources": resources_data,
     }
+    # Load the AI modules the quit check needs now: after an in-place update the
+    # frozen build reads lazy imports from the swapped exe and they fail.
+    import ai_control   # noqa: F401
+    import ai_reports   # noqa: F401
     global _resource_monitor
     _resource_monitor = resources.ResourceMonitor(interval=2.0)
     _resource_monitor.start()
