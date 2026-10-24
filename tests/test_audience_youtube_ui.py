@@ -107,6 +107,36 @@ def t_youtube_dialog_offers_follow_mode():
     assert "body.mode" in action and "body.followChannel" in action, action
 
 
+def _function(page, name):
+    start = page.index("function " + name + "(")
+    return page[start : page.index("\n}\n", start)]
+
+
+def t_youtube_dialog_handles_unloaded_and_empty_channel_tab():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    channels = _function(page, "youtubeChannels")
+    for needle in (
+        "No YouTube channel in the Sheet Channel tab",
+        "Loading the Sheet Channel tab",
+    ):
+        assert needle in channels, needle
+    poll = _function(page, "youtubePoll")
+    # The stored follow row survives until the Channel tab rows first arrive.
+    assert "result.channelsLoaded" in poll and "session.followPref" in poll, poll
+    action = _function(page, "youtubeAction")
+    guard = action.index("Choose a YouTube channel from the Sheet Channel tab")
+    assert guard < action.index("fetch("), "Verify posts an empty follow choice"
+
+
+def t_youtube_key_help_stays_hidden_without_a_wiki_url():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    start = page.index('<a id="youtube-key-help"')
+    tag = page[start : page.index(">", start)]
+    assert " hidden" in tag, tag
+    help_fn = _function(page, "youtubeKeyHelp")
+    assert "link.hidden = false" in help_fn, help_fn
+
+
 def t_wiki_documents_the_api_key_steps():
     wiki = (ROOT / "src/docs/wiki/HUD-Overlays.md").read_text(encoding="utf-8")
     for needle in (
@@ -123,5 +153,7 @@ if __name__ == "__main__":
     t_provider_preflight_rejects_absent_process_and_display_name_as_profile_slug()
     t_rounded_values_show_the_number_without_an_approximate_marker()
     t_youtube_dialog_offers_follow_mode()
+    t_youtube_dialog_handles_unloaded_and_empty_channel_tab()
+    t_youtube_key_help_stays_hidden_without_a_wiki_url()
     t_wiki_documents_the_api_key_steps()
     print("PASS automatic cached baseline and provider preflight callbacks")

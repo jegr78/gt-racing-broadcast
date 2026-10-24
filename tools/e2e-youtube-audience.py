@@ -133,6 +133,9 @@ def main():
                     "() => document.getElementById('youtube-key-help').href"
                     ".endsWith('/wiki/HUD-Overlays#youtube-data-api-key')"
                 )
+                assert page.locator("#youtube-key-help").is_visible(), (
+                    "Key how-to link stayed hidden with a wiki URL"
+                )
                 page.fill("#youtube-video", "https://youtu.be/" + fixtures.VIDEO)
                 page.fill("#youtube-channel", "@Producer")
                 page.fill("#youtube-key", fixtures.KEY)
@@ -297,6 +300,13 @@ def status_has(page, text):
     )
 
 
+def note_has(page, text):
+    page.wait_for_function(
+        "t => document.getElementById('youtube-follow-note').textContent.includes(t)",
+        arg=text,
+    )
+
+
 def follow_verify(page, service):
     page.fill("#youtube-key", fixtures.KEY)
     page.click("#youtube-verify")
@@ -310,6 +320,11 @@ def follow_verify(page, service):
 def follow_pass(page, service, clock, api, sheet, shots):
     """Follow the Sheet channel's live broadcast through every dialog state."""
     second = "@Second"
+    # A Channel tab without YouTube rows offers no follow mode.
+    sheet.rows = []
+    note_has(page, "No YouTube channel in the Sheet Channel tab")
+    assert page.locator("#youtube-follow-note").is_visible()
+    assert page.locator("#youtube-mode-follow").is_disabled()
     sheet.rows = [fixtures.LEAGUE, second]
     sheet.live = [fixtures.VID_A, fixtures.VID_B]
     page.wait_for_function(
@@ -345,6 +360,24 @@ def follow_pass(page, service, clock, api, sheet, shots):
     assert service.status()["mode"] == "follow"
     service.tick()
     status_has(page, "Live: " + newer)
+    # Reopened right after a relay start: the Channel tab is not read yet, so
+    # the stored row must survive until its rows arrive (in another order).
+    page.click("#youtube-close")
+    sheet.rows, sheet.loaded = [], False
+    page.click("#youtube-open")
+    note_has(page, "Loading the Sheet Channel tab")
+    assert page.locator("#youtube-mode-follow").is_checked()
+    page.evaluate("() => youtubeAction('verify')")
+    status_has(page, "Choose a YouTube channel from the Sheet Channel tab")
+    assert service.status()["setup"]["phase"] == "idle", "Empty choice was posted"
+    sheet.rows, sheet.loaded = [second, fixtures.LEAGUE], True
+    page.wait_for_function(
+        "() => document.getElementById('youtube-follow-channel').options.length === 2"
+    )
+    assert page.input_value("#youtube-follow-channel") == fixtures.LEAGUE, (
+        "The stored follow row was replaced by the first Channel tab row"
+    )
+    assert not page.locator("#youtube-follow-note").is_visible()
     for live, rows, line in (
         ([], None, "Not live right now"),
         ([fixtures.VID_A], None, "Live: Output race " + fixtures.VID_A),
