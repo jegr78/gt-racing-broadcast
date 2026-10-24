@@ -3209,8 +3209,9 @@ async function youtubeKeyHelp() {
 }
 // Rebuild the Channel tab choice only when its rows change, so an open select
 // or a picked row survives the 1 s status poll. loaded === false: the relay
-// has not read the Channel tab yet, so its empty list says nothing.
-function youtubeChannels(rows, loaded, preferred) {
+// has not read the Channel tab yet, so its empty list says nothing; error is
+// the relay's last read error then. Returns the loading note ('' once loaded).
+function youtubeChannels(rows, loaded, preferred, error) {
   const select = $('youtube-follow-channel');
   const list = Array.isArray(rows) ? rows : [];
   const now = [...select.options].map(option => option.value);
@@ -3225,22 +3226,27 @@ function youtubeChannels(rows, loaded, preferred) {
   const empty = !missing && !loading && list.length === 0;
   const note = $('youtube-follow-note');
   note.textContent = missing ? 'Follow mode needs the Sheet Channel tab'
-    : loading ? 'Loading the Sheet Channel tab…'
+    : loading ? (error ? 'Could not read the Sheet Channel tab ('+error+'); retrying' : 'Loading the Sheet Channel tab…')
     : 'No YouTube channel in the Sheet Channel tab';
   note.hidden = !(missing || loading || empty);
   $('youtube-mode-follow').disabled = missing || empty;
   if ((missing || empty) && youtubeMode() === 'follow' && youtubeSession && !youtubeSession.activeFollow) youtubeSetMode('video');
+  return loading ? note.textContent : '';
+}
+// "Title [id]", or just "[id]" when YouTube gave the video no title.
+function youtubeVideoLabel(video) {
+  return (video.title ? video.title+' ' : '')+'['+video.id+']';
 }
 function youtubeFollowLines(state, video) {
-  if (state === 'live' && video) return ['Live: '+video.title+' ['+video.id+']'];
+  if (state === 'live' && video) return ['Live: '+youtubeVideoLabel(video)];
   if (state === 'lookup-failed') return video
-    ? ['Live: '+video.title+' ['+video.id+']', 'Lookup failed; keeping the last video']
+    ? ['Live: '+youtubeVideoLabel(video), 'Lookup failed; keeping the last video']
     : ['Live broadcast lookup failed; retrying'];
   return YOUTUBE_FOLLOW_STATES[state] ? [YOUTUBE_FOLLOW_STATES[state]] : [];
 }
 function youtubeOpen() {
   clearTimeout(youtubeTimer);
-  const session = {audience:audienceSession, profile:ovState.active, attempt:null, busy:false, request:0, dirty:false, changed:false, activeFollow:false, followPref:null};
+  const session = {audience:audienceSession, profile:ovState.active, attempt:null, busy:false, request:0, dirty:false, changed:false, activeFollow:false, followPref:null, channelsNote:'', actionIsNote:false};
   youtubeSession = session;
   $('youtube-key').value = '';
   $('youtube-video').value = '';
@@ -3285,6 +3291,8 @@ async function youtubePoll(session,initial=false) {
     }
     if (result.videoState && result.videoState !== 'unknown') lines.push('Broadcast: '+result.videoState);
     if (setup.error || result.error) lines.push(setup.error || result.error);
+    // A "still loading" guard note is over once the Channel tab has loaded.
+    if (session.actionIsNote && result.channelsLoaded !== false) { session.actionError = ''; session.actionIsNote = false; }
     if (session.actionError && !lines.includes(session.actionError)) lines.push(session.actionError);
     $('youtube-status').textContent = lines.join('\n');
     $('youtube-activate').disabled = !verified || session.busy || session.changed;
@@ -3296,7 +3304,7 @@ async function youtubePoll(session,initial=false) {
     // Keep the stored row until the Channel tab rows first arrive, so a
     // multi-row league does not silently fall back to the first row.
     const rows = result.channels ?? null;
-    youtubeChannels(rows, result.channelsLoaded, session.followPref);
+    session.channelsNote = youtubeChannels(rows, result.channelsLoaded, session.followPref, result.channelsError);
     if (Array.isArray(rows) && result.channelsLoaded !== false) session.followPref = null;
     if (fresh) {
       $('youtube-video').value = targets?.video?.id || '';
@@ -3313,11 +3321,14 @@ async function youtubeAction(action,event) {
   if (!session || !youtubeCurrent(session) || session.busy) return;
   if (action === 'activate' && session.changed) { $('youtube-status').textContent = 'Verify the edited targets before activation.'; return; }
   if (action === 'verify' && youtubeMode() === 'follow' && !$('youtube-follow-channel').value) {
-    session.actionError = 'Choose a YouTube channel from the Sheet Channel tab';
+    // While the Channel tab loads there is nothing to choose yet: say so.
+    session.actionError = session.channelsNote || 'Choose a YouTube channel from the Sheet Channel tab';
+    session.actionIsNote = !!session.channelsNote;
     $('youtube-status').textContent = session.actionError;
     return;
   }
   session.actionError = '';
+  session.actionIsNote = false;
   const body = {expectedProfile:session.profile,action,attempt:session.attempt};
   if (action === 'verify') {
     body.mode = youtubeMode();

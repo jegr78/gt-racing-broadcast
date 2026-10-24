@@ -128,6 +128,32 @@ def t_youtube_dialog_handles_unloaded_and_empty_channel_tab():
     assert guard < action.index("fetch("), "Verify posts an empty follow choice"
 
 
+def t_youtube_dialog_shows_the_channel_tab_read_error():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    channels = _function(page, "youtubeChannels")
+    assert "Could not read the Sheet Channel tab" in channels, channels
+    poll = _function(page, "youtubePoll")
+    assert "result.channelsError" in poll, poll
+
+
+def t_youtube_verify_guard_says_loading_while_the_tab_loads():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    action = _function(page, "youtubeAction")
+    loading = action.index("session.channelsNote")
+    assert loading < action.index("Choose a YouTube channel from the Sheet Channel tab")
+    poll = _function(page, "youtubePoll")
+    assert "session.channelsNote" in poll, poll
+
+
+def t_youtube_live_line_omits_an_empty_title():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    lines = _function(page, "youtubeFollowLines")
+    assert "video.title+' ['" not in lines, lines
+    assert "youtubeVideoLabel(video)" in lines, lines
+    label = _function(page, "youtubeVideoLabel")
+    assert "video.title ?" in label, label
+
+
 def t_youtube_key_help_stays_hidden_without_a_wiki_url():
     page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
     start = page.index('<a id="youtube-key-help"')
@@ -154,6 +180,9 @@ if __name__ == "__main__":
     t_rounded_values_show_the_number_without_an_approximate_marker()
     t_youtube_dialog_offers_follow_mode()
     t_youtube_dialog_handles_unloaded_and_empty_channel_tab()
+    t_youtube_dialog_shows_the_channel_tab_read_error()
+    t_youtube_verify_guard_says_loading_while_the_tab_loads()
+    t_youtube_live_line_omits_an_empty_title()
     t_youtube_key_help_stays_hidden_without_a_wiki_url()
     t_wiki_documents_the_api_key_steps()
     print("PASS automatic cached baseline and provider preflight callbacks")

@@ -368,8 +368,17 @@ def follow_pass(page, service, clock, api, sheet, shots):
     note_has(page, "Loading the Sheet Channel tab")
     assert page.locator("#youtube-mode-follow").is_checked()
     page.evaluate("() => youtubeAction('verify')")
-    status_has(page, "Choose a YouTube channel from the Sheet Channel tab")
+    status_has(page, "Loading the Sheet Channel tab")
+    text = page.locator("#youtube-status").inner_text()
+    assert "Choose a YouTube channel" not in text, ("Choose shown while loading", text)
     assert service.status()["setup"]["phase"] == "idle", "Empty choice was posted"
+    # A Channel tab read that keeps failing shows its error, not a forever note.
+    sheet.error = "HTTPError: HTTP Error 404: Not Found"
+    failed = "Could not read the Sheet Channel tab (HTTPError: HTTP Error 404: Not Found); retrying"
+    note_has(page, failed)
+    page.evaluate("() => youtubeAction('verify')")
+    status_has(page, failed)
+    sheet.error = None
     sheet.rows, sheet.loaded = [second, fixtures.LEAGUE], True
     page.wait_for_function(
         "() => document.getElementById('youtube-follow-channel').options.length === 2"
@@ -378,6 +387,10 @@ def follow_pass(page, service, clock, api, sheet, shots):
         "The stored follow row was replaced by the first Channel tab row"
     )
     assert not page.locator("#youtube-follow-note").is_visible()
+    page.wait_for_function(
+        "() => !document.getElementById('youtube-status').textContent"
+        ".includes('Could not read the Sheet Channel tab')"
+    )
     for live, rows, line in (
         ([], None, "Not live right now"),
         ([fixtures.VID_A], None, "Live: Output race " + fixtures.VID_A),
@@ -390,6 +403,11 @@ def follow_pass(page, service, clock, api, sheet, shots):
         clock.advance(30)
         service.tick()
         status_has(page, line)
+    # A live video without a title shows just its ID.
+    untitled = page.evaluate(
+        "() => youtubeFollowLines('live', {id: 'vidCCCCCCCC', title: ''})"
+    )
+    assert untitled == ["Live: [vidCCCCCCCC]"], untitled
     sheet.rows = None
     clock.advance(30)
     service.tick()
