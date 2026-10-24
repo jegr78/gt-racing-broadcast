@@ -172,7 +172,50 @@ def t_follow_channels_never_waits_for_a_running_refresh():
 
 def t_follow_hooks_are_none_without_a_channel_tab():
     assert m.audience_follow_hooks(None, None, None) == {
-        "channels": None, "live_lookup": None, "channel_id_lookup": None}
+        "channels": None, "channels_loaded": None, "live_lookup": None,
+        "channel_id_lookup": None}
+
+
+def t_follow_hooks_report_the_first_load():
+    class Src:
+        def __init__(self):
+            self.loaded, self.rows, self.fail, self.refreshes = False, [], True, 0
+        def refresh(self):
+            self.refreshes += 1
+            if self.fail:
+                return False
+            self.rows, self.loaded = [("youtube", "@a")], True
+            return True
+        def get(self):
+            return list(self.rows)
+    now = [0.0]
+    src = Src()
+    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: now[0],
+                                    spawn=lambda fn: fn())
+    assert hooks["channels_loaded"]() is False
+    assert hooks["channels"]() == [] and src.refreshes == 1
+    now[0] += 5
+    hooks["channels"]()
+    assert src.refreshes == 2, "a failed first read must be retried soon"
+    src.fail = False
+    now[0] += 5
+    assert hooks["channels"]() == ["@a"] and hooks["channels_loaded"]() is True
+    now[0] += 5
+    hooks["channels"]()
+    assert src.refreshes == 3, "once loaded the normal cadence applies"
+    plain = m.audience_follow_hooks(types.SimpleNamespace(refresh=lambda: True,
+                                                          get=lambda: []),
+                                    None, None, spawn=lambda fn: None)
+    assert plain["channels_loaded"]() is True   # a source without the flag
+
+
+def t_channel_source_marks_its_first_successful_read():
+    src = m.ChannelSource("http://x/csv")
+    assert src.loaded is False
+    src._fetch_text = lambda timeout=15: None
+    assert src.refresh() is False and src.loaded is False
+    src._fetch_text = lambda timeout=15: "Platform,Channel\nYouTube,@a\n"
+    assert src.refresh() is True and src.loaded is True
 
 
 def t_follow_wiring_without_broadcast_chat():

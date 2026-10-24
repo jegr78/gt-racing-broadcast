@@ -351,6 +351,19 @@ def t_newest_live_ignores_upcoming_and_ended():
             raise AssertionError("Malformed payload accepted")
 
 
+def t_newest_live_skips_videos_of_another_channel():
+    a, b = "A" * 11, "B" * 11
+    mine, other = "UC" + "m" * 22, "UC" + "o" * 22
+    own = _live_item(a, start="2026-10-23T18:00:00Z")
+    own["snippet"]["channelId"] = mine
+    foreign = _live_item(b, start="2026-10-23T19:00:00Z")
+    foreign["snippet"]["channelId"] = other
+    payload = {"items": [own, foreign]}
+    assert yt.newest_live(payload, [a, b]) == (b, "TB")
+    assert yt.newest_live(payload, [a, b], channel=mine) == (a, "TA")
+    assert yt.newest_live({"items": [foreign]}, [b], channel=mine) is None
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

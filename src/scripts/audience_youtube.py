@@ -154,8 +154,10 @@ def _start_time(value):
     return moment.astimezone(timezone.utc)
 
 
-def newest_live(payload, ids):
-    """(video_id, title) of the live video in ids that started last, else None."""
+def newest_live(payload, ids, channel=None):
+    """(video_id, title) of the live video in ids that started last, else None.
+
+    With channel, a video another channel streams never counts."""
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
         raise ValueError("Invalid YouTube response")
     best = None
@@ -168,6 +170,7 @@ def newest_live(payload, ids):
             raise ValueError("Invalid YouTube video")
         if (
             data.get("id") not in ids
+            or (channel is not None and snippet.get("channelId") != channel)
             or snippet.get("liveBroadcastContent") != "live"
             or live.get("actualEndTime")
             or not live.get("actualStartTime")

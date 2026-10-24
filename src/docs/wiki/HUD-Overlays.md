@@ -369,15 +369,19 @@ in either mode.
   first is preselected). Verify pins that row to a concrete channel ID, and the
   connection then follows that channel: likes and concurrent viewers come from the
   channel's current live video, subscribers from the same channel. The relay looks
-  up the live video every 30 seconds without API quota. When the channel has two
-  live videos at once, the newer one (by its actual start time) counts. When the
+  up the live video every 30 seconds without API quota. When the set of live videos
+  changes, one `videos.list` call picks the newer one (by its actual start time)
+  and skips any video of another channel; an unchanged set costs no call. When the
   channel is not live, likes and viewers are unavailable and the dialog shows
   **Not live right now**; an earlier broadcast's values are never shown. A failed
   lookup keeps the current video while YouTube still reports it live. If the
   Channel tab no longer contains the pinned channel, the dialog shows **Channel tab
   changed; verify again** and likes/viewers stay unavailable until you verify
   again. The mode needs the Channel tab; without it (for example a custom schedule
-  CSV URL) only the fixed video mode is available. A likes net goal is tied to one
+  CSV URL), or when the tab has no YouTube row, only the fixed video mode is
+  available. Right after a relay start the dialog shows **Loading the Sheet Channel
+  tab…** until the relay has read the tab once; an active follow connection keeps
+  following its channel meanwhile. A likes net goal is tied to one
   video: after the followed video changes, the widget shows "Source changed;
   capture a new baseline" until you capture a new baseline.
 - **Fixed video.** Paste a concrete output video ID or URL for likes/viewers. For
@@ -449,7 +453,8 @@ machine. Look restore does not rewind targets, credentials or captured baselines
 Quota: each `videos.list` or `channels.list` call costs 1 unit. If both polls run
 for 24 hours that is about 4,300 units per day, against the default daily quota of
 10,000. Polling only runs while a saved widget uses the metric. The live broadcast
-lookup in follow mode uses no API quota.
+lookup in follow mode uses no API quota; a `videos.list` call to choose between
+live videos runs only when the set of live videos changes.
 
 ### Twitch output metrics
 

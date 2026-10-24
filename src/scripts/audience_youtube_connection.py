@@ -25,6 +25,7 @@ REKEY = (
     "audience widgets keep running"
 )
 NO_CHANNEL_TAB = "Follow mode needs the Sheet Channel tab"
+CHANNELS_LOADING = "The Sheet Channel tab is still loading; try again in a few seconds"
 UNKNOWN_ROW = "Choose a YouTube channel from the Sheet Channel tab"
 UNRESOLVED_CHANNEL = "Use an @handle or channel ID in the Sheet Channel tab"
 CHANNEL_CHANGED = "Channel tab changed; verify again"
@@ -126,6 +127,20 @@ def _live_ids(value):
 
 
 class Service:
+    """Relay-owned YouTube connection: setup, follow cycle and metric polls.
+
+    Follow mode needs relay hooks, each a callable (without any of the first
+    three, follow mode is off):
+    - channels() -> list of the Sheet Channel tab's YouTube row texts, or None
+      when there is no Channel tab; it must never wait on the network.
+    - live_lookup(text) -> list of live video IDs, [] when not live, None when
+      the lookup failed.
+    - channel_id_lookup(text) -> a UC... channel ID or None (custom URLs).
+    - channels_loaded() -> bool, optional: False until the Channel tab was read
+      once, so the [] of a fresh relay is not taken as "row removed". Until
+      then the pinned row is still followed and verify asks to retry. Without
+      this hook the rows always count as loaded."""
+
     def __init__(
         self,
         profile,
@@ -139,6 +154,7 @@ class Service:
         channels=None,
         live_lookup=None,
         channel_id_lookup=None,
+        channels_loaded=None,
     ):
         self.owner = Path(profile).name
         self.files = ConnectionFiles(
@@ -155,6 +171,7 @@ class Service:
         self.channels = channels
         self.live_lookup = live_lookup
         self.channel_id_lookup = channel_id_lookup
+        self.channels_loaded = channels_loaded
         self.lock = threading.RLock()
         self.poll_lock = threading.Lock()
         self.stop, self.wake = threading.Event(), threading.Event()
@@ -169,6 +186,7 @@ class Service:
             "unknown",
         )
         self.follow_state, self.follow_video = "unknown", None
+        self._follow_reset()
         self.storage_error = ""
         self.due = {"videos": 0, "channels": 0, "follow": 0}
         self.backoff = 0
@@ -204,6 +222,14 @@ class Service:
                 "youtube", metric, Sample(availability="unavailable", reason=reason)
             )
 
+    def _follow_reset(self):
+        """Forget the follow decisions; the caller holds self.lock (or __init__).
+
+        follow_memo is (live-ID tuple, chosen video or None) of the last
+        videos.list, so an unchanged live set costs no quota. follow_dead holds
+        IDs the video poll saw end while yt-dlp may still list them."""
+        self.follow_memo, self.follow_dead = None, set()
+
     def _expire(self):
         if self.setup and self.monotonic() >= self.setup["expires"]:
             self.setup_generation += 1
@@ -223,7 +249,19 @@ class Service:
             return None
         return [row for row in rows if isinstance(row, str)]
 
+    def _channels_ready(self):
+        """Whether the Channel tab rows were read at least once.
+
+        Callers read it before _channel_rows(): rows are set before the flag."""
+        if self.channels_loaded is None:
+            return True
+        try:
+            return bool(self.channels_loaded())
+        except Exception:
+            return False
+
     def status(self):
+        loaded = self._channels_ready()
         rows = self._channel_rows()
         with self.lock:
             self._expire()
@@ -249,6 +287,7 @@ class Service:
                 },
                 "mode": self.targets.get("mode", "video"),
                 "channels": rows,
+                "channelsLoaded": loaded,
                 "follow": {
                     "channel": follow.get("channel"),
                     "channelId": follow.get("channelId"),
@@ -289,8 +328,9 @@ class Service:
         if not isinstance(body, dict) or body.get("expectedProfile") != self.owner:
             raise UserError("Active profile changed; reopen the connection settings")
         mode = body.get("mode", "video")
-        rows = None
+        rows, loaded = None, True
         if body.get("action") == "verify" and mode == "follow":
+            loaded = self._channels_ready()
             rows = self._channel_rows()
         with self.lock:
             if self.stop.is_set():
@@ -302,6 +342,8 @@ class Service:
                 if mode == "follow":
                     if rows is None:
                         raise UserError(NO_CHANNEL_TAB)
+                    if not loaded:
+                        raise UserError(CHANNELS_LOADING)
                     follow = body.get("followChannel")
                     try:
                         if follow not in rows:
@@ -363,6 +405,7 @@ class Service:
                 self.backoff, self.error = 0, ""
                 self.video_state = "unknown"
                 self.follow_state, self.follow_video = "unknown", None
+                self._follow_reset()
                 self._invalidate(WAITING)
                 self.wake.set()
             elif action == "disconnect":
@@ -371,6 +414,7 @@ class Service:
                 self.key, self.connected, self.setup = None, False, None
                 self.error, self.video_state = "", "unknown"
                 self.follow_state, self.follow_video = "unknown", None
+                self._follow_reset()
                 self._invalidate("YouTube disconnected")
                 try:
                     self.files.disconnect()
@@ -496,7 +540,9 @@ class Service:
             ids = _live_ids(self.live_lookup(text))
             if ids:
                 found = yt.newest_live(
-                    self.fetch("videos", {"id": ",".join(ids)}, key), ids
+                    self.fetch("videos", {"id": ",".join(ids)}, key),
+                    ids,
+                    channel=row["id"],
                 )
                 live = {"id": found[0], "title": found[1]} if found else None
         except (yt.APIError, UserError) as exc:
@@ -545,7 +591,11 @@ class Service:
             self._invalidate(reason, VIDEO_METRICS)
 
     def _follow(self, wanted):
-        """One follow cycle: which video does the pinned channel stream now?"""
+        """One follow cycle: which video does the pinned channel stream now?
+
+        A videos.list runs only when the live-ID set differs from the set the
+        last lookup decided (follow_memo), so a steady broadcast or a two-live
+        overlap costs no quota per cycle."""
         with self.lock:
             now = self.monotonic()
             if (
@@ -558,12 +608,16 @@ class Service:
                 return
             self.due["follow"] = now + FOLLOW_CADENCE
             generation, key = self.generation, self.key
-            text, current = self.targets["follow"]["channel"], self.follow_video
-        outcome = None
+            follow, current = self.targets["follow"], self.follow_video
+            memo, dead = self.follow_memo, set(self.follow_dead)
+        text = follow["channel"]
+        outcome, ids, candidates = None, None, ()
+        loaded = self._channels_ready()
         rows = self._channel_rows()
         if rows is None:
             outcome = ("no-channel-tab", None, NO_CHANNEL_TAB)
-        elif text not in rows:
+        elif loaded and text not in rows:
+            # Before the first Channel tab read the pinned row is still followed.
             outcome = ("channel-changed", None, CHANNEL_CHANGED)
         else:
             try:
@@ -573,15 +627,25 @@ class Service:
             if ids is None:
                 # Keep the current video: its own poll drops it once it ends.
                 outcome = ("lookup-failed", current, "" if current else LOOKUP_FAILED)
-            elif not ids:
-                outcome = ("not-live", None, NOT_LIVE)
-            elif current and ids == [current["id"]]:
-                outcome = ("live", current, "")
-        failure = None
+            else:
+                candidates = tuple(ident for ident in ids if ident not in dead)
+                if not candidates:
+                    outcome = ("not-live", None, NOT_LIVE)
+                elif current and candidates == (current["id"],):
+                    outcome = ("live", current, "")  # Its own poll checks it.
+                elif memo is not None and memo[0] == candidates:
+                    outcome = (
+                        ("not-live", None, NOT_LIVE)
+                        if memo[1] is None
+                        else ("live", dict(memo[1]), "")
+                    )
+        failure = decided = None
         if outcome is None:
             try:
                 found = yt.newest_live(
-                    self.fetch("videos", {"id": ",".join(ids)}, key), ids
+                    self.fetch("videos", {"id": ",".join(candidates)}, key),
+                    candidates,
+                    channel=follow["channelId"],
                 )
             except yt.APIError as exc:
                 failure = exc
@@ -590,10 +654,12 @@ class Service:
                     "temporary", "Invalid YouTube API response", True, 60
                 )
             else:
+                video = None if found is None else {"id": found[0], "title": found[1]}
+                decided = (candidates, video)
                 outcome = (
                     ("not-live", None, NOT_LIVE)
-                    if found is None
-                    else ("live", {"id": found[0], "title": found[1]}, "")
+                    if video is None
+                    else ("live", dict(video), "")
                 )
         with self.lock:
             if (
@@ -602,9 +668,14 @@ class Service:
                 or self.stop.is_set()
             ):
                 return
+            if ids is not None:
+                # Forget ended IDs that yt-dlp no longer lists.
+                self.follow_dead.intersection_update(ids)
             if failure:
                 self._failed(failure, VIDEO_METRICS)
                 outcome = ("lookup-failed", current, "")
+            elif decided is not None:
+                self.follow_memo, self.error = decided, ""
             self._follow_set(*outcome)
 
     def _poll(self, resource, generation, target, key):
@@ -641,7 +712,9 @@ class Service:
                 return
             self.error = ""
             if following and state in ("ended", "not-live", "inaccessible"):
-                # Never show an ended broadcast's counts as the live one's.
+                # Never show an ended broadcast's counts as the live one's, and
+                # never pick it again while yt-dlp still lists it.
+                self.follow_dead.add(target["id"])
                 self._follow_set("not-live", None, NOT_LIVE)
                 return
             if state is not None:

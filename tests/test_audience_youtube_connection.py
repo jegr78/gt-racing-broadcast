@@ -39,6 +39,8 @@ class API:
         self.likes, self.viewers, self.subscribers = "0", "0", "29500"
         self.hidden, self.state, self.failures = False, "live", {}
         self.starts, self.hook = {}, None
+        # Per-video overrides: owning channel and ended broadcasts.
+        self.channel_of, self.ended = {}, set()
         self.block, self.entered, self.release = (
             False,
             threading.Event(),
@@ -61,16 +63,18 @@ class API:
                     "actualStartTime": self.starts.get(ident, "start"),
                     "concurrentViewers": self.viewers,
                 }
-                if self.state == "ended":
+                if self.state == "ended" or ident in self.ended:
                     details["actualEndTime"] = "end"
                 items.append(
                     {
                         "id": ident,
                         "snippet": {
                             "title": "Output race " + ident,
-                            "channelId": CHANNEL,
+                            "channelId": self.channel_of.get(ident, CHANNEL),
                             "channelTitle": "Producer channel",
-                            "liveBroadcastContent": self.state,
+                            "liveBroadcastContent": "none"
+                            if ident in self.ended
+                            else self.state,
                         },
                         "statistics": {"likeCount": self.likes},
                         "liveStreamingDetails": details,
@@ -634,9 +638,14 @@ STARTS = {VID_A: "2026-10-23T18:00:00Z", VID_B: "2026-10-23T19:00:00Z"}
 class Sheet:
     """Fake Channel tab rows, live lookup and yt-dlp channel-ID resolution."""
 
-    def __init__(self, rows=(LEAGUE,)):
+    def __init__(self, rows=(LEAGUE,), loaded=True):
         self.rows = list(rows) if rows is not None else None
         self.live, self.ids, self.lookups = [], {}, []
+        # None leaves the optional channels_loaded hook out (older callers).
+        self.loaded = loaded
+
+    def channels_loaded(self):
+        return self.loaded
 
     def channels(self):
         return list(self.rows) if self.rows is not None else None
@@ -649,11 +658,14 @@ class Sheet:
         return self.ids.get(text)
 
     def options(self):
-        return {
+        hooks = {
             "channels": self.channels,
             "live_lookup": self.live_lookup,
             "channel_id_lookup": self.channel_id_lookup,
         }
+        if self.loaded is not None:
+            hooks["channels_loaded"] = self.channels_loaded
+        return hooks
 
 
 @contextmanager
@@ -920,6 +932,143 @@ def t_follow_mode_without_key_needs_rekey():
             assert not api.calls and not sheet.lookups
         finally:
             restarted.close()
+
+
+def restart(service, clock, api, cache, sheet, definitions=None):
+    return connection.Service(
+        service.files.public.parent,
+        service.files.secret.parent,
+        cache,
+        definitions=definitions
+        or (lambda: [{"source": "youtube", "metric": "likes"}]),
+        fetch=api,
+        clock=clock.time,
+        monotonic=clock.mono,
+        **sheet.options(),
+    )
+
+
+def t_follow_waits_for_the_first_channel_tab_load():
+    with follow_fixture() as (service, clock, api, cache, sheet):
+        follow_connect(service)
+        # A relay start: the Channel tab has not been read yet.
+        sheet.rows, sheet.loaded, sheet.live = [], False, [VID_A]
+        restarted = restart(service, clock, api, cache, sheet)
+        try:
+            status = restarted.status()
+            assert status["channelsLoaded"] is False and status["channels"] == []
+            restarted.tick()
+            follow = restarted.status()["follow"]
+            assert follow["state"] == "live" and follow["video"]["id"] == VID_A, follow
+            assert metric(cache, "likes")["available"], metric(cache, "likes")
+            try:
+                command(
+                    restarted, "verify", mode="follow", followChannel=LEAGUE, apiKey=KEY
+                )
+            except connection.UserError as error:
+                assert str(error) == connection.CHANNELS_LOADING, error
+            else:
+                raise AssertionError("Verify accepted before the Channel tab loaded")
+            # Once loaded, a missing row is a real change.
+            sheet.rows, sheet.loaded = ["@Other"], True
+            clock.advance(30)
+            restarted.tick()
+            assert restarted.status()["channelsLoaded"] is True
+            assert restarted.status()["follow"]["state"] == "channel-changed"
+        finally:
+            restarted.close()
+    # A hook set without channels_loaded counts as loaded (older callers).
+    with follow_fixture(Sheet(loaded=None)) as (service, _clock, _api, _cache, _s):
+        assert service.status()["channelsLoaded"] is True
+
+
+def t_follow_overlap_costs_one_videos_list():
+    with follow_fixture() as (service, clock, api, _cache, sheet):
+        follow_connect(service)
+        sheet.live = [VID_A, VID_B]
+        api.calls.clear()
+        for _ in range(4):
+            service.tick()
+            clock.advance(30)
+        lookups = [c for c in api.calls if c[0] == "videos" and "," in c[1]["id"]]
+        assert lookups == [("videos", {"id": VID_A + "," + VID_B}, KEY)], api.calls
+        assert service.status()["follow"]["video"]["id"] == VID_B
+
+
+def t_follow_ended_but_listed_video_costs_no_repeated_fetch():
+    with follow_fixture() as (service, clock, api, _cache, sheet):
+        follow_connect(service)
+        sheet.live = [VID_A]
+        service.tick()
+        assert service.status()["follow"]["state"] == "live"
+        # The video poll sees the end while yt-dlp still lists the video.
+        api.ended.add(VID_A)
+        clock.advance(30)
+        service.tick()
+        follow = service.status()["follow"]
+        assert follow["state"] == "not-live" and follow["video"] is None, follow
+        api.calls.clear()
+        for _ in range(3):
+            clock.advance(30)
+            service.tick()
+        assert not [c for c in api.calls if c[0] == "videos"], api.calls
+        assert service.status()["follow"]["state"] == "not-live"
+        # A new broadcast in the set is looked up once, without the ended one.
+        sheet.live = [VID_A, VID_B]
+        clock.advance(30)
+        service.tick()
+        assert service.status()["follow"]["video"]["id"] == VID_B
+        assert not [c for c in api.calls if VID_A in c[1].get("id", "")], api.calls
+    with follow_fixture() as (service, clock, api, _cache, sheet):
+        # The follow lookup itself finds the listed video ended.
+        follow_connect(service)
+        api.ended.add(VID_A)
+        sheet.live = [VID_A]
+        api.calls.clear()
+        for _ in range(3):
+            service.tick()
+            clock.advance(30)
+        assert [c for c in api.calls if c[0] == "videos"] == [
+            ("videos", {"id": VID_A}, KEY)
+        ], api.calls
+        assert service.status()["follow"]["state"] == "not-live"
+
+
+def t_follow_fetch_success_clears_a_stale_error():
+    sheet = Sheet()
+    with fixture(**sheet.options()) as (service, clock, api, _cache, definitions):
+        definitions[:] = [{"source": "youtube", "metric": "likes"}]
+        follow_connect(service)
+        sheet.live = [VID_A]
+        api.failures["videos"] = yt.APIError("temporary", "Fixture outage", True, 30)
+        service.tick()
+        assert "Fixture outage" in service.status()["error"], service.status()
+        del api.failures["videos"]
+        api.ended.add(VID_A)  # Success with no live video: no metric poll follows.
+        clock.advance(60)
+        service.tick()
+        status = service.status()
+        assert status["follow"]["state"] == "not-live", status["follow"]
+        assert status["error"] == "", status["error"]
+
+
+def t_follow_ignores_live_videos_of_another_channel():
+    with follow_fixture() as (service, clock, api, _cache, sheet):
+        sheet.live = [VID_A, VID_B]
+        api.channel_of[VID_B] = CHANNEL_B  # newer, but not the pinned channel
+        result = command(
+            service, "verify", mode="follow", followChannel=LEAGUE, apiKey=KEY
+        )
+        service.tick()
+        setup = service.status()["setup"]
+        assert setup["live"]["id"] == VID_A, setup
+        command(service, "activate", attempt=result["attempt"])
+        service.tick()
+        assert service.status()["follow"]["video"]["id"] == VID_A
+        sheet.live = [VID_B]  # only the foreign video is listed
+        clock.advance(30)
+        service.tick()
+        assert service.status()["follow"]["state"] == "not-live"
 
 
 def t_video_mode_unchanged():

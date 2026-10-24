@@ -3529,6 +3529,9 @@ class ChannelSource:
         self.cache_path = cache_path
         self.lock = threading.Lock()
         self.rows = []
+        # False until the first successful read: [] then means "not read yet",
+        # not "the tab has no rows" (the audience follow mode tells them apart).
+        self.loaded = False
         self.last_error = None
 
     def _fetch_text(self, timeout=15):
@@ -3549,6 +3552,7 @@ class ChannelSource:
         rows = broadcast_chat.parse_channel_tab(text)
         with self.lock:
             self.rows = rows
+            self.loaded = True
             self.last_error = None
         return True
 
@@ -3569,13 +3573,16 @@ def live_channel_source(channel_source, channel_csv_url, runtime):
 
 
 def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monotonic,
-                          refresh_every=30, spawn=None):
+                          refresh_every=30, spawn=None, retry_every=5):
     """Keyword args for the YouTube audience Service's follow-live mode.
     channels() never waits on the network: it returns the cached rows at once
     and, when they are older than refresh_every seconds, starts ONE background
-    refresh (single-flight). spawn(fn) starts it (default: a daemon thread)."""
+    refresh (single-flight). spawn(fn) starts it (default: a daemon thread).
+    channels_loaded() is False until the source's first successful read; until
+    then a refresh is retried every retry_every seconds."""
     if live_channels is None:
-        return {"channels": None, "live_lookup": None, "channel_id_lookup": None}
+        return {"channels": None, "channels_loaded": None, "live_lookup": None,
+                "channel_id_lookup": None}
     if spawn is None:
         def spawn(fn):
             threading.Thread(target=fn, daemon=True).start()
@@ -3591,12 +3598,16 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
             with lock:
                 state["running"] = False
 
+    def channels_loaded():
+        return bool(getattr(live_channels, "loaded", True))
+
     def channels():
         start = False
+        every = refresh_every if channels_loaded() else retry_every
         with lock:
             now = clock()
             if not state["running"] and (
-                    state["at"] is None or now - state["at"] >= refresh_every):
+                    state["at"] is None or now - state["at"] >= every):
                 state["at"] = now
                 state["running"] = start = True
         if start:
@@ -3609,6 +3620,7 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
 
     return {
         "channels": channels,
+        "channels_loaded": channels_loaded,
         "live_lookup": live_tracker.lookup if live_tracker is not None else None,
         "channel_id_lookup": lambda text: yt_channel_id(text, cookies),
     }
