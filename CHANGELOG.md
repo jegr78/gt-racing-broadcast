@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/jegr78/gt-racing-broadcast/compare/v1.14.0...v1.14.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **ui:** keep the Control Center stoppable after an in-place update ([#987](https://github.com/jegr78/gt-racing-broadcast/issues/987)) ([4e47212](https://github.com/jegr78/gt-racing-broadcast/commit/4e47212ba789fbf6a243df436bbd83b791dfb8ef))
+
 ## [1.14.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.13.0...v1.14.0) (2026-10-24)
 
 
