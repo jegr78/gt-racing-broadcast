@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.14.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.13.0...v1.14.0) (2026-10-24)
+
+
+### Features
+
+* **assets:** show the league alias for internal graphics on the Director Panel and Companion ([#959](https://github.com/jegr78/gt-racing-broadcast/issues/959)) ([d5c6bd2](https://github.com/jegr78/gt-racing-broadcast/commit/d5c6bd20e0aff036f85dbb6f5100ed43c239b906))
+* **assets:** support optional Sheet aliases across broadcast controls ([#942](https://github.com/jegr78/gt-racing-broadcast/issues/942)) ([051e486](https://github.com/jegr78/gt-racing-broadcast/commit/051e486ee11ad84fc5949dcaac745f62a79c81b1))
+* **audience:** connect Twitch output viewers and subscription goals ([#946](https://github.com/jegr78/gt-racing-broadcast/issues/946)) ([5463c31](https://github.com/jegr78/gt-racing-broadcast/commit/5463c31145a60af752aae37586b77323a4cf3ddc))
+* **audience:** connect YouTube output metrics to shared widgets ([#943](https://github.com/jegr78/gt-racing-broadcast/issues/943)) ([20d4153](https://github.com/jegr78/gt-racing-broadcast/commit/20d415367630c17bc1ab7c9026994d57df59c5f6))
+* **audience:** recover Twitch authorization automatically wherever possible ([#961](https://github.com/jegr78/gt-racing-broadcast/issues/961)) ([d41bf1e](https://github.com/jegr78/gt-racing-broadcast/commit/d41bf1e66859f58dc57f34bee59d3d6004680078))
+* **audience:** YouTube connection can follow the Sheet channel's live broadcast ([#985](https://github.com/jegr78/gt-racing-broadcast/issues/985)) ([614226e](https://github.com/jegr78/gt-racing-broadcast/commit/614226e05f5bd854b69f16d18e5622286ab246b3))
+* **engineer:** best-lap reference, shared pin, fuel time left and N/A on the Race Engineer desk ([#964](https://github.com/jegr78/gt-racing-broadcast/issues/964)) ([099d970](https://github.com/jegr78/gt-racing-broadcast/commit/099d9703731087c6dd34efb77caa4350a6202554))
+* **hud:** auto-fit the round title to its slot ([#945](https://github.com/jegr78/gt-racing-broadcast/issues/945)) ([d2853dc](https://github.com/jegr78/gt-racing-broadcast/commit/d2853dc15aa5acb22d35c0e7385f794bbdfd6019))
+* **intermission:** add live controls and starter layouts ([#939](https://github.com/jegr78/gt-racing-broadcast/issues/939)) ([e388db2](https://github.com/jegr78/gt-racing-broadcast/commit/e388db25b0bfcaa1e01ada907c05cb6f11adb5c6))
+* **intermission:** add scene layouts for Endurance and Solo ([#937](https://github.com/jegr78/gt-racing-broadcast/issues/937)) ([35496fc](https://github.com/jegr78/gt-racing-broadcast/commit/35496fc796a30cd36926e6826c4707b36cac275a))
+* **overlay:** offer max/min auto-fit on every builder text box ([#960](https://github.com/jegr78/gt-racing-broadcast/issues/960)) ([624a30e](https://github.com/jegr78/gt-racing-broadcast/commit/624a30ec64ad0efb39b1b4954176b592b43354cc))
+* **overlays:** share manual audience counters and goals across scenes ([#941](https://github.com/jegr78/gt-racing-broadcast/issues/941)) ([17e8d6f](https://github.com/jegr78/gt-racing-broadcast/commit/17e8d6f0ae31425014c68094a6bf2f0b06fbbeb0))
+* **splitscreen:** add independent feed and HUD layouts ([#940](https://github.com/jegr78/gt-racing-broadcast/issues/940)) ([d585e00](https://github.com/jegr78/gt-racing-broadcast/commit/d585e00318817b8121716d0c81a6acca2e0b47d8))
+
+
+### Bug Fixes
+
+* **assets:** survive concurrent readers and Sheet hiccups when refreshing assets ([#951](https://github.com/jegr78/gt-racing-broadcast/issues/951)) ([84c6e97](https://github.com/jegr78/gt-racing-broadcast/commit/84c6e975d380f08cba22356a509afdad82ecb961))
+* **audience:** keep provider metrics live through token rollover and surface setup errors ([#950](https://github.com/jegr78/gt-racing-broadcast/issues/950)) ([baf14e1](https://github.com/jegr78/gt-racing-broadcast/commit/baf14e119fee411de185b2d106fc171ef7cac581))
+* **audience:** show rounded subscriber counts without the approx marker ([#966](https://github.com/jegr78/gt-racing-broadcast/issues/966)) ([4aaecf1](https://github.com/jegr78/gt-racing-broadcast/commit/4aaecf1df9dcafc8ca9e40ce446546abaab8c4ef))
+* **engineer:** average fuel over every completed lap, pit laps by burned fuel ([#968](https://github.com/jegr78/gt-racing-broadcast/issues/968)) ([83616c1](https://github.com/jegr78/gt-racing-broadcast/commit/83616c14fe3124d10621c42388f11e8031b03cb2))
+* **obs:** stop reloading every relay browser source when its scene becomes active ([#958](https://github.com/jegr78/gt-racing-broadcast/issues/958)) ([2b14570](https://github.com/jegr78/gt-racing-broadcast/commit/2b1457065827dfc99e412e68c26e9ce9d3177ae4))
+* **preflight:** read real page-file use on Windows, not the commit charge ([#962](https://github.com/jegr78/gt-racing-broadcast/issues/962)) ([25b726e](https://github.com/jegr78/gt-racing-broadcast/commit/25b726eb8461ce09618d11b97e42bb0f4837f4a4))
+* **relay:** show the version badge with a single v ([#947](https://github.com/jegr78/gt-racing-broadcast/issues/947)) ([59a4369](https://github.com/jegr78/gt-racing-broadcast/commit/59a436922c2984bb06b75ecd694d17dc6b7c7be0))
+* resolve open CodeQL quality alerts ([#948](https://github.com/jegr78/gt-racing-broadcast/issues/948)) ([8d3e914](https://github.com/jegr78/gt-racing-broadcast/commit/8d3e91401d89f0b711d6e5a0051b61b4267d92c3))
+* **splitscreen:** keep scene layouts applied and the HUD live across handovers ([#949](https://github.com/jegr78/gt-racing-broadcast/issues/949)) ([933a706](https://github.com/jegr78/gt-racing-broadcast/commit/933a706d83da15dc87b807e17c9a0dac772882fb))
+* **telemetry:** pick the layout the lap actually drove among close candidates ([#967](https://github.com/jegr78/gt-racing-broadcast/issues/967)) ([5a59d06](https://github.com/jegr78/gt-racing-broadcast/commit/5a59d06fc2ccc6d287fa69ba580c0814313bb468))
+
 ## [1.13.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.12.1...v1.13.0) (2026-10-18)
 
 
