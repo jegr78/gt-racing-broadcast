@@ -1428,11 +1428,19 @@ def make_handler(ctx):
                                       code=409)
                 return self._json({"ok": True, "job_id": job_id})
             if path == "/api/quit":
-                state = ctx.get("shutdown_state", lambda: {})()
+                # A failing busy check must never make the service unstoppable: a
+                # frozen build updated in place raises on any lazy import, so an
+                # unknown state asks for the same confirmation as a busy one.
+                try:
+                    state = ctx.get("shutdown_state", lambda: {})()
+                    message = "An AI analysis is running. Stopping the UI service interrupts it and disconnects both interfaces."
+                except Exception:
+                    state = {"ai_busy": True}
+                    message = "Could not check for a running AI analysis. Stopping the UI service interrupts one if it runs and disconnects both interfaces."
                 if state.get("ai_busy"):
                     body = self._body_json()
                     if body is None or body.get("confirm") is not True:
-                        return self._json({"ok": False, "error": {"code": "active_work", "message": "An AI analysis is running. Stopping the UI service interrupts it and disconnects both interfaces."}}, code=409)
+                        return self._json({"ok": False, "error": {"code": "active_work", "message": message}}, code=409)
                 self._json({"ok": True})
                 # shutdown() blocks until serve_forever() returns, so never call it
                 # from a request thread directly.

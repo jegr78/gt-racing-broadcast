@@ -2,6 +2,7 @@
 """Local workspace routes and concurrent analysis-profile boundaries."""
 import concurrent.futures
 import contextlib
+import inspect
 import importlib.util
 import json
 import io
@@ -111,11 +112,11 @@ def t_profile_jobs_are_independent_but_machine_reference_updates_are_exclusive()
 
 
 @contextlib.contextmanager
-def server(ai_busy=False):
+def server(ai_busy=False, shutdown_state=None):
     ctx = {"page_path": str(ROOT / "src/ui/control-center.html"), "version": "test",
            "favicon_path": str(ROOT / "src/assets/app-icon.svg"),
            "telemetry_profile_scope": getattr(m, "telemetry_profile_scope", lambda _name: contextlib.nullcontext()),
-           "shutdown_state": lambda: {"ai_busy": ai_busy},
+           "shutdown_state": shutdown_state or (lambda: {"ai_busy": ai_busy}),
            "telemetry_recordings": lambda: {"ok": True, "profile": m._active_profile_name(), "directory": m._telemetry_rec_dir()},
            "ai_request": lambda op, payload: {"ok": True, "profile": m._active_profile_name()},
            "ops": {"telemetry-index": ["telemetry", "index"], "relay-start": ["relay", "start"]},
@@ -189,6 +190,24 @@ def t_service_stop_requires_explicit_acknowledgement_of_active_ai_work():
             assert request('/api/ping')[0]==200, 'Refused shutdown stopped the shared service'
         code,body=request('/api/quit',{'confirm':True})
         assert code==200 and json.loads(body)['ok'] is True
+
+
+def t_service_stop_survives_a_failing_ai_busy_check():
+    # A frozen build updated in place re-reads its archive from the swapped exe, so a
+    # lazy import in the busy check raises; quit must still work (confirm first).
+    def broken():
+        raise ImportError("archive changed since launch")
+    with server(shutdown_state=broken) as request:
+        code,body=request('/api/quit',{})
+        assert code==409 and json.loads(body)['error']['code']=='active_work'
+        assert request('/api/ping')[0]==200
+        code,body=request('/api/quit',{'confirm':True})
+        assert code==200 and json.loads(body)['ok'] is True
+
+
+def t_ui_imports_the_ai_modules_before_serving():
+    source = inspect.getsource(m.run_ui)
+    assert source.index("import ai_control") < source.index("serve_forever"),         "Lazy AI imports break quit after an in-place update of the frozen build"
 
 
 if __name__ == "__main__":
