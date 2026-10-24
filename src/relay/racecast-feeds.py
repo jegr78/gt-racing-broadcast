@@ -3534,14 +3534,21 @@ class ChannelSource:
     Thin fetch+parse wrapper (parsing is the pure broadcast_chat.parse_channel_tab).
     A missing/empty/unreachable tab is non-fatal -- it simply yields no channels,
     so the broadcast-chat reader has nothing to follow. The last good CSV is
-    kept at cache_path and read back at construction, so a relay start has the
-    rows (and `loaded`) before the first Sheet read answers."""
+    kept at cache_path (written atomically) and read back at construction, so
+    a relay start has the rows (and `loaded`) before the first Sheet read
+    answers; stale() tells when those cached rows stay in use because the
+    Sheet read failed."""
 
     def __init__(self, csv_url, cache_path=None):
         self.csv_url = csv_url
         self.cache_path = cache_path
         self.lock = threading.Lock()
+        # Serializes the row commit + cache write of concurrent refreshes (the
+        # broadcast-chat supervisor and the follow hooks both refresh).
+        self._write_lock = threading.Lock()
         self.rows = []
+        self.from_cache = False     # rows came from the disk cache, no Sheet read yet
+        self._read_failed = False   # the last refresh() failed
         # False until the first successful read (Sheet or cache): [] then means
         # "not read yet", not "the tab has no rows" (the audience follow mode
         # tells them apart).
@@ -3558,7 +3565,14 @@ class ChannelSource:
         except OSError:
             return   # no cache yet: wait for the first Sheet read
         self.rows = broadcast_chat.parse_channel_tab(text)
-        self.loaded = True
+        self.loaded = self.from_cache = True
+
+    def stale(self):
+        """The Sheet read error while the cached rows stand in for it, else None."""
+        with self.lock:
+            if not (self.from_cache and self._read_failed):
+                return None
+            return self.last_error or "Sheet read failed"
 
     def _fetch_text(self, timeout=15):
         if not self.csv_url:
@@ -3574,18 +3588,26 @@ class ChannelSource:
     def refresh(self, timeout=15):
         text = self._fetch_text(timeout)
         if text is None:
+            with self.lock:
+                self._read_failed = True
             return False
         rows = broadcast_chat.parse_channel_tab(text)
-        with self.lock:
-            self.rows = rows
-            self.loaded = True
-            self.last_error = None
-        if self.cache_path:
-            try:
-                with open(self.cache_path, "w", encoding="utf-8") as fh:
-                    fh.write(text)
-            except OSError:
-                pass  # cache write is best-effort; the in-memory rows are current
+        with self._write_lock:
+            with self.lock:
+                self.rows = rows
+                self.loaded = True
+                self.from_cache = self._read_failed = False
+                self.last_error = None
+            if self.cache_path:
+                # tmp + os.replace: a crash mid-write never leaves a truncated
+                # CSV that the next start would load as the whole tab.
+                tmp = self.cache_path + ".tmp"
+                try:
+                    with open(tmp, "w", encoding="utf-8") as fh:
+                        fh.write(text)
+                    os.replace(tmp, self.cache_path)
+                except OSError:
+                    pass  # cache write is best-effort; the in-memory rows are current
         return True
 
     def get(self):
@@ -3614,11 +3636,14 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
     channels_loaded() is False until the source's first successful read (Sheet
     or disk cache); until then a refresh is retried every retry_every seconds
     for the first retry_window seconds, then at the normal cadence, and
-    channels_error() reports the source's last read error. A refresh that
-    raises logs one WARNING (logger, default the relay LOG) until one succeeds."""
+    channels_error() reports the source's last read error, channels_stale() the
+    read error while cached rows stand in for the Sheet. A refresh that raises
+    or returns False logs one WARNING (logger, default the relay LOG) until one
+    succeeds."""
     if live_channels is None:
         return {"channels": None, "channels_loaded": None, "channels_error": None,
-                "live_lookup": None, "channel_id_lookup": None}
+                "channels_stale": None, "live_lookup": None,
+                "channel_id_lookup": None}
     if spawn is None:
         def spawn(fn):
             threading.Thread(target=fn, daemon=True).start()
@@ -3626,19 +3651,25 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
     state = {"at": None, "first": None, "running": False, "warned": False}
     lock = threading.Lock()
 
+    def _failed(reason):
+        # best-effort: keep serving the rows we have, but say so once
+        with lock:
+            warn, state["warned"] = not state["warned"], True
+        if warn:
+            log.warning("Channel tab read failed (audience follow mode): %s%s", reason,
+                        "; serving the cached tab" if channels_stale() else "")
+
     def _refresh():
         try:
-            live_channels.refresh()
+            ok = live_channels.refresh()
         except Exception as e:
-            # best-effort: keep serving the cached rows, but say so once
-            with lock:
-                warn, state["warned"] = not state["warned"], True
-            if warn:
-                log.warning("Channel tab refresh failed (audience follow mode): "
-                            "%s: %s", type(e).__name__, e)
+            _failed(f"{type(e).__name__}: {e}")
         else:
-            with lock:
-                state["warned"] = False
+            if ok is False:
+                _failed(getattr(live_channels, "last_error", None) or "no answer")
+            else:
+                with lock:
+                    state["warned"] = False
         finally:
             with lock:
                 state["running"] = False
@@ -3650,6 +3681,11 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
         if channels_loaded():
             return None
         error = getattr(live_channels, "last_error", None)
+        return error if isinstance(error, str) and error else None
+
+    def channels_stale():
+        stale = getattr(live_channels, "stale", None)
+        error = stale() if callable(stale) else None
         return error if isinstance(error, str) and error else None
 
     def channels():
@@ -3678,6 +3714,7 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
         "channels": channels,
         "channels_loaded": channels_loaded,
         "channels_error": channels_error,
+        "channels_stale": channels_stale,
         "live_lookup": live_tracker.lookup if live_tracker is not None else None,
         "channel_id_lookup": lambda text: yt_channel_id(text, cookies),
     }

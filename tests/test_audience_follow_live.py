@@ -173,7 +173,7 @@ def t_follow_channels_never_waits_for_a_running_refresh():
 def t_follow_hooks_are_none_without_a_channel_tab():
     assert m.audience_follow_hooks(None, None, None) == {
         "channels": None, "channels_loaded": None, "channels_error": None,
-        "live_lookup": None, "channel_id_lookup": None}
+        "channels_stale": None, "live_lookup": None, "channel_id_lookup": None}
 
 
 def t_follow_hooks_report_the_first_load():
@@ -412,6 +412,89 @@ def t_channel_source_keeps_the_last_good_tab_on_disk():
         assert m.ChannelSource("http://x/csv", cache).get() == [("youtube", "@b")]
     missing = m.ChannelSource("http://x/csv", os.path.join("no", "such", "c.txt"))
     assert missing.loaded is False and missing.get() == []
+
+def t_channel_source_cache_write_is_atomic_under_a_lock():
+    real_replace = m.os.replace
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "channel.cache.txt")
+        src = m.ChannelSource("http://x/csv", cache)
+        seen = []
+
+        def replace(a, b):
+            seen.append((a, b, src._write_lock.locked()))
+            return real_replace(a, b)
+        try:
+            m.os.replace = replace
+            src._fetch_text = lambda timeout=15: "Platform,Channel\nYouTube,@a\n"
+            assert src.refresh() is True
+            assert seen == [(cache + ".tmp", cache, True)], seen
+
+            def crash(a, b):
+                raise OSError("disk full")
+            m.os.replace = crash   # a crash before the swap keeps the old file whole
+            src._fetch_text = lambda timeout=15: "Platform,Channel\nYouTube,@b\nYouTube,@c\n"
+            assert src.refresh() is True
+        finally:
+            m.os.replace = real_replace
+        assert m.ChannelSource("http://x/csv", cache).get() == [("youtube", "@a")]
+
+
+def t_channel_source_reports_a_stale_cache():
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "channel.cache.txt")
+        with open(cache, "w", encoding="utf-8") as fh:
+            fh.write("Platform,Channel\nYouTube,@a\n")
+        src = m.ChannelSource("http://x/csv", cache)
+        assert src.loaded is True and src.stale() is None   # not tried yet
+
+        def fail(timeout=15):
+            src.last_error = "HTTPError: HTTP Error 404: Not Found"
+            return None
+        src._fetch_text = fail
+        assert src.refresh() is False
+        assert src.stale() == "HTTPError: HTTP Error 404: Not Found"
+        hooks = m.audience_follow_hooks(src, None, None, spawn=lambda fn: None)
+        assert hooks["channels_stale"]() == "HTTPError: HTTP Error 404: Not Found"
+        assert hooks["channels_error"]() is None   # loaded: not a loading error
+        src._fetch_text = lambda timeout=15: "Platform,Channel\nYouTube,@a\n"
+        assert src.refresh() is True and src.stale() is None
+        src._fetch_text = fail                       # a Sheet-read tab is not "cached"
+        assert src.refresh() is False and src.stale() is None
+    plain = m.audience_follow_hooks(types.SimpleNamespace(refresh=lambda: True,
+                                                          get=lambda: []),
+                                    None, None, spawn=lambda fn: None)
+    assert plain["channels_stale"]() is None
+    assert m.audience_follow_hooks(None, None, None)["channels_stale"] is None
+
+
+def t_follow_hooks_warn_once_about_a_failed_read():
+    class Src:
+        def __init__(self):
+            self.ok, self.loaded = False, True
+            self.last_error = "URLError: <urlopen error timed out>"
+
+        def refresh(self):
+            return self.ok
+
+        def stale(self):
+            return None if self.ok else self.last_error
+
+        def get(self):
+            return []
+    now, log, src = [0.0], _Log(), Src()
+    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: now[0],
+                                    spawn=lambda fn: fn(), logger=log)
+    for _ in range(3):
+        hooks["channels"]()
+        now[0] += 31
+    assert len(log.warnings) == 1, log.warnings
+    assert "timed out" in log.warnings[0] and "cached" in log.warnings[0], log.warnings
+    src.ok = True
+    hooks["channels"]()
+    now[0] += 31
+    src.ok = False
+    hooks["channels"]()
+    assert len(log.warnings) == 2, "a failure after a success must warn again"
 
 
 if __name__ == "__main__":
