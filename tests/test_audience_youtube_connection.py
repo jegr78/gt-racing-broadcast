@@ -644,9 +644,13 @@ class Sheet:
         # None leaves the optional channels_loaded hook out (older callers).
         self.loaded = loaded
         self.error = None  # the Channel tab read error the relay reports
+        self.stale = None  # the read error while cached rows stand in
 
     def channels_error(self):
         return self.error
+
+    def channels_stale(self):
+        return self.stale
 
     def channels_loaded(self):
         return self.loaded
@@ -670,6 +674,7 @@ class Sheet:
         if self.loaded is not None:
             hooks["channels_loaded"] = self.channels_loaded
             hooks["channels_error"] = self.channels_error
+            hooks["channels_stale"] = self.channels_stale
         return hooks
 
 
@@ -1144,6 +1149,73 @@ def t_follow_verify_survives_a_failing_live_lookup():
         assert setup["live"] is None and setup["error"] == "", setup
         assert setup["targets"]["follow"]["channelId"] == CHANNEL
         assert [c[0] for c in api.calls] == ["channels"], api.calls
+
+def t_follow_reports_a_cached_channel_tab():
+    with follow_fixture() as (service, _clock, _api, _cache, sheet):
+        assert service.status()["channelsStale"] is None
+        sheet.stale = "HTTPError: HTTP Error 404: Not Found\n"
+        status = service.status()
+        assert status["channelsLoaded"] is True and status["channelsError"] is None
+        assert status["channelsStale"] == "HTTPError: HTTP Error 404: Not Found"
+    with fixture() as (service, _clock, _api, _cache, _definitions):
+        assert service.status()["channelsStale"] is None
+
+
+def t_follow_dropped_dead_pick_reresolves_at_once():
+    with follow_fixture() as (service, _clock, api, _cache, sheet):
+        follow_connect(service)
+        sheet.live = [VID_A, VID_B]
+
+        def ended_meanwhile(resource, params):
+            # The overlap lookup picks the newer VID_B; its poll ends it meanwhile.
+            if resource == "videos" and "," in params["id"]:
+                with service.lock:
+                    service.follow_dead.add(VID_B)
+
+        api.hook = ended_meanwhile
+        api.calls.clear()
+        service.tick()
+        assert service.status()["follow"]["state"] == "not-live"
+        service.tick()   # no 30 s wait: the next tick resolves the rest of the set
+        follow = service.status()["follow"]
+        assert follow["state"] == "live" and follow["video"]["id"] == VID_A, follow
+        for _ in range(3):
+            service.tick()
+        videos = [c[1]["id"] for c in api.calls if c[0] == "videos"]
+        assert videos[:2] == [VID_A + "," + VID_B, VID_A], videos
+        assert videos.count(VID_A + "," + VID_B) == 1 and VID_A in videos[1:], videos
+        assert all(v == VID_A for v in videos[1:]), videos
+
+
+def t_follow_poll_end_in_an_overlap_reresolves_at_once():
+    with follow_fixture() as (service, clock, api, _cache, sheet):
+        follow_connect(service)
+        sheet.live = [VID_A, VID_B]
+        service.tick()
+        assert service.status()["follow"]["video"]["id"] == VID_B
+        api.ended.add(VID_B)   # the video poll sees the newer stream end
+        clock.advance(30)
+        service.tick()
+        assert service.status()["follow"]["state"] == "not-live"
+        api.calls.clear()
+        service.tick()
+        follow = service.status()["follow"]
+        assert follow["state"] == "live" and follow["video"]["id"] == VID_A, follow
+        lists = [c for c in api.calls if c[0] == "videos" and c[1]["id"] == VID_A]
+        assert len(lists) == 2, api.calls   # one follow videos.list + its metric poll
+    with follow_fixture() as (service, clock, api, _cache, sheet):
+        # Nothing else live: the immediate re-check spends no videos.list.
+        follow_connect(service)
+        sheet.live = [VID_A]
+        service.tick()
+        api.ended.add(VID_A)
+        clock.advance(30)
+        service.tick()
+        api.calls.clear()
+        service.tick()
+        service.tick()
+        assert not [c for c in api.calls if c[0] == "videos"], api.calls
+        assert service.status()["follow"]["state"] == "not-live"
 
 
 def t_video_mode_unchanged():

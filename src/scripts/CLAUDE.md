@@ -272,7 +272,7 @@ transit. Repeated failures cannot extend the shared 120-second hold deadline.
 
 The Service has two modes (`mode` in `audience-youtube.json`; a missing mode is
 `"video"`, the fixed target). `"follow"` stores a Sheet Channel tab row and the
-channel ID verify pinned it to, never a video ID. The relay passes five hooks
+channel ID verify pinned it to, never a video ID. The relay passes six hooks
 (`audience_follow_hooks` in `racecast-feeds.py`; contract in the `Service`
 docstring): the Channel tab's YouTube rows, `channels_loaded()` (optional, False
 until `ChannelSource` read the tab once from the Sheet or its
@@ -281,14 +281,16 @@ row is still followed, verify answers "still loading" and
 `status()["channelsLoaded"]` tells the dialog), `channels_error()` (optional,
 the last read error while unloaded, `status()["channelsError"]`, shown in the
 dialog instead of an endless loading note; unloaded retries run every 5 s for
-30 s, then every 30 s), a quota-free live-ID lookup
+30 s, then every 30 s), `channels_stale()` (optional, the Sheet read error while
+the cached tab stands in, `status()["channelsStale"]`; a failed read logs one
+WARNING until a read succeeds), a quota-free live-ID lookup
 (`LiveVideoTracker`, shared with the broadcast chat, `None` on a failed lookup vs.
 `[]` for not live) and a yt-dlp channel-ID resolver for `/c/` URLs. Without the
 first three `status()["channels"]` is `None` and follow verify fails with "Follow
 mode needs the Sheet Channel tab". The follow cycle runs every 30 s; a
 `videos.list` runs only when the live-ID set changes (`follow_memo` remembers the
 last decided set and its outcome; `follow_dead` keeps IDs the video poll saw end
-while yt-dlp still lists them). It picks the newest live video of the pinned
+while yt-dlp still lists them; a video that ends re-runs the cycle at once). It picks the newest live video of the pinned
 channel ID by `actualStartTime`, and a changed video invalidates likes/viewers at
 once. `status()["follow"]["state"]` is
 `unknown|live|not-live|lookup-failed|channel-changed|no-channel-tab`; the Control

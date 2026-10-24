@@ -142,7 +142,9 @@ class Service:
       then the pinned row is still followed and verify asks to retry. Without
       this hook the rows always count as loaded.
     - channels_error() -> str or None, optional: why the Channel tab has not
-      loaded yet (the last read error), reported while it is not loaded."""
+      loaded yet (the last read error), reported while it is not loaded.
+    - channels_stale() -> str or None, optional: the Sheet read error while
+      the relay serves the Channel tab rows from its disk cache."""
 
     def __init__(
         self,
@@ -159,6 +161,7 @@ class Service:
         channel_id_lookup=None,
         channels_loaded=None,
         channels_error=None,
+        channels_stale=None,
     ):
         self.owner = Path(profile).name
         self.files = ConnectionFiles(
@@ -177,6 +180,7 @@ class Service:
         self.channel_id_lookup = channel_id_lookup
         self.channels_loaded = channels_loaded
         self.channels_error = channels_error
+        self.channels_stale = channels_stale
         self.lock = threading.RLock()
         self.poll_lock = threading.Lock()
         self.stop, self.wake = threading.Event(), threading.Event()
@@ -265,14 +269,14 @@ class Service:
         except Exception:
             return False
 
-    def _channels_failure(self, loaded):
-        """The Channel tab read error while it is not loaded, else None.
-
-        Bounded and printable: it reaches the dialog and verify's message."""
-        if loaded or self.channels_error is None:
+    @staticmethod
+    def _hook_text(hook):
+        """A relay hook's error text, bounded and printable (it reaches the
+        dialog and verify's message), or None."""
+        if hook is None:
             return None
         try:
-            error = self.channels_error()
+            error = hook()
         except Exception:
             return None
         if not isinstance(error, str):
@@ -280,9 +284,14 @@ class Service:
         error = " ".join("".join(c if ord(c) >= 32 else " " for c in error).split())
         return error[:200] or None
 
+    def _channels_failure(self, loaded):
+        """The Channel tab read error while it is not loaded, else None."""
+        return None if loaded else self._hook_text(self.channels_error)
+
     def status(self):
         loaded = self._channels_ready()
         failure = self._channels_failure(loaded)
+        stale = self._hook_text(self.channels_stale)
         rows = self._channel_rows()
         with self.lock:
             self._expire()
@@ -310,6 +319,7 @@ class Service:
                 "channels": rows,
                 "channelsLoaded": loaded,
                 "channelsError": failure,
+                "channelsStale": stale,
                 "follow": {
                     "channel": follow.get("channel"),
                     "channelId": follow.get("channelId"),
@@ -611,9 +621,11 @@ class Service:
         A different video invalidates the old video's cached counts at once and
         makes the next video poll due immediately. A video the video poll saw
         end (follow_dead) is never applied, even when a cycle that started
-        before that decided on it."""
+        before that decided on it; the next cycle then runs at once, so another
+        live video of an overlap is picked without a 30 s gap."""
         if video is not None and video["id"] in self.follow_dead:
             state, video, reason = "not-live", None, NOT_LIVE
+            self.due["follow"] = 0
         previous = self.follow_video
         self.follow_state, self.follow_video = state, video
         if video is not None and (previous is None or previous["id"] != video["id"]):
@@ -750,6 +762,9 @@ class Service:
                 # never pick it again while yt-dlp still lists it.
                 self.follow_dead.add(target["id"])
                 self._follow_set("not-live", None, NOT_LIVE)
+                # Re-resolve at once: in an overlap another video is still live.
+                # Without another candidate that cycle spends no videos.list.
+                self.due["follow"] = 0
                 return
             if state is not None:
                 self.video_state = state
