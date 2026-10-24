@@ -270,6 +270,20 @@ at 30 seconds, channel subscribers at 60 seconds, with quota/rate/error backoff.
 Observation age includes response parsing, state/cache lock waits and local RPC
 transit. Repeated failures cannot extend the shared 120-second hold deadline.
 
+The Service has two modes (`mode` in `audience-youtube.json`; a missing mode is
+`"video"`, the fixed target). `"follow"` stores a Sheet Channel tab row and the
+channel ID verify pinned it to, never a video ID. The relay passes three hooks
+(`audience_follow_hooks` in `racecast-feeds.py`): the Channel tab's YouTube rows,
+a quota-free live-ID lookup (`LiveVideoTracker`, shared with the broadcast chat,
+`None` on a failed lookup vs. `[]` for not live) and a yt-dlp channel-ID resolver
+for `/c/` URLs. Without them `status()["channels"]` is `None` and follow verify
+fails with "Follow mode needs the Sheet Channel tab". Every 30 s the follow cycle
+picks the newest of the live IDs by `actualStartTime` (one `videos.list`), and a
+changed video invalidates likes/viewers at once. `status()["follow"]["state"]` is
+`unknown|live|not-live|lookup-failed|channel-changed|no-channel-tab`; the Control
+Center dialog renders it. Tests: `tests/test_audience_youtube_connection.py`,
+`tests/test_audience_follow_live.py`, `tools/e2e-youtube-audience.py` (Playwright).
+
 `audience_connections.ConnectionFiles` pairs public profile-root targets with
 private runtime-profile credentials using a connection identity. Atomic private
 writes use mode 0600; failed public commits roll back the private file. A mismatch

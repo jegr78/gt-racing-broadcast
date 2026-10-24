@@ -357,20 +357,41 @@ concurrent viewers** or **YouTube channel subscribers**. Manual widgets continue
 to work without a connection. The builder shows sample values.
 
 Open **YouTube connection** while the relay is running for the active profile.
-Enable **YouTube Data API v3** in your Google Cloud project and enter its API key.
+It needs a YouTube Data API key (see [YouTube Data API key](#youtube-data-api-key)).
 This reads public video/channel counts; you do not need to log in with a Google
-account or provide a client secret. Keep API restrictions compatible with the
-producer's local application and network.
+account or provide a client secret.
 
-Paste a concrete output video ID or URL for likes/viewers. For subscribers,
-select a channel ID, channel URL or `@handle` separately. The video and subscriber
-channel are explicit choices; incoming commentator feeds never change them.
-A channel's dynamic `/live` shortcut is not a concrete video selection.
+The dialog offers two modes. Incoming commentator feeds never change the selection
+in either mode.
+
+- **Follow the live broadcast of the Sheet channel.** Choose a YouTube channel
+  from the league Sheet's **Channel** tab (the dialog lists its YouTube rows; the
+  first is preselected). Verify pins that row to a concrete channel ID, and the
+  connection then follows that channel: likes and concurrent viewers come from the
+  channel's current live video, subscribers from the same channel. The relay looks
+  up the live video every 30 seconds without API quota. When the channel has two
+  live videos at once, the newer one (by its actual start time) counts. When the
+  channel is not live, likes and viewers are unavailable and the dialog shows
+  **Not live right now**; an earlier broadcast's values are never shown. A failed
+  lookup keeps the current video while YouTube still reports it live. If the
+  Channel tab no longer contains the pinned channel, the dialog shows **Channel tab
+  changed; verify again** and likes/viewers stay unavailable until you verify
+  again. The mode needs the Channel tab; without it (for example a custom schedule
+  CSV URL) only the fixed video mode is available. A likes net goal is tied to one
+  video: after the followed video changes, the widget shows "Source changed;
+  capture a new baseline" until you capture a new baseline.
+- **Fixed video.** Paste a concrete output video ID or URL for likes/viewers. For
+  subscribers, select a channel ID, channel URL or `@handle` separately. A channel's
+  dynamic `/live` shortcut is not a concrete video selection. Each new live
+  broadcast has a new video ID: enter it, verify and activate before going live.
+  Follow mode avoids that step.
 
 Choose **Verify selected targets**, check the resolved titles and IDs, then
-**Activate verified targets**. The dialog shows the video owner and subscriber
-channel separately, plus cached availability and errors per metric. Editing a
-verified target or key requires verification again. Verification alone keeps the
+**Activate verified targets**. In fixed video mode the dialog shows the video owner
+and subscriber channel separately; in follow mode it shows the followed channel and
+its current live video. Both show cached availability and errors per metric.
+Changing the mode, the Channel tab choice, a verified target or the key requires
+verification again. Verification alone keeps the
 current connection.
 **Cancel verification** discards the candidate. A candidate expires after five
 minutes. Leave the key field blank to reuse the current local key when changing
@@ -410,6 +431,25 @@ profile export. The API key stays in that producer's runtime profile directory;
 profile bundles and Look backups exclude it. An imported profile retains its
 selected output but requires a local key and verification on the receiving
 machine. Look restore does not rewind targets, credentials or captured baselines.
+
+### YouTube Data API key
+
+1. Open the [Google Cloud console](https://console.cloud.google.com/) and create
+   a project (or pick an existing one).
+2. Under **APIs & Services → Library**, search for **YouTube Data API v3** and
+   choose **Enable**.
+3. Under **APIs & Services → Credentials**, choose **Create credentials → API
+   key**.
+4. Edit the new key: under **API restrictions**, choose **Restrict key** and
+   select **YouTube Data API v3** only. Keep any application restriction
+   compatible with the producer machine and its network.
+5. Paste the key into **YouTube Data API key** in the dialog, then **Verify
+   selected targets** and **Activate verified targets**.
+
+Quota: each `videos.list` or `channels.list` call costs 1 unit. If both polls run
+for 24 hours that is about 4,300 units per day, against the default daily quota of
+10,000. Polling only runs while a saved widget uses the metric. The live broadcast
+lookup in follow mode uses no API quota.
 
 ### Twitch output metrics
 

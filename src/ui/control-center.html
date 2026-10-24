@@ -821,6 +821,15 @@
 #audience-source-note:empty{display:none}
 #twitch-approval-link{color:#9fd1ff}
 #youtube-key{background:#232C42;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:13px var(--mono);min-height:34px;box-sizing:border-box}
+#youtube-mode{display:flex;flex-wrap:wrap;gap:8px 22px;margin:0 0 4px}
+#youtube-mode-label{margin:0 0 8px;font-weight:600}
+#youtube-mode label{display:flex;align-items:center;gap:8px;cursor:pointer}
+#youtube-mode input{accent-color:var(--accent);color-scheme:dark;width:16px;height:16px;margin:0;cursor:pointer}
+#youtube-mode label:has(input:disabled){opacity:.55;cursor:not-allowed}
+#youtube-mode input:disabled{cursor:not-allowed}
+#youtube-follow-channel{width:100%;box-sizing:border-box;margin-top:6px}
+#youtube-follow-note,.youtube-hint{color:var(--dim);font-size:13px}
+#youtube-key-help{color:var(--link)}
 #audience-list p{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:12px 0;border-bottom:1px solid #344358}
 #audience-actions{display:flex;flex-wrap:wrap;gap:8px}
 @media(max-width:600px){#audience-fields{grid-template-columns:1fr}}
@@ -856,10 +865,23 @@
   <h3>YouTube audience connection</h3>
   <p>Select your broadcast output explicitly. Incoming commentator feeds do not change this selection.</p>
   <form onsubmit="youtubeAction('verify',event)">
-    <p><label>Output video URL or ID <input id="youtube-video" maxlength="2048" style="width:100%"></label></p>
-    <p><label>Subscriber channel URL, ID or @handle <input id="youtube-channel" maxlength="2048" style="width:100%"></label></p>
+    <p id="youtube-mode-label">Connection mode</p>
+    <div id="youtube-mode" role="radiogroup" aria-labelledby="youtube-mode-label">
+      <label><input type="radio" name="youtube-mode" id="youtube-mode-follow" value="follow"> Follow the live broadcast of the Sheet channel</label>
+      <label><input type="radio" name="youtube-mode" id="youtube-mode-video" value="video" checked> Fixed video</label>
+    </div>
+    <p id="youtube-follow-note" hidden>Follow mode needs the Sheet Channel tab</p>
+    <div id="youtube-follow-fields" hidden>
+      <p><label>Channel from the Sheet Channel tab <select id="youtube-follow-channel"></select></label></p>
+      <p class="youtube-hint">Likes and viewers follow this channel's current live video; subscribers come from the same channel.</p>
+    </div>
+    <div id="youtube-video-fields">
+      <p><label>Output video URL or ID <input id="youtube-video" maxlength="2048" style="width:100%"></label></p>
+      <p class="youtube-hint">Each new live broadcast has a new video ID: enter it, verify and activate before going live.</p>
+      <p><label>Subscriber channel URL, ID or @handle <input id="youtube-channel" maxlength="2048" style="width:100%"></label></p>
+    </div>
     <p><label>YouTube Data API key <input id="youtube-key" type="password" autocomplete="off" maxlength="256" style="width:100%"></label></p>
-    <p>The key stays on this producer machine. Leave it blank to reuse the active connection's key. Enable YouTube Data API v3 in your Google Cloud project.</p>
+    <p>The key stays on this producer machine. Leave it blank to reuse the active connection's key. <a id="youtube-key-help" target="_blank" rel="noopener" href="#" data-wiki-anchor="HUD-Overlays#youtube-data-api-key">How to create a YouTube Data API key ↗</a></p>
     <p>Video likes and concurrent viewers refresh every 30 seconds when used. Channel subscribers refresh every 60 seconds and are rounded to three significant figures. Temporary failures retain the last good value for at most 120 seconds.</p>
     <p id="youtube-status" role="status" style="white-space:pre-wrap"></p>
     <button id="youtube-verify" type="submit">Verify selected targets</button>
@@ -3148,20 +3170,78 @@ function audienceSourceChanged() {
 }
 let youtubeSession = null;
 let youtubeTimer = null;
+let youtubeWikiUrl = '';
+const YOUTUBE_FOLLOW_STATES = {
+  'not-live': 'Not live right now',
+  'channel-changed': 'Channel tab changed; verify again',
+  'no-channel-tab': 'Follow mode needs the Sheet Channel tab',
+};
 function youtubeCurrent(session) {
   return session === youtubeSession && audienceCurrent(session.audience) && $('youtube-dialog').open;
 }
+function youtubeMode() {
+  return $('youtube-mode-follow').checked ? 'follow' : 'video';
+}
+function youtubeSetMode(mode) {
+  $('youtube-mode-follow').checked = mode === 'follow';
+  $('youtube-mode-video').checked = mode !== 'follow';
+  youtubeModeShow();
+}
+function youtubeModeShow() {
+  const follow = youtubeMode() === 'follow';
+  $('youtube-follow-fields').hidden = !follow;
+  $('youtube-video-fields').hidden = follow;
+}
+// The key how-to lives in the wiki; its base URL comes from /api/docs (the same
+// source as the Help view's "Open the wiki" link), never a hardcoded repo.
+async function youtubeKeyHelp() {
+  const link = $('youtube-key-help');
+  if (!youtubeWikiUrl) {
+    try {
+      const d = await (await fetch('/api/docs', {cache: 'no-store'})).json();
+      if (d.ok && d.wiki_url) youtubeWikiUrl = d.wiki_url;
+    } catch (e) { /* the link stays inert without the docs route */ }
+  }
+  if (youtubeWikiUrl) link.href = youtubeWikiUrl + '/' + link.dataset.wikiAnchor;
+}
+// Rebuild the Channel tab choice only when its rows change, so an open select
+// or a picked row survives the 1 s status poll.
+function youtubeChannels(rows, preferred) {
+  const select = $('youtube-follow-channel');
+  const list = Array.isArray(rows) ? rows : [];
+  const now = [...select.options].map(option => option.value);
+  if (now.length !== list.length || now.some((value,index) => value !== list[index])) {
+    const keep = select.value;
+    select.replaceChildren(...list.map(row => new Option(row, row)));
+    if (list.includes(keep)) select.value = keep;
+  }
+  if (preferred && list.includes(preferred)) select.value = preferred;
+  const missing = rows === null;
+  $('youtube-mode-follow').disabled = missing;
+  $('youtube-follow-note').hidden = !missing;
+  if (missing && youtubeMode() === 'follow' && youtubeSession && !youtubeSession.activeFollow) youtubeSetMode('video');
+}
+function youtubeFollowLines(state, video) {
+  if (state === 'live' && video) return ['Live: '+video.title+' ['+video.id+']'];
+  if (state === 'lookup-failed') return video
+    ? ['Live: '+video.title+' ['+video.id+']', 'Lookup failed; keeping the last video']
+    : ['Live broadcast lookup failed; retrying'];
+  return YOUTUBE_FOLLOW_STATES[state] ? [YOUTUBE_FOLLOW_STATES[state]] : [];
+}
 function youtubeOpen() {
   clearTimeout(youtubeTimer);
-  const session = {audience:audienceSession, profile:ovState.active, attempt:null, busy:false, request:0, dirty:false, changed:false};
+  const session = {audience:audienceSession, profile:ovState.active, attempt:null, busy:false, request:0, dirty:false, changed:false, activeFollow:false};
   youtubeSession = session;
   $('youtube-key').value = '';
   $('youtube-video').value = '';
   $('youtube-channel').value = '';
+  $('youtube-follow-channel').replaceChildren();
+  youtubeSetMode('video');
   $('youtube-verify').disabled = false;
   $('youtube-status').textContent = 'Loading local connection…';
   $('youtube-activate').disabled = true;
   $('youtube-dialog').showModal();
+  youtubeKeyHelp();
   youtubePoll(session,true);
 }
 async function youtubePoll(session,initial=false) {
@@ -3174,12 +3254,21 @@ async function youtubePoll(session,initial=false) {
     if (result.profile !== session.profile) throw new Error('Active profile changed; reopen connection settings.');
     const setup = result.setup || {phase:'idle'};
     session.attempt = setup.attempt || null;
-    const targets = setup.phase === 'verified' ? setup.targets : result.targets;
+    const verified = setup.phase === 'verified';
+    const targets = verified ? setup.targets : result.targets;
+    const follow = targets?.mode === 'follow' ? targets.follow : null;
+    session.activeFollow = result.connected && result.mode === 'follow';
     const lines = [result.connected ? 'Connected' : 'Disconnected', 'Setup: '+setup.phase];
-    for (const kind of ['video','channel']) {
-      if (targets && targets[kind]) lines.push(kind + ': ' + targets[kind].title + ' [' + targets[kind].id + ']');
+    if (follow) {
+      lines.push('Following: '+follow.title+' ['+follow.channelId+']');
+      if (verified) lines.push(...(setup.live ? youtubeFollowLines('live', setup.live) : ['Not live right now']));
+      else if (result.connected) lines.push(...youtubeFollowLines(result.follow?.state, result.follow?.video));
+    } else {
+      for (const kind of ['video','channel']) {
+        if (targets && targets[kind]) lines.push(kind + ': ' + targets[kind].title + ' [' + targets[kind].id + ']');
+      }
+      if (targets?.video) lines.push('Video channel: '+targets.video.channelTitle+' ['+targets.video.channelId+']');
     }
-    if (targets?.video) lines.push('Video channel: '+targets.video.channelTitle+' ['+targets.video.channelId+']');
     if (result.connected) for (const [metric,row] of Object.entries(result.metrics || {})) {
       const number = row.available ? ' · '+new Intl.NumberFormat('en-US', row.precision?.significantDigits ? {maximumSignificantDigits:row.precision.significantDigits} : {maximumFractionDigits:0}).format(row.value) : '';
       lines.push(metric+': '+row.availability+number+(row.reason ? ' · '+row.reason : ''));
@@ -3188,10 +3277,13 @@ async function youtubePoll(session,initial=false) {
     if (setup.error || result.error) lines.push(setup.error || result.error);
     if (session.actionError && !lines.includes(session.actionError)) lines.push(session.actionError);
     $('youtube-status').textContent = lines.join('\n');
-    $('youtube-activate').disabled = setup.phase !== 'verified' || session.busy || session.changed;
-    if (initial && !session.dirty) {
+    $('youtube-activate').disabled = !verified || session.busy || session.changed;
+    const fresh = initial && !session.dirty;
+    if (fresh) youtubeSetMode(targets?.mode === 'follow' ? 'follow' : 'video');
+    youtubeChannels(result.channels ?? null, fresh ? follow?.channel : null);
+    if (fresh) {
       $('youtube-video').value = targets?.video?.id || '';
-      $('youtube-channel').value = targets?.channel?.id || '';
+      $('youtube-channel').value = follow ? '' : targets?.channel?.id || '';
     }
   } catch (error) {
     if (youtubeCurrent(session)) $('youtube-status').textContent = error.message;
@@ -3206,8 +3298,12 @@ async function youtubeAction(action,event) {
   session.actionError = '';
   const body = {expectedProfile:session.profile,action,attempt:session.attempt};
   if (action === 'verify') {
-    body.video = $('youtube-video').value;
-    body.channel = $('youtube-channel').value;
+    body.mode = youtubeMode();
+    if (body.mode === 'follow') body.followChannel = $('youtube-follow-channel').value;
+    else {
+      body.video = $('youtube-video').value;
+      body.channel = $('youtube-channel').value;
+    }
     body.apiKey = $('youtube-key').value;
     session.changed = false;
   }
@@ -3234,8 +3330,13 @@ async function youtubeAction(action,event) {
     if (youtubeCurrent(session)) $('youtube-verify').disabled = false;
   }
 }
-for (const field of ['youtube-video','youtube-channel','youtube-key']) $(field).addEventListener('input',() => {
+function youtubeEdited() {
   if (youtubeSession) { youtubeSession.dirty = true; youtubeSession.changed = true; $('youtube-activate').disabled = true; }
+}
+for (const field of ['youtube-video','youtube-channel','youtube-key']) $(field).addEventListener('input',youtubeEdited);
+for (const field of ['youtube-mode-follow','youtube-mode-video','youtube-follow-channel']) $(field).addEventListener('change',() => {
+  youtubeModeShow();
+  youtubeEdited();
 });
 $('youtube-dialog').addEventListener('close',() => {
   clearTimeout(youtubeTimer);

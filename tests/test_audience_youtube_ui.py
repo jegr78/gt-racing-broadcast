@@ -85,8 +85,43 @@ def t_rounded_values_show_the_number_without_an_approximate_marker():
         assert "≈" not in text and "\u2248" not in text, name
 
 
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def t_youtube_dialog_offers_follow_mode():
+    page = (ROOT / "src/ui/control-center.html").read_text(encoding="utf-8")
+    for needle in (
+        'id="youtube-mode-follow"',
+        'id="youtube-mode-video"',
+        'id="youtube-follow-channel"',
+        "Follow the live broadcast of the Sheet channel",
+        "Fixed video",
+        "Each new live broadcast has a new video ID: enter it, verify and "
+        "activate before going live.",
+        "HUD-Overlays#youtube-data-api-key",
+        "Follow mode needs the Sheet Channel tab",
+    ):
+        assert needle in page, needle
+    start = page.index("async function youtubeAction(")
+    action = page[start : page.index("\n}\n", start)]
+    assert "body.mode" in action and "body.followChannel" in action, action
+
+
+def t_wiki_documents_the_api_key_steps():
+    wiki = (ROOT / "src/docs/wiki/HUD-Overlays.md").read_text(encoding="utf-8")
+    for needle in (
+        "### YouTube Data API key",
+        "YouTube Data API v3",
+        "Create credentials",
+        "new video ID",
+    ):
+        assert needle in wiki, needle
+
+
 if __name__ == "__main__":
     t_automatic_capture_uses_fresh_cache_and_rejects_profile_change_during_rpc()
     t_provider_preflight_rejects_absent_process_and_display_name_as_profile_slug()
     t_rounded_values_show_the_number_without_an_approximate_marker()
+    t_youtube_dialog_offers_follow_mode()
+    t_wiki_documents_the_api_key_steps()
     print("PASS automatic cached baseline and provider preflight callbacks")

@@ -31,10 +31,13 @@ def main():
     from playwright.sync_api import sync_playwright
 
     m = cli.m
+    # Fake Sheet Channel tab: no tab first (fixed video only), rows for follow mode.
+    sheet = fixtures.Sheet(rows=None)
     with (
         tempfile.TemporaryDirectory(prefix="youtube-audience-") as td,
-        fixtures.fixture() as (service, clock, api, cache, _definitions),
+        fixtures.fixture(**sheet.options()) as (service, clock, api, cache, _defs),
     ):
+        api.starts.update(fixtures.STARTS)
         original = cli._mk_active_profile(td)
         (Path(td) / "profiles/demo/profile.env").write_text(
             "NAME=Demo Racing\nKIND=endurance\n", encoding="utf-8"
@@ -75,6 +78,7 @@ def main():
             audience_read=m.audience_read_data,
             audience_write=m.audience_write_data,
             audience_youtube=m.audience_youtube_data,
+            docs=m.docs_data,
         )
         server, port = ui._serve(ctx)
         try:
@@ -118,6 +122,16 @@ def main():
                 page.click("#youtube-open")
                 page.wait_for_function(
                     "() => youtubeSession && document.getElementById('youtube-status').textContent.includes('Disconnected')"
+                )
+                assert page.locator("#youtube-mode-follow").is_disabled(), (
+                    "Follow mode offered without a Sheet Channel tab"
+                )
+                assert page.locator("#youtube-follow-note").is_visible()
+                assert page.locator("#youtube-mode-video").is_checked()
+                assert page.locator("#youtube-video").is_visible()
+                page.wait_for_function(
+                    "() => document.getElementById('youtube-key-help').href"
+                    ".endsWith('/wiki/HUD-Overlays#youtube-data-api-key')"
                 )
                 page.fill("#youtube-video", "https://youtu.be/" + fixtures.VIDEO)
                 page.fill("#youtube-channel", "@Producer")
@@ -164,8 +178,6 @@ def main():
                     "() => !document.getElementById('youtube-activate').disabled"
                 )
                 assert "Video channel:" in page.locator("#youtube-status").inner_text()
-                if args.shots:
-                    shot(page, "cc-audience-youtube")
                 original_writer = service.files.writer
 
                 def failed_public(path, body, **kwargs):
@@ -247,6 +259,7 @@ def main():
                 assert fixtures.KEY not in page.content(), (
                     "Credential leaked into rendered markup"
                 )
+                follow_pass(page, service, clock, api, sheet, args.shots)
 
                 def stale_profile(route):
                     response = route.fetch()
@@ -267,7 +280,7 @@ def main():
                 assert not errors, errors
                 browser.close()
                 print(
-                    "PASS actual YouTube UI: source/precision/verify/activate/zero/net baseline/disconnect"
+                    "PASS actual YouTube UI: source/precision/verify/activate/zero/net baseline/disconnect/follow live"
                 )
         finally:
             server.shutdown()
@@ -275,6 +288,86 @@ def main():
             relay.shutdown()
             relay.server_close()
             m._env_base, m._runtime_base_dir = original
+
+
+def status_has(page, text):
+    page.wait_for_function(
+        "t => document.getElementById('youtube-status').textContent.includes(t)",
+        arg=text,
+    )
+
+
+def follow_verify(page, service):
+    page.fill("#youtube-key", fixtures.KEY)
+    page.click("#youtube-verify")
+    status_has(page, "pending")
+    service.tick()
+    page.wait_for_function(
+        "() => !document.getElementById('youtube-activate').disabled"
+    )
+
+
+def follow_pass(page, service, clock, api, sheet, shots):
+    """Follow the Sheet channel's live broadcast through every dialog state."""
+    second = "@Second"
+    sheet.rows = [fixtures.LEAGUE, second]
+    sheet.live = [fixtures.VID_A, fixtures.VID_B]
+    page.wait_for_function(
+        "() => !document.getElementById('youtube-mode-follow').disabled"
+    )
+    assert not page.locator("#youtube-follow-note").is_visible()
+    page.check("#youtube-mode-follow")
+    assert page.locator("#youtube-follow-channel").is_visible()
+    assert not page.locator("#youtube-video").is_visible(), "Fixed fields in follow"
+    options = page.locator("#youtube-follow-channel option").all_inner_texts()
+    assert options == [fixtures.LEAGUE, second], options
+    assert page.input_value("#youtube-follow-channel") == fixtures.LEAGUE
+    follow_verify(page, service)
+    setup = service.status()["setup"]
+    assert setup["targets"]["follow"]["channel"] == fixtures.LEAGUE, setup
+    text = page.locator("#youtube-status").inner_text()
+    assert "Following: Producer channel [" + fixtures.CHANNEL + "]" in text, text
+    newer = "Output race " + fixtures.VID_B + " [" + fixtures.VID_B + "]"
+    assert "Live: " + newer in text, ("Newer live video not shown", text)
+    page.select_option("#youtube-follow-channel", second)
+    assert page.locator("#youtube-activate").is_disabled(), (
+        "Changing the Channel tab choice left activation enabled"
+    )
+    page.select_option("#youtube-follow-channel", fixtures.LEAGUE)
+    page.check("#youtube-mode-video")
+    assert page.locator("#youtube-activate").is_disabled()
+    page.check("#youtube-mode-follow")
+    follow_verify(page, service)
+    if shots:
+        shot(page, "cc-audience-youtube")
+    page.click("#youtube-activate")
+    status_has(page, "Connected")
+    assert service.status()["mode"] == "follow"
+    service.tick()
+    status_has(page, "Live: " + newer)
+    for live, rows, line in (
+        ([], None, "Not live right now"),
+        ([fixtures.VID_A], None, "Live: Output race " + fixtures.VID_A),
+        (None, None, "Lookup failed; keeping the last video"),
+        ([fixtures.VID_A], ["@Other"], "Channel tab changed; verify again"),
+    ):
+        sheet.live = live
+        if rows is not None:
+            sheet.rows = rows
+        clock.advance(30)
+        service.tick()
+        status_has(page, line)
+    sheet.rows = None
+    clock.advance(30)
+    service.tick()
+    status_has(page, "Follow mode needs the Sheet Channel tab")
+    assert page.locator("#youtube-mode-follow").is_disabled()
+    assert page.locator("#youtube-mode-follow").is_checked(), (
+        "The active follow connection lost its mode in the dialog"
+    )
+    page.click("#youtube-disconnect")
+    status_has(page, "Disconnected")
+    assert not any(c[0] == "search" for c in api.calls)
 
 
 def shot(page, name):
