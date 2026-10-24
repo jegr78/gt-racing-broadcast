@@ -3,6 +3,7 @@
 an ephemeral port so CI needs no fixed port.
 Run: python3 tests/test_ui_server.py"""
 import json, os, re, shutil, subprocess, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -2177,14 +2178,54 @@ def _cc_page():
 
 
 
-def _run_js(src):
-    """stdout of `src` under node, or None where node is not installed."""
+def _run_js(src, attempts=2):
+    """stdout of `src` under node, or None where node is not installed.
+
+    A timeout is retried once: windows-latest runners occasionally stall one node
+    process for 30 s while the rest of the file runs at normal speed (#965). A
+    script that really hangs times out on the second attempt as well."""
     node = shutil.which("node")
     if not node:
         print("  (node not installed, JS check skipped)")
         return None
-    return subprocess.run([node, "-"], input=src, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", check=True, timeout=30).stdout
+    for attempt in range(1, attempts + 1):
+        try:
+            return subprocess.run([node, "-"], input=src, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", check=True,
+                                  timeout=30).stdout
+        except subprocess.TimeoutExpired:
+            if attempt == attempts:
+                raise
+            print("  (node timed out, retrying once)")
+    return None
+
+
+def t_run_js_retries_one_stalled_node_process():
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(kwargs["timeout"])
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+        return subprocess.CompletedProcess(args[0], 0, stdout="ok\n")
+
+    def hung(*args, **kwargs):
+        calls.append(kwargs["timeout"])
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    with mock.patch.object(shutil, "which", return_value="node"), \
+            mock.patch.object(subprocess, "run", fake_run):
+        assert _run_js("x") == "ok\n" and len(calls) == 2
+    calls.clear()
+    with mock.patch.object(shutil, "which", return_value="node"), \
+            mock.patch.object(subprocess, "run", hung):
+        try:
+            _run_js("x")
+        except subprocess.TimeoutExpired:
+            pass  # expected: a real hang still fails
+        else:
+            raise AssertionError("a script that hangs twice must still fail")
+    assert len(calls) == 2
 
 
 def t_gt7_data_age_reads_naturally():
