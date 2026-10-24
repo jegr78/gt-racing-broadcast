@@ -172,8 +172,8 @@ def t_follow_channels_never_waits_for_a_running_refresh():
 
 def t_follow_hooks_are_none_without_a_channel_tab():
     assert m.audience_follow_hooks(None, None, None) == {
-        "channels": None, "channels_loaded": None, "live_lookup": None,
-        "channel_id_lookup": None}
+        "channels": None, "channels_loaded": None, "channels_error": None,
+        "live_lookup": None, "channel_id_lookup": None}
 
 
 def t_follow_hooks_report_the_first_load():
@@ -225,6 +225,193 @@ def t_follow_wiring_without_broadcast_chat():
     assert isinstance(made, m.ChannelSource) and made.csv_url == "http://x/csv"
     assert made.cache_path == os.path.join("rt", "channel.cache.txt")
     assert m.live_channel_source(None, None, "rt") is None
+
+def _run_result(code, out="", err=""):
+    return lambda cmd, **kw: types.SimpleNamespace(returncode=code, stdout=out, stderr=err)
+
+
+def t_live_lookup_trusts_a_definite_not_live_answer_from_the_live_tab():
+    real_run = m.subprocess.run
+    old = _patch(_yt_run_json=lambda cmd, timeout=30: None)   # /streams unreadable
+    try:
+        for err in ("ERROR: [youtube:tab] @somechannel: The channel is not currently live",
+                    "ERROR: [youtube] abcdefghijk: This live event will begin in 3 hours.",
+                    "ERROR: [youtube] abcdefghijk: Premieres in 2 days"):
+            m.subprocess.run = _run_result(1, err=err)
+            assert m.yt_live_video_lookup(CH, None) == [], err
+        m.subprocess.run = _run_result(0, out="")   # a clean answer without an id
+        assert m.yt_live_video_lookup(CH, None) == []
+        for err in ("ERROR: [youtube:tab] @somechannel: HTTP Error 429: Too Many Requests",
+                    "ERROR: Unable to download webpage: <urlopen error timed out>",
+                    "ERROR: [youtube] Sign in to confirm that you are not a bot", ""):
+            m.subprocess.run = _run_result(1, err=err)
+            assert m.yt_live_video_lookup(CH, None) is None, err
+    finally:
+        m.subprocess.run = real_run
+        _restore(old)
+
+
+def t_tracker_falls_back_to_the_live_tab_when_streams_is_unreadable():
+    real_run = m.subprocess.run
+    seen = []
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        return types.SimpleNamespace(returncode=0, stdout="liveAAAAAAA\n", stderr="")
+    old = _patch(_yt_run_json=lambda cmd, timeout=30: None)
+    try:
+        m.subprocess.run = run
+        tracker = m.LiveVideoTracker(None)
+        assert tracker.lookup(CH) == ["liveAAAAAAA"]
+        assert seen and seen[0][-1].endswith("/live"), seen
+        assert tracker.lookup(CH) == ["liveAAAAAAA"] and len(seen) == 1  # cached
+    finally:
+        m.subprocess.run = real_run
+        _restore(old)
+
+
+def t_tracker_resolves_once_for_two_concurrent_callers():
+    import threading
+    entered, release, calls = threading.Event(), threading.Event(), []
+
+    def lookup(channel, cookies, **kw):
+        calls.append(channel)
+        entered.set()
+        assert release.wait(3), "lookup was not released"
+        return ["vidAAAAAAAA"]
+    tracker = m.LiveVideoTracker(None, lookup=lookup)
+    results = []
+    first = threading.Thread(target=lambda: results.append(tracker.lookup(CH)))
+    first.start()
+    assert entered.wait(3)
+    second = threading.Thread(target=lambda: results.append(tracker.lookup(CH)))
+    second.start()
+    second.join(0.2)
+    assert second.is_alive(), "the second caller did not wait for the running resolve"
+    release.set()
+    first.join(3)
+    second.join(3)
+    assert results == [["vidAAAAAAAA"], ["vidAAAAAAAA"]], results
+    assert calls == [CH], calls
+
+
+def t_tracker_forwards_its_logger_to_the_lookup():
+    got = []
+    logger = object()
+
+    def lookup(channel, cookies, logger=None):
+        got.append(logger)
+        return []
+    m.LiveVideoTracker(None, lookup=lookup, logger=logger).lookup(CH)
+    m.LiveVideoTracker(None, lookup=lookup).lookup(CH)
+    assert got == [logger, None], got
+
+
+class _FailingTab:
+    """A Channel tab source whose read keeps failing."""
+
+    def __init__(self):
+        self.loaded, self.last_error, self.refreshes = False, None, 0
+
+    def refresh(self):
+        self.refreshes += 1
+        self.last_error = "URLError: <urlopen error timed out>"
+        return False
+
+    def get(self):
+        return []
+
+
+def t_follow_hooks_expose_the_channel_tab_read_error():
+    src = _FailingTab()
+    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: 0.0,
+                                    spawn=lambda fn: fn())
+    assert hooks["channels_error"]() is None
+    hooks["channels"]()
+    assert hooks["channels_error"]() == "URLError: <urlopen error timed out>"
+    src.loaded = True     # a loaded tab (fresh or from cache) reports no error
+    assert hooks["channels_error"]() is None
+    plain = m.audience_follow_hooks(types.SimpleNamespace(refresh=lambda: True,
+                                                          get=lambda: []),
+                                    None, None, spawn=lambda fn: None)
+    assert plain["channels_error"]() is None
+
+
+def t_follow_hooks_back_off_an_unloaded_retry():
+    src = _FailingTab()
+    now = [0.0]
+    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: now[0],
+                                    spawn=lambda fn: fn())
+    while now[0] <= 25:
+        hooks["channels"]()
+        now[0] += 5
+    assert src.refreshes == 6, src.refreshes   # 0, 5, ..., 25: the quick retries
+    while now[0] < 55:
+        hooks["channels"]()
+        now[0] += 5
+    assert src.refreshes == 6, "kept retrying every 5 s past the first 30 s"
+    hooks["channels"]()                         # t=55: 30 s after the last try
+    assert src.refreshes == 7, src.refreshes
+
+
+class _Log:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, msg, *args):
+        self.warnings.append(msg % args if args else msg)
+
+
+def t_follow_hooks_warn_once_about_a_failing_refresh():
+    class Src:
+        def __init__(self):
+            self.boom = True
+
+        def refresh(self):
+            if self.boom:
+                raise RuntimeError("tab exploded")
+            return True
+
+        def get(self):
+            return []
+    now, log, src = [0.0], _Log(), Src()
+    hooks = m.audience_follow_hooks(src, None, None, clock=lambda: now[0],
+                                    spawn=lambda fn: fn(), logger=log)
+    for _ in range(3):
+        hooks["channels"]()
+        now[0] += 31
+    assert len(log.warnings) == 1, log.warnings
+    assert "tab exploded" in log.warnings[0], log.warnings
+    src.boom = False
+    hooks["channels"]()
+    now[0] += 31
+    src.boom = True
+    hooks["channels"]()
+    assert len(log.warnings) == 2, "a failure after a success must warn again"
+
+
+def t_channel_source_keeps_the_last_good_tab_on_disk():
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "channel.cache.txt")
+        src = m.ChannelSource("http://x/csv", cache)
+        assert src.loaded is False and src.get() == []
+        src._fetch_text = lambda timeout=15: "Platform,Channel\nYouTube,@a\n"
+        assert src.refresh() is True
+        with open(cache, encoding="utf-8") as fh:
+            assert "@a" in fh.read()
+        src._fetch_text = lambda timeout=15: None
+        assert src.refresh() is False
+        # A relay start: the cached tab is there before the first Sheet read.
+        again = m.ChannelSource("http://x/csv", cache)
+        assert again.loaded is True and again.get() == [("youtube", "@a")]
+        hooks = m.audience_follow_hooks(again, None, None, spawn=lambda fn: None)
+        assert hooks["channels_loaded"]() is True and hooks["channels"]() == ["@a"]
+        # A newer tab replaces the cache.
+        again._fetch_text = lambda timeout=15: "Platform,Channel\nYouTube,@b\n"
+        assert again.refresh() is True
+        assert m.ChannelSource("http://x/csv", cache).get() == [("youtube", "@b")]
+    missing = m.ChannelSource("http://x/csv", os.path.join("no", "such", "c.txt"))
+    assert missing.loaded is False and missing.get() == []
 
 
 if __name__ == "__main__":

@@ -3350,6 +3350,13 @@ def _yt_run_json(cmd, timeout=30):
         return None
 
 
+# yt-dlp's answers on a channel `/live` URL that mean "nothing is live right
+# now" (a definite answer), as opposed to a timeout, a crash or a network error.
+_YT_NOT_LIVE_RE = re.compile(
+    r"not currently live|is not live|live event will begin|premieres in",
+    re.IGNORECASE)
+
+
 def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
     """Currently-live videoId(s) for one YouTube channel, telling failure from
     "not live".
@@ -3357,9 +3364,10 @@ def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
     Prefers the channel `/streams` tab so CONCURRENT live streams are all found
     (the producer-handover overlap); falls back to the `/live` shorthand (one
     stream) when the tab enumeration yields nothing. Returns the IDs; `[]` when
-    the lookup worked and nothing is live (the `/streams` JSON was read and
-    `/live` gave no ID); `None` when it failed (the JSON was unreadable and
-    `/live` gave no ID either)."""
+    the lookup worked and nothing is live (the `/streams` JSON was read, or
+    `/live` answered definitely that nothing is live: a clean exit without an
+    ID or yt-dlp's "not currently live" style error); `None` when it failed
+    (the JSON was unreadable and `/live` failed too)."""
     ids = []
     streams_cmd = ["yt-dlp", "--flat-playlist", "--no-warnings",
                    "--playlist-items", "1-15", "-J"]
@@ -3380,16 +3388,18 @@ def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
     if cookies:
         one_cmd += ["--cookies", cookies]
     one_cmd += ["--", broadcast_chat.channel_live_url(channel)]
+    not_live = False
     try:
         r = subprocess.run(one_cmd, capture_output=True, text=True, errors="replace",
                            timeout=timeout, env=external_tool_env(), **_no_window_kwargs())
         if r.returncode == 0 and r.stdout.strip():
             return [r.stdout.strip().splitlines()[0]]
+        not_live = r.returncode == 0 or bool(_YT_NOT_LIVE_RE.search(r.stderr or ""))
     except (OSError, subprocess.TimeoutExpired):
         pass  # best-effort resolve; handled below
     if logger:
         logger.debug("no live stream resolved for channel %s", channel)
-    return [] if data is not None else None
+    return [] if data is not None or not_live else None
 
 
 def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
@@ -3421,9 +3431,10 @@ class LiveVideoTracker:
     lookup returns None and is retried on the next call."""
 
     def __init__(self, cookies, lookup=yt_live_video_lookup, max_age=25,
-                 clock=time.monotonic):
+                 clock=time.monotonic, logger=None):
         self.cookies = cookies
         self._lookup = lookup
+        self.logger = logger   # forwarded to the lookup (its debug lines)
         self.max_age = max_age
         self._clock = clock
         self._guard = threading.Lock()
@@ -3447,7 +3458,7 @@ class LiveVideoTracker:
                 hit = self._fresh(channel)
             if hit is not None:
                 return hit
-            ids = self._lookup(channel, self.cookies)
+            ids = self._lookup(channel, self.cookies, logger=self.logger)
             if ids is None:
                 return None
             with self._guard:
@@ -3522,17 +3533,32 @@ class ChannelSource:
 
     Thin fetch+parse wrapper (parsing is the pure broadcast_chat.parse_channel_tab).
     A missing/empty/unreachable tab is non-fatal -- it simply yields no channels,
-    so the broadcast-chat reader has nothing to follow."""
+    so the broadcast-chat reader has nothing to follow. The last good CSV is
+    kept at cache_path and read back at construction, so a relay start has the
+    rows (and `loaded`) before the first Sheet read answers."""
 
     def __init__(self, csv_url, cache_path=None):
         self.csv_url = csv_url
         self.cache_path = cache_path
         self.lock = threading.Lock()
         self.rows = []
-        # False until the first successful read: [] then means "not read yet",
-        # not "the tab has no rows" (the audience follow mode tells them apart).
+        # False until the first successful read (Sheet or cache): [] then means
+        # "not read yet", not "the tab has no rows" (the audience follow mode
+        # tells them apart).
         self.loaded = False
         self.last_error = None
+        self._load_cache()
+
+    def _load_cache(self):
+        if not self.cache_path:
+            return
+        try:
+            with open(self.cache_path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            return   # no cache yet: wait for the first Sheet read
+        self.rows = broadcast_chat.parse_channel_tab(text)
+        self.loaded = True
 
     def _fetch_text(self, timeout=15):
         if not self.csv_url:
@@ -3554,6 +3580,12 @@ class ChannelSource:
             self.rows = rows
             self.loaded = True
             self.last_error = None
+        if self.cache_path:
+            try:
+                with open(self.cache_path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+            except OSError:
+                pass  # cache write is best-effort; the in-memory rows are current
         return True
 
     def get(self):
@@ -3573,27 +3605,40 @@ def live_channel_source(channel_source, channel_csv_url, runtime):
 
 
 def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monotonic,
-                          refresh_every=30, spawn=None, retry_every=5):
+                          refresh_every=30, spawn=None, retry_every=5,
+                          retry_window=30, logger=None):
     """Keyword args for the YouTube audience Service's follow-live mode.
     channels() never waits on the network: it returns the cached rows at once
     and, when they are older than refresh_every seconds, starts ONE background
     refresh (single-flight). spawn(fn) starts it (default: a daemon thread).
-    channels_loaded() is False until the source's first successful read; until
-    then a refresh is retried every retry_every seconds."""
+    channels_loaded() is False until the source's first successful read (Sheet
+    or disk cache); until then a refresh is retried every retry_every seconds
+    for the first retry_window seconds, then at the normal cadence, and
+    channels_error() reports the source's last read error. A refresh that
+    raises logs one WARNING (logger, default the relay LOG) until one succeeds."""
     if live_channels is None:
-        return {"channels": None, "channels_loaded": None, "live_lookup": None,
-                "channel_id_lookup": None}
+        return {"channels": None, "channels_loaded": None, "channels_error": None,
+                "live_lookup": None, "channel_id_lookup": None}
     if spawn is None:
         def spawn(fn):
             threading.Thread(target=fn, daemon=True).start()
-    state = {"at": None, "running": False}
+    log = logger if logger is not None else LOG
+    state = {"at": None, "first": None, "running": False, "warned": False}
     lock = threading.Lock()
 
     def _refresh():
         try:
             live_channels.refresh()
-        except Exception:
-            pass  # best-effort: keep serving the cached rows
+        except Exception as e:
+            # best-effort: keep serving the cached rows, but say so once
+            with lock:
+                warn, state["warned"] = not state["warned"], True
+            if warn:
+                log.warning("Channel tab refresh failed (audience follow mode): "
+                            "%s: %s", type(e).__name__, e)
+        else:
+            with lock:
+                state["warned"] = False
         finally:
             with lock:
                 state["running"] = False
@@ -3601,13 +3646,24 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
     def channels_loaded():
         return bool(getattr(live_channels, "loaded", True))
 
+    def channels_error():
+        if channels_loaded():
+            return None
+        error = getattr(live_channels, "last_error", None)
+        return error if isinstance(error, str) and error else None
+
     def channels():
         start = False
-        every = refresh_every if channels_loaded() else retry_every
+        loaded = channels_loaded()
         with lock:
             now = clock()
+            quick = not loaded and (
+                state["first"] is None or now - state["first"] < retry_window)
+            every = retry_every if quick else refresh_every
             if not state["running"] and (
                     state["at"] is None or now - state["at"] >= every):
+                if state["first"] is None:
+                    state["first"] = now
                 state["at"] = now
                 state["running"] = start = True
         if start:
@@ -3621,6 +3677,7 @@ def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monot
     return {
         "channels": channels,
         "channels_loaded": channels_loaded,
+        "channels_error": channels_error,
         "live_lookup": live_tracker.lookup if live_tracker is not None else None,
         "channel_id_lookup": lambda text: yt_channel_id(text, cookies),
     }
@@ -14492,7 +14549,8 @@ def main():
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
     # yt-dlp resolution is heavier than a CSV fetch. Best-effort daemon.
-    live_tracker = LiveVideoTracker(cookies) if live_channels is not None else None
+    live_tracker = (LiveVideoTracker(cookies, logger=LOG)
+                    if live_channels is not None else None)
     _bc_supervisor = None
     if broadcast_chat_store is not None and channel_source is not None:
         _bc_supervisor = BroadcastChatSupervisor(
