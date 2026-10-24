@@ -643,6 +643,10 @@ class Sheet:
         self.live, self.ids, self.lookups = [], {}, []
         # None leaves the optional channels_loaded hook out (older callers).
         self.loaded = loaded
+        self.error = None  # the Channel tab read error the relay reports
+
+    def channels_error(self):
+        return self.error
 
     def channels_loaded(self):
         return self.loaded
@@ -665,6 +669,7 @@ class Sheet:
         }
         if self.loaded is not None:
             hooks["channels_loaded"] = self.channels_loaded
+            hooks["channels_error"] = self.channels_error
         return hooks
 
 
@@ -853,8 +858,11 @@ def t_follow_cycle_not_live_and_ended_hide_video_metrics():
         service.tick()
         follow = service.status()["follow"]
         assert follow["state"] == "not-live" and follow["video"] is None, follow
-        assert not metric(cache, "likes")["available"]
-        assert not metric(cache, "viewers")["available"]
+        for name in ("likes", "viewers"):
+            assert not metric(cache, name)["available"]
+            assert metric(cache, name)["reason"] == "Not live right now", metric(
+                cache, name
+            )
 
 
 def t_follow_cycle_detects_a_changed_channel_tab():
@@ -1069,6 +1077,73 @@ def t_follow_ignores_live_videos_of_another_channel():
         clock.advance(30)
         service.tick()
         assert service.status()["follow"]["state"] == "not-live"
+
+def t_follow_reports_why_the_channel_tab_is_not_loaded():
+    sheet = Sheet(rows=[], loaded=False)
+    with follow_fixture(sheet) as (service, _clock, api, _cache, sheet):
+        status = service.status()
+        assert status["channelsLoaded"] is False and status["channelsError"] is None
+        sheet.error = "HTTPError: HTTP Error 404: Not Found"
+        status = service.status()
+        assert status["channelsError"] == "HTTPError: HTTP Error 404: Not Found"
+        message = rejected(
+            service, {"mode": "follow", "followChannel": LEAGUE, "apiKey": KEY}
+        )
+        assert message == (
+            "Could not read the Sheet Channel tab (HTTPError: HTTP Error 404: "
+            "Not Found); retrying"
+        ), message
+        sheet.error = "x" * 1000 + "\n\x00tail"
+        error = service.status()["channelsError"]
+        assert len(error) <= 200 and "\n" not in error and "\x00" not in error, error
+        # Loaded: an old read error is no longer reported.
+        sheet.rows, sheet.loaded = [LEAGUE], True
+        assert service.status()["channelsError"] is None
+        assert not api.calls
+    with fixture() as (service, _clock, _api, _cache, _definitions):
+        assert service.status()["channelsError"] is None
+
+
+def t_follow_commit_drops_a_video_the_poll_saw_end():
+    with follow_fixture() as (service, _clock, api, cache, sheet):
+        follow_connect(service)
+        sheet.live = [VID_A]
+
+        def ended_meanwhile(resource, params):
+            # The video poll marks VID_A ended while this follow lookup runs.
+            if resource == "videos":
+                with service.lock:
+                    service.follow_dead.add(VID_A)
+
+        api.hook = ended_meanwhile
+        api.calls.clear()
+        service.tick()
+        follow = service.status()["follow"]
+        assert follow["state"] == "not-live" and follow["video"] is None, follow
+        assert metric(cache, "likes")["reason"] == "Not live right now"
+        assert [c for c in api.calls if c[0] == "videos"] == [
+            ("videos", {"id": VID_A}, KEY)
+        ], api.calls
+    with follow_fixture() as (service, _clock, _api, _cache, _sheet):
+        with service.lock:
+            service.follow_dead.add(VID_A)
+            service._follow_set("live", {"id": VID_A, "title": "Old"})
+            assert service.follow_state == "not-live" and service.follow_video is None
+
+
+def t_follow_verify_survives_a_failing_live_lookup():
+    def broken(_text):
+        raise RuntimeError("yt-dlp exploded")
+
+    with follow_fixture() as (service, _clock, api, _cache, _sheet):
+        service.live_lookup = broken
+        command(service, "verify", mode="follow", followChannel=LEAGUE, apiKey=KEY)
+        service.tick()
+        setup = service.status()["setup"]
+        assert setup["phase"] == "verified", setup
+        assert setup["live"] is None and setup["error"] == "", setup
+        assert setup["targets"]["follow"]["channelId"] == CHANNEL
+        assert [c[0] for c in api.calls] == ["channels"], api.calls
 
 
 def t_video_mode_unchanged():

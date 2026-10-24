@@ -26,6 +26,7 @@ REKEY = (
 )
 NO_CHANNEL_TAB = "Follow mode needs the Sheet Channel tab"
 CHANNELS_LOADING = "The Sheet Channel tab is still loading; try again in a few seconds"
+CHANNELS_FAILED = "Could not read the Sheet Channel tab ({}); retrying"
 UNKNOWN_ROW = "Choose a YouTube channel from the Sheet Channel tab"
 UNRESOLVED_CHANNEL = "Use an @handle or channel ID in the Sheet Channel tab"
 CHANNEL_CHANGED = "Channel tab changed; verify again"
@@ -139,7 +140,9 @@ class Service:
     - channels_loaded() -> bool, optional: False until the Channel tab was read
       once, so the [] of a fresh relay is not taken as "row removed". Until
       then the pinned row is still followed and verify asks to retry. Without
-      this hook the rows always count as loaded."""
+      this hook the rows always count as loaded.
+    - channels_error() -> str or None, optional: why the Channel tab has not
+      loaded yet (the last read error), reported while it is not loaded."""
 
     def __init__(
         self,
@@ -155,6 +158,7 @@ class Service:
         live_lookup=None,
         channel_id_lookup=None,
         channels_loaded=None,
+        channels_error=None,
     ):
         self.owner = Path(profile).name
         self.files = ConnectionFiles(
@@ -172,6 +176,7 @@ class Service:
         self.live_lookup = live_lookup
         self.channel_id_lookup = channel_id_lookup
         self.channels_loaded = channels_loaded
+        self.channels_error = channels_error
         self.lock = threading.RLock()
         self.poll_lock = threading.Lock()
         self.stop, self.wake = threading.Event(), threading.Event()
@@ -260,8 +265,24 @@ class Service:
         except Exception:
             return False
 
+    def _channels_failure(self, loaded):
+        """The Channel tab read error while it is not loaded, else None.
+
+        Bounded and printable: it reaches the dialog and verify's message."""
+        if loaded or self.channels_error is None:
+            return None
+        try:
+            error = self.channels_error()
+        except Exception:
+            return None
+        if not isinstance(error, str):
+            return None
+        error = " ".join("".join(c if ord(c) >= 32 else " " for c in error).split())
+        return error[:200] or None
+
     def status(self):
         loaded = self._channels_ready()
+        failure = self._channels_failure(loaded)
         rows = self._channel_rows()
         with self.lock:
             self._expire()
@@ -288,6 +309,7 @@ class Service:
                 "mode": self.targets.get("mode", "video"),
                 "channels": rows,
                 "channelsLoaded": loaded,
+                "channelsError": failure,
                 "follow": {
                     "channel": follow.get("channel"),
                     "channelId": follow.get("channelId"),
@@ -328,9 +350,10 @@ class Service:
         if not isinstance(body, dict) or body.get("expectedProfile") != self.owner:
             raise UserError("Active profile changed; reopen the connection settings")
         mode = body.get("mode", "video")
-        rows, loaded = None, True
+        rows, loaded, failure = None, True, None
         if body.get("action") == "verify" and mode == "follow":
             loaded = self._channels_ready()
+            failure = self._channels_failure(loaded)
             rows = self._channel_rows()
         with self.lock:
             if self.stop.is_set():
@@ -343,7 +366,11 @@ class Service:
                     if rows is None:
                         raise UserError(NO_CHANNEL_TAB)
                     if not loaded:
-                        raise UserError(CHANNELS_LOADING)
+                        raise UserError(
+                            CHANNELS_FAILED.format(failure)
+                            if failure
+                            else CHANNELS_LOADING
+                        )
                     follow = body.get("followChannel")
                     try:
                         if follow not in rows:
@@ -537,7 +564,10 @@ class Service:
             with self.lock:
                 if not self._setup_current(generation):
                     return
-            ids = _live_ids(self.live_lookup(text))
+            try:
+                ids = _live_ids(self.live_lookup(text))
+            except Exception:
+                ids = None  # Being live is optional: a failed lookup is "not live".
             if ids:
                 found = yt.newest_live(
                     self.fetch("videos", {"id": ",".join(ids)}, key),
@@ -579,7 +609,11 @@ class Service:
         """Apply one follow outcome; the caller holds self.lock.
 
         A different video invalidates the old video's cached counts at once and
-        makes the next video poll due immediately."""
+        makes the next video poll due immediately. A video the video poll saw
+        end (follow_dead) is never applied, even when a cycle that started
+        before that decided on it."""
+        if video is not None and video["id"] in self.follow_dead:
+            state, video, reason = "not-live", None, NOT_LIVE
         previous = self.follow_video
         self.follow_state, self.follow_video = state, video
         if video is not None and (previous is None or previous["id"] != video["id"]):
