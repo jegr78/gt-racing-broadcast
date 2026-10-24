@@ -3350,13 +3350,24 @@ def _yt_run_json(cmd, timeout=30):
         return None
 
 
-def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
-    """Currently-live videoId(s) for one YouTube channel.
+# yt-dlp's answers on a channel `/live` URL that mean "nothing is live right
+# now" (a definite answer), as opposed to a timeout, a crash or a network error.
+_YT_NOT_LIVE_RE = re.compile(
+    r"not currently live|is not live|live event will begin|premieres in",
+    re.IGNORECASE)
+
+
+def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
+    """Currently-live videoId(s) for one YouTube channel, telling failure from
+    "not live".
 
     Prefers the channel `/streams` tab so CONCURRENT live streams are all found
     (the producer-handover overlap); falls back to the `/live` shorthand (one
-    stream) when the tab enumeration yields nothing. Best-effort: any failure
-    returns []."""
+    stream) when the tab enumeration yields nothing. Returns the IDs; `[]` when
+    the lookup worked and nothing is live (the `/streams` JSON was read, or
+    `/live` answered definitely that nothing is live: a clean exit without an
+    ID or yt-dlp's "not currently live" style error); `None` when it failed
+    (the JSON was unreadable and `/live` failed too)."""
     ids = []
     streams_cmd = ["yt-dlp", "--flat-playlist", "--no-warnings",
                    "--playlist-items", "1-15", "-J"]
@@ -3377,16 +3388,82 @@ def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
     if cookies:
         one_cmd += ["--cookies", cookies]
     one_cmd += ["--", broadcast_chat.channel_live_url(channel)]
+    not_live = False
     try:
         r = subprocess.run(one_cmd, capture_output=True, text=True, errors="replace",
                            timeout=timeout, env=external_tool_env(), **_no_window_kwargs())
         if r.returncode == 0 and r.stdout.strip():
             return [r.stdout.strip().splitlines()[0]]
+        not_live = r.returncode == 0 or bool(_YT_NOT_LIVE_RE.search(r.stderr or ""))
     except (OSError, subprocess.TimeoutExpired):
-        pass  # best-effort resolve; treat as "no live stream" and fall through
+        pass  # best-effort resolve; handled below
     if logger:
         logger.debug("no live stream resolved for channel %s", channel)
-    return []
+    return [] if data is not None or not_live else None
+
+
+def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
+    """Like yt_live_video_lookup but best-effort: any failure returns []."""
+    return yt_live_video_lookup(channel, cookies, timeout=timeout, logger=logger) or []
+
+
+_YT_CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
+
+
+def yt_channel_id(channel, cookies, timeout=25):
+    """The canonical `UC...` channel id of a YouTube channel (URL / @handle /
+    id), read quota-free from yt-dlp's playlist metadata. None on any failure."""
+    cmd = ["yt-dlp", "--flat-playlist", "--no-warnings", "--playlist-items", "0", "-J"]
+    if cookies:
+        cmd += ["--cookies", cookies]
+    cmd += ["--", broadcast_chat.channel_streams_url(channel)]
+    data = _yt_run_json(cmd, timeout=timeout)
+    cid = (data or {}).get("channel_id") if isinstance(data, dict) else None
+    if isinstance(cid, str) and _YT_CHANNEL_ID_RE.match(cid):
+        return cid
+    return None
+
+
+class LiveVideoTracker:
+    """Shared, short-lived cache of "which videos are live on this channel", so
+    the broadcast-chat supervisor and the audience worker resolve it once per
+    ~max_age instead of each running yt-dlp. Only successes are cached; a failed
+    lookup returns None and is retried on the next call."""
+
+    def __init__(self, cookies, lookup=yt_live_video_lookup, max_age=25,
+                 clock=time.monotonic, logger=None):
+        self.cookies = cookies
+        self._lookup = lookup
+        self.logger = logger   # forwarded to the lookup (its debug lines)
+        self.max_age = max_age
+        self._clock = clock
+        self._guard = threading.Lock()
+        self._locks = {}       # channel -> resolve lock
+        self._cache = {}       # channel -> (stamp, ids)
+
+    def _fresh(self, channel):
+        hit = self._cache.get(channel)
+        if hit and self._clock() - hit[0] < self.max_age:
+            return list(hit[1])
+        return None
+
+    def lookup(self, channel):
+        with self._guard:
+            hit = self._fresh(channel)
+            if hit is not None:
+                return hit
+            lock = self._locks.setdefault(channel, threading.Lock())
+        with lock:                       # one resolve at a time per channel
+            with self._guard:
+                hit = self._fresh(channel)
+            if hit is not None:
+                return hit
+            ids = self._lookup(channel, self.cookies, logger=self.logger)
+            if ids is None:
+                return None
+            with self._guard:
+                self._cache[channel] = (self._clock(), list(ids))
+            return list(ids)
 
 
 class BroadcastChatStore:
@@ -3456,14 +3533,46 @@ class ChannelSource:
 
     Thin fetch+parse wrapper (parsing is the pure broadcast_chat.parse_channel_tab).
     A missing/empty/unreachable tab is non-fatal -- it simply yields no channels,
-    so the broadcast-chat reader has nothing to follow."""
+    so the broadcast-chat reader has nothing to follow. The last good CSV is
+    kept at cache_path (written atomically) and read back at construction, so
+    a relay start has the rows (and `loaded`) before the first Sheet read
+    answers; stale() tells when those cached rows stay in use because the
+    Sheet read failed."""
 
     def __init__(self, csv_url, cache_path=None):
         self.csv_url = csv_url
         self.cache_path = cache_path
         self.lock = threading.Lock()
+        # Serializes the row commit + cache write of concurrent refreshes (the
+        # broadcast-chat supervisor and the follow hooks both refresh).
+        self._write_lock = threading.Lock()
         self.rows = []
+        self.from_cache = False     # rows came from the disk cache, no Sheet read yet
+        self._read_failed = False   # the last refresh() failed
+        # False until the first successful read (Sheet or cache): [] then means
+        # "not read yet", not "the tab has no rows" (the audience follow mode
+        # tells them apart).
+        self.loaded = False
         self.last_error = None
+        self._load_cache()
+
+    def _load_cache(self):
+        if not self.cache_path:
+            return
+        try:
+            with open(self.cache_path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            return   # no cache yet: wait for the first Sheet read
+        self.rows = broadcast_chat.parse_channel_tab(text)
+        self.loaded = self.from_cache = True
+
+    def stale(self):
+        """The Sheet read error while the cached rows stand in for it, else None."""
+        with self.lock:
+            if not (self.from_cache and self._read_failed):
+                return None
+            return self.last_error or "Sheet read failed"
 
     def _fetch_text(self, timeout=15):
         if not self.csv_url:
@@ -3479,16 +3588,140 @@ class ChannelSource:
     def refresh(self, timeout=15):
         text = self._fetch_text(timeout)
         if text is None:
+            with self.lock:
+                self._read_failed = True
             return False
         rows = broadcast_chat.parse_channel_tab(text)
-        with self.lock:
-            self.rows = rows
-            self.last_error = None
+        with self._write_lock:
+            with self.lock:
+                self.rows = rows
+                self.loaded = True
+                self.from_cache = self._read_failed = False
+                self.last_error = None
+            if self.cache_path:
+                # tmp + os.replace: a crash mid-write never leaves a truncated
+                # CSV that the next start would load as the whole tab.
+                tmp = self.cache_path + ".tmp"
+                try:
+                    with open(tmp, "w", encoding="utf-8") as fh:
+                        fh.write(text)
+                    os.replace(tmp, self.cache_path)
+                except OSError:
+                    # cache write is best-effort; the in-memory rows are current
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass  # nothing left behind, or it is overwritten next time
         return True
 
     def get(self):
         with self.lock:
             return list(self.rows)
+
+
+def live_channel_source(channel_source, channel_csv_url, runtime):
+    """The Channel-tab source the audience follow-live mode reads. Reuses the
+    broadcast-chat source when there is one, else builds its own so follow-live
+    works under --no-broadcast-chat too."""
+    if channel_source is not None:
+        return channel_source
+    if channel_csv_url:
+        return ChannelSource(channel_csv_url, os.path.join(runtime, "channel.cache.txt"))
+    return None
+
+
+def audience_follow_hooks(live_channels, live_tracker, cookies, clock=time.monotonic,
+                          refresh_every=30, spawn=None, retry_every=5,
+                          retry_window=30, logger=None):
+    """Keyword args for the YouTube audience Service's follow-live mode.
+    channels() never waits on the network: it returns the cached rows at once
+    and, when they are older than refresh_every seconds, starts ONE background
+    refresh (single-flight). spawn(fn) starts it (default: a daemon thread).
+    channels_loaded() is False until the source's first successful read (Sheet
+    or disk cache); until then a refresh is retried every retry_every seconds
+    for the first retry_window seconds, then at the normal cadence, and
+    channels_error() reports the source's last read error, channels_stale() the
+    read error while cached rows stand in for the Sheet. A refresh that raises
+    or returns False logs one WARNING (logger, default the relay LOG) until one
+    succeeds."""
+    if live_channels is None:
+        return {"channels": None, "channels_loaded": None, "channels_error": None,
+                "channels_stale": None, "live_lookup": None,
+                "channel_id_lookup": None}
+    if spawn is None:
+        def spawn(fn):
+            threading.Thread(target=fn, daemon=True).start()
+    log = logger if logger is not None else LOG
+    state = {"at": None, "first": None, "running": False, "warned": False}
+    lock = threading.Lock()
+
+    def _failed(reason):
+        # best-effort: keep serving the rows we have, but say so once
+        with lock:
+            warn, state["warned"] = not state["warned"], True
+        if warn:
+            log.warning("Channel tab read failed (audience follow mode): %s%s", reason,
+                        "; serving the cached tab" if channels_stale() else "")
+
+    def _refresh():
+        try:
+            ok = live_channels.refresh()
+        except Exception as e:
+            _failed(f"{type(e).__name__}: {e}")
+        else:
+            if ok is False:
+                _failed(getattr(live_channels, "last_error", None) or "no answer")
+            else:
+                with lock:
+                    state["warned"] = False
+        finally:
+            with lock:
+                state["running"] = False
+
+    def channels_loaded():
+        return bool(getattr(live_channels, "loaded", True))
+
+    def channels_error():
+        if channels_loaded():
+            return None
+        error = getattr(live_channels, "last_error", None)
+        return error if isinstance(error, str) and error else None
+
+    def channels_stale():
+        stale = getattr(live_channels, "stale", None)
+        error = stale() if callable(stale) else None
+        return error if isinstance(error, str) and error else None
+
+    def channels():
+        start = False
+        loaded = channels_loaded()
+        with lock:
+            now = clock()
+            quick = not loaded and (
+                state["first"] is None or now - state["first"] < retry_window)
+            every = retry_every if quick else refresh_every
+            if not state["running"] and (
+                    state["at"] is None or now - state["at"] >= every):
+                if state["first"] is None:
+                    state["first"] = now
+                state["at"] = now
+                state["running"] = start = True
+        if start:
+            try:
+                spawn(_refresh)
+            except Exception:
+                with lock:
+                    state["running"] = False
+        return [c for p, c in live_channels.get() if p == "youtube"]
+
+    return {
+        "channels": channels,
+        "channels_loaded": channels_loaded,
+        "channels_error": channels_error,
+        "channels_stale": channels_stale,
+        "live_lookup": live_tracker.lookup if live_tracker is not None else None,
+        "channel_id_lookup": lambda text: yt_channel_id(text, cookies),
+    }
 
 
 class ProducerSource:
@@ -3746,7 +3979,9 @@ class BroadcastChatSupervisor:
     that ended genuinely (stream over) is tombstoned until its videoId leaves the
     live set, so it is not restarted in a loop. Best-effort throughout."""
 
-    def __init__(self, store, channel_source, cookies, interval=30, logger=None):
+    def __init__(self, store, channel_source, cookies, interval=30, logger=None,
+                 tracker=None):
+        self.tracker = tracker
         self.store = store
         self.channel_source = channel_source
         self.cookies = cookies
@@ -3791,7 +4026,11 @@ class BroadcastChatSupervisor:
         desired = {}
         for platform, channel in self.channel_source.get():
             if platform == "youtube":
-                for vid in yt_live_video_ids(channel, self.cookies, logger=self.logger):
+                if self.tracker is not None:
+                    vids = self.tracker.lookup(channel) or []
+                else:
+                    vids = yt_live_video_ids(channel, self.cookies, logger=self.logger)
+                for vid in vids:
                     desired[vid] = (lambda v=vid: _BroadcastReader(v, self.store, self.logger))
             elif platform == "twitch":
                 login = broadcast_chat.twitch_login(channel)
@@ -14051,9 +14290,11 @@ def main():
     channel_source = None
     broadcast_chat_store = None
     if channel_csv_url and not args.no_broadcast_chat:
-        channel_cache = os.path.join(runtime, "channel.cache.txt")
-        channel_source = ChannelSource(channel_csv_url, channel_cache)
+        channel_source = live_channel_source(None, channel_csv_url, runtime)
         broadcast_chat_store = BroadcastChatStore()
+    # Audience follow-live reads the same Channel tab, independent of
+    # --no-broadcast-chat (it never feeds the broadcast-chat reader).
+    live_channels = live_channel_source(channel_source, channel_csv_url, runtime)
 
     # Broadcast Part control (#395): the Producer-tab Part list + the persisted
     # part.json pointer. Disabled under a custom --sheet-csv-url or --no-parts;
@@ -14349,10 +14590,13 @@ def main():
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
     # yt-dlp resolution is heavier than a CSV fetch. Best-effort daemon.
+    live_tracker = (LiveVideoTracker(cookies, logger=LOG)
+                    if live_channels is not None else None)
     _bc_supervisor = None
     if broadcast_chat_store is not None and channel_source is not None:
         _bc_supervisor = BroadcastChatSupervisor(
-            broadcast_chat_store, channel_source, cookies, interval=30, logger=LOG)
+            broadcast_chat_store, channel_source, cookies, interval=30, logger=LOG,
+            tracker=live_tracker)
         threading.Thread(target=_bc_supervisor.run, daemon=True).start()
 
     # Commentator cockpit (#191): per-league secret (injected from profile.env,
@@ -14389,7 +14633,8 @@ def main():
     audience_runtime = audience_widgets.Runtime(
         os.path.join(os.path.dirname(args.overlay_dir), "audience.json") if args.overlay_dir else None)
     youtube_service = (audience_youtube_connection.Service(
-        os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)
+        os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache,
+        **audience_follow_hooks(live_channels, live_tracker, cookies))
         if args.overlay_dir else None)
     twitch_service = (audience_twitch_connection.Service(
         os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)

@@ -3,12 +3,14 @@
 import re
 import json
 import time
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import http_util
 from audience_admin import UserError
 from urllib.parse import urlparse, parse_qs, unquote, urlencode
 
 VIDEO = re.compile(r"[A-Za-z0-9_-]{11}\Z")
+VIDEO_IDS = re.compile(r"[A-Za-z0-9_-]{11}(?:,[A-Za-z0-9_-]{11}){0,4}\Z")
 CHANNEL = re.compile(r"UC[A-Za-z0-9_-]{22}\Z")
 HANDLE = re.compile(r"@[\w.\-·]{1,100}\Z")
 HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
@@ -140,6 +142,47 @@ def video_snapshot(payload, expected):
     }
 
 
+def _start_time(value):
+    if not isinstance(value, str):
+        raise ValueError("Invalid YouTube video")
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("Invalid YouTube video") from None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def newest_live(payload, ids, channel=None):
+    """(video_id, title) of the live video in ids that started last, else None.
+
+    With channel, a video another channel streams never counts."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise ValueError("Invalid YouTube response")
+    best = None
+    for data in payload["items"]:
+        if not isinstance(data, dict):
+            raise ValueError("Invalid YouTube video")
+        snippet = data.get("snippet", {})
+        live = data.get("liveStreamingDetails", {})
+        if not isinstance(snippet, dict) or not isinstance(live, dict):
+            raise ValueError("Invalid YouTube video")
+        if (
+            data.get("id") not in ids
+            or (channel is not None and snippet.get("channelId") != channel)
+            or snippet.get("liveBroadcastContent") != "live"
+            or live.get("actualEndTime")
+            or not live.get("actualStartTime")
+        ):
+            continue
+        started = _start_time(live["actualStartTime"])
+        title = snippet.get("title")
+        if best is None or started > best[0]:
+            best = (started, data["id"], title if isinstance(title, str) else "")
+    return None if best is None else (best[1], best[2])
+
+
 def channel_snapshot(payload, expected):
     data = item(payload, expected)
     stats = data.get("statistics", {}) if data else {}
@@ -239,7 +282,7 @@ def _failure(error):
 def request(resource, params, key, open_url=None):
     """Call one fixed official resource; never follow redirects with the key."""
     allowed = (
-        {"id": VIDEO}
+        {"id": VIDEO_IDS}
         if resource == "videos"
         else {
             "id": CHANNEL,
