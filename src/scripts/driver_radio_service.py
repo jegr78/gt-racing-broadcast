@@ -87,6 +87,20 @@ class Service:
 
     def _expire(self, now):
         for message in self._messages.values():
+            if message['state'] in ('queued','playing') and not message['_native']:
+                valid = {}
+                for requester, authorize in message['_requesters'].items():
+                    try:
+                        if authorize():valid[requester] = authorize
+                    except Exception:
+                        continue  # An unavailable authorization provider fails closed.
+                message['_requesters'] = valid
+                if not valid:
+                    message['state'] = 'cancelled'
+                    self._audio.pop(message['id'], None)
+                    if self._ticket and self._ticket.message['id'] == message['id']:
+                        self._ticket.cancelled.set()
+                    self._revision += 1
             if now >= message['_deadline'] and message['state'] in ('queued', 'playing'):
                 message['state'] = 'expired'
                 self._audio.pop(message['id'], None)
@@ -98,7 +112,7 @@ class Service:
     def _public(self, message):
         return copy.deepcopy({k:v for k,v in message.items() if not k.startswith('_')})
 
-    def _publish(self, preset, kind, severity, result, now):
+    def _publish(self, preset, kind, severity, result, now, requester=None, authorization=None):
         # Superseded routine answers cannot form a spoken backlog.
         for mid in list(self._queue):
             old = self._messages[mid]
@@ -123,7 +137,8 @@ class Service:
                        kind=kind, preset=preset, severity=severity, text=result['answers'][preset],
                        evidence={k:result[k] for k in ('fuel','pace','tyres','uncertainties')},
                        created_at=self.wall(), expires_at=self.wall()+ttl, state='queued',
-                       audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now)
+                       audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now,
+                       _native=requester is None, _requesters={requester:authorization} if requester is not None else {})
         self._messages[mid] = copy.deepcopy(message)
         self._queue.append(mid)
         self._queue.sort(key=lambda ident:self._messages[ident]['severity'] != 'urgent')
@@ -197,9 +212,11 @@ class Service:
             return dict(version=1, revision=self._revision, epoch=self._epoch, binding=copy.deepcopy(self._binding),
                         changed=changed, messages=[self._public(m) for m in self._messages.values()] if changed else [])
 
-    def request(self, preset, binding):
+    def request(self, preset, binding, requester=None, authorization=None):
         with access._LOCK, self._lock:
             self.refresh()
+            if requester is not None and (not callable(authorization) or not authorization()):
+                raise access.RadioError('unauthorized', 'Console request authorization was revoked')
             if preset not in assessment.PRESETS:
                 raise access.RadioError('invalid_body', 'Choose a supported radio preset')
             if not self._enabled or self._closed:
@@ -211,9 +228,15 @@ class Service:
                               if m['preset']==preset and m['epoch']==self._epoch and now-m['_created']<2
                               and m['state'] not in ('cancelled','expired','superseded')), None)
             if duplicate is not None:
+                if requester is None:
+                    duplicate['_native'] = True
+                elif len(duplicate['_requesters']) < 16 or requester in duplicate['_requesters']:
+                    duplicate['_requesters'][requester] = authorization
+                else:
+                    raise access.RadioError('rate_limited', 'Too many simultaneous radio requesters')
                 return self._public(duplicate)
             result = self._assessment or assessment.assess({})
-            message = self._publish(preset, 'requested', 'normal', result, now)
+            message = self._publish(preset, 'requested', 'normal', result, now, requester, authorization)
             if not self._live:
                 self._messages[message['id']]['state'] = 'text_only'
                 self._queue.remove(message['id'])

@@ -11747,7 +11747,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         elif route == "request":
                             if set(body) != {"preset", "binding"}:
                                 return self._radio_error("invalid_body", "Expected preset and current binding", 400)
-                            result = {"message": radio_service.request(body["preset"], body["binding"])}
+                            token = self._cockpit_token()
+                            def still_authorized():
+                                versions = console_admin.load_versions(console_versions_path) if console_versions_path else {}
+                                return (console_auth.verify_token(console_secret, token, versions) == subject
+                                        and bool(radio_access.authorize(subject)))
+                            result = {"message": radio_service.request(body["preset"], body["binding"],
+                                      requester=subject, authorization=still_authorized)}
                         else:
                             engine = getattr(telemetry_store, "engineer", None)
                             snapshot = engine.snapshot(compact=True) if engine is not None else {}
@@ -11761,7 +11767,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 result = radio_session.read(binding)
                     return self._send(result, no_store=True)
             except driver_radio_access.RadioError as exc:
-                status = (429 if exc.code == "rate_limited" else
+                status = (401 if exc.code == "unauthorized" else
+                          429 if exc.code == "rate_limited" else
                           403 if exc.code in ("forbidden", "feature_disabled") else
                           409 if exc.code in ("conflict", "session_unavailable") else
                           503 if exc.code in ("source_unavailable", "settings_unavailable") else 400)

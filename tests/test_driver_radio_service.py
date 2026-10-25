@@ -127,6 +127,21 @@ def t_invalid_request_limits_and_shutdown():
         assert not f.service.attach(message['id'],message['epoch'],{'explanation':'late'})
 
 
+def t_queued_request_rechecks_its_originating_authorization():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();allowed={'first':True,'second':True}
+        message=f.service.request('fuel',assessment.binding(f.snap),requester='first',authorization=lambda:allowed['first'])
+        same=f.service.request('fuel',assessment.binding(f.snap),requester='second',authorization=lambda:allowed['second'])
+        assert same['id']==message['id']
+        ticket=f.service.take_playback()
+        allowed['first']=False;f.poll()
+        assert not ticket.cancelled.is_set(), 'another current requester still authorizes the shared answer'
+        allowed['second']=False;f.poll()
+        assert ticket.cancelled.is_set() and f.service.take_playback() is None
+        assert not f.service.attach(message['id'],message['epoch'],{'explanation':'revoked answer'})
+        assert f.service.finish_playback(ticket.id)
+
+
 def t_evicted_active_message_stays_cancelled_until_owner_acknowledges():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);f.poll();first=f.request();ticket=f.service.take_playback()
@@ -150,8 +165,9 @@ def t_signed_http_clients_share_messages_and_revalidate_access():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);f.poll()
         engine=SimpleNamespace(snapshot=lambda compact=False:copy.deepcopy(f.snap))
+        versions=str(Path(d)/'console-versions.json')
         handler=m.make_handler(m.Relay(fixture._FakeSource([],[]),[53001,53002],d),
-            console_secret=fixture.SECRET, engineer_access=m.race_engineer_access.Store(d,True),
+            console_secret=fixture.SECRET, console_versions_path=versions, engineer_access=m.race_engineer_access.Store(d,True),
             telemetry_store=SimpleNamespace(engineer=engine),radio_service=f.service)
         server=m.ThreadingHTTPServer(('127.0.0.1',0),handler)
         threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -177,16 +193,23 @@ def t_signed_http_clients_share_messages_and_revalidate_access():
             status,history,_=request('messages')
             assert status==200 and len(history['messages'])==1
             assert request('messages?since='+str(history['revision']))[1]['messages']==[]
-            for path,method,body,headers,code,want in (
+            for path,method,payload,headers,code,want in (
                 ('request','POST',{'preset':'fuel','binding':{}},{},409,'conflict'),
                 ('request','POST',{'preset':'prompt','binding':state['binding']},{},400,'invalid_body'),
                 ('request','POST',{'preset':'fuel','binding':state['binding'],'command':'obs'},{},400,'invalid_body'),
                 ('request','POST',body,{'Origin':'https://foreign.example.test'},403,'foreign_origin'),
                 ('messages?since=bad','GET',None,{},400,'invalid_query')):
-                status,doc,cache=request(path,method,body,headers=headers)
+                status,doc,cache=request(path,method,payload,headers=headers)
                 assert status==code and doc['error']['code']==want and cache=='no-store',(status,doc)
             assert request(subject=None)[0]==401
             assert request(subject='director')[1]['error']['code']=='forbidden'
+            playing=f.service.take_playback()
+            m.console_admin.bump_version(versions,'driver')
+            f.service.refresh(force=True)
+            assert playing.cancelled.is_set(), 'queued HTTP request must observe token revocation'
+            assert request('messages')[0]==401
+            f.service.finish_playback(playing.id)
+            m.console_admin.write_versions(versions,{})  # Restore fixture identity for the independent assignment check.
             f.access.update({'expected':1,'drivers':[]})
             status,doc,_=request('messages')
             assert status==403 and doc['error']['code']=='forbidden'
