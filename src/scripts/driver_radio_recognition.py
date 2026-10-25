@@ -129,7 +129,7 @@ def whisper_transcribe(pcm,language,executable,model,process=run_process):
     with tempfile.TemporaryDirectory(prefix='racecast-radio-stt-') as scratch:
         invocation=ai_agents.Invocation([executable,'-m',model,'-f','-','-of','result','-l',language,'-t','2','-np','-nt'],scratch,'',8,'speech')
         raw=process(invocation,payload,threading.Event(),8,ai_jobs.execution_env(os.environ),
-                    output_limit=4096,input_limit=PCM_MAX+128)
+                    output_limit=4096,input_limit=PCM_MAX+128,inherit_tree=True)
     return clean_text(raw.decode('utf8','replace').strip())
 
 

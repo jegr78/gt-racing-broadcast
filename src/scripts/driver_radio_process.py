@@ -31,21 +31,23 @@ def _output_bound(output,limit):
             raise ProviderError('output_too_large')
 
 
-def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,extra_env=None,input_limit=INPUT_MAX):
+def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,extra_env=None,input_limit=INPUT_MAX,inherit_tree=False):
     """Own the tree before executing it; bound both pipes and generated files."""
     deadline=time.monotonic()+budget
     if stopped.is_set():raise ProviderError('cancelled')
     if budget<=0:raise ProviderError('timed_out')
     if type(output_limit) is not int or not 1<=output_limit<=3*1024*1024:
         raise ProviderError('invalid_transport')
+    if type(inherit_tree) is not bool:raise ProviderError('invalid_transport')
     if type(input_limit) is not int or not 1<=input_limit<=1024*1024:raise ProviderError('invalid_transport')
     if prompt is not None and len(prompt)>input_limit:raise ProviderError('input_too_large')
     tree=None;proc=None;readers=[];writer=None
     overflow=threading.Event();stream_error=threading.Event()
     output=[bytearray(),bytearray()]
     try:
-        tree=ai_jobs.WindowsTree()
-        flags={'creationflags':0x08000204} if os.name=='nt' else {'start_new_session':True}
+        tree=None if inherit_tree else ai_jobs.WindowsTree()
+        flags=({'creationflags':0x08000000} if os.name=='nt' else {}) if inherit_tree else (
+            {'creationflags':0x08000204} if os.name=='nt' else {'start_new_session':True})
         safe_env=ai_jobs.execution_env(os.environ)
         safe_env.update(ai_jobs.execution_env(env))
         for name,value in (extra_env or {}).items():
@@ -54,7 +56,7 @@ def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,ext
         proc=subprocess.Popen(invocation.argv,cwd=invocation.cwd,env=safe_env,
                               stdin=subprocess.PIPE if prompt is not None else subprocess.DEVNULL,
                               stdout=subprocess.PIPE,stderr=subprocess.PIPE,**flags)
-        tree.attach(proc)
+        if tree is not None:tree.attach(proc)
         def drain(stream,target):
             try:
                 while chunk:=stream.read1(4096):
@@ -85,8 +87,14 @@ def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,ext
         raise ProviderError('agent_failed') from exc
     finally:
         if proc is not None:
-            try:ai_jobs.terminate_tree(proc,tree)
-            except (ai_jobs.JobError,OSError) as exc:
+            try:
+                if inherit_tree:
+                    # The outer native worker owns this group/Job Object. Never
+                    # start or signal a second group that can escape its owner.
+                    if proc.poll() is None:proc.kill()
+                    proc.wait(timeout=10)
+                else:ai_jobs.terminate_tree(proc,tree)
+            except (ai_jobs.JobError,OSError,subprocess.TimeoutExpired) as exc:
                 raise ProviderError('cleanup_failed') from exc
         elif tree is not None:
             tree.close()

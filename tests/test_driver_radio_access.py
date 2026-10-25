@@ -291,6 +291,16 @@ def t_delayed_body_cannot_retain_revoked_token_or_assignment():
             server.server_close()
 
 
+def t_native_service_selection_rejects_paths_unknown_engines_and_unbounded_controls():
+    with tempfile.TemporaryDirectory() as d:
+        store=radio.Store(d,True)
+        for config in ({'wake':'custom phrase'},{'wake':[]},{'stt':'automatic_cloud_fallback'},
+                       {'volume':True},{'volume':2},{'muted':1},{'executable':'/private/path'}):
+            rejected(lambda value=config:store.update({'expected':0,'native':value}),'invalid_settings')
+        state=store.update({'expected':0,'native':{'wake':'hey_engineer','stt':'whisper','volume':.3,'muted':False}})
+        assert state['native']['stt']=='whisper' and state['revision']==1
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):

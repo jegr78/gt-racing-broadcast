@@ -112,6 +112,40 @@ def t_cleanup_failure_retains_the_native_slot_and_controls_do_not_block_on_proce
         h.n.close()
 
 
+def t_unreadable_settings_fail_closed_while_listening_or_speaking():
+    import threading
+    for speaking in (False,True):
+        with tempfile.TemporaryDirectory() as d:
+            h=Harness(d);h.n.step()
+            if speaking:
+                message=h.f.request('pace')
+                h.f.service.attach(message['id'],message['epoch'],{'audio':b'fixture audio','audio_state':'ready'})
+                h.n.step()
+            h.f.access.path.write_text('{invalid settings')
+            h.n.start()
+            deadline=threading.Event()
+            # Poll only the status; a missing valid settings document cannot admit work.
+            for _ in range(100):
+                if h.n.status()['phase']=='error':break
+                deadline.wait(.01)
+            assert h.n.status()['phase']=='error' and not h.n.status()['enabled']
+            assert h.workers[0].closed
+            if speaking:assert h.players[0].closed
+            h.n.close()
+
+
+def t_disabled_startup_never_opens_a_microphone_or_player():
+    for field in ('profile','voice'):
+        with tempfile.TemporaryDirectory() as d:
+            h=Harness(d)
+            body={'expected':1,'enabled':False} if field=='profile' else {
+                'expected':1,'voice':{'enabled':False,'microphone':None,'input_language':'en'}}
+            h.f.access.update(body)
+            for _ in range(3):h.n.step()
+            assert h.workers==[] and h.players==[] and h.n.status()['phase']=='disabled'
+            h.n.close()
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

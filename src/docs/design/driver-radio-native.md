@@ -94,3 +94,17 @@ refreshed deterministic evidence. Session/context changes discard that context.
 Bounded messages retain recognized questions and answers. Vehicle and broadcast
 commands are refused. Optional AI receives only that small question context and
 current allowlisted facts under the existing isolated live adapter policy.
+
+## Review evidence
+
+The security pass identified and corrected two lifecycle failures. Nested Whisper
+initially created a new POSIX session; its bounded runner now inherits the outer
+native ownership tree. A controlled real-process test proves it is alive before
+outer cancellation and gone afterward. Unreadable consent settings initially left
+capture active; fail-closed cleanup now stops capture/output and retains ownership
+when termination fails. Both listening and playback failure scenarios are tested.
+
+A synthetic FFmpeg source, real Vosk wake model and real whisper.cpp base model
+exercised the shipped private worker from listening through transcription to the
+English fuel question in 3.24 seconds. The input was the bundled eSpeak fixture,
+not a microphone. Ordinary tests do not download models or invoke cloud services.

@@ -133,6 +133,22 @@ def t_deadline_kills_the_owned_descendant_tree():
             assert not state or state.startswith('Z'), 'live provider descendant survived timeout: '+state
 
 
+def t_inherited_transport_keeps_large_private_input_bounded():
+    with tempfile.TemporaryDirectory() as d:
+        data=b'x'*100000
+        script='import sys;print(len(sys.stdin.buffer.read()))'
+        result=live.run_process(invocation(d,script),data,threading.Event(),3,{},input_limit=200000,inherit_tree=True)
+        assert result.strip()==b'100000'
+        # Invalid limits cannot reach process creation even in a fault-injection run.
+        with patch.object(live.subprocess,'Popen') as spawn,patch.object(ai_jobs,'WindowsTree'),patch.object(ai_jobs,'terminate_tree'):
+            spawn.return_value.stdout=io.BytesIO();spawn.return_value.stderr=io.BytesIO();spawn.return_value.stdin=io.BytesIO()
+            spawn.return_value.poll.return_value=0;spawn.return_value.returncode=0
+            for limit in (False,0,1024*1024+1):
+                rejected(lambda bound=limit:live.run_process(invocation(d,'pass'),data,threading.Event(),3,{},input_limit=bound),'invalid_transport')
+            spawn.assert_not_called()
+        rejected(lambda:live.run_process(invocation(d,script),data,threading.Event(),3,{}),'input_too_large')
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

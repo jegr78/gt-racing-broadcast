@@ -55,6 +55,7 @@ def t_whisper_adapter_sends_wav_via_stdin_without_recording_a_file():
         with wave.open(io.BytesIO(prompt),'rb') as f:assert f.getframerate()==16000 and f.getnchannels()==1
         assert argv[argv.index('-f')+1]=='-' and argv[argv.index('-l')+1]=='de'
         assert budget==8 and kwargs['output_limit']==4096 and kwargs['input_limit']<=1024*1024
+        assert kwargs['inherit_tree'] is True, 'Whisper must stay inside the native owner tree'
         assert not list(Path(invocation.cwd).iterdir()), 'microphone audio must stay off disk'
         return b'Wie warm sind die Reifen?'
     assert 'Reifen' in r.whisper_transcribe(b'\0'*3200,'de','whisper-fixture','weights.bin',process=process)

@@ -162,6 +162,15 @@ class Supervisor:
                 self._retry_at=self.clock()+5;self._set('error','worker_failed');return
             self._heartbeat=self.clock();self._set('listening')
 
+    def fail_closed(self):
+        with self._lock:
+            self._enabled=False
+            failed=False
+            for stop in (self._stop_capture,lambda:self._stop_output('failed')):
+                try:stop()
+                except (OSError,ValueError,TypeError):failed=True
+            self._set('error','cleanup_failed' if failed else 'native_unavailable')
+
     def start(self):
         with self._lock:
             if self._thread is not None or self._closed:return
@@ -169,9 +178,9 @@ class Supervisor:
                 while not self._stop.is_set():
                     try:self.step()
                     except (OSError,ValueError,TypeError):
-                        # Keep ownership references until a subsequent cleanup succeeds.
-                        # Never acknowledge a playback slot after failed termination.
-                        with self._lock:self._set('error','native_unavailable')
+                        # Lost consent must stop capture/output. Failed termination
+                        # retains its ownership reference and never grants a new slot.
+                        self.fail_closed()
                         self._stop.wait(5)
                     self._stop.wait(.1)
             self._thread=threading.Thread(target=run,name='radio-native',daemon=True);self._thread.start()

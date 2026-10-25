@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Owned private voice workers use real controlled fixtures, never audio devices."""
-import json,sys,time
+import json,sys,time,tempfile,os,subprocess
 from pathlib import Path
 from unittest.mock import patch,Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
@@ -56,6 +56,44 @@ def t_private_voice_worker_masks_bad_requests_and_never_opens_a_device():
     assert done.returncode==0
     assert json.loads(done.stdout)=={'event':'error','code':'invalid_request'}
     assert b'private device' not in done.stdout
+
+
+def t_nested_transcription_cannot_escape_the_outer_native_owner():
+    with tempfile.TemporaryDirectory() as d:
+        pidfile=Path(d)/'nested.pid'
+        inner='import os,time,pathlib;pathlib.Path('+repr(str(pidfile))+').write_text(str(os.getpid()));time.sleep(30)'
+        script=("import sys,threading;sys.path.insert(0,"+repr(str(Path(__file__).resolve().parents[1]/'src/scripts'))+");import ai_agents,ai_jobs;from driver_radio_process import run_process;"+
+                "run_process(ai_agents.Invocation([sys.executable,'-c',"+repr(inner)+"],"+repr(d)+",'',30,'speech'),None,threading.Event(),30,ai_jobs.execution_env({}),inherit_tree=True)")
+        owner=p.Owned([sys.executable,'-c',script],b'',config.execution_env(),events=True)
+        pid=None
+        def dead():
+            if os.name=='nt':
+                import ctypes as ct
+                kernel=ct.WinDLL('kernel32',use_last_error=True)
+                kernel.OpenProcess.argtypes=[ct.c_uint32,ct.c_int,ct.c_uint32];kernel.OpenProcess.restype=ct.c_void_p
+                kernel.WaitForSingleObject.argtypes=[ct.c_void_p,ct.c_uint32];kernel.CloseHandle.argtypes=[ct.c_void_p]
+                handle=kernel.OpenProcess(0x00100000,False,pid)
+                if not handle:return True
+                try:return kernel.WaitForSingleObject(handle,0)==0
+                finally:kernel.CloseHandle(handle)
+            result=subprocess.run(['ps','-p',str(pid),'-o','stat='],capture_output=True,text=True,errors='replace',check=False)
+            return not result.stdout.strip() or result.stdout.strip().startswith('Z')
+        try:
+            until=time.monotonic()+5
+            while time.monotonic()<until:
+                try:pid=int(pidfile.read_text());break
+                except (OSError,ValueError):time.sleep(.01)
+            assert type(pid) is int and pid>1, 'nested fixture must start before cancellation'
+            assert not dead()
+            owner.close()
+            assert dead(), 'transcription process escaped native owner cancellation'
+        finally:
+            owner.close()
+            if pid is not None and not dead():
+                if os.name=='nt':subprocess.run(['taskkill','/PID',str(pid),'/F'],capture_output=True,check=False)
+                else:
+                    import signal
+                    os.kill(pid,signal.SIGKILL)
 
 
 if __name__=='__main__':

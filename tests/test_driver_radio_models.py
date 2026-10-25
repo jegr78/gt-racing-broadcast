@@ -2,6 +2,7 @@
 """Provisioning is explicit, hash checked, bounded and validates wake phrases."""
 import hashlib,io,json,sys,tempfile,zipfile,stat
 from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_radio_models as m
 from driver_radio_voice_config import paths,ready
@@ -49,9 +50,12 @@ def t_corrupt_download_unsafe_archives_and_failed_validation_publish_nothing():
         else:raise AssertionError('Unverified download accepted')
     for name in ('../escape','/absolute','C:/escape','a\\escape'):
         with tempfile.TemporaryDirectory() as d:
-            try:m.extract(archive(name),d)
-            except ValueError:pass
-            else:raise AssertionError('Unsafe archive accepted')
+            # Invalid-archive fault injection must never write outside the fixture.
+            with patch.object(Path,'mkdir',side_effect=AssertionError('Unexpected archive directory write')), \
+                 patch.object(Path,'open',side_effect=AssertionError('Unexpected archive file write')):
+                try:m.extract(archive(name),d)
+                except ValueError:pass
+                else:raise AssertionError('Unsafe archive accepted')
             assert list(Path(d).iterdir())==[]
     with tempfile.TemporaryDirectory() as d:
         stream=io.BytesIO()
