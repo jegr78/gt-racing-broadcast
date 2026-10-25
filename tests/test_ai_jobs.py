@@ -202,7 +202,7 @@ def t_darwin_zombie_group_is_only_accepted_after_reap_and_absence_probe():
             raise PermissionError(1, 'zombie-only group')
         assert proc.wait.called, 'Probe must follow the owned leader reap'
         raise ProcessLookupError()
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill:
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill:
         j.terminate_tree(proc)
     assert kill.call_args_list == [mock.call(proc.pid, 9), mock.call(proc.pid, 0)]
     assert proc.wait.called
@@ -213,7 +213,7 @@ def t_darwin_cleanup_does_not_accept_a_remaining_or_unsignalable_group():
         proc = mock.Mock(pid=12345)
         proc.poll.return_value = None
         proc.wait.return_value = 0
-        with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=[PermissionError(1, 'group exists'), probe]) as kill:
+        with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=[PermissionError(1, 'group exists'), probe]) as kill:
             error(lambda owned=proc: j.terminate_tree(owned), 'cleanup_failed')
         assert kill.call_args_list == [mock.call(proc.pid, 9), mock.call(proc.pid, 0)]
 
@@ -221,14 +221,14 @@ def t_darwin_cleanup_does_not_accept_a_remaining_or_unsignalable_group():
 def t_darwin_cleanup_timeout_stays_a_failure():
     proc = mock.Mock(pid=12345)
     proc.wait.side_effect = subprocess.TimeoutExpired('provider', 10)
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'denied')) as kill:
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'denied')) as kill:
         error(lambda owned=proc: j.terminate_tree(owned), 'cleanup_failed')
     assert kill.call_count == 1
 
 
 def t_non_darwin_permission_errors_never_use_the_zombie_exception():
     proc = mock.Mock(pid=12345)
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.sys, 'platform', 'linux'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'denied')) as kill:
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'linux'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'denied')) as kill:
         error(lambda owned=proc: j.terminate_tree(owned), 'cleanup_failed')
     assert kill.call_count == 1
 
