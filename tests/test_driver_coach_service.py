@@ -8,7 +8,8 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_coach_service as coach
 import driver_coach_calibration as calibration
-from driver_radio_providers import COACH_EXPLANATIONS
+import driver_radio_providers as providers
+COACH_EXPLANATIONS=providers.COACH_EXPLANATIONS
 from test_driver_coach_focus import real_lap,real_definition
 from test_driver_radio_service import Fixture as RadioFixture
 
@@ -312,7 +313,6 @@ def t_review_uses_measured_lap_time_and_never_promotes_an_unselected_second_acti
 
 
 def t_optional_ai_requires_training_consent_and_uses_guarded_current_progress_only():
-    import driver_radio_providers as providers
     class AI:
         def __init__(self):self.calls=[]
         def explain(self,agent,message,stopped,budget):
@@ -350,7 +350,6 @@ def t_ai_progress_claims_bind_all_recent_attempts_not_only_the_last_lap():
 
 
 def t_invalid_or_late_ai_keeps_grounded_text_and_cannot_change_the_focus():
-    import driver_radio_providers as providers
     bad=[dict(explanation='The observations prove learning.',exercise='current'),
          dict(explanation='You could brake two metres later.',exercise='current'),
          dict(explanation='The result is faster.',exercise='current'),
@@ -425,7 +424,6 @@ def t_relay_attachment_has_one_shared_worker_and_disabled_sources_have_none():
 
 
 def t_ai_cannot_hide_a_new_driving_action_in_explanation_synonyms():
-    import driver_radio_providers as providers
     with tempfile.TemporaryDirectory() as root:
         f=Fixture(root);f.command(allow_ai=True);f.step()
         for n in (2,3):f.complete(n);f.step()
