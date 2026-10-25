@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import driver_radio_access as access
 import driver_radio_assessment as assessment
+import driver_radio_questions as questions
 
 HISTORY_MAX = 32
 QUEUE_MAX = 4
@@ -51,6 +52,7 @@ class Service:
         self._voice_enabled = False
         self._pace_at = float('-inf')
         self._pace_key = None
+        self._conversation = collections.deque(maxlen=4)
 
     def start(self):
         with self._lock:
@@ -81,6 +83,7 @@ class Service:
     def _invalidate(self):
         self._cancel()
         self._messages.clear()
+        self._conversation.clear()
         self._assessment = None
         self._signature = None
         self._epoch = uuid.uuid4().hex
@@ -271,6 +274,34 @@ class Service:
                 self._queue.remove(message['id'])
                 message = self._public(self._messages[message['id']])
             return message
+
+    def question(self, text, binding):
+        """Internal native entry; no browser route accepts free prompts."""
+        with access._LOCK, self._lock:
+            self.refresh(force=True)
+            if not self._voice_enabled or self._closed:
+                raise access.RadioError('feature_disabled', 'Native voice is not enabled')
+            if binding != self._binding:
+                raise access.RadioError('conflict', 'Voice session changed; ask again')
+            result = copy.deepcopy(self._assessment or assessment.assess({}))
+            previous = self._conversation[-1]['preset'] if self._conversation else None
+            try:
+                route, answer = questions.answer(text, result, previous)
+            except ValueError as exc:
+                raise access.RadioError('invalid_body', 'Use a bounded telemetry question') from exc
+            preset = route['preset']
+            result['answers'][preset] = answer
+            message = self._publish(preset, 'question', 'normal', result, self.clock())
+            stored = self._messages[message['id']]
+            stored['question'] = text.strip()
+            stored['conversation'] = list(self._conversation)
+            if route['rejected']:
+                stored['ai_state'] = 'not_requested'
+            if not self._live:
+                stored['state'] = 'text_only'
+                self._queue.remove(message['id'])
+            self._conversation.append(dict(question=text.strip(), preset=preset))
+            return self._public(stored)
 
     def pending_count(self):
         with self._lock:return len(self._queue)

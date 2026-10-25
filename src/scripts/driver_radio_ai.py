@@ -47,7 +47,8 @@ class LiveAI:
                 root=Path(scratch);package=root/'package';out=root/'output'
                 package.mkdir();out.mkdir()
                 data={'facts':facts,'uncertainties':message['evidence']['uncertainties'],
-                      'question':message.get('question') or message['preset']}
+                      'question':message.get('question') or message['preset'],
+                      'conversation':message.get('conversation',[])[:4]}
                 raw=json.dumps(data,ensure_ascii=True,allow_nan=False)
                 if len(raw.encode())>INPUT_MAX:raise ProviderError('input_too_large')
                 (package/'facts.json').write_text(raw,encoding='utf8')

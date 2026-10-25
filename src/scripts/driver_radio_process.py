@@ -31,14 +31,15 @@ def _output_bound(output,limit):
             raise ProviderError('output_too_large')
 
 
-def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,extra_env=None):
+def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,extra_env=None,input_limit=INPUT_MAX):
     """Own the tree before executing it; bound both pipes and generated files."""
     deadline=time.monotonic()+budget
     if stopped.is_set():raise ProviderError('cancelled')
     if budget<=0:raise ProviderError('timed_out')
     if type(output_limit) is not int or not 1<=output_limit<=3*1024*1024:
         raise ProviderError('invalid_transport')
-    if prompt is not None and len(prompt)>INPUT_MAX:raise ProviderError('input_too_large')
+    if type(input_limit) is not int or not 1<=input_limit<=1024*1024:raise ProviderError('invalid_transport')
+    if prompt is not None and len(prompt)>input_limit:raise ProviderError('input_too_large')
     tree=None;proc=None;readers=[];writer=None
     overflow=threading.Event();stream_error=threading.Event()
     output=[bytearray(),bytearray()]

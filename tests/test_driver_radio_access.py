@@ -182,6 +182,17 @@ def t_signed_http_boundaries_and_session_writes():
             access.update({'expected': 0, 'enabled': True, 'drivers': ['driver']})
             status, doc, cache = request()
             assert status == 200 and doc == {'version': 1, 'enabled': True, 'revision': 1} and cache == 'no-store', (status, doc)
+            status, native, _ = request('/console/driver-radio/native')
+            assert status == 200 and native['phase'] == 'disabled', (status, native)
+            assert 'microphone' not in native and 'google_key' not in native
+            control = dict(binding=native['binding'], expected=native['revision'], paused=True)
+            status, changed, _ = request('/console/driver-radio/native', method='POST', body=control)
+            assert status == 200 and changed['paused'] is True, (status, changed)
+            error('conflict', 409, path='/console/driver-radio/native', method='POST', body=control)
+            error('foreign_origin', 403, path='/console/driver-radio/native', method='POST', body=control,
+                  headers={'Origin':'https://foreign.invalid'})
+            error('forbidden', 403, path='/console/driver-radio/native', subject='director')
+            error('unauthorized', 401, path='/console/driver-radio/native', subject=None)
             for subject in ('director', 'engineer', 'producer', 'stranger'):
                 error('forbidden', 403, subject=subject)
             for path in ('/console/race-engineer/access', '/console/next', '/console/obs/stint/live'):

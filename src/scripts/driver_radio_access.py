@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import gt7_context
+import driver_radio_voice_config
 import driver_radio_assessment
 
 MAX_BYTES = 16384
@@ -49,7 +50,7 @@ def _provider_settings(value):
 def _valid(doc):
     return (isinstance(doc, dict)
             and {'version','revision','enabled','drivers','voice'} <= set(doc)
-            and not set(doc)-{'version','revision','enabled','drivers','voice','limits','providers'}
+            and not set(doc)-{'version','revision','enabled','drivers','voice','limits','providers','native'}
             and type(doc['version']) is int and doc['version'] == 1
             and type(doc['revision']) is int and doc['revision'] >= 0
             and type(doc['enabled']) is bool
@@ -74,7 +75,8 @@ class Store:
         except FileNotFoundError:
             return dict(version=1, revision=0, enabled=False, drivers=[],
                         voice=dict(enabled=False, microphone=None, input_language='en'),
-                        limits=driver_radio_assessment.settings(), providers=_provider_settings({}))
+                        limits=driver_radio_assessment.settings(), providers=_provider_settings({}),
+                        native=driver_radio_voice_config.settings())
         except OSError as exc:
             raise RadioError('settings_unavailable', 'Radio settings are unreadable; repair locally') from exc
         try:
@@ -83,13 +85,14 @@ class Store:
                 raise ValueError('schema')
             doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
             doc['providers'] = _provider_settings(doc.get('providers',{}))
+            doc['native'] = driver_radio_voice_config.settings(doc.get('native'))
             return doc
         except (ValueError, TypeError, RecursionError) as exc:
             raise RadioError('settings_unavailable', 'Radio settings are unreadable; repair locally') from exc
 
     def update(self, body):
         _require(self.available, 'source_unavailable', 'Radio requires a Solo POV telemetry profile')
-        _require(isinstance(body, dict) and not set(body) - {'expected', 'enabled', 'drivers', 'voice', 'limits', 'providers'},
+        _require(isinstance(body, dict) and not set(body) - {'expected', 'enabled', 'drivers', 'voice', 'limits', 'providers', 'native'},
                  'invalid_settings', 'Unsupported radio settings')
         try:
             with _LOCK, gt7_context._file_lock(str(self.path)):
@@ -100,6 +103,7 @@ class Store:
                 try:
                     doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
                     doc['providers'] = _provider_settings(doc.get('providers',{}))
+                    doc['native'] = driver_radio_voice_config.settings(doc.get('native'))
                 except ValueError as exc:
                     raise RadioError('invalid_settings', 'Invalid radio limits or service selection') from exc
                 doc['revision'] += 1
