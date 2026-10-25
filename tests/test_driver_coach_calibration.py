@@ -230,6 +230,16 @@ def t_finite_positive_baseline_inputs_cannot_overflow_or_underflow():
         json.dumps(result, allow_nan=False)
 
 
+def t_session_identity_survives_objective_changes_and_unavailable_source_resets():
+    for reset in (lambda c: c.set_objective('pace'), lambda c: c.invalidate('source_unavailable')):
+        c = started(); c.ingest(lap(5)); c.ingest(lap(6)); reset(c)
+        c.ingest(lap(1, session_id='new-session'))
+        before = c.snapshot()
+        result = c.ingest(lap(7))
+        assert not result['accepted'] and result['epoch'] == before['epoch']
+        assert result['retired_sessions'] == 1
+
+
 def t_real_live_store_packets_calibrate_without_external_target():
     from test_gt7_laps import FakeCars, FakeTracks, write_circle_recording
     from test_race_engineer_live import feed

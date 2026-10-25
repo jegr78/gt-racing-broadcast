@@ -142,6 +142,7 @@ class Calibration:
         self._phase = 'inactive'
         self._events = collections.deque(maxlen=16)
         self._retired = set()
+        self._session = None
         self._clear()
 
     def _clear(self):
@@ -168,6 +169,7 @@ class Calibration:
         self._clear()
         self._events.clear()
         self._retired.clear()
+        self._session = None
         self.owner = copy.deepcopy(owner)
         self.mode, self.objective = mode, objective
         self.training_id = uuid.uuid4().hex
@@ -221,6 +223,14 @@ class Calibration:
             self._reason = 'unsuitable'
             return self.snapshot()
         row = entry.row
+        if self._session is not None and row['session_id'] != self._session:
+            if len(self._retired) >= SESSION_MAX:
+                self.stop()
+                self._reason = 'session_limit'
+                return self.snapshot()
+            self._retired.add(self._session)
+            self.invalidate('session_changed')
+        self._session = row['session_id']
         retained = self._cohort + [e for e in (self._working, self._candidate) if e]
         key = (row['session_id'], row['id'])
         previous = self._seen.get(key) or next(
@@ -235,12 +245,6 @@ class Calibration:
             self._reason = 'out_of_order'
             return self.snapshot()
         elif self._context is not None and _context(row) != self._context:
-            if row['session_id'] != self._context['session_id']:
-                if len(self._retired) >= SESSION_MAX:
-                    self.stop()
-                    self._reason = 'session_limit'
-                    return self.snapshot()
-                self._retired.add(self._context['session_id'])
             self.invalidate('context_changed')
         self._context = _context(row)
         self._latest = row['lap']
@@ -321,6 +325,7 @@ class Calibration:
 
     def stop(self):
         self.active, self._phase, self._focus = False, 'stopped', False
+        self._session = None
         self._accepted = False
         self.epoch = uuid.uuid4().hex
         result = self.snapshot()
