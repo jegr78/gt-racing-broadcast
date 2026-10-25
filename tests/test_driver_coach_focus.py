@@ -287,7 +287,7 @@ def t_evidence_and_screen_are_numeric_and_cannot_be_replaced_by_success_prose():
     engine,cal,_,_=ready('pace',(90,90));bad=finding(net=-.001);bad['check']['screen_s']=.00001
     for n in (3,4,5):state=attempt(engine,cal,n,89,[bad])
     assert state['phase']!='completed' and not state['progress']['pace_improved']
-    for malformed in ({'evidence':[]},{'support':True},{'strength':100},{'section_id':[]},
+    for malformed in ({'evidence':[]},{'evidence':[{'id':'x','lap_id':'lap-2','unit':'s','value':1}]*9},{'support':True},{'strength':100},{'section_id':[]},
                       {'evidence':[{'id':'x','lap_id':'other','unit':'s','value':float('nan')}]}):
         engine,cal,baseline,_=ready();engine=coach.Focus();row=baseline[-1]
         bad=finding();bad.update(malformed)
@@ -456,6 +456,26 @@ def t_complete_check_fields_and_control_types_fail_closed():
     engine=coach.Focus();row=lap(2,92);bad=finding();bad['skill']=[]
     state=engine.observe(row,assessment(row,[bad]),cal.snapshot(),cal.baseline_laps())
     assert state['focus']['skill']=='consistency'
+
+
+def t_other_section_checks_cannot_fill_a_missing_focus_window():
+    engine,cal,_,_=ready();row=lap(3,89);snap=cal.ingest(row)
+    result=assessment(row,[])
+    result['section_checks']=[dict(section_id='other',check=finding()['check'])]
+    state=engine.observe(row,result,snap,cal.baseline_laps())
+    assert not state['attempts'] and state['progress']['result']=='evidence_unavailable'
+
+
+def t_balanced_requires_both_components_and_general_pace_uses_the_fixed_screen():
+    for times,fact in (((90,90),finding()),((90,92),finding(net=.2))):
+        engine,cal,_,_=ready('balanced',times)
+        for n in (3,4,5):state=attempt(engine,cal,n,89,[fact])
+        assert state['phase']!='completed'
+        assert not (state['progress']['pace_improved'] and state['progress']['consistency_improved'])
+    engine,cal,baseline,_=ready('pace');engine=coach.Focus();row=baseline[-1]
+    engine.observe(row,assessment(row,[]),cal.snapshot(),baseline)
+    for n in (3,4,5):state=attempt(engine,cal,n,90.90905,[])
+    assert state['phase']!='completed' and not state['progress']['pace_improved']
 
 
 if __name__=='__main__':
