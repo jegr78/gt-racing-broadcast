@@ -135,7 +135,7 @@ def t_limits_are_validated_and_pure_inputs_are_unchanged():
     for limits in ({'fuel_warning_laps':1,'fuel_urgent_laps':2}, {'fuel_urgent_laps':True},
                    {'fuel_warning_laps':float('nan')}, {'recent_laps':0}, {'unknown':1}):
         try:review(snap,limits=limits)
-        except ValueError:pass
+        except ValueError:pass  # expected invalid configuration
         else:raise AssertionError('Invalid limits accepted: '+str(limits))
 
 
