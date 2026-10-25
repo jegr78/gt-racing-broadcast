@@ -144,6 +144,8 @@ def _duration(trace, start, end):
 def _corners(definition):
     if not isinstance(definition, dict) or not isinstance(definition.get('corners'), list):
         return []
+    if len(definition['corners']) > CORNERS_MAX:
+        return []
     out = []
     for row in definition['corners'][:CORNERS_MAX]:
         if (not isinstance(row, dict) or not isinstance(row.get('id'), str)
@@ -183,7 +185,13 @@ def _separation(own, other, corner):
         match = ref.get(point['d'])
         if match is None or any(p.get(k) is None for p in (point, match) for k in ('x', 'z')):
             return None
-        distances.append(math.hypot(point['x'] - match['x'], point['z'] - match['z']))
+        dx, dz = point['x'] - match['x'], point['z'] - match['z']
+        if not finite(dx) or not finite(dz):
+            return None
+        distance = math.hypot(dx, dz)
+        if not finite(distance):
+            return None
+        distances.append(distance)
     if not distances:
         return None
     mean = sum(distances) / len(distances)
@@ -194,14 +202,18 @@ def _following_end(corner, corners, definition, trace):
     following = next((row['exit_m'] for row in corners if row['entry_m'] > corner['entry_m']), None)
     end = following if following is not None else (trace[-1]['d'] if trace else None)
     combinations = definition.get('combinations', [])
-    if isinstance(combinations, list):
-        for combination in combinations[:CORNERS_MAX]:
-            ids = combination.get('corner_ids') if isinstance(combination, dict) else None
-            if not isinstance(ids, list) or len(ids) > CORNERS_MAX or corner['id'] not in ids:
-                continue
-            combined = [c['exit_m'] for c in corners if c['id'] in ids]
-            if combined:
-                end = max([end or 0, *combined])
+    if not isinstance(combinations, list) or len(combinations) > CORNERS_MAX:
+        return None
+    known = {c['id'] for c in corners}
+    for combination in combinations:
+        ids = combination.get('corner_ids') if isinstance(combination, dict) else None
+        if (not isinstance(ids, list) or not 0 < len(ids) <= CORNERS_MAX
+                or any(not isinstance(ident, str) or ident not in known for ident in ids)):
+            return None
+        if corner['id'] not in ids:
+            continue
+        combined = [c['exit_m'] for c in corners if c['id'] in ids]
+        end = max([end or 0, *combined])
     return end
 
 
@@ -248,7 +260,7 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
     if reference is not None and not isinstance(reference, dict):
         unknown.append('Selected reference is unavailable.')
         reference = None
-    rows = personal_laps[-COHORT_MAX:] if isinstance(personal_laps, (list, tuple)) else []
+    rows = personal_laps[-(COHORT_MAX-1):] if isinstance(personal_laps, (list, tuple)) else []
     cohort = {(_scope(row), row['id']): row for row in [*rows, lap] if _compatible(lap, row)}
     candidates = [row for row in cohort.values() if (_scope(row), row['id']) != (_scope(lap), lap['id'])]
     if reference is None or (_scope(reference), reference.get('id')) == (_scope(lap), lap['id']):
@@ -271,7 +283,11 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
     corners = _corners(definition) if valid_definition else []
     if not corners:
         unknown.append('Comparable corner definition is unavailable.')
+    if isinstance(definition, dict) and isinstance(definition.get('corners'), list) and len(definition['corners']) > CORNERS_MAX:
+        unknown.append('Section evidence exceeds the assessment budget.')
     findings = []
+    incomplete_following = False
+    unavailable_line = False
     if own_trace and ref_trace:
         trace_cache = {key: _trace(row) for key, row in cohort.items()}
         for corner in corners:
@@ -283,8 +299,10 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
                 return cache[key]
             a, b = metrics(lap, own_trace), metrics(reference, ref_trace)
             a['line_separation_m'], b['line_separation_m'] = _separation(own_trace, ref_trace, corner), 0
+            unavailable_line = unavailable_line or a['line_separation_m'] is None
             check = _check(own_trace, ref_trace, corner, _following_end(corner, corners, definition, own_trace))
             if not check['available']:
+                incomplete_following = True
                 continue
             reviewed = (definition.get('reviewed') is True and type(corner.get('number')) is int
                         and 0 < corner['number'] <= 10000)
@@ -331,6 +349,10 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
                                  text='Compare timing variation over repeated comparable attempts.'),
                              evidence=[_evidence(row, 'lap', 'time_s', row['time_s'], 's') for row in cohort.values()]))
     result['findings'] = findings[:FINDINGS_MAX]
+    if incomplete_following:
+        unknown.append('Following-passage evidence is incomplete; section success is unavailable.')
+    if unavailable_line:
+        unknown.append('Line comparison is unavailable for at least one section.')
     if findings:
         result['status'] = 'ready'
         result['summary'] = f"Completed lap in {lap['time_s']:g} seconds. " + findings[0]['action']

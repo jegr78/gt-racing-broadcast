@@ -155,11 +155,12 @@ def t_incompatible_and_sparse_or_invalid_traces_cannot_support_corner_claims():
         reference=lap('ref',True);reference.update(changes)
         result=assess(own,reference)
         assert not any(f.get('section_id') for f in result['findings']),changes
-    for damage in ('gap','nan','reverse'):
+    for damage in ('gap','nan','reverse','local_order'):
         own=lap()
         if damage=='gap':own['trace']=own['trace'][::10]
-        if damage=='nan':own['trace'][10]['t']=float('nan')
+        if damage=='nan':own['trace'][2]['t']=float('nan')
         if damage=='reverse':own['trace'].reverse()
+        if damage=='local_order':own['trace'][1],own['trace'][2]=own['trace'][2],own['trace'][1]
         result=assess(own)
         assert not any(f.get('section_id') for f in result['findings']),damage
 
@@ -173,6 +174,51 @@ def t_malformed_identity_and_bounded_inputs_fail_closed_without_corner_claims():
     doc=definition();doc['combinations']=[{'corner_ids':None}]
     result=coach.assess(lap(),lap('ref',True),definition=doc)
     assert len(result['findings'])<=coach.FINDINGS_MAX
+
+
+def t_truncated_connected_context_cannot_claim_an_early_provisional_gain():
+    doc=definition()
+    first=doc['corners'][0]
+    doc['corners']=[dict(first,id='c'+str(i),number=i+1,exit_m=180+i*.001) for i in range(coach.CORNERS_MAX)]
+    doc['corners'].append(dict(first,id='far',number=coach.CORNERS_MAX+1,entry_m=325,apex_m=350,exit_m=375))
+    doc['combinations']=[dict(corner_ids=['c0','far'])]
+    own=lap(corner_gain=-.3)
+    for point in own['trace']:point['t']+=.8*max(0,min(1,(point['d']-300)/75))
+    own['time_s']=own['trace'][-1]['t']
+    result=coach.assess(own,lap('ref',True),definition=doc)
+    assert not any(f.get('section_id') for f in result['findings'])
+    assert any('budget' in message.lower() for message in result['unknown'])
+    complete=dict(doc,corners=[doc['corners'][0],doc['corners'][-1]])
+    result=coach.assess(own,lap('ref',True),definition=complete)
+    check=next(f for f in result['findings'] if f['section_id']=='c0')['check']
+    assert check['end_m']==375 and round(check['net_delta_s'],3)==.5 and check['result']=='tradeoff'
+    doc=definition();doc['combinations']=[{}]*coach.CORNERS_MAX+[dict(corner_ids=['turn-a','unknown'])]
+    result=coach.assess(lap(corner_gain=-.3),lap('ref',True),definition=doc)
+    assert not any(f.get('section_id') for f in result['findings'])
+
+
+def t_extreme_finite_coordinates_leave_line_unavailable_without_losing_timing():
+    own,ref=lap(),lap('ref',True)
+    for point in own['trace']:point['x']=10**308
+    for point in ref['trace']:point['x']=-(10**308)
+    result=assess(own,ref)
+    assert not any(f['skill']=='line' for f in result['findings'])
+    assert any(f['skill']=='braking' for f in result['findings'])
+
+
+def t_trace_cohort_and_result_budgets_are_observable_with_otherwise_usable_data():
+    own=lap()
+    own['trace']=[dict(d=i*.25,t=i*.01,speed_kmh=100) for i in range(coach.TRACE_MAX+1)]
+    own['time_s']=own['trace'][-1]['t'];own['length_m']=own['trace'][-1]['d']
+    assert not any(f.get('section_id') for f in assess(own)['findings'])
+    own=lap()
+    previous=[lap('prior-'+str(i)) for i in range(coach.COHORT_MAX+3)]
+    result=assess(own,personal_laps=previous)
+    assert all(f['support']<=coach.COHORT_MAX for f in result['findings'])
+    doc=definition();first=doc['corners'][0]
+    doc['corners']=[dict(first,id='section-'+str(i),number=i+1,entry_m=50+i*5,apex_m=125+i*5,exit_m=180+i*5) for i in range(8)]
+    result=coach.assess(own,lap('ref',True),definition=doc)
+    assert len(result['findings'])==coach.FINDINGS_MAX
 
 
 def t_production_live_store_rows_provide_personal_consistency_without_an_ideal_target():
