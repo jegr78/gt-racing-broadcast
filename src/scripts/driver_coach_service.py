@@ -59,6 +59,24 @@ def _mark(doc, wall):
                 lap=current.get('lap'), wall=wall)
 
 
+def _review(row, result, trained):
+    if result['status'] == 'unsuitable':
+        return dict(lap_id=row['id'], text='This lap is unsuitable for a new technique score. Keep the current exercise.',
+                    summary='No new technique score.', observation='This lap is unsuitable for comparison.',
+                    interpretation='Current evidence is unavailable.', action=None,
+                    check='Wait for a suitable comparable lap.')
+    observation = f"Completed lap in {row['time_s']:g} seconds."
+    exercise = trained.get('focus')
+    interpretation = trained['progress']['text'] if exercise else 'More suitable calibration laps are needed.'
+    action = exercise['action'] if exercise else 'Consider repeating a comparable approach for calibration.'
+    check = ('Check repeated passage time, its following section and exit speed.' if exercise and exercise['section_id'] is not None
+             else 'Check timing variation over repeated comparable laps.')
+    label = exercise['label']+'. ' if exercise else ''
+    return dict(lap_id=row['id'], observation=observation, interpretation=interpretation,
+                action=action, check=check, summary=observation+' '+interpretation,
+                text=observation+' '+label+action+' '+check)
+
+
 class Service:
     def __init__(self, profile, source, detail, radio, clock=time.monotonic, wall=time.time, assessor=None):
         self.profile, self.source, self.detail, self.radio = profile, source, detail, radio
@@ -340,9 +358,8 @@ class Service:
                 model['seen'][ident] = digest
                 while len(model['seen']) > 128:
                     model['seen'].popitem(last=False)
-                text = ('This lap is unsuitable for a new technique score. Keep the current exercise.'
-                        if result['status'] == 'unsuitable' else trained['review'])
-                model['latest'] = dict(lap_id=ident, text=text, summary=result['summary'])
+                model['latest'] = _review(row, result, trained)
+                text = model['latest']['text']
                 evidence = dict(coach=dict(lap_time_s=row.get('time_s'), baseline_time_s=(calibrated.get('baseline') or {}).get('time_s')),
                                 uncertainties=result['unknown'])
                 completed = brief.get('_end_wall')

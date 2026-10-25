@@ -256,6 +256,60 @@ def t_cached_phase_and_pending_changes_advance_the_optimistic_revision():
         assert stopped['revision']>pending['revision'] and not stopped['pending']
 
 
+def t_real_live_store_packets_drive_fresh_calibration_and_focus_without_an_external_target():
+    from test_gt7_laps import FakeCars,FakeTracks,write_circle_recording
+    import gt7_recording,gt7_telemetry
+    from race_engineer_live import Store
+    with tempfile.TemporaryDirectory() as root:
+        path=write_circle_recording(root,lap_secs=(20,20,16,20,19,18))
+        packets=list(gt7_recording.Recording(path).packets());clock=[100.0];wall=[packets[0][0]]
+        with Store(lambda:True,tracks=FakeTracks(),cars=FakeCars(),queue_max=4096,clock=lambda:clock[0]) as store:
+            radio=RadioFixture(root);radio.service.source=store.snapshot
+            radio.service.clock=lambda:clock[0];radio.service.wall=lambda:wall[0]
+            service=coach.Service('solo',store.snapshot,store.detail,radio.service,clock=lambda:clock[0],wall=lambda:wall[0])
+            try:
+                for i,(stamp,_kind,plain) in enumerate(packets):
+                    wall[0]=stamp;clock[0]=100+stamp-packets[0][0]
+                    store.put(gt7_telemetry.parse_packet(plain),stamp)
+                    if i==9:
+                        assert store.flush(10)
+                        service.command(LOCAL,'start',0,{},authorize=lambda:True);service.step()
+                    elif i%400==399:
+                        assert store.flush(10);service.step()
+                assert store.flush(10);service.step()
+                state=service.snapshot(LOCAL)
+                assert state['calibration']['phase']=='ready',state['calibration']
+                assert state['focus']['focus'] and state['focus']['focus']['skill']=='consistency'
+                baseline=state['calibration']['baseline']['lap_ids']
+                lookup={r['id']:r for r in store.snapshot()['laps']}
+                assert all(lookup[lid]['lap']>=3 for lid in baseline), 'Old or partly driven context lap calibrated'
+                assert state['latest'] and state['latest']['lap_id'] in lookup
+                assert any(m['kind']=='coach' for m in radio.service.history()['messages'])
+            finally:service.close();radio.service.close()
+
+
+def t_review_uses_measured_lap_time_and_never_promotes_an_unselected_second_action():
+    from test_driver_coach_focus import finding
+    import driver_coach_assessment
+    def assess(row,reference,**kwargs):
+        result=driver_coach_assessment.assess(row,reference,**kwargs)
+        chosen=finding('chosen','braking');chosen['action']='Consider the retained brake experiment.'
+        other=finding('other','steering',8,3);other['action']='Consider a different steering experiment.'
+        result['findings']=[chosen] if row['lap']<=3 else [other,chosen]
+        for fact in result['findings']:
+            for evidence in fact['evidence']:evidence['lap_id']=row['id']
+        result['status']='ready';result['summary']=result['findings'][0]['action']
+        return result
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root,assessor=assess);f.command();f.step()
+        for n in (2,3,4):f.complete(n,8.5);f.step()
+        state=f.service.snapshot(LOCAL);text=state['latest']['text']+' '+state['latest']['summary']
+        assert state['focus']['focus']['id']=='chosen'
+        assert 'different steering' not in text, 'Unselected assessment suggestion became a second coaching action'
+        assert '8.5' in state['latest']['text'] and 'retained brake' in text
+        assert all(state['latest'][k] for k in ('observation','interpretation','action','check'))
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)
