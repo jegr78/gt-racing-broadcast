@@ -176,6 +176,7 @@ from audience_connections import StorageError
 import overlay_build
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
+import driver_radio_access
 import race_engineer_live
 import race_engineer_api
 import gt7_context     # prepared session notes attached to each new recording
@@ -11582,6 +11583,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None):
+    radio_access = (driver_radio_access.Store(engineer_access.root, engineer_access.available)
+                    if engineer_access is not None else None)
+    radio_session = driver_radio_access.Session()
     audience_runtime = audience_runtime or audience_widgets.Runtime(
         os.path.join(os.path.dirname(overlay_dir), "audience.json") if overlay_dir else None)
     audience_script = os.path.join(_SRC_BASE, "ui", "audience.js")
@@ -11675,6 +11679,75 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
             return None
+        def _radio_error(self, code, message, status):
+            return self._send({"error": {"code": code, "message": message}}, status, no_store=True)
+
+        def _radio_body(self):
+            lengths = self.headers.get_all("Content-Length", [])
+            valid = (self.headers.get_content_type() == "application/json"
+                     and not self.headers.get("Transfer-Encoding") and len(lengths) == 1
+                     and lengths[0].isascii() and lengths[0].isdigit()
+                     and 0 < int(lengths[0]) <= driver_radio_access.MAX_BYTES)
+            if not valid:
+                raise driver_radio_access.RadioError("invalid_body", "Expected bounded JSON with Content-Length")
+            self.connection.settimeout(5)
+            raw = self.rfile.read(int(lengths[0]))
+            self._body_consumed = True
+            try:
+                value = json.loads(raw)
+            except (ValueError, RecursionError) as exc:
+                raise driver_radio_access.RadioError("invalid_body", "Expected a JSON object") from exc
+            if not isinstance(value, dict):
+                raise driver_radio_access.RadioError("invalid_body", "Expected a JSON object")
+            return value
+
+        def _radio(self, route, method, subject=None, admin=False):
+            # Bound both body parsing and do_POST's rejection drain.
+            self.connection.settimeout(5)
+            try:
+                if admin:
+                    if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
+                        return self._radio_error("foreign_origin", "Radio administration requires the local server origin", 403)
+                elif method == "POST" and not driver_radio_access.same_origin(self.headers):
+                    return self._radio_error("foreign_origin", "Radio writes require the current server origin", 403)
+                if radio_access is None:
+                    return self._radio_error("source_unavailable", "Radio requires a Solo POV telemetry profile", 503)
+                body = self._radio_body() if method == "POST" else None
+                # Settings writes and request authorization share a lock. A delayed
+                # body cannot retain an assignment that has since been revoked.
+                with driver_radio_access._LOCK:
+                    if admin:
+                        profile = radio_access.path.parent.name
+                        if method == "POST":
+                            if body.get("profile") != profile:
+                                return self._radio_error("profile_changed", "Radio profile changed; reload before saving", 409)
+                            body = {k: v for k, v in body.items() if k != "profile"}
+                        result = dict(radio_access.update(body) if method == "POST" else radio_access.read(), profile=profile)
+                    else:
+                        if self._console_subject() != subject:
+                            return self._radio_error("unauthorized", "Console identity changed; sign in again", 401)
+                        access = radio_access.authorize(subject)
+                        if route == "access":
+                            result = access
+                        else:
+                            engine = getattr(telemetry_store, "engineer", None)
+                            snapshot = engine.snapshot(compact=True) if engine is not None else {}
+                            binding = ({k: snapshot[k] for k in ("generation", "session_id", "context_revision")}
+                                       if snapshot.get("session_id") is not None else None)
+                            if method == "POST":
+                                result = radio_session.update(binding, body, service=route == "service",
+                                    lap_id=(snapshot.get("current") or {}).get("id"))
+                            else:
+                                result = radio_session.read(binding)
+                    return self._send(result, no_store=True)
+            except driver_radio_access.RadioError as exc:
+                status = (403 if exc.code in ("forbidden", "feature_disabled") else
+                          409 if exc.code in ("conflict", "session_unavailable") else
+                          503 if exc.code in ("source_unavailable", "settings_unavailable") else 400)
+                return self._radio_error(exc.code, str(exc), status)
+            except (OSError, ValueError, TypeError):
+                return self._radio_error("radio_unavailable", "Radio state is temporarily unavailable", 503)
+
         def _audience_admin(self, mutation=False, provider="youtube"):
             provider_service = {"youtube": youtube_service, "twitch": twitch_service}.get(provider)
             send = lambda obj, code=200: self._send({**obj, "protocol": audience_admin.PROTOCOL, "profile": provider_service.owner if provider_service else None, "provider": provider}, code, no_store=True)
@@ -12240,11 +12313,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     self._send_page(console_page_path, "/console")
                     return None
                 # API calls, non-GET, or OAuth-off installs: the rate-limited 401.
-                if sub and sub[0] == 'race-engineer':
+                if sub and sub[0] in ('race-engineer', 'driver-radio'):
                     client = self.client_address[0] if self.client_address else '?'
                     limited = not _console_authfail_rl.allow(client)
                     self._send({'error': {'code': 'rate_limited' if limited else 'unauthorized',
-                                         'message': 'Console identity is required'}}, 429 if limited else 401)
+                                         'message': 'Console identity is required'}}, 429 if limited else 401, no_store=True)
                 else:
                     self._console_deny()
                 return None
@@ -12310,6 +12383,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 ctype = _LOGO_CTYPES.get(ext, "image/png")
                 self._send_file(path, ctype)
                 return None
+            if sub and sub[0] == "driver-radio":
+                if console_policy.min_capability(sub, method) is None:
+                    return self._radio_error("not_found", "Unknown driver radio route", 404)
+                return self._radio(sub[1], method, subject=subject)
             if sub and sub[0]=="race-engineer":
                 is_pin = method == "POST" and sub == ["race-engineer", "pin"]
                 if not is_pin and (method != "GET" or not (
@@ -12604,6 +12681,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             /status is unaffected."""
             return redact_console_status(self._status_payload(), roles)
         def do_GET(self):
+            if urlparse(self.path).path == "/driver-radio/admin":
+                return self._radio("admin", "GET", admin=True)
             if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
                 return self._audience_admin(provider=urlparse(self.path).path.rsplit("/", 1)[1])
             p = [x for x in urlparse(self.path).path.split("/") if x]
@@ -13315,6 +13394,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.rfile.read(length)
 
         def do_POST(self):
+            if urlparse(self.path).path == "/driver-radio/admin":
+                self._body_consumed = False
+                try:
+                    return self._radio("admin", "POST", admin=True)
+                finally:
+                    self._drain_body()
             if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
                 return self._audience_admin(mutation=True, provider=urlparse(self.path).path.rsplit("/", 1)[1])
             p = [x for x in urlparse(self.path).path.split("/") if x]
@@ -13903,8 +13988,20 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
             else path
         )
 
+    radio = driver_radio_access.Store(access.root, access.available)
+
+    def ingestion_enabled():
+        for feature in (access, radio):
+            try:
+                if feature.available and feature.read()["enabled"]:
+                    return True
+            except (race_engineer_access.AccessError, driver_radio_access.RadioError):
+                # One corrupt feature's settings must not disable the other.
+                continue
+        return False
+
     store = race_engineer_live.Store(
-        lambda: access.read()["enabled"],
+        ingestion_enabled,
         tracks=telemetry._eng.track_db,
         cars=telemetry._cars,
         runtime_base=runtime_base,
