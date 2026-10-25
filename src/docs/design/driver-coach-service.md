@@ -102,3 +102,8 @@ Stop signals an active coach ticket before attempting the radio lock and never
 waits for a radio reader's grant I/O. Deferred queue cleanup uses the invalidated
 training token; a grant result is checked again after I/O before it can authorize
 any old message. The worker still serializes model transitions.
+
+While coach audio is playing, the native owner permits only one outstanding
+radio read. It polls cancellation while that read waits for grant I/O and closes
+its own player before the read returns. The read helper never owns microphone
+or player processes; cancellation cannot release a process slot before cleanup.

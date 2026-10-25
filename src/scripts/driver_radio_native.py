@@ -73,18 +73,48 @@ class Supervisor:
         if self._worker_proc is not None:
             self._worker_proc.close();self._worker_proc=None
 
-    def _stop_output(self,outcome):
+    def _stop_player(self):
         if self._player_proc is not None:
             self._player_proc.close();self._player_proc=None
+
+    def _stop_output(self,outcome):
+        self._stop_player()
         if self._ticket is not None:
             self.service.finish_playback(self._ticket.id,outcome);self._ticket=None
             self._settle=self.clock()+.3
 
+    def _radio_read(self, read):
+        ticket = self._ticket
+        if self._player_proc is None or ticket is None or ticket.message.get('kind') != 'coach':
+            return read()
+        # One read may wait for grant I/O. The sole native owner keeps polling
+        # cancellation and closes its player itself; no second process owner.
+        done = threading.Event(); results = []; failures = []; cleanup = []
+        def run():
+            try:results.append(read())
+            except Exception as exc:failures.append(exc)
+            finally:done.set()
+        worker = threading.Thread(target=run, name='radio-native-read', daemon=True)
+        worker.start()
+        def cancel():
+            with self._lock:
+                cancelled = (self._closed or self._paused or self._muted
+                             or self._control_changed or ticket.cancelled.is_set())
+            if cancelled and not cleanup:
+                try:self._stop_player()
+                except (OSError, ValueError, TypeError) as exc:
+                    cleanup.append(exc);self._set('error','cleanup_failed')
+        while not done.wait(.02):cancel()
+        cancel(); worker.join()
+        if cleanup:raise cleanup[0]
+        if failures:raise failures[0]
+        if not results:raise ValueError('radio_unavailable')
+        return results[0]
+
     def _current(self,signature,output=False):
         # Consent may change while a previous process is stopping. Revalidate
         # outside the state lock before admitting its replacement.
-        settings=self.service.settings.read()
-        state=self.service.refresh(force=True)
+        settings,state=self._radio_read(lambda:(self.service.settings.read(),self.service.refresh(force=True)))
         with self._lock:
             return (not self._closed and not self._paused and not self._control_changed
                     and (not output or not self._muted)
@@ -95,7 +125,7 @@ class Supervisor:
         # separate state lock and remain available during spawn/termination.
         with self._work_lock:
             if self._closed:return
-            settings=self.service.settings.read();state=self.service.refresh()
+            settings,state=self._radio_read(lambda:(self.service.settings.read(),self.service.refresh()))
             voice=settings['voice'];native=config.settings(settings.get('native'))
             signature=(settings['revision'],state['binding'],state['epoch'])
             enabled=settings['enabled'] and self.service.settings.available and voice['enabled']
@@ -118,7 +148,7 @@ class Supervisor:
                 self._set('disabled' if not enabled else 'paused');return
             if self._ticket is not None:
                 # Force freshness and cancellation checks before every player poll.
-                audio=self.service.audio_for(self._ticket.id)
+                audio=self._radio_read(lambda:self.service.audio_for(self._ticket.id))
                 if self._ticket.cancelled.is_set() or self._muted:
                     self._stop_output('text_only');return
                 if self._player_proc is not None:
@@ -134,7 +164,8 @@ class Supervisor:
                         self._stop_output('failed');self._set('error','playback_unavailable')
                     if not self._current(signature,output=True):self._stop_output('text_only')
                     return
-                message=next((m for m in self.service.history()['messages'] if m['id']==self._ticket.message['id']),None)
+                history=self._radio_read(self.service.history)
+                message=next((m for m in history['messages'] if m['id']==self._ticket.message['id']),None)
                 if message is None or message['audio_state'] in ('unconfigured','failed','not_requested'):
                     self._stop_output('text_only');return
                 self._set('responding');return
@@ -147,7 +178,7 @@ class Supervisor:
                     self._set('responding')
                     if self._muted:self._stop_output('text_only')
                     else:
-                        audio=self.service.audio_for(self._ticket.id)
+                        audio=self._radio_read(lambda:self.service.audio_for(self._ticket.id))
                         if audio is not None:
                             if not self._current(signature,output=True):self._stop_output('text_only');return
                             try:self._player_proc=self.player_factory(audio,self._volume)

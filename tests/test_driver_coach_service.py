@@ -663,6 +663,79 @@ def t_publication_rechecks_the_training_token_after_a_delayed_grant():
         assert not reader.is_alive() and results==[False], 'Delayed grant authorized an obsolete publication'
 
 
+def t_native_player_closes_before_a_blocked_radio_grant_is_released():
+    import driver_radio_native as native
+    from test_driver_radio_native import Worker,Player
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();f.complete(2);f.step();f.at+=2
+        message=f.messages()[-1]
+        assert f.radio.service.attach(message['id'],message['epoch'],{'audio':b'fixture','audio_state':'ready'})
+        closed=threading.Event();players=[]
+        class WatchedPlayer(Player):
+            def close(self):super().close();closed.set()
+        def player(_audio,_volume):p=WatchedPlayer();players.append(p);return p
+        owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=lambda _body:Worker(),player=player,
+                               ready=lambda:True,clock=lambda:f.at)
+        entered=threading.Event();release=threading.Event();reading=threading.Event()
+        reader=None;output=None;read=f.radio.access.read
+        try:
+            owner.step();assert len(players)==1 and not players[0].closed
+            def grant():entered.set();assert release.wait(4);return True
+            f.service._grant=grant
+            reader=threading.Thread(target=f.messages);reader.start();assert entered.wait(1)
+            def blocked_read():reading.set();return read()
+            f.radio.access.read=blocked_read
+            output=threading.Thread(target=owner.step);output.start();assert reading.wait(1)
+            assert not f.command('stop')['active']
+            assert closed.wait(.5), 'Native player kept playing while radio grant I/O blocked refresh'
+        finally:
+            release.set()
+            if reader is not None:reader.join(5)
+            if output is not None:output.join(5)
+            f.radio.access.read=read;owner.close()
+        assert not reader.is_alive() and not output.is_alive()
+
+
+def t_failed_player_cleanup_keeps_its_slot_and_does_not_abandon_a_pending_radio_read():
+    import driver_radio_native as native
+    from test_driver_radio_native import Worker,Player
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();f.complete(2);f.step();f.at+=2
+        message=f.messages()[-1]
+        assert f.radio.service.attach(message['id'],message['epoch'],{'audio':b'fixture','audio_state':'ready'})
+        attempted=threading.Event();entered=threading.Event();release=threading.Event();reading=threading.Event()
+        class FailingPlayer(Player):
+            def close(self):
+                if not attempted.is_set():attempted.set();raise OSError('Controlled cleanup failure')
+                super().close()
+        player=FailingPlayer();errors=[];calls=[];read=f.radio.access.read;finished=threading.Event()
+        owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=lambda _body:Worker(),
+                               player=lambda _audio,_volume:player,ready=lambda:True,clock=lambda:f.at)
+        reader=None;output=None
+        try:
+            owner.step();assert owner._player_proc is player
+            def grant():entered.set();assert release.wait(4);return True
+            f.service._grant=grant
+            reader=threading.Thread(target=f.messages);reader.start();assert entered.wait(1)
+            def blocked_read():calls.append(True);reading.set();return read()
+            f.radio.access.read=blocked_read
+            def step():
+                try:owner.step()
+                except OSError as error:errors.append(str(error))
+                finally:finished.set()
+            output=threading.Thread(target=step);output.start();assert reading.wait(1)
+            f.command('stop');assert attempted.wait(.5)
+            assert not finished.wait(.1), 'Cleanup failure abandoned a radio read still in flight'
+            assert output.is_alive() and owner._player_proc is player and owner._worker_proc is None
+            assert len(calls)==1 and not errors, 'Pending grant read was abandoned after cleanup failure'
+        finally:
+            release.set()
+            if reader is not None:reader.join(5)
+            if output is not None:output.join(5)
+            f.radio.access.read=read;owner.close()
+        assert player.closed and errors==['Controlled cleanup failure']
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)
