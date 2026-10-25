@@ -61,3 +61,9 @@ non-finite or oversized inputs before retaining them. Public snapshots contain
 metadata, not full telemetry traces or recording filesystem paths. The caller
 serializes coaching operations; no provider, process, network or persistence is
 started by calibration itself.
+
+Retired GT7 session identities are remembered until an explicit training restart.
+Late packets from those sessions cannot roll calibration back. After 64 session
+transitions, training stops and requires an explicit restart, rather than evicting
+tombstones and silently allowing old sessions again. Baseline arithmetic preserves
+finite positive values without overflowing their sum or underflowing equal inputs.

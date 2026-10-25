@@ -5,7 +5,6 @@ import copy
 import hashlib
 import json
 import math
-import statistics
 import uuid
 from dataclasses import dataclass
 
@@ -13,6 +12,7 @@ import gt7_context
 
 LAP_BYTES_MAX = 1024 * 1024
 SEEN_MAX = 128
+SESSION_MAX = 64
 OBJECTIVES = ('balanced', 'consistency', 'pace')
 MODES = ('practice', 'time_trial')
 CONTEXT = ('session_id', 'car_id', 'track_id', 'layout', 'compound', 'stint_id',
@@ -141,6 +141,7 @@ class Calibration:
         self.epoch = uuid.uuid4().hex
         self._phase = 'inactive'
         self._events = collections.deque(maxlen=16)
+        self._retired = set()
         self._clear()
 
     def _clear(self):
@@ -166,6 +167,7 @@ class Calibration:
             raise CoachError('invalid_owner')
         self._clear()
         self._events.clear()
+        self._retired.clear()
         self.owner = copy.deepcopy(owner)
         self.mode, self.objective = mode, objective
         self.training_id = uuid.uuid4().hex
@@ -204,18 +206,25 @@ class Calibration:
         self._check_grant()
         if not self.active:
             return self.snapshot()
+        session_id = value.get('session_id') if isinstance(value, dict) else None
+        if isinstance(session_id, str) and session_id in self._retired:
+            self._reason = 'retired_session'
+            return self.snapshot()
         entry = _prepare(value)
         if entry is None:
             ident = value.get('id') if isinstance(value, dict) else None
             retained = self._cohort + [e for e in (self._working, self._candidate) if e]
-            if isinstance(ident, str) and (ident in self._seen or any(e.row['id'] == ident for e in retained)):
+            if (isinstance(ident, str) and isinstance(session_id, str)
+                    and ((session_id, ident) in self._seen or any(
+                        e.row['id'] == ident and e.row['session_id'] == session_id for e in retained))):
                 self.invalidate('evidence_corrected')
             self._reason = 'unsuitable'
             return self.snapshot()
         row = entry.row
         retained = self._cohort + [e for e in (self._working, self._candidate) if e]
-        previous = self._seen.get(row['id']) or next(
-            (e.digest for e in retained if e.row['id'] == row['id']), None)
+        key = (row['session_id'], row['id'])
+        previous = self._seen.get(key) or next(
+            (e.digest for e in retained if (e.row['session_id'], e.row['id']) == key), None)
         if previous is not None:
             if previous == entry.digest:
                 self._reason = 'duplicate'
@@ -226,10 +235,16 @@ class Calibration:
             self._reason = 'out_of_order'
             return self.snapshot()
         elif self._context is not None and _context(row) != self._context:
+            if row['session_id'] != self._context['session_id']:
+                if len(self._retired) >= SESSION_MAX:
+                    self.stop()
+                    self._reason = 'session_limit'
+                    return self.snapshot()
+                self._retired.add(self._context['session_id'])
             self.invalidate('context_changed')
         self._context = _context(row)
         self._latest = row['lap']
-        self._seen[row['id']] = entry.digest
+        self._seen[key] = entry.digest
         while len(self._seen) > SEEN_MAX:
             self._seen.popitem(last=False)
         if len(self._cohort) < 3:
@@ -239,9 +254,10 @@ class Calibration:
         if not self._focus and not self._selected:
             self._working = self._candidate
         if self._baseline is None and len(self._cohort) >= 2:
+            low, high = sorted(e.row['time_s'] for e in self._cohort[:2])
             self._baseline = dict(id=uuid.uuid4().hex,
                                   lap_ids=[e.row['id'] for e in self._cohort[:2]],
-                                  time_s=statistics.median(e.row['time_s'] for e in self._cohort[:2]))
+                                  time_s=low + (high - low) / 2)
         self._phase = 'ready' if len(self._cohort) >= 3 else 'provisional' if self._baseline else 'calibrating'
         self._accepted, self._reason = True, None
         return self.snapshot()
@@ -300,6 +316,7 @@ class Calibration:
                     baseline=copy.deepcopy(self._baseline), reference=ref,
                     focus_active=self._focus, unknown=sorted(unknown),
                     retained_laps=len(retained), dedup_entries=len(self._seen),
+                    retired_sessions=len(self._retired),
                     invalidations=copy.deepcopy(list(self._events)))
 
     def stop(self):

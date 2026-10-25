@@ -207,6 +207,29 @@ def t_stale_context_cannot_reset_the_current_cohort_and_free_notes_do_not_drift_
     rejects(lambda: c.select_reference(malformed, lambda: True), 'reference_incompatible')
 
 
+def t_retired_session_packets_cannot_roll_calibration_back_and_tombstones_are_bounded():
+    c = started(); c.ingest(lap(5)); c.ingest(lap(6))
+    c.ingest(lap(1, session_id='new-session'))
+    before = c.snapshot()
+    result = c.ingest(lap(7))
+    assert not result['accepted'] and result['epoch'] == before['epoch']
+    assert result['calibration_ids'] == before['calibration_ids']
+    for n in range(coach.SESSION_MAX + 1):
+        result = c.ingest(lap(1, session_id='session-' + str(n)))
+    assert not result['active'] and result['reason'] == 'session_limit'
+    assert c.ingest(lap(7))['active'] is False
+    c.start(OWNER)
+    assert c.ingest(lap(7))['accepted'], 'explicit restart did not clear session tombstones'
+
+
+def t_finite_positive_baseline_inputs_cannot_overflow_or_underflow():
+    import json
+    for number in (1e308, 5e-324):
+        c = started(); c.ingest(lap(2, number)); result = c.ingest(lap(3, number))
+        assert result['baseline']['time_s'] == number
+        json.dumps(result, allow_nan=False)
+
+
 def t_real_live_store_packets_calibrate_without_external_target():
     from test_gt7_laps import FakeCars, FakeTracks, write_circle_recording
     from test_race_engineer_live import feed
