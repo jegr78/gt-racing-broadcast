@@ -140,10 +140,10 @@ class Supervisor:
                 self._set('responding');return
             if self.service.pending_count():
                 if not self._current(signature):return
-                self._stop_capture()
-                if not self._current(signature):return
                 self._ticket=self.service.take_playback()
                 if self._ticket is not None:
+                    self._stop_capture()
+                    if not self._current(signature):self._stop_output('text_only');return
                     self._set('responding')
                     if self._muted:self._stop_output('text_only')
                     else:

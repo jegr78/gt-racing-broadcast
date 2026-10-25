@@ -164,7 +164,8 @@ class Service:
                                stamp=_stamp(doc) if _live(doc) else None,
                                mark=_mark(doc, command['wall']) if _live(doc) else None,
                                seen=collections.OrderedDict(), allow_ai=options.get('allow_ai', False),
-                               latest=None, owner=command['owner'], cal_epoch=cal.epoch, reference_grant=None)
+                               latest=None, owner=command['owner'], cal_epoch=cal.epoch, reference_grant=None,
+                               sources=collections.OrderedDict(), best_source=None)
             return
         model = self._model
         if model is None:
@@ -188,7 +189,7 @@ class Service:
             model['focus'].observe(None, None, model['cal'].snapshot())
         model['latest'] = None
 
-    def _current(self, token, stamp=None):
+    def _current(self, token, stamp=None, expected=()):
         with self._lock:
             valid = (not self._stop.is_set() and self._state['active'] and self._token == token
                      and self._command is None)
@@ -196,7 +197,10 @@ class Service:
         if not valid or not _allowed(grant) or self._model and self._model.get('reference_grant') is not None and not _allowed(self._model['reference_grant']):
             return False
         doc = self.source()
-        return _live(doc) and (stamp is None or _stamp(doc) == stamp)
+        if not _live(doc) or stamp is not None and _stamp(doc) != stamp:
+            return False
+        lookup = {row.get('id'): row for row in (doc.get('laps') or [])[-512:] if isinstance(row, dict)}
+        return all(ident in lookup and _facts(lookup[ident]) == facts for ident, facts in expected)
 
     def _speak(self, token):
         doc = self.source()
@@ -235,6 +239,8 @@ class Service:
                 model['cal_epoch'] = model['cal'].epoch
                 model['focus'].observe(None, None, model['cal'].snapshot())
                 model['cohort'].clear(); model['latest'] = None
+                if model['cal'].snapshot()['baseline'] is None:
+                    model['sources'].clear(); model['best_source'] = None
                 model['reference_grant'] = None if model['cal'].snapshot()['reference'] is None or model['cal'].snapshot()['reference']['source'] != 'selected' else model['reference_grant']
                 self.radio.cancel_coach()
             doc = self.source()
@@ -252,6 +258,7 @@ class Service:
                 model['focus'].observe(None, None, model['cal'].snapshot())
                 model['stamp'], model['mark'] = stamp, _mark(doc, self.wall())
                 model['cohort'].clear(); model['seen'].clear(); model['latest'] = None
+                model['sources'].clear(); model['best_source'] = None
                 self.radio.cancel_coach()
             mark = model['mark']
             rows = doc.get('laps') or []
@@ -284,6 +291,8 @@ class Service:
                 if model['cal'].epoch != model['cal_epoch']:
                     model['cal_epoch'] = model['cal'].epoch
                     model['cohort'].clear()
+                    if calibrated['baseline'] is None:
+                        model['sources'].clear(); model['best_source'] = None
                     self.radio.cancel_coach()
                 result = self.assessor(row, frozen, definition=row.get('track_definition'), personal_laps=list(model['cohort']))
                 trained = model['focus'].observe(row, result, calibrated, model['cal'].baseline_laps())
@@ -293,12 +302,23 @@ class Service:
                     prepared = calibration._prepare(row)
                     if prepared:
                         model['cohort'].append(prepared.row)
+                        if model['best_source'] is None or row['time_s'] < model['best_source'][0]:
+                            model['best_source'] = (row['time_s'], ident)
                 if not self._current(token, stamp):
                     return
                 current = self.source()
                 valid = next((r for r in current.get('laps', []) if r.get('id') == ident), None)
                 if valid is None or any(valid.get(k) != brief.get(k) for k in ('measurement_hash', 'version', 'context_revision')):
                     return
+                model['sources'][ident] = digest
+                required = set((calibrated.get('baseline') or {}).get('lap_ids', [])) | {ident}
+                reference = calibrated.get('reference') or {}
+                if reference.get('source') == 'personal':required.add(reference['id'])
+                pins = required | ({model['best_source'][1]} if model['best_source'] else set())
+                while len(model['sources']) > 128:
+                    disposable = next(key for key in model['sources'] if key not in pins)
+                    del model['sources'][disposable]
+                expected = tuple((key, model['sources'].get(key)) for key in sorted(required))
                 model['seen'][ident] = digest
                 while len(model['seen']) > 128:
                     model['seen'].popitem(last=False)
@@ -307,10 +327,14 @@ class Service:
                 model['latest'] = dict(lap_id=ident, text=text, summary=result['summary'])
                 evidence = dict(coach=dict(lap_time_s=row.get('time_s'), baseline_time_s=(calibrated.get('baseline') or {}).get('time_s')),
                                 uncertainties=result['unknown'])
-                self._ready_at = self.clock()+1.5
+                completed = brief.get('_end_wall')
+                completion = completed if assessment.finite(completed) else float('-inf')
+                latest_lap = max((r['lap'] for r in candidates), default=None)
+                self._ready_at = self.clock()+max(0, completion+1.5-self.wall())
                 self.radio.publish_coach(text, evidence, model['owner'], token,
-                    authorize=lambda token=token,stamp=stamp:self._current(token, stamp),
-                    ready=lambda token=token:self._speak(token), allow_ai=model['allow_ai'])
+                    authorize=lambda token=token,stamp=stamp,expected=expected:self._current(token, stamp, expected),
+                    ready=lambda token=token:self._speak(token), allow_ai=model['allow_ai'],
+                    completed_at=completion, latest=brief['lap'] == latest_lap)
             with self._lock:
                 if token == self._token and self._command is None:
                     new = dict(active=True, pending=False, phase=model['cal'].snapshot()['phase'],

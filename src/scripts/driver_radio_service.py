@@ -192,7 +192,8 @@ class Service:
             self._queue = [mid for mid in self._queue if self._messages[mid]['state'] == 'queued']
             self._revision += 1
 
-    def publish_coach(self, text, evidence, owner, training_epoch, authorize, ready, allow_ai=False):
+    def publish_coach(self, text, evidence, owner, training_epoch, authorize, ready, allow_ai=False,
+                      completed_at=None, latest=False):
         """Trusted coordinator entry. Private facts use the existing native owner."""
         if (not isinstance(text, str) or not 0 < len(text) <= 1200
                 or not callable(authorize) or authorize() is not True):
@@ -202,13 +203,15 @@ class Service:
             if not self._enabled or not self._live or self._closed:return None
             self.cancel_coach()
             result = dict(answers={'coach':text}, fuel={}, pace={}, tyres={}, uncertainties=[])
-            queued = (self._voice_enabled and not any(self._messages[mid]['severity']=='urgent' for mid in self._queue))
+            remaining = max(0, min(12, completed_at+12-self.wall())) if assessment.number(completed_at) is not None else 0
+            fresh = latest is True and remaining > 0
+            queued = (fresh and self._voice_enabled and not any(self._messages[mid]['severity']=='urgent' for mid in self._queue))
             public = self._publish('coach', 'coach', 'normal', result, self.clock(), queued=queued)
             message = self._messages[public['id']]
             message.update(evidence=copy.deepcopy(evidence), _coach_owner=copy.deepcopy(owner),
                            _coach_epoch=training_epoch, _coach_guard=authorize, _coach_ready=ready,
-                           _deadline=self.clock()+12, expires_at=self.wall()+12,
-                           ai_state='pending' if allow_ai is True else 'not_requested')
+                           _deadline=self.clock()+remaining, expires_at=self.wall()+remaining,
+                           ai_state='pending' if fresh and allow_ai is True else 'not_requested')
             return self._public(message)
 
     def refresh(self, force=False):

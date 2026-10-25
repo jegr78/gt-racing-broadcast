@@ -19,6 +19,8 @@ class Fixture:
     def __init__(self,root,assessor=None):
         self.radio=RadioFixture(root)
         self.at=100.0;self.wall=1000.0;self.granted=True;self.rows={}
+        self.radio.service.clock=lambda:self.at
+        self.radio.service.wall=lambda:self.wall
         self.snap=dict(generation='generation',session_id='live',context_revision=0,revision=1,
                        current=self.current(1),laps=[],receipt=dict(state='live',received_at=self.wall),
                        replay=dict(active=False),instruments=dict(speed_kmh=100,brake=0,throttle=100,steer_rad=0))
@@ -156,6 +158,59 @@ def t_reference_revocation_without_a_new_lap_cancels_focus_and_pending_output():
         state=f.step()
         assert state['focus']['focus'] is None and state['latest'] is None
         assert not f.radio.service.take_playback()
+
+
+def t_old_completion_after_reconnect_keeps_text_without_a_new_speech_or_ai_deadline():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(allow_ai=True);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        f.snap['receipt']['state']='stale';f.complete(4);f.step()
+        f.at+=120;f.wall+=120;f.snap['receipt'].update(state='live',received_at=f.wall)
+        state=f.step();assert state['latest']['lap_id']=='lap-4'
+        f.at+=2;f.wall+=2
+        assert f.radio.service.take_playback() is None, 'Old completed lap received a fresh spoken deadline'
+        last=f.messages()[-1]
+        assert last['state']=='text_only' and last['ai_state']=='not_requested'
+        assert f.radio.service.remaining_for(last['id'],last['epoch'],kind='ai')==0
+
+
+def t_corrected_latest_baseline_and_working_reference_cancel_output_without_a_cpu_step():
+    for changed in (7,2,4):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.command(objective='pace');f.step()
+            for n,seconds in ((2,8.2),(3,8),(4,7.8),(5,7.8),(6,7.8),(7,8.1)):
+                f.complete(n,seconds);f.step()
+            state=f.service.snapshot(LOCAL)
+            assert state['calibration']['reference']['id']=='lap-4'
+            for brief in f.snap['laps']:
+                if brief['id']=='lap-'+str(changed):brief.update(measurement_hash='corrected',time_s=9)
+            f.rows['lap-'+str(changed)].update(measurement_hash='corrected',time_s=9)
+            f.at+=2;f.wall+=2
+            assert f.radio.service.take_playback() is None,changed
+            last=f.messages()[-1]
+            assert not f.radio.service.attach(last['id'],last['epoch'],{'explanation':'Old evidence','ai_state':'ready'})
+
+
+def t_deferred_coach_speech_does_not_recreate_the_native_microphone_owner():
+    import driver_radio_native as native
+    from test_driver_radio_native import Worker,Player
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();f.complete(2);f.step()
+        workers=[];players=[]
+        def worker(_config):w=Worker();workers.append(w);return w
+        def player(_audio,_volume):p=Player();players.append(p);return p
+        owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=worker,player=player,
+                               microphone=lambda:'Fixture microphone',clock=lambda:f.at,ready=lambda:True)
+        try:
+            owner.step();assert len(workers)==1
+            f.complete(3);f.step()
+            for _ in range(6):owner.step()
+            assert len(workers)==1 and not workers[0].closed and not players
+            f.at+=2;f.wall+=2
+            message=f.messages()[-1]
+            assert f.radio.service.attach(message['id'],message['epoch'],{'audio':b'fixture','audio_state':'ready'})
+            owner.step();assert workers[0].closed and len(players)==1
+        finally:owner.close()
 
 
 if __name__=='__main__':
