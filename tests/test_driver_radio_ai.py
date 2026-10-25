@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import ai_agents
@@ -82,6 +83,13 @@ def t_disabled_personal_busy_and_changed_configuration_do_not_publish():
             settings.save({'enabled':True,'agents':[updated]})
             return b''
         rejected(lambda:live.LiveAI(machine,adapter_factory=Adapter,process=changes).explain('live',message,threading.Event(),8),'cancelled')
+
+
+def t_deadline_rounding_cannot_increase_the_process_budget():
+    # Windows can return the same monotonic tick throughout a short preparation.
+    # (8.002 + 8) - 8.002 rounds to 8.000000000000002 on every platform.
+    with patch.object(live,'time',SimpleNamespace(monotonic=lambda:8.002)):
+        t_live_package_reuses_isolation_and_contains_only_allowed_facts()
 
 
 def invocation(d,script):

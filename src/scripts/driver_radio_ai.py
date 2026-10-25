@@ -30,7 +30,8 @@ class LiveAI:
         self.adapter_factory,self.process=adapter_factory,process
 
     def explain(self,agent_id,message,stopped,budget):
-        deadline=time.monotonic()+min(8,budget)
+        budget=min(8,budget)
+        deadline=time.monotonic()+budget
         lease=None
         try:
             settings=ai_agents.Settings(self.machine)
@@ -60,7 +61,7 @@ class LiveAI:
                         'belong only in claims with their exact supplied fact ID, value and unit; the server renders them. Read facts.json.\n'+raw).encode()
                 adapter=self.adapter_factory(agent)
                 def probe_run(argv,**kwargs):
-                    left=min(2,deadline-time.monotonic())
+                    left=min(2,budget,deadline-time.monotonic())
                     invocation=ai_agents.Invocation(argv,str(package),'',max(1,int(left)),adapter.provider)
                     try:
                         result=self.process(invocation,None,stopped,left,ai_jobs.execution_env(os.environ))
@@ -72,7 +73,7 @@ class LiveAI:
                 probe=adapter.probe(run=probe_run,env=dict(os.environ))
                 if stopped.is_set():raise ProviderError('cancelled')
                 invocation=adapter.invocation(package,out,package/'result-schema.json',probe)
-                left=deadline-time.monotonic()
+                left=min(budget,deadline-time.monotonic())
                 if left<=0:raise ProviderError('timed_out')
                 stdout=self.process(invocation,prompt,stopped,left,ai_jobs.execution_env(os.environ))
                 if stopped.is_set():raise ProviderError('cancelled')
