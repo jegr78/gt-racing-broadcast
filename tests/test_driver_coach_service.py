@@ -592,6 +592,40 @@ def t_real_store_detail_eviction_recovers_after_a_delayed_worker():
             finally:service.close();radio.service.close()
 
 
+def t_training_trust_boundaries_reject_foreign_owners_and_truthy_grants():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root)
+        for owner in ({'profile':'other','subject':'local:producer'},
+                      {'profile':'solo','subject':'untrusted'},
+                      dict(LOCAL,extra=True)):
+            rejects(lambda owner=owner:f.service.command(owner,'start',0,{},authorize=lambda:True),'invalid_owner')
+        for grant in (lambda:1,lambda:'yes',None):
+            rejects(lambda grant=grant:f.service.command(LOCAL,'start',0,{},authorize=grant),'forbidden')
+        f.command()
+        rejects(lambda:f.service.command(LOCAL,'stop',True,{},authorize=lambda:True),'conflict')
+        f.step()
+        f.service.close()
+        rejects(f.command,'service_closed')
+
+
+def t_wall_watermark_excludes_later_numbered_laps_started_before_consent():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        f.complete(2,_start_wall=999)
+        state=f.step();assert not state['latest'] and not state['calibration']['calibration_ids']
+
+
+def t_frozen_detail_identity_cannot_be_substituted_and_source_session_cannot_mix():
+    for field,value in (('id','foreign'),('session_id','other'),('measurement_hash','other'),
+                        ('version',99),('context_revision',99)):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.command();f.step();row=f.complete(2);f.rows[row['id']][field]=value
+            state=f.step();assert not state['latest'] and not state['calibration']['calibration_ids'],field
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();f.complete(2,session_id='foreign')
+        state=f.step();assert not state['latest'] and not state['calibration']['calibration_ids']
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)
