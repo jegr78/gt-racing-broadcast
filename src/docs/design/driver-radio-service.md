@@ -25,6 +25,12 @@ cleared on session/context/setup/access changes. Non-live data cancels queued
 and active playback immediately. Reconnect reads text only and cannot enqueue
 old alerts. A read never claims playback.
 
+AI interpretation has independent eligibility until the message deadline. A
+completed, failed or unconfigured audio attempt cannot cancel a still-current
+text interpretation or cause audio to replay. Requester revocation and epoch
+changes cancel both kinds of work. Bounded follow-up context includes prior
+answers and validated interpretations, not only question topics.
+
 Fuel announcements occur at severity crossings. Urgency can escalate once. A
 physical refill accumulating at least two litres or a usable range above warning+0.5 laps
 rearms the warning. Session/setup changes reset the episode. This avoids chatter
@@ -32,7 +38,9 @@ around the warning threshold. Pace notices require a new completed-lap compariso
 and a 60-second cooldown. Unsupported or stale data creates no automatic notice.
 
 Requested presets are a fixed enum. The request must echo the current binding;
-identical requests within two seconds share a message. Admission is bounded and
+identical preset requests with unchanged evidence within two seconds share a
+message. Automatic alerts and voice questions are never preset substitutes.
+Admission is bounded and
 returns `rate_limited` when a native queue cannot accept another routine message.
 Urgent fuel cancels a routine active ticket and waits for its stop acknowledgement
 before granting the only playback slot. Cancelled/expired tickets never free that

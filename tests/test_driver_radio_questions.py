@@ -45,6 +45,21 @@ def t_commands_and_unbound_followups_never_execute_controls_or_reuse_old_context
             else:raise AssertionError('Invalid question accepted')
 
 
+def t_followup_context_contains_the_prior_answer_and_validated_interpretation():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=f.poll()
+        first=f.service.question('Fuel range?',state['binding'])
+        assert f.service.attach(first['id'],first['epoch'],{'explanation':'Fuel range may change.','ai_state':'ready'})
+        second=f.service.question('And one more lap?',state['binding'])
+        context=second['conversation'][-1]
+        assert first['text'] in context['answer'] and 'Fuel range may change.' in context['answer']
+        assert context['question']==first['question'] and 'id' not in context
+        for _ in range(6):f.service.question('What about pace?',state['binding'])
+        assert len(f.service.history()['messages'][-1]['conversation'])==4
+        f.snap['context_revision']+=1;state=f.poll()
+        assert f.service.question('And one more lap?',state['binding'])['conversation']==[]
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

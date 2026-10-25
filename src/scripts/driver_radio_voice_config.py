@@ -21,7 +21,7 @@ def settings(value=None):
 
 def paths(machine):
     root=Path(machine)/'radio-voice'
-    name='libvosk.dll' if sys.platform.startswith('win') else 'libvosk.dylib' if sys.platform=='darwin' else 'libvosk.so'
+    name='libvosk.dll' if sys.platform.startswith('win') else 'libvosk.dyld' if sys.platform=='darwin' else 'libvosk.so'
     return dict(library=str(root/'vosk'/name),en=str(root/'vosk-model-small-en-us-0.15'),
                 de=str(root/'vosk-model-small-de-0.15'))
 

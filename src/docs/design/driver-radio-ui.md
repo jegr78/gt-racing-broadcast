@@ -19,3 +19,10 @@ Static shared JavaScript is available under the Console mount for both views;
 it contains no session data. Every data and control operation remains signed and
 profile-authorized. A direct panel can display its sign-in state without changing
 existing production controls. UI text and spoken answers remain English.
+
+Setup drafts survive preset/native-control actions and temporary connection
+failures. A save acknowledgement advances the form's base revision while keeping
+edits made during that save. Explicit reload, session/profile change or a current
+access denial clears the draft. A view generation discards old successful replies
+after denial or context change, so an in-flight authorized poll cannot restore
+revoked data. Prior validated interpretations remain visible with their messages.

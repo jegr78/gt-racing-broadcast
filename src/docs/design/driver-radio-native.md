@@ -80,6 +80,10 @@ It does not modify OBS routing or mute. The supervisor stops capture before taki
 an output ticket, stops obsolete output before acknowledging that ticket, and
 allows a short output-drain interval before reopening capture. No spoken barge-in
 is enabled. Failed cleanup retains ownership rather than granting a replacement.
+The process-owner loop has a separate lock from public state/control access.
+Blocking process startup or termination never holds the radio access/state locks.
+Admission rechecks current consent and the radio epoch after process I/O, including
+control changes received while a previous worker was stopping.
 
 `GET/POST /console/driver-radio/native` requires the current explicit driver grant.
 Controls are revisioned and bound to the current radio context. Local producer
@@ -89,7 +93,7 @@ are producer settings; pause, language, mute and volume are temporary controls.
 Read responses contain fixed state/error codes and no credentials or device paths.
 
 Free questions are internal native requests, not arbitrary browser prompts. A
-four-turn volatile topic context supports follow-ups; all numerical answers use
+four-turn volatile question/answer context supports follow-ups; all numerical answers use
 refreshed deterministic evidence. Session/context changes discard that context.
 Bounded messages retain recognized questions and answers. Vehicle and broadcast
 commands are refused. Optional AI receives only that small question context and
@@ -108,3 +112,11 @@ A synthetic FFmpeg source, real Vosk wake model and real whisper.cpp base model
 exercised the shipped private worker from listening through transcription to the
 English fuel question in 3.24 seconds. The input was the bundled eSpeak fixture,
 not a microphone. Ordinary tests do not download models or invoke cloud services.
+
+The full #969 review also exercised the pinned packages on actual macOS 27.0.1
+ARM64 and Windows 11 build 26300 AMD64, using Python 3.14.9 and 3.14.7. The macOS
+wheel contains `libvosk.dyld`; both discovery and phrase validation now use that
+filename. Before correction the real Mac failed with a missing-library error.
+After correction both systems loaded their native libraries and validated both
+prepared wake phrases plus the negative sample through the isolated worker.
+These tests used only bundled synthetic audio, with no microphone capture.

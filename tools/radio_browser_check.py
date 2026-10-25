@@ -34,6 +34,37 @@ def check(browser,outdir,shots=None):
             second.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('latest').textContent.includes('Fuel')")
             assert len(f.f.service.history()['messages'])==1,'views multiplied shared radio requests'
             f.enricher.step('audio')
+            a.locator('#race-mode').select_option('laps');a.locator('#race-length').fill('37')
+            a.locator('[data-preset=fuel]').click();first.wait_for_timeout(1100)
+            assert a.locator('#race-length').input_value()=='37','preset request discarded an unsaved setup draft'
+            # A successful save must not discard edits made while awaiting its response.
+            first.evaluate("""window.__realRadioFetch=window.fetch;window.fetch=async(...args)=>{
+                const response=await window.__realRadioFetch(...args);
+                if(String(args[0]).endsWith('/driver-radio/setup')&&args[1]?.method==='POST')
+                    await new Promise(resolve=>window.__releaseRadioSave=resolve);
+                return response;
+            };""")
+            a.locator('#setup-form button').click()
+            first.wait_for_function("typeof window.__releaseRadioSave==='function'")
+            a.locator('#race-length').fill('38')
+            first.evaluate('window.__releaseRadioSave();window.fetch=window.__realRadioFetch')
+            first.wait_for_timeout(1100)
+            assert a.locator('#race-length').input_value()=='38','save acknowledgement discarded newer edits'
+            a.locator('#setup-form button').click();first.wait_for_timeout(1100)
+            assert f.f.session.read(f.f.service.refresh()['binding'])['setup']['laps']==38
+            a.locator('#race-length').fill('39')
+            first.route('**/driver-radio/snapshot',lambda route:route.fulfill(status=503,content_type='application/json',body='{"error":{"message":"Synthetic temporary outage"}}'))
+            first.wait_for_timeout(1200)
+            assert a.locator('#race-length').input_value()=='39','temporary outage discarded the setup draft'
+            first.unroute('**/driver-radio/snapshot');first.wait_for_timeout(4200)
+            assert a.locator('#race-length').input_value()=='39'
+            a.locator('#setup-form button').click();first.wait_for_timeout(1100)
+            binding=f.f.service.refresh()['binding']
+            old=f.f.service.question('Fuel range?',binding)
+            assert f.f.service.attach(old['id'],old['epoch'],{'explanation':'Current range may vary.','ai_state':'ready'})
+            f.f.service.question('What about pace?',binding)
+            first.wait_for_timeout(1100)
+            assert 'Interpretation: Current range may vary.' in a.locator('#history').inner_text(),'history lost a completed interpretation'
             # An edited form keeps its original revision while another view saves.
             a.locator('#race-mode').select_option('laps');a.locator('#race-length').fill('20')
             b.locator('#race-mode').select_option('laps');b.locator('#race-length').fill('24')
@@ -97,8 +128,25 @@ def check(browser,outdir,shots=None):
             assert cc.locator('#driver-radio-admin').locator('#voice-enabled').is_checked()
             cc.locator('#driver-radio-admin').scroll_into_view_if_needed()
             shot(cc,'driver-radio-control-center',wiki='cc-telemetry.png')
+            f.f.service.question('Fuel range?',f.f.service.refresh()['binding'])
+            first.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('question').textContent.includes('Fuel range?')")
+            # Hold an already-authorized poll while a later request observes revocation.
+            first.evaluate("""window.__realRadioFetch=window.fetch;window.__radioReplies=0;
+                window.fetch=async(...args)=>{
+                    const response=await window.__realRadioFetch(...args);
+                    if(String(args[0]).startsWith('/console/driver-radio/')&&args[1]?.method==='GET'){
+                        window.__radioReplies++;
+                        if(String(args[0]).endsWith('/snapshot'))await new Promise(resolve=>window.__releaseRadioPoll=resolve);
+                    }
+                    return response;
+                };""")
+            first.wait_for_function("window.__radioReplies===4&&typeof window.__releaseRadioPoll==='function'")
             config=f.f.access.read();f.f.access.update({'expected':config['revision'],'drivers':['director']})
+            a.locator('[data-preset=fuel]').click()
             first.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('content').hidden")
+            first.evaluate('window.__releaseRadioPoll();window.fetch=window.__realRadioFetch')
+            first.wait_for_timeout(200)
+            assert first.evaluate("document.getElementById('driver-radio').shadowRoot.getElementById('content').hidden"),'late authorized poll revived a revoked view'
             assert first.evaluate("document.getElementById('driver-radio').shadowRoot.getElementById('question').textContent===''"),'revoked view retained transcript'
             shot(first,'driver-radio-denied',wiki='console-driver-radio-access.png')
             # Finish only synthetic queued work, then closing views must not pause native service.

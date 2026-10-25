@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path,PurePosixPath
 
 import http_util
+from driver_radio_process import temporary_directory
 
 MODELS={
  'en':('https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip','30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498'),
@@ -70,7 +71,7 @@ def validate_phrases(root,fixtures=None):
     import sys
     source=Path(sys._MEIPASS)/'src' if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]
     fixtures=Path(fixtures) if fixtures else source/'assets'/'driver-radio'
-    library=next((Path(root)/'vosk'/name for name in ('libvosk.so','libvosk.dylib','libvosk.dll')
+    library=next((Path(root)/'vosk'/name for name in ('libvosk.so','libvosk.dyld','libvosk.dylib','libvosk.dll')
                   if (Path(root)/'vosk'/name).is_file()),None)
     if library is None:raise ValueError('Voice library is missing')
     for key,phrase in PHRASES.items():
@@ -109,7 +110,7 @@ def provision(machine,whisper=False,fetch=download,validate=validate_in_worker,p
     if dest.is_symlink():raise ValueError('Voice model directory must not be a link')
     if not ready(machine):
         if dest.exists():raise ValueError('Incomplete voice models exist; repair the local model directory before retrying')
-        with tempfile.TemporaryDirectory(prefix='.radio-models-',dir=machine) as scratch:
+        with temporary_directory(prefix='.radio-models-',dir=machine) as scratch:
             root=Path(scratch)/'radio-voice';root.mkdir()
             for url,digest in (LIBRARIES[platform_key or target()],*MODELS.values()):
                 extract(fetch(url,digest,64*1024*1024),root)

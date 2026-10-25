@@ -8,13 +8,12 @@ import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 import threading
 import time
 import wave
 
-from driver_radio_process import ProviderError
+from driver_radio_process import ProviderError,temporary_directory
 
 
 VOICE = 'en-US-Studio-Q'
@@ -102,7 +101,7 @@ class GoogleSpeech:
                  else [sys.executable,str(Path(__file__).with_name('driver_radio_tts_worker.py'))])
         extra={k:os.environ[k] for k in ('SSL_CERT_FILE','SSL_CERT_DIR') if os.environ.get(k)}
         if getattr(sys,'frozen',False):extra['PYINSTALLER_RESET_ENVIRONMENT']='1'
-        with tempfile.TemporaryDirectory(prefix='racecast-radio-tts-') as scratch:
+        with temporary_directory(prefix='racecast-radio-tts-') as scratch:
             left=deadline-self.clock()
             if left<=0:raise ProviderError('timed_out')
             invocation=ai_agents.Invocation(command,scratch,'',8,'speech')
@@ -177,6 +176,18 @@ def compact_facts(message):
     return facts
 
 
+def _conditional_recommendations(text):
+    # An uncertainty word elsewhere cannot qualify a later command. Keep the
+    # allowed form deliberately narrow; rejected prose leaves baseline advice.
+    for clause in re.split(r'[.!?;,]|\b(?:and|then|but|however)\b',text,flags=re.I):
+        if re.search(r'\b(?:must|should|ought to|need to|have to|required|necessary|immediate(?:ly)?|right away|at once|now|this lap)\b',clause,re.I):return False
+        action=re.search(r'\b(?:pit(?:ting|stop|lane|s)?|box(?:ing)?|stop(?:ping)?)\b|'
+                         r'\b(?:chang(?:e|ed|ing)|replac(?:e|ed|ing)|refuel(?:ling|ing)?|rubber|garage|service area|fuel up|come in|pull in|head|go|enter|drive|return|switch|take|visit|bring)\b',clause,re.I)
+        if action:
+            if not re.match(r'\s*(?:consider\b|(?:you\s+)?(?:could|might|may)\b)',clause,re.I):return False
+    return True
+
+
 def validate_explanation(result,facts):
     if not isinstance(result,dict) or set(result)!={'explanation','evidence','claims'}:
         raise ProviderError('invalid_explanation')
@@ -202,11 +213,12 @@ def validate_explanation(result,facts):
     if NUMBER_RE.search(text):raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:nan|infinite|infinity|percent|ideal|optimal)\b|%|\d\s*[+*/=]\s*\d',text,re.I):
         raise ProviderError('invalid_explanation')
-    if re.search(r'\b(?:box now|pit now|must pit|must box)\b',text,re.I):
+    if not _conditional_recommendations(text):
         raise ProviderError('invalid_explanation')
-    uncertain=re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|consider)\b|not measured',text,re.I)
-    if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear|temperature)\b',text,re.I) and not uncertain:
-        raise ProviderError('invalid_explanation')
+    for clause in re.split(r'[.!?;,]|\b(?:and|then|but|however)\b',text,flags=re.I):
+        uncertain=re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|consider|if|when)\b|not (?:measured|observed)',clause,re.I)
+        if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear|temperature)\b',clause,re.I) and not uncertain:
+            raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear)\s+(?:caused|causes|is causing|are worn)|caused by (?:traffic|weather)',text,re.I):
         raise ProviderError('invalid_explanation')
     rendered_text=' '.join([text.strip(),*rendered])
@@ -215,15 +227,15 @@ def validate_explanation(result,facts):
 
 
 class _Current:
-    def __init__(self,worker,message):
-        self.worker,self.message=worker,message
+    def __init__(self,worker,message,kind='audio'):
+        self.worker,self.message,self.kind=worker,message,kind
         self._checked=float('-inf')
         self._invalid=False
     def is_set(self):
         if self.worker._stop.is_set() or self._invalid:return True
         now=self.worker.clock()
         if now-self._checked>=.25:
-            self._invalid=self.worker.service.remaining_for(self.message['id'],self.message['epoch'])<=0
+            self._invalid=self.worker.service.remaining_for(self.message['id'],self.message['epoch'],kind=self.kind)<=0
             self._checked=now
         return self._invalid
 
@@ -258,7 +270,7 @@ class Enricher:
             work=self.service.enrichment_work(kind)
             if work is None or self._stop.is_set():return False
             message=work
-            stopped=_Current(self,message)
+            stopped=_Current(self,message,kind)
             state_key='audio_state' if kind=='audio' else 'ai_state'
             error_key='audio_error' if kind=='audio' else 'ai_error'
             try:
@@ -267,7 +279,7 @@ class Enricher:
                     if not config['speech'] or not self.service.refresh()['voice_enabled']:
                         raise ProviderError('unconfigured')
                     audio=self.speech.synthesize(message['text'],stopped,
-                        min(BUDGET,self.service.remaining_for(message['id'],message['epoch'])))
+                        min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
                     fields={'audio':audio,state_key:'ready',error_key:None}
                 else:
                     if not config['agent'] or self.ai is None:
@@ -277,7 +289,7 @@ class Enricher:
                     if self.clock()-self._ai_at<30:raise ProviderError('rate_limited')
                     self._ai_at=self.clock()
                     result=self.ai.explain(config['agent'],message,stopped,
-                        min(BUDGET,self.service.remaining_for(message['id'],message['epoch'])))
+                        min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
                     explanation=validate_explanation(result,compact_facts(message))
                     fields={'explanation':explanation,state_key:'ready',error_key:None}
                 if stopped.is_set():return False
