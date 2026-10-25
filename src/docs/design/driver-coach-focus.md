@@ -16,7 +16,7 @@ States: waiting -> provisional/active -> completed; active may report regression
 
 At selection freeze calibration reference identity and original baseline identity/times. Do not score the selection lap. Section pace checks require identical measured start/end and frozen reference time; recompute numeric net/downstream/exit gates, never trust a prose/result label. Missing focused section cannot be invented. General whole-lap pace uses the original baseline midpoint and states cause unknown.
 
-Consistency uses original two-lap range as stable starting denominator and three-attempt range; meaningful reduction >max(.05s,10% starting range). Zero starting range can maintain repeatability but cannot prove reduction. Pace requires all three gains beyond measured screen with no hidden downstream/exit loss. Balanced requires both. These conservative initial screens describe measured evidence, not optimal targets.
+Consistency uses the original two-lap measured range as stable starting denominator and three-attempt range; meaningful reduction >max(.05s,10% starting range). Zero starting range can maintain repeatability but cannot prove reduction. Pace requires all three gains against the original measured baseline, beyond its screen and with no hidden downstream/exit loss. Balanced requires both. These conservative initial screens describe measured evidence, not optimal targets.
 
 # Objective and attempt examples
 
@@ -68,3 +68,21 @@ A corrected input difference may disappear from the next assessment. Repeated
 progress still uses an available check from the same complete section, with the
 same frozen reference and measurement window. A different section cannot fill
 that gap. A missing check remains unavailable.
+
+## Original progress denominator and reference facts
+
+For a section focus, freeze the original two laps' full-window mean/range,
+following-section mean and exit-speed mean. Pace requires repeatable gains
+against this original window, with no new following loss or lower exit speed.
+Consistency compares the three-attempt window range with the original window
+range. General exercises use whole-lap timing/range and explicitly leave causes
+unknown. A selected reference remains a separate comparison and cannot redefine
+starting progress merely by being slower.
+
+Assessment exposes complete section checks even when an input difference has
+vanished or the reference is matched. Checks include the corner-exit station and
+absolute downstream timing. Preserve the original measured check and evidence;
+a separate reference benchmark identifies the frozen lap/window used by future
+attempts. Self-reference fallback never rewrites earlier measured facts.
+Skip and changed-skill controls retain the previous result in transition history,
+then clear the current success score and review while waiting for a new exercise.

@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src/scripts'))
 import driver_coach_focus as coach
 import driver_coach_calibration as calibration
+import driver_coach_assessment as measured
 
 
 def lap(n, seconds=90, **changes):
@@ -15,7 +16,8 @@ def lap(n, seconds=90, **changes):
              state='confirmed',time_s=seconds,time_valid=True,comparison_eligible=True,
              capture_complete=True,trace_complete=True,data_quality='ok',analysis_role='regular',
              after_service=False,definition_fingerprint='definition',compound=None,stint_id=None,
-             strategy={},context_settings={})
+             strategy={},context_settings={},
+             trace=[dict(d=d,t=d*seconds/2250,speed_kmh=100) for d in range(0,2251,5)])
     row.update(changes)
     return row
 
@@ -24,7 +26,9 @@ def finding(ident='turn/brake', skill='braking', support=3, strength=1, net=-.2,
     return dict(id=ident,section_id='turn',skill=skill,support=support,strength=strength,
                 observation='Measured pedal transition differs.',interpretation='Cause is unknown.',
                 action='Consider repeating a smooth transition.',label='Provisional section',reviewed=False,
-                check=dict(available=True,start_m=50,end_m=300,own_s=10+net,reference_s=10,
+                check=dict(available=True,start_m=50,corner_exit_m=180,end_m=300,own_s=10+net,reference_s=10,
+                           own_downstream_s=4.8+downstream,reference_downstream_s=4.8,
+                           exit_speed_kmh=100+exit_delta,reference_exit_speed_kmh=100,
                            net_delta_s=net,corner_delta_s=net-downstream,downstream_delta_s=downstream,
                            exit_speed_delta_kmh=exit_delta,screen_s=.05,result='provisional_gain'),
                 evidence=[{'id':'evidence/lap/metric','lap_id':'lap-2','value':10,'unit':'s'}])
@@ -280,7 +284,7 @@ def t_evidence_and_screen_are_numeric_and_cannot_be_replaced_by_success_prose():
         engine,cal,_,_=ready('pace');bad=finding();bad['check'].update(change)
         for n in (3,4,5):state=attempt(engine,cal,n,89,[bad])
         assert state['phase']!='completed' and not state['attempts'],change
-    engine,cal,_,_=ready('pace');bad=finding(net=-.001);bad['check']['screen_s']=.00001
+    engine,cal,_,_=ready('pace',(90,90));bad=finding(net=-.001);bad['check']['screen_s']=.00001
     for n in (3,4,5):state=attempt(engine,cal,n,89,[bad])
     assert state['phase']!='completed' and not state['progress']['pace_improved']
     for malformed in ({'evidence':[]},{'support':True},{'strength':100},{'section_id':[]},
@@ -302,6 +306,74 @@ def t_findings_and_dismissals_have_explicit_bounds_without_partial_failed_contro
     before=engine.snapshot()
     rejects(lambda:engine.control('skip',epoch),'focus_limit')
     assert engine.snapshot()==before
+
+
+def real_lap(n,seconds):
+    row=lap(n,seconds)
+    row['trace']=[dict(d=d,t=d*seconds/400,speed_kmh=180,brake=70 if 60<=d<=140 else 0,
+                       throttle=100 if d>=165 else 0,steer_deg=4,gear=3,x=d,z=0) for d in range(0,401,5)]
+    return row
+
+
+def real_definition():
+    return dict(fingerprint='definition',reviewed=True,combinations=[],corners=[
+        dict(id='turn',number=1,entry_m=50,apex_m=125,exit_m=180),
+        dict(id='following',number=2,entry_m=220,apex_m=250,exit_m=300)])
+
+
+def t_real_assessment_slower_selected_reference_cannot_redefine_starting_progress():
+    cal=calibration.Calibration();cal.start(dict(profile='solo',subject='driver'),objective='pace')
+    rows=[real_lap(1,8),real_lap(2,8.2)]
+    for row in rows:cal.ingest(row)
+    cal.select_reference(real_lap(20,10),authorize=lambda:True)
+    engine=coach.Focus();doc=real_definition()
+    result=measured.assess(rows[-1],cal.reference(),doc,rows)
+    state=engine.observe(rows[-1],result,cal.snapshot(),cal.baseline_laps());cal.begin_focus()
+    for n in (3,4,5):
+        row=real_lap(n,9);snap=cal.ingest(row)
+        result=measured.assess(row,cal.reference(),doc,cal.baseline_laps())
+        state=engine.observe(row,result,snap,cal.baseline_laps())
+    assert state['phase']!='completed' and not state['progress']['pace_improved']
+    assert state['phase']=='regression'
+    assert state['baseline']['passage']['time_s']==5.0625
+
+
+def t_real_self_reference_fallback_preserves_measured_check_and_separate_benchmark():
+    cal=calibration.Calibration();cal.start(dict(profile='solo',subject='driver'),objective='pace')
+    rows=[real_lap(1,8.2),real_lap(2,8)]
+    for row in rows:cal.ingest(row)
+    result=measured.assess(rows[-1],cal.reference(),real_definition(),rows)
+    before=copy.deepcopy(result['findings'][0]['check'])
+    engine=coach.Focus();state=engine.observe(rows[-1],result,cal.snapshot(),cal.baseline_laps())
+    check=state['focus']['check']
+    assert check['own_s']==before['own_s'] and check['reference_s']==before['reference_s']
+    assert check['net_delta_s']==before['net_delta_s']
+    assert abs(check['own_s']-check['reference_s']-check['net_delta_s'])<.001
+    assert state['reference_benchmark']['time_s']==before['own_s']
+    assert state['reference_benchmark']['lap_id']==rows[-1]['id']
+    assert result['findings'][0]['check']==before
+
+
+def t_skip_and_changed_skill_reset_current_success_while_history_retains_it():
+    for action,skill in (('skip',None),('skill','throttle')):
+        engine,cal,_,_=ready('pace')
+        for n in (3,4,5):state=attempt(engine,cal,n,89)
+        assert state['progress']['pace_improved']
+        state=engine.control(action,state['epoch'],skill=skill)
+        assert state['phase']=='waiting' and state['focus'] is None and not state['attempts']
+        assert state['progress']['result']=='waiting' and state['progress']['sample_count']==0
+        assert not state['progress']['pace_improved'] and not state['progress']['consistency_improved']
+        assert any(e['progress'].get('pace_improved') for e in state['history'])
+        assert 'smooth transition' not in state['review']
+
+
+def t_real_matched_reference_still_exposes_complete_section_checks_for_consistency():
+    row=real_lap(3,8);ref=real_lap(1,8)
+    result=measured.assess(row,ref,real_definition(),[real_lap(2,8.2)])
+    assert result['section_checks']
+    check=next(c['check'] for c in result['section_checks'] if c['section_id']=='turn')
+    assert check['available'] and check['corner_exit_m']==180 and check['own_downstream_s']>0
+    assert check['net_delta_s']==0
 
 
 if __name__=='__main__':

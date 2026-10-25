@@ -5,6 +5,7 @@ import copy
 import math
 
 import driver_coach_calibration as calibration
+import driver_coach_assessment as measured
 
 ATTEMPTS_MAX = 12
 SEEN_MAX = 128
@@ -26,27 +27,35 @@ def _text(value, maximum=160):
 
 
 def _check(value):
-    fields = ('start_m', 'end_m', 'own_s', 'reference_s', 'net_delta_s', 'corner_delta_s',
-              'downstream_delta_s', 'exit_speed_delta_kmh', 'screen_s')
+    fields = ('start_m', 'corner_exit_m', 'end_m', 'own_s', 'reference_s', 'net_delta_s', 'corner_delta_s',
+              'own_downstream_s', 'reference_downstream_s', 'downstream_delta_s',
+              'exit_speed_kmh', 'reference_exit_speed_kmh', 'exit_speed_delta_kmh', 'screen_s')
     if (not isinstance(value, dict) or value.get('available') is not True
             or not all(_number(value.get(k)) for k in fields)):
         return None
     result = {k: value[k] for k in fields}
-    if (not 0 <= result['start_m'] < result['end_m'] <= 100000
-            or min(result['own_s'], result['reference_s'], result['screen_s']) <= 0):
+    if (not 0 <= result['start_m'] < result['corner_exit_m'] < result['end_m'] <= 100000
+            or min(result['own_s'], result['reference_s'], result['screen_s'],
+                   result['own_downstream_s'], result['reference_downstream_s']) <= 0
+            or min(result['exit_speed_kmh'], result['reference_exit_speed_kmh']) < 0):
         return None
     net = result['own_s'] - result['reference_s']
     downstream = net - result['corner_delta_s']
     if (not _number(downstream) or abs(net - result['net_delta_s']) > .001
-            or abs(downstream - result['downstream_delta_s']) > .001):
+            or abs(downstream - result['downstream_delta_s']) > .001
+            or abs(result['own_downstream_s']-result['reference_downstream_s']-downstream) > .001
+            or abs(result['exit_speed_kmh']-result['reference_exit_speed_kmh']-result['exit_speed_delta_kmh']) > .001
+            or result['own_downstream_s'] >= result['own_s']
+            or result['reference_downstream_s'] >= result['reference_s']):
         return None
     # A supplied result label and an artificially tiny screen never establish gain.
     result['screen_s'] = max(.05, result['reference_s'] * .005, result['screen_s'])
+    result['available'] = True
     return result
 
 
 def _finding(row, lap_id):
-    if (not isinstance(row, dict) or row.get('skill') not in SKILLS
+    if (not isinstance(row, dict) or not isinstance(row.get('skill'), str) or row['skill'] not in SKILLS
             or not _text(row.get('id'), 256)
             or row.get('section_id') is not None and not _text(row['section_id'], 80)
             or type(row.get('support')) is not int or not 0 <= row['support'] <= 8
@@ -81,6 +90,27 @@ def _lap(value):
     return prepared.row if prepared else None
 
 
+def _passage(rows, check):
+    measurements = []
+    for row in rows:
+        trace = measured._trace(row)
+        if not trace:
+            return None
+        own = measured._duration(trace, check['start_m'], check['end_m'])
+        downstream = measured._duration(trace, check['corner_exit_m'], check['end_m'])
+        exit_point = next((p for p in trace if p['d'] >= check['corner_exit_m']), None)
+        speed = exit_point.get('speed_kmh') if exit_point else None
+        if own is None or downstream is None or not _number(speed) or speed < 0:
+            return None
+        measurements.append(dict(time_s=own, downstream_s=downstream, exit_speed_kmh=speed))
+    result = {k: min(m[k] for m in measurements)+(max(m[k] for m in measurements)-min(m[k] for m in measurements))/2
+              for k in ('time_s', 'downstream_s', 'exit_speed_kmh')}
+    times = [m['time_s'] for m in measurements]
+    result.update(start_m=check['start_m'], corner_exit_m=check['corner_exit_m'], end_m=check['end_m'],
+                  range_s=max(times)-min(times), lap_times_s=times)
+    return result
+
+
 def _general():
     return dict(id='lap/consistency', section_id=None, skill='consistency', support=0, strength=0,
                 label='Personal lap consistency', reviewed=False, evidence=[], check=None,
@@ -105,6 +135,7 @@ class Focus:
         self._baseline = None
         self._context = None
         self._reference = None
+        self._benchmark = None
         self._phase = 'waiting'
         self._objective = 'balanced'
         self._attempts = collections.deque(maxlen=ATTEMPTS_MAX)
@@ -158,7 +189,7 @@ class Focus:
                 and isinstance(baseline, dict) and _text(baseline.get('id'))
                 and isinstance(reference, dict) and _text(reference.get('id')))
 
-    def _select(self, findings, row, snapshot, baseline):
+    def _select(self, findings, row, snapshot, baseline, assessment):
         rows = [_lap(r) for r in baseline] if isinstance(baseline, (list, tuple)) and len(baseline) == 2 else []
         if (not rows or any(r is None for r in rows)
                 or [r.get('id') for r in rows] != snapshot['baseline'].get('lap_ids')
@@ -170,13 +201,28 @@ class Focus:
         self._baseline = dict(id=snapshot['baseline']['id'], lap_ids=[r['id'] for r in rows],
                               time_s=low+(high-low)/2, range_s=high-low)
         self._reference = snapshot['reference']['id']
+        self._benchmark = None
         self._context = {k: copy.deepcopy(row.get(k)) for k in calibration.CONTEXT}
         self._context.update(session_id=row['session_id'], comparison_eligible=True)
         choices = [f for f in findings if f['id'] not in self._skipped | self._completed
                    and (self._skill is None or f['skill'] == self._skill)]
         relevance = {'pace': {'pace': 2}, 'consistency': {'consistency': 2}, 'balanced': {}}[self._objective]
         choices.sort(key=lambda f: (f['support'], relevance.get(f['skill'], 1), f['strength']), reverse=True)
-        self._focus = copy.deepcopy(choices[0]) if choices else _general()
+        # Only the original two actual laps define progress, even with a slower selected target.
+        self._focus = None
+        for choice in choices:
+            if choice['section_id'] is not None:
+                passage = _passage(baseline, choice['check'])
+                reference_time = (choice['check']['reference_s'] if assessment.get('reference_id') == self._reference else
+                                  choice['check']['own_s'] if self._reference == row['id'] else None)
+                if passage is None or reference_time is None:
+                    continue
+                self._baseline['passage'] = passage
+                self._benchmark = dict(lap_id=self._reference, time_s=reference_time)
+            self._focus = copy.deepcopy(choice)
+            break
+        if self._focus is None:
+            self._focus = _general()
         self._keep = False
         self._attempts.clear()
         self._phase = 'provisional' if snapshot['phase'] == 'provisional' else 'active'
@@ -214,11 +260,7 @@ class Focus:
                 findings = []
             self._focus = None
         if self._focus is None:
-            if self._select(findings, row, snapshot, baseline_laps):
-                # Assessment may have fallen back from a self-reference on this selection lap.
-                check = self._focus['check']
-                if check and assessment.get('reference_id') != self._reference:
-                    check['reference_s'] = check['own_s'] if self._reference == row['id'] else None
+            if self._select(findings, row, snapshot, baseline_laps, assessment):
                 self._review = 'Completed a suitable lap. ' + self._focus['action']
             return self.snapshot()
         if (row['session_id'] != self._context['session_id']
@@ -228,31 +270,37 @@ class Focus:
         seconds = row['time_s']
         check = None
         if self._focus['section_id'] is not None:
-            candidate = next((f for f in findings if f['section_id'] == self._focus['section_id'] and f['check']), None)
-            check = candidate['check'] if candidate else None
+            checks = assessment.get('section_checks', [])
+            valid = [_check(c.get('check')) for c in checks
+                     if isinstance(c, dict) and c.get('section_id') == self._focus['section_id']] if isinstance(checks, list) and len(checks) <= 128 else []
+            valid += [f['check'] for f in findings if f['section_id'] == self._focus['section_id'] and f['check']]
             original = self._focus['check']
-            if (check is None or assessment.get('reference_id') != self._reference
-                    or any(check[k] != original[k] for k in ('start_m', 'end_m', 'reference_s'))):
+            check = next((c for c in valid if c and all(c[k] == original[k] for k in ('start_m', 'corner_exit_m', 'end_m'))
+                          and c['reference_s'] == self._benchmark['time_s']), None)
+            if check is None or assessment.get('reference_id') != self._reference:
                 self._progress['result'] = 'evidence_unavailable'
                 return self.snapshot()
-            pace = (check['net_delta_s'] < -check['screen_s']
-                    and check['downstream_delta_s'] <= check['screen_s']
-                    and check['exit_speed_delta_kmh'] >= -2)
-            slower = check['net_delta_s'] > check['screen_s']
+            passage = self._baseline['passage']
+            screen = max(.05, passage['time_s']*.005)
+            pace = (check['own_s']-passage['time_s'] < -screen
+                    and check['own_downstream_s']-passage['downstream_s'] <= screen
+                    and check['exit_speed_kmh']-passage['exit_speed_kmh'] >= -2)
+            slower = check['own_s']-passage['time_s'] > screen
         else:
             screen = max(.05, self._baseline['time_s']*.001)
             pace = seconds-self._baseline['time_s'] < -screen
             slower = seconds-self._baseline['time_s'] > screen
         self._attempts.append(dict(lap_id=row['id'], lap=row['lap'], time_s=seconds,
-                                   pace_gain=pace, slower=slower, check=copy.deepcopy(check)))
+                                   pace_gain=pace, slower=slower,
+                                   measure_s=check['own_s'] if check else seconds, check=copy.deepcopy(check)))
         self._evaluate()
         return self.snapshot()
 
     def _evaluate(self):
         samples = list(self._attempts)[-3:]
-        times = [r['time_s'] for r in samples]
+        times = [r['measure_s'] for r in samples]
         spread = max(times)-min(times)
-        original = self._baseline['range_s']
+        original = self._baseline.get('passage', self._baseline)['range_s']
         repeated = len(samples) == 3
         pace = repeated and all(r['pace_gain'] for r in samples)
         consistent = repeated and original-spread > max(.05, original*.1)
@@ -264,7 +312,9 @@ class Focus:
                   'repeatability_maintained' if maintained else 'provisional')
         self._phase = ('retained' if self._keep else 'completed') if success else 'regression' if worse else 'active'
         self._progress = dict(result=result, sample_count=len(samples), pace_improved=pace,
-                              consistency_improved=consistent, lap_range_s=spread,
+                              consistency_improved=consistent, measure_range_s=spread,
+                              measure='section' if self._focus['section_id'] is not None else 'lap',
+                              lap_range_s=max(r['time_s'] for r in samples)-min(r['time_s'] for r in samples),
                               baseline_range_s=original,
                               text=('Repeated measured improvement; the cause remains unknown.' if success else
                                     'Repeated measurements are provisional; their cause remains unknown.'))
@@ -274,7 +324,7 @@ class Focus:
             raise calibration.CoachError('conflict')
         if action not in ('skill', 'skip', 'keep'):
             raise calibration.CoachError('invalid_control')
-        if action == 'skill' and skill is not None and skill not in SKILLS:
+        if action == 'skill' and skill is not None and (not isinstance(skill, str) or skill not in SKILLS):
             raise calibration.CoachError('invalid_skill')
         if action == 'keep':
             if self._focus is None:
@@ -294,11 +344,14 @@ class Focus:
             self._attempts.clear()
             self._phase = 'waiting'
             self._keep = False
+            self._progress = dict(result='waiting', sample_count=0, pace_improved=False,
+                                  consistency_improved=False, text='A new exercise has not been scored.')
+            self._review = 'Choose a new exercise on the next suitable lap.'
         return self.snapshot()
 
     def snapshot(self):
         return copy.deepcopy(dict(epoch=self._epoch, objective=self._objective, phase=self._phase,
                                   skill=self._skill, focus=self._focus, baseline=self._baseline,
-                                  reference_id=self._reference, attempts=list(self._attempts),
+                                  reference_id=self._reference, reference_benchmark=self._benchmark, attempts=list(self._attempts),
                                   progress=self._progress, review=self._review,
                                   seen_count=len(self._seen), history=list(self._history)))

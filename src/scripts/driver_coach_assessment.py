@@ -235,7 +235,8 @@ def _check(own, reference, corner, end):
     screen = max(.05, totalr * .005)
     result = ('tradeoff' if a < ar and (net > screen or exit_delta < -2) else
               'provisional_gain' if net < -screen and downstream <= screen and exit_delta >= -2 else 'no_clear_change')
-    return dict(available=True, start_m=start, end_m=end, corner_delta_s=a-ar,
+    return dict(available=True, start_m=start, corner_exit_m=exit_m, end_m=end,
+                own_downstream_s=b, reference_downstream_s=br, corner_delta_s=a-ar,
                 downstream_delta_s=downstream, net_delta_s=net, own_s=total, reference_s=totalr,
                 screen_s=screen, result=result,
                 exit_speed_kmh=speeds[0], reference_exit_speed_kmh=speeds[1], exit_speed_delta_kmh=exit_delta,
@@ -253,7 +254,7 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
     unknown = ['Traffic is not observed.', 'Weather is not measured.', 'Tyre wear is not measured.',
                'Setup and aid behavior are not inferred.']
     result = dict(status='unsuitable', lap_id=lap.get('id') if isinstance(lap, dict) else None,
-                  reference_id=None, findings=[], unknown=unknown,
+                  reference_id=None, findings=[], section_checks=[], unknown=unknown,
                   summary='This lap is unsuitable for a new technique score. Keep the current exercise.')
     if not _eligible(lap):
         return result
@@ -304,6 +305,7 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
             if not check['available']:
                 incomplete_following = True
                 continue
+            result['section_checks'].append(dict(section_id=corner['id'], check=dict(check)))
             reviewed = (definition.get('reviewed') is True and type(corner.get('number')) is int
                         and 0 < corner['number'] <= 10000)
             label = ('Turn '+str(corner['number'])+(': '+str(corner.get('name', ''))[:160] if corner.get('name') else '')
