@@ -195,7 +195,13 @@ def t_truncated_connected_context_cannot_claim_an_early_provisional_gain():
     result=coach.assess(own,lap('ref',True),definition=complete)
     check=next(f for f in result['findings'] if f['section_id']=='c0')['check']
     assert check['end_m']==375 and round(check['net_delta_s'],3)==.5 and check['result']=='tradeoff'
-    doc=definition();doc['combinations']=[{}]*coach.CORNERS_MAX+[dict(corner_ids=['turn-a','unknown'])]
+    doc=definition();doc['combinations']=[dict(id='group-'+str(i),corner_ids=['turn-b']) for i in range(coach.CORNERS_MAX)]+[dict(corner_ids=['turn-a','turn-b'])]
+    result=coach.assess(lap(corner_gain=-.3),lap('ref',True),definition=doc)
+    assert not any(f.get('section_id') for f in result['findings'])
+    doc=definition();doc['combinations']=[dict(corner_ids=['turn-a','unknown'])]
+    result=coach.assess(lap(corner_gain=-.3),lap('ref',True),definition=doc)
+    assert not any(f.get('section_id') for f in result['findings'])
+    doc=definition();doc['corners']=[dict(first,id='section-'+str(i)) for i in range(coach.CORNERS_MAX+1)]
     result=coach.assess(lap(corner_gain=-.3),lap('ref',True),definition=doc)
     assert not any(f.get('section_id') for f in result['findings'])
 
