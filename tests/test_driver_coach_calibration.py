@@ -28,7 +28,6 @@ def lap(n, seconds=90, **changes):
 def started():
     c = coach.Calibration()
     c.start(OWNER)
-    rejects(c.begin_focus, 'calibration_required')
     return c
 
 
@@ -50,6 +49,7 @@ def t_explicit_practice_start_and_two_lap_baseline_then_three_lap_readiness():
     rejects(lambda: c.start({'profile': 'solo'}), 'invalid_owner')
     rejects(lambda: c.start({'profile': 'x' * 161, 'subject': 'driver-one'}), 'invalid_owner')
     c.start(OWNER)
+    rejects(c.begin_focus, 'calibration_required')
     assert c.snapshot()['objective'] == 'balanced'
     assert c.ingest(lap(2))['phase'] == 'calibrating'
     before = c.ingest(lap(3, 89))
