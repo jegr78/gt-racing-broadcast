@@ -320,6 +320,21 @@ class Focus:
                               text=('Repeated measured improvement; the cause remains unknown.' if success else
                                     'Repeated measurements are provisional; their cause remains unknown.'))
 
+    def finish(self):
+        """Complete this exercise before the coordinator promotes a working reference."""
+        if self._phase != 'completed' or self._focus is None:
+            raise calibration.CoachError('focus_not_completed')
+        self._record('completed')
+        if len(self._completed | self._skipped) < DISMISSED_MAX:
+            self._completed.add(self._focus['id'])
+        self._focus = None
+        self._attempts.clear()
+        self._phase = 'waiting'
+        self._progress = dict(result='waiting', sample_count=0, pace_improved=False,
+                              consistency_improved=False, text='A new exercise has not been scored.')
+        self._review = 'Choose a new exercise on the next suitable lap.'
+        return self.snapshot()
+
     def control(self, action, epoch, skill=None):
         if epoch != self._epoch or self._binding is None:
             raise calibration.CoachError('conflict')

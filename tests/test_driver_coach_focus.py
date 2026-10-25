@@ -486,6 +486,21 @@ def t_pace_cannot_complete_from_one_faster_outlier_among_slower_attempts():
     assert state['phase']!='completed' and not state['progress']['pace_improved']
 
 
+def t_completed_focus_can_finish_before_calibration_promotes_the_next_reference():
+    engine,cal,_,state=ready('pace')
+    rejects(engine.finish,'focus_not_completed')
+    original=state['baseline']['id'];old_reference=cal.reference()['id']
+    for n in (3,4,5):state=attempt(engine,cal,n,89)
+    assert state['phase']=='completed'
+    state=engine.finish()
+    assert state['phase']=='waiting' and state['focus'] is None and not state['attempts']
+    assert state['progress']['result']=='waiting'
+    assert state['history'][-1]['state']=='completed' and state['history'][-1]['progress']['pace_improved']
+    cal.end_focus()
+    assert cal.reference()['id']!=old_reference and cal.snapshot()['baseline']['id']==original
+    rejects(engine.finish,'focus_not_completed')
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:

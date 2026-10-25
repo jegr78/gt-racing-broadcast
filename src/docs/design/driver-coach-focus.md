@@ -86,3 +86,8 @@ a separate reference benchmark identifies the frozen lap/window used by future
 attempts. Self-reference fallback never rewrites earlier measured facts.
 Skip and changed-skill controls retain the previous result in transition history,
 then clear the current success score and review while waiting for a new exercise.
+
+The coordinator calls `Focus.finish()` only after completion and before
+`Calibration.end_focus()`. The completed result is retained in history, current
+attempts are cleared, and only then may calibration promote a better personal
+reference. Driver-retained focus cannot be finished by that automatic transition.
