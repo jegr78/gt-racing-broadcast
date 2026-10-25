@@ -14,6 +14,8 @@ import threading
 import time
 import wave
 
+from driver_radio_process import ProviderError
+
 
 VOICE = 'en-US-Studio-Q'
 URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
@@ -22,12 +24,6 @@ AUDIO_MAX = 2*1024*1024
 CACHE_MAX = 8*1024*1024
 CACHE_ENTRIES = 16
 BUDGET = 8.0
-
-
-class ProviderError(ValueError):
-    def __init__(self,code,message='Radio provider is unavailable'):
-        self.code=code
-        super().__init__(message)
 
 
 def validate_wav(audio):

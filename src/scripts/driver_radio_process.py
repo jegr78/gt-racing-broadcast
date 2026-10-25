@@ -8,10 +8,15 @@ import time
 from pathlib import Path
 
 import ai_jobs
-from driver_radio_providers import ProviderError
 
 STREAM_MAX = 65536
 INPUT_MAX = 32768
+
+
+class ProviderError(ValueError):
+    def __init__(self,code,message='Radio provider is unavailable'):
+        self.code=code
+        super().__init__(message)
 
 
 def _output_bound(output,limit):
