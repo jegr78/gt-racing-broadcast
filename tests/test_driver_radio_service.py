@@ -17,7 +17,8 @@ class Fixture:
         self.at=100.0
         self.snap=snap or snapshot((90,90,90,90,90,90))
         self.access=access.Store(d,True)
-        self.access.update({'expected':0,'enabled':True,'drivers':['driver']})
+        self.access.update({'expected':0,'enabled':True,'drivers':['driver'],
+                            'voice':{'enabled':True,'microphone':None,'input_language':'en'}})
         self.session=access.Session()
         self.service=radio.Service(self.access,self.session,lambda:copy.deepcopy(self.snap),clock=lambda:self.at)
     def poll(self):return self.service.refresh(force=True)
@@ -153,6 +154,54 @@ def t_evicted_active_message_stays_cancelled_until_owner_acknowledges():
         assert ticket.cancelled.is_set(), 'eviction must invalidate an active output'
         assert f.service.take_playback() is None
         assert f.service.finish_playback(ticket.id)
+
+
+def t_fuel_recovery_cancels_old_warning_before_take_and_during_output():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.snap['instruments']['fuel_l']=3;f.poll()
+        old=f.service.history()['messages'][-1]
+        f.snap['instruments']['fuel_l']=15;f.snap['revision']+=1;f.poll()
+        assert f.service.take_playback() is None, 'resolved risk must not play the old warning'
+        assert not f.service.attach(old['id'],old['epoch'],{'explanation':'obsolete fuel'})
+        f.snap['instruments']['fuel_l']=3;f.snap['revision']+=1;f.poll()
+        ticket=f.service.take_playback();assert ticket.message['severity']=='urgent'
+        f.snap['instruments']['fuel_l']=15;f.snap['revision']+=1;f.poll()
+        assert ticket.cancelled.is_set() and f.service.take_playback() is None
+        assert not f.service.attach(ticket.message['id'],ticket.message['epoch'],{'audio':b'old'})
+        assert f.service.finish_playback(ticket.id)
+        assert f.service.take_playback() is None
+
+
+def t_gradual_refuel_rearms_below_the_separate_range_reset_threshold():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.snap['instruments']['fuel_l']=3;f.poll()
+        ticket=f.service.take_playback();f.service.finish_playback(ticket.id)
+        for fuel in (3.5,4,4.5,5,5.5,4,3):
+            f.snap['instruments']['fuel_l']=fuel;f.snap['revision']+=1;f.poll()
+        alerts=[m for m in f.service.history()['messages'] if m['kind']=='fuel']
+        assert len([m for m in alerts if m['severity']=='urgent'])==2, alerts
+        assert alerts[-1]['severity']=='urgent' and alerts[-1]['state']=='queued'
+
+
+def t_native_playback_requires_explicit_profile_voice_enablement():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'voice':{'enabled':False,'microphone':None,'input_language':'en'}})
+        f.poll();message=f.request()
+        assert message['text'] and f.service.take_playback() is None
+
+
+def t_readers_share_snapshot_work_but_attachments_recheck_current_context():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);calls=[]
+        def source():calls.append(1);return copy.deepcopy(f.snap)
+        f.service.source=source;f.poll()
+        for _ in range(20):f.service.history()
+        assert len(calls)==1, 'reader count must not multiply snapshot preparation'
+        message=f.request()
+        f.snap['context_revision']+=1
+        assert not f.service.attach(message['id'],message['epoch'],{'explanation':'old context'})
+        assert len(calls)>=3, 'attachment publication must bypass a cached context'
 
 
 def t_signed_http_clients_share_messages_and_revalidate_access():

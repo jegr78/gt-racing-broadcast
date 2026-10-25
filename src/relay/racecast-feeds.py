@@ -11765,7 +11765,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 radio_service.refresh(force=True)
                             else:
                                 result = radio_session.read(binding)
-                    return self._send(result, no_store=True)
+                return self._send(result, no_store=True)
             except driver_radio_access.RadioError as exc:
                 status = (401 if exc.code == "unauthorized" else
                           429 if exc.code == "rate_limited" else

@@ -34,6 +34,7 @@ class Service:
         self._closed = False
         self._key = None
         self._signature = None
+        self._read_at = float('-inf')
         self._epoch = uuid.uuid4().hex
         self._revision = 0
         self._messages = collections.OrderedDict()
@@ -46,6 +47,8 @@ class Service:
         self._enabled = False
         self._fuel_level = 0
         self._previous_fuel = None
+        self._refuel_total = 0
+        self._voice_enabled = False
         self._pace_at = float('-inf')
         self._pace_key = None
 
@@ -81,7 +84,7 @@ class Service:
         self._assessment = None
         self._signature = None
         self._epoch = uuid.uuid4().hex
-        self._fuel_level, self._previous_fuel = 0, None
+        self._fuel_level, self._previous_fuel, self._refuel_total = 0, None, 0
         self._pace_key, self._pace_at = None, float('-inf')
         self._live = False
 
@@ -116,7 +119,7 @@ class Service:
         # Superseded routine answers cannot form a spoken backlog.
         for mid in list(self._queue):
             old = self._messages[mid]
-            if old['preset'] == preset and old['severity'] != 'urgent':
+            if old['preset'] == preset and (old['severity'] != 'urgent' or severity == 'urgent'):
                 old['state'] = 'superseded'
                 self._queue.remove(mid)
                 self._audio.pop(mid, None)
@@ -158,7 +161,13 @@ class Service:
                 return self._state()
             config = self.settings.read()
             enabled = self.settings.available and config['enabled'] and bool(config['drivers'] or config['voice']['enabled'])
+            now = self.clock()
+            if (not force and self._key is not None and config['revision'] == self._key[1]
+                    and now-self._read_at < .25):
+                self._expire(now)
+                return self._state()
             snapshot = self.source() if enabled else {}
+            self._read_at = now
             bound = assessment.binding(snapshot)
             declared = self.session.read(bound)
             key = (bound, config['revision'], declared['revision'], enabled)
@@ -166,6 +175,7 @@ class Service:
                 self._invalidate()
                 self._key = copy.deepcopy(key)
             self._binding, self._enabled = bound, enabled
+            self._voice_enabled = config['voice']['enabled'] and enabled
             now = self.clock()
             self._expire(now)
             signature = (key, snapshot.get('revision'), snapshot.get('receipt', {}).get('state'),
@@ -182,14 +192,32 @@ class Service:
                     self._announcements(result, now)
             return self._state()
 
+    def _cancel_fuel_alerts(self):
+        for mid, message in self._messages.items():
+            if message['kind'] == 'fuel' and message['state'] in ('queued','playing'):
+                message['state'] = 'cancelled'
+                self._audio.pop(mid, None)
+                if mid in self._queue:self._queue.remove(mid)
+                if self._ticket is not None and self._ticket.message['id'] == mid:
+                    self._ticket.cancelled.set()
+                self._revision += 1
+
     def _announcements(self, result, now):
         fuel = result['fuel']
         current = fuel['current_l']
-        if ((current is not None and self._previous_fuel is not None and current-self._previous_fuel >= 2)
-                or fuel['usable_laps'] is not None and fuel['usable_laps'] > result['limits']['fuel_warning_laps']+.5):
-            self._fuel_level = 0
-        self._previous_fuel = current
+        if current is not None and self._previous_fuel is not None:
+            if current > self._previous_fuel:
+                self._refuel_total += current - self._previous_fuel
+            elif current < self._previous_fuel:
+                self._refuel_total = 0
+        rearmed = (self._refuel_total >= 2 or fuel['usable_laps'] is not None
+                   and fuel['usable_laps'] > result['limits']['fuel_warning_laps']+.5)
         level = {'normal':0,'warning':1,'urgent':2}[fuel['severity']]
+        if rearmed or level < self._fuel_level:
+            self._cancel_fuel_alerts()
+        if rearmed:
+            self._fuel_level, self._refuel_total = 0, 0
+        self._previous_fuel = current
         if level > self._fuel_level:
             self._publish('fuel', 'fuel', fuel['severity'], result, now)
             self._fuel_level = level
@@ -203,7 +231,8 @@ class Service:
     def _state(self):
         return copy.deepcopy(dict(version=1, revision=self._revision, epoch=self._epoch,
                                   binding=self._binding, enabled=self._enabled and not self._closed,
-                                  live=self._live and not self._closed, assessment=self._assessment))
+                                  live=self._live and not self._closed, voice_enabled=self._voice_enabled and not self._closed,
+                                  assessment=self._assessment))
 
     def history(self, since=None):
         self.refresh()
@@ -214,7 +243,7 @@ class Service:
 
     def request(self, preset, binding, requester=None, authorization=None):
         with access._LOCK, self._lock:
-            self.refresh()
+            self.refresh(force=True)
             if requester is not None and (not callable(authorization) or not authorization()):
                 raise access.RadioError('unauthorized', 'Console request authorization was revoked')
             if preset not in assessment.PRESETS:
@@ -247,9 +276,9 @@ class Service:
         with self._lock:return len(self._queue)
 
     def take_playback(self):
-        self.refresh()
+        self.refresh(force=True)
         with self._lock:
-            if self._closed or not self._live or self._ticket is not None:
+            if self._closed or not self._live or not self._voice_enabled or self._ticket is not None:
                 return None
             self._expire(self.clock())
             if not self._queue:
@@ -274,7 +303,7 @@ class Service:
             return True
 
     def attach(self, message_id, epoch, fields):
-        self.refresh()
+        self.refresh(force=True)
         with self._lock:
             message = self._messages.get(message_id)
             if (self._closed or not self._live or epoch != self._epoch or message is None
@@ -288,6 +317,8 @@ class Service:
             if any(fields.get(k) not in (None,'pending','ready','unconfigured','failed','not_requested') for k in ('audio_state','ai_state')):
                 return False
             if 'audio' in fields:
+                if not self._voice_enabled:
+                    return False
                 if not isinstance(fields['audio'],bytes) or len(fields['audio'])>2*1024*1024:
                     return False
                 self._audio[message_id] = fields['audio']
