@@ -37,10 +37,19 @@ def _voice(value):
                  and all(ord(c) >= 32 for c in value['microphone'])))
 
 
+def _provider_settings(value):
+    if (not isinstance(value,dict) or set(value)-{'speech','agent'}
+            or type(value.get('speech',False)) is not bool
+            or value.get('agent') is not None and (not isinstance(value['agent'],str)
+                or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}',value['agent']))):
+        raise ValueError('Invalid radio service selection')
+    return dict(speech=value.get('speech',False),agent=value.get('agent'))
+
+
 def _valid(doc):
     return (isinstance(doc, dict)
-            and set(doc) in ({'version', 'revision', 'enabled', 'drivers', 'voice'},
-                             {'version', 'revision', 'enabled', 'drivers', 'voice', 'limits'})
+            and {'version','revision','enabled','drivers','voice'} <= set(doc)
+            and not set(doc)-{'version','revision','enabled','drivers','voice','limits','providers'}
             and type(doc['version']) is int and doc['version'] == 1
             and type(doc['revision']) is int and doc['revision'] >= 0
             and type(doc['enabled']) is bool
@@ -65,7 +74,7 @@ class Store:
         except FileNotFoundError:
             return dict(version=1, revision=0, enabled=False, drivers=[],
                         voice=dict(enabled=False, microphone=None, input_language='en'),
-                        limits=driver_radio_assessment.settings())
+                        limits=driver_radio_assessment.settings(), providers=_provider_settings({}))
         except OSError as exc:
             raise RadioError('settings_unavailable', 'Radio settings are unreadable; repair locally') from exc
         try:
@@ -73,13 +82,14 @@ class Store:
             if len(raw) > MAX_BYTES or not _valid(doc):
                 raise ValueError('schema')
             doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
+            doc['providers'] = _provider_settings(doc.get('providers',{}))
             return doc
         except (ValueError, TypeError, RecursionError) as exc:
             raise RadioError('settings_unavailable', 'Radio settings are unreadable; repair locally') from exc
 
     def update(self, body):
         _require(self.available, 'source_unavailable', 'Radio requires a Solo POV telemetry profile')
-        _require(isinstance(body, dict) and not set(body) - {'expected', 'enabled', 'drivers', 'voice', 'limits'},
+        _require(isinstance(body, dict) and not set(body) - {'expected', 'enabled', 'drivers', 'voice', 'limits', 'providers'},
                  'invalid_settings', 'Unsupported radio settings')
         try:
             with _LOCK, gt7_context._file_lock(str(self.path)):
@@ -89,6 +99,7 @@ class Store:
                 doc.update(copy.deepcopy({k: v for k, v in body.items() if k != 'expected'}))
                 try:
                     doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
+                    doc['providers'] = _provider_settings(doc.get('providers',{}))
                 except ValueError as exc:
                     raise RadioError('invalid_settings', 'Invalid radio assessment limits') from exc
                 doc['revision'] += 1

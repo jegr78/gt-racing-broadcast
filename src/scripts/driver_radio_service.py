@@ -290,13 +290,13 @@ class Service:
             self._revision += 1
             return self._ticket
 
-    def finish_playback(self, ticket_id):
+    def finish_playback(self, ticket_id, outcome='spoken'):
         with self._lock:
-            if self._ticket is None or self._ticket.id != ticket_id:
+            if self._ticket is None or self._ticket.id != ticket_id or outcome not in ('spoken','text_only','failed'):
                 return False
             mid = self._ticket.message['id']
             if mid in self._messages:
-                self._messages[mid]['state'] = 'cancelled' if self._ticket.cancelled.is_set() else 'spoken'
+                self._messages[mid]['state'] = 'cancelled' if self._ticket.cancelled.is_set() else outcome
             self._audio.pop(mid, None)
             self._ticket = None
             self._revision += 1
@@ -310,11 +310,14 @@ class Service:
                     or message['epoch'] != epoch or self.clock() >= message['_deadline']
                     or message['state'] not in ('queued','playing')):
                 return False
-            if not isinstance(fields, dict) or set(fields)-{'explanation','audio','audio_state','ai_state'}:
+            if not isinstance(fields, dict) or set(fields)-{'explanation','audio','audio_state','ai_state','audio_error','ai_error'}:
                 return False
             if 'explanation' in fields and (not isinstance(fields['explanation'],str) or len(fields['explanation'])>600):
                 return False
             if any(fields.get(k) not in (None,'pending','ready','unconfigured','failed','not_requested') for k in ('audio_state','ai_state')):
+                return False
+            if any(fields.get(k) is not None and (not isinstance(fields[k],str) or len(fields[k])>64
+                   or not all(c.isascii() and (c.isalnum() or c=='_') for c in fields[k])) for k in ('audio_error','ai_error')):
                 return False
             if 'audio' in fields:
                 if not self._voice_enabled:
@@ -326,6 +329,32 @@ class Service:
             message.update({k:v for k,v in fields.items() if k!='audio'})
             self._revision += 1
             return True
+
+    def remaining_for(self, message_id, epoch):
+        self.refresh(force=True)
+        with self._lock:
+            message=self._messages.get(message_id)
+            if (self._closed or not self._live or epoch!=self._epoch or message is None
+                    or message['state'] not in ('queued','playing')):
+                return 0
+            return max(0,message['_deadline']-self.clock())
+
+    def enrichment_work(self, kind):
+        self.refresh()
+        field='audio_state' if kind=='audio' else 'ai_state'
+        with self._lock:
+            if self._closed or not self._live:return None
+            pending=[m for m in self._messages.values() if m['state'] in ('queued','playing') and m[field]=='pending']
+            pending.sort(key=lambda message:message['severity']!='urgent')
+            return self._public(pending[0]) if pending else None
+
+    def audio_for(self,ticket_id):
+        self.refresh(force=True)
+        with self._lock:
+            if (self._closed or not self._live or not self._voice_enabled or self._ticket is None
+                    or self._ticket.id!=ticket_id or self._ticket.cancelled.is_set()):
+                return None
+            return self._audio.get(self._ticket.message['id'])
 
     def close(self):
         with self._lock:
