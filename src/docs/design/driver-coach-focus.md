@@ -63,3 +63,8 @@ the driver explicitly keeps the focus. Absent matching skill evidence uses a
 labelled general repeatability exercise rather than inventing a skill diagnosis.
 The original baseline stays fixed when a new focus begins. The live coordinator
 ends the calibration focus before promoting its better personal reference.
+
+A corrected input difference may disappear from the next assessment. Repeated
+progress still uses an available check from the same complete section, with the
+same frozen reference and measurement window. A different section cannot fill
+that gap. A missing check remains unavailable.

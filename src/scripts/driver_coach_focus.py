@@ -228,7 +228,7 @@ class Focus:
         seconds = row['time_s']
         check = None
         if self._focus['section_id'] is not None:
-            candidate = next((f for f in findings if f['id'] == self._focus['id']), None)
+            candidate = next((f for f in findings if f['section_id'] == self._focus['section_id'] and f['check']), None)
             check = candidate['check'] if candidate else None
             original = self._focus['check']
             if (check is None or assessment.get('reference_id') != self._reference

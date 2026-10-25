@@ -125,7 +125,8 @@ def t_unsuitable_duplicate_out_of_order_and_missing_focused_check_do_not_score()
     for n in (4,3):
         state=attempt(engine,cal,n,89)
         assert len(state['attempts'])==count
-    state=attempt(engine,cal,5,89,[finding('other','steering')])
+    missing=finding('other','steering');missing['section_id']='other-section'
+    state=attempt(engine,cal,5,89,[missing])
     assert len(state['attempts'])==count and state['focus']==frozen
     assert state['review'] and state['progress']['result']=='evidence_unavailable'
 
@@ -249,6 +250,58 @@ def t_malformed_current_context_or_baseline_cannot_select_or_score():
     baseline=cal.baseline_laps();baseline[0]['context_settings']=[]
     state=engine.observe(row,assessment(row),snap,baseline)
     assert state['focus'] is None
+
+
+def t_correcting_the_original_metric_does_not_hide_a_measured_same_section_gain():
+    engine,cal,_,_=ready('pace')
+    for n in (3,4,5):
+        state=attempt(engine,cal,n,89,[finding('turn/window_time_s','pace')])
+    assert state['phase']=='completed' and state['focus']['id']=='turn/brake'
+    assert state['progress']['pace_improved']
+
+
+def t_admission_and_current_context_guards_do_not_accept_unsuitable_or_foreign_laps():
+    for change in ({'state':'provisional'},{'comparison_eligible':False},{'capture_complete':False},
+                   {'trace_complete':False},{'time_valid':False},{'data_quality':'interrupted'},
+                   {'analysis_role':'pit'},{'after_service':True},{'time_s':0},{'time_s':float('nan')},
+                   {'lap':True},{'id':[]},{'session_id':'other'},{'car_id':2},{'compound':'RM'}):
+        engine,cal,_,_=ready();row=lap(3,89,**change);snap=cal.snapshot();snap['accepted']=True
+        state=engine.observe(row,assessment(dict(row,id='lap-3')),snap,cal.baseline_laps())
+        assert not state['attempts'],change
+    engine,cal,_,_=ready();row=lap(3,89);snap=cal.snapshot();snap['accepted']=False
+    assert not engine.observe(row,assessment(row),snap,cal.baseline_laps())['attempts']
+    snap['accepted']=True
+    assert not engine.observe(row,assessment(row,status='unsuitable'),snap,cal.baseline_laps())['attempts']
+
+
+def t_evidence_and_screen_are_numeric_and_cannot_be_replaced_by_success_prose():
+    for change in ({'available':False},{'own_s':True},{'net_delta_s':-9},
+                   {'downstream_delta_s':7},{'start_m':-1},{'end_m':10**400}):
+        engine,cal,_,_=ready('pace');bad=finding();bad['check'].update(change)
+        for n in (3,4,5):state=attempt(engine,cal,n,89,[bad])
+        assert state['phase']!='completed' and not state['attempts'],change
+    engine,cal,_,_=ready('pace');bad=finding(net=-.001);bad['check']['screen_s']=.00001
+    for n in (3,4,5):state=attempt(engine,cal,n,89,[bad])
+    assert state['phase']!='completed' and not state['progress']['pace_improved']
+    for malformed in ({'evidence':[]},{'support':True},{'strength':100},{'section_id':[]},
+                      {'evidence':[{'id':'x','lap_id':'other','unit':'s','value':float('nan')}]}):
+        engine,cal,baseline,_=ready();engine=coach.Focus();row=baseline[-1]
+        bad=finding();bad.update(malformed)
+        state=engine.observe(row,assessment(row,[bad]),cal.snapshot(),baseline)
+        assert state['focus']['skill']=='consistency',malformed
+
+
+def t_findings_and_dismissals_have_explicit_bounds_without_partial_failed_control():
+    engine,cal,baseline,_=ready();engine=coach.Focus();row=baseline[-1]
+    state=engine.observe(row,assessment(row,[finding(str(n)) for n in range(coach.FINDINGS_MAX+1)]),cal.snapshot(),baseline)
+    assert state['focus']['skill']=='consistency'
+    engine,cal,_,state=ready();epoch=state['epoch']
+    for n in range(3,3+coach.DISMISSED_MAX):
+        engine.control('skip',epoch)
+        state=attempt(engine,cal,n,90,[finding('focus-'+str(n))])
+    before=engine.snapshot()
+    rejects(lambda:engine.control('skip',epoch),'focus_limit')
+    assert engine.snapshot()==before
 
 
 if __name__=='__main__':
