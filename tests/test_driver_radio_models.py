@@ -2,6 +2,7 @@
 """Provisioning is explicit, hash checked, bounded and validates wake phrases."""
 import hashlib,io,json,sys,tempfile,zipfile,stat
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_radio_models as m
@@ -10,7 +11,9 @@ from driver_radio_voice_config import paths,ready
 
 def archive(name,data=b'fixture'):
     stream=io.BytesIO()
-    with zipfile.ZipFile(stream,'w') as z:z.writestr(name,data)
+    # ZipInfo normalizes backslashes on Windows. Preserve the actual archive name.
+    info=zipfile.ZipInfo(name);info.filename=name
+    with zipfile.ZipFile(stream,'w') as z:z.writestr(info,data)
     return stream.getvalue()
 
 
@@ -50,7 +53,7 @@ def t_corrupt_download_unsafe_archives_and_failed_validation_publish_nothing():
         try:m.download('https://fixture.invalid/archive',checksum,maximum,open_url=lambda *a,**k:Reply())
         except ValueError:pass  # The unsafe input or failed cleanup must be rejected.
         else:raise AssertionError('Unverified download accepted')
-    for name in ('../escape','/absolute','C:/escape','a\\escape'):
+    for name in ('../escape','/absolute','C:/escape','a\\escape','.. /escape','a./escape','a\0/escape'):
         with tempfile.TemporaryDirectory() as d:
             # Invalid-archive fault injection must never write outside the fixture.
             with patch.object(Path,'mkdir',side_effect=AssertionError('Unexpected archive directory write')), \
@@ -73,6 +76,21 @@ def t_corrupt_download_unsafe_archives_and_failed_validation_publish_nothing():
         except ValueError:pass  # The unsafe input or failed cleanup must be rejected.
         else:raise AssertionError('Unvalidated wake catalogue published')
         assert not (Path(d)/'radio-voice').exists()
+
+
+def t_archive_rejects_original_names_even_when_the_reader_normalizes_them():
+    class NormalizedArchive:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def infolist(self):
+            return [SimpleNamespace(filename='a/escape',orig_filename='a\\escape',external_attr=0,file_size=1,is_dir=lambda:False)]
+    with tempfile.TemporaryDirectory() as d, \
+         patch.object(m,'zipfile',SimpleNamespace(ZipFile=lambda _:NormalizedArchive())), \
+         patch.object(Path,'mkdir',side_effect=AssertionError('Unexpected archive directory write')), \
+         patch.object(Path,'open',side_effect=AssertionError('Unexpected archive file write')):
+        try:m.extract(b'fixture',d)
+        except ValueError:pass  # Reject the raw name before any filesystem operation.
+        else:raise AssertionError('Normalized unsafe archive name accepted')
 
 
 def t_frozen_phrase_validation_reads_the_bundled_source_fixture_directory():

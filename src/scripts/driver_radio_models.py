@@ -47,11 +47,15 @@ def extract(raw,destination):
         members=archive.infolist()
         if len(members)>20000:raise ValueError('Voice archive contains too many entries')
         for member in members:
-            path=PurePosixPath(member.filename)
+            # ZipInfo.filename normalizes backslashes on Windows and truncates
+            # NULs. Validate the original name before any filesystem operation.
+            name=member.orig_filename
+            path=PurePosixPath(name)
             mode=member.external_attr>>16
             total+=member.file_size
-            if (path.is_absolute() or '..' in path.parts or '\\' in member.filename or ':' in member.filename
-                    or len(member.filename)>1024 or stat.S_ISLNK(mode)
+            if (path.is_absolute() or '..' in path.parts or '\\' in name or ':' in name or '\0' in name
+                    or any(part.endswith(('.', ' ')) for part in path.parts)
+                    or len(name)>1024 or stat.S_ISLNK(mode)
                     or total>300*1024*1024 or member.file_size>128*1024*1024):
                 raise ValueError('Unsafe voice model archive')
             out=Path(destination).joinpath(*path.parts)
