@@ -41,3 +41,8 @@ station, 12-section, nine-lap replay, local calculation fell from 0.24 seconds t
 0.09 seconds after indexing. This is measured development evidence, not a device
 latency guarantee. Live orchestration must run assessment outside telemetry and
 view/control locks.
+
+An over-budget definition or an incomplete connected combination cannot support
+a per-section success claim. The evaluator falls back to the general hint rather
+than shortening the check window. Unrepresentable coordinate differences make
+line evidence unavailable while preserving valid pedal and timing observations.
