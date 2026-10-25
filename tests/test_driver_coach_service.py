@@ -422,8 +422,10 @@ def t_relay_attachment_has_one_shared_worker_and_disabled_sources_have_none():
         assert coach.attach(f.radio.service,live) is None
         assert coach.attach(f.radio.service,None) is None
         f.radio.access.available=True
-        assert coach.attach(f.radio.service,SimpleNamespace(snapshot=lambda:{})) is None
-        assert coach.attach(f.radio.service,SimpleNamespace(detail=lambda _id:{})) is None
+        for source in (SimpleNamespace(snapshot=lambda:{}),SimpleNamespace(detail=lambda _id:{})):
+            try:attached=coach.attach(f.radio.service,source)
+            except AttributeError:raise AssertionError('Incomplete live dependency crashed existing radio setup') from None
+            assert attached is None
 
 
 def t_ai_cannot_hide_a_new_driving_action_in_explanation_synonyms():
