@@ -66,6 +66,9 @@ def t_pace_requires_repeated_comparable_evidence():
     assert review(snapshot((90,94,86,91,94,89)))['pace']['state']=='stable'
     assert review(snapshot((90,90,90,89,89,89)))['pace']['state']=='faster'
     assert review(snapshot((90,90,91)))['pace']['state']=='insufficient'
+    assert review(snapshot((90,90,90,91,91)))['pace']['state']=='insufficient'
+    snap=snapshot();snap['laps'][2]['state']='unconfirmed'
+    assert review(snap)['pace']['state']=='insufficient'
     for field,value in (('session_id','other'),('car_id',2),('track_id','other'),('compound','RS'),
                         ('strategy',{'fuel_map':6}),('after_service',True)):
         snap=snapshot()
