@@ -478,6 +478,14 @@ def t_balanced_requires_both_components_and_general_pace_uses_the_fixed_screen()
     assert state['phase']!='completed' and not state['progress']['pace_improved']
 
 
+def t_pace_cannot_complete_from_one_faster_outlier_among_slower_attempts():
+    engine,cal,_,_=ready('pace')
+    attempt(engine,cal,3,89,[finding(net=-.2)])
+    for n in (4,5):state=attempt(engine,cal,n,91,[finding(net=.4)])
+    assert len(state['attempts'])==3 and state['progress']['sample_count']==3
+    assert state['phase']!='completed' and not state['progress']['pace_improved']
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:
