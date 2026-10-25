@@ -76,3 +76,31 @@ writes require JSON with bounded unambiguous Content-Length and reject foreign
 Origin/Referer and cross-site browser requests. Native configuration is never
 returned on remote routes. Revocation stops the next request; future message/audio
 workers must also bind their work to current access revision before publishing.
+
+## Review and measured evidence
+
+The signed HTTP fixture exercises the production relay handler with current
+Console tokens, assignment changes, same-origin rejection, producer profile
+binding, semantic errors, session reset and setup/service round trips. A delayed
+body test pauses the actual request while token or assignment revocation lands;
+the write then returns 401 or 403 before changing session state.
+
+The separate security review found a shared-ingestion dependency on Engineer
+opt-in. A real TelemetryStore/worker regression first failed with radio alone,
+then passed after either feature could enable collection. Engineer access remains
+disabled in that case and no recording starts. Code review also reproduced an
+oversized-integer conversion error; numeric bounds now reject it without float
+conversion. Corrupt storage fails closed with 503 and a stable semantic error.
+
+Twenty-four assurances were falsified individually from committed source and
+restored after the intended assertion failed: availability, opt-in, assignment,
+settings revision/schema, driver count, native configuration schema, document
+bound, foreign symlink, setup fields, numeric bounds/types, exclusive race length,
+service compound, session reset, active session, setup revision, evidence binding,
+remote origin, admin origin/profile, JSON content type, delayed token revocation
+and radio-only ingestion. No external speech or AI service was called.
+
+No browser surface changes in this delivery. Native configuration is a stored
+contract for #976, not an active microphone or playback service. Remaining remote
+presets, messages and audio routes are intentionally absent until their owning
+implementation deliveries.
