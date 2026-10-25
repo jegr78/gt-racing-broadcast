@@ -8,7 +8,7 @@ from pathlib import Path
 
 import ai_agents
 import ai_jobs
-from driver_radio_providers import ProviderError, compact_facts, render_explanation
+from driver_radio_providers import ProviderError, compact_facts, render_explanation, COACH_EXPLANATIONS
 
 from driver_radio_process import INPUT_MAX, STREAM_MAX, run_process, ensure_ready, temporary_directory
 
@@ -25,6 +25,7 @@ def schema(facts,context=None):
         result['required'].append('exercise')
         result['properties']['exercise']={'type':'string','enum':['current','repeat']}
         result['properties']['explanation']['maxLength']=300
+        result['properties']['explanation']['enum']=list(COACH_EXPLANATIONS)
     return result
 
 
@@ -69,7 +70,7 @@ class LiveAI:
                         'Use qualitative explanation prose without numbers or number words. Numerical measurements '
                         'belong only in claims with their exact supplied fact ID, value and unit; the server renders them. '
                         + ('For coaching keep the same focus. Put the practice suggestion only in exercise, choosing current or repeat. '
-                           'Every explanation sentence must remain conditional or provisional. Do not name driving inputs or targets, '
+                           'Select explanation exactly from its allowed enum. Do not generate explanation prose or name driving inputs or targets, '
                            'claim learning or causes, or invent a new exercise. ' if context is not None else '')
                         +'Read facts.json.\n'+raw).encode()
                 adapter=self.adapter_factory(agent)

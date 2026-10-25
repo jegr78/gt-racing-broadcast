@@ -271,6 +271,14 @@ class Service:
                     return
                 self._apply(command)
             model = self._model
+            if model is not None and not _allowed(self._grant):
+                self._model = None
+                with self._lock:
+                    if token == self._token:
+                        self._invalidate('forbidden')
+                        self._state.update(active=False, pending=False, calibration=None, focus=None, latest=None)
+                self.radio.cancel_coach()
+                return
             if model is None:
                 with self._lock:
                     if token == self._token:
@@ -328,7 +336,7 @@ class Service:
                 row = detail.get('lap') if isinstance(detail, dict) and detail.get('state') == 'ready' else None
                 if (not isinstance(row, dict) or row.get('id') != ident
                         or row.get('session_id') != doc['session_id']
-                        or any(row.get(k) != brief.get(k) for k in ('measurement_hash', 'version', 'context_revision'))):
+                        or any(row.get(k) != brief.get(k) for k in ('measurement_hash', 'version', 'context_revision', 'lap', 'time_s', '_start_wall', '_end_wall', 'state'))):
                     continue
                 if model['focus'].snapshot()['phase'] == 'completed':
                     model['focus'].finish(); model['cal'].end_focus()

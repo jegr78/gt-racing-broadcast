@@ -159,6 +159,13 @@ FACT_LABELS = {
 }
 
 
+COACH_EXPLANATIONS = (
+    'The observed pattern remains provisional.',
+    'Further comparable attempts may clarify the timing variation.',
+    'The current exercise may help test repeatability.',
+)
+
+
 COACH_FACTS = {
     'lap_time_s':('Measured coach lap time', 'seconds'),
     'baseline_time_s':('Original baseline lap time', 'seconds'),
@@ -257,14 +264,8 @@ def render_explanation(result,message):
     if (not isinstance(selected,str) or not 0<len(selected)<=600
             or result['exercise'] not in ('current','repeat')):
         raise ProviderError('invalid_explanation')
-    text=result['explanation']
-    if (not isinstance(text,str) or len(text)>300
-            or re.search(r'\b(?:brak(?:e|ing)|throttle|steer(?:ing)?|gear|apex|hydraulic|pressure|metres?|meters?|'
-                         r'turn(?:ing)?|corners?|line|entry|exit|accelerat(?:e|ion)|pedal|earlier|later|sooner|caus(?:e|ed|es|al)|learn(?:ed|ing)?|pro(?:ve|ved|ven)|guarantee|must|should|always)\b',text,re.I)):
+    if result['explanation'] not in COACH_EXPLANATIONS:
         raise ProviderError('invalid_explanation')
-    for clause in re.split(r'[.!?;]',text):
-        if clause.strip() and not re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|provisional|consider)\b',clause,re.I):
-            raise ProviderError('invalid_explanation')
     rendered=validate_explanation({k:v for k,v in result.items() if k!='exercise'},facts)+' '+selected
     if len(rendered)>600:
         raise ProviderError('invalid_explanation')

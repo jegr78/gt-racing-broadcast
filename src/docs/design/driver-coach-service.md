@@ -68,8 +68,9 @@ An unselected assessment suggestion never becomes a second action in the summary
 Optional AI requires both per-training consent and a configured isolated agent.
 Only bounded current numeric facts, unknowns and the current exercise are sent.
 The model selects the current experiment or a repeatability variant within that
-same exercise. Free explanation prose must remain conditional; numeric claims are
-rendered from exact fact IDs/units, and invented targets, causes or learning claims
+same exercise. Explanation sentences are selected from server-owned provisional/conditional templates; numeric claims are
+rendered from exact fact IDs/units. Arbitrary prose cannot introduce an additional
+driving instruction through synonyms; invented targets, causes and learning claims
 are rejected. Explanations cannot change the focus or replace the grounded text.
 The shared radio enrichment lane keeps its existing deadline and rate limits;
 failed/late output leaves the deterministic review available.

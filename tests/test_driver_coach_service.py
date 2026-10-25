@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_coach_service as coach
 import driver_coach_calibration as calibration
+from driver_radio_providers import COACH_EXPLANATIONS
 from test_driver_coach_focus import real_lap,real_definition
 from test_driver_radio_service import Fixture as RadioFixture
 
@@ -316,7 +317,7 @@ def t_optional_ai_requires_training_consent_and_uses_guarded_current_progress_on
         def __init__(self):self.calls=[]
         def explain(self,agent,message,stopped,budget):
             self.calls.append((agent,message,budget))
-            return dict(explanation='The observed variation may warrant more comparable practice.',
+            return dict(explanation=COACH_EXPLANATIONS[1],
                         evidence=['coach.lap_time_s'],claims=[],exercise='repeat')
     for consent in (False,True):
         with tempfile.TemporaryDirectory() as root:
@@ -377,7 +378,7 @@ def t_invalid_or_late_ai_keeps_grounded_text_and_cannot_change_the_focus():
                 def explain(self,*_args,stale=stale,f=f):
                     if stale=='deadline':f.at+=13;f.wall+=13
                     else:f.command('skip')
-                    return dict(explanation='The pattern may remain provisional.',evidence=['coach.lap_time_s'],claims=[],exercise='current')
+                    return dict(explanation=COACH_EXPLANATIONS[0],evidence=['coach.lap_time_s'],claims=[],exercise='current')
             worker=providers.Enricher(f.radio.service,ai=Late(),clock=lambda f=f:f.at)
             assert not worker.step('ai')
             assert all('explanation' not in m for m in f.messages()) and f.messages()[-1]['text']==original
@@ -399,7 +400,7 @@ def t_coach_cli_package_contains_only_current_bounded_context_and_a_variant_sche
             assert data['current_exercise']['variants'] and 'history' not in data and 'trace' not in str(data)
             assert schema['properties']['exercise']['enum']==['current','repeat']
             assert budget<=8 and 'RACECAST_CONSOLE_SECRET' not in env
-            Path(invocation.output).write_text(json.dumps(dict(explanation='The pattern may remain provisional.',
+            Path(invocation.output).write_text(json.dumps(dict(explanation=COACH_EXPLANATIONS[0],
                 evidence=['coach.lap_time_s'],claims=[],exercise='current')),encoding='utf8')
             return b''
         result=driver_radio_ai.LiveAI(machine,adapter_factory=Adapter,process=process).explain('live',f.messages()[-1],threading.Event(),8)
@@ -420,6 +421,42 @@ def t_relay_attachment_has_one_shared_worker_and_disabled_sources_have_none():
         f=Fixture(root);f.radio.access.available=False
         assert coach.attach(f.radio.service,live) is None
         assert coach.attach(f.radio.service,None) is None
+
+
+def t_ai_cannot_hide_a_new_driving_action_in_explanation_synonyms():
+    import driver_radio_providers as providers
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(allow_ai=True);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        message=f.messages()[-1]
+        for prose in ('You could depress the accelerator completely.',
+                      'You might select a higher ratio.',
+                      'Consider a more aggressive trajectory.'):
+            result=dict(explanation=prose,evidence=['coach.lap_time_s'],claims=[],exercise='repeat')
+            try:providers.render_explanation(result,message)
+            except providers.ProviderError as error:assert error.code=='invalid_explanation'
+            else:raise AssertionError('Unbounded AI driving instruction passed: '+prose)
+
+
+def t_revoking_the_active_owner_releases_the_training_slot_without_sharing_private_state():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(owner=REMOTE);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        f.granted=False;f.step()
+        revoked=f.service.snapshot(REMOTE)
+        assert not revoked['active'] and revoked['phase']=='forbidden'
+        f.granted=True;state=f.command(owner=LOCAL)
+        assert state['active'] and state['calibration'] is None and state['focus'] is None
+        f.step();assert f.service.snapshot(LOCAL)['calibration']['calibration_ids']==[]
+
+
+def t_live_detail_must_match_the_requested_summary_before_model_mutation():
+    for field,value in (('lap',99),('time_s',99),('_start_wall',100),('_end_wall',200),('state','provisional')):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.command();f.step();row=f.complete(2)
+            f.rows[row['id']][field]=value
+            state=f.step()
+            assert not state['calibration']['calibration_ids'] and not state['latest'],field
 
 
 if __name__=='__main__':
