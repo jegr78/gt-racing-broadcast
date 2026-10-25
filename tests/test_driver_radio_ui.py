@@ -102,6 +102,36 @@ def t_producer_proxy_rejects_foreign_origin_wrong_profile_and_stale_revision():
         else:raise AssertionError('Foreign relay accepted')
 
 
+def t_producer_read_reports_an_unavailable_relay_without_a_request_error():
+    with RadioFixture() as f,patch.object(f,'admin',return_value={'ok':False,'error':'Start the relay for this profile'}):
+        # The handler captured the bound callback when the fixture was created.
+        context=ui._ctx();context['driver_radio']=f.admin
+        server,port=ui._serve(context)
+        try:
+            conn=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+            conn.request('GET','/api/driver-radio')
+            response=conn.getresponse();result=json.loads(response.read());conn.close()
+            assert response.status==200 and result=={'ok':False,'error':'Start the relay for this profile'}
+        finally:server.shutdown();server.server_close()
+
+
+def t_packaged_component_is_served_and_cached_before_bundle_cleanup():
+    with tempfile.TemporaryDirectory() as directory:
+        root=Path(directory);(root/'ui').mkdir()
+        page=root/'ui/control-center.html';page.write_text('<html>Control Center</html>',encoding='utf8')
+        script=root/'driver-radio.js';expected=(ROOT/'src/console/driver-radio.js').read_bytes();script.write_bytes(expected)
+        context=ui._ctx();context['page_path']=str(page)
+        server,port=ui._serve(context)
+        try:
+            script.unlink()
+            conn=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+            conn.request('GET','/driver-radio-ui.js')
+            response=conn.getresponse();raw=response.read();conn.close()
+            assert response.status==200 and raw==expected
+            assert response.getheader('Content-Type').startswith('application/javascript')
+        finally:server.shutdown();server.server_close()
+
+
 def t_control_center_proxy_checks_owned_relay_and_profile_before_writes():
     from unittest.mock import patch
     import test_racecast
