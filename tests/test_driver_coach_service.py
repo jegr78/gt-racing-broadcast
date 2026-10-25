@@ -673,18 +673,18 @@ def t_native_player_closes_before_a_blocked_radio_grant_is_released():
             assert f.radio.service.attach(message['id'],message['epoch'],{'audio':b'fixture','audio_state':'ready'})
             closed=threading.Event();players=[]
             class WatchedPlayer(Player):
-                def close(self):super().close();closed.set()
-            def player(_audio,_volume):p=WatchedPlayer();players.append(p);return p
+                def close(self,closed=closed):super().close();closed.set()
+            def player(_audio,_volume,players=players,klass=WatchedPlayer):p=klass();players.append(p);return p
             owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=lambda _body:Worker(),player=player,
-                                   ready=lambda:True,clock=lambda:f.at)
+                                   ready=lambda:True,clock=lambda f=f:f.at)
             entered=threading.Event();release=threading.Event();reading=threading.Event()
             reader=None;output=None;read=f.radio.access.read
             try:
                 owner.step();assert len(players)==1 and not players[0].closed
-                def grant():entered.set();assert release.wait(4);return True
+                def grant(entered=entered,release=release):entered.set();assert release.wait(4);return True
                 f.service._grant=grant
                 reader=threading.Thread(target=f.messages);reader.start();assert entered.wait(1)
-                def blocked_read():reading.set();return read()
+                def blocked_read(reading=reading,read=read):reading.set();return read()
                 f.radio.access.read=blocked_read
                 output=threading.Thread(target=owner.step);output.start();assert reading.wait(1)
                 if action=='stop':assert not f.command('stop')['active']
