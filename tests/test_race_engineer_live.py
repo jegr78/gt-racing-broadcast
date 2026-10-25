@@ -294,8 +294,10 @@ def t_bounds_eviction_concurrent_readers_and_async_recovery():
             assert store.stats()['replays'] == 1
             recovered['lap']['trace'].clear()
             assert store.detail(old['id'])['lap']['trace'], 'reader mutated shared history'
-            os.unlink(path)
-            assert store.detail(old['id'])['state'] == 'unavailable'
+        # Background context reads may hold the file open on Windows. Stop the
+        # readers before deleting the source, then recheck the cached lookup.
+        os.unlink(path)
+        assert store.detail(old['id'])['state'] == 'unavailable'
 
 
 def t_ingestion_does_not_wait_for_analysis_and_overflow_is_visible():
