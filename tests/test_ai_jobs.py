@@ -175,6 +175,24 @@ def t_success_handoff_and_frozen_profile():
         assert pending['state']=='awaiting_validation' and pending['report'] is None
 
 
+def t_cleanup_rejects_unsafe_or_untyped_process_ids_before_any_signal():
+    # Every termination primitive stays mocked even when the guard is broken.
+    for platform_name in ('posix','nt'):
+        for pid in (mock.MagicMock(),mock.Mock(),True,False,None,'42',-1,0,1,24680):
+            proc=mock.Mock(pid=pid);tree=mock.Mock()
+            with mock.patch.object(j.os,'name',platform_name), \
+                 mock.patch.object(j.os,'getpgrp',return_value=24680,create=True), \
+                 mock.patch.object(j.os,'killpg',create=True) as kill_group:
+                if platform_name=='nt' and pid==24680:
+                    continue  # Only POSIX process groups can target our own group.
+                error(lambda owned=proc,job=tree:j.terminate_tree(owned,job),'cleanup_failed')
+                kill_group.assert_not_called()
+                proc.kill.assert_not_called()
+                proc.poll.assert_not_called()
+                proc.wait.assert_not_called()
+                tree.close.assert_not_called()
+
+
 def t_darwin_zombie_group_is_only_accepted_after_reap_and_absence_probe():
     proc = mock.Mock(pid=12345)
     proc.poll.return_value = None

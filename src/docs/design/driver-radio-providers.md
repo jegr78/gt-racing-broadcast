@@ -42,7 +42,13 @@ The relay starts synthesis in an owned private process. This bounds DNS and
 socket stalls as well as response reads. Credentials travel through bounded
 stdin, never argv or environment; the private source/frozen entry bypasses
 profile bootstrap. The transport drains bounded pipes and kills the process
-tree on cancellation, timeout or excessive output. The shared HTTP helper in
+tree on cancellation, timeout or excessive output. Cleanup requires an exact
+integer process ID greater than one and rejects the caller's POSIX process group
+before any signal. Mock process IDs never reach operating-system termination.
+Fake-spawn cancellation tests also replace tree ownership and cleanup, so a
+removed cancellation guard remains safe to test. Fault injection runs in memory
+with signal primitives intercepted; it must not mutate a shared checkout during
+other test runs. The shared HTTP helper in
 that child refuses redirects. Stream reads also enforce the absolute deadline,
 so repeated small chunks cannot extend the request indefinitely.
 

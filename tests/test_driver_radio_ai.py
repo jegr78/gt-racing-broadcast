@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Isolated live CLI jobs use only synthetic fixtures and never invoke a provider."""
 import json
+import io
 import os
 import subprocess
 import sys
@@ -95,9 +96,19 @@ def t_owned_process_is_bounded_and_cancellable():
         script='import sys,time;sys.stdout.buffer.write(b"x"*'+str(live.STREAM_MAX+20000)+');sys.stdout.flush();time.sleep(20)'
         rejected(lambda:live.run_process(invocation(d,script),b'',threading.Event(),3,{}),'output_too_large')
         stopped=threading.Event();stopped.set()
-        with patch.object(live.subprocess,'Popen') as spawn:
+        # A broken cancellation guard must never pass a mock PID to real cleanup.
+        with patch.object(live.subprocess,'Popen') as spawn, \
+             patch.object(ai_jobs,'WindowsTree') as tree, \
+             patch.object(ai_jobs,'terminate_tree') as cleanup:
+            spawn.return_value.stdout=io.BytesIO()
+            spawn.return_value.stderr=io.BytesIO()
+            spawn.return_value.stdin=io.BytesIO()
+            spawn.return_value.poll.return_value=0
+            spawn.return_value.returncode=0
             rejected(lambda:live.run_process(invocation(d,'pass'),b'',stopped,3,{}),'cancelled')
             spawn.assert_not_called()
+            tree.assert_not_called()
+            cleanup.assert_not_called()
         stopped.clear();timer=threading.Timer(.1,stopped.set);timer.start()
         try:rejected(lambda:live.run_process(invocation(d,'import time;time.sleep(20)'),b'',stopped,3,{}),'cancelled')
         finally:timer.join()
