@@ -92,3 +92,8 @@ mistaken for a correction. Ready bounded detail is required for technique scorin
 Reference grant checks and snapshots run outside the control-state lock. An
 inactive calibration, including its session-budget stop, cannot publish new work.
 The current owner can read the explicit per-training AI-consent flag.
+
+Detail lookups rotate with a four-call per-step budget. Evicted/unavailable laps
+are skipped with a compact lap/state status; pending rows are retried without
+blocking newer ready laps. Once a newer lap is processed, older delayed detail
+cannot roll the review backward or manufacture a backlog of spoken hints.

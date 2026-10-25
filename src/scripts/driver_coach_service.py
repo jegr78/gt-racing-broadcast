@@ -200,7 +200,7 @@ class Service:
                                mark=_mark(doc, command['wall']) if _live(doc) else None,
                                seen=collections.OrderedDict(), allow_ai=options.get('allow_ai', False),
                                latest=None, owner=command['owner'], cal_epoch=cal.epoch, reference_grant=None,
-                               sources=collections.OrderedDict(), best_source=None, focus_key=None, focus_sources=set(), cursor=0)
+                               sources=collections.OrderedDict(), best_source=None, focus_key=None, focus_sources=set(), cursor=0, detail_cursor=0, detail_status=None)
             return
         model = self._model
         if model is None:
@@ -274,6 +274,7 @@ class Service:
         model['stamp'], model['mark'] = _stamp(doc), _mark(doc, self.wall())
         model['seen'].clear(); model['sources'].clear(); model['best_source'] = None
         model['cursor'] = 0
+        model['detail_cursor'], model['detail_status'] = 0, None
 
     def _cache(self, token, model, calibrated=None):
         # Grant callbacks may perform bounded I/O; never run them under the state lock.
@@ -281,7 +282,7 @@ class Service:
         self._sync_epoch(model, calibrated)
         new = dict(active=calibrated['active'], pending=False, phase=calibrated['phase'],
                    calibration=calibrated, focus=model['focus'].snapshot(), latest=model['latest'],
-                   allow_ai=model['allow_ai'] if calibrated['active'] else False)
+                   allow_ai=model['allow_ai'] if calibrated['active'] else False, detail_status=model['detail_status'])
         with self._lock:
             if token == self._token and self._command is None and new != self._state:
                 self._state = copy.deepcopy(new); self._revision += 1
@@ -350,8 +351,13 @@ class Service:
                           and type(r.get('lap')) is int and type(mark.get('lap')) is int
                           and r['lap'] > mark['lap'] and assessment.finite(r.get('_start_wall'))
                           and r['_start_wall'] > mark['wall']]
+            # Rotate bounded detail attempts so pending/evicted rows cannot starve ready data.
+            ordered = sorted((r for r in candidates if r['lap'] > model['cursor']), key=lambda r:r['lap'])
+            remaining = [r for r in ordered if r['lap'] > model['detail_cursor']]
+            if not remaining:
+                remaining = ordered
             processed = 0
-            for brief in sorted(candidates, key=lambda r:r['lap']):
+            for brief in remaining:
                 ident = brief.get('id')
                 if not calibration._text(ident):
                     continue
@@ -361,7 +367,14 @@ class Service:
                 if processed >= ROWS_PER_STEP:
                     break
                 processed += 1
+                model['detail_cursor'] = brief['lap']
                 detail = self.detail(ident)
+                detail_state = detail.get('state') if isinstance(detail, dict) else 'unavailable'
+                if detail_state != 'ready':
+                    model['detail_status'] = dict(lap_id=ident, state=detail_state if detail_state in ('evicted', 'unavailable', 'pending') else 'unavailable')
+                    if detail_state in ('evicted', 'unavailable'):
+                        model['cursor'] = brief['lap']
+                    continue
                 row = detail.get('lap') if isinstance(detail, dict) and detail.get('state') == 'ready' else None
                 if (not isinstance(row, dict) or row.get('id') != ident
                         or row.get('session_id') != doc['session_id']

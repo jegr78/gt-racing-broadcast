@@ -398,6 +398,7 @@ def t_coach_cli_package_contains_only_current_bounded_context_and_a_variant_sche
             schema=json.loads((Path(invocation.cwd)/'result-schema.json').read_text())
             seen.append(data)
             assert data['current_exercise']['variants'] and 'history' not in data and 'trace' not in str(data)
+            assert 'exercise' in schema['properties']
             assert schema['properties']['exercise']['enum']==['current','repeat']
             assert budget<=8 and 'RACECAST_CONSOLE_SECRET' not in env
             Path(invocation.output).write_text(json.dumps(dict(explanation=COACH_EXPLANATIONS[0],
@@ -529,6 +530,66 @@ def t_a_normal_provisional_to_confirmed_lap_transition_is_not_a_correction_reset
         state=f.step()
         assert state['calibration']['calibration_ids']==[row['id']]
         assert not state['calibration']['invalidations']
+
+
+def t_unavailable_and_pending_detail_cannot_starve_new_ready_laps():
+    for missing in ('evicted','unavailable','pending'):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.command();f.step()
+            for n in (2,3,4,5):f.complete(n);f.step()
+            for n in range(6,20):f.complete(n)
+            calls=[]
+            def detail(ident,calls=calls,missing=missing,f=f):
+                calls.append(ident)
+                return {'state':missing} if int(ident.split('-')[1])<16 else f.detail(ident)
+            f.service.detail=detail
+            for _ in range(5):
+                before=len(calls);state=f.step()
+                assert len(calls)-before<=coach.ROWS_PER_STEP, 'Detail retry budget exceeded'
+            assert state['latest']['lap_id']=='lap-19', (missing,state['latest'])
+            assert state['detail_status']['state']==missing
+            before=len(calls);f.step();assert len(calls)==before
+
+
+def t_pending_detail_is_retried_without_a_newer_ready_lap():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();f.complete(2)
+        f.service.detail=lambda _ident:{'state':'pending'}
+        assert f.step()['latest'] is None
+        f.service.detail=f.detail
+        state=f.step();assert state['latest']['lap_id']=='lap-2'
+
+
+def t_real_store_detail_eviction_recovers_after_a_delayed_worker():
+    from test_gt7_laps import FakeCars,FakeTracks,write_circle_recording
+    from race_engineer_live import Store
+    import gt7_recording,gt7_telemetry
+    with tempfile.TemporaryDirectory() as root:
+        path=write_circle_recording(root,lap_secs=(20,)*32)
+        packets=list(gt7_recording.Recording(path).packets());clock=[100.];wall=[packets[0][0]]
+        with Store(lambda:True,tracks=FakeTracks(),cars=FakeCars(),queue_max=4096,clock=lambda:clock[0]) as live:
+            radio=RadioFixture(root);radio.service.source=live.snapshot
+            radio.service.clock=lambda:clock[0];radio.service.wall=lambda:wall[0]
+            service=coach.Service('solo',live.snapshot,live.detail,radio.service,clock=lambda:clock[0],wall=lambda:wall[0])
+            try:
+                for i,(stamp,_kind,plain) in enumerate(packets):
+                    wall[0]=stamp;clock[0]=100+stamp-packets[0][0]
+                    live.put(gt7_telemetry.parse_packet(plain),stamp)
+                    if i==9:
+                        assert live.flush(10);service.command(LOCAL,'start',0,{},authorize=lambda:True);service.step()
+                    elif i%400==399:
+                        assert live.flush(10)
+                        if (live.snapshot().get('current') or {}).get('lap',999)<=6:service.step()
+                assert live.flush(10)
+                doc=live.snapshot();assert service._model['stamp']==coach._stamp(doc)
+                assert any(r['lap']==6 and live.detail(r['id'])['state']=='evicted' for r in doc['laps'])
+                newest=max((r for r in doc['laps'] if r['state']=='confirmed'),key=lambda r:r['lap'])
+                assert live.detail(newest['id'])['state']=='ready'
+                for _ in range(10):service.step()
+                state=service.snapshot(LOCAL)
+                assert state['latest']['lap_id']==newest['id'], 'Evicted details blocked newer ready evidence'
+                assert state['detail_status']['state']=='evicted'
+            finally:service.close();radio.service.close()
 
 
 if __name__=='__main__':
