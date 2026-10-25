@@ -63,6 +63,9 @@ def t_disabled_personal_busy_and_changed_configuration_do_not_publish():
         def process(invocation,*args):calls.append(1);return b''
         worker=live.LiveAI(machine,adapter_factory=Adapter,process=process)
         rejected(lambda:worker.explain('live',message,threading.Event(),8),'unconfigured')
+        settings.save({'enabled':False,'agents':[config()]})
+        rejected(lambda:worker.explain('live',message,threading.Event(),8),'unconfigured')
+        assert not calls
         settings.save({'enabled':True,'agents':[config('personal')]})
         rejected(lambda:worker.explain('live',message,threading.Event(),8),'isolation_required')
         assert not calls

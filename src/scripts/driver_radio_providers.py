@@ -213,7 +213,9 @@ def validate_explanation(result,facts):
         raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear)\s+(?:caused|causes|is causing|are worn)|caused by (?:traffic|weather)',text,re.I):
         raise ProviderError('invalid_explanation')
-    return ' '.join([text.strip(),*rendered])
+    rendered_text=' '.join([text.strip(),*rendered])
+    if len(rendered_text)>600:raise ProviderError('invalid_explanation')
+    return rendered_text
 
 
 class _Current:

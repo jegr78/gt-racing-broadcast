@@ -60,8 +60,11 @@ def t_blocked_transport_worker_cannot_hold_the_parent_indefinitely():
     import ai_agents
     import driver_radio_process
     def runner(invocation,prompt,stopped,budget,env,**kwargs):
-        blocked=ai_agents.Invocation([sys.executable,'-c','import time;time.sleep(30)'],invocation.cwd,'',600,'speech')
-        return driver_radio_process.run_process(blocked,prompt,stopped,budget,env,**kwargs)
+        finished=Path(invocation.cwd)/'finished'
+        script='import time,pathlib;time.sleep(2);pathlib.Path("finished").write_text("done")'
+        blocked=ai_agents.Invocation([sys.executable,'-c',script],invocation.cwd,'',600,'speech')
+        try:return driver_radio_process.run_process(blocked,prompt,stopped,budget,env,**kwargs)
+        finally:assert not finished.exists(), 'transport deadline must stop the unfinished worker'
     rejected(lambda:providers.GoogleSpeech(key=lambda:'fixture-key',runner=runner).synthesize('Fuel',threading.Event(),.2),'timed_out')
 
 

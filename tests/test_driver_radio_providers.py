@@ -85,6 +85,16 @@ def t_grounded_explanation_rejects_unsupported_facts_and_numbers():
         rejected(lambda change=change:providers.validate_explanation(dict(valid,**change),facts),'invalid_explanation')
 
 
+
+def t_rendered_claims_fit_the_message_attachment_bound():
+    facts={'fuel.usable_laps':{'value':2.5,'unit':'laps'}}
+    result={'explanation':'Measured fuel range is provisional. '*16,
+            'evidence':['fuel.usable_laps'],
+            'claims':[{'fact':'fuel.usable_laps','value':2.5,'unit':'laps'}]*8}
+    assert len(result['explanation'])<=600
+    rejected(lambda:providers.validate_explanation(result,facts),'invalid_explanation')
+
+
 def t_numeric_explanations_cannot_relabel_other_measurements():
     facts={'fuel.usable_laps':{'value':2.5,'unit':'laps'},
            'tyres.front_left':{'value':80,'unit':'degrees_c'}}
@@ -117,6 +127,22 @@ def t_provider_work_is_text_first_and_late_results_cannot_attach():
         assert not thread.is_alive() and f.service.history()['messages']==[]
         assert f.service.audio_for('forged') is None
         worker.close()
+
+
+
+def t_stopped_enricher_cannot_publish_a_completed_attachment():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'providers':{'speech':True,'agent':None}});f.poll();f.request()
+        entered,release=threading.Event(),threading.Event()
+        class Speech:
+            def synthesize(self,*args):entered.set();assert release.wait(3);return wav()
+        worker=providers.Enricher(f.service,speech=Speech())
+        thread=threading.Thread(target=lambda:worker.step('audio'))
+        thread.start();assert entered.wait(3)
+        worker.close();release.set();thread.join(3)
+        assert not thread.is_alive()
+        assert f.service.history()['messages'][-1]['audio_state']=='pending'
 
 
 def t_unconfigured_services_and_voice_disable_make_no_calls():
