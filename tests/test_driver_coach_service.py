@@ -459,6 +459,33 @@ def t_live_detail_must_match_the_requested_summary_before_model_mutation():
             assert not state['calibration']['calibration_ids'] and not state['latest'],field
 
 
+def t_only_stop_can_preempt_a_control_command_already_being_applied():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        entered=threading.Event();release=threading.Event();apply=f.service._apply
+        def blocked(command):entered.set();assert release.wait(3);apply(command)
+        f.service._apply=blocked;f.command('objective',objective='pace')
+        thread=threading.Thread(target=f.service.step);thread.start();assert entered.wait(2)
+        try:rejects(lambda:f.command('keep'),'busy')
+        finally:release.set();thread.join(3)
+        assert not thread.is_alive()
+
+
+def t_an_obsolete_blocked_grant_check_cannot_discard_a_new_valid_command_model():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        before=f.service.snapshot(LOCAL)['focus']['focus']
+        entered=threading.Event();release=threading.Event()
+        def blocked():entered.set();assert release.wait(3);return False
+        f.service._grant=blocked
+        thread=threading.Thread(target=f.service.step);thread.start();assert entered.wait(2)
+        f.command('keep');release.set();thread.join(3);assert not thread.is_alive()
+        state=f.step()
+        assert f.service._model is not None and state['active'] and state['focus']['focus']==before
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)

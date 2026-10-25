@@ -49,7 +49,7 @@ and never gate the grounded text. Existing completed-session runs remain separat
 
 One actor owns the mutable calibration/focus model. Controls invalidate a public
 publication token immediately and occupy one bounded command slot. Stop preempts
-that slot; other writes receive a busy response until it is consumed. Permission
+that slot; other writes receive a busy response until the current command has been applied. Permission
 is checked before enqueue and again before execution. Numerical calculation and
 provider work never hold the state/view/access locks.
 
@@ -74,3 +74,10 @@ driving instruction through synonyms; invented targets, causes and learning clai
 are rejected. Explanations cannot change the focus or replace the grounded text.
 The shared radio enrichment lane keeps its existing deadline and rate limits;
 failed/late output leaves the deterministic review available.
+
+Revoking the active owner ends the training model and releases the single training
+slot. A new owner receives a fresh calibration rather than the previous owner's
+private state. A delayed obsolete authorization check cannot discard a model now
+owned by a newer valid command. Only Stop may preempt an in-flight control.
+Live detail must match its requested summary's lap identity, times and state
+before it can mutate calibration.

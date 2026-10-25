@@ -169,7 +169,7 @@ class Service:
                 raise calibration.CoachError('training_busy')
             if action != 'start' and (not self._state['active'] or owner != self._owner):
                 raise calibration.CoachError('training_required')
-            if self._command is not None and action != 'stop':
+            if (self._command is not None or self._state['pending']) and action != 'stop':
                 raise calibration.CoachError('busy')
             if action in ('skip', 'keep') and not (self._state.get('focus') or {}).get('focus'):
                 raise calibration.CoachError('focus_unavailable')
@@ -262,9 +262,9 @@ class Service:
                 return
             if command:
                 if command['action'] != 'stop' and not _allowed(command['authorize']):
-                    self._model = None
                     with self._lock:
                         if token == self._token:
+                            self._model = None
                             self._state.update(active=False, pending=False, phase='forbidden', calibration=None, focus=None, latest=None)
                             self._revision += 1
                     self.radio.cancel_coach()
@@ -272,9 +272,9 @@ class Service:
                 self._apply(command)
             model = self._model
             if model is not None and not _allowed(self._grant):
-                self._model = None
                 with self._lock:
                     if token == self._token:
+                        self._model = None
                         self._invalidate('forbidden')
                         self._state.update(active=False, pending=False, calibration=None, focus=None, latest=None)
                 self.radio.cancel_coach()
@@ -284,7 +284,7 @@ class Service:
                     if token == self._token:
                         new_phase = 'stopped' if command else 'inactive'
                         if self._state['pending'] or self._state['phase'] != new_phase:
-                            self._state.update(pending=False, phase=new_phase)
+                            self._state.update(active=False, pending=False, phase=new_phase)
                             self._revision += 1
                 return
             model['cal'].reference()
