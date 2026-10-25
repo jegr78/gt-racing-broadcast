@@ -139,8 +139,17 @@ class Service:
             if old is not None:old['state'] = 'cancelled'
         ttl = URGENT_TTL if severity == 'urgent' else ROUTINE_TTL
         mid = uuid.uuid4().hex
+        text = result['answers'][preset]
+        if kind == 'fuel':
+            fuel = result['fuel']
+            text = (('Urgent fuel. ' if severity == 'urgent' else 'Fuel warning. ')
+                    + f"Estimated range after reserve {fuel['usable_laps']:.1f} laps. Fuel {fuel['current_l']:.1f} litres.")
+            if fuel['state'] == 'provisional':text += ' This estimate is provisional.'
+        elif kind == 'pace':
+            text = (f"Recent comparable pace is {result['pace']['delta_s']:.1f} seconds slower. "
+                    'Tyres may contribute. Consider changing them at the next stop; causes remain unknown.')
         message = dict(id=mid, version=1, epoch=self._epoch, binding=self._binding,
-                       kind=kind, preset=preset, severity=severity, text=result['answers'][preset],
+                       kind=kind, preset=preset, severity=severity, text=text,
                        evidence={k:result[k] for k in ('fuel','pace','tyres','uncertainties')},
                        created_at=self.wall(), expires_at=self.wall()+ttl, state='queued',
                        audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now,

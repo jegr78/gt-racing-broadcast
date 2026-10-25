@@ -1,5 +1,6 @@
 """Fixed local voice selections. No browser-supplied executable or model paths."""
 import os
+import json
 import sys
 from pathlib import Path
 
@@ -26,9 +27,13 @@ def paths(machine):
 
 
 def ready(machine):
-    p=paths(machine)
-    return (Path(p['library']).is_file() and Path(p['en']).is_dir()
-            and (Path(machine)/'radio-voice'/'validated-phrases.json').is_file())
+    p=paths(machine);root=Path(machine)/'radio-voice';manifest=root/'validated-phrases.json'
+    try:
+        if root.is_symlink() or manifest.is_symlink() or any(Path(value).is_symlink() for value in p.values()):return False
+        with manifest.open('rb') as stream:raw=stream.read(2049)
+        if len(raw)>2048 or json.loads(raw)!=dict(version=1,phrases=list(PHRASES)):return False
+        return Path(p['library']).is_file() and all(Path(p[language]).is_dir() for language in ('en','de'))
+    except (OSError,ValueError,RecursionError):return False
 
 
 def execution_env():

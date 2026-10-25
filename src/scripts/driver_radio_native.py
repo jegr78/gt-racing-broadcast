@@ -81,7 +81,7 @@ class Supervisor:
             if self._closed:return
             settings=self.service.settings.read();state=self.service.refresh(force=True)
             voice=settings['voice'];native=config.settings(settings.get('native'))
-            signature=(settings['revision'],state['binding'])
+            signature=(settings['revision'],state['binding'],state['epoch'])
             enabled=settings['enabled'] and self.service.settings.available and voice['enabled']
             if signature!=self._signature:
                 old_binding=self._binding
@@ -145,8 +145,10 @@ class Supervisor:
                         self._set('error',event.get('code') if event.get('code') in (
                             'microphone_unavailable','model_unavailable','transcription_failed','transcription_uncertain',
                             'transcription_unconfigured','utterance_timeout') else 'worker_failed');return
-                if self._worker_proc.poll() is not None or self.clock()-self._heartbeat>20:
-                    self._stop_capture();self._retry_at=self.clock()+5;self._set('error','worker_failed')
+                budget=8 if self._phase=='transcribing' else 20
+                if self._worker_proc.poll() is not None or self.clock()-self._heartbeat>budget:
+                    code='transcription_timed_out' if self._phase=='transcribing' else 'worker_failed'
+                    self._stop_capture();self._retry_at=self.clock()+5;self._set('error',code)
                 return
             if self.clock()<max(self._retry_at,self._settle):return
             if not self.ready():self._set('error','models_unavailable');return

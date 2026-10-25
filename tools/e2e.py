@@ -515,6 +515,8 @@ def run_visual(urls, outdir, headed=False, slowmo=0):
         try:
             import hud_fit_check
             results.append(hud_fit_check.check(browser, outdir))
+            import radio_browser_check
+            results.extend(radio_browser_check.check(browser, outdir))
             for surface in V.SURFACES:
                 for viewport in surface.viewports:
                     results.append(_visual_one(browser, surface, viewport, urls, outdir,

@@ -37,6 +37,7 @@ flowchart LR
 - **You're the remote director?** → [Director setup](Director-Setup) (first
   time), then the [Director guide](Director)
 - **You run the league (Sheet + Discord)?** → [League owner setup](League-Owner-Setup)
+- **Driving a Solo POV race?** → [Driver radio](Driver-Radio)
 - **Watching read-only as Race Control?** → [Console → Race Control desk](Console#race-control-read-only-monitoring-desk)
 - **Helping over the internet without a Tailscale account?** → [Remote access & the Funnel](Remote-access)
 - **Not sure who does what?** → [Who does what](Who-does-what)

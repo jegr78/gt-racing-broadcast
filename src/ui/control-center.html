@@ -746,6 +746,7 @@
         <div class="viewhead"><h2>Telemetry controls</h2><a class="linkbtn" href="/telemetry" target="_blank" rel="noopener">Open Telemetry workspace</a></div>
         <p class="sub">Analyse recordings in the local workspace. These controls affect Engineer sharing and the broadcast HUD.</p>
         <p id="tm-err" class="enverr" hidden></p>
+        <section aria-label="Driver radio settings"><div id="driver-radio-admin"></div></section>
         <section aria-label="Telemetry replay controls"><h3>Broadcast replay</h3><div class="row" style="flex-wrap:wrap">
           <label>Recording <select id="tm-replay-recording" onchange="tmState.rec=this.value;tmReplaySelection()" aria-label="Replay recording"></select></label>
           <button onclick="tmLoad()">Refresh recordings</button><button id="tm-replay" onclick="tmReplayStart()" disabled>Replay selected recording</button>
@@ -925,7 +926,7 @@ let currentView = 'home', lastStatus = null;
 
 function showView(name) {
   currentView = name;
-  if (name === 'telemetry') {window.RacecastEngineer?.settings();}
+  if (name === 'telemetry') {window.RacecastEngineer?.settings();window.radioAdmin?.destroy();window.radioAdmin=window.DriverRadio?.mountAdmin(document.getElementById('driver-radio-admin'));}
   document.querySelectorAll('[data-view]').forEach(v => {
     v.hidden = v.dataset.view !== name;
   });
@@ -2783,7 +2784,7 @@ function applyKindGating(data) {
     window.RacecastEngineer?.reset(data.active);
   }
   if (currentView === 'telemetry' && !(kind === 'solo' && template === 'pov')) showView('home');
-  else if (currentView === 'telemetry' && !tmState.loaded) tmLoad();   // switched to another solo POV profile
+  else if (currentView === 'telemetry' && !tmState.loaded) {tmLoad();window.radioAdmin?.destroy();window.radioAdmin=window.DriverRadio?.mountAdmin(document.getElementById('driver-radio-admin'));}   // switched to another solo POV profile
 }
 
 async function useProfile(name) {
@@ -5479,6 +5480,7 @@ assetsLoaded = true; fetchAssetFiles();
   </form>
 </dialog>
 
+<script src="/driver-radio-ui.js"></script>
 <script src="/race-engineer.js"></script>
 </body>
 </html>

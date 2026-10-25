@@ -11561,7 +11561,7 @@ def engineer_page_for(console_page):
 
 
 _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
-                                ("health-monitor",), ("race-control",), ("race-engineer",), ("buttons",)})
+                                ("health-monitor",), ("race-control",), ("race-engineer",), ("driver-radio",), ("buttons",)})
 
 
 # The largest request body the control server reads (a parsed POST, or one drained
@@ -11595,6 +11595,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     if radio_service is None and radio_access is not None:
         radio_service = driver_radio_service.Service(radio_access, driver_radio_access.Session(), radio_source)
     radio_session = radio_service.session if radio_service is not None else driver_radio_access.Session()
+    radio_page_dir = os.path.dirname(console_page_path) if console_page_path else os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "console"))
     if radio_native is None and radio_service is not None:
         radio_native = driver_radio_native.Supervisor(radio_service, radio_access.path.parent.parent)
 
@@ -11776,6 +11778,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 radio_service.refresh(force=True)
                             else:
                                 result = radio_session.read(binding)
+                if admin:
+                    result['protocol'] = 'racecast-driver-radio-admin-v1'
                 return self._send(result, no_store=True)
             except driver_radio_access.RadioError as exc:
                 status = (401 if exc.code == "unauthorized" else
@@ -11853,6 +11857,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             oauth_flag = b"1" if (discord_client_id and discord_client_secret) else b""
             body = body.replace(b"__RC_OAUTH__", oauth_flag)
             body = body.replace(b"__RC_VERSION__", (app_version or "dev").encode())
+            try:
+                radio_allowed = bool(radio_access and radio_access.authorize(self._console_subject()))
+            except (driver_radio_access.RadioError, OSError, ValueError):
+                radio_allowed = False
+            body = body.replace(b"__RC_RADIO_ACCESS__", b"1" if radio_allowed else b"0")
             if b"<!--__CREW_FRAME__-->" in body:
                 try:
                     with open(crew_frame_path, "rb") as fh:
@@ -12366,7 +12375,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             has_step_up = bool(presented) and console_auth.secret_matches(presented, console_secret)
             # /console-only: identity introspection for the launcher (any auth).
             if sub == ["whoami"]:
-                self._send({"subject": subject, "roles": sorted(roles)})
+                try:
+                    radio_allowed = bool(radio_access and radio_access.authorize(subject))
+                except (driver_radio_access.RadioError, OSError, ValueError):
+                    radio_allowed = False
+                self._send({"subject": subject, "roles": sorted(roles), "driver_radio": radio_allowed})
                 return None
             # Read-only broadcast-chat mirror (#294): any authenticated /console
             # subject (commentator, director, race_control) may read it. Funnelled
@@ -12423,6 +12436,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send_file(path, ctype)
                 return None
             if sub and sub[0] == "driver-radio":
+                if sub == ["driver-radio"] and method == "GET":
+                    if radio_access is None:
+                        return self._radio_error("source_unavailable", "Driver radio is unavailable for this profile", 503)
+                    try:
+                        radio_access.authorize(subject)
+                    except driver_radio_access.RadioError as exc:
+                        return self._radio_error(exc.code, str(exc), 403)
+                    page = os.path.join(radio_page_dir, "driver-radio.html")
+                    return self._send_page(page, "/console", cookie_token=self._cockpit_token(), cookie_path="/console")
                 if console_policy.min_capability(sub, method) is None:
                     return self._radio_error("not_found", "Unknown driver radio route", 404)
                 return self._radio(sub[1], method, subject=subject)
@@ -12720,6 +12742,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             /status is unaffected."""
             return redact_console_status(self._status_payload(), roles)
         def do_GET(self):
+            if urlparse(self.path).path in ("/driver-radio-ui.js", "/console/driver-radio-ui.js"):
+                # Public static code only; every data/control route remains authenticated.
+                return self._send_file(os.path.join(radio_page_dir, "driver-radio.js"), "application/javascript; charset=utf-8")
             if urlparse(self.path).path in ("/driver-radio/admin", "/driver-radio/admin/native"):
                 return self._radio("native" if self.path.split('?')[0].endswith('/native') else "admin", "GET", admin=True)
             if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):

@@ -24,15 +24,6 @@ def answer(text, assessment, previous=None):
     result=assessment['answers'][route['preset']]
     if route['rejected']:
         return route,'I can explain current telemetry. Vehicle and broadcast control commands are unavailable.'
-    if route['preset']=='fuel' and not route['extra_lap']:
-        finish=assessment['fuel'].get('finish','unknown')
-        suffix={'supported':'Measured range supports the estimated finish distance after reserve.',
-                'short':'Measured range is short of the estimated finish distance after reserve.',
-                'estimated_supported':'Range may support the timed finish under the stated final-lap assumption.',
-                'estimated_short':'Range may be short for the timed finish under the stated final-lap assumption.',
-                'complete':'The declared race distance is complete.',
-                'unknown':'Finish feasibility is unknown without compatible race and consumption context.'}
-        result+=' '+suffix[finish]
     if route['extra_lap']:
         fuel=assessment['fuel']
         current=number(fuel.get('current_l'));burn=number(fuel.get('consumption_l'),True)

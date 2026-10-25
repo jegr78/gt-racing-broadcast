@@ -105,7 +105,7 @@ def t_cleanup_failure_retains_the_native_slot_and_controls_do_not_block_on_proce
         player.close=failed
         h.control(paused=True)  # HTTP controls only queue the change; no process I/O.
         try:h.n.step()
-        except ValueError:pass
+        except ValueError:pass  # The unsafe input or failed cleanup must be rejected.
         else:raise AssertionError('Cleanup failure hidden')
         assert h.f.service.take_playback() is None and h.n._ticket is not None
         player.close=lambda:None;h.n.step();assert h.n._ticket is None
@@ -144,6 +144,28 @@ def t_disabled_startup_never_opens_a_microphone_or_player():
             for _ in range(3):h.n.step()
             assert h.workers==[] and h.players==[] and h.n.status()['phase']=='disabled'
             h.n.close()
+
+
+def t_setup_corrections_discard_a_question_captured_under_the_old_radio_epoch():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step();old=h.workers[0]
+        old.events=[{'event':'question','text':'And one more lap?'}]
+        binding=h.f.service.refresh()['binding'];state=h.f.session.read(binding)
+        h.f.session.update(binding,dict(binding=binding,expected=state['revision'],setup={'laps':24}))
+        h.f.poll();h.n.step()
+        assert old.closed and len(h.workers)==2
+        assert not any(m['kind']=='question' for m in h.f.service.history()['messages'])
+        h.n.close()
+
+
+def t_stalled_transcription_is_cancelled_at_its_own_short_deadline():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step();worker=h.workers[0]
+        worker.events=[{'event':'transcribing'}];h.n.step()
+        h.f.at+=9;h.n.step()
+        assert worker.closed and h.n.status()['error']=='transcription_timed_out'
+        assert not h.f.service.history()['messages']
+        h.n.close()
 
 
 if __name__=='__main__':

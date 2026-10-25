@@ -188,6 +188,17 @@ def t_provisional_finish_cannot_suppress_warning_and_large_windows_require_repea
     assert review(snap,limits={'recent_laps':6})['pace']['state']=='stable'
 
 
+def t_preset_text_contains_required_measurements_and_status_stays_brief():
+    snap=snapshot((90,90,90,91,91,91))
+    snap['current']['tyre_age_laps']=3
+    result=radio.assess(snap)
+    assert 'Consumption ' in result['answers']['fuel'] and 'litres per lap' in result['answers']['fuel']
+    assert 'Last eligible comparable lap' in result['answers']['pace']
+    assert 'Best eligible comparable lap' in result['answers']['pace']
+    assert '3 completed laps' in result['answers']['tyres']
+    assert len(result['answers']['status'].split())<=55
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

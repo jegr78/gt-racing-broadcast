@@ -328,6 +328,17 @@ def t_worker_runs_without_clients_and_close_stops_it():
         assert f.service.take_playback() is None
 
 
+def t_automatic_urgent_speech_is_brief_while_presets_keep_complete_measurements():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll()
+        f.snap['instruments']['fuel_l']=2;f.snap['revision']+=1;f.poll()
+        urgent=f.service.history()['messages'][-1]
+        assert urgent['severity']=='urgent' and urgent['text'].startswith('Urgent fuel.')
+        assert len(urgent['text'].split())<=25
+        f.at+=3;requested=f.request('fuel')
+        assert 'Consumption ' in requested['text']
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

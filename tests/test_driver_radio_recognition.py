@@ -43,7 +43,7 @@ def t_cloud_transcriber_only_receives_the_bounded_utterance_and_selected_languag
     assert calls[0][1]['allow_redirects'] is False and 'private-key' not in calls[0][0]
     for key,pcm in (('',b'\0'*100),( 'key',b'x'*(r.PCM_MAX+1))):
         try:r.google_transcribe(pcm,'en',key,open_url=request)
-        except ValueError:pass
+        except ValueError:pass  # The unsafe input or failed cleanup must be rejected.
         else:raise AssertionError('Invalid or unconfigured STT accepted')
     assert len(calls)==1
 

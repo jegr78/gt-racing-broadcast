@@ -7678,6 +7678,41 @@ def _audience_connection_data(provider, body=None):
         return {"ok": False, "error": str(exc)}
 
 
+def driver_radio_data(body=None, native=False):
+    import driver_radio_admin
+    import ai_agents
+    try:
+        active = _active_profile_name()
+        pid = sv.read_pid(_relay_pid_path())
+        if not active or _running_relay_profile() != active or not pid or not sv.pid_is_relay(pid):
+            raise ValueError("Start the relay for this profile before changing driver radio")
+        if body is not None and (not isinstance(body, dict) or body.get("expectedProfile") != active):
+            raise ValueError("Active profile changed; reload driver radio settings")
+        client = driver_radio_admin.Client(active, RELAY_PORT)
+        settings = client.request()
+        if body is not None:
+            if _active_profile_name() != active:
+                raise ValueError("Active profile changed; reload driver radio settings")
+            result = client.request(native=native, body={k:v for k,v in body.items() if k != "expectedProfile"})
+            if _active_profile_name() != active:
+                raise ValueError("Active profile changed; reload driver radio settings")
+            return dict(ok=True, profile=active, result=result)
+        state = client.request(native=True)
+        try:
+            ai = ai_agents.Settings(_runtime_base_dir()).read()
+            agents = [dict(id=a['id'],name=a['name']) for a in ai['agents']
+                      if ai['enabled'] and a['mode'] == 'isolated']
+        except (OSError,ValueError):
+            agents = []
+        if _active_profile_name() != active:
+            raise ValueError("Active profile changed; reload driver radio settings")
+        return dict(ok=True,profile=active,settings=settings,native=state,agents=agents)
+    except driver_radio_admin.AdminError as exc:
+        return dict(ok=False,error=str(exc),code=exc.code)
+    except ValueError as exc:
+        return dict(ok=False,error=str(exc))
+
+
 def audience_youtube_data(body=None):
     return _audience_connection_data("youtube", body)
 
@@ -9222,6 +9257,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "overlay_read": overlay_read_data,
         "overlay_write": overlay_write_data,
         "audience_read": audience_read_data,
+        "driver_radio": driver_radio_data,
         "audience_youtube": audience_youtube_data,
         "audience_twitch": audience_twitch_data,
         "audience_write": audience_write_data,

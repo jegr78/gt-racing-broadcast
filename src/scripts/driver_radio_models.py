@@ -63,7 +63,9 @@ def extract(raw,destination):
 def validate_phrases(root,fixtures=None):
     from driver_radio_recognition import Vosk
     from driver_radio_voice_config import PHRASES
-    fixtures=Path(fixtures) if fixtures else Path(__file__).resolve().parents[1]/'assets'/'driver-radio'
+    import sys
+    source=Path(sys._MEIPASS)/'src' if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]
+    fixtures=Path(fixtures) if fixtures else source/'assets'/'driver-radio'
     library=next((Path(root)/'vosk'/name for name in ('libvosk.so','libvosk.dylib','libvosk.dll')
                   if (Path(root)/'vosk'/name).is_file()),None)
     if library is None:raise ValueError('Voice library is missing')

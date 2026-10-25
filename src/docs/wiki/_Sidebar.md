@@ -13,6 +13,7 @@
 - [Director setup](Director-Setup)
 - [Director guide](Director)
 - [The Console launcher](Console)
+- [Driver radio](Driver-Radio)
 - [Commentator Cockpit](Commentator-Cockpit)
 - [Race Control (monitoring desk)](Console#race-control-read-only-monitoring-desk)
 - [Health Monitor](Health-Monitor)
