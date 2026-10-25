@@ -38,6 +38,20 @@ never waits for AI. These are bounded engineering defaults; configured Studio-Q
 cold/warm latency is a separate explicit smoke check, not an ordinary CI call.
 No paid service call or live microphone capture is part of synthetic validation.
 
+The relay starts synthesis in an owned private process. This bounds DNS and
+socket stalls as well as response reads. Credentials travel through bounded
+stdin, never argv or environment; the private source/frozen entry bypasses
+profile bootstrap. The transport drains bounded pipes and kills the process
+tree on cancellation, timeout or excessive output. The shared HTTP helper in
+that child refuses redirects. Stream reads also enforce the absolute deadline,
+so repeated small chunks cannot extend the request indefinitely.
+
+`racecast radio smoke --allow-cloud` deliberately performs two synthesis calls
+and a third cached read, reporting cold, warm and cached latency without playing
+audio. Omitting `--allow-cloud` makes no provider call. This check exposes cost
+and outgoing text before the operator enables it; ordinary tests use fake HTTP.
+Without a configured key, it reports the required machine environment setting.
+
 ## Result boundaries
 
 AI explanations are labelled interpretation. They must cite supplied fact IDs;

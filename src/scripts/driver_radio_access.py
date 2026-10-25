@@ -101,7 +101,7 @@ class Store:
                     doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
                     doc['providers'] = _provider_settings(doc.get('providers',{}))
                 except ValueError as exc:
-                    raise RadioError('invalid_settings', 'Invalid radio assessment limits') from exc
+                    raise RadioError('invalid_settings', 'Invalid radio limits or service selection') from exc
                 doc['revision'] += 1
                 _require(_valid(doc) and len(json.dumps(doc).encode()) <= MAX_BYTES,
                          'invalid_settings', 'Invalid or oversized radio settings')

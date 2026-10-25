@@ -178,6 +178,8 @@ import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
 import driver_radio_access
 import driver_radio_service
+import driver_radio_providers
+import driver_radio_ai
 import race_engineer_live
 import race_engineer_api
 import gt7_context     # prepared session notes attached to each new recording
@@ -14758,6 +14760,8 @@ def main():
         driver_radio_access.Store(runtime, engineer_access.available),
         driver_radio_access.Session(),
         lambda: engineer_live.snapshot() if engineer_live is not None else {})
+    radio_enricher = driver_radio_providers.Enricher(
+        radio_service, ai=driver_radio_ai.LiveAI(runtime_base))
     engineer_page_path = engineer_page_for(console_page_path)
     audience_runtime = audience_widgets.Runtime(
         os.path.join(os.path.dirname(args.overlay_dir), "audience.json") if args.overlay_dir else None)
@@ -14843,6 +14847,7 @@ def main():
                  f"to see what holds the port.")
 
     radio_service.start()
+    radio_enricher.start()
     if youtube_service is not None:
         youtube_service.start()
     if twitch_service is not None:
@@ -14877,6 +14882,7 @@ def main():
             telemetry_store.recorder.close()   # flush and rename before the hard exit
         if telemetry_store is not None and telemetry_store.replay is not None:
             telemetry_store.replay.stop()
+        radio_enricher.close()
         radio_service.close()
         if engineer_live is not None:
             engineer_live.close()

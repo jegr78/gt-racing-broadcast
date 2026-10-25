@@ -7,11 +7,13 @@ import io
 import json
 import os
 import re
+import sys
+import tempfile
+from pathlib import Path
 import threading
 import time
 import wave
 
-import http_util
 
 VOICE = 'en-US-Studio-Q'
 URL = 'https://texttospeech.googleapis.com/v1/text:synthesize'
@@ -48,9 +50,9 @@ def validate_wav(audio):
 
 
 class GoogleSpeech:
-    def __init__(self,key=None,open_url=http_util.open_url,clock=time.monotonic):
+    def __init__(self,key=None,open_url=None,clock=time.monotonic,runner=None):
         self.key=key or (lambda:os.environ.get('RACECAST_GCLOUD_TTS_KEY',''))
-        self.open_url,self.clock=open_url,clock
+        self.open_url,self.clock,self.runner=open_url,clock,runner
         self._lock=threading.Lock()
         self._cache=collections.OrderedDict()
         self._bytes=0
@@ -59,6 +61,7 @@ class GoogleSpeech:
         deadline=self.clock()+min(BUDGET,budget)
         with self._lock:
             if stopped.is_set():raise ProviderError('cancelled')
+            if self.clock()>=deadline:raise ProviderError('timed_out')
             key=self.key()
             if not key:raise ProviderError('unconfigured')
             if not isinstance(text,str) or not text.strip() or len(text)>1200:
@@ -69,22 +72,24 @@ class GoogleSpeech:
                 return self._cache[ident]
             timeout=deadline-self.clock()
             if timeout<=0:raise ProviderError('timed_out')
-            body=dict(input={'text':text},voice={'languageCode':'en-US','name':VOICE},
-                      audioConfig={'audioEncoding':'LINEAR16','sampleRateHertz':24000})
-            try:
-                with self.open_url(URL,data=json.dumps(body).encode(),method='POST',
-                                   headers={'Content-Type':'application/json','X-Goog-Api-Key':key},
-                                   timeout=timeout,allow_redirects=False) as response:
-                    raw=response.read(JSON_MAX+1)
-            except Exception as exc:
-                raise ProviderError('speech_failed') from exc
+            if self.open_url is None:
+                raw=self._process_request(text,key,stopped,deadline)
+            else:
+                raw=self._direct_request(text,key,stopped,deadline)
             if len(raw)>JSON_MAX:raise ProviderError('response_too_large')
             if stopped.is_set():raise ProviderError('cancelled')
             if self.clock()>=deadline:raise ProviderError('timed_out')
             try:
-                encoded=json.loads(raw)['audioContent']
+                doc=json.loads(raw)
+                if isinstance(doc,dict) and 'error' in doc:
+                    code=doc['error']
+                    safe=('unconfigured','cancelled','timed_out','response_too_large','invalid_audio','audio_too_long','speech_failed','invalid_request')
+                    raise ProviderError(code if isinstance(code,str) and code in safe else 'speech_failed')
+                encoded=doc['audioContent']
                 if not isinstance(encoded,str):raise ValueError('audio')
                 audio=base64.b64decode(encoded,validate=True)
+            except ProviderError:
+                raise
             except (ValueError,KeyError,TypeError,RecursionError) as exc:
                 raise ProviderError('invalid_audio') from exc
             validate_wav(audio)
@@ -93,9 +98,58 @@ class GoogleSpeech:
                 _,old=self._cache.popitem(last=False);self._bytes-=len(old)
             return audio
 
+    def _process_request(self,text,key,stopped,deadline):
+        import ai_agents
+        import ai_jobs
+        from driver_radio_process import run_process
+        command=([sys.executable,'_radio-speech-worker'] if getattr(sys,'frozen',False)
+                 else [sys.executable,str(Path(__file__).with_name('driver_radio_tts_worker.py'))])
+        extra={k:os.environ[k] for k in ('SSL_CERT_FILE','SSL_CERT_DIR') if os.environ.get(k)}
+        if getattr(sys,'frozen',False):extra['PYINSTALLER_RESET_ENVIRONMENT']='1'
+        with tempfile.TemporaryDirectory(prefix='racecast-radio-tts-') as scratch:
+            left=deadline-self.clock()
+            if left<=0:raise ProviderError('timed_out')
+            invocation=ai_agents.Invocation(command,scratch,'',8,'speech')
+            prompt=json.dumps(dict(key=key,text=text,budget=min(BUDGET,left),allow_cloud=True)).encode()
+            try:
+                return (self.runner or run_process)(invocation,prompt,stopped,left,
+                    ai_jobs.execution_env(os.environ),output_limit=JSON_MAX,extra_env=extra)
+            except ProviderError as exc:
+                if exc.code in ('timed_out','cancelled','output_too_large','cleanup_failed'):raise
+                raise ProviderError('speech_failed') from exc
+
+    def _direct_request(self,text,key,stopped,deadline):
+        timeout=deadline-self.clock()
+        if timeout<=0:raise ProviderError('timed_out')
+        body=dict(input={'text':text},voice={'languageCode':'en-US','name':VOICE},
+                  audioConfig={'audioEncoding':'LINEAR16','sampleRateHertz':24000})
+        try:
+            with self.open_url(URL,data=json.dumps(body).encode(),method='POST',
+                               headers={'Content-Type':'application/json','X-Goog-Api-Key':key},
+                               timeout=timeout,allow_redirects=False) as response:
+                raw=bytearray()
+                read=getattr(response,'read1',response.read)
+                while True:
+                    if stopped.is_set():raise ProviderError('cancelled')
+                    left=deadline-self.clock()
+                    if left<=0:raise ProviderError('timed_out')
+                    sock=getattr(getattr(getattr(response,'fp',None),'raw',None),'_sock',None)
+                    if sock is not None:sock.settimeout(left)
+                    block=read(min(8192,JSON_MAX+1-len(raw)))
+                    if not block:break
+                    raw.extend(block)
+                    if len(raw)>JSON_MAX:raise ProviderError('response_too_large')
+        except ProviderError:
+            raise
+        except TimeoutError:
+            raise ProviderError('timed_out') from None
+        except Exception as exc:
+            raise ProviderError('speech_failed') from exc
+        return bytes(raw)
+
 
 NUMBER_WORDS=dict(zip(('zero','one','two','three','four','five','six','seven','eight','nine','ten'),range(11),strict=True))
-NUMBER_RE=re.compile(r'(?<![A-Za-z0-9_])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?![A-Za-z_])')
+NUMBER_RE=re.compile(r'(?<![A-Za-z0-9_])[+-]?(?:\d{1,3}(?:,\d{3})+|\d+|\.\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?(?![A-Za-z_])')
 
 
 def compact_facts(message):
@@ -135,9 +189,11 @@ def validate_explanation(result,facts):
                 or claim['value']!=fact['value'] or claim['unit']!=fact['unit']):
             raise ProviderError('invalid_explanation')
         values.append(claim['value'])
-    numbers=[float(m.group()) for m in NUMBER_RE.finditer(text)]
+    numbers=[float(m.group().replace(',','')) for m in NUMBER_RE.finditer(text)]
     numbers += [NUMBER_WORDS[word.lower()] for word in re.findall(r'\b(?:'+ '|'.join(NUMBER_WORDS)+r')\b',text,re.I)]
     if any(value not in values for value in numbers):raise ProviderError('invalid_explanation')
+    if re.search(r'\b(?:nan|infinite|infinity|percent|ideal|optimal)\b|%|\d\s*[+*/=]\s*\d',text,re.I):
+        raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:box now|pit now|must pit|must box)\b',text,re.I):
         raise ProviderError('invalid_explanation')
     uncertain=re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|consider)\b|not measured',text,re.I)
@@ -149,9 +205,17 @@ def validate_explanation(result,facts):
 
 
 class _Current:
-    def __init__(self,worker,message):self.worker,self.message=worker,message
+    def __init__(self,worker,message):
+        self.worker,self.message=worker,message
+        self._checked=float('-inf')
+        self._invalid=False
     def is_set(self):
-        return self.worker._stop.is_set() or self.worker.service.remaining_for(self.message['id'],self.message['epoch'])<=0
+        if self.worker._stop.is_set() or self._invalid:return True
+        now=self.worker.clock()
+        if now-self._checked>=.25:
+            self._invalid=self.worker.service.remaining_for(self.message['id'],self.message['epoch'])<=0
+            self._checked=now
+        return self._invalid
 
 
 class Enricher:
@@ -173,7 +237,10 @@ class Enricher:
 
     def _run(self,kind):
         while not self._stop.is_set():
-            self.step(kind)
+            try:self.step(kind)
+            except (OSError,ValueError,TypeError):
+                self._stop.wait(.1)
+                continue  # Temporary unreadable profile settings do not kill the worker.
             self._stop.wait(.1)
 
     def step(self,kind):
@@ -213,3 +280,18 @@ class Enricher:
     def close(self):
         self._stop.set()
         for thread in self._threads:thread.join(2)
+
+
+def smoke(allow_cloud=False,speech_factory=None,clock=time.monotonic,key=None):
+    """Two deliberately authorized provider calls, then one in-memory cache read."""
+    if not allow_cloud:raise ProviderError('consent_required')
+    speech_factory=speech_factory or (lambda:GoogleSpeech(key=key))
+    text='Racecast driver radio speech check.'
+    stopped=threading.Event()
+    first=speech_factory();start=clock()
+    audio=first.synthesize(text,stopped,BUDGET);cold=clock()-start
+    second=speech_factory();start=clock()
+    second.synthesize(text,stopped,BUDGET);warm=clock()-start
+    start=clock();second.synthesize(text,stopped,BUDGET);cached=clock()-start
+    return dict(voice=VOICE,network_calls=2,audio_seconds=validate_wav(audio),
+                cold_s=round(cold,4),warm_s=round(warm,4),cached_s=round(cached,4))
