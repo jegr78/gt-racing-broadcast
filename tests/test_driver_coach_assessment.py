@@ -148,19 +148,22 @@ def t_current_lap_cannot_be_its_own_target_and_missing_session_identity_is_unusa
 
 
 def t_incompatible_and_sparse_or_invalid_traces_cannot_support_corner_claims():
-    for changes in ({'car_id':2},{'compound':'RM'},{'strategy':{'fuel_map':2}},
-                    {'definition_fingerprint':'different'}):
+    for changes in ({'car_id':2},{'track_id':'other'},{'layout':'Reverse'},{'stint_id':'fresh'},
+                    {'compound':'RM'},{'strategy':{'fuel_map':2}},{'definition_fingerprint':'different'}):
         own=lap()
         if 'strategy' in changes:own['strategy']={'fuel_map':1}
         reference=lap('ref',True);reference.update(changes)
         result=assess(own,reference)
         assert not any(f.get('section_id') for f in result['findings']),changes
-    for damage in ('gap','nan','reverse','local_order'):
+        assert result['reference_id'] is None,changes
+    for damage in ('gap','nan','reverse','local_order','time_order','distance_order'):
         own=lap()
         if damage=='gap':own['trace']=own['trace'][::10]
         if damage=='nan':own['trace'][2]['t']=float('nan')
         if damage=='reverse':own['trace'].reverse()
         if damage=='local_order':own['trace'][1],own['trace'][2]=own['trace'][2],own['trace'][1]
+        if damage=='time_order':own['trace'][2]['t']=own['trace'][1]['t']-.01
+        if damage=='distance_order':own['trace'][2]['d']=own['trace'][1]['d']
         result=assess(own)
         assert not any(f.get('section_id') for f in result['findings']),damage
 
@@ -201,7 +204,8 @@ def t_extreme_finite_coordinates_leave_line_unavailable_without_losing_timing():
     own,ref=lap(),lap('ref',True)
     for point in own['trace']:point['x']=10**308
     for point in ref['trace']:point['x']=-(10**308)
-    result=assess(own,ref)
+    try:result=assess(own,ref)
+    except (OverflowError,ValueError) as error:raise AssertionError('Line arithmetic must degrade without losing other evidence') from error
     assert not any(f['skill']=='line' for f in result['findings'])
     assert any(f['skill']=='braking' for f in result['findings'])
 
@@ -219,6 +223,20 @@ def t_trace_cohort_and_result_budgets_are_observable_with_otherwise_usable_data(
     doc['corners']=[dict(first,id='section-'+str(i),number=i+1,entry_m=50+i*5,apex_m=125+i*5,exit_m=180+i*5) for i in range(8)]
     result=coach.assess(own,lap('ref',True),definition=doc)
     assert len(result['findings'])==coach.FINDINGS_MAX
+
+
+def t_unsuitable_lap_flags_and_reference_identity_do_not_produce_technique_scores():
+    for changes in ({'state':'provisional'},{'comparison_eligible':False},{'capture_complete':False},
+                    {'trace_complete':False},{'time_valid':False},{'data_quality':'interrupted'},
+                    {'analysis_role':'warmup'},{'after_service':True},{'time_s':0},
+                    {'time_s':float('nan')},{'time_s':True}):
+        own=lap();own.update(changes)
+        result=assess(own)
+        assert result['status']=='unsuitable' and not result['findings'],changes
+    own,ref=lap(),lap('ref',True);own['track_id']=None;ref['track_id']=None;ref['session_id']='earlier'
+    assert assess(own,ref)['reference_id'] is None
+    own,ref=lap(),lap('ref',True);own['compound']='RM'
+    assert assess(own,ref)['reference_id'] is None
 
 
 def t_production_live_store_rows_provide_personal_consistency_without_an_ideal_target():
