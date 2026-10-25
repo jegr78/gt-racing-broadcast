@@ -169,7 +169,7 @@ def t_epoch_and_reference_changes_invalidate_old_focus_with_provenance():
 
 
 def t_changed_check_geometry_reference_or_nonfinite_values_cannot_score_success():
-    for field,value in (('end_m',350),('reference_s',11),('net_delta_s',float('nan')),
+    for field,value in (('end_m',350),('reference_s',11),('corner_exit_m',190),('start_m',55),('net_delta_s',float('nan')),
                         ('own_s',float('inf')),('screen_s',-1)):
         engine,cal,_,_=ready('pace');bad=finding();bad['check'][field]=value
         for n in (3,4,5):state=attempt(engine,cal,n,89,[bad])
@@ -304,6 +304,7 @@ def t_findings_and_dismissals_have_explicit_bounds_without_partial_failed_contro
         engine.control('skip',epoch)
         state=attempt(engine,cal,n,90,[finding('focus-'+str(n))])
     before=engine.snapshot()
+    assert len(before['history'])<=coach.HISTORY_MAX
     rejects(lambda:engine.control('skip',epoch),'focus_limit')
     assert engine.snapshot()==before
 
@@ -426,6 +427,35 @@ def t_missing_original_passage_evidence_never_invents_a_technique_denominator():
         if damage=='speed':raw[0]['trace'][36]['speed_kmh']=None
         row=baseline[-1];state=engine.observe(row,assessment(row),cal.snapshot(),raw)
         assert state['focus']['section_id'] is None and 'passage' not in state['baseline'],damage
+
+
+def t_current_snapshot_and_lap_ledger_guards_are_independent_of_calibration_admission():
+    for field,value in (('active',False),('phase','calibrating')):
+        engine,cal,_,_=ready();row=lap(3,89);snap=cal.snapshot();snap.update({field:value,'accepted':True})
+        state=engine.observe(row,assessment(row),snap,cal.baseline_laps())
+        assert not state['attempts'] and (state['focus'] is None or field=='phase')
+    for row in (lap(2,89,id='new-late-id'),lap(3,89,id='lap-2')):
+        engine,cal,_,_=ready();snap=cal.snapshot();snap['accepted']=True
+        state=engine.observe(row,assessment(row),snap,cal.baseline_laps())
+        assert not state['attempts']
+    engine,cal,_,_=ready();row=lap(3,89);snap=cal.ingest(row)
+    bad=finding();bad['check'].update(reference_s=11,own_s=10.8)
+    state=engine.observe(row,assessment(row,[bad]),snap,cal.baseline_laps())
+    assert not state['attempts'], 'Coherent but changed reference timing passed the frozen benchmark'
+
+
+def t_complete_check_fields_and_control_types_fail_closed():
+    for field in ('own_downstream_s','reference_downstream_s','exit_speed_kmh','reference_exit_speed_kmh'):
+        engine,cal,_,_=ready();bad=finding();bad['check'][field]=float('nan')
+        state=attempt(engine,cal,3,89,[bad]);assert not state['attempts'],field
+    for field,value in (('own_downstream_s',4),('exit_speed_kmh',110),('exit_speed_kmh',-1)):
+        engine,cal,_,_=ready();bad=finding();bad['check'][field]=value
+        state=attempt(engine,cal,3,89,[bad]);assert not state['attempts'],field
+    engine,cal,_,state=ready()
+    rejects(lambda:engine.control('skill',state['epoch'],skill=[]),'invalid_skill')
+    engine=coach.Focus();row=lap(2,92);bad=finding();bad['skill']=[]
+    state=engine.observe(row,assessment(row,[bad]),cal.snapshot(),cal.baseline_laps())
+    assert state['focus']['skill']=='consistency'
 
 
 if __name__=='__main__':
