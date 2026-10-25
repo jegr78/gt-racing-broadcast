@@ -56,7 +56,9 @@ Without a configured key, it reports the required machine environment setting.
 
 AI explanations are labelled interpretation. They must cite supplied fact IDs;
 structured numerical claims must exactly match the supplied value and unit.
-Numerical text must be covered by those claims. Missing traffic, wear, weather
+Explanation prose must be qualitative and contain no digits or number words.
+The server renders validated claims with fixed fact labels and units, so a tyre
+temperature cannot be relabelled as fuel range in model-written numerical text. Missing traffic, wear, weather
 and ideal-temperature channels cannot become observed facts. Reject unsupported
 output and keep deterministic text. This validation checks grounding, not the
 truth of an interpretation. No provider output can execute a control operation.

@@ -73,9 +73,9 @@ def t_google_failures_are_safe_and_never_substitute_a_voice():
 
 def t_grounded_explanation_rejects_unsupported_facts_and_numbers():
     facts={'fuel.usable_laps':{'value':2.5,'unit':'laps'},'pace.delta_s':{'value':1,'unit':'seconds'}}
-    valid={'explanation':'Pace is one second slower. Tyres may contribute; traffic is unknown.',
+    valid={'explanation':'Pace is slower. Tyres may contribute; traffic is unknown.',
            'evidence':['pace.delta_s'],'claims':[{'fact':'pace.delta_s','value':1,'unit':'seconds'}]}
-    assert providers.validate_explanation(valid,facts).startswith('Pace')
+    assert providers.validate_explanation(valid,facts).endswith('Recent pace change: 1 seconds.')
     for change in ({'explanation':'The tyres have 40 percent wear.'},
                    {'explanation':'Pace is 1e3 seconds slower. Tyres may contribute.'},
                    {'explanation':'The fuel range is infinite.'},
@@ -83,6 +83,21 @@ def t_grounded_explanation_rejects_unsupported_facts_and_numbers():
                    {'evidence':['unknown.fact']},{'explanation':'Traffic caused the slowdown.'},
                    {'explanation':'Box now.'},{'claims':[{'fact':'pace.delta_s','value':1,'unit':'litres'}]}):
         rejected(lambda change=change:providers.validate_explanation(dict(valid,**change),facts),'invalid_explanation')
+
+
+def t_numeric_explanations_cannot_relabel_other_measurements():
+    facts={'fuel.usable_laps':{'value':2.5,'unit':'laps'},
+           'tyres.front_left':{'value':80,'unit':'degrees_c'}}
+    for text in ('Fuel range is 80 laps.', 'Fuel range is eighty laps.',
+                 'Fuel range is 2.5 laps.', 'Fuel range is twenty-five laps.'):
+        rejected(lambda text=text:providers.validate_explanation({
+            'explanation':text,'evidence':['tyres.front_left'],
+            'claims':[{'fact':'tyres.front_left','value':80,'unit':'degrees_c'}]},facts),'invalid_explanation')
+    for change in ({'evidence':['unknown.fact'],'claims':[]},
+                   {'claims':[{'fact':'fuel.usable_laps','value':99,'unit':'laps'}]}):
+        rejected(lambda change=change:providers.validate_explanation(dict(
+            explanation='Fuel range depends on measured consumption.',
+            evidence=['fuel.usable_laps'],claims=[]) | change,facts),'invalid_explanation')
 
 
 def t_provider_work_is_text_first_and_late_results_cannot_attach():

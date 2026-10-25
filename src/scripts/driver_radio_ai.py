@@ -56,8 +56,8 @@ class LiveAI:
                         'Do not read any other source or execute controls. Output only the result schema. '
                         'Separate uncertain interpretation from facts. Traffic, weather, tyre wear and ideal '
                         'temperatures are not observed. Never issue an unconditional box command. '
-                        'Cite provided fact IDs; declare every numerical claim with its exact supplied value '
-                        'and unit. Use no unsupported numbers. Read facts.json.\n'+raw).encode()
+                        'Use qualitative explanation prose without numbers or number words. Numerical measurements '
+                        'belong only in claims with their exact supplied fact ID, value and unit; the server renders them. Read facts.json.\n'+raw).encode()
                 adapter=self.adapter_factory(agent)
                 def probe_run(argv,**kwargs):
                     left=min(2,deadline-time.monotonic())

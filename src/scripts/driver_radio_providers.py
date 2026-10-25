@@ -148,8 +148,20 @@ class GoogleSpeech:
         return bytes(raw)
 
 
-NUMBER_WORDS=dict(zip(('zero','one','two','three','four','five','six','seven','eight','nine','ten'),range(11),strict=True))
-NUMBER_RE=re.compile(r'(?<![A-Za-z0-9_])[+-]?(?:\d{1,3}(?:,\d{3})+|\d+|\.\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?(?![A-Za-z_])')
+# Numerical measurements are rendered from validated claims, never model prose.
+NUMBER_RE=re.compile(r'\d|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|'
+                     r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|'
+                     r'nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|'
+                     r'hundred|thousand|million|billion|half|quarter|double|triple|dozen)\b',re.I)
+FACT_LABELS = {
+    'fuel.current_l':'Current fuel', 'fuel.consumption_l':'Measured fuel per lap',
+    'fuel.reserve_l':'Fuel reserve', 'fuel.range_laps':'Physical fuel range',
+    'fuel.usable_laps':'Fuel range after reserve', 'pace.delta_s':'Recent pace change',
+    'pace.baseline_s':'Baseline lap time', 'pace.recent_s':'Recent lap time',
+    'pace.last_s':'Last eligible lap time', 'pace.best_s':'Best eligible lap time',
+    'tyres.front_left':'Front left tyre temperature', 'tyres.front_right':'Front right tyre temperature',
+    'tyres.rear_left':'Rear left tyre temperature', 'tyres.rear_right':'Rear right tyre temperature',
+}
 
 
 def compact_facts(message):
@@ -180,7 +192,7 @@ def validate_explanation(result,facts):
             or any(not isinstance(k,str) or k not in facts for k in refs)
             or not isinstance(claims,list) or len(claims)>8):
         raise ProviderError('invalid_explanation')
-    values=[]
+    rendered=[]
     for claim in claims:
         if not isinstance(claim,dict) or set(claim)!={'fact','value','unit'}:
             raise ProviderError('invalid_explanation')
@@ -188,10 +200,10 @@ def validate_explanation(result,facts):
         if (fact is None or claim['fact'] not in refs or type(claim['value']) not in (int,float)
                 or claim['value']!=fact['value'] or claim['unit']!=fact['unit']):
             raise ProviderError('invalid_explanation')
-        values.append(claim['value'])
-    numbers=[float(m.group().replace(',','')) for m in NUMBER_RE.finditer(text)]
-    numbers += [NUMBER_WORDS[word.lower()] for word in re.findall(r'\b(?:'+ '|'.join(NUMBER_WORDS)+r')\b',text,re.I)]
-    if any(value not in values for value in numbers):raise ProviderError('invalid_explanation')
+        label=FACT_LABELS.get(claim['fact'])
+        if label is None:raise ProviderError('invalid_explanation')
+        rendered.append(f"{label}: {claim['value']:g} {claim['unit']}.")
+    if NUMBER_RE.search(text):raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:nan|infinite|infinity|percent|ideal|optimal)\b|%|\d\s*[+*/=]\s*\d',text,re.I):
         raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:box now|pit now|must pit|must box)\b',text,re.I):
@@ -201,7 +213,7 @@ def validate_explanation(result,facts):
         raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear)\s+(?:caused|causes|is causing|are worn)|caused by (?:traffic|weather)',text,re.I):
         raise ProviderError('invalid_explanation')
-    return text.strip()
+    return ' '.join([text.strip(),*rendered])
 
 
 class _Current:

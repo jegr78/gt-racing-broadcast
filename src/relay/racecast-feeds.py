@@ -14761,7 +14761,7 @@ def main():
         driver_radio_access.Session(),
         lambda: engineer_live.snapshot() if engineer_live is not None else {})
     radio_enricher = driver_radio_providers.Enricher(
-        radio_service, ai=driver_radio_ai.LiveAI(runtime_base))
+        radio_service, ai=driver_radio_ai.LiveAI(runtime_base) if telemetry_store is not None else None)
     engineer_page_path = engineer_page_for(console_page_path)
     audience_runtime = audience_widgets.Runtime(
         os.path.join(os.path.dirname(args.overlay_dir), "audience.json") if args.overlay_dir else None)
