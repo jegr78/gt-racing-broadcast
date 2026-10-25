@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_radio_models as m
-from driver_radio_voice_config import paths,ready
+import driver_radio_voice_config as config
 
 
 def archive(name,data=b'fixture'):
@@ -20,7 +20,7 @@ def archive(name,data=b'fixture'):
 def t_explicit_provision_validates_before_publishing_and_reuses_installed_models():
     with tempfile.TemporaryDirectory() as d:
         calls=[];validated=[]
-        library=Path(paths(d)['library']).name
+        library=Path(config.paths(d)['library']).name
         def fetch(url,digest,maximum):
             calls.append(url)
             assert len(digest)==64 and maximum<=100*1024*1024
@@ -33,14 +33,14 @@ def t_explicit_provision_validates_before_publishing_and_reuses_installed_models
             validated.append(root)
             return ['hey_jeff','hey_engineer']
         result=m.provision(d,fetch=fetch,validate=validate,platform_key='linux_x64')
-        assert result['models']=='ready' and ready(d) and len(calls)==3 and len(validated)==1
+        assert result['models']=='ready' and config.ready(d) and len(calls)==3 and len(validated)==1
         assert json.loads((Path(d)/'radio-voice'/'validated-phrases.json').read_text())['version']==1
         m.provision(d,fetch=fetch,validate=validate,platform_key='linux_x64')
         assert len(calls)==3
         result=m.provision(d,whisper=True,fetch=fetch,validate=validate,platform_key='linux_x64')
         assert result['whisper_model'] and len(calls)==4
         (Path(d)/'radio-voice'/'validated-phrases.json').write_text('{}')
-        assert not ready(d), 'Corrupt phrase validation metadata must fail closed'
+        assert not config.ready(d), 'Corrupt phrase validation metadata must fail closed'
 
 
 def t_corrupt_download_unsafe_archives_and_failed_validation_publish_nothing():
@@ -112,7 +112,6 @@ def t_frozen_phrase_validation_reads_the_bundled_source_fixture_directory():
 
 
 def t_macos_library_matches_the_pinned_upstream_wheel():
-    import driver_radio_voice_config as config
     import driver_radio_recognition as recognition
     class Recognizer:
         def __init__(self,library,*args,**kwargs):assert Path(library).name=='libvosk.dyld'
