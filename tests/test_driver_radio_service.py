@@ -123,9 +123,13 @@ def t_invalid_request_limits_and_shutdown():
         assert f.poll()['assessment']['fuel']['severity']=='warning'
         message=f.request('tyres');ticket=f.service.take_playback()
         assert message and ticket
+        assert not f.service.attach(message['id'],'forged',{'explanation':'wrong epoch'})
+        assert not f.service.attach(message['id'],message['epoch'],{'explanation':'x'*601})
+        assert not f.service.attach(message['id'],message['epoch'],{'audio':b'x'*(2*1024*1024+1)})
         f.service.close()
         assert ticket.cancelled.is_set() and f.service.take_playback() is None
         assert not f.service.attach(message['id'],message['epoch'],{'explanation':'late'})
+        error(f.request,'feature_disabled')
 
 
 def t_queued_request_rechecks_its_originating_authorization():
@@ -189,6 +193,9 @@ def t_native_playback_requires_explicit_profile_voice_enablement():
         f.access.update({'expected':1,'voice':{'enabled':False,'microphone':None,'input_language':'en'}})
         f.poll();message=f.request()
         assert message['text'] and f.service.take_playback() is None
+        f.access.update({'expected':2,'enabled':False,'voice':{'enabled':True,'microphone':None,'input_language':'en'}})
+        assert not f.poll()['enabled']
+        error(f.request,'feature_disabled')
 
 
 def t_readers_share_snapshot_work_but_attachments_recheck_current_context():
@@ -237,6 +244,14 @@ def t_existing_profile_settings_migrate_limits_and_invalid_limits_never_write():
         assert store.read()['limits']['fuel_warning_laps']==3
         error(lambda:store.update({'expected':2,'limits':{'fuel_warning_laps':1,'fuel_urgent_laps':2}}),'invalid_settings')
         assert store.read()['revision']==2 and store.read()['drivers']==['driver']
+
+
+def t_urgent_work_precedes_queued_routine_answers():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();f.request('pace');f.at+=3;f.request('tyres')
+        f.snap['instruments']['fuel_l']=3;f.snap['revision']+=1;f.poll()
+        ticket=f.service.take_playback()
+        assert ticket.message['severity']=='urgent' and ticket.message['preset']=='fuel'
 
 
 def t_signed_http_clients_share_messages_and_revalidate_access():
