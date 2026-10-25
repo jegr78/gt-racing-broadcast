@@ -79,7 +79,7 @@ class Supervisor:
     def step(self):
         with access._LOCK,self._lock:
             if self._closed:return
-            settings=self.service.settings.read();state=self.service.refresh(force=True)
+            settings=self.service.settings.read();state=self.service.refresh()
             voice=settings['voice'];native=config.settings(settings.get('native'))
             signature=(settings['revision'],state['binding'],state['epoch'])
             enabled=settings['enabled'] and self.service.settings.available and voice['enabled']
