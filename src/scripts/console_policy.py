@@ -115,8 +115,8 @@ def min_capability(segments, method="GET"):
 
     # Exact radio routes only. The relay additionally checks profile opt-in and
     # explicit subject assignment; Crew roles never imply DRIVER_RADIO.
-    if (method == "GET" and p in (["driver-radio", "access"], ["driver-radio", "setup"])) or (
-            method == "POST" and p in (["driver-radio", "setup"], ["driver-radio", "service"])):
+    if (method == "GET" and p in (["driver-radio", "access"], ["driver-radio", "setup"], ["driver-radio", "snapshot"], ["driver-radio", "messages"])) or (
+            method == "POST" and p in (["driver-radio", "setup"], ["driver-radio", "service"], ["driver-radio", "request"])):
         return Requirement(DRIVER_RADIO, False)
 
     if method == "GET" and (p == ["race-engineer"] or len(p) == 2 and p[0] == "race-engineer" and p[1] in ("access", "snapshot", "history", "lap", "reference", "compare", "trace")):
