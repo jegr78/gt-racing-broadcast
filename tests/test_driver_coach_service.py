@@ -656,7 +656,9 @@ def t_publication_rechecks_the_training_token_after_a_delayed_grant():
         f.service._grant=grant
         reader=threading.Thread(target=lambda:results.append(f.service._current(token)))
         reader.start();assert entered.wait(1)
-        try:assert not f.command('stop')['active']
+        try:
+            assert f.command()['active']
+            state=f.step();assert state['active'] and not state['pending']
         finally:release.set();reader.join(4)
         assert not reader.is_alive() and results==[False], 'Delayed grant authorized an obsolete publication'
 
