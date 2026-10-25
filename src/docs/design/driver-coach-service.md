@@ -81,3 +81,14 @@ private state. A delayed obsolete authorization check cannot discard a model now
 owned by a newer valid command. Only Stop may preempt an in-flight control.
 Live detail must match its requested summary's lap identity, times and state
 before it can mutate calibration.
+
+A monotonic processed-lap cursor prevents old Store summaries from becoming new
+work after deduplication eviction. Tracked measurement corrections are checked
+separately, including pinned old baseline/reference contributors. A correction
+invalidates the old model with provenance and captures a new partial-lap watermark.
+Provisional-to-confirmed publication is awaited before first admission; it is not
+mistaken for a correction. Ready bounded detail is required for technique scoring.
+
+Reference grant checks and snapshots run outside the control-state lock. An
+inactive calibration, including its session-budget stop, cannot publish new work.
+The current owner can read the explicit per-training AI-consent flag.

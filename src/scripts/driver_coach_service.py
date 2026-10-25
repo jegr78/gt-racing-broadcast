@@ -104,7 +104,7 @@ class Service:
         self._revision = 0
         self._lowload_at = None
         self._ready_at = 0
-        self._state = dict(active=False, pending=False, phase='inactive', calibration=None, focus=None, latest=None)
+        self._state = dict(active=False, pending=False, phase='inactive', calibration=None, focus=None, latest=None, allow_ai=False)
 
     def start(self):
         with self._lock:
@@ -179,7 +179,8 @@ class Service:
                                  token=self._token, doc=doc, wall=self.wall(), authorize=authorize)
             self._state.update(active=action != 'stop', pending=True)
             if action in ('start', 'stop'):
-                self._state.update(calibration=None, focus=None, latest=None)
+                self._state.update(calibration=None, focus=None, latest=None,
+                                   allow_ai=options.get('allow_ai', False) if action == 'start' else False)
         self.radio.cancel_coach()
         return self.snapshot(owner)
 
@@ -199,7 +200,7 @@ class Service:
                                mark=_mark(doc, command['wall']) if _live(doc) else None,
                                seen=collections.OrderedDict(), allow_ai=options.get('allow_ai', False),
                                latest=None, owner=command['owner'], cal_epoch=cal.epoch, reference_grant=None,
-                               sources=collections.OrderedDict(), best_source=None, focus_key=None, focus_sources=set())
+                               sources=collections.OrderedDict(), best_source=None, focus_key=None, focus_sources=set(), cursor=0)
             return
         model = self._model
         if model is None:
@@ -253,6 +254,38 @@ class Service:
             elif self._lowload_at is None:
                 self._lowload_at = self.clock()
 
+    def _sync_epoch(self, model, calibrated):
+        if calibrated['epoch'] == model['cal_epoch']:
+            return False
+        model['cal_epoch'] = calibrated['epoch']
+        model['focus'].observe(None, None, calibrated)
+        model['cohort'].clear(); model['latest'] = None
+        model['focus_key'], model['focus_sources'] = None, set()
+        if calibrated['baseline'] is None:
+            model['sources'].clear(); model['best_source'] = None
+        if (calibrated.get('reference') or {}).get('source') != 'selected':
+            model['reference_grant'] = None
+        self.radio.cancel_coach()
+        return True
+
+    def _reset_evidence(self, model, doc, reason):
+        model['cal'].invalidate(reason)
+        self._sync_epoch(model, model['cal'].snapshot())
+        model['stamp'], model['mark'] = _stamp(doc), _mark(doc, self.wall())
+        model['seen'].clear(); model['sources'].clear(); model['best_source'] = None
+        model['cursor'] = 0
+
+    def _cache(self, token, model, calibrated=None):
+        # Grant callbacks may perform bounded I/O; never run them under the state lock.
+        calibrated = model['cal'].snapshot() if calibrated is None else calibrated
+        self._sync_epoch(model, calibrated)
+        new = dict(active=calibrated['active'], pending=False, phase=calibrated['phase'],
+                   calibration=calibrated, focus=model['focus'].snapshot(), latest=model['latest'],
+                   allow_ai=model['allow_ai'] if calibrated['active'] else False)
+        with self._lock:
+            if token == self._token and self._command is None and new != self._state:
+                self._state = copy.deepcopy(new); self._revision += 1
+
     def step(self):
         with self._work_lock:
             with self._lock:
@@ -288,14 +321,11 @@ class Service:
                             self._revision += 1
                 return
             model['cal'].reference()
-            if model['cal'].epoch != model['cal_epoch']:
-                model['cal_epoch'] = model['cal'].epoch
-                model['focus'].observe(None, None, model['cal'].snapshot())
-                model['cohort'].clear(); model['latest'] = None
-                if model['cal'].snapshot()['baseline'] is None:
-                    model['sources'].clear(); model['best_source'] = None
-                model['reference_grant'] = None if model['cal'].snapshot()['reference'] is None or model['cal'].snapshot()['reference']['source'] != 'selected' else model['reference_grant']
-                self.radio.cancel_coach()
+            calibrated = model['cal'].snapshot()
+            self._sync_epoch(model, calibrated)
+            if not calibrated['active']:
+                self._cache(token, model, calibrated)
+                return
             doc = self.source()
             if not self._current(token):
                 with self._lock:
@@ -309,15 +339,14 @@ class Service:
             self._opportunity(doc)
             stamp = _stamp(doc)
             if model['stamp'] != stamp:
-                model['cal'].invalidate('live_context_changed')
-                model['focus'].observe(None, None, model['cal'].snapshot())
-                model['stamp'], model['mark'] = stamp, _mark(doc, self.wall())
-                model['cohort'].clear(); model['seen'].clear(); model['latest'] = None
-                model['sources'].clear(); model['best_source'] = None
-                self.radio.cancel_coach()
+                self._reset_evidence(model, doc, 'live_context_changed')
+            lookup = {r.get('id'): r for r in (doc.get('laps') or [])[-512:] if isinstance(r, dict)}
+            if any(ident in lookup and _facts(lookup[ident]) != facts for ident, facts in model['sources'].items()):
+                self._reset_evidence(model, doc, 'source_evidence_corrected')
             mark = model['mark']
             rows = doc.get('laps') or []
-            candidates = [r for r in rows[-512:] if isinstance(r, dict) and r.get('session_id') == doc['session_id']
+            candidates = [r for r in rows[-512:] if isinstance(r, dict) and r.get('state') == 'confirmed'
+                          and r.get('session_id') == doc['session_id']
                           and type(r.get('lap')) is int and type(mark.get('lap')) is int
                           and r['lap'] > mark['lap'] and assessment.finite(r.get('_start_wall'))
                           and r['_start_wall'] > mark['wall']]
@@ -327,7 +356,7 @@ class Service:
                 if not calibration._text(ident):
                     continue
                 digest = _facts(brief)
-                if model['seen'].get(ident) == digest:
+                if brief['lap'] <= model['cursor'] or model['seen'].get(ident) == digest:
                     continue
                 if processed >= ROWS_PER_STEP:
                     break
@@ -340,15 +369,15 @@ class Service:
                     continue
                 if model['focus'].snapshot()['phase'] == 'completed':
                     model['focus'].finish(); model['cal'].end_focus()
-                calibrated = model['cal'].ingest(row)
+                model['cal'].ingest(row)
                 frozen = model['cal'].reference()
                 calibrated = model['cal'].snapshot()
-                if model['cal'].epoch != model['cal_epoch']:
-                    model['cal_epoch'] = model['cal'].epoch
-                    model['cohort'].clear()
-                    if calibrated['baseline'] is None:
-                        model['sources'].clear(); model['best_source'] = None
-                    self.radio.cancel_coach()
+                if self._sync_epoch(model, calibrated):
+                    frozen = model['cal'].reference()
+                    calibrated = model['cal'].snapshot()
+                if not calibrated['active']:
+                    self._cache(token, model, calibrated)
+                    return
                 result = self.assessor(row, frozen, definition=row.get('track_definition'), personal_laps=list(model['cohort']))
                 trained = model['focus'].observe(row, result, calibrated, model['cal'].baseline_laps())
                 focus_key = (trained['epoch'], trained['focus']['id']) if trained['focus'] else None
@@ -381,6 +410,7 @@ class Service:
                     disposable = next(key for key in model['sources'] if key not in pins)
                     del model['sources'][disposable]
                 expected = tuple((key, model['sources'].get(key)) for key in sorted(required))
+                model['cursor'] = brief['lap']
                 model['seen'][ident] = digest
                 while len(model['seen']) > 128:
                     model['seen'].popitem(last=False)
@@ -415,12 +445,7 @@ class Service:
                     authorize=lambda token=token,stamp=stamp,expected=expected:self._current(token, stamp, expected),
                     ready=lambda token=token:self._speak(token), allow_ai=model['allow_ai'] and calibrated['accepted'],
                     completed_at=completion, latest=brief['lap'] == latest_lap)
-            with self._lock:
-                if token == self._token and self._command is None:
-                    new = dict(active=True, pending=False, phase=model['cal'].snapshot()['phase'],
-                               calibration=model['cal'].snapshot(), focus=model['focus'].snapshot(), latest=model['latest'])
-                    if new != self._state:
-                        self._state = copy.deepcopy(new); self._revision += 1
+            self._cache(token, model)
 
     def close(self):
         self._stop.set()

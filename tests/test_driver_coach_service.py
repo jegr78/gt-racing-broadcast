@@ -486,6 +486,51 @@ def t_an_obsolete_blocked_grant_check_cannot_discard_a_new_valid_command_model()
         assert f.service._model is not None and state['active'] and state['focus']['focus']==before
 
 
+def t_evicted_lap_ids_never_replay_old_reviews_but_old_baseline_corrections_still_invalidate():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        for n in range(2,140):
+            f.complete(n);state=f.step()
+            assert state['latest']['lap_id']=='lap-'+str(n), (n,state['latest'])
+        baseline=state['calibration']['baseline']['id'];before=state['latest']
+        for _ in range(3):assert f.step()['latest']==before
+        for brief in f.snap['laps']:
+            if brief['id']=='lap-2':brief.update(measurement_hash='corrected-old-baseline',time_s=9)
+        f.rows['lap-2'].update(measurement_hash='corrected-old-baseline',time_s=9)
+        state=f.step()
+        assert state['calibration']['baseline'] is None and state['latest'] is None
+        assert state['calibration']['invalidations'][-1]['reason']=='source_evidence_corrected'
+        assert any(e['baseline_id']==baseline for e in state['focus']['history'])
+        f.complete(140);f.step();f.complete(141);f.step();f.complete(142);state=f.step()
+        assert state['calibration']['baseline']['lap_ids']==['lap-141','lap-142']
+
+
+def t_selected_reference_snapshot_io_cannot_block_status_or_stop_controls():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        entered=threading.Event();release=threading.Event();completed=threading.Event()
+        cal=f.service._model['cal'];snapshot=cal.snapshot
+        def blocked():entered.set();assert release.wait(3);return snapshot()
+        cal.snapshot=blocked
+        thread=threading.Thread(target=f.service.step);thread.start();assert entered.wait(2)
+        control=threading.Thread(target=lambda:(f.command('stop'),completed.set()));control.start()
+        try:assert completed.wait(1), 'Reference snapshot blocked the control state lock'
+        finally:release.set();thread.join(3);control.join(3)
+        assert not thread.is_alive() and not control.is_alive()
+
+
+def t_a_normal_provisional_to_confirmed_lap_transition_is_not_a_correction_reset():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();row=f.complete(2)
+        f.snap['laps'][-1]['state']='provisional';f.rows[row['id']]['state']='provisional'
+        state=f.step();assert state['latest'] is None
+        f.snap['laps'][-1]['state']='confirmed';f.rows[row['id']]['state']='confirmed'
+        state=f.step()
+        assert state['calibration']['calibration_ids']==[row['id']]
+        assert not state['calibration']['invalidations']
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)
