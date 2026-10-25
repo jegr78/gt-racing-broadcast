@@ -126,7 +126,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "gt7_context", "--hidden-import", "gt7_export",
            "--hidden-import", "gt7_track_definitions",
            "--hidden-import", "gt7_shifts",
-           "--hidden-import", "ai_agents", "--hidden-import", "race_engineer_access", "--hidden-import", "driver_radio_access", "--hidden-import", "driver_radio_assessment", "--hidden-import", "driver_radio_service", "--hidden-import", "ai_package",
+           "--hidden-import", "ai_agents", "--hidden-import", "race_engineer_access", "--hidden-import", "driver_radio_access", "--hidden-import", "driver_radio_assessment", "--hidden-import", "driver_radio_service", "--hidden-import", "driver_radio_providers", "--hidden-import", "driver_radio_ai", "--hidden-import", "driver_radio_process", "--hidden-import", "driver_radio_tts_worker", "--hidden-import", "ai_package",
            "--hidden-import", "race_engineer_live", "--hidden-import", "race_engineer_api", "--hidden-import", "gt7_comparison",
            "--hidden-import", "ai_jobs", "--hidden-import", "ai_control",
            "--hidden-import", "ai_reports",
@@ -289,6 +289,13 @@ def smoke(binary, version):
     out = run(["--version"])
     if out.returncode != 0 or version not in out.stdout:
         sys.exit(f"smoke --version FAILED: rc={out.returncode} out={out.stdout!r} err={out.stderr!r}")
+    # Exercise the private frozen entry without credentials or provider traffic.
+    # Malformed consent must be rejected before bootstrap or any network work.
+    speech = subprocess.run([binary, "_radio-speech-worker"], input=b"{}",
+                            capture_output=True, timeout=15)
+    if speech.returncode != 0 or speech.stdout.strip() != b'{"error": "invalid_request"}':
+        sys.exit(f"smoke speech worker FAILED: rc={speech.returncode} "
+                 f"out={speech.stdout!r} err={speech.stderr!r}")
     st = run(["status"])
     if st.returncode != 0 or "relay" not in st.stdout:
         sys.exit(f"smoke status FAILED: rc={st.returncode} out={st.stdout!r} err={st.stderr!r}")

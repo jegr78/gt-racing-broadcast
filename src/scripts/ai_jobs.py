@@ -322,6 +322,11 @@ class WindowsTree:
 
 def terminate_tree(proc, tree=None):
     """Terminate only the owned process group/Job Object, never a saved PID."""
+    pid = proc.pid
+    # Never coerce process identities: int(MagicMock()) is 1, and killpg(1)
+    # becomes kill(-1), targeting every permitted process on POSIX systems.
+    if type(pid) is not int or pid <= 1 or (os.name != "nt" and pid == os.getpgrp()):
+        raise JobError("cleanup_failed", "Refusing an unsafe analysis process identity")
     if os.name == "nt":
         if tree:
             tree.close()
@@ -330,7 +335,7 @@ def terminate_tree(proc, tree=None):
     else:
         proc.poll()  # Reap an exited leader before signalling its remaining group (Darwin zombie-only groups reject signals).
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            os.killpg(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass  # The owned group already exited.
         except PermissionError as exc:
@@ -344,7 +349,7 @@ def terminate_tree(proc, tree=None):
             except (OSError, subprocess.TimeoutExpired) as reap_error:
                 raise JobError("cleanup_failed", "Could not reap the owned analysis process") from reap_error
             try:
-                os.killpg(proc.pid, 0)
+                os.killpg(pid, 0)
             except ProcessLookupError:
                 pass  # The non-destructive probe confirms the group disappeared.
             except OSError as probe_error:
