@@ -152,7 +152,8 @@ class Focus:
         if self._focus is not None:
             self._history.append(dict(state=state, epoch=self._epoch, focus_id=self._focus['id'],
                                       baseline_id=self._baseline['id'] if self._baseline else None,
-                                      reference_id=self._reference,
+                                      reference_id=self._reference, baseline=copy.deepcopy(self._baseline),
+                                      attempt_lap_ids=[r['lap_id'] for r in list(self._attempts)[-3:]],
                                       progress=copy.deepcopy(self._progress)))
 
     def _unavailable(self):

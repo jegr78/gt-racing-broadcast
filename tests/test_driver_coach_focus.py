@@ -363,7 +363,9 @@ def t_skip_and_changed_skill_reset_current_success_while_history_retains_it():
         assert state['phase']=='waiting' and state['focus'] is None and not state['attempts']
         assert state['progress']['result']=='waiting' and state['progress']['sample_count']==0
         assert not state['progress']['pace_improved'] and not state['progress']['consistency_improved']
-        assert any(e['progress'].get('pace_improved') for e in state['history'])
+        event=next(e for e in state['history'] if e['progress'].get('pace_improved'))
+        assert event['baseline']['lap_ids']==['lap-1','lap-2']
+        assert event['attempt_lap_ids']==['lap-3','lap-4','lap-5']
         assert 'smooth transition' not in state['review']
 
 
@@ -374,6 +376,56 @@ def t_real_matched_reference_still_exposes_complete_section_checks_for_consisten
     check=next(c['check'] for c in result['section_checks'] if c['section_id']=='turn')
     assert check['available'] and check['corner_exit_m']==180 and check['own_downstream_s']>0
     assert check['net_delta_s']==0
+
+
+def t_real_slow_target_cannot_hide_new_exit_or_following_losses_against_baseline():
+    for damage in ('exit','following'):
+        cal=calibration.Calibration();cal.start(dict(profile='solo',subject='driver'),objective='pace')
+        rows=[real_lap(1,8),real_lap(2,8.2)]
+        for row in rows:cal.ingest(row)
+        target=real_lap(20,10)
+        for point in target['trace']:point['speed_kmh']=100
+        cal.select_reference(target,authorize=lambda:True)
+        engine=coach.Focus();doc=real_definition()
+        result=measured.assess(rows[-1],cal.reference(),doc,rows)
+        engine.observe(rows[-1],result,cal.snapshot(),cal.baseline_laps());cal.begin_focus()
+        for n in (3,4,5):
+            row=real_lap(n,7.8 if damage=='exit' else 7.2)
+            if damage=='exit':row['trace'][36]['speed_kmh']=170
+            else:
+                for point in row['trace']:
+                    d=point['d'];point['t']=d*6.4/400+.8*max(0,min(1,(d-180)/120))
+            snap=cal.ingest(row);result=measured.assess(row,cal.reference(),doc,cal.baseline_laps())
+            state=engine.observe(row,result,snap,cal.baseline_laps())
+        assert state['phase']!='completed' and not state['progress']['pace_improved'],damage
+        assert state['attempts'] and state['attempts'][-1]['check']['net_delta_s']<0
+
+
+def t_real_consistency_can_complete_when_the_original_input_difference_disappears():
+    cal=calibration.Calibration();cal.start(dict(profile='solo',subject='driver'),objective='consistency')
+    rows=[real_lap(1,8),real_lap(2,8.2)]
+    for row in rows:cal.ingest(row)
+    engine=coach.Focus();doc=real_definition()
+    result=measured.assess(rows[-1],cal.reference(),doc,rows)
+    state=engine.observe(rows[-1],result,cal.snapshot(),cal.baseline_laps());cal.begin_focus()
+    assert state['focus']['section_id']=='turn'
+    for n in (3,4,5):
+        row=real_lap(n,8);snap=cal.ingest(row)
+        result=measured.assess(row,cal.reference(),doc,cal.baseline_laps())
+        state=engine.observe(row,result,snap,cal.baseline_laps())
+    assert state['phase']=='completed' and state['progress']['consistency_improved']
+    assert state['progress']['measure']=='section' and state['progress']['measure_range_s']==0
+
+
+def t_missing_original_passage_evidence_never_invents_a_technique_denominator():
+    for damage in ('missing','sparse','nonfinite','speed'):
+        engine,cal,baseline,_=ready();engine=coach.Focus();raw=copy.deepcopy(baseline)
+        if damage=='missing':raw[0].pop('trace')
+        if damage=='sparse':raw[0]['trace']=raw[0]['trace'][::10]
+        if damage=='nonfinite':raw[0]['trace'][2]['t']=float('nan')
+        if damage=='speed':raw[0]['trace'][36]['speed_kmh']=None
+        row=baseline[-1];state=engine.observe(row,assessment(row),cal.snapshot(),raw)
+        assert state['focus']['section_id'] is None and 'passage' not in state['baseline'],damage
 
 
 if __name__=='__main__':
