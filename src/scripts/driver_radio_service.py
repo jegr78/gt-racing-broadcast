@@ -110,6 +110,18 @@ class Service:
                     if self._ticket and self._ticket.message['id'] == message['id']:
                         self._ticket.cancelled.set()
                     self._revision += 1
+            if message.get('_coach_owner') is not None and unfinished:
+                try:
+                    allowed = message['_coach_guard']() is True
+                    ready = message['_coach_ready']() is True
+                except Exception:
+                    allowed = ready = False
+                if not allowed or message['state'] == 'playing' and not ready:
+                    message['state'] = 'cancelled'
+                    self._audio.pop(message['id'], None)
+                    if self._ticket and self._ticket.message['id'] == message['id']:
+                        self._ticket.cancelled.set()
+                    self._revision += 1
             if now >= message['_deadline'] and unfinished:
                 message['state'] = 'expired'
                 self._audio.pop(message['id'], None)
@@ -121,7 +133,7 @@ class Service:
     def _public(self, message):
         return copy.deepcopy({k:v for k,v in message.items() if not k.startswith('_')})
 
-    def _publish(self, preset, kind, severity, result, now, requester=None, authorization=None):
+    def _publish(self, preset, kind, severity, result, now, requester=None, authorization=None, queued=True):
         # Superseded routine answers cannot form a spoken backlog.
         for mid in list(self._queue):
             old = self._messages[mid]
@@ -129,7 +141,7 @@ class Service:
                 old['state'] = 'superseded'
                 self._queue.remove(mid)
                 self._audio.pop(mid, None)
-        while len(self._queue) >= QUEUE_MAX:
+        while queued and len(self._queue) >= QUEUE_MAX:
             disposable = next((mid for mid in self._queue if self._messages[mid]['severity'] != 'urgent'), None)
             if disposable is None:
                 raise access.RadioError('rate_limited', 'Radio work queue is full; retry after the current answer')
@@ -154,11 +166,11 @@ class Service:
         message = dict(id=mid, version=1, epoch=self._epoch, binding=self._binding,
                        kind=kind, preset=preset, severity=severity, text=text,
                        evidence={k:result[k] for k in ('fuel','pace','tyres','uncertainties')},
-                       created_at=self.wall(), expires_at=self.wall()+ttl, state='queued',
+                       created_at=self.wall(), expires_at=self.wall()+ttl, state='queued' if queued else 'text_only',
                        audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now,
                        _native=requester is None, _requesters={requester:authorization} if requester is not None else {})
         self._messages[mid] = copy.deepcopy(message)
-        self._queue.append(mid)
+        if queued:self._queue.append(mid)
         self._queue.sort(key=lambda ident:self._messages[ident]['severity'] != 'urgent')
         while len(self._messages) > HISTORY_MAX:
             expired, _ = self._messages.popitem(last=False)
@@ -168,6 +180,36 @@ class Service:
             if expired in self._queue:self._queue.remove(expired)
         self._revision += 1
         return self._public(message)
+
+    def cancel_coach(self):
+        with self._lock:
+            for mid, message in self._messages.items():
+                if message.get('_coach_owner') is not None and message['state'] in TEXT_STATES:
+                    message['state'] = 'cancelled'
+                    self._audio.pop(mid, None)
+                    if self._ticket and self._ticket.message['id'] == mid:
+                        self._ticket.cancelled.set()
+            self._queue = [mid for mid in self._queue if self._messages[mid]['state'] == 'queued']
+            self._revision += 1
+
+    def publish_coach(self, text, evidence, owner, training_epoch, authorize, ready, allow_ai=False):
+        """Trusted coordinator entry. Private facts use the existing native owner."""
+        if (not isinstance(text, str) or not 0 < len(text) <= 1200
+                or not callable(authorize) or authorize() is not True):
+            return None
+        self.refresh(force=True)
+        with self._lock:
+            if not self._enabled or not self._live or self._closed:return None
+            self.cancel_coach()
+            result = dict(answers={'coach':text}, fuel={}, pace={}, tyres={}, uncertainties=[])
+            queued = (self._voice_enabled and not any(self._messages[mid]['severity']=='urgent' for mid in self._queue))
+            public = self._publish('coach', 'coach', 'normal', result, self.clock(), queued=queued)
+            message = self._messages[public['id']]
+            message.update(evidence=copy.deepcopy(evidence), _coach_owner=copy.deepcopy(owner),
+                           _coach_epoch=training_epoch, _coach_guard=authorize, _coach_ready=ready,
+                           _deadline=self.clock()+12, expires_at=self.wall()+12,
+                           ai_state='pending' if allow_ai is True else 'not_requested')
+            return self._public(message)
 
     def refresh(self, force=False):
         """One cached assessment for an immutable live revision, regardless of readers."""
@@ -249,12 +291,14 @@ class Service:
                                   live=self._live and not self._closed, voice_enabled=self._voice_enabled and not self._closed,
                                   assessment=self._assessment))
 
-    def history(self, since=None):
+    def history(self, since=None, requester=None):
         self.refresh()
         with self._lock:
             changed = since != self._revision
             return dict(version=1, revision=self._revision, epoch=self._epoch, binding=copy.deepcopy(self._binding),
-                        changed=changed, messages=[self._public(m) for m in self._messages.values()] if changed else [])
+                        changed=changed, messages=[self._public(m) for m in self._messages.values()
+                            if requester is None or m.get('_coach_owner') is None
+                            or m['_coach_owner'].get('subject') == 'console:'+requester] if changed else [])
 
     def request(self, preset, binding, requester=None, authorization=None):
         with access._LOCK, self._lock:
@@ -328,7 +372,10 @@ class Service:
             self._expire(self.clock())
             if not self._queue:
                 return None
-            mid = self._queue.pop(0)
+            mid = next((mid for mid in self._queue if self._messages[mid].get('_coach_owner') is None
+                        or self._messages[mid]['_coach_ready']() is True), None)
+            if mid is None:return None
+            self._queue.remove(mid)
             message = self._messages[mid]
             message['state'] = 'playing'
             self._ticket = Ticket(uuid.uuid4().hex, self._public(message), threading.Event())

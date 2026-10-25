@@ -1,0 +1,46 @@
+# Relay coach orchestration and radio, #981
+
+One relay-owned coordinator, one active owner at a time. No panels own workers.
+Trusted server constructs owner profile + namespace-local or namespace-console
+subject; no incoming owner/subject fields. Local and Console identities differ.
+Permissions/HTTP/UI/voice vocabulary are delivered in982, using these contracts.
+
+| Requirement | Production path | Positive | Failure | Runtime |
+|---|---|---|---|---|
+| Explicit training and watermark | Coordinator start command | New full laps after captured current lap/session/time only | Old Store history/current partial lap cannot calibrate | Real Store replay |
+| Calibration+assessment+focus | Single worker-owned training model | Two-lap hint, third readiness, repeated focus progress | Unsuitable/corrected/context/ref revoked resets or preserves as specified | Multi-lap replay |
+| Responsive controls | Short state lock, generation cancellation, bounded command queue | Start/stop/focus change return without calculation/provider wait | Slow calculation loses publication race to Stop/revoke | Blocking calculation fixture |
+| Fresh publication | Recheck owner grant, generation/context/definition/epoch before publish | Current frozen evidence produces text | Stale/unavailable/replay/newsession cannot publish old text/audio/AI | Events and source mutation fixtures |
+| Deterministic baseline | Publish immediately after suitable completed lap | Grounded observation/action/check without AI | Missing geometry/provider leaves general text | Text-only replay |
+| Shared native owner | Radio Service private coach message lane | Same Enricher+Supervisor+oneTicket | Urgent Engineer cancels/deprioritizes coach; no stale backlog | Existing native fake-process fixture |
+| Private scope | Internal coach owner + history filter | Own Console sees own coach text; native explicitly started output | Other assigned drivers see no private coach messages | Service and signedHTTP982 |
+| Optional AI consent | Volatile explicit allow_ai AND profile agent setting | One bounded current explanation | Default off, stale/invalid/late result never changes grounded facts | Controlled provider fixture, zero paid calls |
+| Bounded scheduling | Single CPU worker, command/event budgets, bounded per-owner current state | Latest completed lap text, one pending speech | Delay/high workload expires voice rather than accumulating | Fake clock/deadline queue tests |
+
+Start captures current generation/session/lap plus receipt wall time before the
+worker starts. A just-completed old lap and the current partial lap are excluded.
+A current-source context/definition change is forwarded to calibration before any
+new publication, regardless of whether a new suitable lap exists. Metadata-only
+revision/free note updates do not manufacture a technique/context change.
+
+Original baseline and selected reference remain distinct. Start/focus/objective/
+reference/owner/stop changes cancel all pending private coach speech and AI by a
+fresh publication generation. Selected references need a fresh trusted callback
+that verifies both source identity/context and archive grant on every read.
+
+Calculation uses frozen detail rows and definition outside telemetry/view/access
+locks. Start/control writes invalidate publication immediately; the single worker
+applies bounded queued commands to its model. Recheck binding/grant after detail
+lookup and calculation. Under overload, never replay a stale backlog of speech.
+
+Speech uses the existing Radio Service/Ticket/Enricher/Supervisor lane, English
+Studio-Q and selected input language. It is postponed during high pedal/steering
+workload and expires at a short deadline. Urgent Engineer work has priority and
+cancels active coach output. New lap/focus supersedes older coach output including
+an active ticket. No competing recorder/player process or signal path is added.
+
+AI receives only bounded current training facts/unknowns and the current exercise,
+never private earlier-session history/raw traces/audio. Explicit allow_ai is per
+training and defaultsFalse; profile provider selection remains mandatory. Model
+explanations are validated attachments, cannot replace numeric facts/current focus,
+and never gate the grounded text. Existing completed-session runs remain separate.
