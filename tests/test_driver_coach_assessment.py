@@ -283,10 +283,10 @@ def t_indexed_trace_cannot_append_points_without_updating_its_distance_index():
     assert coach._duration(trace,50,300)==5
     assert coach._window(trace,50,60)[0]['d']==45
     try:trace.append(dict(d=405,t=8.1))
-    except AttributeError:pass
+    except AttributeError:assert len(trace)==81
     else:raise AssertionError('Indexed trace allowed an unsynchronized point append')
     try:trace.distances[0]=-1
-    except TypeError:pass
+    except TypeError:assert trace.distances[0]==0
     else:raise AssertionError('Indexed trace allowed direct index mutation')
 
 
