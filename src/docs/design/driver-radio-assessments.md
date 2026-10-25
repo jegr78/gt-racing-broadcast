@@ -62,3 +62,22 @@ Paused/loading/menu/stale/delayed/replay snapshots retain explanatory text and
 historical evidence but do not present old instruments as current or emit alerts.
 No external service, AI inference, arbitrary target temperature or wear percentage
 is needed to produce any preset answer.
+
+## Review and verification
+
+Independent review reproduced stale session declarations suppressing a current
+fuel warning. Nonempty declarations now require exact generation, session and
+context binding; otherwise they are discarded with an explicit uncertainty.
+Regression cases cover all three mismatches and absent binding. Current service
+boundaries and authoritative zero fuel burn also reject old estimates. Extremely
+small consumption and nonfinite derived ratios stay unavailable. Timed-race
+continuity checks use bounded enumeration, never an unbounded range allocation.
+
+Twenty protections were falsified individually and restored after the intended
+assertion failed: declaration binding, live receipt, replay silence, car/track
+identity, current/historical service boundaries, shared context compatibility,
+completed laps, pit/warmup exclusion, sample minimum, repeated slowdown, observed
+line, completed reference length, known timed start, reserve subtraction, stable
+finish estimate, urgent/warning crossings, radio service boundary and limit order.
+A real production TelemetryStore replay supplies positive fuel/temperature facts;
+no browser, recording writer or external provider is needed by assessment.
