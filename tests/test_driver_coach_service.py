@@ -200,7 +200,7 @@ def t_deferred_coach_speech_does_not_recreate_the_native_microphone_owner():
         def worker(_config):w=Worker();workers.append(w);return w
         def player(_audio,_volume):p=Player();players.append(p);return p
         owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=worker,player=player,
-                               microphone=lambda:'Fixture microphone',clock=lambda:f.at,ready=lambda:True)
+                               microphone=lambda:'Fixture microphone',clock=lambda f=f:f.at,ready=lambda:True)
         try:
             owner.step();assert len(workers)==1
             f.complete(3);f.step()
@@ -321,7 +321,7 @@ def t_optional_ai_requires_training_consent_and_uses_guarded_current_progress_on
     for consent in (False,True):
         with tempfile.TemporaryDirectory() as root:
             f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'agent':'fixture','speech':False}})
-            ai=AI();worker=providers.Enricher(f.radio.service,ai=ai,clock=lambda:f.at)
+            ai=AI();worker=providers.Enricher(f.radio.service,ai=ai,clock=lambda f=f:f.at)
             f.command(allow_ai=consent);f.step()
             for n in (2,3):f.complete(n);f.step()
             result=worker.step('ai')
@@ -362,7 +362,7 @@ def t_invalid_or_late_ai_keeps_grounded_text_and_cannot_change_the_focus():
             message=f.messages()[-1];before=f.service.snapshot(LOCAL)['focus']['focus']
             class AI:
                 def explain(self,*_args,change=change):return dict(evidence=['coach.lap_time_s'],claims=[],**change)
-            worker=providers.Enricher(f.radio.service,ai=AI(),clock=lambda:f.at)
+            worker=providers.Enricher(f.radio.service,ai=AI(),clock=lambda f=f:f.at)
             assert worker.step('ai')
             last=f.messages()[-1]
             assert last['ai_state']=='failed' and last['text']==message['text'] and 'explanation' not in last
@@ -378,7 +378,7 @@ def t_invalid_or_late_ai_keeps_grounded_text_and_cannot_change_the_focus():
                     if stale=='deadline':f.at+=13;f.wall+=13
                     else:f.command('skip')
                     return dict(explanation='The pattern may remain provisional.',evidence=['coach.lap_time_s'],claims=[],exercise='current')
-            worker=providers.Enricher(f.radio.service,ai=Late(),clock=lambda:f.at)
+            worker=providers.Enricher(f.radio.service,ai=Late(),clock=lambda f=f:f.at)
             assert not worker.step('ai')
             assert all('explanation' not in m for m in f.messages()) and f.messages()[-1]['text']==original
 
