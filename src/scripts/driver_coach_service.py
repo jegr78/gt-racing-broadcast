@@ -24,9 +24,12 @@ def _allowed(check):
 
 
 def _live(doc):
-    return (isinstance(doc, dict) and doc.get('receipt', {}).get('state') == 'live'
-            and not doc.get('replay', {}).get('active') and calibration._text(doc.get('session_id'))
-            and isinstance(doc.get('current'), dict))
+    if not isinstance(doc, dict):
+        return False
+    receipt, replay = doc.get('receipt'), doc.get('replay')
+    return (isinstance(receipt, dict) and receipt.get('state') == 'live'
+            and isinstance(replay, dict) and replay.get('active') is False
+            and calibration._text(doc.get('session_id')) and isinstance(doc.get('current'), dict))
 
 
 def _stamp(doc):
@@ -117,7 +120,7 @@ class Service:
             raise calibration.CoachError('invalid_control')
         allowed = {'start': {'mode', 'objective', 'allow_ai'}, 'objective': {'objective'},
                    'skill': {'skill'}, 'reference': {'row', 'authorize'}}.get(action, set())
-        if set(options)-allowed:
+        if set(options)-allowed or action == 'objective' and 'objective' not in options or action == 'reference' and 'row' not in options:
             raise calibration.CoachError('invalid_body')
         if (action == 'start' and (options.get('mode', 'practice') not in calibration.MODES
                                   or type(options.get('allow_ai', False)) is not bool)
@@ -126,6 +129,8 @@ class Service:
                 and (not isinstance(options['skill'], str) or options['skill'] not in focus.SKILLS)):
             raise calibration.CoachError('invalid_body')
         doc = self.source() if action in ('start', 'objective', 'reference') else None
+        if not _allowed(authorize):
+            raise calibration.CoachError('forbidden')
         with self._lock:
             if self._stop.is_set():
                 raise calibration.CoachError('service_closed')
@@ -142,7 +147,7 @@ class Service:
             self._owner, self._grant = copy.deepcopy(owner), authorize
             self._invalidate('pending' if action != 'stop' else 'stopped')
             self._command = dict(action=action, options=copy.deepcopy(options), owner=copy.deepcopy(owner),
-                                 token=self._token, doc=doc, wall=self.wall())
+                                 token=self._token, doc=doc, wall=self.wall(), authorize=authorize)
             self._state.update(active=action != 'stop', pending=True)
             if action in ('start', 'stop'):
                 self._state.update(calibration=None, focus=None, latest=None)
@@ -178,8 +183,8 @@ class Service:
             def grant():
                 live = self.source()
                 return anchor is not None and _live(live) and _stamp(live) == anchor and _allowed(archive)
-            model['reference_grant'] = grant if options.get('row') is not None else None
             model['cal'].select_reference(options.get('row'), authorize=grant)
+            model['reference_grant'] = grant if options.get('row') is not None else None
         else:
             model['focus'].control(action, model['focus'].snapshot()['epoch'], skill=options.get('skill'))
         if action in ('objective', 'reference'):
@@ -192,7 +197,7 @@ class Service:
     def _current(self, token, stamp=None, expected=()):
         with self._lock:
             valid = (not self._stop.is_set() and self._state['active'] and self._token == token
-                     and self._command is None)
+                     and self._command is None and self._model is not None and self._model['owner'] == self._owner)
             grant = self._grant
         if not valid or not _allowed(grant) or self._model and self._model.get('reference_grant') is not None and not _allowed(self._model['reference_grant']):
             return False
@@ -227,12 +232,23 @@ class Service:
             if self._stop.is_set():
                 return
             if command:
+                if command['action'] != 'stop' and not _allowed(command['authorize']):
+                    self._model = None
+                    with self._lock:
+                        if token == self._token:
+                            self._state.update(active=False, pending=False, phase='forbidden', calibration=None, focus=None, latest=None)
+                            self._revision += 1
+                    self.radio.cancel_coach()
+                    return
                 self._apply(command)
             model = self._model
             if model is None:
                 with self._lock:
                     if token == self._token:
-                        self._state.update(pending=False, phase='stopped' if command else 'inactive')
+                        new_phase = 'stopped' if command else 'inactive'
+                        if self._state['pending'] or self._state['phase'] != new_phase:
+                            self._state.update(pending=False, phase=new_phase)
+                            self._revision += 1
                 return
             model['cal'].reference()
             if model['cal'].epoch != model['cal_epoch']:
@@ -247,7 +263,9 @@ class Service:
             if not self._current(token):
                 with self._lock:
                     if token == self._token:
-                        self._state.update(pending=False, phase='paused', latest=None)
+                        if self._state['pending'] or self._state['phase'] != 'paused' or self._state['latest'] is not None:
+                            self._state.update(pending=False, phase='paused', latest=None)
+                            self._revision += 1
                         self._lowload_at = None
                 self.radio.cancel_coach()
                 return

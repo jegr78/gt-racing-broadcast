@@ -213,6 +213,49 @@ def t_deferred_coach_speech_does_not_recreate_the_native_microphone_owner():
         finally:owner.close()
 
 
+def t_revoked_commands_cannot_mutate_focus_after_queueing_or_a_delayed_source_read():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        before=f.service.snapshot(LOCAL)['focus']
+        f.command('skip');f.granted=False
+        state=f.step()
+        assert f.service._model is None or f.service._model['focus'].snapshot()==before
+        assert not state['active'] and state['phase']=='forbidden'
+    entered=threading.Event();release=threading.Event()
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);errors=[]
+        def source():entered.set();assert release.wait(3);return copy.deepcopy(f.snap)
+        f.service.source=source
+        def start():
+            try:f.command()
+            except calibration.CoachError as error:errors.append(error.code)
+        thread=threading.Thread(target=start);thread.start();assert entered.wait(2)
+        f.granted=False;release.set();thread.join(3)
+        assert not thread.is_alive() and errors==['forbidden']
+        assert not f.service.snapshot(LOCAL)['active']
+
+
+def t_invalid_control_shapes_are_rejected_before_a_command_is_accepted():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();before=f.service.snapshot(LOCAL)
+        for action,options in (('objective',{}),('reference',{}),('objective',[]),([],{})):
+            rejects(lambda action=action,options=options:f.service.command(LOCAL,action,before['revision'],options,
+                    authorize=lambda:True),'invalid_control' if isinstance(action,list) else 'invalid_body')
+        assert f.service.snapshot(LOCAL)==before
+
+
+def t_cached_phase_and_pending_changes_advance_the_optimistic_revision():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);pending=f.command();active=f.step()
+        assert active['revision']>pending['revision'] and not active['pending']
+        f.snap['receipt']['state']='stale';paused=f.step()
+        assert paused['revision']>active['revision'] and paused['phase']=='paused'
+        same=f.step();assert same['revision']==paused['revision']
+        pending=f.command('stop');stopped=f.step()
+        assert stopped['revision']>pending['revision'] and not stopped['pending']
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)
