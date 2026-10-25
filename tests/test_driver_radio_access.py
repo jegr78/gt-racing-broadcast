@@ -29,6 +29,7 @@ def t_access_is_explicit_profile_scoped_and_revocable():
         rejected(lambda: radio.Store(Path(d) / 'other', True).authorize('driver'), 'feature_disabled')
         rejected(lambda: radio.Store(Path(d) / 'solo', False).authorize('driver'), 'source_unavailable')
         rejected(lambda: store.update({'expected': 0, 'enabled': False}), 'conflict')
+        rejected(lambda: radio.Store(Path(d) / 'solo', False).update({'expected': 1, 'enabled': False}), 'source_unavailable')
         store.update({'expected': 1, 'drivers': []})
         rejected(lambda: store.authorize('driver'), 'forbidden')
         store.path.write_text('{"enabled":true}', encoding='utf8')
@@ -57,13 +58,13 @@ def t_settings_validate_and_native_configuration_is_separate():
         assert store.read()['voice'] == {'enabled': False, 'microphone': None, 'input_language': 'en'}
         doc = store.update({'expected': 0, 'voice': {'enabled': True, 'microphone': 'USB Mic', 'input_language': 'de'}})
         assert doc['voice']['input_language'] == 'de' and not doc['enabled']
-        for change in ({'enabled': 'yes'}, {'drivers': ['../other']}, {'drivers': ['driver'] * 129},
+        for change in ({'enabled': 'yes'}, {'drivers': ['../other']}, {'drivers': ['driver-' + str(i) for i in range(129)]},
                        {'voice': {'enabled': True, 'microphone': None, 'input_language': 'fr'}},
                        {'voice': {'enabled': True, 'microphone': 'x' * 257, 'input_language': 'en'}},
                        {'archive_grants': []}, {'expected': True}):
             rejected(lambda change=change: store.update({'expected': 1, **change}), 'invalid_settings' if 'expected' not in change else 'conflict')
         assert store.read()['revision'] == 1
-        store.path.write_text(' ' * 16385, encoding='utf8')
+        store.path.write_text(json.dumps(store.read()) + ' ' * 16385, encoding='utf8')
         rejected(store.read, 'settings_unavailable')
 
 
@@ -95,10 +96,11 @@ def t_setup_rejects_unknown_or_unsafe_fields_without_writing():
     for setup in ({'laps': True}, {'laps': -1}, {'laps': 1.5}, {'laps': 100001},
                   {'duration_min': float('nan')}, {'duration_min': float('inf')},
                   {'laps': 2, 'duration_min': 10}, {'starting_compound': 'ideal'},
-                  {'fuel_reserve_l': -1}, {'fuel_reserve_l': 10 ** 400}, {'weather': 'clear'}):
+                  {'fuel_reserve_l': -1}, {'fuel_reserve_l': True}, {'fuel_reserve_l': 10 ** 400}, {'weather': 'clear'}):
         rejected(lambda setup=setup: state.update(binding, {'binding': binding, 'expected': 0, 'setup': setup}), 'invalid_body')
         assert state.read(binding)['revision'] == 0 and state.read(binding)['setup'] == {}
     rejected(lambda: state.update(binding, {'binding': binding, 'expected': 0, 'compound': 'RM', 'confirmed_at': 0}, service=True), 'invalid_body')
+    rejected(lambda: state.update(binding, {'binding': binding, 'expected': 0, 'compound': 'invalid'}, service=True), 'invalid_body')
     assert state.read(binding)['service'] is None
 
 

@@ -2,7 +2,6 @@
 
 import copy
 import json
-import math
 import re
 import threading
 import time
@@ -105,7 +104,7 @@ def validate_setup(value):
     for key, limit in (('laps', 100000), ('duration_min', 10080), ('fuel_reserve_l', 1000)):
         v = value.get(key)
         if v is not None:
-            _require(type(v) in (int, float) and 0 <= v <= limit and math.isfinite(v))
+            _require(type(v) in (int, float) and 0 <= v <= limit)
             if key == 'laps':
                 _require(type(v) is int and v > 0)
             if key == 'duration_min':
