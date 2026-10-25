@@ -26,7 +26,7 @@ and active playback immediately. Reconnect reads text only and cannot enqueue
 old alerts. A read never claims playback.
 
 Fuel announcements occur at severity crossings. Urgency can escalate once. A
-physical refill of at least two litres or a usable range above warning+0.5 laps
+physical refill accumulating at least two litres or a usable range above warning+0.5 laps
 rearms the warning. Session/setup changes reset the episode. This avoids chatter
 around the warning threshold. Pace notices require a new completed-lap comparison
 and a 60-second cooldown. Unsupported or stale data creates no automatic notice.
@@ -51,3 +51,28 @@ origins, stale bindings and revoked identities keep semantic error responses.
 Producer administration can set validated assessment limits; old profile settings
 migrate additively with the prior defaults. No credentials, device identifiers,
 archive data or arbitrary prompts appear in remote messages.
+
+## Review and runtime evidence
+
+The independent review reproduced two fuel lifecycle defects. Recovery now
+cancels old queued/active fuel alerts, and a refill is accumulated across rising
+samples rather than requiring a two-litre jump in one packet. Both have red/green
+regressions. Cancellation retains the active output slot until acknowledgement.
+Profile voice opt-in also gates playback itself, separately from radio text access.
+
+Remote requested work retains up to 16 current requester authorizers. Token and
+assignment revocation are rechecked before attachments/output; shared work remains
+valid while another current requester authorizes it. No tokens or authorizer
+objects are serialized into the public message. Read-only clients share a
+250-millisecond snapshot cache, while requests, attachments and playback force a
+current-context check. Network response writes occur outside the access lock.
+
+Twenty-six protections were falsified individually at their intended assertions
+and restored: acknowledgement identity, occupied playback slot, voice/profile
+opt-in, closed request, expiry, history/queue bounds, deduplication, pause,
+epoch invalidation, attachment epoch, request binding, urgent preemption/priority,
+requester revocation, reader cache, attachment freshness, fuel recovery, gradual
+refill, range hysteresis, pace cooldown, audio/explanation bounds, active eviction
+and additive profile-limit migration. Concurrent signed HTTP tests share IDs and
+prove token revocation during active output. The synthetic e2e suite reports 17
+passes plus telemetry replay; the relay POV regression also passes.
