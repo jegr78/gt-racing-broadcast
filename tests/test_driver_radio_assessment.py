@@ -25,8 +25,14 @@ def snapshot(times=(90, 90, 90, 91, 91, 91)):
                 laps=[lap(i+1,t) for i,t in enumerate(times)], fuel_avg_l=7)
 
 
+def review(snap, session=None, limits=None):
+    if session is not None:
+        session=dict(session, binding={k:snap.get(k) for k in ('generation','session_id','context_revision')})
+    return radio.assess(snap, session, limits)
+
+
 def t_all_presets_have_evidence_and_no_provider_dependency():
-    data=radio.assess(snapshot(), {'setup':{}, 'service':None})
+    data=review(snapshot(), {'setup':{}, 'service':None})
     assert set(data['answers'])=={'fuel','pace','tyres','status'}
     assert all(isinstance(v,str) and v for v in data['answers'].values())
     assert data['fuel']['consumption_l']==3 and data['fuel']['range_laps']==5
@@ -42,42 +48,42 @@ def t_all_presets_have_evidence_and_no_provider_dependency():
 
 def t_reserve_partial_lap_finish_and_warning():
     snap=snapshot();snap['instruments']['fuel_l']=5
-    result=radio.assess(snap, {'setup':{'fuel_reserve_l':2,'laps':7}})['fuel']
+    result=review(snap, {'setup':{'fuel_reserve_l':2,'laps':7}})['fuel']
     assert result['range_laps']==round(5/3,3) and result['usable_laps']==1
     assert result['remaining_race_laps']==.5, 'current trace length must not imply a complete lap'
     assert result['finish']=='supported' and result['severity']=='normal'
-    result=radio.assess(snap, {'setup':{'fuel_reserve_l':2,'laps':10}})['fuel']
+    result=review(snap, {'setup':{'fuel_reserve_l':2,'laps':10}})['fuel']
     assert result['severity']=='urgent' and result['finish']=='short'
     snap['current']['observed_from_line']=False
-    result=radio.assess(snap, {'setup':{'laps':7}})['fuel']
+    result=review(snap, {'setup':{'laps':7}})['fuel']
     assert result['finish']=='unknown' and result['severity']=='warning'
     snap['current']['lap']=8
-    assert radio.assess(snap, {'setup':{'laps':7}})['fuel']['finish']=='complete'
+    assert review(snap, {'setup':{'laps':7}})['fuel']['finish']=='complete'
 
 
 def t_pace_requires_repeated_comparable_evidence():
-    assert radio.assess(snapshot((90,90,90,90,90,130)))['pace']['state']=='stable'
-    assert radio.assess(snapshot((90,94,86,91,94,89)))['pace']['state']=='stable'
-    assert radio.assess(snapshot((90,90,90,89,89,89)))['pace']['state']=='faster'
-    assert radio.assess(snapshot((90,90,91)))['pace']['state']=='insufficient'
+    assert review(snapshot((90,90,90,90,90,130)))['pace']['state']=='stable'
+    assert review(snapshot((90,94,86,91,94,89)))['pace']['state']=='stable'
+    assert review(snapshot((90,90,90,89,89,89)))['pace']['state']=='faster'
+    assert review(snapshot((90,90,91)))['pace']['state']=='insufficient'
     for field,value in (('session_id','other'),('car_id',2),('track_id','other'),('compound','RS'),
                         ('strategy',{'fuel_map':6}),('after_service',True)):
         snap=snapshot()
         if field=='strategy':snap['current']['strategy']={'fuel_map':1}
         snap['laps'][-3][field]=value
-        assert radio.assess(snap)['pace']['state']=='insufficient', (field,radio.assess(snap)['pace'])
+        assert review(snap)['pace']['state']=='insufficient', (field,review(snap)['pace'])
     snap=snapshot();snap['laps'][2]['analysis_role']='pit'
-    assert radio.assess(snap)['pace']['state']=='insufficient'
+    assert review(snap)['pace']['state']=='insufficient'
 
 
 def t_service_resets_evidence_without_inventing_tyres_or_wear():
     snap=snapshot()
-    result=radio.assess(snap, {'setup':{'starting_compound':'RS'},
+    result=review(snap, {'setup':{'starting_compound':'RS'},
                              'service':{'lap_id':'L4','compound':'RH','confirmed_at':100}})
     assert result['tyres']['compound']=='RH' and result['pace']['state']=='insufficient'
     snap['current']['compound']=None
     for row in snap['laps']:row['compound']=None
-    result=radio.assess(snap)
+    result=review(snap)
     assert result['pace']['state']=='slower'
     assert result['tyres']['compound'] is None
     assert not any(word in result['answers']['pace'].lower() for word in ('box now','wear percent','ideal temperature'))
@@ -87,48 +93,48 @@ def t_service_resets_evidence_without_inventing_tyres_or_wear():
 def t_bad_or_stale_measurements_are_explicitly_unavailable():
     for state in ('paused','loading','menu','stale','delayed','waiting'):
         snap=snapshot();snap['receipt']['state']=state
-        result=radio.assess(snap)
+        result=review(snap)
         assert not result['live'] and result['fuel']['severity']=='normal'
         assert result['fuel']['range_laps'] is None and result['tyres']['temperatures_c']==[None]*4
         assert 'unavailable' in result['answers']['fuel'].lower()
     snap=snapshot();snap['replay']['active']=True
-    assert not radio.assess(snap)['live']
+    assert not review(snap)['live']
     for value in (None,0,-1,float('nan'),float('inf'),True,1e-320):
         snap=snapshot()
         for row in snap['laps']:row['fuel_burn_l']=value;row['fuel_used_l']=value
-        result=radio.assess(snap)
+        result=review(snap)
         assert result['fuel']['range_laps'] is None
-    assert radio.assess({})['pace']['state']=='insufficient'
+    assert review({})['pace']['state']=='insufficient'
 
 
 def t_current_service_and_authoritative_zero_burn_do_not_reuse_old_estimates():
     snap=snapshot();snap['current']['after_service']=True
-    result=radio.assess(snap)
+    result=review(snap)
     assert result['pace']['state']=='insufficient' and result['fuel']['range_laps'] is None
     snap=snapshot()
     for row in snap['laps']:row['fuel_burn_l']=0;row['fuel_used_l']=3
-    assert radio.assess(snap)['fuel']['range_laps'] is None
+    assert review(snap)['fuel']['range_laps'] is None
     snap=snapshot();snap['instruments']['fuel_l']=None
-    assert radio.assess(snap)['fuel']['state']=='unavailable'
+    assert review(snap)['fuel']['state']=='unavailable'
 
 
 def t_timed_race_requires_observed_start_and_publishes_final_lap_assumption():
     snap=snapshot((90,90,90,90,90,90))
-    result=radio.assess(snap, {'setup':{'duration_min':10}})['fuel']
+    result=review(snap, {'setup':{'duration_min':10}})['fuel']
     assert result['remaining_race_laps']==round(15/90+1,3)
     assert result['finish_assumption']=='one extra lap after timer expiry'
     assert result['finish']=='estimated_supported'
     snap['laps']=snap['laps'][1:]
-    assert radio.assess(snap, {'setup':{'duration_min':10}})['fuel']['finish']=='unknown'
+    assert review(snap, {'setup':{'duration_min':10}})['fuel']['finish']=='unknown'
 
 
 def t_limits_are_validated_and_pure_inputs_are_unchanged():
     snap=snapshot();before=copy.deepcopy(snap)
-    result=radio.assess(snap, limits={'fuel_warning_laps':6,'fuel_urgent_laps':2})
+    result=review(snap, limits={'fuel_warning_laps':6,'fuel_urgent_laps':2})
     assert result['fuel']['severity']=='warning' and snap==before
     for limits in ({'fuel_warning_laps':1,'fuel_urgent_laps':2}, {'fuel_urgent_laps':True},
                    {'fuel_warning_laps':float('nan')}, {'recent_laps':0}, {'unknown':1}):
-        try:radio.assess(snap,limits=limits)
+        try:review(snap,limits=limits)
         except ValueError:pass
         else:raise AssertionError('Invalid limits accepted: '+str(limits))
 
@@ -150,12 +156,33 @@ def t_real_replay_supplies_production_snapshot_facts():
                 assert store.put(pkt, wall)
             assert store.flush(10)
             snap=store.snapshot()
-            result=radio.assess(snap)
+            result=review(snap)
             assert result['live'] and result['fuel']['consumption_l'] > 0
             assert result['fuel']['current_l']==snap['instruments']['fuel_l']
             assert result['fuel']['range_laps'] > 0
             assert set(result['fuel']['sample_ids']) <= {r['id'] for r in snap['laps'] if r['comparison_eligible']}
             assert all(result['answers'][preset] for preset in radio.PRESETS)
+
+
+def t_stale_setup_and_service_never_suppress_current_fuel_risk():
+    snap=snapshot();snap['instruments']['fuel_l']=5
+    good={k:snap[k] for k in ('generation','session_id','context_revision')}
+    for key,value in (('generation','old'),('session_id','old'),('context_revision',99)):
+        stale=dict(binding=dict(good, **{key:value}), setup={'laps':1},
+                   service={'compound':'RH','lap_id':'L4','confirmed_at':100})
+        result=radio.assess(snap,stale)
+        assert result['fuel']['finish']=='unknown' and result['fuel']['severity']=='warning'
+        assert result['tyres']['compound']=='RM' and result['pace']['state']=='slower'
+    result=radio.assess(snap, {'setup':{'laps':1}})
+    assert result['fuel']['severity']=='warning' and result['fuel']['finish']=='unknown'
+
+
+def t_provisional_finish_cannot_suppress_warning_and_large_windows_require_repeats():
+    snap=snapshot((90,));snap['instruments']['fuel_l']=5
+    result=review(snap, {'setup':{'fuel_reserve_l':2,'laps':2}})['fuel']
+    assert result['finish']=='supported' and result['state']=='provisional' and result['severity']=='urgent'
+    snap=snapshot((90,90,90,90.3,90.3,90.3,91.1,91.1,91.1))
+    assert review(snap,limits={'recent_laps':6})['pace']['state']=='stable'
 
 
 if __name__=='__main__':

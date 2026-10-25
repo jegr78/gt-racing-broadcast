@@ -145,6 +145,10 @@ def assess(snapshot, session=None, limits=None):
     """Return allowlisted facts/English text for one immutable shared snapshot."""
     limits = settings(limits)
     session = session or {}
+    stale_declarations = bool(session.get('setup') or session.get('service')) and (
+        binding(snapshot) is None or session.get('binding') != binding(snapshot))
+    if stale_declarations:
+        session = {}
     setup, service = session.get('setup') or {}, session.get('service') or {}
     live = (snapshot.get('receipt', {}).get('state') == 'live'
             and not snapshot.get('replay', {}).get('active') and snapshot.get('session_id') is not None)
@@ -163,8 +167,8 @@ def assess(snapshot, session=None, limits=None):
     if fuel is not None and fuel < 0:
         fuel = None
     reserve = setup.get('fuel_reserve_l') or 0
-    physical = fuel / consumption if fuel is not None and consumption else None
-    usable = max(0, fuel - reserve) / consumption if fuel is not None and consumption else None
+    physical = number(fuel / consumption) if fuel is not None and consumption else None
+    usable = number(max(0, fuel - reserve) / consumption) if fuel is not None and consumption else None
     finish = _finish(snapshot, setup, rows, consumption, usable)
     severity = ('urgent' if usable is not None and usable <= limits['fuel_urgent_laps']
                 else 'warning' if usable is not None and usable <= limits['fuel_warning_laps'] else 'normal')
@@ -190,6 +194,8 @@ def assess(snapshot, session=None, limits=None):
     uncertainty = ['Tyre wear, traffic and weather causes are not measured.']
     if not (snapshot.get('current') or {}).get('context_confirmed'):
         uncertainty.append('Current strategy and tyre context may be incomplete.')
+    if stale_declarations:
+        uncertainty.append('Obsolete or unbound race declarations were discarded.')
     if not setup:
         uncertainty.append('Race length and reserve are not declared.')
     if fuel is None:
