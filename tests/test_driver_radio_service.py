@@ -204,6 +204,41 @@ def t_readers_share_snapshot_work_but_attachments_recheck_current_context():
         assert len(calls)>=3, 'attachment publication must bypass a cached context'
 
 
+def t_queue_admission_and_pace_cooldown_cover_new_completed_laps():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll()
+        with patch.object(radio,'QUEUE_MAX',2):
+            for preset in ('fuel','pace','tyres'):
+                f.at+=3;f.request(preset)
+            assert f.service.pending_count()==2
+        f.snap=snapshot();f.snap['revision']+=1;f.poll()
+        assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1
+        f.at+=1
+        f.snap['laps'].append(dict(f.snap['laps'][-1],id='L7',lap=7))
+        f.snap['current']['lap']=8;f.snap['revision']+=1;f.poll()
+        assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1
+        f.at+=61
+        for n in range(8,11):f.snap['laps'].append(dict(f.snap['laps'][-1],id='L'+str(n),lap=n,time_s=94))
+        f.snap['current']['lap']=11;f.snap['revision']+=1;f.poll()
+        assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==2
+
+
+def t_existing_profile_settings_migrate_limits_and_invalid_limits_never_write():
+    import json
+    with tempfile.TemporaryDirectory() as d:
+        store=access.Store(d,True)
+        old=dict(version=1,revision=1,enabled=True,drivers=['driver'],
+                 voice=dict(enabled=False,microphone=None,input_language='en'))
+        store.path.parent.mkdir(parents=True,exist_ok=True)
+        store.path.write_text(json.dumps(old),encoding='utf8')
+        assert store.read()['limits']==assessment.DEFAULTS
+        store.update({'expected':1,'limits':{'fuel_warning_laps':3,'fuel_urgent_laps':1}})
+        assert store.read()['limits']['fuel_warning_laps']==3
+        error(lambda:store.update({'expected':2,'limits':{'fuel_warning_laps':1,'fuel_urgent_laps':2}}),'invalid_settings')
+        assert store.read()['revision']==2 and store.read()['drivers']==['driver']
+
+
 def t_signed_http_clients_share_messages_and_revalidate_access():
     import concurrent.futures
     import http.client
