@@ -182,7 +182,7 @@ class Service:
             if action in ('start', 'stop'):
                 self._state.update(calibration=None, focus=None, latest=None,
                                    allow_ai=options.get('allow_ai', False) if action == 'start' else False)
-        self.radio.cancel_coach()
+        self.radio.cancel_coach(blocking=False)
         return self.snapshot(owner)
 
     def _apply(self, command):
@@ -236,7 +236,10 @@ class Service:
         if not _live(doc) or stamp is not None and _stamp(doc) != stamp:
             return False
         lookup = {row.get('id'): row for row in (doc.get('laps') or [])[-512:] if isinstance(row, dict)}
-        return all(ident in lookup and _facts(lookup[ident]) == facts for ident, facts in expected)
+        consistent = all(ident in lookup and _facts(lookup[ident]) == facts for ident, facts in expected)
+        with self._lock:
+            return (consistent and not self._stop.is_set() and self._token == token
+                    and self._state['active'] and self._command is None)
 
     def _speak(self, token):
         doc = self.source()
@@ -466,6 +469,6 @@ class Service:
         with self._lock:
             self._invalidate('stopped')
             self._state['active'] = False
-        self.radio.cancel_coach()
+        self.radio.cancel_coach(blocking=False)
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(2)

@@ -629,6 +629,38 @@ def t_frozen_detail_identity_cannot_be_substituted_and_source_session_cannot_mix
         state=f.step();assert not state['latest'] and not state['calibration']['calibration_ids']
 
 
+def t_radio_grant_io_cannot_block_stop_or_revalidate_an_obsolete_training_token():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step();f.complete(2);f.step();f.at+=2
+        ticket=f.radio.service.take_playback();assert ticket is not None
+        entered=threading.Event();release=threading.Event();done=threading.Event()
+        def grant():entered.set();assert release.wait(3);return True
+        f.service._grant=grant
+        messages=[]
+        reader=threading.Thread(target=lambda:messages.extend(f.messages()));reader.start();assert entered.wait(1)
+        control=threading.Thread(target=lambda:(f.command('stop'),done.set()));control.start()
+        try:
+            assert done.wait(.5), 'Radio grant I/O blocked Stop'
+            assert ticket.cancelled.is_set(), 'Stop did not immediately cancel the active coach ticket'
+        finally:release.set();reader.join(4);control.join(4)
+        assert not reader.is_alive() and not control.is_alive()
+        assert messages[-1]['state']=='cancelled', 'Delayed grant revalidated an obsolete training token'
+
+
+def t_publication_rechecks_the_training_token_after_a_delayed_grant():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        token=f.service.snapshot(LOCAL)['epoch']
+        entered=threading.Event();release=threading.Event();results=[]
+        def grant():entered.set();assert release.wait(3);return True
+        f.service._grant=grant
+        reader=threading.Thread(target=lambda:results.append(f.service._current(token)))
+        reader.start();assert entered.wait(1)
+        try:assert not f.command('stop')['active']
+        finally:release.set();reader.join(4)
+        assert not reader.is_alive() and results==[False], 'Delayed grant authorized an obsolete publication'
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)

@@ -181,8 +181,14 @@ class Service:
         self._revision += 1
         return self._public(message)
 
-    def cancel_coach(self):
-        with self._lock:
+    def cancel_coach(self, blocking=True):
+        # Signal the owner before waiting for a reader's grant callback.
+        ticket = self._ticket
+        if ticket is not None and ticket.message.get('kind') == 'coach':
+            ticket.cancelled.set()
+        if not self._lock.acquire(blocking=blocking):
+            return
+        try:
             for mid, message in self._messages.items():
                 if message.get('_coach_owner') is not None and message['state'] in TEXT_STATES:
                     message['state'] = 'cancelled'
@@ -191,6 +197,8 @@ class Service:
                         self._ticket.cancelled.set()
             self._queue = [mid for mid in self._queue if self._messages[mid]['state'] == 'queued']
             self._revision += 1
+        finally:
+            self._lock.release()
 
     def publish_coach(self, text, evidence, owner, training_epoch, authorize, ready, allow_ai=False,
                       completed_at=None, latest=False):

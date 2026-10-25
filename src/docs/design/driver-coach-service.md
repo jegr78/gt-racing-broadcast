@@ -97,3 +97,8 @@ Detail lookups rotate with a four-call per-step budget. Evicted/unavailable laps
 are skipped with a compact lap/state status; pending rows are retried without
 blocking newer ready laps. Once a newer lap is processed, older delayed detail
 cannot roll the review backward or manufacture a backlog of spoken hints.
+
+Stop signals an active coach ticket before attempting the radio lock and never
+waits for a radio reader's grant I/O. Deferred queue cleanup uses the invalidated
+training token; a grant result is checked again after I/O before it can authorize
+any old message. The worker still serializes model transitions.
