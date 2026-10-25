@@ -48,6 +48,7 @@ def t_explicit_practice_start_and_two_lap_baseline_then_three_lap_readiness():
         rejects(lambda mode=mode: c.start(OWNER, mode=mode), 'invalid_mode')
     rejects(lambda: c.start(OWNER, objective='optimal'), 'invalid_objective')
     rejects(lambda: c.start({'profile': 'solo'}), 'invalid_owner')
+    rejects(lambda: c.start({'profile': 'x' * 161, 'subject': 'driver-one'}), 'invalid_owner')
     c.start(OWNER)
     assert c.snapshot()['objective'] == 'balanced'
     assert c.ingest(lap(2))['phase'] == 'calibrating'
@@ -130,6 +131,12 @@ def t_external_references_require_current_access_and_compatible_known_identity()
     assert c.reference()['id'] != 'lap-7'
     assert c.snapshot()['epoch'] != before and c.snapshot()['reference']['source'] == 'personal'
     rejects(lambda: c.select_reference(reference, lambda: False), 'reference_forbidden')
+    for verdict in (1, 'yes', {'allowed': True}):
+        rejects(lambda verdict=verdict: c.select_reference(reference, lambda: verdict), 'reference_forbidden')
+    private = dict(reference, recording_path='/private/recording.gt7rec')
+    c.select_reference(private, lambda: True)
+    assert 'recording_path' not in c.reference()
+    c.select_reference(None)
     for changes in ({'car_id': 2}, {'track_id': None}, {'layout': 'Reverse'},
                     {'compound': 'RM'}, {'strategy': {'fuel_map': 2}},
                     {'definition_fingerprint': 'different'}, {'sector_variant_id': 'other'}):
