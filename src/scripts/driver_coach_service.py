@@ -81,7 +81,8 @@ def attach(radio, live):
     existing = getattr(radio, 'coach', None)
     if existing is not None:
         return existing
-    if live is None or not radio.settings.available:
+    if (live is None or not radio.settings.available
+            or not callable(getattr(live, 'snapshot', None)) or not callable(getattr(live, 'detail', None))):
         return None
     coordinator = Service(radio.settings.path.parent.name, live.snapshot, live.detail, radio)
     radio.coach = coordinator
