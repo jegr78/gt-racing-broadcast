@@ -177,6 +177,7 @@ import overlay_build
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
 import driver_radio_access
+import driver_radio_service
 import race_engineer_live
 import race_engineer_api
 import gt7_context     # prepared session notes attached to each new recording
@@ -11582,10 +11583,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
-                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None):
+                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None):
     radio_access = (driver_radio_access.Store(engineer_access.root, engineer_access.available)
                     if engineer_access is not None else None)
-    radio_session = driver_radio_access.Session()
+    def radio_source():
+        engine = getattr(telemetry_store, "engineer", None)
+        return engine.snapshot() if engine is not None else {}
+    if radio_service is None and radio_access is not None:
+        radio_service = driver_radio_service.Service(radio_access, driver_radio_access.Session(), radio_source)
+    radio_session = radio_service.session if radio_service is not None else driver_radio_access.Session()
     audience_runtime = audience_runtime or audience_widgets.Runtime(
         os.path.join(os.path.dirname(overlay_dir), "audience.json") if overlay_dir else None)
     audience_script = os.path.join(_SRC_BASE, "ui", "audience.js")
@@ -11729,6 +11735,19 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         access = radio_access.authorize(subject)
                         if route == "access":
                             result = access
+                        elif route == "snapshot":
+                            result = radio_service.refresh()
+                        elif route == "messages":
+                            query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                            values = query.get("since", [])
+                            if (set(query) - {"since", "t"} or len(values) > 1
+                                    or values and not (values[0].isascii() and values[0].isdigit() and len(values[0]) <= 18)):
+                                return self._radio_error("invalid_query", "Use one nonnegative message revision", 400)
+                            result = radio_service.history(int(values[0]) if values else None)
+                        elif route == "request":
+                            if set(body) != {"preset", "binding"}:
+                                return self._radio_error("invalid_body", "Expected preset and current binding", 400)
+                            result = {"message": radio_service.request(body["preset"], body["binding"])}
                         else:
                             engine = getattr(telemetry_store, "engineer", None)
                             snapshot = engine.snapshot(compact=True) if engine is not None else {}
@@ -11737,11 +11756,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             if method == "POST":
                                 result = radio_session.update(binding, body, service=route == "service",
                                     lap_id=(snapshot.get("current") or {}).get("id"))
+                                radio_service.refresh(force=True)
                             else:
                                 result = radio_session.read(binding)
                     return self._send(result, no_store=True)
             except driver_radio_access.RadioError as exc:
-                status = (403 if exc.code in ("forbidden", "feature_disabled") else
+                status = (429 if exc.code == "rate_limited" else
+                          403 if exc.code in ("forbidden", "feature_disabled") else
                           409 if exc.code in ("conflict", "session_unavailable") else
                           503 if exc.code in ("source_unavailable", "settings_unavailable") else 400)
                 return self._radio_error(exc.code, str(exc), status)
@@ -14726,6 +14747,10 @@ def main():
     )
     if telemetry_store is not None:
         telemetry_store.replay = telemetry_replay.Controller(telemetry_store, rec_dir)
+    radio_service = driver_radio_service.Service(
+        driver_radio_access.Store(runtime, engineer_access.available),
+        driver_radio_access.Session(),
+        lambda: engineer_live.snapshot() if engineer_live is not None else {})
     engineer_page_path = engineer_page_for(console_page_path)
     audience_runtime = audience_widgets.Runtime(
         os.path.join(os.path.dirname(args.overlay_dir), "audience.json") if args.overlay_dir else None)
@@ -14787,6 +14812,7 @@ def main():
         telemetry_store=telemetry_store,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
+        radio_service=radio_service,
     )
     bind_addrs = resolve_bind_addresses(
         args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
@@ -14809,6 +14835,7 @@ def main():
                  f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
                  f"to see what holds the port.")
 
+    radio_service.start()
     if youtube_service is not None:
         youtube_service.start()
     if twitch_service is not None:
@@ -14843,6 +14870,7 @@ def main():
             telemetry_store.recorder.close()   # flush and rename before the hard exit
         if telemetry_store is not None and telemetry_store.replay is not None:
             telemetry_store.replay.stop()
+        radio_service.close()
         if engineer_live is not None:
             engineer_live.close()
         if youtube_service is not None:
