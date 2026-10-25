@@ -231,6 +231,53 @@ def t_signed_http_boundaries_and_session_writes():
             server.server_close()
 
 
+def t_delayed_body_cannot_retain_revoked_token_or_assignment():
+    import http.client
+    import threading
+    import test_console_gate as fixture
+    m = fixture.m
+    with tempfile.TemporaryDirectory() as d:
+        access = radio.Store(d, True)
+        access.update({'expected': 0, 'enabled': True, 'drivers': ['driver']})
+        versions = str(Path(d) / 'console-versions.json')
+        handler = m.make_handler(m.Relay(fixture._FakeSource([], []), [53001, 53002], d),
+            console_secret=fixture.SECRET, console_versions_path=versions,
+            engineer_access=m.race_engineer_access.Store(d, True))
+        reached = threading.Event()
+        original = handler._radio_body
+        def announced_body(self):
+            reached.set()
+            return original(self)
+        handler._radio_body = announced_body
+        server = m.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            for version, error, status in ((1, 'unauthorized', 401), (2, 'forbidden', 403)):
+                reached.clear()
+                conn = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                body = json.dumps({'binding': None, 'expected': 0, 'setup': {}}).encode()
+                token = m.console_auth.mint_token(fixture.SECRET, 'driver', version)
+                conn.putrequest('POST', '/console/driver-radio/setup')
+                conn.putheader('Cookie', 'rc_console=' + token)
+                conn.putheader('Content-Type', 'application/json')
+                conn.putheader('Content-Length', str(len(body)))
+                conn.endheaders()
+                conn.send(body[:1])
+                assert reached.wait(3), 'request did not reach body processing'
+                if version == 1:
+                    m.console_admin.bump_version(versions, 'driver')
+                else:
+                    access.update({'expected': 1, 'drivers': []})
+                conn.send(body[1:])
+                response = conn.getresponse()
+                doc = json.loads(response.read())
+                conn.close()
+                assert response.status == status and doc['error']['code'] == error, (response.status, doc)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):
