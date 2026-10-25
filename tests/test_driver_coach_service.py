@@ -310,6 +310,118 @@ def t_review_uses_measured_lap_time_and_never_promotes_an_unselected_second_acti
         assert all(state['latest'][k] for k in ('observation','interpretation','action','check'))
 
 
+def t_optional_ai_requires_training_consent_and_uses_guarded_current_progress_only():
+    import driver_radio_providers as providers
+    class AI:
+        def __init__(self):self.calls=[]
+        def explain(self,agent,message,stopped,budget):
+            self.calls.append((agent,message,budget))
+            return dict(explanation='The observed variation may warrant more comparable practice.',
+                        evidence=['coach.lap_time_s'],claims=[],exercise='repeat')
+    for consent in (False,True):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'agent':'fixture','speech':False}})
+            ai=AI();worker=providers.Enricher(f.radio.service,ai=ai,clock=lambda:f.at)
+            f.command(allow_ai=consent);f.step()
+            for n in (2,3):f.complete(n);f.step()
+            result=worker.step('ai')
+            assert bool(ai.calls)==consent
+            if consent:
+                assert result and ai.calls[0][1]['evidence']['coach_context']['variants']
+                assert 'history' not in ai.calls[0][1]['evidence']
+                assert 'trace' not in str(ai.calls[0][1]['evidence'])
+                assert f.messages()[-1]['ai_state']=='ready'
+                assert f.messages()[-1]['text']!=f.messages()[-1]['explanation']
+
+
+def t_ai_progress_claims_bind_all_recent_attempts_not_only_the_last_lap():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(objective='pace',allow_ai=True);f.step()
+        for n,seconds in ((2,8.2),(3,8),(4,7.8),(5,7.8),(6,7.8)):
+            f.complete(n,seconds);f.step()
+        message=f.messages()[-1]
+        assert message['evidence']['coach']['sample_count']==3
+        for brief in f.snap['laps']:
+            if brief['id']=='lap-4':brief['measurement_hash']='corrected-earlier-attempt'
+        f.rows['lap-4']['measurement_hash']='corrected-earlier-attempt'
+        assert f.radio.service.remaining_for(message['id'],message['epoch'],kind='ai')==0
+        assert not f.radio.service.attach(message['id'],message['epoch'],{'explanation':'Stale progress','ai_state':'ready'})
+
+
+def t_invalid_or_late_ai_keeps_grounded_text_and_cannot_change_the_focus():
+    import driver_radio_providers as providers
+    bad=[dict(explanation='The observations prove learning.',exercise='current'),
+         dict(explanation='You could brake two metres later.',exercise='current'),
+         dict(explanation='The result is faster.',exercise='current'),
+         dict(explanation='The result may be provisional.',exercise='invented')]
+    for change in bad:
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'agent':'fixture','speech':False}})
+            f.command(allow_ai=True);f.step()
+            for n in (2,3):f.complete(n);f.step()
+            message=f.messages()[-1];before=f.service.snapshot(LOCAL)['focus']['focus']
+            class AI:
+                def explain(self,*_args,change=change):return dict(evidence=['coach.lap_time_s'],claims=[],**change)
+            worker=providers.Enricher(f.radio.service,ai=AI(),clock=lambda:f.at)
+            assert worker.step('ai')
+            last=f.messages()[-1]
+            assert last['ai_state']=='failed' and last['text']==message['text'] and 'explanation' not in last
+            assert f.service.snapshot(LOCAL)['focus']['focus']==before
+    for stale in ('deadline','focus'):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'agent':'fixture','speech':False}})
+            f.command(allow_ai=True);f.step()
+            for n in (2,3):f.complete(n);f.step()
+            original=f.messages()[-1]['text']
+            class Late:
+                def explain(self,*_args,stale=stale,f=f):
+                    if stale=='deadline':f.at+=13;f.wall+=13
+                    else:f.command('skip')
+                    return dict(explanation='The pattern may remain provisional.',evidence=['coach.lap_time_s'],claims=[],exercise='current')
+            worker=providers.Enricher(f.radio.service,ai=Late(),clock=lambda:f.at)
+            assert not worker.step('ai')
+            assert all('explanation' not in m for m in f.messages()) and f.messages()[-1]['text']==original
+
+
+def t_coach_cli_package_contains_only_current_bounded_context_and_a_variant_schema():
+    import ai_agents,driver_radio_ai
+    from test_driver_radio_ai import Adapter,config
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(allow_ai=True);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        machine=Path(root)/'machine';ai_agents.Settings(machine).save({'enabled':True,'agents':[config()]})
+        seen=[]
+        def process(invocation,_prompt,_stopped,budget,env):
+            import json
+            data=json.loads((Path(invocation.cwd)/'facts.json').read_text())
+            schema=json.loads((Path(invocation.cwd)/'result-schema.json').read_text())
+            seen.append(data)
+            assert data['current_exercise']['variants'] and 'history' not in data and 'trace' not in str(data)
+            assert schema['properties']['exercise']['enum']==['current','repeat']
+            assert budget<=8 and 'RACECAST_CONSOLE_SECRET' not in env
+            Path(invocation.output).write_text(json.dumps(dict(explanation='The pattern may remain provisional.',
+                evidence=['coach.lap_time_s'],claims=[],exercise='current')),encoding='utf8')
+            return b''
+        result=driver_radio_ai.LiveAI(machine,adapter_factory=Adapter,process=process).explain('live',f.messages()[-1],threading.Event(),8)
+        assert result['exercise']=='current' and len(seen)==1
+
+
+def t_relay_attachment_has_one_shared_worker_and_disabled_sources_have_none():
+    from types import SimpleNamespace
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);live=SimpleNamespace(snapshot=lambda:copy.deepcopy(f.snap),detail=f.detail)
+        attached=coach.attach(f.radio.service,live)
+        assert attached is coach.attach(f.radio.service,live) and f.radio.service.coach is attached
+        assert attached._thread is None, 'Handler construction started a worker before relay binding'
+        attached.start();attached.start()
+        thread=attached._thread;assert thread is not None and thread.is_alive()
+        attached.close();assert not thread.is_alive()
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.radio.access.available=False
+        assert coach.attach(f.radio.service,live) is None
+        assert coach.attach(f.radio.service,None) is None
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)

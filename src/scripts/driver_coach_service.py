@@ -77,6 +77,17 @@ def _review(row, result, trained):
                 text=observation+' '+label+action+' '+check)
 
 
+def attach(radio, live):
+    existing = getattr(radio, 'coach', None)
+    if existing is not None:
+        return existing
+    if live is None or not radio.settings.available:
+        return None
+    coordinator = Service(radio.settings.path.parent.name, live.snapshot, live.detail, radio)
+    radio.coach = coordinator
+    return coordinator
+
+
 class Service:
     def __init__(self, profile, source, detail, radio, clock=time.monotonic, wall=time.time, assessor=None):
         self.profile, self.source, self.detail, self.radio = profile, source, detail, radio
@@ -188,7 +199,7 @@ class Service:
                                mark=_mark(doc, command['wall']) if _live(doc) else None,
                                seen=collections.OrderedDict(), allow_ai=options.get('allow_ai', False),
                                latest=None, owner=command['owner'], cal_epoch=cal.epoch, reference_grant=None,
-                               sources=collections.OrderedDict(), best_source=None)
+                               sources=collections.OrderedDict(), best_source=None, focus_key=None, focus_sources=set())
             return
         model = self._model
         if model is None:
@@ -332,6 +343,10 @@ class Service:
                     self.radio.cancel_coach()
                 result = self.assessor(row, frozen, definition=row.get('track_definition'), personal_laps=list(model['cohort']))
                 trained = model['focus'].observe(row, result, calibrated, model['cal'].baseline_laps())
+                focus_key = (trained['epoch'], trained['focus']['id']) if trained['focus'] else None
+                if focus_key != model['focus_key']:
+                    model['focus_key'] = focus_key
+                    model['focus_sources'] = {r['id'] for r in model['cohort']} | {ident} if focus_key else set()
                 if trained['focus'] and not calibrated['focus_active']:
                     model['cal'].begin_focus()
                 if calibrated['accepted']:
@@ -350,6 +365,9 @@ class Service:
                 required = set((calibrated.get('baseline') or {}).get('lap_ids', [])) | {ident}
                 reference = calibrated.get('reference') or {}
                 if reference.get('source') == 'personal':required.add(reference['id'])
+                required.update(model['focus_sources'])
+                required.update(r['id'] for r in model['cohort'])
+                required.update(r['lap_id'] for r in trained['attempts'][-3:])
                 pins = required | ({model['best_source'][1]} if model['best_source'] else set())
                 while len(model['sources']) > 128:
                     disposable = next(key for key in model['sources'] if key not in pins)
@@ -360,15 +378,34 @@ class Service:
                     model['seen'].popitem(last=False)
                 model['latest'] = _review(row, result, trained)
                 text = model['latest']['text']
-                evidence = dict(coach=dict(lap_time_s=row.get('time_s'), baseline_time_s=(calibrated.get('baseline') or {}).get('time_s')),
-                                uncertainties=result['unknown'])
+                exercise = trained.get('focus')
+                recent = trained['attempts'][-1] if trained['attempts'] and trained['attempts'][-1]['lap_id'] == ident else {}
+                measured_check = recent.get('check') or {}
+                original = trained.get('baseline') or {}
+                passage = original.get('passage') or {}
+                progress = trained['progress']
+                context = dict(skill=exercise['skill'] if exercise else 'consistency',
+                    label=exercise['label'] if exercise else 'Personal calibration',
+                    reviewed=exercise['reviewed'] if exercise else False, objective=calibrated['objective'],
+                    observation=model['latest']['observation'], interpretation=model['latest']['interpretation'],
+                    check=model['latest']['check'], variants={
+                        'current':model['latest']['action'],
+                        'repeat':'Consider repeating the current exercise without adding another change.' if exercise
+                                 else 'Consider repeating a comparable approach while collecting calibration evidence.'})
+                evidence = dict(coach=dict(lap_time_s=row.get('time_s'),
+                    baseline_time_s=(calibrated.get('baseline') or {}).get('time_s'),
+                    window_time_s=measured_check.get('own_s'), baseline_window_s=passage.get('time_s'),
+                    recent_range_s=progress.get('measure_range_s'), baseline_range_s=passage.get('range_s', original.get('range_s')),
+                    sample_count=progress.get('sample_count'), exit_speed_kmh=measured_check.get('exit_speed_kmh'),
+                    baseline_exit_speed_kmh=passage.get('exit_speed_kmh')),
+                    uncertainties=result['unknown'], coach_context=context)
                 completed = brief.get('_end_wall')
                 completion = completed if assessment.finite(completed) else float('-inf')
                 latest_lap = max((r['lap'] for r in candidates), default=None)
                 self._ready_at = self.clock()+max(0, completion+1.5-self.wall())
                 self.radio.publish_coach(text, evidence, model['owner'], token,
                     authorize=lambda token=token,stamp=stamp,expected=expected:self._current(token, stamp, expected),
-                    ready=lambda token=token:self._speak(token), allow_ai=model['allow_ai'],
+                    ready=lambda token=token:self._speak(token), allow_ai=model['allow_ai'] and calibrated['accepted'],
                     completed_at=completion, latest=brief['lap'] == latest_lap)
             with self._lock:
                 if token == self._token and self._command is None:

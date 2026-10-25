@@ -159,6 +159,20 @@ FACT_LABELS = {
 }
 
 
+COACH_FACTS = {
+    'lap_time_s':('Measured coach lap time', 'seconds'),
+    'baseline_time_s':('Original baseline lap time', 'seconds'),
+    'window_time_s':('Measured passage time', 'seconds'),
+    'baseline_window_s':('Original baseline passage time', 'seconds'),
+    'recent_range_s':('Recent comparable timing range', 'seconds'),
+    'baseline_range_s':('Original comparable timing range', 'seconds'),
+    'sample_count':('Comparable attempt count', 'laps'),
+    'exit_speed_kmh':('Measured passage exit speed', 'km/h'),
+    'baseline_exit_speed_kmh':('Original passage exit speed', 'km/h'),
+}
+FACT_LABELS.update({'coach.'+key:label for key,(label,_unit) in COACH_FACTS.items()})
+
+
 def compact_facts(message):
     evidence=message.get('evidence') or {}
     facts={}
@@ -173,6 +187,11 @@ def compact_facts(message):
                          evidence.get('tyres',{}).get('temperatures_c',[None]*4),strict=True):
         if type(value) in (int,float) and -1000<=value<=1000:
             facts['tyres.'+key]={'value':value,'unit':'degrees_c'}
+    if message.get('kind') == 'coach':
+        for key,(_label,unit) in COACH_FACTS.items():
+            value=evidence.get('coach',{}).get(key)
+            if type(value) in (int,float) and -1e9<=value<=1e9:
+                facts['coach.'+key]={'value':value,'unit':unit}
     return facts
 
 
@@ -224,6 +243,32 @@ def validate_explanation(result,facts):
     rendered_text=' '.join([text.strip(),*rendered])
     if len(rendered_text)>600:raise ProviderError('invalid_explanation')
     return rendered_text
+
+
+def render_explanation(result,message):
+    facts=compact_facts(message)
+    if message.get('kind')!='coach':
+        return validate_explanation(result,facts)
+    if not isinstance(result,dict) or set(result)!={'explanation','evidence','claims','exercise'}:
+        raise ProviderError('invalid_explanation')
+    context=(message.get('evidence') or {}).get('coach_context') or {}
+    variants=context.get('variants') or {}
+    selected=variants.get(result['exercise']) if isinstance(result['exercise'],str) else None
+    if (not isinstance(selected,str) or not 0<len(selected)<=600
+            or result['exercise'] not in ('current','repeat')):
+        raise ProviderError('invalid_explanation')
+    text=result['explanation']
+    if (not isinstance(text,str) or len(text)>300
+            or re.search(r'\b(?:brak(?:e|ing)|throttle|steer(?:ing)?|gear|apex|hydraulic|pressure|metres?|meters?|'
+                         r'turn(?:ing)?|corners?|line|entry|exit|accelerat(?:e|ion)|pedal|earlier|later|sooner|caus(?:e|ed|es|al)|learn(?:ed|ing)?|pro(?:ve|ved|ven)|guarantee|must|should|always)\b',text,re.I)):
+        raise ProviderError('invalid_explanation')
+    for clause in re.split(r'[.!?;]',text):
+        if clause.strip() and not re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|provisional|consider)\b',clause,re.I):
+            raise ProviderError('invalid_explanation')
+    rendered=validate_explanation({k:v for k,v in result.items() if k!='exercise'},facts)+' '+selected
+    if len(rendered)>600:
+        raise ProviderError('invalid_explanation')
+    return rendered
 
 
 class _Current:
@@ -290,7 +335,7 @@ class Enricher:
                     self._ai_at=self.clock()
                     result=self.ai.explain(config['agent'],message,stopped,
                         min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
-                    explanation=validate_explanation(result,compact_facts(message))
+                    explanation=render_explanation(result,message)
                     fields={'explanation':explanation,state_key:'ready',error_key:None}
                 if stopped.is_set():return False
             except ProviderError as exc:

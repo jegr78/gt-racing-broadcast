@@ -44,3 +44,32 @@ never private earlier-session history/raw traces/audio. Explicit allow_ai is per
 training and defaultsFalse; profile provider selection remains mandatory. Model
 explanations are validated attachments, cannot replace numeric facts/current focus,
 and never gate the grounded text. Existing completed-session runs remain separate.
+
+## Implemented scheduling and explanation constraints
+
+One actor owns the mutable calibration/focus model. Controls invalidate a public
+publication token immediately and occupy one bounded command slot. Stop preempts
+that slot; other writes receive a busy response until it is consumed. Permission
+is checked before enqueue and again before execution. Numerical calculation and
+provider work never hold the state/view/access locks.
+
+A 128-entry source-fact ledger pins the original baseline, personal reference,
+best candidate, current cohort and contributors to the retained exercise/attempts.
+Private radio callbacks revalidate those facts before playback or enrichment,
+including while a calculation is blocked. Missing/corrected evidence fails closed.
+Actual completion time bounds speech/AI to twelve seconds; only the latest lap may
+speak. Delayed older laps retain deterministic text. Deferred speech leaves the
+existing native microphone owner intact.
+
+Every suitable lap review contains measured lap time and the retained exercise.
+Observation, interpretation, action and check remain separate structured fields.
+An unselected assessment suggestion never becomes a second action in the summary.
+
+Optional AI requires both per-training consent and a configured isolated agent.
+Only bounded current numeric facts, unknowns and the current exercise are sent.
+The model selects the current experiment or a repeatability variant within that
+same exercise. Free explanation prose must remain conditional; numeric claims are
+rendered from exact fact IDs/units, and invented targets, causes or learning claims
+are rejected. Explanations cannot change the focus or replace the grounded text.
+The shared radio enrichment lane keeps its existing deadline and rate limits;
+failed/late output leaves the deterministic review available.
