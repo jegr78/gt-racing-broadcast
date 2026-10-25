@@ -162,7 +162,7 @@ def t_epoch_and_reference_changes_invalidate_old_focus_with_provenance():
     assert any(e['state']=='invalidated' and e['baseline_id']==base for e in state['history'])
     rejects(lambda engine=engine,old=old:engine.control('keep',old),'conflict')
     engine,cal,_,state=ready();old=state['epoch']
-    snap=cal.select_reference(lap(20,88,session_id='archive'),authorize=lambda:True)
+    cal.select_reference(lap(20,88,session_id='archive'),authorize=lambda:True)
     row=lap(3,89);snap=cal.ingest(row)
     state=engine.observe(row,assessment(row,reference='lap-20'),snap,cal.baseline_laps())
     assert state['epoch']!=old and state['attempts']==[]
@@ -302,7 +302,7 @@ def t_findings_and_dismissals_have_explicit_bounds_without_partial_failed_contro
     engine,cal,_,state=ready();epoch=state['epoch']
     for n in range(3,3+coach.DISMISSED_MAX):
         engine.control('skip',epoch)
-        state=attempt(engine,cal,n,90,[finding('focus-'+str(n))])
+        attempt(engine,cal,n,90,[finding('focus-'+str(n))])
     before=engine.snapshot()
     assert len(before['history'])<=coach.HISTORY_MAX
     rejects(lambda:engine.control('skip',epoch),'focus_limit')
