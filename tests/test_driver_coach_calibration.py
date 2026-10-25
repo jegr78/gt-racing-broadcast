@@ -47,6 +47,7 @@ def t_explicit_practice_start_and_two_lap_baseline_then_three_lap_readiness():
     for mode in ('race', 'qualifying', '', None):
         rejects(lambda mode=mode: c.start(OWNER, mode=mode), 'invalid_mode')
     rejects(lambda: c.start(OWNER, objective='optimal'), 'invalid_objective')
+    rejects(lambda: c.start({'profile': 'solo'}), 'invalid_owner')
     c.start(OWNER)
     assert c.snapshot()['objective'] == 'balanced'
     assert c.ingest(lap(2))['phase'] == 'calibrating'
@@ -140,11 +141,15 @@ def t_external_references_require_current_access_and_compatible_known_identity()
     c = started(); c.ingest(lap(2, track_id=None)); c.ingest(lap(3, track_id=None))
     assert c.snapshot()['phase'] == 'provisional', 'unknown track blocked personal same-session evidence'
     rejects(lambda: c.select_reference(reference, lambda: True), 'reference_incompatible')
+    unknown = copy.deepcopy(reference); unknown['track_id'] = None
+    rejects(lambda: c.select_reference(unknown, lambda: True), 'reference_incompatible')
 
 
 def t_same_session_stint_and_known_settings_conflicts_cannot_be_selected():
     c = started(); c.ingest(lap(2, stint_id='old')); c.ingest(lap(3, stint_id='old'))
     rejects(lambda: c.select_reference(lap(7, stint_id='fresh'), lambda: True), 'reference_incompatible')
+    c = started(); c.ingest(lap(2, compound='RM')); c.ingest(lap(3, compound='RM'))
+    rejects(lambda: c.select_reference(lap(7, session_id='older', compound=None), lambda: True), 'reference_incompatible')
     c = started()
     for n in (2, 3):
         c.ingest(lap(n, context_settings={'bop': False}, settings_confirmed=True))
