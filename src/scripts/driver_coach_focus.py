@@ -205,7 +205,8 @@ class Focus:
         self._benchmark = None
         self._context = {k: copy.deepcopy(row.get(k)) for k in calibration.CONTEXT}
         self._context.update(session_id=row['session_id'], comparison_eligible=True)
-        choices = [f for f in findings if f['id'] not in self._skipped | self._completed
+        choices = [f for f in findings if len(self._skipped | self._completed) < DISMISSED_MAX
+                   and f['id'] not in self._skipped | self._completed
                    and (self._skill is None or f['skill'] == self._skill)]
         relevance = {'pace': {'pace': 2}, 'consistency': {'consistency': 2}, 'balanced': {}}[self._objective]
         choices.sort(key=lambda f: (f['support'], relevance.get(f['skill'], 1), f['strength']), reverse=True)

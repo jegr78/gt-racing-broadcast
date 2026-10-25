@@ -501,6 +501,19 @@ def t_completed_focus_can_finish_before_calibration_promotes_the_next_reference(
     rejects(engine.finish,'focus_not_completed')
 
 
+def t_completed_focus_cannot_be_reselected_after_the_dismissal_budget_is_full():
+    engine,cal,_,state=ready('pace');epoch=state['epoch']
+    for n in range(3,3+coach.DISMISSED_MAX):
+        engine.control('skip',epoch)
+        state=attempt(engine,cal,n,90,[finding('focus-'+str(n))])
+    ident=state['focus']['id']
+    for n in (131,132,133):state=attempt(engine,cal,n,89,[finding(ident)])
+    assert state['phase']=='completed'
+    engine.finish()
+    state=attempt(engine,cal,134,89,[finding(ident)])
+    assert state['focus']['section_id'] is None, 'Completed identity returned after the dismissal budget was full'
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:
