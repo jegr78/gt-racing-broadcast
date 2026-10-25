@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import driver_radio_access as access
 import driver_radio_assessment as assessment
+import driver_radio_questions as questions
 
 HISTORY_MAX = 32
 QUEUE_MAX = 4
@@ -51,6 +52,7 @@ class Service:
         self._voice_enabled = False
         self._pace_at = float('-inf')
         self._pace_key = None
+        self._conversation = collections.deque(maxlen=4)
 
     def start(self):
         with self._lock:
@@ -81,6 +83,7 @@ class Service:
     def _invalidate(self):
         self._cancel()
         self._messages.clear()
+        self._conversation.clear()
         self._assessment = None
         self._signature = None
         self._epoch = uuid.uuid4().hex
@@ -136,8 +139,17 @@ class Service:
             if old is not None:old['state'] = 'cancelled'
         ttl = URGENT_TTL if severity == 'urgent' else ROUTINE_TTL
         mid = uuid.uuid4().hex
+        text = result['answers'][preset]
+        if kind == 'fuel':
+            fuel = result['fuel']
+            text = (('Urgent fuel. ' if severity == 'urgent' else 'Fuel warning. ')
+                    + f"Estimated range after reserve {fuel['usable_laps']:.1f} laps. Fuel {fuel['current_l']:.1f} litres.")
+            if fuel['state'] == 'provisional':text += ' This estimate is provisional.'
+        elif kind == 'pace':
+            text = (f"Recent comparable pace is {result['pace']['delta_s']:.1f} seconds slower. "
+                    'Tyres may contribute. Consider changing them at the next stop; causes remain unknown.')
         message = dict(id=mid, version=1, epoch=self._epoch, binding=self._binding,
-                       kind=kind, preset=preset, severity=severity, text=result['answers'][preset],
+                       kind=kind, preset=preset, severity=severity, text=text,
                        evidence={k:result[k] for k in ('fuel','pace','tyres','uncertainties')},
                        created_at=self.wall(), expires_at=self.wall()+ttl, state='queued',
                        audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now,
@@ -271,6 +283,34 @@ class Service:
                 self._queue.remove(message['id'])
                 message = self._public(self._messages[message['id']])
             return message
+
+    def question(self, text, binding):
+        """Internal native entry; no browser route accepts free prompts."""
+        with access._LOCK, self._lock:
+            self.refresh(force=True)
+            if not self._voice_enabled or self._closed:
+                raise access.RadioError('feature_disabled', 'Native voice is not enabled')
+            if binding != self._binding:
+                raise access.RadioError('conflict', 'Voice session changed; ask again')
+            result = copy.deepcopy(self._assessment or assessment.assess({}))
+            previous = self._conversation[-1]['preset'] if self._conversation else None
+            try:
+                route, answer = questions.answer(text, result, previous)
+            except ValueError as exc:
+                raise access.RadioError('invalid_body', 'Use a bounded telemetry question') from exc
+            preset = route['preset']
+            result['answers'][preset] = answer
+            message = self._publish(preset, 'question', 'normal', result, self.clock())
+            stored = self._messages[message['id']]
+            stored['question'] = text.strip()
+            stored['conversation'] = list(self._conversation)
+            if route['rejected']:
+                stored['ai_state'] = 'not_requested'
+            if not self._live:
+                stored['state'] = 'text_only'
+                self._queue.remove(message['id'])
+            self._conversation.append(dict(question=text.strip(), preset=preset))
+            return self._public(stored)
 
     def pending_count(self):
         with self._lock:return len(self._queue)

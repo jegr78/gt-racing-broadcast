@@ -148,12 +148,15 @@ def make_handler(ctx):
     _engineer_script = os.path.join(
         os.path.dirname(ctx["page_path"]), "race-engineer.js"
     )
+    _radio_script = os.path.join(os.path.dirname(ctx['page_path']), '..', 'console', 'driver-radio.js')
+    if not os.path.isfile(_radio_script):
+        _radio_script = os.path.join(os.path.dirname(ctx['page_path']), '..', 'driver-radio.js')
     _workspace = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry.html")
     _workspace_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-workspace.js")
     _shared_assets = {"/audience.js": ("audience.js", "application/javascript; charset=utf-8"),
                       "/overlay-fit.js": ("overlay-fit.js", "application/javascript; charset=utf-8"),"/ui-base.css": ("ui-base.css", "text/css; charset=utf-8"),
                       "/telemetry-shell.js": ("telemetry-shell.js", "application/javascript; charset=utf-8")}
-    _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script, _workspace, _workspace_script]
+    _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script, _radio_script, _workspace, _workspace_script]
                    + [os.path.join(os.path.dirname(ctx["page_path"]), filename) for filename, _ctype in _shared_assets.values()])
 
     class Handler(BaseHTTPRequestHandler):
@@ -718,6 +721,12 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"console status failed: {exc}"},
                                       code=500)
+            if path in ("/api/driver-radio", "/api/driver-radio/native"):
+                if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
+                    return self._json({"ok":False,"error":"Radio setup requires the local server origin"}, code=403)
+                callback=ctx.get("driver_radio")
+                result=callback(native=path.endswith('/native')) if callback else {"ok":False,"error":"Radio controls unavailable"}
+                return self._json(result)
             if path in ("/api/audience/youtube", "/api/audience/twitch"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     return self._json({"ok": False, "error": "Provider setup requires the local server origin"}, code=403)
@@ -809,6 +818,9 @@ def make_handler(ctx):
                                        "error": f"could not read the report: "
                                                 f"{type(exc).__name__}"},
                                       code=500)
+            if path == '/driver-radio-ui.js':
+                try:return self._serve_bytes(_pages.read(_radio_script),'application/javascript; charset=utf-8')
+                except OSError:return self._not_found('Driver radio interface unavailable')
             if path == '/race-engineer.js':
                 try:return self._serve_bytes(_pages.read(_engineer_script),'application/javascript; charset=utf-8')
                 except OSError:return self._not_found('Engineer settings interface unavailable')
@@ -1173,6 +1185,16 @@ def make_handler(ctx):
             if path == "/api/console/post-link":
                 result = ctx["console_post_link"]()
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path in ("/api/driver-radio", "/api/driver-radio/native"):
+                if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
+                    self._drain_refused_body()
+                    return self._json({"ok":False,"error":"Radio setup requires the local server origin"}, code=403)
+                body=self._body_json()
+                if not isinstance(body,dict):
+                    return self._json({"ok":False,"error":"Radio command must be an object"}, code=400)
+                callback=ctx.get("driver_radio")
+                result=callback(body,native=path.endswith('/native')) if callback else {"ok":False,"error":"Radio controls unavailable"}
+                return self._json(result, code=200 if result.get('ok') else 409 if result.get('code')=='conflict' else 400)
             if path in ("/api/audience/youtube", "/api/audience/twitch"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     self._drain_refused_body()

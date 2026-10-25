@@ -70,12 +70,14 @@
   }).then(function (me) {
     var roles = me.roles || [];
     document.getElementById('who').textContent =
-      me.subject + (roles.length ? ' — ' + roles.join(', ') : ' — viewer');
+      me.subject + (roles.length ? ' — ' + roles.join(', ') : me.driver_radio ? ' — driver radio' : ' — viewer');
     var out = [];
     if (roles.indexOf('commentator') !== -1)
       out.push(card(RC_API('/cockpit'), 'Commentator Cockpit', 'Program monitor, tally, chat, stint links'));
     if (roles.indexOf('race_control') !== -1)
       out.push(card(RC_API('/race-control'), 'Race Control', 'Read-only monitor: program, schedule, timer & chat'));
+    if (me.driver_radio)
+      out.push(card('/console/driver-radio','Driver radio','Live fuel, pace and tyre answers; native Engineer voice controls'));
     var engineerIndex=-1;
     if (roles.indexOf('race_engineer') !== -1) {
       engineerIndex=out.length;

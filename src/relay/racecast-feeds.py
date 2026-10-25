@@ -180,6 +180,7 @@ import driver_radio_access
 import driver_radio_service
 import driver_radio_providers
 import driver_radio_ai
+import driver_radio_native
 import race_engineer_live
 import race_engineer_api
 import gt7_context     # prepared session notes attached to each new recording
@@ -11560,7 +11561,7 @@ def engineer_page_for(console_page):
 
 
 _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
-                                ("health-monitor",), ("race-control",), ("race-engineer",), ("buttons",)})
+                                ("health-monitor",), ("race-control",), ("race-engineer",), ("driver-radio",), ("buttons",)})
 
 
 # The largest request body the control server reads (a parsed POST, or one drained
@@ -11585,7 +11586,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
-                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None):
+                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None):
     radio_access = (driver_radio_access.Store(engineer_access.root, engineer_access.available)
                     if engineer_access is not None else None)
     def radio_source():
@@ -11594,6 +11595,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     if radio_service is None and radio_access is not None:
         radio_service = driver_radio_service.Service(radio_access, driver_radio_access.Session(), radio_source)
     radio_session = radio_service.session if radio_service is not None else driver_radio_access.Session()
+    radio_page_dir = os.path.dirname(console_page_path) if console_page_path else os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "console"))
+    if radio_native is None and radio_service is not None:
+        radio_native = driver_radio_native.Supervisor(radio_service, radio_access.path.parent.parent)
+
     audience_runtime = audience_runtime or audience_widgets.Runtime(
         os.path.join(os.path.dirname(overlay_dir), "audience.json") if overlay_dir else None)
     audience_script = os.path.join(_SRC_BASE, "ui", "audience.js")
@@ -11730,13 +11736,18 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             if body.get("profile") != profile:
                                 return self._radio_error("profile_changed", "Radio profile changed; reload before saving", 409)
                             body = {k: v for k, v in body.items() if k != "profile"}
-                        result = dict(radio_access.update(body) if method == "POST" else radio_access.read(), profile=profile)
+                        if route == "native":
+                            result = dict(radio_native.control(body) if method == "POST" else radio_native.status(), profile=profile)
+                        else:
+                            result = dict(radio_access.update(body) if method == "POST" else radio_access.read(), profile=profile)
                     else:
                         if self._console_subject() != subject:
                             return self._radio_error("unauthorized", "Console identity changed; sign in again", 401)
                         access = radio_access.authorize(subject)
                         if route == "access":
                             result = access
+                        elif route == "native":
+                            result = radio_native.control(body) if method == "POST" else radio_native.status()
                         elif route == "snapshot":
                             result = radio_service.refresh()
                         elif route == "messages":
@@ -11767,6 +11778,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 radio_service.refresh(force=True)
                             else:
                                 result = radio_session.read(binding)
+                if admin:
+                    result['protocol'] = 'racecast-driver-radio-admin-v1'
                 return self._send(result, no_store=True)
             except driver_radio_access.RadioError as exc:
                 status = (401 if exc.code == "unauthorized" else
@@ -11844,6 +11857,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             oauth_flag = b"1" if (discord_client_id and discord_client_secret) else b""
             body = body.replace(b"__RC_OAUTH__", oauth_flag)
             body = body.replace(b"__RC_VERSION__", (app_version or "dev").encode())
+            try:
+                radio_allowed = bool(radio_access and radio_access.authorize(self._console_subject()))
+            except (driver_radio_access.RadioError, OSError, ValueError):
+                radio_allowed = False
+            body = body.replace(b"__RC_RADIO_ACCESS__", b"1" if radio_allowed else b"0")
             if b"<!--__CREW_FRAME__-->" in body:
                 try:
                     with open(crew_frame_path, "rb") as fh:
@@ -12357,7 +12375,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             has_step_up = bool(presented) and console_auth.secret_matches(presented, console_secret)
             # /console-only: identity introspection for the launcher (any auth).
             if sub == ["whoami"]:
-                self._send({"subject": subject, "roles": sorted(roles)})
+                try:
+                    radio_allowed = bool(radio_access and radio_access.authorize(subject))
+                except (driver_radio_access.RadioError, OSError, ValueError):
+                    radio_allowed = False
+                self._send({"subject": subject, "roles": sorted(roles), "driver_radio": radio_allowed})
                 return None
             # Read-only broadcast-chat mirror (#294): any authenticated /console
             # subject (commentator, director, race_control) may read it. Funnelled
@@ -12414,6 +12436,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send_file(path, ctype)
                 return None
             if sub and sub[0] == "driver-radio":
+                if sub == ["driver-radio"] and method == "GET":
+                    if radio_access is None:
+                        return self._radio_error("source_unavailable", "Driver radio is unavailable for this profile", 503)
+                    try:
+                        radio_access.authorize(subject)
+                    except driver_radio_access.RadioError as exc:
+                        return self._radio_error(exc.code, str(exc), 403)
+                    page = os.path.join(radio_page_dir, "driver-radio.html")
+                    return self._send_page(page, "/console", cookie_token=self._cockpit_token(), cookie_path="/console")
                 if console_policy.min_capability(sub, method) is None:
                     return self._radio_error("not_found", "Unknown driver radio route", 404)
                 return self._radio(sub[1], method, subject=subject)
@@ -12711,8 +12742,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             /status is unaffected."""
             return redact_console_status(self._status_payload(), roles)
         def do_GET(self):
-            if urlparse(self.path).path == "/driver-radio/admin":
-                return self._radio("admin", "GET", admin=True)
+            if urlparse(self.path).path in ("/driver-radio-ui.js", "/console/driver-radio-ui.js"):
+                # Public static code only; every data/control route remains authenticated.
+                return self._send_file(os.path.join(radio_page_dir, "driver-radio.js"), "application/javascript; charset=utf-8")
+            if urlparse(self.path).path in ("/driver-radio/admin", "/driver-radio/admin/native"):
+                return self._radio("native" if self.path.split('?')[0].endswith('/native') else "admin", "GET", admin=True)
             if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
                 return self._audience_admin(provider=urlparse(self.path).path.rsplit("/", 1)[1])
             p = [x for x in urlparse(self.path).path.split("/") if x]
@@ -13424,10 +13458,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.rfile.read(length)
 
         def do_POST(self):
-            if urlparse(self.path).path == "/driver-radio/admin":
+            if urlparse(self.path).path in ("/driver-radio/admin", "/driver-radio/admin/native"):
                 self._body_consumed = False
                 try:
-                    return self._radio("admin", "POST", admin=True)
+                    return self._radio("native" if self.path.split('?')[0].endswith('/native') else "admin", "POST", admin=True)
                 finally:
                     self._drain_body()
             if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
@@ -14762,6 +14796,9 @@ def main():
         lambda: engineer_live.snapshot() if engineer_live is not None else {})
     radio_enricher = driver_radio_providers.Enricher(
         radio_service, ai=driver_radio_ai.LiveAI(runtime_base) if telemetry_store is not None else None)
+    radio_native = driver_radio_native.Supervisor(
+        radio_service, runtime_base or os.path.dirname(os.path.abspath(runtime)),
+        microphone=lambda: mic_device_for(os.environ, sys.platform))
     engineer_page_path = engineer_page_for(console_page_path)
     audience_runtime = audience_widgets.Runtime(
         os.path.join(os.path.dirname(args.overlay_dir), "audience.json") if args.overlay_dir else None)
@@ -14824,6 +14861,7 @@ def main():
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,
+        radio_native=radio_native,
     )
     bind_addrs = resolve_bind_addresses(
         args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
@@ -14848,6 +14886,7 @@ def main():
 
     radio_service.start()
     radio_enricher.start()
+    radio_native.start()
     if youtube_service is not None:
         youtube_service.start()
     if twitch_service is not None:
@@ -14882,6 +14921,7 @@ def main():
             telemetry_store.recorder.close()   # flush and rename before the hard exit
         if telemetry_store is not None and telemetry_store.replay is not None:
             telemetry_store.replay.stop()
+        radio_native.close()
         radio_enricher.close()
         radio_service.close()
         if engineer_live is not None:

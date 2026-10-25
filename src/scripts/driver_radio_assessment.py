@@ -203,13 +203,21 @@ def assess(snapshot, session=None, limits=None):
     elif physical is None:
         fuel_text = f'Fuel {fuel:.1f} litres. Range is unavailable until comparable consumption is measured.'
     else:
-        fuel_text = f'Fuel {fuel:.1f} litres, estimated range {physical:.1f} laps, {usable:.1f} after reserve. Based on {len(recent)} comparable laps.'
+        fuel_text = (f'Fuel {fuel:.1f} litres. Consumption {consumption:.2f} litres per lap from {len(recent)} comparable laps. '
+                     f'Estimated range {physical:.1f} laps, {usable:.1f} after reserve.')
         if len(recent) < 3:
             fuel_text += ' This is provisional.'
         if finish['remaining_race_laps'] is not None:
-            fuel_text += f" Estimated race distance remaining {finish['remaining_race_laps']:.1f} laps."
+            fuel_text += f" Estimated finish distance {finish['remaining_race_laps']:.1f} laps."
+        if finish['finish'] in ('supported','estimated_supported'):
+            fuel_text += ' Range supports the estimated finish after reserve.'
+        elif finish['finish'] in ('short','estimated_short'):
+            fuel_text += ' Range is short of the estimated finish after reserve.'
         if finish['finish_assumption']:
-            fuel_text += ' Assumption: ' + finish['finish_assumption'] + '.'
+            fuel_text += (' Assumes one extra lap after timer expiry.' if finish['finish'].startswith('estimated_')
+                          else ' Progress uses comparable lap lengths.')
+    if finish['finish']=='complete':
+        fuel_text += ' The declared race distance is complete.'
     if not live:
         pace_text = 'Live pace assessment is unavailable. Historical lap evidence remains available.'
     elif pace['state']=='insufficient':
@@ -220,9 +228,24 @@ def assess(snapshot, session=None, limits=None):
             pace_text = 'Recent comparable pace is stable within the measured noise margin.'
         if tyres['concern']:
             pace_text += ' Tyres may be contributing. Consider changing them at the next stop; traffic or other causes remain unknown.'
+    if live:
+        prefix = []
+        if pace['last_s'] is not None:prefix.append(f"Last eligible comparable lap {pace['last_s']:.3f} seconds.")
+        if pace['best_s'] is not None:prefix.append(f"Best eligible comparable lap {pace['best_s']:.3f} seconds.")
+        pace_text = ' '.join([*prefix,pace_text])
     temperature_text = ', '.join(f'{label} {value:.0f} C' if value is not None else label+' unavailable'
                                  for label,value in zip(('front left','front right','rear left','rear right'),temps, strict=True))
-    tyre_text = 'Tyre temperatures: '+temperature_text+'. Compound '+(compound or 'unknown')+'. Wear is not measured.'
+    age = number(tyres['age_laps'])
+    age_text = f' Confirmed tyre age {age:g} completed laps.' if age is not None and age >= 0 else ' Confirmed tyre age is unavailable.'
+    tyre_text = 'Tyre temperatures: '+temperature_text+'. Compound '+(compound or 'unknown')+'.'+age_text+' Wear is not measured.'
+    status_fuel = (f'Fuel {fuel:.1f} litres, usable range {usable:.1f} laps.' if fuel is not None and usable is not None
+                   else f'Fuel {fuel:.1f} litres; range unavailable.' if fuel is not None else 'Live fuel is unavailable.')
+    if fuel_result['state']=='provisional':status_fuel += ' Fuel estimate is provisional.'
+    if finish['finish'] in ('short','estimated_short'):status_fuel += ' Range is short for the estimated finish.'
+    status_pace = ('Live pace is unavailable.' if not live else 'Pace trend is not yet available.' if pace['state']=='insufficient'
+                   else 'Comparable pace is stable.' if pace['state']=='stable'
+                   else f"Comparable pace is {abs(pace['delta_s']):.1f} seconds {pace['state']}.")
+    if tyres['concern']:status_pace += ' Tyres may contribute; consider tyres at the next stop. Causes remain uncertain.'
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, uncertainties=uncertainty, limits=limits,
-                answers=dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=fuel_text+' '+pace_text))
+                answers=dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_fuel+' '+status_pace))

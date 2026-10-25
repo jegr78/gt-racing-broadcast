@@ -28,6 +28,7 @@
   racecast telemetry analyze <name> --session N --agent ID [--laps N,N] [--template TEMPLATE] [--goal TEXT] [--questions TEXT] [--model NAME] [--language LANG] [--reference REC:S:L]   # preview selected cloud-provider input
   racecast telemetry analyze <name> --session N --agent ID --start --confirm-preview HASH   # explicitly start the reviewed immutable input
   racecast telemetry analyze --status | --cancel JOB_ID   # one machine-wide analysis; cancellation does not recover quota
+  racecast radio provision [--whisper]       # explicitly install validated local voice models
   racecast radio smoke --allow-cloud         # two configured Studio-Q calls; measure cold/warm/cache latency
   racecast telemetry index   # build the missing lap indexes (the Control Center runs it for lap comparison)
   racecast telemetry shifts <name> --lap N [--session N]   # offline shift references and recorded phases
@@ -1023,7 +1024,7 @@ TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
 TELEMETRY_VERBS = ("ui", "replay", "import", "record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
-RADIO_VERBS = ("smoke",)
+RADIO_VERBS = ("smoke", "provision")
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
@@ -6275,6 +6276,18 @@ def _radio_tts_key():
     return parse_env_text(raw).get("RACECAST_GCLOUD_TTS_KEY", "") if len(raw) <= 131072 else ""
 
 
+def radio_provision_cmd(rest):
+    import argparse
+    import driver_radio_models
+    parser = argparse.ArgumentParser(prog="racecast radio provision")
+    parser.add_argument("--whisper", action="store_true", help="also download multilingual tiny weights; install whisper-cli separately")
+    args = parser.parse_args(rest)
+    try:
+        print(json.dumps(driver_radio_models.provision(_runtime_base_dir(), whisper=args.whisper)))
+    except (OSError, ValueError):
+        sys.exit("Native voice provisioning failed; verify network, disk space and the local model directory")
+
+
 def radio_smoke_cmd(rest):
     import argparse
     import driver_radio_providers
@@ -6294,6 +6307,7 @@ def radio_smoke_cmd(rest):
 
 DISPATCH = {
     ("radio", "smoke"): radio_smoke_cmd,
+    ("radio", "provision"): radio_provision_cmd,
     ("relay", "start"): relay_start, ("relay", "stop"): relay_stop,
     ("relay", "restart"): relay_restart, ("relay", "status"): relay_status,
     ("relay", "logs"): relay_logs, ("relay", "run"): relay_run,
@@ -7662,6 +7676,41 @@ def _audience_connection_data(provider, body=None):
         return result
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def driver_radio_data(body=None, native=False):
+    import driver_radio_admin
+    import ai_agents
+    try:
+        active = _active_profile_name()
+        pid = sv.read_pid(_relay_pid_path())
+        if not active or _running_relay_profile() != active or not pid or not sv.pid_is_relay(pid):
+            raise ValueError("Start the relay for this profile before changing driver radio")
+        if body is not None and (not isinstance(body, dict) or body.get("expectedProfile") != active):
+            raise ValueError("Active profile changed; reload driver radio settings")
+        client = driver_radio_admin.Client(active, RELAY_PORT)
+        settings = client.request()
+        if body is not None:
+            if _active_profile_name() != active:
+                raise ValueError("Active profile changed; reload driver radio settings")
+            result = client.request(native=native, body={k:v for k,v in body.items() if k != "expectedProfile"})
+            if _active_profile_name() != active:
+                raise ValueError("Active profile changed; reload driver radio settings")
+            return dict(ok=True, profile=active, result=result)
+        state = client.request(native=True)
+        try:
+            ai = ai_agents.Settings(_runtime_base_dir()).read()
+            agents = [dict(id=a['id'],name=a['name']) for a in ai['agents']
+                      if ai['enabled'] and a['mode'] == 'isolated']
+        except (OSError,ValueError):
+            agents = []
+        if _active_profile_name() != active:
+            raise ValueError("Active profile changed; reload driver radio settings")
+        return dict(ok=True,profile=active,settings=settings,native=state,agents=agents)
+    except driver_radio_admin.AdminError as exc:
+        return dict(ok=False,error=str(exc),code=exc.code)
+    except ValueError as exc:
+        return dict(ok=False,error=str(exc))
 
 
 def audience_youtube_data(body=None):
@@ -9208,6 +9257,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "overlay_read": overlay_read_data,
         "overlay_write": overlay_write_data,
         "audience_read": audience_read_data,
+        "driver_radio": driver_radio_data,
         "audience_youtube": audience_youtube_data,
         "audience_twitch": audience_twitch_data,
         "audience_write": audience_write_data,
@@ -10142,6 +10192,14 @@ def _smoke_finish(results, tools, sources, minutes, as_json, lines, cleared=None
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["_radio-model-check"]:
+        from driver_radio_models import main as model_check
+        return model_check(argv[1:])
+    if argv[:1] == ["_radio-voice-worker"]:
+        if len(argv) != 1:
+            sys.exit("Private voice worker takes no arguments")
+        from driver_radio_voice_worker import main as voice_worker
+        return voice_worker()
     if argv[:1] == ["_radio-speech-worker"]:
         if len(argv) != 1:
             sys.exit("Private speech worker takes no arguments")
