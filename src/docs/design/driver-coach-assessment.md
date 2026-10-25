@@ -46,3 +46,8 @@ An over-budget definition or an incomplete connected combination cannot support
 a per-section success claim. The evaluator falls back to the general hint rather
 than shortening the check window. Unrepresentable coordinate differences make
 line evidence unavailable while preserving valid pedal and timing observations.
+
+The private indexed trace is a frozen data class with tuple-backed points and
+distance indexes. It provides read-only sequence access for the existing metric
+calculators, without inheriting list mutation or equality that omits the index.
+The distance lookup remains cached. This resolves CodeQL alert #290.

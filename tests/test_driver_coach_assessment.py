@@ -277,6 +277,19 @@ def t_production_corner_metrics_feed_coaching_checks_from_a_reviewed_definition(
             assert any(f['skill']=='pace' and f['check']['available'] for f in result['findings'])
 
 
+def t_indexed_trace_cannot_append_points_without_updating_its_distance_index():
+    trace=coach._trace(lap());same=coach._trace(lap())
+    assert trace==same and len(trace)==81 and trace[0]['d']==0
+    assert coach._duration(trace,50,300)==5
+    assert coach._window(trace,50,60)[0]['d']==45
+    try:trace.append(dict(d=405,t=8.1))
+    except AttributeError:pass
+    else:raise AssertionError('Indexed trace allowed an unsynchronized point append')
+    try:trace.distances[0]=-1
+    except TypeError:pass
+    else:raise AssertionError('Indexed trace allowed direct index mutation')
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

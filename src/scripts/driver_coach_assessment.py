@@ -4,6 +4,7 @@ import bisect
 import hashlib
 import json
 import math
+from dataclasses import dataclass, field
 
 import ai_driver_review as driver
 import gt7_context
@@ -91,10 +92,23 @@ def _compatible(a, b):
         return False
 
 
-class _Trace(list):
-    def __init__(self, points):
-        super().__init__(points)
-        self.distances = [point['d'] for point in points]
+@dataclass(frozen=True)
+class _Trace:
+    points: tuple
+    distances: tuple = field(init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, 'points', tuple(self.points))
+        object.__setattr__(self, 'distances', tuple(point['d'] for point in self.points))
+
+    def __len__(self):
+        return len(self.points)
+
+    def __iter__(self):
+        return iter(self.points)
+
+    def __getitem__(self, index):
+        return self.points[index]
 
 
 def _window(trace, start, end):
