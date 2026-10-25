@@ -99,7 +99,8 @@ class Supervisor:
         def cancel():
             with self._lock:
                 cancelled = (self._closed or self._paused or self._muted
-                             or self._control_changed or ticket.cancelled.is_set())
+                             or self._control_changed or ticket.cancelled.is_set()
+                             or self.service.clock() >= ticket.deadline)
             if cancelled and not cleanup:
                 try:self._stop_player()
                 except (OSError, ValueError, TypeError) as exc:

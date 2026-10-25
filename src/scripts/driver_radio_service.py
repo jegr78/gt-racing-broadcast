@@ -24,6 +24,7 @@ class Ticket:
     id: str
     message: dict
     cancelled: threading.Event
+    deadline: float
 
 
 class Service:
@@ -389,7 +390,7 @@ class Service:
             self._queue.remove(mid)
             message = self._messages[mid]
             message['state'] = 'playing'
-            self._ticket = Ticket(uuid.uuid4().hex, self._public(message), threading.Event())
+            self._ticket = Ticket(uuid.uuid4().hex, self._public(message), threading.Event(), message['_deadline'])
             self._revision += 1
             return self._ticket
 

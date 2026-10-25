@@ -107,3 +107,6 @@ While coach audio is playing, the native owner permits only one outstanding
 radio read. It polls cancellation while that read waits for grant I/O and closes
 its own player before the read returns. The read helper never owns microphone
 or player processes; cancellation cannot release a process slot before cleanup.
+
+The native owner also watches the ticket's captured monotonic deadline during
+a blocked read. A grant check cannot extend already playing speech beyond expiry.

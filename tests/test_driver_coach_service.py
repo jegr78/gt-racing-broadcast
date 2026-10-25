@@ -666,34 +666,36 @@ def t_publication_rechecks_the_training_token_after_a_delayed_grant():
 def t_native_player_closes_before_a_blocked_radio_grant_is_released():
     import driver_radio_native as native
     from test_driver_radio_native import Worker,Player
-    with tempfile.TemporaryDirectory() as root:
-        f=Fixture(root);f.command();f.step();f.complete(2);f.step();f.at+=2
-        message=f.messages()[-1]
-        assert f.radio.service.attach(message['id'],message['epoch'],{'audio':b'fixture','audio_state':'ready'})
-        closed=threading.Event();players=[]
-        class WatchedPlayer(Player):
-            def close(self):super().close();closed.set()
-        def player(_audio,_volume):p=WatchedPlayer();players.append(p);return p
-        owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=lambda _body:Worker(),player=player,
-                               ready=lambda:True,clock=lambda:f.at)
-        entered=threading.Event();release=threading.Event();reading=threading.Event()
-        reader=None;output=None;read=f.radio.access.read
-        try:
-            owner.step();assert len(players)==1 and not players[0].closed
-            def grant():entered.set();assert release.wait(4);return True
-            f.service._grant=grant
-            reader=threading.Thread(target=f.messages);reader.start();assert entered.wait(1)
-            def blocked_read():reading.set();return read()
-            f.radio.access.read=blocked_read
-            output=threading.Thread(target=owner.step);output.start();assert reading.wait(1)
-            assert not f.command('stop')['active']
-            assert closed.wait(.5), 'Native player kept playing while radio grant I/O blocked refresh'
-        finally:
-            release.set()
-            if reader is not None:reader.join(5)
-            if output is not None:output.join(5)
-            f.radio.access.read=read;owner.close()
-        assert not reader.is_alive() and not output.is_alive()
+    for action in ('stop','expiry'):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.command();f.step();f.complete(2);f.step();f.at+=2
+            message=f.messages()[-1]
+            assert f.radio.service.attach(message['id'],message['epoch'],{'audio':b'fixture','audio_state':'ready'})
+            closed=threading.Event();players=[]
+            class WatchedPlayer(Player):
+                def close(self):super().close();closed.set()
+            def player(_audio,_volume):p=WatchedPlayer();players.append(p);return p
+            owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=lambda _body:Worker(),player=player,
+                                   ready=lambda:True,clock=lambda:f.at)
+            entered=threading.Event();release=threading.Event();reading=threading.Event()
+            reader=None;output=None;read=f.radio.access.read
+            try:
+                owner.step();assert len(players)==1 and not players[0].closed
+                def grant():entered.set();assert release.wait(4);return True
+                f.service._grant=grant
+                reader=threading.Thread(target=f.messages);reader.start();assert entered.wait(1)
+                def blocked_read():reading.set();return read()
+                f.radio.access.read=blocked_read
+                output=threading.Thread(target=owner.step);output.start();assert reading.wait(1)
+                if action=='stop':assert not f.command('stop')['active']
+                else:f.at+=13;f.wall+=13
+                assert closed.wait(.5), 'Native player kept playing while radio grant I/O blocked refresh'
+            finally:
+                release.set()
+                if reader is not None:reader.join(5)
+                if output is not None:output.join(5)
+                f.radio.access.read=read;owner.close()
+            assert not reader.is_alive() and not output.is_alive()
 
 
 def t_failed_player_cleanup_keeps_its_slot_and_does_not_abandon_a_pending_radio_read():
