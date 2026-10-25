@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -11,7 +10,7 @@ import ai_agents
 import ai_jobs
 from driver_radio_providers import ProviderError, compact_facts, validate_explanation
 
-from driver_radio_process import INPUT_MAX, STREAM_MAX, run_process
+from driver_radio_process import INPUT_MAX, STREAM_MAX, run_process, ensure_ready, temporary_directory
 
 
 def schema(facts):
@@ -42,8 +41,9 @@ class LiveAI:
             if stopped.is_set():raise ProviderError('cancelled')
             facts=compact_facts(message)
             if not facts:raise ProviderError('facts_unavailable')
+            ensure_ready()
             lease=ai_jobs.Lease(self.machine).acquire()
-            with tempfile.TemporaryDirectory(prefix='racecast-radio-ai-') as scratch:
+            with temporary_directory(prefix='racecast-radio-ai-') as scratch:
                 root=Path(scratch);package=root/'package';out=root/'output'
                 package.mkdir();out.mkdir()
                 data={'facts':facts,'uncertainties':message['evidence']['uncertainties'],
@@ -58,6 +58,7 @@ class LiveAI:
                         'Do not read any other source or execute controls. Output only the result schema. '
                         'Separate uncertain interpretation from facts. Traffic, weather, tyre wear and ideal '
                         'temperatures are not observed. Never issue an unconditional box command. '
+                        'Put optional stop or tyre-change advice in a separate clause beginning with Consider, could, might or may. '
                         'Use qualitative explanation prose without numbers or number words. Numerical measurements '
                         'belong only in claims with their exact supplied fact ID, value and unit; the server renders them. Read facts.json.\n'+raw).encode()
                 adapter=self.adapter_factory(agent)
@@ -67,6 +68,7 @@ class LiveAI:
                     try:
                         result=self.process(invocation,None,stopped,left,ai_jobs.execution_env(os.environ))
                     except ProviderError as exc:
+                        if exc.code=='cleanup_failed':raise
                         if exc.code in ('timed_out','cancelled'):
                             raise subprocess.TimeoutExpired(argv,max(0,left)) from exc
                         raise OSError('CLI probe failed') from exc
@@ -94,6 +96,10 @@ class LiveAI:
                 selected=next((a for a in current['agents'] if a['id']==agent_id),None)
                 if not current['enabled'] or selected!=agent:raise ProviderError('cancelled')
                 return result
+        except ProviderError as exc:
+            if exc.code=='cleanup_failed' and exc.cleanup is not None:
+                exc.cleanup.retain(lease);lease=None
+            raise
         except ai_agents.AgentError as exc:
             raise ProviderError('agent_unavailable') from exc
         except ai_jobs.JobError as exc:

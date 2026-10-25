@@ -52,6 +52,14 @@ other test runs. The shared HTTP helper in
 that child refuses redirects. Stream reads also enforce the absolute deadline,
 so repeated small chunks cannot extend the request indefinitely.
 
+Unconfirmed transport cleanup quarantines the owned process, pipes and scratch
+directory. Further relay AI/synthesis transport admission fails closed, and a
+live AI job keeps its machine lease. The transport does not retry a signal
+against a potentially reused process-group identity. This exceptional state
+requires local operator attention before restarting or replacing work. Scratch
+cleanup remains deferred even at interpreter exit; it contains no raw microphone
+recording. Normal completion removes temporary inputs as before.
+
 `racecast radio smoke --allow-cloud` deliberately performs two synthesis calls
 and a third cached read, reporting cold, warm and cached latency without playing
 audio. Omitting `--allow-cloud` makes no provider call. This check exposes cost
@@ -68,6 +76,10 @@ temperature cannot be relabelled as fuel range in model-written numerical text. 
 and ideal-temperature channels cannot become observed facts. Reject unsupported
 output and keep deterministic text. This validation checks grounding, not the
 truth of an interpretation. No provider output can execute a control operation.
+Stop and tyre-change recommendations require conditional wording in their own
+clause. An uncertainty word in another sentence cannot qualify an imperative.
+The validator deliberately rejects ambiguous action prose and retains the
+deterministic answer; it does not claim general semantic verification.
 
 Provider failures publish fixed status codes, retain text and discard raw remote
 diagnostics. Every completion rechecks message epoch, freshness, current requester

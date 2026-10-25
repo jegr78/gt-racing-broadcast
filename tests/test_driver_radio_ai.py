@@ -96,6 +96,55 @@ def invocation(d,script):
     return ai_agents.Invocation([sys.executable,'-c',script],str(d),str(Path(d)/'result.json'),600,'claude')
 
 
+def t_failed_process_cleanup_retains_ownership_and_blocks_replacement():
+    import driver_radio_process as transport
+    from unittest.mock import Mock
+    stopped=threading.Event();proc=Mock(pid=424242)
+    proc.stdout=io.BytesIO();proc.stderr=io.BytesIO();proc.stdin=io.BytesIO();proc.poll.return_value=None
+    def spawn(*args,**kwargs):stopped.set();return proc
+    with tempfile.TemporaryDirectory() as d,patch.object(transport,'_QUARANTINED',[],create=True), \
+         patch.object(transport.subprocess,'Popen',side_effect=spawn) as create, \
+         patch.object(ai_jobs,'WindowsTree'), \
+         patch.object(ai_jobs,'terminate_tree',side_effect=ai_jobs.JobError('cleanup_failed','fixture')) as terminate:
+        try:transport.run_process(invocation(d,'pass'),b'',stopped,3,{})
+        except ProviderError as error:
+            assert error.code=='cleanup_failed'
+            assert getattr(error,'cleanup',None) is not None,'failed process ownership was lost'
+            assert error.cleanup.proc is proc
+        else:raise AssertionError('Expected failed cleanup')
+        stopped.clear()
+        rejected(lambda:transport.run_process(invocation(d,'pass'),b'',stopped,3,{}),'cleanup_failed')
+        assert create.call_count==1 and terminate.call_count==1,'unconfirmed cleanup admitted a replacement or repeated a signal'
+
+
+def t_live_ai_keeps_its_lease_and_scratch_after_unconfirmed_cleanup():
+    for phase in ('probe','execution'):
+        class Keeper:
+            def __init__(self):self.resources=[]
+            def retain(self,resource):self.resources.append(resource)
+        keeper=Keeper();calls=[]
+        class ProbeAdapter(Adapter):
+            def probe(self,phase=phase,**kwargs):
+                if phase=='probe':kwargs['run'](['fixture-cli','--version'])
+                return super().probe(**kwargs)
+        def process(invocation,*args,keeper=keeper,calls=calls):
+            calls.append(invocation.cwd)
+            error=ProviderError('cleanup_failed');error.cleanup=keeper;raise error
+        with tempfile.TemporaryDirectory() as d:
+            machine=Path(d)/'machine';ai_agents.Settings(machine).save({'enabled':True,'agents':[config()]})
+            f=Fixture(Path(d)/'profile');f.poll()
+            try:
+                rejected(lambda machine=machine,f=f,adapter=ProbeAdapter,process=process:live.LiveAI(machine,adapter_factory=adapter,process=process).explain('live',f.request(),threading.Event(),8),'cleanup_failed')
+                assert calls and Path(calls[0]).is_dir(),'live child scratch was removed before confirmed cleanup'
+                try:other=ai_jobs.Lease(machine).acquire()
+                except ai_jobs.JobError as error:assert error.code=='busy'
+                else:other.close();raise AssertionError('failed cleanup released machine admission')
+            finally:
+                # Only injected failures exist here, with no process or signal.
+                for resource in keeper.resources:
+                    (resource.cleanup if isinstance(resource,tempfile.TemporaryDirectory) else resource.close)()
+
+
 def t_owned_process_is_bounded_and_cancellable():
     with tempfile.TemporaryDirectory() as d:
         result=live.run_process(invocation(d,'import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())'),

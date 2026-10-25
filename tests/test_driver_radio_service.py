@@ -52,6 +52,47 @@ def t_shared_requests_dedupe_and_one_playback_owner():
         assert f.service.take_playback() is None, 'message must not replay after completion'
 
 
+def t_preset_deduplication_cannot_reuse_an_alert_question_or_old_facts():
+    for previous in ('alert','question','old_request'):
+        with tempfile.TemporaryDirectory() as d:
+            f=Fixture(d);state=f.poll()
+            if previous=='alert':
+                f.snap['instruments']['fuel_l']=3;f.snap['revision']+=1;f.poll()
+                old=f.service.history()['messages'][-1]
+            elif previous=='question':old=f.service.question('Fuel after one more lap?',state['binding'])
+            else:
+                old=f.request('fuel');f.snap['instruments']['fuel_l']=9;f.snap['revision']+=1
+            result=f.request('fuel')
+            assert result['id']!=old['id'],previous
+            assert result['kind']=='requested' and 'Consumption ' in result['text']
+            assert result['evidence']['fuel']['current_l']==f.snap['instruments']['fuel_l']
+            assert f.request('fuel')['id']==result['id'], 'identical current presets still share work'
+
+
+def t_current_ai_can_finish_after_playback_without_reviving_audio():
+    for outcome in ('text_only','spoken','failed'):
+        with tempfile.TemporaryDirectory() as d:
+            f=Fixture(d);f.poll();message=f.request();ticket=f.service.take_playback()
+            f.service.finish_playback(ticket.id,outcome)
+            work=f.service.enrichment_work('ai')
+            assert work and work['id']==message['id']
+            assert f.service.remaining_for(message['id'],message['epoch'],kind='ai')>0
+            assert f.service.attach(message['id'],message['epoch'],{'explanation':'Measured range is provisional.','ai_state':'ready'})
+            assert not f.service.attach(message['id'],message['epoch'],{'audio':b'obsolete audio'})
+            assert f.service.take_playback() is None
+            assert f.service.history()['messages'][-1]['state']==outcome
+    for invalidation in ('expiry','revocation','context'):
+        with tempfile.TemporaryDirectory() as d:
+            f=Fixture(d);f.poll();allowed=[True]
+            message=f.service.request('fuel',assessment.binding(f.snap),requester='driver',authorization=lambda allowed=allowed:allowed[0])
+            ticket=f.service.take_playback();f.service.finish_playback(ticket.id,'text_only')
+            if invalidation=='expiry':f.at+=31
+            elif invalidation=='revocation':allowed[0]=False
+            else:f.snap['context_revision']+=1
+            assert not f.service.attach(message['id'],message['epoch'],{'explanation':'Obsolete explanation','ai_state':'ready'})
+            assert f.service.remaining_for(message['id'],message['epoch'],kind='ai')==0
+
+
 def t_fuel_crossings_refuel_hysteresis_and_urgent_preemption():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);f.poll();routine=f.request('pace')

@@ -112,6 +112,39 @@ def t_cleanup_failure_retains_the_native_slot_and_controls_do_not_block_on_proce
         h.n.close()
 
 
+def t_blocked_cleanup_does_not_block_status_controls_or_consent_updates():
+    import threading
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step();entered=threading.Event();release=threading.Event()
+        def slow_close():entered.set();assert release.wait(3)
+        h.workers[0].close=slow_close
+        h.control(paused=True)
+        thread=threading.Thread(target=h.n.step);thread.start();assert entered.wait(1)
+        completed=threading.Event()
+        def control():
+            state=h.n.status()
+            h.n.control(dict(binding=state['binding'],expected=state['revision'],paused=True))
+            h.f.access.update({'expected':1,'enabled':False})
+            completed.set()
+        request=threading.Thread(target=control);request.start()
+        try:assert completed.wait(.5), 'native process I/O blocked controls or profile consent'
+        finally:release.set();thread.join(3);request.join(3);h.n.close()
+
+
+def t_consent_revoked_while_a_worker_stops_cannot_admit_its_replacement():
+    import threading
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step();entered=threading.Event();release=threading.Event()
+        def slow_close():entered.set();assert release.wait(3)
+        h.workers[0].close=slow_close
+        h.f.access.update({'expected':1,'voice':dict(enabled=True,microphone='New mic',input_language='en')})
+        thread=threading.Thread(target=h.n.step);thread.start();assert entered.wait(1)
+        try:h.f.access.update({'expected':2,'enabled':False})
+        finally:release.set();thread.join(3)
+        assert len(h.workers)==1,'cleanup admitted replacement capture after consent revocation'
+        h.n.step();assert not h.n.status()['enabled'];h.n.close()
+
+
 def t_unreadable_settings_fail_closed_while_listening_or_speaking():
     import threading
     for speaking in (False,True):

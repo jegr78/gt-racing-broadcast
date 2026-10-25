@@ -16,6 +16,7 @@ QUEUE_MAX = 4
 ROUTINE_TTL = 30
 URGENT_TTL = 15
 PACE_COOLDOWN = 60
+TEXT_STATES = ('queued','playing','text_only','spoken','failed')
 
 
 @dataclass
@@ -93,7 +94,9 @@ class Service:
 
     def _expire(self, now):
         for message in self._messages.values():
-            if message['state'] in ('queued','playing') and not message['_native']:
+            unfinished = message['state'] in ('queued','playing') or (
+                message['state'] in TEXT_STATES and message['ai_state']=='pending')
+            if unfinished and not message['_native']:
                 valid = {}
                 for requester, authorize in message['_requesters'].items():
                     try:
@@ -107,7 +110,7 @@ class Service:
                     if self._ticket and self._ticket.message['id'] == message['id']:
                         self._ticket.cancelled.set()
                     self._revision += 1
-            if now >= message['_deadline'] and message['state'] in ('queued', 'playing'):
+            if now >= message['_deadline'] and unfinished:
                 message['state'] = 'expired'
                 self._audio.pop(message['id'], None)
                 if self._ticket and self._ticket.message['id'] == message['id']:
@@ -266,7 +269,9 @@ class Service:
                 raise access.RadioError('conflict', 'Radio session changed; reload before requesting')
             now = self.clock()
             duplicate = next((m for m in reversed(self._messages.values())
-                              if m['preset']==preset and m['epoch']==self._epoch and now-m['_created']<2
+                              if m['kind']=='requested' and m['preset']==preset and m['epoch']==self._epoch
+                              and m['evidence']=={k:self._assessment[k] for k in ('fuel','pace','tyres','uncertainties')}
+                              and now-m['_created']<2
                               and m['state'] not in ('cancelled','expired','superseded')), None)
             if duplicate is not None:
                 if requester is None:
@@ -303,13 +308,13 @@ class Service:
             message = self._publish(preset, 'question', 'normal', result, self.clock())
             stored = self._messages[message['id']]
             stored['question'] = text.strip()
-            stored['conversation'] = list(self._conversation)
+            stored['conversation'] = [{k:v for k,v in turn.items() if k!='id'} for turn in self._conversation]
             if route['rejected']:
                 stored['ai_state'] = 'not_requested'
             if not self._live:
                 stored['state'] = 'text_only'
                 self._queue.remove(message['id'])
-            self._conversation.append(dict(question=text.strip(), preset=preset))
+            self._conversation.append(dict(id=message['id'],question=text.strip(),preset=preset,answer=stored['text'][:1200]))
             return self._public(stored)
 
     def pending_count(self):
@@ -346,9 +351,11 @@ class Service:
         self.refresh(force=True)
         with self._lock:
             message = self._messages.get(message_id)
+            text_only_fields=isinstance(fields,dict) and not set(fields)-{'explanation','ai_state','ai_error'}
+            eligible_states=TEXT_STATES if text_only_fields else ('queued','playing')
             if (self._closed or not self._live or epoch != self._epoch or message is None
                     or message['epoch'] != epoch or self.clock() >= message['_deadline']
-                    or message['state'] not in ('queued','playing')):
+                    or message['state'] not in eligible_states):
                 return False
             if not isinstance(fields, dict) or set(fields)-{'explanation','audio','audio_state','ai_state','audio_error','ai_error'}:
                 return False
@@ -367,15 +374,19 @@ class Service:
                 self._audio[message_id] = fields['audio']
                 message['audio_state'] = 'ready'
             message.update({k:v for k,v in fields.items() if k!='audio'})
+            if 'explanation' in fields:
+                for turn in self._conversation:
+                    if turn['id']==message_id:
+                        turn['answer']=(message['text'][:1200]+' Interpretation: '+fields['explanation'])[:1820]
             self._revision += 1
             return True
 
-    def remaining_for(self, message_id, epoch):
+    def remaining_for(self, message_id, epoch, kind='audio'):
         self.refresh(force=True)
         with self._lock:
             message=self._messages.get(message_id)
             if (self._closed or not self._live or epoch!=self._epoch or message is None
-                    or message['state'] not in ('queued','playing')):
+                    or message['state'] not in (TEXT_STATES if kind=='ai' else ('queued','playing'))):
                 return 0
             return max(0,message['_deadline']-self.clock())
 
@@ -384,7 +395,8 @@ class Service:
         field='audio_state' if kind=='audio' else 'ai_state'
         with self._lock:
             if self._closed or not self._live:return None
-            pending=[m for m in self._messages.values() if m['state'] in ('queued','playing') and m[field]=='pending']
+            states=TEXT_STATES if kind=='ai' else ('queued','playing')
+            pending=[m for m in self._messages.values() if m['state'] in states and m[field]=='pending']
             pending.sort(key=lambda message:message['severity']!='urgent')
             return self._public(pending[0]) if pending else None
 

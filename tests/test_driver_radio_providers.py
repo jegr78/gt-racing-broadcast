@@ -85,6 +85,20 @@ def t_grounded_explanation_rejects_unsupported_facts_and_numbers():
         rejected(lambda change=change:providers.validate_explanation(dict(valid,**change),facts),'invalid_explanation')
 
 
+def t_each_pit_recommendation_requires_its_own_conditional_language():
+    facts={'pace.delta_s':{'value':1,'unit':'seconds'}}
+    def result(text):return dict(explanation=text,evidence=['pace.delta_s'],claims=[])
+    for text in ('Pit immediately.','You need to box this lap.','Tyres could contribute. Pit immediately.',
+                 'Tyres may contribute; change your tyres now.','Consider tyre condition and pit immediately.',
+                 'Come in right away.','Your tyres must be changed at the next stop.',
+                 'You should come in for fresh rubber.','Refuel immediately.','Replace the rubber immediately.',
+                 'Tyre degradation explains the slowdown. Traffic might contribute.'):
+        rejected(lambda text=text:providers.validate_explanation(result(text),facts),'invalid_explanation')
+    for text in ('Tyres may contribute. Consider changing them at the next stop.',
+                 'If comparable pace keeps falling, consider a tyre change at the next stop.'):
+        assert providers.validate_explanation(result(text),facts)==text
+
+
 
 def t_rendered_claims_fit_the_message_attachment_bound():
     facts={'fuel.usable_laps':{'value':2.5,'unit':'laps'}}
@@ -127,6 +141,29 @@ def t_provider_work_is_text_first_and_late_results_cannot_attach():
         assert not thread.is_alive() and f.service.history()['messages']==[]
         assert f.service.audio_for('forged') is None
         worker.close()
+
+
+def t_native_text_completion_does_not_discard_inflight_ai():
+    from test_driver_radio_native import Harness
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d)
+        h.f.access.update({'expected':1,'providers':{'speech':False,'agent':'fixture'}})
+        h.f.poll();message=h.f.request()
+        entered,release=threading.Event(),threading.Event()
+        class AI:
+            def explain(self,*args):
+                entered.set();assert release.wait(3)
+                return dict(explanation='Measured range may vary.',evidence=['fuel.usable_laps'],claims=[])
+        worker=providers.Enricher(h.f.service,ai=AI())
+        worker.step('audio')
+        thread=threading.Thread(target=lambda:worker.step('ai'));thread.start();assert entered.wait(1)
+        try:
+            h.n.step();h.n.step()
+            assert h.f.service.history()['messages'][-1]['state']=='text_only'
+        finally:release.set();thread.join(3);worker.close();h.n.close()
+        current=h.f.service.history()['messages'][-1]
+        assert current['id']==message['id'] and current['ai_state']=='ready'
+        assert current['explanation']=='Measured range may vary.'
 
 
 

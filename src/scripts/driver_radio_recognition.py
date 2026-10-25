@@ -6,7 +6,6 @@ import json
 import math
 import os
 import struct
-import tempfile
 import threading
 import wave
 from pathlib import Path
@@ -14,7 +13,7 @@ from pathlib import Path
 import ai_agents
 import ai_jobs
 import http_util
-from driver_radio_process import run_process
+from driver_radio_process import run_process,temporary_directory
 from driver_radio_voice_config import PHRASES
 
 PCM_MAX=16*32000
@@ -126,7 +125,7 @@ def whisper_transcribe(pcm,language,executable,model,process=run_process):
     if language not in ('en','de') or not executable or not model:raise ValueError('transcription_unconfigured')
     payload=wav_bytes(pcm)
     # Private PCM is passed through stdin and is never written into scratch.
-    with tempfile.TemporaryDirectory(prefix='racecast-radio-stt-') as scratch:
+    with temporary_directory(prefix='racecast-radio-stt-') as scratch:
         invocation=ai_agents.Invocation([executable,'-m',model,'-f','-','-of','result','-l',language,'-t','2','-np','-nt'],scratch,'',8,'speech')
         raw=process(invocation,payload,threading.Event(),8,ai_jobs.execution_env(os.environ),
                     output_limit=4096,input_limit=PCM_MAX+128,inherit_tree=True)

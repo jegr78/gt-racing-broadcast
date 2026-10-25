@@ -1,8 +1,10 @@
 """Bounded private provider processes, including DNS/socket work, with owned trees."""
 
 import os
+import contextlib
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -14,9 +16,50 @@ INPUT_MAX = 32768
 
 
 class ProviderError(ValueError):
-    def __init__(self,code,message='Radio provider is unavailable'):
+    def __init__(self,code,message='Radio provider is unavailable',cleanup=None):
         self.code=code
+        self.cleanup=cleanup
         super().__init__(message)
+
+
+class _Cleanup:
+    """Retain uncertain ownership, never retry a potentially reused POSIX ID."""
+    def __init__(self,proc,tree,threads):
+        self.proc,self.tree,self.threads=proc,tree,threads
+        self.resources=[]
+    def retain(self,resource):
+        if resource is not None:self.resources.append(resource)
+
+
+_QUARANTINE_LOCK=threading.Lock()
+_QUARANTINED=[]
+
+
+def ensure_ready():
+    with _QUARANTINE_LOCK:
+        if _QUARANTINED:raise ProviderError('cleanup_failed',cleanup=_QUARANTINED[0])
+
+
+def _failed_cleanup(proc,tree,threads):
+    owner=_Cleanup(proc,tree,threads)
+    with _QUARANTINE_LOCK:_QUARANTINED.append(owner)
+    return ProviderError('cleanup_failed',cleanup=owner)
+
+
+@contextlib.contextmanager
+def temporary_directory(*args,**kwargs):
+    ensure_ready()
+    # Explicit cleanup below handles success; an uncertain live child must not
+    # lose its directory to an interpreter-exit finalizer either.
+    kwargs.setdefault('delete',False)
+    directory=tempfile.TemporaryDirectory(*args,**kwargs)
+    try:yield directory.name
+    except ProviderError as error:
+        if error.cleanup is not None:
+            error.cleanup.retain(directory);directory=None
+        raise
+    finally:
+        if directory is not None:directory.cleanup()
 
 
 def _output_bound(output,limit):
@@ -41,6 +84,7 @@ def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,ext
     if type(inherit_tree) is not bool:raise ProviderError('invalid_transport')
     if type(input_limit) is not int or not 1<=input_limit<=1024*1024:raise ProviderError('invalid_transport')
     if prompt is not None and len(prompt)>input_limit:raise ProviderError('input_too_large')
+    ensure_ready()
     tree=None;proc=None;readers=[];writer=None
     overflow=threading.Event();stream_error=threading.Event()
     output=[bytearray(),bytearray()]
@@ -95,9 +139,10 @@ def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,ext
                     proc.wait(timeout=10)
                 else:ai_jobs.terminate_tree(proc,tree)
             except (ai_jobs.JobError,OSError,subprocess.TimeoutExpired) as exc:
-                raise ProviderError('cleanup_failed') from exc
+                raise _failed_cleanup(proc,tree,readers+([writer] if writer is not None else [])) from exc
         elif tree is not None:
-            tree.close()
+            try:tree.close()
+            except (ai_jobs.JobError,OSError) as exc:raise _failed_cleanup(proc,tree,[]) from exc
         for thread in readers:thread.join(1)
         if writer is not None:writer.join(1)
         if proc is not None:
@@ -105,7 +150,7 @@ def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,ext
                 if stream is not None and not any(t.is_alive() for t in readers):stream.close()
     if overflow.is_set():raise ProviderError('output_too_large')
     if stream_error.is_set() or any(t.is_alive() for t in readers) or writer is not None and writer.is_alive():
-        raise ProviderError('cleanup_failed')
+        raise _failed_cleanup(proc,tree,readers+([writer] if writer is not None else []))
     _output_bound(invocation.output,output_limit)
     return bytes(output[0])
 

@@ -111,6 +111,28 @@ def t_frozen_phrase_validation_reads_the_bundled_source_fixture_directory():
             assert m.validate_phrases(models)==['hey_jeff','hey_engineer']
 
 
+def t_macos_library_matches_the_pinned_upstream_wheel():
+    import driver_radio_voice_config as config
+    import driver_radio_recognition as recognition
+    class Recognizer:
+        def __init__(self,library,*args,**kwargs):assert Path(library).name=='libvosk.dyld'
+        def wake(self,pcm,phrase):return pcm==b'\1\0'
+        def close(self):pass
+    import wave
+    with tempfile.TemporaryDirectory() as d,patch.object(sys,'platform','darwin'):
+        root=Path(d)/'radio-voice';(root/'vosk').mkdir(parents=True)
+        (root/'vosk/libvosk.dyld').write_bytes(b'fixture')
+        for language in ('en','de'):Path(config.paths(d)[language]).mkdir()
+        (root/'validated-phrases.json').write_text(json.dumps(dict(version=1,phrases=list(config.PHRASES))))
+        assert Path(config.paths(d)['library']).name=='libvosk.dyld'
+        assert config.ready(d)
+        fixtures=Path(d)/'fixtures';fixtures.mkdir()
+        for name,pcm in (('hey-jeff',b'\1\0'),('hey-engineer',b'\1\0'),('no-wake',b'\0\0')):
+            with wave.open(str(fixtures/(name+'.wav')),'wb') as wav:
+                wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(16000);wav.writeframes(pcm)
+        with patch.object(recognition,'Vosk',Recognizer):assert m.validate_phrases(root,fixtures)==list(config.PHRASES)
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)
