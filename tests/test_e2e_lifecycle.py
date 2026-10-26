@@ -113,6 +113,8 @@ def t_independent_child_deadline_releases_its_listener():
 def t_owner_death_closes_child_control_pipe_and_releases_its_listener():
     with tempfile.TemporaryDirectory() as directory:
         root=Path(directory);ready=root/'ready';child=listener(root)
+        def remove_supervisor_log():
+            (root/'child.log').unlink(missing_ok=True)
         owner=root/'owner.py'
         owner.write_text('''import os,sys,time
 from pathlib import Path
@@ -138,7 +140,7 @@ os._exit(0)
                 # Job termination releases the listener before the supervisor's
                 # own stdout handle closes. Windows forbids deleting that log
                 # until process finalization; wait for that distinct boundary.
-                atomic_replace.retry_windows_file_operation(lambda:(root/'child.log').unlink(missing_ok=True))
+                atomic_replace.retry_windows_file_operation(remove_supervisor_log)
 
 
 def t_unsafe_process_id_is_rejected_before_any_signal():
