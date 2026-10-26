@@ -11792,14 +11792,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 archives = []  # Driver access does not imply archive grants.
                     result['references'] = references.choices(archives) if result['phase'] != 'busy' else []
                 history_doc=result.pop('_history',None)
-                history_error=None
+                history_error=actor._journal_error
                 if method=='GET' and actor.journal is not None:
                     try:history_doc=actor.journal.read(owner,result['generation'])
                     except driver_coach_calibration.CoachError:history_error='history_unavailable'
                 reference_proofs={}
+                history_sources=set()
                 def historical_reference(ident,expected):
                     if ident not in reference_proofs:
-                        if len(reference_proofs)>=4:return False
+                        source=ident.split(':')[1]
+                        if source not in history_sources and len(history_sources)>=4:return False
+                        history_sources.add(source)
                         reference_proofs[ident]=None
                         try:
                             prepared=driver_coach_calibration._prepare(references._load(ident))

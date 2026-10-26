@@ -37,6 +37,7 @@ class RadioFixture:
         m=console.m;self.template=patch.object(m,'solo_template',return_value='pov');self.template.start();crew=m.CrewSource('');crew.inject_row(1,name='Director',director=True)
         relay=m.Relay(console._FakeSource([],[]),[53001,53002],self.temp.name,solo=self.solo)
         telemetry=m.gt7_telemetry.TelemetryStore();telemetry.engineer=SimpleNamespace(snapshot=lambda compact=False:copy.deepcopy(self.f.snap))
+        self.crew=crew;self.telemetry=telemetry
         if self.practice:telemetry.engineer.detail=self.practice.detail
         self.engineer=m.race_engineer_access.Store(self.f.access.path.parent,True)
         engineer=self.engineer

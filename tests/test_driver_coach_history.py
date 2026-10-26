@@ -105,7 +105,10 @@ def t_corrupt_oversized_and_symlinked_private_files_fail_closed():
         _,record=sample(root);store=history.Store(Path(root)/'solo',clock=lambda:1200)
         store.save(LOCAL,record);path=next(store.directory.glob('*.json'));original=path.read_bytes()
         nested=json.loads(original);nested['entries'][0]['worked_focus']=[{}]
-        for raw in (b'{broken',b' '* (history.MAX_BYTES+1),json.dumps({'owner':LOCAL,'entries':[{'trace':'secret'}]}).encode(),json.dumps(nested).encode()):
+        wrong_reference=json.loads(original);wrong_reference['entries'][0]['reference']['id']=[]
+        wrong_progress=json.loads(original);wrong_progress['entries'][0]['progress']['sample_count']='many'
+        for raw in (b'{broken',b' '* (history.MAX_BYTES+1),json.dumps({'owner':LOCAL,'entries':[{'trace':'secret'}]}).encode(),
+                    json.dumps(nested).encode(),json.dumps(wrong_reference).encode(),json.dumps(wrong_progress).encode()):
             path.write_bytes(raw)
             rejects(lambda:store.read(LOCAL,GENERATION),'history_unavailable')
         path.write_bytes(original)
@@ -218,6 +221,48 @@ def t_history_suggestion_requires_compatible_current_calibration_and_never_suppl
         state['calibration']['accepted']=False
         assert history.suggest(exposed,state,current) is None
         assert before['calibration']['baseline']==state['calibration']['baseline']
+
+
+def t_many_worked_exercises_cannot_make_the_journal_write_a_record_it_cannot_read():
+    with tempfile.TemporaryDirectory() as root:
+        _,record=sample(root);store=history.Store(Path(root)/'solo',clock=lambda:1200)
+        for n in range(16):
+            value=copy.deepcopy(record)
+            value['focus'].update(id='exercise/'+str(n),label='L'*160,action='A'*600)
+            value['worked_focus']=[copy.deepcopy(value['focus'])];value['updated_at']=1200+n
+            assert store.save(LOCAL,value)
+            saved=store.read(LOCAL,GENERATION)['entries'][0]
+            assert saved['worked_focus'][-1]['id']=='exercise/'+str(n)
+            assert 1<=len(saved['worked_focus'])<=8
+
+
+def t_retaining_the_last_review_across_a_control_also_retains_its_correction_proof():
+    import driver_coach_service as service
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3,4):f.complete(n);f.step()
+        f.command('skill',skill='braking');f.step()
+        document=store.read(LOCAL,f.service._generation)
+        assert document['entries'][0]['latest']['lap_id']=='lap-4'
+        f.snap['laps'][-1]['measurement_hash']='corrected-after-skill-change'
+        exposed=history.expose(document,f.snap,service._facts,lambda _id,_digest:True)
+        assert exposed['entries'][0]['evidence_status']=='corrected'
+        assert exposed['entries'][0]['latest'] is None
+
+
+def t_a_failed_checkpoint_keeps_live_feedback_and_finishes_as_an_honest_partial_debrief():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        f.complete(4)
+        with patch.object(store,'save',side_effect=OSError('Synthetic disk failure')):
+            current=f.step()
+        assert current['active'] and current['latest']['lap_id']=='lap-4'
+        assert store.read(LOCAL,f.service._generation)['entries'][0]['latest']['lap_id']=='lap-3'
+        f.command('stop');f.step()
+        saved=store.read(LOCAL,f.service._generation)['entries'][0]
+        assert saved['status']=='interrupted' and saved['reason']=='checkpoint_unavailable'
+        assert saved['latest']['lap_id']=='lap-3'
 
 
 if __name__=='__main__':

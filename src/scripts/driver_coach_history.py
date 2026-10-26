@@ -101,7 +101,24 @@ def _validate_record(record):
     for focus in ([record['focus']] if record['focus'] else [])+record['worked_focus']:
         if (not all(calibration._text(focus[k],600 if k=='action' else 160) for k in ('id','skill','label','action'))
                 or focus['skill'] not in ('braking','throttle','steering','gear','speed','line','pace','consistency')
-                or type(focus['reviewed']) is not bool):_error()
+                or type(focus['reviewed']) is not bool
+                or focus['section_id'] is not None and not calibration._text(focus['section_id'])):_error()
+    baseline=record['baseline']
+    if baseline is not None and (not calibration._text(baseline['id']) or not isinstance(baseline['lap_ids'],list)
+            or len(baseline['lap_ids'])!=2 or not all(calibration._text(ident) for ident in baseline['lap_ids'])
+            or any(type(baseline[k]) not in (int,float) or not 0<=baseline[k]<1e9 for k in ('time_s','range_s'))):_error()
+    reference=record['reference']
+    if reference is not None and (not calibration._text(reference['id']) or reference['source'] not in ('personal','selected')):_error()
+    progress=record['progress']
+    if progress is not None and (not {'result','sample_count','pace_improved','consistency_improved','text'}.issubset(progress)
+            or progress['result'] not in ('waiting','provisional','evidence_unavailable','repeated_improvement','repeated_regression','repeatability_maintained')
+            or type(progress['sample_count']) is not int or not 0<=progress['sample_count']<=3
+            or any(type(progress[k]) is not bool for k in ('pace_improved','consistency_improved'))
+            or not calibration._text(progress['text'],600)):_error()
+    latest=record['latest']
+    if latest is not None and (not calibration._text(latest['lap_id'])
+            or any(not calibration._text(latest[k],600) for k in ('observation','interpretation','check'))
+            or latest['action'] is not None and not calibration._text(latest['action'],600)):_error()
     def bounded(value,depth=0):
         if depth>12:_error()
         if isinstance(value,dict):
@@ -213,9 +230,20 @@ class Store:
                 return False
             if previous and record['updated_at']<previous['updated_at']:return False
             replacement=copy.deepcopy(record)
-            if previous and replacement['latest'] is None:replacement['latest']=copy.deepcopy(previous['latest'])
+            if previous and replacement['latest'] is None:
+                replacement['latest']=copy.deepcopy(previous['latest'])
+                if replacement['latest']:
+                    ident=replacement['latest']['lap_id']
+                    replacement['source_ids']=list(dict.fromkeys(replacement['source_ids']+[ident]))[:8]
+                    if ident in previous['source_fingerprints']:
+                        replacement['source_fingerprints'][ident]=previous['source_fingerprints'][ident]
             worked={r['id']:r for r in (previous or {}).get('worked_focus',[])+replacement['worked_focus']}
             replacement['worked_focus']=list(worked.values())[-8:]
+            while len(replacement['worked_focus'])>1 and len(json.dumps(replacement,allow_nan=False).encode())>8192:
+                replacement['worked_focus'].pop(0)
+            if record['latest'] is None and len(json.dumps(replacement,allow_nan=False).encode())>8192:
+                replacement['latest']=None
+            _validate_record(replacement)
             value['entries']=[r for r in value['entries'] if r['id']!=record['id']]+[replacement]
             return True
         return self._edit(owner,save)[0]
@@ -244,6 +272,7 @@ def expose(document,current,facts,reference_allowed):
     result=copy.deepcopy(document)
     lookup={row.get('id'):row for row in (current.get('laps') or [])[-512:] if isinstance(row,dict)}
     for record in result['entries']:
+        worked_skills=list(dict.fromkeys(focus['skill'] for focus in record['worked_focus']))
         corrected=any(ident in lookup and fingerprint(facts(lookup[ident]))!=digest
                       for ident,digest in record['source_fingerprints'].items())
         reference=record['reference']
@@ -260,7 +289,8 @@ def expose(document,current,facts,reference_allowed):
         record.pop('source_fingerprints',None);record.pop('reference_fingerprint',None)
         worked=record['worked_focus']
         record['debrief']=dict(
-            worked='; '.join(focus.get('label','Exercise') for focus in worked)[:1000] or 'No retained exercise was scored.',
+            worked=('Previously worked skills: '+', '.join(worked_skills)+'. Exercise evidence is unavailable.' if (corrected or denied) and worked_skills else
+                    '; '.join(focus.get('label','Exercise') for focus in worked)[:1000] or 'No retained exercise was scored.'),
             observed=(record.get('latest') or {}).get('observation') or 'No comparable completed-lap observation is available.',
             interpretation=(record.get('progress') or {}).get('text') or 'Evidence is unavailable; no improvement or cause is inferred.',
             next='Start fresh personal calibration before choosing the next exercise.' if not worked else

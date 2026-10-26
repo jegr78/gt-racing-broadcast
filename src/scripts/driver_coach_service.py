@@ -349,6 +349,8 @@ class Service:
     def _journal_end(self,status,reason):
         current=self._journal_current
         if self.journal is not None and current is not None:
+            if status=='stopped' and self._journal_error:
+                status,reason='interrupted','checkpoint_unavailable'
             self._journal_attempt(lambda:self.journal.finish(current[0],current[1],status,reason))
             self._journal_current=None
 

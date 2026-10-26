@@ -22,6 +22,9 @@ contain several context/calibration segments. Each segment preserves its own
 baseline and definition; history never compares measurements across segments.
 The limit is 32 segments and 90 days per owner, pruned on that owner's reads and
 writes. Explicit deletion is available independently of recording retention.
+Deleting an active segment also suppresses further retention for that training,
+including later context segments, until an explicit fresh Start. At most eight
+recent worked exercises are retained within each segment's byte bound.
 
 Persistence uses the existing actor worker outside short state/access/telemetry
 locks. Stop changes the actor token immediately. If a final checkpoint never
@@ -35,3 +38,14 @@ archive grant, and reference-derived details require current permission/source
 checks before display or reuse. A next-session skill suggestion requires a known
 compatible car, track, definition and conditions, explicit application, and fresh
 personal calibration. Improvement records continue to state that cause is unknown.
+History verifies at most four archive sources per response, matching the bounded
+reference chooser. Unverified reference details remain hidden; the driver's own
+worked skill category and measured lap observation can still form a partial debrief.
+
+The existing exact coaching route returns private history on GET. A deletion uses
+`expected/action/options`, with `action=delete_history`, `options={id:<segment or null>}`
+and the history revision in `expected`. It never uses the actor revision or a
+client-selected owner. Ordinary control/Stop replies perform no journal IO. A
+failed history read leaves current coaching available. Responses recheck driver
+and separate archive permissions after IO; browser state tracks history revisions
+independently so an older response cannot restore a deleted summary.

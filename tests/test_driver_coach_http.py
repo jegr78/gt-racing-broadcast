@@ -282,6 +282,61 @@ def t_corrupt_history_does_not_disable_current_coaching_or_shared_radio():
         assert status==200 and state['focus']['focus'] and state['history_error']=='history_unavailable'
 
 
+def t_a_busy_local_producer_can_read_and_delete_its_past_history_without_touching_the_active_driver():
+    with RadioFixture(coaching=True) as f:
+        path='/driver-radio/admin/coach';local=answer(f,path)[1]
+        body=dict(profile='solo-pov',expected=local['revision'],action='start',options={})
+        assert answer(f,path,method='POST',body=body)[0]==200;f.practice.service.step()
+        for n in (2,3,4):f.practice.complete(n);f.practice.service.step()
+        body.update(expected=0,action='stop')
+        assert answer(f,path,method='POST',body=body)[0]==200;f.practice.service.step()
+        remote=answer(f)[1]
+        assert answer(f,method='POST',body=dict(expected=remote['revision'],action='start',options={}))[0]==200
+        f.practice.service.step()
+        for n in (6,7,8):f.practice.complete(n);f.practice.service.step()
+        owner={'profile':'solo-pov','subject':'console:driver'};before=f.practice.service.snapshot(owner)
+        status,local,_=answer(f,path)
+        assert status==200 and local['phase']=='busy' and local['history']['entries'][0]['status']=='stopped'
+        assert 'focus' not in local and 'latest' not in local
+        body=dict(profile='solo-pov',expected=local['history']['revision'],action='delete_history',options={'id':None})
+        status,result,_=answer(f,path,method='POST',body=body)
+        assert status==200 and result['history']['entries']==[]
+        assert f.practice.service.snapshot(owner)==before
+
+
+def t_historical_shared_reference_details_require_the_current_separate_engineer_role_and_grant():
+    import copy
+    from types import SimpleNamespace
+    import test_ai_package as recording
+    from test_driver_coach_service import real_lap
+    for revoke in ('role','grant'):
+        with RadioFixture(coaching=True) as f:
+            source=recording.source(f.f.access.path.parent/'telemetry-recordings')
+            f.engineer.update(enabled=True,grant=source.identity,expected=0)
+            f.crew.inject_row(2,name='Driver',race_engineer=True)
+            row=real_lap(20,8);row.update(id='r:'+source.identity+':1:20',session_id='recorded')
+            def detail(_ident,grant,row=row,source=source):
+                grant(source.identity);return dict(state='ready',lap=copy.deepcopy(row))
+            f.telemetry.engineer.api=SimpleNamespace(_detail=detail,reference=lambda _ident,_path,row=row:dict(laps=[copy.deepcopy(row)]))
+            state=answer(f)[1]
+            assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+            f.practice.service.step()
+            for n in (2,3):f.practice.complete(n);f.practice.service.step()
+            state=answer(f)[1]
+            assert answer(f,method='POST',body=dict(expected=state['revision'],action='reference',options={'lap_id':row['id']}))[0]==200
+            f.practice.service.step()
+            for n in (4,5):f.practice.complete(n);f.practice.service.step()
+            entry=next(r for r in answer(f)[1]['history']['entries'] if r['reference'] and r['reference']['source']=='selected')
+            assert entry['focus'] and entry['evidence_status']=='historical'
+            if revoke=='role':f.crew.inject_row(2,name='Driver',race_engineer=False)
+            else:f.engineer.update(revoke=source.identity,expected=f.engineer.read()['revision'])
+            status,current,_=answer(f)
+            assert status==200
+            entry=next(r for r in current['history']['entries'] if r['id']==entry['id'])
+            assert entry['evidence_status']=='reference_unavailable' and entry['reference'] is None and entry['focus'] is None
+            assert entry['latest'].get('action') is None
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)
