@@ -172,6 +172,26 @@ def t_driver_cannot_select_an_unoffered_previous_session_live_reference():
         assert f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})==before
 
 
+def t_a_maximum_length_assigned_driver_identity_can_train_without_truncation():
+    with RadioFixture(coaching=True) as f:
+        subject='x'*160
+        config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=[subject]))
+        status,state,_=answer(f,subject=subject);assert status==200
+        status,state,_=answer(f,subject=subject,method='POST',body=dict(expected=state['revision'],action='start',options={}))
+        assert status==200 and state['active'], 'A valid driver identity exceeded the namespaced owner budget'
+        f.practice.service.step()
+        for n in (2,3):f.practice.complete(n);f.practice.service.step()
+        status,state,_=answer(f,subject=subject)
+        assert status==200 and state['focus']['focus'] and state['viewer']=='console:'+subject
+
+
+def t_control_center_unreadable_settings_preserve_the_unavailable_error_status():
+    with RadioFixture(coaching=True) as f:
+        f.f.access.path.write_text('{broken',encoding='utf8')
+        status,data,_=answer(f,'/api/driver-radio/coach',cc=True)
+        assert status==503 and not data['ok'] and data['code']=='settings_unavailable'
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)

@@ -102,6 +102,7 @@ class Service:
         self._command = None
         self._model = None
         self._token = uuid.uuid4().hex
+        self._generation = uuid.uuid4().hex
         self._revision = 0
         self._lowload_at = None
         self._ready_at = 0
@@ -133,9 +134,9 @@ class Service:
     def snapshot(self, owner):
         with self._lock:
             if self._owner is not None and owner != self._owner:
-                return dict(version=1, revision=self._revision, active=False, pending=False,
+                return dict(version=1, generation=self._generation, revision=self._revision, active=False, pending=False,
                             phase='busy' if self._state['active'] else 'inactive')
-            return copy.deepcopy(dict(self._state, version=1, revision=self._revision, epoch=self._token))
+            return copy.deepcopy(dict(self._state, version=1, generation=self._generation, revision=self._revision, epoch=self._token))
 
     def view(self, owner):
         for _ in range(2):
@@ -157,8 +158,7 @@ class Service:
         return state
 
     def command(self, owner, action, expected, options=None, authorize=None, training_authorize=None):
-        if (not isinstance(owner, dict) or set(owner) != {'profile', 'subject'}
-                or owner.get('profile') != self.profile or not calibration._text(owner.get('subject'))
+        if (not calibration.valid_owner(owner) or owner.get('profile') != self.profile
                 or not (owner['subject'] == 'local:producer' or owner['subject'].startswith('console:'))):
             raise calibration.CoachError('invalid_owner')
         if not _allowed(authorize) or training_authorize is not None and not _allowed(training_authorize):
@@ -184,7 +184,7 @@ class Service:
         with self._lock:
             if self._stop.is_set():
                 raise calibration.CoachError('service_closed')
-            if type(expected) is not int or expected != self._revision:
+            if type(expected) is not int or expected < 0 or action != 'stop' and expected != self._revision:
                 raise calibration.CoachError('conflict')
             if self._state['active'] and owner != self._owner:
                 raise calibration.CoachError('training_busy')
@@ -237,8 +237,10 @@ class Service:
                 return anchor is not None and _live(live) and _stamp(live) == anchor and _allowed(archive)
             model['cal'].select_reference(options.get('row'), authorize=grant)
             model['reference_grant'] = grant if options.get('row') is not None else None
+        elif action == 'skill':
+            model['focus'].set_skill(options.get('skill'))
         else:
-            model['focus'].control(action, model['focus'].snapshot()['epoch'], skill=options.get('skill'))
+            model['focus'].control(action, model['focus'].snapshot()['epoch'])
         if action in ('objective', 'reference'):
             model['cohort'].clear()
             model['seen'].clear()

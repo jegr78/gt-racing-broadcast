@@ -12,7 +12,8 @@ def command(service, owner, body, authorize, resolve=None):
     if not orchestration._allowed(authorize):
         raise calibration.CoachError('forbidden')
     state = service.snapshot(owner)
-    if type(body['expected']) is not int or body['expected'] != state['revision']:
+    if (type(body['expected']) is not int or body['expected'] < 0
+            or body['action'] != 'stop' and body['expected'] != state['revision']):
         raise calibration.CoachError('conflict')
     options = body['options']
     if body['action'] == 'reference':

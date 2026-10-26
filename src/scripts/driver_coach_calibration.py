@@ -33,8 +33,13 @@ class CoachError(ValueError):
         super().__init__(message)
 
 
-def _text(value):
-    return isinstance(value, str) and 0 < len(value) <= 160 and all(ord(c) >= 32 for c in value)
+def _text(value, maximum=160):
+    return isinstance(value, str) and 0 < len(value) <= maximum and all(ord(c) >= 32 for c in value)
+
+
+def valid_owner(owner):
+    return (isinstance(owner, dict) and set(owner) == {'profile', 'subject'}
+            and _text(owner.get('profile')) and _text(owner.get('subject'), 168))
 
 
 def eligible(lap):
@@ -163,8 +168,7 @@ class Calibration:
             raise CoachError('invalid_mode', 'Training requires practice or time trial')
         if objective not in OBJECTIVES:
             raise CoachError('invalid_objective', 'Choose Balanced, Consistency or Pace')
-        if (not isinstance(owner, dict) or set(owner) != {'profile', 'subject'}
-                or not all(_text(v) for v in owner.values())):
+        if not valid_owner(owner):
             raise CoachError('invalid_owner')
         self._clear()
         self._events.clear()

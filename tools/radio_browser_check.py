@@ -134,7 +134,7 @@ def check(browser,outdir,shots=None):
             first.evaluate("""window.__realRadioFetch=window.fetch;window.__radioReplies=0;
                 window.fetch=async(...args)=>{
                     const response=await window.__realRadioFetch(...args);
-                    if(String(args[0]).startsWith('/console/driver-radio/')&&args[1]?.method==='GET'){
+                    if(['snapshot','messages','native','setup'].some(name=>String(args[0])==='/console/driver-radio/'+name)&&args[1]?.method==='GET'){
                         window.__radioReplies++;
                         if(String(args[0]).endsWith('/snapshot'))await new Promise(resolve=>window.__releaseRadioPoll=resolve);
                     }

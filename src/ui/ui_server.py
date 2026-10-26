@@ -728,7 +728,8 @@ def make_handler(ctx):
                 callback=ctx.get("driver_radio")
                 flags={'coach':True} if path.endswith('/coach') else {'native':path.endswith('/native')}
                 result=callback(**flags) if callback else {"ok":False,"error":"Radio controls unavailable"}
-                return self._json(result)
+                code=200 if result.get('ok') or not path.endswith('/coach') else driver_radio_admin.error_status(result.get('code'))
+                return self._json(result,code=code)
             if path in ("/api/audience/youtube", "/api/audience/twitch"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     return self._json({"ok": False, "error": "Provider setup requires the local server origin"}, code=403)

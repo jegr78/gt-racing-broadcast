@@ -48,3 +48,19 @@ Input consent and the captured native frame are checked when a spoken command
 is admitted and applied. Ongoing local training uses the producer's profile
 grant. Pausing listening alone does not stop calibration. Speech and spoken
 answers keep the captured native binding and current training provenance.
+
+Stop is preemptive. It requires the current owner and permission plus a valid
+revision value, but accepts an older display revision so lap updates or blocked
+reference reads cannot prevent stopping. Other writes retain exact revision
+checks. Stop also remains available after the ordinary control rate budget.
+
+Replies include the coordinator lifetime generation. Views reject older revisions
+within that lifetime and retire earlier generations after a relay restart. A
+fresh whoami response verifies the current Console identity before any delayed
+coaching response is rendered. Changing profile/identity clears private DOM and
+outstanding responses cannot restore the previous driver's exercise.
+
+A skill may be selected during calibration. The preference is retained until
+comparable evidence supports that skill; an unrelated fallback exercise does
+not silently replace the constraint. Console owner identifiers preserve the
+complete existing driver identity plus the server namespace.

@@ -15,11 +15,12 @@ def t_http_commands_have_exact_shapes_and_no_client_selected_identity_or_raw_ref
         f=Fixture(root)
         for body in ({},dict(expected=0,action='start',options={},owner=LOCAL),
                      dict(expected=0,action='reference',options={'row':real_lap(2,8)}),
+                     dict(expected=0,action='start',options={'training_authorize':True}),
                      dict(expected=0,action='start',options=[],profile='other')):
             rejects(lambda body=body:controls.command(f.service,LOCAL,body,lambda:True),'invalid_body')
         state=controls.command(f.service,LOCAL,dict(expected=0,action='start',options={}),lambda:True)
         assert state['active'] and state['pending']
-        rejects(lambda:controls.command(f.service,LOCAL,dict(expected=0,action='stop',options={}),lambda:True),'conflict')
+        rejects(lambda:controls.command(f.service,LOCAL,dict(expected=0,action='objective',options={'objective':'pace'}),lambda:True),'conflict')
 
 
 def t_selected_reference_is_resolved_by_trusted_server_code_and_keeps_its_grant():
@@ -172,7 +173,74 @@ def t_actual_native_worker_routes_coaching_without_a_browser_or_a_second_audio_o
             owner.step()
             assert state['focus']['focus']['action'] in f.messages()[-1]['text']
             assert f.messages()[-1]['ai_state']=='not_requested' and not f.radio.service._conversation
+            f.snap['laps'][-1]['measurement_hash']='corrected-before-answer'
+            assert f.radio.service.take_playback() is None, 'A spoken query outlived its measured evidence'
         finally:owner.close()
+
+
+def t_input_consent_is_rechecked_for_queued_controls_but_does_not_become_the_training_grant():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);input_allowed=[True];training_allowed=[True]
+        def request():return controls.voice_result(f.service,'start training',lambda:input_allowed[0],
+                                                   training_authorize=lambda:training_allowed[0])
+        request();input_allowed[0]=False;state=f.step()
+        assert not state['active'] and state['phase']=='forbidden'
+        input_allowed[0]=True;request();f.step();input_allowed[0]=False
+        assert f.step()['active'], 'A later input pause revoked ongoing local training'
+        training_allowed[0]=False;state=f.step()
+        assert not state['active'] and state['phase']=='forbidden'
+
+
+def t_native_listening_pause_preserves_training_but_profile_revocation_ends_it():
+    import driver_radio_native as native
+    from test_driver_radio_native import Worker,Player
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(Path(root)/'solo');f.radio.service.coach=f.service;workers=[]
+        def worker(_body):w=Worker();workers.append(w);return w
+        owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=worker,player=lambda *_args:Player(),
+                               microphone=lambda:'Synthetic microphone',ready=lambda:True,clock=lambda:f.at)
+        try:
+            owner.step();workers[-1].events=[dict(event='question',text='start training')];owner.step();f.step()
+            state=owner.status();owner.control(dict(binding=state['binding'],expected=state['revision'],paused=True));owner.step()
+            assert f.step()['active'] and owner.status()['paused']
+            config=f.radio.access.read();f.radio.access.update(dict(expected=config['revision'],voice=dict(enabled=False,microphone=None,input_language='en')))
+            owner.step();assert f.step()['active']
+            config=f.radio.access.read();f.radio.access.update(dict(expected=config['revision'],enabled=False))
+            assert not f.step()['active']
+        finally:owner.close()
+
+
+def t_actual_native_requests_cannot_control_a_console_owner_or_read_its_exercise():
+    import driver_radio_native as native
+    from test_driver_radio_native import Worker,Player
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(Path(root)/'solo');f.radio.service.coach=f.service;workers=[]
+        f.command(owner=REMOTE);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        before=f.service.snapshot(REMOTE)
+        def worker(_body):w=Worker();workers.append(w);return w
+        owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=worker,player=lambda *_args:Player(),
+                               microphone=lambda:'Synthetic microphone',ready=lambda:True,clock=lambda:f.at)
+        try:
+            owner.step();workers[-1].events=[dict(event='question',text='stop training')];owner.step()
+            assert f.service.snapshot(REMOTE)==before
+            reply=f.messages()[-1]
+            assert 'Another driver' in reply['text'] and before['focus']['focus']['action'] not in reply['text']
+            assert reply['id'] not in [m['id'] for m in f.messages('driver')]
+        finally:owner.close()
+
+
+def t_skill_preference_can_be_set_before_calibration_or_a_current_exercise_exists():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command();f.step()
+        assert f.service.snapshot(LOCAL)['focus']['focus'] is None
+        f.command('skill',skill='braking');state=f.step()
+        assert state['focus']['skill']=='braking' and state['focus']['focus'] is None
+        for n in (2,3):f.complete(n);state=f.step()
+        assert state['focus']['skill']=='braking'
+        assert state['focus']['focus'] is None or state['focus']['focus']['skill']=='braking'
+        f.command('objective',objective='pace');f.step()
+        f.command('skill',skill=None);state=f.step();assert state['focus']['skill'] is None
 
 
 if __name__=='__main__':

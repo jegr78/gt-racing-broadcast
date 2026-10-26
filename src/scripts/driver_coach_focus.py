@@ -166,8 +166,7 @@ class Focus:
         if not isinstance(snapshot, dict):
             return self._unavailable()
         owner = snapshot.get('owner')
-        if (not isinstance(owner, dict) or set(owner) != {'profile', 'subject'}
-                or not all(_text(v) for v in owner.values())
+        if (not calibration.valid_owner(owner)
                 or not _text(snapshot.get('epoch')) or not _text(snapshot.get('training_id'))
                 or snapshot.get('objective') not in ('balanced', 'consistency', 'pace')):
             return self._unavailable()
@@ -224,6 +223,9 @@ class Focus:
             self._focus = copy.deepcopy(choice)
             break
         if self._focus is None:
+            if self._skill not in (None, 'consistency'):
+                self._review = 'Current evidence does not support an exercise for the selected skill.'
+                return False
             self._focus = _general()
         self._keep = False
         self._attempts.clear()
@@ -335,6 +337,15 @@ class Focus:
                               consistency_improved=False, text='A new exercise has not been scored.')
         self._review = 'Choose a new exercise on the next suitable lap.'
         return self.snapshot()
+
+    def set_skill(self, skill):
+        """Trusted coordinator preference, also valid before calibration binds."""
+        if skill is not None and (not isinstance(skill, str) or skill not in SKILLS):
+            raise calibration.CoachError('invalid_skill')
+        if self._binding is None:
+            self._skill = skill
+            return self.snapshot()
+        return self.control('skill', self._epoch, skill=skill)
 
     def control(self, action, epoch, skill=None):
         if epoch != self._epoch or self._binding is None:

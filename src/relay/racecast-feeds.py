@@ -11738,7 +11738,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 def authorize():
                     if admin:
                         config = radio_access.read()
-                        return radio_access.available and config['enabled'] is True
+                        if not config['enabled']:
+                            raise driver_radio_access.RadioError('feature_disabled', 'Enable driver radio for this profile to use coaching')
+                        return radio_access.available
                     versions = console_admin.load_versions(console_versions_path) if console_versions_path else {}
                     return (console_auth.verify_token(console_secret, token, versions) == subject
                             and bool(radio_access.authorize(subject)))
