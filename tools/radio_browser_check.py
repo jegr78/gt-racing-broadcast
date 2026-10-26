@@ -96,7 +96,7 @@ def check(browser,outdir,shots=None):
             f.f.poll();f.native.step();f.f.service.request('pace',binding);f.f.service.request('tyres',binding)
             f.f.service.question('Will the fuel last at this pace?',binding);f.enricher.step('audio')
             first.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('question').textContent.includes('Will the fuel')")
-            a.locator('summary').click()
+            a.locator('summary').filter(has_text='Measurement evidence').click()
             for width,view,wiki in ((1440,'desktop','console-driver-radio-desktop.png'),(1024,'tablet','console-driver-radio-tablet.png'),(390,'phone','console-driver-radio-phone.png')):
                 first.set_viewport_size({'width':width,'height':1000})
                 assert first.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),'driver desk overflows viewport'
@@ -134,7 +134,7 @@ def check(browser,outdir,shots=None):
             first.evaluate("""window.__realRadioFetch=window.fetch;window.__radioReplies=0;
                 window.fetch=async(...args)=>{
                     const response=await window.__realRadioFetch(...args);
-                    if(String(args[0]).startsWith('/console/driver-radio/')&&args[1]?.method==='GET'){
+                    if(['snapshot','messages','native','setup'].some(name=>String(args[0])==='/console/driver-radio/'+name)&&args[1]?.method==='GET'){
                         window.__radioReplies++;
                         if(String(args[0]).endsWith('/snapshot'))await new Promise(resolve=>window.__releaseRadioPoll=resolve);
                     }

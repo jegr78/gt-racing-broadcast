@@ -179,6 +179,8 @@ import race_engineer_access
 import driver_radio_access
 import driver_radio_service
 import driver_coach_service
+import driver_coach_controls
+import driver_coach_calibration
 import driver_radio_providers
 import driver_radio_ai
 import driver_radio_native
@@ -11674,6 +11676,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # (like chat) so one commentator can't exhaust the crew's quota.
     _cockpit_cueback_rl = console_auth.RateLimiter(limit=12, window_s=60)
 
+    _coach_controls_rl = console_auth.RateLimiter(limit=30, window_s=60)
+
     class H(BaseHTTPRequestHandler):
         def _send(self, obj, code=200, no_store=False):
             body = json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
@@ -11717,6 +11721,97 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if not isinstance(value, dict):
                 raise driver_radio_access.RadioError("invalid_body", "Expected a JSON object")
             return value
+
+        def _coach(self, method, subject=None, admin=False):
+            self.connection.settimeout(5)
+            try:
+                if admin and not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
+                    return self._radio_error('foreign_origin', 'Local coaching requires the producer server origin', 403)
+                if not admin and method == 'POST' and not driver_radio_access.same_origin(self.headers):
+                    return self._radio_error('foreign_origin', 'Coaching writes require the current server origin', 403)
+                actor = getattr(radio_service, 'coach', None)
+                live = getattr(telemetry_store, 'engineer', None)
+                if actor is None or live is None or radio_access is None:
+                    return self._radio_error('source_unavailable', 'Live coaching is unavailable for this source', 503)
+                profile = radio_access.path.parent.name
+                token = self._cockpit_token() if not admin else None
+                def authorize():
+                    if admin:
+                        config = radio_access.read()
+                        if not config['enabled']:
+                            raise driver_radio_access.RadioError('feature_disabled', 'Enable driver radio for this profile to use coaching')
+                        return radio_access.available
+                    versions = console_admin.load_versions(console_versions_path) if console_versions_path else {}
+                    return (console_auth.verify_token(console_secret, token, versions) == subject
+                            and bool(radio_access.authorize(subject)))
+                if authorize() is not True:
+                    return self._radio_error('forbidden', 'Explicit driver coaching access is required', 403)
+                owner = dict(profile=profile, subject='local:producer' if admin else 'console:'+subject)
+                query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                if set(query)-{'t'} or len(query.get('t', [])) > 1:
+                    return self._radio_error('invalid_query', 'Unknown coaching query', 400)
+                sources = {}
+                def archive(ident):
+                    if engineer_access is None:
+                        raise driver_coach_calibration.CoachError('reference_unavailable')
+                    if not admin:
+                        path = engineer_access.reference(ident, self._console_roles(subject))
+                    else:
+                        doc = engineer_access.read()
+                        if not engineer_access.available or not doc['enabled']:
+                            raise driver_coach_calibration.CoachError('reference_unavailable')
+                        path = engineer_access._reference(ident, doc)
+                    sources[ident] = path
+                    return path
+                references = driver_coach_controls.References(live, archive)
+                if method == 'POST':
+                    body = self._radio_body()
+                    if admin:
+                        if body.get('profile') != profile:
+                            return self._radio_error('profile_changed', 'The coaching profile changed; reload', 409)
+                        body = {k:v for k,v in body.items() if k != 'profile'}
+                    if body.get('action') != 'stop' and not _coach_controls_rl.allow(owner['subject']):
+                        return self._radio_error('rate_limited', 'Too many coaching controls; retry later', 429)
+                    result = driver_coach_controls.command(actor, owner, body, authorize, resolve=references.resolve)
+                else:
+                    result = actor.view(owner)
+                    choice_stamp = driver_coach_service._stamp(live.snapshot())
+                    archives = []
+                    if result['phase'] != 'busy' and engineer_access is not None:
+                        if admin:
+                            doc = engineer_access.read()
+                            if engineer_access.available and doc['enabled']:
+                                for ident, grant in list(doc['grants'].items())[:4]:
+                                    try:archive(ident)
+                                    except race_engineer_access.AccessError:continue
+                                    archives.append(dict(id=ident, label=grant['label']))
+                        else:
+                            try:archives = engineer_access.authorize(self._console_roles(subject))['references']
+                            except race_engineer_access.AccessError:
+                                archives = []  # Driver access does not imply archive grants.
+                    result['references'] = references.choices(archives) if result['phase'] != 'busy' else []
+                if authorize() is not True:
+                    return self._radio_error('forbidden', 'Coaching access changed during the request', 403)
+                for ident, path in tuple(sources.items()):
+                    if archive(ident) != path:
+                        raise driver_coach_calibration.CoachError('reference_unavailable')
+                if method == 'GET':
+                    current = actor.view(owner)
+                    same = (all(current.get(k) == result.get(k) for k in ('epoch', 'revision', 'phase'))
+                            and driver_coach_service._stamp(live.snapshot()) == choice_stamp)
+                    current['references'] = result['references'] if same else []
+                    result = current
+                result.update(profile=profile, viewer=owner['subject'])
+                if admin:result['protocol'] = 'racecast-driver-radio-admin-v1'
+                return self._send(result, no_store=True)
+            except (driver_coach_calibration.CoachError, driver_radio_access.RadioError, race_engineer_access.AccessError) as error:
+                status = (403 if error.code in ('forbidden', 'feature_disabled') else
+                          409 if error.code in ('conflict', 'busy', 'training_busy', 'training_required', 'focus_unavailable', 'incompatible_reference', 'profile_changed') else
+                          503 if error.code in ('source_unavailable', 'settings_unavailable', 'reference_pending') else
+                          410 if error.code == 'reference_unavailable' else 400)
+                return self._radio_error(error.code, str(error), status)
+            except (OSError, ValueError, TypeError, KeyError):
+                return self._radio_error('coaching_unavailable', 'Coaching is temporarily unavailable', 503)
 
         def _radio(self, route, method, subject=None, admin=False):
             # Bound both body parsing and do_POST's rejection drain.
@@ -12450,6 +12545,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send_page(page, "/console", cookie_token=self._cockpit_token(), cookie_path="/console")
                 if console_policy.min_capability(sub, method) is None:
                     return self._radio_error("not_found", "Unknown driver radio route", 404)
+                if sub == ['driver-radio', 'coach']:
+                    return self._coach(method, subject=subject)
                 return self._radio(sub[1], method, subject=subject)
             if sub and sub[0]=="race-engineer":
                 is_pin = method == "POST" and sub == ["race-engineer", "pin"]
@@ -12745,6 +12842,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             /status is unaffected."""
             return redact_console_status(self._status_payload(), roles)
         def do_GET(self):
+            if urlparse(self.path).path == '/driver-radio/admin/coach':
+                return self._coach('GET', admin=True)
             if urlparse(self.path).path in ("/driver-radio-ui.js", "/console/driver-radio-ui.js"):
                 # Public static code only; every data/control route remains authenticated.
                 return self._send_file(os.path.join(radio_page_dir, "driver-radio.js"), "application/javascript; charset=utf-8")
@@ -13461,6 +13560,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.rfile.read(length)
 
         def do_POST(self):
+            if urlparse(self.path).path == '/driver-radio/admin/coach':
+                self._body_consumed = False
+                try:return self._coach('POST', admin=True)
+                finally:self._drain_body()
             if urlparse(self.path).path in ("/driver-radio/admin", "/driver-radio/admin/native"):
                 self._body_consumed = False
                 try:

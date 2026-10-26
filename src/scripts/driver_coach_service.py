@@ -102,9 +102,11 @@ class Service:
         self._command = None
         self._model = None
         self._token = uuid.uuid4().hex
+        self._generation = uuid.uuid4().hex
         self._revision = 0
         self._lowload_at = None
         self._ready_at = 0
+        self._checks = (None, ())
         self._state = dict(active=False, pending=False, phase='inactive', calibration=None, focus=None, latest=None, allow_ai=False)
 
     def start(self):
@@ -132,16 +134,37 @@ class Service:
     def snapshot(self, owner):
         with self._lock:
             if self._owner is not None and owner != self._owner:
-                return dict(version=1, revision=self._revision, active=False, pending=False,
+                return dict(version=1, generation=self._generation, revision=self._revision, active=False, pending=False,
                             phase='busy' if self._state['active'] else 'inactive')
-            return copy.deepcopy(dict(self._state, version=1, revision=self._revision, epoch=self._token))
+            return copy.deepcopy(dict(self._state, version=1, generation=self._generation, revision=self._revision, epoch=self._token))
 
-    def command(self, owner, action, expected, options=None, authorize=None):
-        if (not isinstance(owner, dict) or set(owner) != {'profile', 'subject'}
-                or owner.get('profile') != self.profile or not calibration._text(owner.get('subject'))
+    def view(self, owner):
+        for _ in range(2):
+            with self._lock:
+                state = self.snapshot(owner)
+                stamp, expected = self._checks
+            if state['pending']:
+                state.update(calibration=None, focus=None, latest=None)
+                return state
+            if not state['active']:
+                return state
+            current = self._current(state['epoch'], stamp, expected)
+            with self._lock:
+                if state['revision'] != self._revision or state['epoch'] != self._token:
+                    continue
+            if not current:
+                state.update(phase='paused', calibration=None, focus=None, latest=None)
+            return state
+        state = self.snapshot(owner)
+        if state['active']:
+            state.update(phase='paused', calibration=None, focus=None, latest=None)
+        return state
+
+    def command(self, owner, action, expected, options=None, authorize=None, training_authorize=None):
+        if (not calibration.valid_owner(owner) or owner.get('profile') != self.profile
                 or not (owner['subject'] == 'local:producer' or owner['subject'].startswith('console:'))):
             raise calibration.CoachError('invalid_owner')
-        if not _allowed(authorize):
+        if not _allowed(authorize) or training_authorize is not None and not _allowed(training_authorize):
             raise calibration.CoachError('forbidden')
         if options is not None and not isinstance(options, dict):
             raise calibration.CoachError('invalid_body')
@@ -159,12 +182,12 @@ class Service:
                 and (not isinstance(options['skill'], str) or options['skill'] not in focus.SKILLS)):
             raise calibration.CoachError('invalid_body')
         doc = self.source() if action in ('start', 'objective', 'reference') else None
-        if not _allowed(authorize):
+        if not _allowed(authorize) or training_authorize is not None and not _allowed(training_authorize):
             raise calibration.CoachError('forbidden')
         with self._lock:
             if self._stop.is_set():
                 raise calibration.CoachError('service_closed')
-            if type(expected) is not int or expected != self._revision:
+            if type(expected) is not int or expected < 0 or action != 'stop' and expected != self._revision:
                 raise calibration.CoachError('conflict')
             if self._state['active'] and owner != self._owner:
                 raise calibration.CoachError('training_busy')
@@ -174,7 +197,8 @@ class Service:
                 raise calibration.CoachError('busy')
             if action in ('skip', 'keep') and not (self._state.get('focus') or {}).get('focus'):
                 raise calibration.CoachError('focus_unavailable')
-            self._owner, self._grant = copy.deepcopy(owner), authorize
+            self._owner = copy.deepcopy(owner)
+            self._grant = authorize if training_authorize is None else training_authorize
             self._invalidate('pending' if action != 'stop' else 'stopped')
             self._command = dict(action=action, options=copy.deepcopy(options), owner=copy.deepcopy(owner),
                                  token=self._token, doc=doc, wall=self.wall(), authorize=authorize)
@@ -183,7 +207,7 @@ class Service:
                 self._state.update(calibration=None, focus=None, latest=None,
                                    allow_ai=options.get('allow_ai', False) if action == 'start' else False)
         self.radio.cancel_coach(blocking=False)
-        return self.snapshot(owner)
+        return self.view(owner)
 
     def _apply(self, command):
         action, options = command['action'], command['options']
@@ -216,8 +240,10 @@ class Service:
                 return anchor is not None and _live(live) and _stamp(live) == anchor and _allowed(archive)
             model['cal'].select_reference(options.get('row'), authorize=grant)
             model['reference_grant'] = grant if options.get('row') is not None else None
+        elif action == 'skill':
+            model['focus'].set_skill(options.get('skill'))
         else:
-            model['focus'].control(action, model['focus'].snapshot()['epoch'], skill=options.get('skill'))
+            model['focus'].control(action, model['focus'].snapshot()['epoch'])
         if action in ('objective', 'reference'):
             model['cohort'].clear()
             model['seen'].clear()
@@ -288,8 +314,10 @@ class Service:
                    calibration=calibrated, focus=model['focus'].snapshot(), latest=model['latest'],
                    allow_ai=model['allow_ai'] if calibrated['active'] else False, detail_status=model['detail_status'])
         with self._lock:
-            if token == self._token and self._command is None and new != self._state:
-                self._state = copy.deepcopy(new); self._revision += 1
+            if token == self._token and self._command is None:
+                self._checks = (model['stamp'], tuple(model['sources'].items()))
+                if new != self._state:
+                    self._state = copy.deepcopy(new); self._revision += 1
 
     def step(self):
         with self._work_lock:

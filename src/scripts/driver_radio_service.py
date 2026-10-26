@@ -303,6 +303,12 @@ class Service:
                                   live=self._live and not self._closed, voice_enabled=self._voice_enabled and not self._closed,
                                   assessment=self._assessment))
 
+    def current_binding(self, binding, epoch):
+        """Cached identity/consent only; no callbacks or source/provider I/O."""
+        with self._lock:
+            return (not self._closed and self._enabled and self._voice_enabled
+                    and self._binding == binding and self._epoch == epoch)
+
     def history(self, since=None, requester=None):
         self.refresh()
         with self._lock:

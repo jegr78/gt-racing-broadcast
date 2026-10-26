@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import logsetup   # re-open-per-poll log tailing (scripts/ on sys.path via racecast)
 import http_util
 import audience_admin
+import driver_radio_admin
 import bundle_cache
 from contextlib import ExitStack, nullcontext
 
@@ -721,12 +722,14 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"console status failed: {exc}"},
                                       code=500)
-            if path in ("/api/driver-radio", "/api/driver-radio/native"):
+            if path in ("/api/driver-radio", "/api/driver-radio/native", "/api/driver-radio/coach"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     return self._json({"ok":False,"error":"Radio setup requires the local server origin"}, code=403)
                 callback=ctx.get("driver_radio")
-                result=callback(native=path.endswith('/native')) if callback else {"ok":False,"error":"Radio controls unavailable"}
-                return self._json(result)
+                flags={'coach':True} if path.endswith('/coach') else {'native':path.endswith('/native')}
+                result=callback(**flags) if callback else {"ok":False,"error":"Radio controls unavailable"}
+                code=200 if result.get('ok') or not path.endswith('/coach') or not result.get('code') else driver_radio_admin.error_status(result.get('code'))
+                return self._json(result,code=code)
             if path in ("/api/audience/youtube", "/api/audience/twitch"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     return self._json({"ok": False, "error": "Provider setup requires the local server origin"}, code=403)
@@ -1185,7 +1188,7 @@ def make_handler(ctx):
             if path == "/api/console/post-link":
                 result = ctx["console_post_link"]()
                 return self._json(result, code=200 if result.get("ok") else 400)
-            if path in ("/api/driver-radio", "/api/driver-radio/native"):
+            if path in ("/api/driver-radio", "/api/driver-radio/native", "/api/driver-radio/coach"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     self._drain_refused_body()
                     return self._json({"ok":False,"error":"Radio setup requires the local server origin"}, code=403)
@@ -1193,8 +1196,9 @@ def make_handler(ctx):
                 if not isinstance(body,dict):
                     return self._json({"ok":False,"error":"Radio command must be an object"}, code=400)
                 callback=ctx.get("driver_radio")
-                result=callback(body,native=path.endswith('/native')) if callback else {"ok":False,"error":"Radio controls unavailable"}
-                return self._json(result, code=200 if result.get('ok') else 409 if result.get('code')=='conflict' else 400)
+                flags={'coach':True} if path.endswith('/coach') else {'native':path.endswith('/native')}
+                result=callback(body,**flags) if callback else {"ok":False,"error":"Radio controls unavailable"}
+                return self._json(result, code=200 if result.get('ok') else driver_radio_admin.error_status(result.get('code')))
             if path in ("/api/audience/youtube", "/api/audience/twitch"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     self._drain_refused_body()
