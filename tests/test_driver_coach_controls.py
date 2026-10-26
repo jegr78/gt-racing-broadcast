@@ -150,6 +150,31 @@ def t_unoffered_previous_session_live_rows_cannot_bypass_the_archive_boundary():
         rejects(lambda:references.resolve(row['id']),'reference_unavailable')
 
 
+def t_actual_native_worker_routes_coaching_without_a_browser_or_a_second_audio_owner():
+    import driver_radio_native as native
+    from test_driver_radio_native import Worker,Player
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(Path(root)/'solo');f.radio.service.coach=f.service;workers=[]
+        def worker(_body):w=Worker();workers.append(w);return w
+        owner=native.Supervisor(f.radio.service,Path(root)/'machine',worker=worker,player=lambda *_args:Player(),
+                               microphone=lambda:'Synthetic microphone',ready=lambda:True,clock=lambda:f.at)
+        try:
+            owner.step();assert len(workers)==1
+            workers[-1].events=[dict(event='question',text='start training')]
+            owner.step();assert f.service.snapshot(LOCAL)['active'], 'Native coaching request was routed as an ordinary telemetry question'
+            f.service.step();assert not f.service.snapshot(LOCAL)['allow_ai']
+            for n in (2,3):f.complete(n);f.service.step()
+            state=f.service.view(LOCAL);assert state['focus']['focus']
+            # Isolate the next captured utterance from automatic lap feedback.
+            f.radio.service.cancel_coach();f.at+=1;f.wall+=1;owner.step()
+            assert owner._worker_proc is not None
+            workers[-1].events=[dict(event='question',text='current focus')]
+            owner.step()
+            assert state['focus']['focus']['action'] in f.messages()[-1]['text']
+            assert f.messages()[-1]['ai_state']=='not_requested' and not f.radio.service._conversation
+        finally:owner.close()
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)

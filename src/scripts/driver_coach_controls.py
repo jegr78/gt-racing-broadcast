@@ -87,7 +87,11 @@ def voice_reply(state, topic):
             +(trained.get('progress') or {}).get('text', 'Collect further comparable laps.'))[:600]
 
 
-def voice(service, text, authorize):
+def _spoken(text, state, kind):
+    return dict(text=text, kind=kind, epoch=state.get('epoch'), revision=state['revision'], phase=state['phase'])
+
+
+def voice_result(service, text, authorize, training_authorize=None):
     plan = voice_plan(text)
     if plan is None:
         return None
@@ -96,19 +100,26 @@ def voice(service, text, authorize):
     owner = dict(profile=service.profile, subject='local:producer')
     state = service.view(owner)
     if state['phase'] == 'busy':
-        return voice_reply(state, 'status')
+        return _spoken(voice_reply(state, 'status'), state, 'question')
     if plan['kind'] == 'clarify':
-        return 'Say start training, stop training, objective, focus on a skill, skip focus, keep focus, or training status.'
+        return _spoken('Say start training, stop training, objective, focus on a skill, skip focus, keep focus, or training status.', state, 'clarify')
     if plan['kind'] == 'command':
-        try:service.command(owner, plan['action'], state['revision'], plan['options'], authorize=authorize)
+        try:
+            state = service.command(owner, plan['action'], state['revision'], plan['options'],
+                                    authorize=authorize, training_authorize=training_authorize)
         except calibration.CoachError as error:
             if error.code not in ('training_required', 'focus_unavailable', 'busy', 'conflict'):
                 raise
-            return 'The current training state cannot accept that command. Ask for training status and try again.'
-        return 'Training command accepted.'
+            return _spoken('The current training state cannot accept that command. Ask for training status and try again.', service.view(owner), 'question')
+        return _spoken('Training command accepted.', state, 'command')
     if not orchestration._allowed(authorize):
         raise calibration.CoachError('forbidden')
-    return voice_reply(state, plan['topic'])
+    return _spoken(voice_reply(state, plan['topic']), state, 'question')
+
+
+def voice(service, text, authorize):
+    result = voice_result(service, text, authorize)
+    return result['text'] if result is not None else None
 
 
 class References:

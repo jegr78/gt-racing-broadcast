@@ -156,12 +156,12 @@ class Service:
             state.update(phase='paused', calibration=None, focus=None, latest=None)
         return state
 
-    def command(self, owner, action, expected, options=None, authorize=None):
+    def command(self, owner, action, expected, options=None, authorize=None, training_authorize=None):
         if (not isinstance(owner, dict) or set(owner) != {'profile', 'subject'}
                 or owner.get('profile') != self.profile or not calibration._text(owner.get('subject'))
                 or not (owner['subject'] == 'local:producer' or owner['subject'].startswith('console:'))):
             raise calibration.CoachError('invalid_owner')
-        if not _allowed(authorize):
+        if not _allowed(authorize) or training_authorize is not None and not _allowed(training_authorize):
             raise calibration.CoachError('forbidden')
         if options is not None and not isinstance(options, dict):
             raise calibration.CoachError('invalid_body')
@@ -179,7 +179,7 @@ class Service:
                 and (not isinstance(options['skill'], str) or options['skill'] not in focus.SKILLS)):
             raise calibration.CoachError('invalid_body')
         doc = self.source() if action in ('start', 'objective', 'reference') else None
-        if not _allowed(authorize):
+        if not _allowed(authorize) or training_authorize is not None and not _allowed(training_authorize):
             raise calibration.CoachError('forbidden')
         with self._lock:
             if self._stop.is_set():
@@ -194,7 +194,8 @@ class Service:
                 raise calibration.CoachError('busy')
             if action in ('skip', 'keep') and not (self._state.get('focus') or {}).get('focus'):
                 raise calibration.CoachError('focus_unavailable')
-            self._owner, self._grant = copy.deepcopy(owner), authorize
+            self._owner = copy.deepcopy(owner)
+            self._grant = authorize if training_authorize is None else training_authorize
             self._invalidate('pending' if action != 'stop' else 'stopped')
             self._command = dict(action=action, options=copy.deepcopy(options), owner=copy.deepcopy(owner),
                                  token=self._token, doc=doc, wall=self.wall(), authorize=authorize)

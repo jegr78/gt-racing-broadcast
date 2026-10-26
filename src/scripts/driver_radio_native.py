@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 import driver_radio_access as access
+import driver_radio_assessment as assessment
+import driver_coach_controls as coaching
 import driver_radio_voice_config as config
 from driver_radio_voice_process import Owned
 
@@ -121,6 +123,41 @@ class Supervisor:
                     and (not output or not self._muted)
                     and settings['revision']==signature[0] and state['epoch']==signature[2])
 
+    def _local_training_rights(self):
+        settings = self.service.settings.read()
+        actor = getattr(self.service, 'coach', None)
+        return (self.service.settings.available and settings['enabled'] is True and actor is not None
+                and actor.profile == self.service.settings.path.parent.name)
+
+    def _input_authorized(self, signature):
+        settings = self.service.settings.read()
+        if (not self._local_training_rights() or settings['voice']['enabled'] is not True
+                or settings['revision'] != signature[0]
+                or assessment.binding(self.service.source()) != signature[1]
+                or not self.service.current_binding(signature[1], signature[2])):
+            return False
+        with self._lock:
+            return not (self._closed or self._paused or self._control_changed) and self._signature == signature
+
+    def _coaching(self, text, signature):
+        actor = getattr(self.service, 'coach', None)
+        if actor is None:
+            return False
+        result = coaching.voice_result(actor, text, lambda:self._input_authorized(signature),
+                                       training_authorize=self._local_training_rights)
+        if result is None:
+            return False
+        owner = dict(profile=actor.profile, subject='local:producer')
+        def current():
+            if not self._input_authorized(signature):
+                return False
+            state = actor.view(owner)
+            return (state.get('epoch') == result['epoch'] and (result['kind'] != 'question'
+                    or state['revision'] == result['revision'] and state['phase'] == result['phase']))
+        self.service.publish_coach(result['text'], {}, owner, result['epoch'], authorize=current,
+                                   ready=lambda:True, completed_at=self.service.wall(), latest=True)
+        return True
+
     def step(self):
         # Only the owner loop touches process references. HTTP controls use the
         # separate state lock and remain available during spawn/termination.
@@ -193,8 +230,10 @@ class Supervisor:
                         current=self.service.refresh(force=True)
                         if (self._closed or self._control_changed or self._paused
                                 or current['epoch']!=state['epoch']):return
-                        try:self.service.question(event.get('text'),self._binding)
-                        except access.RadioError:self._set('error','question_rejected')
+                        try:
+                            if not self._coaching(event.get('text'),signature):
+                                self.service.question(event.get('text'),self._binding)
+                        except (access.RadioError, coaching.calibration.CoachError):self._set('error','question_rejected')
                         else:self._set('responding')
                         return
                     if event.get('event') in ('heartbeat','listening','transcribing'):

@@ -43,3 +43,8 @@ ready, pending, paused, detail unavailable and another owner's busy state. The
 passage label explicitly identifies reviewed versus provisional geometry.
 Evidence uses existing measured IDs/values and text nodes, without raw trace
 or private earlier-session history. Detailed debrief/history follows in #983.
+
+Input consent and the captured native frame are checked when a spoken command
+is admitted and applied. Ongoing local training uses the producer's profile
+grant. Pausing listening alone does not stop calibration. Speech and spoken
+answers keep the captured native binding and current training provenance.
