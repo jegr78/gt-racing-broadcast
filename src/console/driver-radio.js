@@ -96,8 +96,8 @@ class View {
 }
 class CoachView {
  constructor(host,{admin=false,compact=false,profile=()=>null}={}){
-  this.host=host;this.admin=admin;this.compact=compact;this.profile=profile;this.state=null;this.scope=null;this.serviceKey=null;this.retired=new Set();this.generation=0;this.editVersion=0;this.base=null;this.dirty=false;this.sending=false;this.polling=false;this.stopping=false;this.dead=false;this.actionError='';this.timer=null;this.controllers=new Set();
-  host.className='coach';host.innerHTML=`<div class="head"><h3>Driver coaching</h3><span id="coach-phase" class="badge">Connecting</span></div><p id="coach-error" class="error" role="status"></p><div class="coach-controls"><label>Mode<select id="coach-mode"><option value="practice">Practice</option><option value="time_trial">Time trial</option></select></label><label>Objective<select id="coach-objective"><option value="balanced">Balanced</option><option value="consistency">Consistency</option><option value="pace">Pace</option></select></label><label><input id="coach-ai" type="checkbox">Optional AI explanation</label></div><p class="notice">AI uses the configured profile agent. Measured feedback does not wait for it.</p><div class="row"><button id="coach-start" type="button">Start training</button><button id="coach-stop" type="button">Stop training</button><button id="coach-goal" type="button">Apply objective</button><button id="coach-reload" type="button" hidden>Reload current values</button></div><p id="coach-calibration" class="muted"></p><p id="coach-reference" class="muted"></p><p id="coach-label" class="muted"></p><p id="coach-focus" class="answer" role="status"></p><p id="coach-progress" class="muted"></p><p id="coach-review"></p><div class="coach-advanced" ${compact?'hidden':''}><div class="coach-controls"><label>Skill<select id="coach-skill"></select></label><label>Reference<select id="coach-reference-choice"><option value="">Automatic personal reference</option></select></label></div><div class="row"><button id="coach-set-skill" type="button">Apply skill</button><button id="coach-use-reference" type="button">Use reference</button><button id="coach-skip" type="button">Skip exercise</button><button id="coach-keep" type="button">Keep exercise</button><button id="coach-show-evidence" type="button">View measured evidence</button></div><details id="coach-details"><summary>Measured training evidence</summary><table id="coach-evidence"></table></details></div>`;
+  this.host=host;this.admin=admin;this.compact=compact;this.profile=profile;this.state=null;this.scope=null;this.serviceKey=null;this.requestSerial=0;this.adoptedSerial=0;this.historyFloor=0;this.retired=new Set();this.generation=0;this.editVersion=0;this.base=null;this.dirty=false;this.sending=false;this.polling=false;this.stopping=false;this.dead=false;this.actionError='';this.timer=null;this.controllers=new Set();
+  host.className='coach';host.innerHTML=`<div class="head"><h3>Driver coaching</h3><span id="coach-phase" class="badge">Connecting</span></div><p id="coach-error" class="error" role="status"></p><div class="coach-controls"><label>Mode<select id="coach-mode"><option value="practice">Practice</option><option value="time_trial">Time trial</option></select></label><label>Objective<select id="coach-objective"><option value="balanced">Balanced</option><option value="consistency">Consistency</option><option value="pace">Pace</option></select></label><label><input id="coach-ai" type="checkbox">Optional AI explanation</label></div><p class="notice">AI uses the configured profile agent. Measured feedback does not wait for it.</p><div class="row"><button id="coach-start" type="button">Start training</button><button id="coach-stop" type="button">Stop training</button><button id="coach-goal" type="button">Apply objective</button><button id="coach-reload" type="button" hidden>Reload current values</button></div><p id="coach-calibration" class="muted"></p><p id="coach-reference" class="muted"></p><p id="coach-label" class="muted"></p><p id="coach-focus" class="answer" role="status"></p><p id="coach-progress" class="muted"></p><p id="coach-review"></p><p id="coach-debrief" class="muted"></p><div class="coach-advanced" ${compact?'hidden':''}><div class="coach-controls"><label>Skill<select id="coach-skill"></select></label><label>Reference<select id="coach-reference-choice"><option value="">Automatic personal reference</option></select></label></div><div class="row"><button id="coach-set-skill" type="button">Apply skill</button><button id="coach-use-reference" type="button">Use reference</button><button id="coach-skip" type="button">Skip exercise</button><button id="coach-keep" type="button">Keep exercise</button><button id="coach-show-evidence" type="button">View measured evidence</button></div><details id="coach-details"><summary>Measured training evidence</summary><table id="coach-evidence"></table></details><p id="coach-history-suggestion" class="muted"></p><button id="coach-apply-history" type="button" hidden>Apply suggested skill</button><details id="coach-history"><summary>Private training history</summary><p id="coach-history-error" class="muted"></p><div id="coach-history-entries"></div><button id="coach-history-delete-all" type="button">Delete all private history</button><p class="notice">Up to 32 summaries and 90 days per driver. Deleting active training also prevents later checkpoints until a fresh Start. Raw audio and traces are not stored here.</p></details></div>`;
   this.q('skill').append(new Option('Any skill',''));for(const [key,label] of [['braking','Braking'],['throttle','Throttle'],['steering','Steering'],['gear','Gear choice'],['speed','Speed'],['line','Line'],['pace','Pace'],['consistency','Consistency']])this.q('skill').append(new Option(label,key));
   for(const id of ['mode','objective','ai','skill','reference-choice'])this.q(id).oninput=()=>{if(!this.dirty)this.base=this.state;this.dirty=true;this.editVersion++;};
   this.q('start').onclick=()=>this.send('start',{mode:this.q('mode').value,objective:this.q('objective').value,allow_ai:this.q('ai').checked});
@@ -105,24 +105,27 @@ class CoachView {
   this.q('set-skill').onclick=()=>this.send('skill',{skill:this.q('skill').value||null});this.q('use-reference').onclick=()=>this.send('reference',{lap_id:this.q('reference-choice').value||null});
   this.q('skip').onclick=()=>this.send('skip',{});this.q('keep').onclick=()=>this.send('keep',{});
   this.q('show-evidence').onclick=()=>{this.q('details').open=true;this.q('details').scrollIntoView({block:'nearest'});};
+  this.q('history-delete-all').onclick=()=>this.send('delete_history',{id:null});
+  this.q('apply-history').onclick=()=>{if(this.state?.history_suggestion)this.send('skill',{skill:this.state.history_suggestion.skill});};
   this.q('reload').onclick=()=>{this.generation++;this.abort();this.polling=false;this.dirty=false;this.base=null;this.actionError='';this.editVersion++;this.q('reload').hidden=true;this.schedule(0);};
   this.render();this.poll();
  }
  q(id){return this.host.querySelector('#coach-'+id);}
  abort(){for(const controller of this.controllers)controller.abort();this.controllers.clear();}
  clear(message='Connecting'){
-  this.generation++;this.abort();this.state=null;this.scope=null;this.base=null;this.dirty=false;this.actionError='';this.editVersion++;this.polling=false;this.sending=false;this.stopping=false;
+  this.generation++;this.abort();this.state=null;this.scope=null;this.historyFloor=0;this.adoptedSerial=0;this.base=null;this.dirty=false;this.actionError='';this.editVersion++;this.polling=false;this.sending=false;this.stopping=false;
   this.q('error').textContent=message;this.q('reference-choice').replaceChildren(new Option('Automatic personal reference',''));this.q('mode').value='practice';this.q('objective').value='balanced';this.q('skill').value='';this.q('ai').checked=false;this.q('reload').hidden=true;this.render();
  }
  schedule(delay=1000){if(this.dead)return;clearTimeout(this.timer);this.timer=setTimeout(()=>{this.timer=null;this.poll();},delay);}
  async api(body){
+  const serial=++this.requestSerial;
   const controller=new AbortController();this.controllers.add(controller);const timer=setTimeout(()=>controller.abort(),4000);
   const request=async(url,options={})=>{const response=await fetch(url,{credentials:'same-origin',cache:'no-store',signal:controller.signal,...options});const data=await response.json();if(!response.ok||data.ok===false){const error=new Error(data.error?.message||data.error||'Coaching is unavailable.');error.status=response.status;error.code=data.error?.code||data.code;throw error;}return data;};
   try{
    const data=await request((this.admin?'/api/driver-radio':'/console/driver-radio')+'/coach',body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
    const state=data.result||data;
    if(!this.admin){const identity=await request('/console/whoami');if(!identity.driver_radio||state.viewer!=='console:'+identity.subject){const error=new Error('Console identity changed. Refreshing coaching.');error.code='identity_changed';throw error;}}
-   return state;
+   return {...state,_clientSerial:serial};
   }finally{clearTimeout(timer);this.controllers.delete(controller);}
  }
  adopt(state,generation,expectedProfile){
@@ -135,7 +138,13 @@ class CoachView {
   if(this.serviceKey!==null&&this.serviceKey!==key){this.retired.add(this.serviceKey);if(this.retired.size>16)this.retired.delete(this.retired.values().next().value);this.clear('');}
   if(this.scope!==null&&this.scope!==scope)this.clear('');
   if(this.scope===scope&&this.state&&state.revision<this.state.revision)return false;
-  this.serviceKey=key;this.scope=scope;this.state=state;this.q('error').textContent=this.actionError;this.render();return true;
+  if(state._clientSerial<this.adoptedSerial)return false;
+  if(state.history&&( !Number.isSafeInteger(state.history.revision)||!Array.isArray(state.history.entries)||state.history.entries.length>32))throw new Error('Private training history is unavailable.');
+  if(state.history_error)state={...state,history:null,history_suggestion:null};
+  else if(state.history&&state.history.revision<this.historyFloor)state={...state,history:this.state?.history||null,history_suggestion:this.state?.history_suggestion||null};
+  else if(state.history)this.historyFloor=state.history.revision;
+  else if(this.scope===scope&&this.state?.history)state={...state,history:this.state.history,history_suggestion:this.state.history_suggestion};
+  this.adoptedSerial=state._clientSerial;this.serviceKey=key;this.scope=scope;this.state=state;this.q('error').textContent=this.actionError;this.render();return true;
  }
  fail(error,action=false){
   if(error.status===401||error.status===403||['identity_changed','profile_changed','training_busy','forbidden','feature_disabled','unauthorized'].includes(error.code))this.clear(error.message);
@@ -161,12 +170,13 @@ class CoachView {
   if(action==='stop'){this.generation++;this.abort();this.polling=false;this.stopping=true;}
   const generation=this.generation,editVersion=this.editVersion,profile=this.profile();
   const base=['start','objective','skill','reference'].includes(action)?this.base||this.state:this.state;
-  const body={expected:base.revision,action,options};if(this.admin)body.expectedProfile=base.profile;
+  if(action==='delete_history'&&!this.state.history){this.sending=false;return;}
+  const body={expected:action==='delete_history'?this.state.history.revision:base.revision,action,options};if(this.admin)body.expectedProfile=base.profile;
   this.sending=true;this.actionError='';this.q('error').textContent='';this.q('reload').hidden=true;this.render();
   try{
    const state=await this.api(body);
    if(this.dead||generation!==this.generation)return;
-   if(editVersion===this.editVersion){this.dirty=false;this.base=null;}
+   if(['start','objective','skill','reference'].includes(action)&&editVersion===this.editVersion){this.dirty=false;this.base=null;}
    else if(this.dirty)this.base=state;
    this.adopt(state,generation,profile);
   }catch(error){if(!this.dead&&generation===this.generation)this.fail(error,true);}
@@ -190,10 +200,27 @@ class CoachView {
   const evidence=this.q('evidence');evidence.replaceChildren();
   const attempt=f.attempts?.[f.attempts.length-1],check=attempt?.check||{},original=f.baseline?.passage||{};
   if(latest||focus){for(const [label,value] of [['Baseline lap IDs',(f.baseline?.lap_ids||[]).join(', ')||'Unavailable'],['Working reference ID',reference?.id||'Unavailable'],...(latest?[['Reviewed lap ID',latest.lap_id]]:[]),['Observation',latest?.observation||'Unavailable'],['Interpretation',latest?.interpretation||'Unavailable'],['Action',latest?.action||'No new technique score'],['Check',latest?.check||'Wait for a suitable lap'],['Original lap baseline · seconds',val(f.baseline?.time_s,3)],['Starting lap variation · seconds',val(f.baseline?.range_s,3)],['Comparable attempts',String(f.progress?.sample_count||0)],...(focus?.section_id?[['Original passage · seconds',val(original.time_s,3)],['Current passage · seconds',val(check.own_s,3)],['Following section · seconds',val(check.own_downstream_s,3)],['Passage exit · km/h',val(check.exit_speed_kmh)]]:[]),['Recent timing range · seconds',val(f.progress?.measure_range_s,3)]]){const row=el('tr');row.append(el('th',label),el('td',value));evidence.append(row);}}
+  this.renderHistory();
   if(!this.dirty&&!pending){
    this.q('mode').value=c.mode||'practice';this.q('objective').value=c.objective||'balanced';this.q('ai').checked=!!s?.allow_ai;this.q('skill').value=f.skill||'';
    const chooser=this.q('reference-choice');chooser.replaceChildren(new Option('Automatic personal reference',''));for(const r of (s?.references||[]).slice(0,32))chooser.append(new Option(r.label,r.id));
    if(reference?.source==='selected'){if(!Array.from(chooser.options).some(o=>o.value===reference.id))chooser.append(new Option('Selected reference · lap '+reference.lap,reference.id));chooser.value=reference.id;}
+  }
+ }
+ renderHistory(){
+  const state=this.state,history=state?.history,rows=history?.entries||[],box=this.q('history-entries');
+  const opened=new Set(Array.from(box.querySelectorAll('details[open]')).map(node=>node.dataset.historyId));box.replaceChildren();
+  this.q('history-error').textContent=state?.history_error?'Private history is unavailable. Current coaching continues.':history?(rows.length?'Historical checkpoints remain separate from the current calibration.':'No private training summaries.'):'';
+  this.q('history-delete-all').disabled=!rows.length||this.sending;
+  const ended=rows.find(row=>row.status!=='active'),debrief=ended?.debrief;
+  this.q('debrief').textContent=debrief?'Last debrief · car '+(ended.context?.car_id||'unknown')+' · '+(ended.context?.track_id||'unknown track')+': '+[debrief.worked,debrief.observed,debrief.interpretation,debrief.next].join(' '):'';
+  const hint=state?.history_suggestion;this.q('history-suggestion').textContent=hint?.text||'';this.q('apply-history').hidden=!hint;this.q('apply-history').disabled=!state?.active||state?.pending||this.sending;
+  for(const row of rows){
+   const item=el('details');item.dataset.historyId=row.id;item.open=opened.has(row.id);
+   item.append(el('summary',new Date(row.updated_at*1000).toLocaleString()+' · car '+(row.context?.car_id||'unknown')+' · '+(row.context?.track_id||'unknown track')+' · '+row.status));
+   for(const [label,text] of [['Worked focus',row.debrief?.worked],['Observed change',row.debrief?.observed],['Interpretation',row.debrief?.interpretation],['Next exercise',row.debrief?.next]])item.append(el('p',label+': '+(text||'Unavailable')));
+   item.append(el('p','Evidence: '+row.evidence_status+'. Baseline laps: '+(row.baseline?.lap_ids||[]).join(', '),'muted'));
+   const button=el('button','Delete this summary');button.type='button';button.disabled=this.sending;button.onclick=()=>this.send('delete_history',{id:row.id});item.append(button);box.append(item);
   }
  }
  destroy(){this.dead=true;this.generation++;clearTimeout(this.timer);this.abort();this.state=null;this.base=null;this.retired.clear();this.host.replaceChildren();}

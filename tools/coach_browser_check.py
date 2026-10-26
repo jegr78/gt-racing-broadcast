@@ -159,6 +159,8 @@ def check(browser,outdir,shots=None):
             results.append(V.SurfaceResult('driver-coach-controls','desktop',None,[],0,None))
         ordering_and_identity(browser)
         results.append(V.SurfaceResult('driver-coach-privacy-ordering','desktop',None,[],0,None))
+        history_lifecycle(browser)
+        results.append(V.SurfaceResult('driver-coach-private-history','desktop',None,[],0,None))
     except Exception:
         results.append(V.SurfaceResult('driver-coach','desktop',None,[],0,traceback.format_exc()))
     finally:context.close()
@@ -237,6 +239,33 @@ def ordering_and_identity(browser):
                 assert not page.evaluate('window.radioView.coach.state?.focus?.focus'),'Late old reply restored private focus'
                 page.close()
         finally:context.close()
+
+
+def history_lifecycle(browser):
+    sys.path.insert(0,str(ROOT/'tests'))
+    from test_driver_radio_ui import RadioFixture
+    context=browser.new_context()
+    try:
+        with RadioFixture(coaching=True) as f:
+            page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
+            host=page.locator('#driver-radio')
+            host.locator('#coach-history').wait_for(state='visible',timeout=5000)
+            host.locator('#coach-start').click()
+            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            for n in (2,3,4):f.practice.complete(n);f.practice.service.step()
+            page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.latest?.lap_id==='lap-4')")
+            host.locator('#coach-history').evaluate('(node)=>node.open=true')
+            host.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
+            assert 'Completed lap' in host.locator('#coach-history-entries').inner_text()
+            host.locator('#coach-stop').click();page.wait_for_function('window.radioView.coach.state?.pending')
+            f.practice.service.step()
+            page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.status==='stopped')")
+            assert 'fresh' in host.locator('#coach-debrief').inner_text().lower()
+            host.locator('#coach-history-delete-all').click()
+            page.wait_for_function('window.radioView.coach.state?.history?.entries.length===0')
+            assert not host.locator('#coach-debrief').inner_text()
+            page.close()
+    finally:context.close()
 
 
 def main():
