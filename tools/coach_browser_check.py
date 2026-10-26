@@ -169,6 +169,7 @@ def check(browser,outdir,shots=None):
         ordering_and_identity(browser)
         results.append(V.SurfaceResult('driver-coach-privacy-ordering','desktop',None,[],0,None))
         history_lifecycle(browser)
+        history_source_ordering(browser)
         results.append(V.SurfaceResult('driver-coach-private-history','desktop',None,[],0,None))
     except Exception:
         results.append(V.SurfaceResult('driver-coach','desktop',None,[],0,traceback.format_exc()))
@@ -322,6 +323,38 @@ def history_lifecycle(browser):
             page.close()
             assert f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})['active']
     finally:context.close()
+
+
+def history_source_ordering(browser):
+    sys.path.insert(0, str(ROOT / 'tests'))
+    from test_driver_radio_ui import RadioFixture
+    context = browser.new_context()
+    try:
+        with RadioFixture(coaching=True) as f:
+            page = context.new_page()
+            page.goto(f.url + '/console/driver-radio?t=' + f.token)
+            host = page.locator('#driver-radio')
+            host.locator('#coach-start').click()
+            page.wait_for_function('window.radioView.coach.state?.pending')
+            f.practice.service.step()
+            for n in (2, 3, 4):
+                f.practice.complete(n)
+                f.practice.service.step()
+            page.wait_for_function('window.radioView.coach.state?.focus?.focus&&window.radioView.coach.state.history?.entries.length')
+            host.locator('#coach-history').evaluate('(node)=>node.open=true')
+            previous = page.evaluate('window.radioView.coach.state.revision')
+            page.evaluate("window.__sourceFetch=fetch;window.fetch=async(...args)=>{\n    const response=await window.__sourceFetch(...args);\n    if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST'&&!window.__releaseSourceReply&&(await response.clone().json()).focus?.focus)\n      await new Promise(resolve=>window.__releaseSourceReply=resolve);\n    return response;};")
+            page.wait_for_function('typeof window.__releaseSourceReply==="function"')
+            f.practice.snap['current']['car_id'] = 99
+            host.locator('#coach-history-delete-all').click()
+            page.wait_for_function('window.radioView.coach.state?.phase==="paused"&&!window.radioView.coach.sending')
+            assert page.evaluate('window.radioView.coach.state.revision') == previous, 'Fixture unexpectedly changed actor revision'
+            page.evaluate('window.__releaseSourceReply();window.fetch=window.__sourceFetch')
+            page.wait_for_function('!window.radioView.coach.polling')
+            assert not page.evaluate('window.radioView.coach.state?.focus?.focus'), 'An old equal-revision GET revived live facts after a newer context-aware acknowledgement'
+            page.close()
+    finally:
+        context.close()
 
 
 def main():

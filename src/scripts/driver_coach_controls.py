@@ -178,6 +178,8 @@ class References:
 
     def choices(self, archives):
         doc = self.live.snapshot()
+        if not orchestration._live(doc):
+            return []
         context = dict(calibration._context(doc.get('current') or {}), comparison_eligible=True)
         rows = [r for r in (doc.get('laps') or [])[-512:] if isinstance(r, dict)
                 and r.get('session_id') == doc.get('session_id') and calibration.eligible(r)

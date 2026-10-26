@@ -261,6 +261,18 @@ def t_skill_preference_can_be_set_before_calibration_or_a_current_exercise_exist
         f.command('skill',skill=None);state=f.step();assert state['focus']['skill'] is None
 
 
+def t_reference_choices_do_not_offer_recorded_or_stale_laps_as_current_live_references():
+    for change in ('replay','stale'):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.complete(2)
+            live=SimpleNamespace(snapshot=lambda f=f:copy.deepcopy(f.snap),detail=f.detail)
+            references=controls.References(live,lambda _ident:None)
+            assert references.choices([])
+            if change=='replay':f.snap['replay']['active']=True
+            else:f.snap['receipt']['state']='stale'
+            assert references.choices([])==[], 'Unavailable live evidence was offered as a current reference'
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)
