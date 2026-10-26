@@ -1,0 +1,37 @@
+# Private coaching history and debrief
+
+History belongs to the exact profile and server-derived `local:producer` or
+`console:<verified subject>` identity. Opening a desk, Engineer access or a shared
+recording grant does not select another driver's history. Display names and raw
+owner selectors are never accepted from a browser.
+
+| Requirement | Production path | Positive test | Failure test | Runtime evidence |
+|---|---|---|---|---|
+| Private stable identity | Profile-local hashed journal selector | Local and full-length Console owners retain their own sessions | Foreign profile/owner, malformed selector, forged HTTP owner | Signed HTTP owner matrix |
+| Compact provenance | Strict journal projection from accepted actor evidence | Original baseline, worked focus, latest observed change and source IDs survive without a recording | Trace/audio/transcript/provider fields never enter the journal | Real synthetic lap checkpoint and JSON inspection |
+| Honest debrief | Completed/interrupted/context-invalidated segment summary | Stopped training retains provisional versus repeated improvement and unknown cause | A crash cannot invent a completed session or a causal result | Restart and session-end integration |
+| Current reuse | Compatible current context plus explicit skill action | A prior skill may be suggested after current personal calibration | No historic timing becomes a new baseline; changed car/track/definition/grant cannot authorize reuse | Fresh-session replay |
+| Bounded private storage | Atomic bounded JSON, advisory lock, private directory | At most 32 recent segments per owner, expired records pruned on access | Symlink/path/corruption/oversize/conflicting edits fail closed | Actual temporary filesystem, OS CI |
+| Responsive controls | Existing actor worker performs journal IO outside state locks | Stop acknowledges and cancels speech while persistence is blocked | Late checkpoints cannot reactivate stopped/deleted history | Blocking IO integration |
+| Retention and deletion | Owner-only revisioned deletion and bounded tombstones | Delete one/all; later checkpoints cannot restore deleted active training | Wrong owner/revision and delayed read after revocation | HTTP and browser concurrency |
+| Private views | Shared detailed driver/producer component | Own history and end debrief are readable while another driver is training | Late responses cannot restore previous identity/deleted private DOM | Desktop/tablet/phone browser evidence |
+
+The journal stores compact structured measurements and provenance, never raw
+traces, audio, transcripts, credentials or arbitrary agent output. A training may
+contain several context/calibration segments. Each segment preserves its own
+baseline and definition; history never compares measurements across segments.
+The limit is 32 segments and 90 days per owner, pruned on that owner's reads and
+writes. Explicit deletion is available independently of recording retention.
+
+Persistence uses the existing actor worker outside short state/access/telemetry
+locks. Stop changes the actor token immediately. If a final checkpoint never
+reaches disk, the debrief honestly uses the last stored checkpoint and remains
+partial. A journal constructor performs no IO. After a successful relay bind,
+reading or starting training marks older-generation unfinished entries interrupted;
+a failed second bind cannot touch the running relay's history.
+
+Historical observations remain historical. Reference provenance is not a retained
+archive grant, and reference-derived details require current permission/source
+checks before display or reuse. A next-session skill suggestion requires a known
+compatible car, track, definition and conditions, explicit application, and fresh
+personal calibration. Improvement records continue to state that cause is unknown.
