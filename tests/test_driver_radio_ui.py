@@ -24,6 +24,8 @@ class RadioFixture:
             from test_driver_coach_service import Fixture as Practice
             self.practice=Practice(Path(self.temp.name)/'solo-pov');self.f=self.practice.radio
             self.practice.service.profile='solo-pov';self.f.service.coach=self.practice.service
+            import driver_coach_history
+            self.practice.service.journal=driver_coach_history.Store(self.f.access.path.parent,clock=lambda:self.practice.wall)
         else:self.f=Fixture(Path(self.temp.name)/'solo-pov')
         self.f.poll()
         self.workers=[]
@@ -35,6 +37,7 @@ class RadioFixture:
         m=console.m;self.template=patch.object(m,'solo_template',return_value='pov');self.template.start();crew=m.CrewSource('');crew.inject_row(1,name='Director',director=True)
         relay=m.Relay(console._FakeSource([],[]),[53001,53002],self.temp.name,solo=self.solo)
         telemetry=m.gt7_telemetry.TelemetryStore();telemetry.engineer=SimpleNamespace(snapshot=lambda compact=False:copy.deepcopy(self.f.snap))
+        self.crew=crew;self.telemetry=telemetry
         if self.practice:telemetry.engineer.detail=self.practice.detail
         self.engineer=m.race_engineer_access.Store(self.f.access.path.parent,True)
         engineer=self.engineer

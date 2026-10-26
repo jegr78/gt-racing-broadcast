@@ -11,6 +11,16 @@ def command(service, owner, body, authorize, resolve=None):
         raise calibration.CoachError('invalid_body')
     if not orchestration._allowed(authorize):
         raise calibration.CoachError('forbidden')
+    if body['action']=='delete_history':
+        if set(body['options'])!={'id'}:
+            raise calibration.CoachError('invalid_body')
+        if service.journal is None:
+            raise calibration.CoachError('history_unavailable')
+        deleted=service.journal.delete(owner,body['expected'],body['options']['id'])
+        if not orchestration._allowed(authorize):
+            raise calibration.CoachError('forbidden')
+        result=service.view(owner);result['_history']=deleted
+        return result
     state = service.snapshot(owner)
     if (type(body['expected']) is not int or body['expected'] < 0
             or body['action'] != 'stop' and body['expected'] != state['revision']):

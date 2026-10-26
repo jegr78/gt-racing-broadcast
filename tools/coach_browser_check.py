@@ -35,6 +35,9 @@ def check(browser,outdir,shots=None):
     context.route('https://fonts.googleapis.com/**',lambda route:route.fulfill(status=200,content_type='text/css',body='/* Offline synthetic fixture. */'))
     try:
         with RadioFixture(coaching=True) as f:
+            f.practice.wall=1767225600.0
+            f.practice.snap['receipt']['received_at']=f.practice.wall
+            f.practice.snap['current']['_start_wall']=f.practice.wall
             page=context.new_page();errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(f.url+'/console/driver-radio?t='+f.token)
@@ -52,6 +55,8 @@ def check(browser,outdir,shots=None):
             assert a.locator('#coach-review').inner_text()
             sync(page,f);apply(page,a,'#coach-keep',f)
             a.locator('#coach-show-evidence').click()
+            a.locator('#coach-history').evaluate('(node)=>node.open=true')
+            a.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
             assert a.locator('#coach-evidence').inner_text().find('Observation')>=0
             assert all(ident in a.locator('#coach-evidence').inner_text() for ident in f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['focus']['baseline']['lap_ids'])
             # Start a reference read, then let a new lap change the actor revision.
@@ -117,6 +122,8 @@ def check(browser,outdir,shots=None):
             assert page.evaluate('window.__coachInjected===undefined')
             page.unroute('**/driver-radio/coach');page.wait_for_function("!document.getElementById('driver-radio').shadowRoot.getElementById('coach-label').textContent.includes('<img')")
             a.locator('#coach-show-evidence').click()
+            a.locator('#coach-history').evaluate('(node)=>node.open=true')
+            a.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
             for width,view in ((1440,'desktop'),(1024,'tablet'),(390,'phone')):
                 page.set_viewport_size({'width':width,'height':1000})
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),'Driver coaching overflows viewport'
@@ -133,7 +140,9 @@ def check(browser,outdir,shots=None):
                 f.practice.complete(n,seconds);f.practice.service.step()
             sync(cc,f,'radioAdmin','local:producer');cc.wait_for_function("window.radioAdmin.coach.state?.focus?.focus")
             assert f.practice.service.snapshot({'profile':'solo-pov','subject':'local:producer'})['calibration']['mode']=='time_trial'
-            c.locator('#coach-show-evidence').click();c.scroll_into_view_if_needed()
+            c.locator('#coach-history').evaluate('(node)=>node.open=true')
+            c.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
+            c.locator('#coach-history').scroll_into_view_if_needed()
             shot(cc,'coach-control-center','desktop','cc-telemetry.png')
             apply(cc,c,'#coach-stop',f,'radioAdmin','local:producer')
             config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','director']))
@@ -159,6 +168,8 @@ def check(browser,outdir,shots=None):
             results.append(V.SurfaceResult('driver-coach-controls','desktop',None,[],0,None))
         ordering_and_identity(browser)
         results.append(V.SurfaceResult('driver-coach-privacy-ordering','desktop',None,[],0,None))
+        history_lifecycle(browser)
+        results.append(V.SurfaceResult('driver-coach-private-history','desktop',None,[],0,None))
     except Exception:
         results.append(V.SurfaceResult('driver-coach','desktop',None,[],0,traceback.format_exc()))
     finally:context.close()
@@ -234,9 +245,83 @@ def ordering_and_identity(browser):
                 else:page.wait_for_function('window.radioView.coach.state===null')
                 assert not a.locator('#coach-review').inner_text(),'Private review survived identity or permission change'
                 assert not a.locator('#coach-evidence').inner_text(),'Private evidence remained in the DOM'
+                assert not a.locator('#coach-history-entries').inner_text(),'Private history remained in the DOM'
+                assert not a.locator('#coach-debrief').inner_text(),'Private debrief survived identity or permission change'
                 assert not page.evaluate('window.radioView.coach.state?.focus?.focus'),'Late old reply restored private focus'
                 page.close()
         finally:context.close()
+
+
+def history_lifecycle(browser):
+    sys.path.insert(0,str(ROOT/'tests'))
+    from test_driver_radio_ui import RadioFixture
+    context=browser.new_context()
+    try:
+        with RadioFixture(coaching=True) as f:
+            current=f.practice.current
+            f.practice.current=lambda n:dict(current(n),settings_confirmed=True)
+            f.practice.snap['current']=f.practice.current(1)
+            page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
+            host=page.locator('#driver-radio')
+            host.locator('#coach-history').wait_for(state='visible',timeout=5000)
+            host.locator('#coach-start').click()
+            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            for n in (2,3,4):f.practice.complete(n,settings_confirmed=True);f.practice.service.step()
+            page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.latest?.lap_id==='lap-4')")
+            host.locator('#coach-history').evaluate('(node)=>node.open=true')
+            host.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
+            assert 'Completed lap' in host.locator('#coach-history-entries').inner_text()
+            host.locator('#coach-stop').click();page.wait_for_function('window.radioView.coach.state?.pending')
+            f.practice.service.step()
+            page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.status==='stopped')")
+            assert 'fresh' in host.locator('#coach-debrief').inner_text().lower()
+            ended=page.evaluate("window.radioView.coach.state.history.entries.find(r=>r.status==='stopped').id")
+            host.locator('#coach-start').click()
+            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            assert not f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['calibration']['calibration_ids']
+            for n in (6,7,8):f.practice.complete(n,settings_confirmed=True);f.practice.service.step()
+            page.wait_for_function('window.radioView.coach.state?.history_suggestion')
+            hint=page.evaluate('window.radioView.coach.state.history_suggestion.skill')
+            host.locator('#coach-apply-history').click()
+            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            page.wait_for_function('(skill)=>window.radioView.coach.state?.focus?.skill===skill&&!window.radioView.coach.state.pending',arg=hint)
+            assert set(f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['calibration']['baseline']['lap_ids']).isdisjoint({'lap-2','lap-3'})
+            page.wait_for_function('!window.radioView.coach.polling')
+            host.locator('#coach-objective').select_option('pace')
+            host.locator('[data-history-id="'+ended+'"]').evaluate('(node)=>node.open=true')
+            store=f.practice.service.journal;original=store.delete;entered=threading.Event();release=threading.Event()
+            def delayed(*args):
+                entered.set();assert release.wait(6);return original(*args)
+            page.evaluate("""window.__historyFetch=fetch;window.fetch=async(...args)=>{
+                const response=await window.__historyFetch(...args);
+                if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST'&&!window.__releaseHistoryReply)
+                    await new Promise(resolve=>window.__releaseHistoryReply=resolve);
+                return response;};""")
+            try:
+                with patch.object(store,'delete',delayed):
+                    with page.expect_response(lambda response:response.url.endswith('/coach') and response.request.method=='POST'):
+                        host.locator('[data-history-id="'+ended+'"] button').click()
+                        assert entered.wait(2)
+                        page.evaluate('clearTimeout(window.radioView.coach.timer);void window.radioView.coach.poll()')
+                        page.wait_for_function('typeof window.__releaseHistoryReply==="function"')
+                        release.set()
+                    page.wait_for_function('(id)=>!window.radioView.coach.sending&&!window.radioView.coach.state.history.entries.some(r=>r.id===id)',arg=ended)
+                    deleted_revision=page.evaluate('window.radioView.coach.state.history.revision')
+                    page.evaluate('window.__releaseHistoryReply();window.fetch=window.__historyFetch')
+                    page.wait_for_function('!window.radioView.coach.polling')
+                    assert not host.locator('[data-history-id="'+ended+'"]').count(),'An older history reply restored a deleted summary'
+                    assert page.evaluate('window.radioView.coach.state.history.revision')>=deleted_revision
+                    assert host.locator('#coach-objective').input_value()=='pace','History deletion discarded an unsaved objective'
+            finally:
+                release.set();page.evaluate('window.__releaseHistoryReply?.();window.fetch=window.__historyFetch')
+            host.locator('#coach-history-delete-all').click()
+            page.wait_for_function('window.radioView.coach.state?.history?.entries.length===0')
+            assert not host.locator('#coach-debrief').inner_text()
+            f.practice.complete(9,settings_confirmed=True);f.practice.service.step()
+            assert not store.read({'profile':'solo-pov','subject':'console:driver'},f.practice.service._generation)['entries']
+            page.close()
+            assert f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})['active']
+    finally:context.close()
 
 
 def main():

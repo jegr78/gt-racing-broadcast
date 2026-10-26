@@ -10,6 +10,7 @@ import uuid
 import driver_coach_assessment as assessment
 import driver_coach_calibration as calibration
 import driver_coach_focus as focus
+import driver_coach_history as history
 
 COMMANDS = frozenset(('start', 'stop', 'objective', 'skill', 'skip', 'keep', 'reference'))
 ROWS_PER_STEP = 4
@@ -84,13 +85,14 @@ def attach(radio, live):
     if (live is None or not radio.settings.available
             or not callable(getattr(live, 'snapshot', None)) or not callable(getattr(live, 'detail', None))):
         return None
-    coordinator = Service(radio.settings.path.parent.name, live.snapshot, live.detail, radio)
+    coordinator = Service(radio.settings.path.parent.name, live.snapshot, live.detail, radio,
+                          journal=history.Store(radio.settings.path.parent))
     radio.coach = coordinator
     return coordinator
 
 
 class Service:
-    def __init__(self, profile, source, detail, radio, clock=time.monotonic, wall=time.time, assessor=None):
+    def __init__(self, profile, source, detail, radio, clock=time.monotonic, wall=time.time, assessor=None, journal=None):
         self.profile, self.source, self.detail, self.radio = profile, source, detail, radio
         self.clock, self.wall, self.assessor = clock, wall, assessor or assessment.assess
         self._lock = threading.RLock()
@@ -103,6 +105,9 @@ class Service:
         self._model = None
         self._token = uuid.uuid4().hex
         self._generation = uuid.uuid4().hex
+        self.journal=journal
+        self._journal_current=None
+        self._journal_error=None
         self._revision = 0
         self._lowload_at = None
         self._ready_at = 0
@@ -116,14 +121,17 @@ class Service:
                 self._thread.start()
 
     def _run(self):
-        while not self._stop.is_set():
-            try:
-                self.step()
-            except (OSError, ValueError, TypeError, KeyError):
-                with self._lock:
-                    self._invalidate('unavailable')
-                self.radio.cancel_coach()
-            self._stop.wait(.25)
+        try:
+            while not self._stop.is_set():
+                try:
+                    self.step()
+                except (OSError, ValueError, TypeError, KeyError):
+                    with self._lock:
+                        self._invalidate('unavailable')
+                    self.radio.cancel_coach()
+                self._stop.wait(.25)
+        finally:
+            self._journal_end('stopped','relay_closed')
 
     def _invalidate(self, phase):
         self._token = uuid.uuid4().hex
@@ -209,14 +217,36 @@ class Service:
         self.radio.cancel_coach(blocking=False)
         return self.view(owner)
 
+    def after_io(self,owner,prior,doc):
+        """Only remove unproven facts after external IO; never invoke grant callbacks."""
+        with self._lock:
+            current=self.snapshot(owner)
+            stamp,expected=self._checks
+        same=all(current.get(k)==prior.get(k) for k in ('epoch','revision'))
+        state=copy.deepcopy(prior if same else current)
+        if state['active']:
+            lookup={row.get('id'):row for row in (doc.get('laps') or [])[-512:] if isinstance(row,dict)}
+            valid=(same and _live(doc) and _stamp(doc)==stamp
+                   and all(ident in lookup and _facts(lookup[ident])==facts for ident,facts in expected))
+            if state['pending'] or not valid:
+                state.update(phase='pending' if state['pending'] else 'paused',calibration=None,focus=None,latest=None)
+                if 'references' in state:state['references']=[]
+        with self._lock:
+            if self._revision!=current['revision'] or self._token!=current.get('epoch',self._token):
+                state=self.snapshot(owner)
+                if state['active']:state.update(phase='pending' if state['pending'] else 'paused',calibration=None,focus=None,latest=None)
+        return state
+
     def _apply(self, command):
         action, options = command['action'], command['options']
         if action == 'stop':
+            self._journal_end('stopped','explicit_stop')
             if self._model:
                 self._model['cal'].stop()
             self._model = None
             return
         if action == 'start':
+            self._journal_end('restarted','explicit_restart')
             cal = calibration.Calibration()
             cal.start(command['owner'], mode=options.get('mode', 'practice'), objective=options.get('objective', 'balanced'))
             doc = command['doc']
@@ -225,7 +255,12 @@ class Service:
                                mark=_mark(doc, command['wall']) if _live(doc) else None,
                                seen=collections.OrderedDict(), allow_ai=options.get('allow_ai', False),
                                latest=None, owner=command['owner'], cal_epoch=cal.epoch, reference_grant=None,
-                               sources=collections.OrderedDict(), best_source=None, focus_key=None, focus_sources=set(), cursor=0, detail_cursor=0, detail_status=None)
+                               sources=collections.OrderedDict(), best_source=None, focus_key=None, focus_sources=set(), cursor=0, detail_cursor=0, detail_status=None,
+                               started_at=command['wall'])
+            if self.journal is not None:
+                self._journal_attempt(lambda:self.journal.read(command['owner'],self._generation))
+                initial=dict(calibration=cal.snapshot(),focus=None,latest=None)
+                self._journal_checkpoint(command['token'],self._model,initial,initial=True)
             return
         model = self._model
         if model is None:
@@ -287,6 +322,8 @@ class Service:
     def _sync_epoch(self, model, calibrated):
         if calibrated['epoch'] == model['cal_epoch']:
             return False
+        invalidations=calibrated.get('invalidations') or []
+        self._journal_end('invalidated',calibrated.get('reason') or (invalidations[-1]['reason'] if invalidations else 'calibration_changed'))
         model['cal_epoch'] = calibrated['epoch']
         model['focus'].observe(None, None, calibrated)
         model['cohort'].clear(); model['latest'] = None
@@ -313,11 +350,44 @@ class Service:
         new = dict(active=calibrated['active'], pending=False, phase=calibrated['phase'],
                    calibration=calibrated, focus=model['focus'].snapshot(), latest=model['latest'],
                    allow_ai=model['allow_ai'] if calibrated['active'] else False, detail_status=model['detail_status'])
+        changed=False
         with self._lock:
             if token == self._token and self._command is None:
                 self._checks = (model['stamp'], tuple(model['sources'].items()))
                 if new != self._state:
                     self._state = copy.deepcopy(new); self._revision += 1
+                    changed=True
+        if changed:self._journal_checkpoint(token,model,new)
+
+    def _journal_attempt(self,operation):
+        try:
+            result=operation();self._journal_error=None;return result
+        except (calibration.CoachError,OSError,ValueError,TypeError,KeyError):
+            self._journal_error='history_unavailable'
+            return None
+
+    def _journal_end(self,status,reason):
+        current=self._journal_current
+        if self.journal is not None and current is not None:
+            if status=='stopped' and self._journal_error:
+                status,reason='interrupted','checkpoint_unavailable'
+            self._journal_attempt(lambda:self.journal.finish(current[0],current[1],status,reason))
+            self._journal_current=None
+
+    def _journal_checkpoint(self,token,model,state,initial=False):
+        if self.journal is None:return
+        with self._lock:
+            if token!=self._token or self._stop.is_set() or self._command is not None:return
+        if not _allowed(self._grant):return
+        doc=self.source()
+        if not initial and not self._current(token,model['stamp'],tuple(model['sources'].items())):return
+        working=model['cal']._working
+        record=self._journal_attempt(lambda:history.compact(state,doc.get('current') if _live(doc) else {},self._generation,model['started_at'],self.wall(),
+                                                           proof=tuple(model['sources'].items()),reference_fingerprint=working.digest if working else None))
+        if record is not None:
+            owner=copy.deepcopy(model['owner'])
+            self._journal_current=(owner,record['id'])
+            self._journal_attempt(lambda:self.journal.save(owner,record))
 
     def step(self):
         with self._work_lock:
@@ -338,6 +408,7 @@ class Service:
                 self._apply(command)
             model = self._model
             if model is not None and not _allowed(self._grant):
+                self._journal_end('revoked','driver_access_revoked')
                 with self._lock:
                     if token == self._token:
                         self._model = None

@@ -3,6 +3,7 @@ import json
 import http_util
 
 PROTOCOL='racecast-driver-radio-admin-v1'
+MAX_COACH_RESPONSE=1024*1024  # 32 compact journal records, debriefs and the current actor view.
 
 
 class AdminError(ValueError):
@@ -28,8 +29,9 @@ class Client:
                     headers={'Content-Type':'application/json'},timeout=4,allow_redirects=False)
             except http_util.HTTPError as exc:response=exc
             with response:
-                raw=response.read(65537)
-                if len(raw)>65536:raise ValueError('Radio response is too large')
+                limit=MAX_COACH_RESPONSE if coach else 65536
+                raw=response.read(limit+1)
+                if len(raw)>limit:raise ValueError('Radio response is too large')
                 result=json.loads(raw)
         except (OSError,ValueError,TypeError,RecursionError):
             raise ValueError('Radio relay unavailable; start the relay for this profile') from None
@@ -44,7 +46,7 @@ class Client:
 def error_status(code):
     if code in ('conflict','busy','training_busy','training_required','focus_unavailable','incompatible_reference','profile_changed'):
         return 409
-    if code in ('source_unavailable','settings_unavailable','reference_pending','coaching_unavailable'):
+    if code in ('source_unavailable','settings_unavailable','reference_pending','coaching_unavailable','history_unavailable'):
         return 503
     if code in ('forbidden','feature_disabled','foreign_origin'):
         return 403
