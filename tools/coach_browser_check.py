@@ -205,12 +205,12 @@ def ordering_and_identity(browser):
         context=browser.new_context()
         try:
             with RadioFixture(coaching=True) as f:
+                config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','other']))
                 page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
                 a=page.locator('#driver-radio');a.locator('#coach-start').click()
                 page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
                 for n in (2,3):f.practice.complete(n);f.practice.service.step()
                 page.wait_for_function('window.radioView.coach.state?.focus?.focus')
-                config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','other']))
                 page.evaluate("""window.__scopeFetch=fetch;window.fetch=async(...args)=>{
                     const response=await window.__scopeFetch(...args);
                     if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST'&&!window.__releasePrivateCoach)
@@ -223,6 +223,8 @@ def ordering_and_identity(browser):
                 else:
                     config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=[]));f.practice.service.step()
                 page.evaluate('window.__releasePrivateCoach();window.fetch=window.__scopeFetch')
+                page.wait_for_function('!window.radioView.coach.polling')
+                assert not a.locator('#coach-evidence').inner_text(),'A delayed private reply rendered before the next current-identity poll'
                 if change=='identity':page.wait_for_function("window.radioView.coach.state?.viewer==='console:other'")
                 else:page.wait_for_function('window.radioView.coach.state===null')
                 assert not a.locator('#coach-review').inner_text(),'Private review survived identity or permission change'

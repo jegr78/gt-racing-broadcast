@@ -121,6 +121,22 @@ def t_stop_uses_current_permission_and_owner_without_requiring_the_latest_displa
         assert status==200 and not stopped['active']
 
 
+
+def t_pending_post_and_get_never_return_old_focus_after_the_live_context_changes():
+    with RadioFixture(coaching=True) as f:
+        state=answer(f)[1]
+        assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+        f.practice.service.step()
+        for n in (2,3):f.practice.complete(n);f.practice.service.step()
+        state=answer(f)[1];assert state['focus']['focus']
+        f.practice.snap['current']['car_id']=99
+        status,pending,_=answer(f,method='POST',body=dict(expected=state['revision'],action='skill',options={'skill':'braking'}))
+        assert status==200 and pending['pending']
+        assert pending['calibration'] is None and pending['focus'] is None and pending['latest'] is None
+        current=answer(f)[1]
+        assert current['pending'] and current['calibration'] is None and current['focus'] is None
+
+
 def t_unreadable_local_settings_have_a_semantic_unavailable_response():
     with RadioFixture(coaching=True) as f:
         f.f.access.path.write_text('{broken',encoding='utf8')

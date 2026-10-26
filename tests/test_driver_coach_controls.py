@@ -106,9 +106,11 @@ def t_pending_controls_cannot_reveal_retained_reference_or_focus_after_a_grant_o
             f.command('reference',row=real_lap(20,8),authorize=lambda allowed=allowed:allowed[0]);f.step()
             for n in (4,5):f.complete(n);f.step()
             assert f.service.view(LOCAL)['calibration']['reference']['source']=='selected'
-            f.command('skill',skill='braking')
             if change=='grant':allowed[0]=False
             else:f.snap['current']['car_id']=99
+            body=dict(expected=f.service.snapshot(LOCAL)['revision'],action='skill',options={'skill':'braking'})
+            ack=controls.command(f.service,LOCAL,body,lambda:True)
+            assert ack['pending'] and ack['calibration'] is None and ack['focus'] is None and ack['latest'] is None
             view=f.service.view(LOCAL)
             assert view['pending'] and view['calibration'] is None and view['focus'] is None and view['latest'] is None
 

@@ -207,7 +207,7 @@ class Service:
                 self._state.update(calibration=None, focus=None, latest=None,
                                    allow_ai=options.get('allow_ai', False) if action == 'start' else False)
         self.radio.cancel_coach(blocking=False)
-        return self.snapshot(owner)
+        return self.view(owner)
 
     def _apply(self, command):
         action, options = command['action'], command['options']
