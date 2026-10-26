@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 spec = importlib.util.spec_from_file_location('e2e_harness', ROOT / 'tools/e2e.py')
 harness = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(harness)
+import atomic_replace
 
 
 def t_windows_teardown_kills_the_tree_before_waiting_and_closes_the_log():
@@ -134,6 +135,10 @@ os._exit(0)
                 # Both test listener and independent watchdog also self-expire.
                 until=time.monotonic()+5
                 while ready.exists() and not can_bind(int(ready.read_text())) and time.monotonic()<until:time.sleep(.02)
+                # Job termination releases the listener before the supervisor's
+                # own stdout handle closes. Windows forbids deleting that log
+                # until process finalization; wait for that distinct boundary.
+                atomic_replace.retry_windows_file_operation(lambda:(root/'child.log').unlink(missing_ok=True))
 
 
 def t_unsafe_process_id_is_rejected_before_any_signal():
