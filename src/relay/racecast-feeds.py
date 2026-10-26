@@ -178,6 +178,7 @@ import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
 import driver_radio_access
 import driver_radio_service
+import driver_coach_service
 import driver_radio_providers
 import driver_radio_ai
 import driver_radio_native
@@ -11594,6 +11595,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         return engine.snapshot() if engine is not None else {}
     if radio_service is None and radio_access is not None:
         radio_service = driver_radio_service.Service(radio_access, driver_radio_access.Session(), radio_source)
+    if radio_service is not None:
+        driver_coach_service.attach(radio_service, getattr(telemetry_store, 'engineer', None))
     radio_session = radio_service.session if radio_service is not None else driver_radio_access.Session()
     radio_page_dir = os.path.dirname(console_page_path) if console_page_path else os.path.normpath(
         os.path.join(os.path.dirname(__file__), "..", "console"))
@@ -11756,7 +11759,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             if (set(query) - {"since", "t"} or len(values) > 1
                                     or values and not (values[0].isascii() and values[0].isdigit() and len(values[0]) <= 18)):
                                 return self._radio_error("invalid_query", "Use one nonnegative message revision", 400)
-                            result = radio_service.history(int(values[0]) if values else None)
+                            result = radio_service.history(int(values[0]) if values else None, requester=subject)
                         elif route == "request":
                             if set(body) != {"preset", "binding"}:
                                 return self._radio_error("invalid_body", "Expected preset and current binding", 400)
@@ -14794,6 +14797,7 @@ def main():
         driver_radio_access.Store(runtime, engineer_access.available),
         driver_radio_access.Session(),
         lambda: engineer_live.snapshot() if engineer_live is not None else {})
+    coach_service = driver_coach_service.attach(radio_service, engineer_live)
     radio_enricher = driver_radio_providers.Enricher(
         radio_service, ai=driver_radio_ai.LiveAI(runtime_base) if telemetry_store is not None else None)
     radio_native = driver_radio_native.Supervisor(
@@ -14885,6 +14889,7 @@ def main():
                  f"to see what holds the port.")
 
     radio_service.start()
+    if coach_service is not None:coach_service.start()
     radio_enricher.start()
     radio_native.start()
     if youtube_service is not None:
@@ -14921,6 +14926,7 @@ def main():
             telemetry_store.recorder.close()   # flush and rename before the hard exit
         if telemetry_store is not None and telemetry_store.replay is not None:
             telemetry_store.replay.stop()
+        if coach_service is not None:coach_service.close()
         radio_native.close()
         radio_enricher.close()
         radio_service.close()
