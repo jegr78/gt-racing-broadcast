@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 spec = importlib.util.spec_from_file_location('e2e_harness', ROOT / 'tools/e2e.py')
 harness = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(harness)
+import atomic_replace
 
 
 def t_windows_teardown_kills_the_tree_before_waiting_and_closes_the_log():
@@ -51,6 +52,104 @@ def t_spawn_failure_closes_the_owned_log():
             else:
                 raise AssertionError('spawn failure hidden')
         assert len(opened) == 1 and opened[0].closed, 'failed spawn leaked its log handle'
+
+
+def t_keep_startup_failure_still_cleans_every_acquired_owner():
+    with tempfile.TemporaryDirectory() as directory:
+        target=Path(directory)/'run';target.mkdir()
+        with mock.patch.object(harness.tempfile,'mkdtemp',return_value=str(target)), \
+             mock.patch.object(harness,'_spawn',side_effect=RuntimeError('injected startup failure')), \
+             mock.patch.object(harness,'_cleanup') as cleanup:
+            try:harness.run_synthetic(SimpleNamespace(keep=True,timeout=1))
+            except RuntimeError as error:assert str(error)=='injected startup failure'
+            else:raise AssertionError('Startup failure was hidden')
+            cleanup.assert_called_once_with([],[],str(target))
+
+
+def listener(root):
+    path=root/'listener.py'
+    path.write_text('''import os,socket,sys,time
+from pathlib import Path
+s=socket.socket()
+if hasattr(socket,'SO_EXCLUSIVEADDRUSE'):s.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+s.bind(('127.0.0.1',0));s.listen()
+target=Path(sys.argv[1]);temporary=target.with_suffix('.tmp')
+temporary.write_text(str(s.getsockname()[1]));temporary.replace(target)
+time.sleep(5)
+''',encoding='utf8')
+    return path
+
+
+def wait_port_file(path,proc):
+    deadline=time.monotonic()+5
+    while not path.exists() and time.monotonic()<deadline:
+        assert proc.poll() is None,'Controlled listener exited before binding'
+        time.sleep(.01)
+    assert path.exists(),'Controlled listener did not bind'
+    return int(path.read_text())
+
+
+def can_bind(port):
+    try:
+        with socket.socket() as sock:
+            if hasattr(socket,'SO_EXCLUSIVEADDRUSE'):sock.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+            sock.bind(('127.0.0.1',port))
+        return True
+    except OSError:return False
+
+
+def t_independent_child_deadline_releases_its_listener():
+    with tempfile.TemporaryDirectory() as directory:
+        root=Path(directory);ready=root/'ready'
+        with mock.patch.object(harness.e2e_safety,'MAX_SECONDS',2):
+            proc=harness._spawn([sys.executable,str(listener(root)),str(ready)],dict(os.environ),root/'child.log')
+        try:
+            port=wait_port_file(ready,proc)
+            code=proc.wait(timeout=5)
+            assert code==124 and can_bind(port),'Independent deadline left its listener alive'
+        finally:harness._kill(proc)
+
+
+def t_owner_death_closes_child_control_pipe_and_releases_its_listener():
+    with tempfile.TemporaryDirectory() as directory:
+        root=Path(directory);ready=root/'ready';child=listener(root)
+        def remove_supervisor_log():
+            (root/'child.log').unlink(missing_ok=True)
+        owner=root/'owner.py'
+        owner.write_text('''import os,sys,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1]);import e2e
+e2e.e2e_safety.MAX_SECONDS=3
+proc=e2e._spawn([sys.executable,sys.argv[2],sys.argv[3]],dict(os.environ),sys.argv[4])
+until=time.monotonic()+2
+while not Path(sys.argv[3]).exists() and time.monotonic()<until:time.sleep(.01)
+os._exit(0)
+''',encoding='utf8')
+        with (root/'owner.log').open('wb') as output:
+            proc=subprocess.Popen([sys.executable,str(owner),str(ROOT/'tools'),str(child),str(ready),str(root/'child.log')],stdout=output,stderr=subprocess.STDOUT)
+            try:
+                port=wait_port_file(ready,proc);proc.wait(timeout=5)
+                until=time.monotonic()+1.5
+                while not can_bind(port) and time.monotonic()<until:time.sleep(.01)
+                assert can_bind(port),'Dead E2E owner left its supervised listener alive'
+            finally:
+                proc.wait(timeout=5)
+                # Both test listener and independent watchdog also self-expire.
+                until=time.monotonic()+5
+                while ready.exists() and not can_bind(int(ready.read_text())) and time.monotonic()<until:time.sleep(.02)
+                # Job termination releases the listener before the supervisor's
+                # own stdout handle closes. Windows forbids deleting that log
+                # until process finalization; wait for that distinct boundary.
+                atomic_replace.retry_windows_file_operation(remove_supervisor_log)
+
+
+def t_unsafe_process_id_is_rejected_before_any_signal():
+    for pid in (1,0,-1,True,mock.MagicMock()):
+        proc=SimpleNamespace(pid=pid,_group=pid,poll=lambda:None,wait=lambda **kw:0,kill=lambda:None,terminate=lambda:None)
+        with mock.patch.object(harness.os,'killpg',side_effect=AssertionError('Unsafe group signal'),create=True):
+            try:harness._kill(proc)
+            except RuntimeError:pass  # unsafe identities must fail before any signal
+            else:raise AssertionError('Unsafe E2E identity was accepted')
 
 
 def t_teardown_releases_a_stubborn_grandchild_socket():

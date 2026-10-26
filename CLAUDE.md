@@ -113,6 +113,13 @@ python3 src/racecast.py <group> --help    # e.g. relay | event | profile | conso
 # Maintainer probes (flags, broadcast chat, GT7 telemetry) and wiki sync: tools/CLAUDE.md.
 ```
 
+Run heavy local verification sequentially with explicit resource and runtime
+limits. E2E enforces local Linux cgroup limits automatically and fails closed if
+they cannot be established. `--keep` is a finite foreground lease, never an
+instruction to abandon detached test processes. A run is complete only after its
+owned services have stopped. See `tools/CLAUDE.md` and
+`src/docs/design/e2e-resource-safety.md`.
+
 After changing the relay, run `python3 tests/test_pov.py`; after any change that
 ships, run `python3 tools/build.py`: its verify step is the closest thing to CI
 (checks tokenization, blanked password, no secrets, preflight present, no shell

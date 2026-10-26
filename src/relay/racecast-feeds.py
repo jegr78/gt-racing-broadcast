@@ -5840,16 +5840,35 @@ class FeedCoverTap:
                     warned = True
                 self._stop.wait(self._respawn_s)
                 continue
-            threading.Thread(target=self._feed_stdin, args=(stdin,), daemon=True).start()
-            buf = b""
-            while not self._stop.is_set():
-                chunk = video.read(65536)
-                if not chunk:
-                    break
-                frames, buf = split_mjpeg_frames(buf + chunk)
-                if frames:
-                    self._write(frames[-1])
-            self._kill()
+            proc = self._proc
+            generation = threading.Event()
+            pump = threading.Thread(target=self._feed_stdin,
+                                    args=(stdin, proc, generation), daemon=True)
+            started = False
+            try:
+                pump.start()
+                started = True
+                buf = b""
+                while not self._stop.is_set():
+                    chunk = video.read(65536)
+                    if not chunk:
+                        break
+                    frames, buf = split_mjpeg_frames(buf + chunk)
+                    if frames:
+                        self._write(frames[-1])
+            finally:
+                generation.set()
+                retired = self._kill(proc)
+                if started:
+                    pump.join(timeout=2)
+                else:
+                    stdin.close()
+                video.close()
+            if not retired or pump.is_alive():
+                self.log.info("cover tap %s could not retire its stdin pump; stopping",
+                              os.path.basename(self.path))
+                self._stop.set()
+                return
             self._stop.wait(self._respawn_s)
 
     def _write(self, jpeg):
@@ -5862,17 +5881,22 @@ class FeedCoverTap:
         except OSError as e:
             self.log.debug("cover write %s failed: %s", os.path.basename(self.path), e)
 
-    def _feed_stdin(self, stdin):
+    def _feed_stdin(self, stdin, proc=None, generation=None):
         """Pump ring bytes into ffmpeg from the live edge, fMP4 init segment first (#577);
         the same pump as _PreviewRingTap."""
+        proc = self._proc if proc is None else proc
+        generation = threading.Event() if generation is None else generation
         cursor = self.ring.live_offset() if hasattr(self.ring, "live_offset") else 0
         join = ring_join(self.ring)
         try:
             if join.init:
                 stdin.write(join.init)
                 stdin.flush()
-            while not self._stop.is_set() and not self.ring.closed:
+            while (not self._stop.is_set() and not generation.is_set()
+                   and not self.ring.closed and proc is not None and proc.poll() is None):
                 data, cursor = self.ring.read(cursor, 1.0)
+                if generation.is_set() or proc.poll() is not None:
+                    break
                 data = join.take(data)
                 if data:
                     stdin.write(data)
@@ -5885,13 +5909,16 @@ class FeedCoverTap:
             except OSError:
                 pass  # already closed
 
-    def _kill(self):
-        p = self._proc
+    def _kill(self, proc=None):
+        p = self._proc if proc is None else proc
         try:
             if p and p.poll() is None:
                 p.kill()
+            if p is not None:
+                p.wait(timeout=2)
+            return True
         except Exception:                            # noqa: BLE001
-            pass
+            return False  # uncertain ownership forbids another encoder generation
 
     def stop(self):
         self._stop.set()

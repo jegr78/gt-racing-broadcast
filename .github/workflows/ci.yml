@@ -80,6 +80,7 @@ jobs:
         run: python tools/build.py
 
   binary-smoke:
+    timeout-minutes: 15
     # CI must exercise everything the release pipeline exercises: release.yml
     # builds the PyInstaller binary and runs the build-binary smoke test, so a
     # PR that breaks either (e.g. a removed CLI flag still passed by the smoke)
@@ -97,6 +98,7 @@ jobs:
         run: python tools/build-binary.py --version ci-smoke
 
   native-package:
+    timeout-minutes: 15
     # Exercise the actual frozen relay and private coaching journal on the other
     # producer OSes too. binary-smoke and e2e-binary cover Linux; these runs keep
     # Windows/macOS packaging evidence separate from their stdlib test suites.
@@ -116,6 +118,7 @@ jobs:
         run: python tools/e2e.py --build --coach-only
 
   e2e:
+    timeout-minutes: 15
     # Integration outer loop: stand up the relay + Control Center from src/ and
     # assert the live HTTP surface (cockpit auth gating, tally, chat round-trip,
     # /api/console/status, …): the end-to-end behaviour run-tests.py's unit
@@ -136,6 +139,7 @@ jobs:
         run: python tools/engineer-replay.py --check
 
   visual:
+    timeout-minutes: 15
     # Visual acceptance run: renders Control Center, Director Panel, cockpit and
     # Race Control in Chromium and fails on a layout-rule finding. The stdlib e2e
     # job above stays Playwright-free.
