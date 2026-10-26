@@ -23,6 +23,34 @@ not reopen those completed epics or replace measured evidence with generated adv
 | Optional AI | Explicit training consent and isolated profile agent | Bounded current scalar facts and positive response templates | No provider fallback, raw history upload or invented driving action | Provider schema and injection regressions |
 | Packaged operation | Same relay, controls and journal in the distributable | Packaged relay serves private controls and writes a compact checkpoint | Missing bundled modules and wrong frozen paths fail the gate | Actual PyInstaller relay acceptance |
 
+The matrix is backed by these executable suites, which use production modules:
+
+- `tests/test_driver_coach_calibration.py`: fresh receipt, comparable cohorts,
+  corrected eligibility, owner/context isolation and retained reference consent.
+- `tests/test_driver_coach_assessment.py` and `tests/test_driver_coach_focus.py`:
+  recurring versus isolated differences, connected sections, absent channels,
+  nonoptimal references, fixed personal baselines and repeated measured progress.
+- `tests/test_driver_coach_service.py` and `tests/test_driver_coach_controls.py`:
+  bounded worker IO, native priority/cancellation, consent, explicit controls,
+  source correction and replay/stale reference exclusion.
+- `tests/test_driver_coach_history.py` and `tests/test_driver_coach_http.py`:
+  journal limits, restart/deletion, private namespaces and authorization/source
+  checks after slow IO. The actual Control Center client is included.
+- `tools/coach_browser_check.py`: all three real browser surfaces, fresh-session
+  reuse, drafts, deletion, identity changes and delayed responses with equal actor
+  revisions after a context change.
+- `tests/test_e2e_coach.py` and `tools/e2e_coach.py`: the actual signed relay HTTP
+  control/journal path; refusal of unowned transports and incompatible runtime modes.
+
+Run `python tools/run-tests.py`, `python tools/lint.py` and `python tools/build.py`
+for the canonical local gate. `python tools/e2e.py --visual` adds the full browser
+acceptance suite. `python tools/e2e.py` and `python tools/e2e.py --build` exercise
+the source and Linux frozen integration path, including coaching. For the portable
+Solo gate, run `python tools/e2e.py --coach-only` or build the actual native package
+with `python tools/e2e.py --build --coach-only`. The Windows/macOS `native-package`
+CI jobs use the latter command without POSIX stubs. Package checks must finish green
+before enabling Auto-Merge, even when branch protection does not require those jobs.
+
 The source and frozen integration runs use owned temporary profiles, synthetic
 GT7 recordings, a local OBS stand-in and explicit driver assignment. Voice and
 speech providers stay disabled. They do not access a live microphone, paid service
