@@ -1,5 +1,8 @@
 """Narrow trusted coaching controls and deterministic wake-gated voice vocabulary."""
+import os
 import re
+
+import gt7_context
 
 import driver_coach_calibration as calibration
 import driver_coach_service as orchestration
@@ -137,6 +140,45 @@ class References:
     """Only trusted live rows and separately authorized archive sources."""
     def __init__(self, live, archive):
         self.live, self.archive = live, archive
+
+    def _history_stamp(self, path, context):
+        def signature(filename):
+            try:
+                value=os.stat(filename)
+                return (filename,value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+            except FileNotFoundError:
+                return (filename,None,None,None,None,None)
+        path=os.path.realpath(path)
+        definitions=getattr(self.live,'_definitions',None)
+        relevant=[]
+        if definitions is not None and context.get('track_id'):
+            applied={row[0]:row for row in self.live._definition_stamp}
+            for reverse in (False,True):
+                local=definitions.path(context['track_id'],reverse)
+                for filename in (local,os.path.join(definitions.bundled,os.path.basename(local))):
+                    actual=signature(filename)
+                    if actual!=applied.get(filename,(filename,None,None,None,None,None)):
+                        raise calibration.CoachError('reference_pending')
+                    relevant.append(actual)
+        return (signature(path),signature(gt7_context._stem(path)+'.context.json'),tuple(relevant))
+
+    def history_proof(self, ident, context):
+        """Fence archived facts before/after detail and after final authorization I/O."""
+        source=ident.split(':')[1]
+        path=self.archive(source)
+        before=self._history_stamp(path,context)
+        api=getattr(self.live,'api',None)
+        if api is None:raise calibration.CoachError('reference_unavailable')
+        def pinned(asked):
+            if asked!=source:raise calibration.CoachError('reference_unavailable')
+            return path
+        detail=api._detail(ident,pinned)
+        row=detail.get('lap') if isinstance(detail,dict) and detail.get('state')=='ready' else None
+        prepared=calibration._prepare(row)
+        if (prepared is None or row.get('id')!=ident or row.get('track_id')!=context.get('track_id')
+                or before!=self._history_stamp(path,context)):
+            raise calibration.CoachError('reference_unavailable')
+        return prepared.digest,lambda:before==self._history_stamp(path,context)
 
     def _load(self, ident):
         if ident.startswith('r:'):

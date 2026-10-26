@@ -110,3 +110,15 @@ or player processes; cancellation cannot release a process slot before cleanup.
 
 The native owner also watches the ticket's captured monotonic deadline during
 a blocked read. A grant check cannot extend already playing speech beyond expiry.
+
+Provider subprocess polling uses only cached cancellation, message identity and
+deadline state. It never enters source, settings or reference-grant I/O. Every
+published coach message retains its own cancellation event; Stop signals it before
+attempting the radio metadata lock. A later publication cannot reset an old
+provider's event. Fresh authorization remains mandatory before work admission and
+before any output attachment. Already expired work skips external guards.
+
+The current actor review identifies its exact radio message. Its validated AI
+explanation is projected only when message, owner, training epoch and radio epoch
+still match. The desk displays this attachment separately as AI interpretation;
+a new lap, changed exercise or identity cannot inherit the previous explanation.

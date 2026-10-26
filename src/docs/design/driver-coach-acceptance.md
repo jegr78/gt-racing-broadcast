@@ -65,3 +65,14 @@ never represented as a completed personal-machine check.
 Readiness means all seven children of #977 are implemented, their PRs actually
 merged after green verification, and the parent scope and tracker reconciled. An
 enabled Auto-Merge setting or a written plan does not meet that gate.
+
+## Aggregate review regression gates
+
+| Review requirement | Production path | Positive evidence | Failure evidence | Runtime verification |
+|---|---|---|---|---|
+| Provider owner remains responsive during grant I/O | Cached provider cancellation and per-message event | Current work runs until its finite deadline | Stop/deadline retires owned work without reading a grant; old events never reset | Fake process owner with real coordinator and radio; native OS suites |
+| Optional AI reaches its driver | Exact current message attachment projected into actor view | Validated explanation appears as AI interpretation | Foreign owner, new lap, changed token or obsolete message receives none | Signed HTTP and real browser desk |
+| Archived conclusions retain current provenance | Before/after/final archive proof stamps | Unchanged authorized detail retains its compact summary | Context edits during final grant I/O and unapplied definition edits remove old reference/focus | Actual signed handler plus real temporary sidecars; native OS suites |
+
+These gates supplement the full parent review across all seven delivered children.
+They do not use live microphone capture, paid providers or unbounded stress runs.
