@@ -85,7 +85,8 @@ def t_deletion_is_revisioned_owner_only_and_an_active_checkpoint_cannot_resurrec
         assert not store.save(LOCAL,same_training),'A context reset resumed deleted active training retention'
         fresh=copy.deepcopy(record);fresh['id']='c'*32;fresh['training_id']='d'*32
         assert store.save(LOCAL,fresh)
-        assert store.delete(LOCAL,store.read(LOCAL,GENERATION)['revision'])['entries']==[]
+        cleared=store.delete(LOCAL,store.read(LOCAL,GENERATION)['revision'])
+        assert cleared['entries']==[]
         assert not store.save(LOCAL,fresh)
 
 
@@ -168,7 +169,8 @@ def t_blocked_checkpoint_cannot_block_stop_or_revive_deleted_private_work():
             try:
                 assert entered.wait(2)
                 state=f.command('stop');assert not state['active'] and state['pending']
-                assert store.delete(LOCAL,initial['revision'])['entries']==[]
+                deleted=store.delete(LOCAL,initial['revision'])
+                assert deleted['entries']==[]
             finally:release.set();worker.join(5)
         assert not worker.is_alive()
         f.step();assert store.read(LOCAL,f.service._generation)['entries']==[]
