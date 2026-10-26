@@ -48,6 +48,16 @@ synthetic-CSV builder, tolerant `http_request`, the `CheckResult`/`run_checks` r
 the `check_*` callables, `SYNTHETIC_CHECKS`/`REAL_LEAGUE_CHECKS`), unit-tested in
 `tests/test_e2e.py`; `tools/e2e.py` owns process lifecycle (spawn, readiness-poll,
 guaranteed `finally` teardown, no leaked relays/UI even on failure). Three modes:
+
+Local Linux runs automatically enter a single transient user service before
+starting tools: two CPU cores, 512 tasks, 2 GiB RAM, fifteen minutes, and whole-cgroup
+cleanup. Missing containment fails closed. Do not bypass it or run heavy local
+verification in parallel. Each owned service also has an independent supervisor:
+owner pipe closure or its finite lifetime stops its descendants, using owned
+process groups or a Windows Job Object. `--keep` stays in the foreground, keeps
+the synthetic CSV servers alive and always cleans up, including on failure.
+Its default inspection lease is 300 seconds (`--keep-seconds`, at most600).
+Ctrl+C ends inspection; never use broad `pkill` commands to stop test services.
 - **Synthetic** (`tools/e2e.py`, the default, **CI-runnable**): an ephemeral temp profile +
   an in-process CSV schedule server via `--sheet-csv-url`; spawns an enabled relay + a
   cockpit-disabled relay + the Control Center on free `127.0.0.1` ports; runs `SYNTHETIC_CHECKS`.

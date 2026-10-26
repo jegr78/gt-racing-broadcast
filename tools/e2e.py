@@ -14,6 +14,7 @@ import e2e_checks as E
 import e2e_visual as V
 import console_auth
 import gt7_data
+import e2e_safety
 
 
 def _csv_server(files):
@@ -44,11 +45,14 @@ def _spawn(argv, env, log, cwd=ROOT):
     if os.name == "posix":
         kw["start_new_session"] = True
     try:
-        p = subprocess.Popen(argv, cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT, **kw)
+        command=[sys.executable,os.path.join(ROOT,'tools','e2e_child.py'),str(e2e_safety.MAX_SECONDS),'--',*argv]
+        p = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
+                             stdout=fh, stderr=subprocess.STDOUT, **kw)
     except BaseException:
         fh.close()
         raise
     p._group = p.pid if os.name == "posix" else None
+    p._supervised = True
     p._logfh = fh  # keep the handle so teardown can close it
     return p
 
@@ -84,7 +88,19 @@ def _kill(p):
     """Stop only our owned process tree, then reap the leader and close its log."""
     if p is None:
         return
+    if type(p.pid) is not int or p.pid<=1 or os.name=='posix' and p.pid==os.getpgrp():
+        raise RuntimeError('Refusing an unsafe E2E process identity')
+    if getattr(p,'_supervised',False) is True:
+        try:
+            if p.stdin is not None and not p.stdin.closed:p.stdin.close()
+            code=p.wait(timeout=15)
+            if code not in (0,124):raise RuntimeError('E2E supervisor reported failure; logs retained')
+        finally:
+            if getattr(p,'_logfh',None):p._logfh.close()
+        return
     group = getattr(p, "_group", None)
+    if os.name=='posix' and group is not None and (type(group) is not int or group!=p.pid):
+        raise RuntimeError('Refusing an unowned E2E process group')
     try:
         if os.name == "posix" and group is not None:
             # The leader can already have exited while descendants still hold sockets.
@@ -687,12 +703,7 @@ def _print_live_urls(relay_url, ui_url, token, pov_url=None, pids=None):
     print(f"  Control Center:      {ui_url}/")
     if pov_url:
         print(f"  solo POV Control Center (Telemetry): {pov_url}/")
-    if pids and os.name == "posix":
-        # Each child leads its own process group (_spawn), so this stops exactly these trees.
-        print("  (stop them with:  kill -- " + " ".join(f"-{pid}" for pid in pids) + ")")
-    else:
-        print("  (stop them with:  pkill -f 'racecast.py relay run' ; "
-              "pkill -f 'racecast.py ui')")
+    print('  Keep this command running; Ctrl+C stops only its owned services.')
 
 
 def run_synthetic(args):
@@ -860,14 +871,10 @@ def run_synthetic(args):
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)
         if args.keep:
             _print_live_urls(relay_url, ui_url, token, pov_url, [p.pid for p in procs])
-            print("  NOTE: the synthetic schedule was served in-process and stops "
-                  "when this command exits, so the relay keeps only its cached schedule.")
+            e2e_safety.inspect_for(args.keep_seconds)
         return code
     finally:
-        if not args.keep:
-            _cleanup(procs, servers, tmp)
-        else:
-            print(f"--keep: left tmp at {tmp}")
+        _cleanup(procs, servers, tmp)
 
 
 def run_coach_only(args):
@@ -998,12 +1005,10 @@ def run_real_league(args):
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)
         if args.keep:
             _print_live_urls(relay_url, ui_url, token)
+            e2e_safety.inspect_for(args.keep_seconds)
         return code
     finally:
-        if not args.keep:
-            _cleanup(procs, [], tmp)
-        else:
-            print(f"--keep: left tmp at {tmp}")
+        _cleanup(procs, [], tmp)
 
 
 def main(argv=None):
@@ -1041,12 +1046,17 @@ def main(argv=None):
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="per-service readiness timeout (s)")
     ap.add_argument("--keep", action="store_true",
-                    help="skip teardown: leave relay + Control Center running and print "
-                         "their URLs (open them in a browser)")
+                    help="keep this command and its services alive for a finite inspection lease")
+    ap.add_argument('--keep-seconds',type=e2e_safety.keep_seconds,default=300,
+                    help='foreground inspection lease with --keep (default300, maximum600 seconds)')
     args = ap.parse_args(argv)
     # --build implies binary mode even without an explicit --binary.
     if args.build and args.binary is None:
         args.binary = ""
+    if args.coach_only and (args.real_league or args.visual or args.playwright or args.shots or args.keep):
+        ap.error('--coach-only uses owned synthetic services and cannot be combined with interactive or real-league modes')
+    contained=e2e_safety.enter(__file__,list(sys.argv[1:] if argv is None else argv))
+    if contained is not None:return contained
     if args.coach_only:
         if args.real_league or args.visual or args.playwright or args.shots or args.keep:
             ap.error('--coach-only uses owned synthetic services and cannot be combined with interactive or real-league modes')
