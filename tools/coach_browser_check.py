@@ -103,8 +103,9 @@ def check(browser,outdir,shots=None):
             a.locator('#coach-skill').select_option('consistency');apply(page,a,'#coach-set-skill',f)
             for n,seconds in ((10,88.5),(11,88.2),(12,88.3),(13,88.05),(14,88.15),(15,88.05)):
                 f.practice.complete(n,seconds);f.practice.service.step()
+                if n==12:
+                    sync(page,f);apply(page,a,'#coach-keep',f)
             sync(page,f);page.wait_for_function("window.radioView.coach.state?.focus?.focus")
-            apply(page,a,'#coach-keep',f)
             # Current facts render as text even when a definition label looks hostile.
             def hostile(route):
                 response=route.fetch();data=response.json()

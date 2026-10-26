@@ -106,6 +106,21 @@ def t_stop_remains_available_after_the_control_rate_budget_is_exhausted():
         assert status==200 and not stopped['active'], 'Rate budget blocked an authorized Stop'
 
 
+def t_stop_uses_current_permission_and_owner_without_requiring_the_latest_display_revision():
+    with RadioFixture(coaching=True) as f:
+        old=answer(f)[1]['revision']
+        assert answer(f,method='POST',body=dict(expected=old,action='start',options={}))[0]==200
+        f.practice.service.step()
+        for n in (2,3):f.practice.complete(n);f.practice.service.step()
+        assert answer(f)[1]['revision']>old
+        for invalid in (-1,True,0.0,None):
+            status,body,_=answer(f,method='POST',body=dict(expected=invalid,action='stop',options={}))
+            assert status==409 and body['error']['code']=='conflict'
+            assert answer(f)[1]['active']
+        status,stopped,_=answer(f,method='POST',body=dict(expected=old,action='stop',options={}))
+        assert status==200 and not stopped['active']
+
+
 def t_unreadable_local_settings_have_a_semantic_unavailable_response():
     with RadioFixture(coaching=True) as f:
         f.f.access.path.write_text('{broken',encoding='utf8')
