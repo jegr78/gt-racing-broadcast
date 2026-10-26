@@ -141,6 +141,15 @@ def t_reference_choices_exclude_incompatible_live_laps_and_are_bounded():
         rejects(lambda:references.resolve('lap-29'),'incompatible_reference')
 
 
+def t_unoffered_previous_session_live_rows_cannot_bypass_the_archive_boundary():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);row=f.complete(20,session_id='previous-driver-session')
+        live=SimpleNamespace(snapshot=lambda:copy.deepcopy(f.snap),detail=f.detail)
+        references=controls.References(live,lambda _source:None)
+        assert references.choices([])==[]
+        rejects(lambda:references.resolve(row['id']),'reference_unavailable')
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real signed HTTP coaching controls preserve driver, producer and archive scopes."""
 import json
+import threading
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent))
@@ -124,6 +125,51 @@ def t_control_center_proxy_reuses_local_scope_and_preserves_coach_revision_error
         assert status==409 and data['code']=='conflict'
         status,data,_=answer(f,path,cc=True,method='POST',body=body,headers={'Origin':'https://foreign.invalid'})
         assert status==403 and data['ok'] is False
+
+
+def t_delayed_reference_choices_cannot_publish_old_context_or_revive_stopped_training():
+    from unittest.mock import patch
+    for change in ('context','stop'):
+        with RadioFixture(coaching=True) as f:
+            state=answer(f)[1]
+            assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+            f.practice.service.step()
+            for n in (2,3):f.practice.complete(n);f.practice.service.step()
+            entered=threading.Event();release=threading.Event();replies=[]
+            original=console.m.driver_coach_controls.References.choices
+            def delayed(self,archives,entered=entered,release=release,original=original):
+                choices=original(self,archives);entered.set();assert release.wait(4);return choices
+            worker=None
+            try:
+                with patch.object(console.m.driver_coach_controls.References,'choices',delayed):
+                    worker=threading.Thread(target=lambda f=f,replies=replies:replies.append(answer(f)));worker.start();assert entered.wait(1)
+                    if change=='context':f.practice.snap['current']['car_id']=99
+                    else:
+                        state=f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})
+                        status,stopped,_=answer(f,method='POST',body=dict(expected=state['revision'],action='stop',options={}))
+                        assert status==200 and not stopped['active']
+                    release.set();worker.join(5)
+            finally:
+                release.set()
+                if worker is not None:worker.join(5)
+            assert not worker.is_alive() and len(replies)==1
+            status,state,_=replies[0]
+            assert status==200 and state.get('focus') is None and state.get('latest') is None
+            assert state['references']==[], 'Delayed old reference choices remained current'
+            if change=='context':assert state['phase']=='paused'
+            else:assert not state['active'], 'Delayed GET revived a stopped training'
+
+
+def t_driver_cannot_select_an_unoffered_previous_session_live_reference():
+    with RadioFixture(coaching=True) as f:
+        state=answer(f)[1]
+        assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+        f.practice.service.step();row=f.practice.complete(20,session_id='previous-driver-session')
+        state=answer(f)[1];assert state['references']==[]
+        before=f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})
+        status,result,_=answer(f,method='POST',body=dict(expected=state['revision'],action='reference',options={'lap_id':row['id']}))
+        assert status==410 and result['error']['code']=='reference_unavailable'
+        assert f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})==before
 
 
 if __name__=='__main__':

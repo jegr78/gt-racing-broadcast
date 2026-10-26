@@ -138,10 +138,21 @@ class Service:
             return copy.deepcopy(dict(self._state, version=1, revision=self._revision, epoch=self._token))
 
     def view(self, owner):
-        with self._lock:
-            state = self.snapshot(owner)
-            stamp, expected = self._checks
-        if state['active'] and not state['pending'] and not self._current(state['epoch'], stamp, expected):
+        for _ in range(2):
+            with self._lock:
+                state = self.snapshot(owner)
+                stamp, expected = self._checks
+            if not state['active'] or state['pending']:
+                return state
+            current = self._current(state['epoch'], stamp, expected)
+            with self._lock:
+                if state['revision'] != self._revision or state['epoch'] != self._token:
+                    continue
+            if not current:
+                state.update(phase='paused', calibration=None, focus=None, latest=None)
+            return state
+        state = self.snapshot(owner)
+        if state['active']:
             state.update(phase='paused', calibration=None, focus=None, latest=None)
         return state
 

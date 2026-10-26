@@ -137,6 +137,8 @@ class References:
             raise calibration.CoachError('source_unavailable')
         anchor = orchestration._stamp(source)
         row = self._load(ident)
+        if not ident.startswith('r:') and row.get('session_id') != source.get('session_id'):
+            raise calibration.CoachError('reference_unavailable')
         context = dict(calibration._context(source['current']), comparison_eligible=True)
         if not calibration._compatible(row, context):
             raise calibration.CoachError('incompatible_reference')

@@ -11773,6 +11773,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     result = driver_coach_controls.command(actor, owner, body, authorize, resolve=references.resolve)
                 else:
                     result = actor.view(owner)
+                    choice_stamp = driver_coach_service._stamp(live.snapshot())
                     archives = []
                     if result['phase'] != 'busy' and engineer_access is not None:
                         if admin:
@@ -11792,6 +11793,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 for ident, path in tuple(sources.items()):
                     if archive(ident) != path:
                         raise driver_coach_calibration.CoachError('reference_unavailable')
+                if method == 'GET':
+                    current = actor.view(owner)
+                    same = (all(current.get(k) == result.get(k) for k in ('epoch', 'revision', 'phase'))
+                            and driver_coach_service._stamp(live.snapshot()) == choice_stamp)
+                    current['references'] = result['references'] if same else []
+                    result = current
                 result.update(profile=profile, viewer=owner['subject'])
                 if admin:result['protocol'] = 'racecast-driver-radio-admin-v1'
                 return self._send(result, no_store=True)
