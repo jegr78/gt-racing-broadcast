@@ -217,6 +217,10 @@ def ordering_and_identity(browser):
                         await new Promise(resolve=>window.__releasePrivateCoach=resolve);
                     return response;};""")
                 page.wait_for_function('typeof window.__releasePrivateCoach==="function"')
+                page.evaluate("""const coach=window.radioView.coach,adopt=coach.adopt;
+                    coach.adopt=function(state,...args){const accepted=adopt.call(this,state,...args);
+                        if(accepted&&state.viewer==='console:driver'&&state.focus?.focus)window.__privateCoachRevived=true;
+                        return accepted;};""")
                 if change=='identity':
                     token=console.m.console_auth.mint_token(console.SECRET,'other')
                     context.add_cookies([dict(name='rc_console',value=token,domain='127.0.0.1',path='/console',httpOnly=True,sameSite='Lax')])
@@ -224,6 +228,7 @@ def ordering_and_identity(browser):
                     config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=[]));f.practice.service.step()
                 page.evaluate('window.__releasePrivateCoach();window.fetch=window.__scopeFetch')
                 page.wait_for_function('!window.radioView.coach.polling')
+                assert not page.evaluate('window.__privateCoachRevived'),'A delayed private reply rendered before the next current-identity poll'
                 assert not a.locator('#coach-evidence').inner_text(),'A delayed private reply rendered before the next current-identity poll'
                 if change=='identity':page.wait_for_function("window.radioView.coach.state?.viewer==='console:other'")
                 else:page.wait_for_function('window.radioView.coach.state===null')
