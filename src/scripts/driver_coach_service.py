@@ -330,12 +330,14 @@ class Service:
         new = dict(active=calibrated['active'], pending=False, phase=calibrated['phase'],
                    calibration=calibrated, focus=model['focus'].snapshot(), latest=model['latest'],
                    allow_ai=model['allow_ai'] if calibrated['active'] else False, detail_status=model['detail_status'])
+        changed=False
         with self._lock:
             if token == self._token and self._command is None:
                 self._checks = (model['stamp'], tuple(model['sources'].items()))
                 if new != self._state:
                     self._state = copy.deepcopy(new); self._revision += 1
-        self._journal_checkpoint(token,model,new)
+                    changed=True
+        if changed:self._journal_checkpoint(token,model,new)
 
     def _journal_attempt(self,operation):
         try:

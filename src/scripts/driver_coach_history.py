@@ -157,7 +157,7 @@ class Store:
             atomic_replace.replace(temp,path)
         finally:
             try:os.unlink(temp)
-            except FileNotFoundError:pass
+            except FileNotFoundError:pass  # Successful replacement already consumed the temporary file.
 
     def _edit(self,owner,operation):
         path=self._path(owner)

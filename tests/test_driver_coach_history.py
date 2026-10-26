@@ -171,6 +171,16 @@ def t_graceful_worker_close_finishes_the_last_stored_checkpoint():
         assert record['status']=='stopped' and record['reason']=='relay_closed'
 
 
+def t_unchanged_worker_polls_do_not_rewrite_history_or_make_deletion_revisions_unusable():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        before=store.read(LOCAL,f.service._generation)
+        for _ in range(4):f.at+=1;f.wall+=1;f.step()
+        after=store.read(LOCAL,f.service._generation)
+        assert after==before,'Unchanged worker polls rewrote the compact checkpoint'
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)
