@@ -65,6 +65,14 @@ def check(browser,outdir,shots=None):
             entered=threading.Event();release=threading.Event()
             def delayed(self,ident):
                 value=resolver(self,ident);entered.set();assert release.wait(6);return value
+            # A current reply may omit choices after concurrent actor/history I/O.
+            # Exercise that legitimate transient state before opening the selector.
+            page.evaluate("window.radioView.coach.state.references=[];window.radioView.coach.render()")
+            option=a.locator('#coach-reference-choice option').nth(1).get_attribute('value')
+            a.locator('#coach-reference-choice').select_option(option)
+            page.wait_for_function("""() => {const coach=window.radioView.coach;
+                if(coach.polling||coach.sending)return false;
+                clearTimeout(coach.timer);return true;}""")
             page.evaluate("""window.__coachFetch=window.fetch;window.__heldCoachGets=[];
                 window.fetch=async(...args)=>{const response=await window.__coachFetch(...args);
                     if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST')
@@ -72,9 +80,10 @@ def check(browser,outdir,shots=None):
                     return response;};""")
             try:
                 with patch.object(controls.References,'resolve',delayed):
-                    option=a.locator('#coach-reference-choice option').nth(1).get_attribute('value')
-                    a.locator('#coach-reference-choice').select_option(option);a.locator('#coach-use-reference').click()
+                    a.locator('#coach-use-reference').click()
                     assert entered.wait(2),'Reference lookup did not begin'
+                    page.evaluate('clearTimeout(window.radioView.coach.timer);void window.radioView.coach.poll()')
+                    page.wait_for_function('window.__heldCoachGets.length>0',timeout=2000)
                     f.practice.complete(5,88.3);f.practice.service.step()
                     assert a.locator('#coach-stop').is_enabled(),'A pending reference disabled Stop'
                     a.locator('#coach-stop').click()
