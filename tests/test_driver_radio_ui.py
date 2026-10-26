@@ -24,6 +24,8 @@ class RadioFixture:
             from test_driver_coach_service import Fixture as Practice
             self.practice=Practice(Path(self.temp.name)/'solo-pov');self.f=self.practice.radio
             self.practice.service.profile='solo-pov';self.f.service.coach=self.practice.service
+            import driver_coach_history
+            self.practice.service.journal=driver_coach_history.Store(self.f.access.path.parent,clock=lambda:self.practice.wall)
         else:self.f=Fixture(Path(self.temp.name)/'solo-pov')
         self.f.poll()
         self.workers=[]

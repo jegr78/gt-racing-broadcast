@@ -44,7 +44,7 @@ class Client:
 def error_status(code):
     if code in ('conflict','busy','training_busy','training_required','focus_unavailable','incompatible_reference','profile_changed'):
         return 409
-    if code in ('source_unavailable','settings_unavailable','reference_pending','coaching_unavailable'):
+    if code in ('source_unavailable','settings_unavailable','reference_pending','coaching_unavailable','history_unavailable'):
         return 503
     if code in ('forbidden','feature_disabled','foreign_origin'):
         return 403

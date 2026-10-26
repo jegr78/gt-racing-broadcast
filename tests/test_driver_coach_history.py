@@ -104,7 +104,8 @@ def t_corrupt_oversized_and_symlinked_private_files_fail_closed():
     with tempfile.TemporaryDirectory() as root:
         _,record=sample(root);store=history.Store(Path(root)/'solo',clock=lambda:1200)
         store.save(LOCAL,record);path=next(store.directory.glob('*.json'));original=path.read_bytes()
-        for raw in (b'{broken',b' '* (history.MAX_BYTES+1),json.dumps({'owner':LOCAL,'entries':[{'trace':'secret'}]}).encode()):
+        nested=json.loads(original);nested['entries'][0]['worked_focus']=[{}]
+        for raw in (b'{broken',b' '* (history.MAX_BYTES+1),json.dumps({'owner':LOCAL,'entries':[{'trace':'secret'}]}).encode(),json.dumps(nested).encode()):
             path.write_bytes(raw)
             rejects(lambda:store.read(LOCAL,GENERATION),'history_unavailable')
         path.write_bytes(original)
@@ -179,6 +180,44 @@ def t_unchanged_worker_polls_do_not_rewrite_history_or_make_deletion_revisions_u
         for _ in range(4):f.at+=1;f.wall+=1;f.step()
         after=store.read(LOCAL,f.service._generation)
         assert after==before,'Unchanged worker polls rewrote the compact checkpoint'
+
+
+def t_history_display_rechecks_shared_reference_rights_and_marks_corrected_sources():
+    import driver_coach_service as service
+    with tempfile.TemporaryDirectory() as root:
+        f,record=sample(root)
+        record['reference']=dict(id='r:'+('a'*32)+':1:20',source='selected')
+        record['reference_fingerprint']='b'*64
+        record['source_fingerprints']={'lap-4':history.fingerprint(service._facts(f.snap['laps'][-1]))}
+        doc=dict(revision=1,entries=[record])
+        visible=history.expose(doc,f.snap,service._facts,lambda _ident,_fingerprint:False)
+        entry=visible['entries'][0]
+        assert entry['evidence_status']=='reference_unavailable' and entry['reference'] is None and entry['focus'] is None
+        assert entry['latest']['observation']==record['latest']['observation'] and entry['latest'].get('action') is None
+        assert doc['entries'][0]['focus'],'Display filtering modified stored historical facts'
+        f.snap['laps'][-1]['measurement_hash']='corrected'
+        corrected=history.expose(doc,f.snap,service._facts,lambda _ident,_fingerprint:True)['entries'][0]
+        assert corrected['evidence_status']=='corrected' and corrected['baseline'] is None and corrected['progress'] is None
+
+
+def t_history_suggestion_requires_compatible_current_calibration_and_never_supplies_old_measurements():
+    import driver_coach_service as service
+    with tempfile.TemporaryDirectory() as root:
+        f,record=sample(root);record.update(status='stopped',ended_at=1200)
+        record['context'].update(settings_confirmed=True,context_settings={})
+        current=copy.deepcopy(record['context']);state=f.service.view(LOCAL)
+        state['calibration']['accepted']=True;state['calibration']['training_id']='f'*32
+        exposed=history.expose(dict(revision=1,entries=[record]),f.snap,service._facts,lambda _id,_hash:True)
+        suggestion=history.suggest(exposed,state,current)
+        assert suggestion and set(suggestion)=={'id','skill','text'} and suggestion['skill']==record['focus']['skill']
+        assert 'calibration' in suggestion['text'].lower()
+        before=copy.deepcopy(state)
+        for field,value in (('car_id',99),('track_id','different'),('definition_fingerprint','changed'),('settings_confirmed',False)):
+            changed=dict(current);changed[field]=value
+            assert history.suggest(exposed,state,changed) is None,field
+        state['calibration']['accepted']=False
+        assert history.suggest(exposed,state,current) is None
+        assert before['calibration']['baseline']==state['calibration']['baseline']
 
 
 if __name__=='__main__':

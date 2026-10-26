@@ -20,7 +20,8 @@ RETENTION_S=90*86400
 _LOCK=threading.RLock()
 _ID=re.compile(r'[0-9a-f]{32}')
 _FIELDS={'id','training_id','generation','started_at','updated_at','ended_at','status','reason',
-         'context','objective','baseline','reference','focus','progress','latest','source_ids'}
+         'context','objective','baseline','reference','focus','worked_focus','progress','latest','source_ids',
+         'source_fingerprints','reference_fingerprint'}
 _FORBIDDEN={'trace','points','audio','transcript','credentials','provider','prompt','path'}
 
 
@@ -32,7 +33,11 @@ def _pick(value,keys):
     return {key:copy.deepcopy(value[key]) for key in keys if key in value} if isinstance(value,dict) else None
 
 
-def compact(state,current,generation,started_at,now):
+def fingerprint(facts):
+    return hashlib.sha256(json.dumps(facts,sort_keys=True,allow_nan=False).encode()).hexdigest()
+
+
+def compact(state,current,generation,started_at,now,proof=(),reference_fingerprint=None):
     """Project only current scalar/compact provenance, never a lap trace or utterance."""
     calibrated=state.get('calibration') or {}
     if not calibrated.get('training_id') or not calibrated.get('epoch'):
@@ -51,8 +56,10 @@ def compact(state,current,generation,started_at,now):
     result=dict(id=calibrated['epoch'],training_id=calibrated['training_id'],generation=generation,
                 started_at=started_at,updated_at=now,ended_at=None,status='active',reason=None,
                 context=calibration._context(current or {}),objective=calibrated['objective'],
-                baseline=baseline,reference=reference,focus=focus,progress=progress,latest=latest,
-                source_ids=list(dict.fromkeys(ident for ident in ids if calibration._text(ident)))[:8])
+                baseline=baseline,reference=reference,focus=focus,worked_focus=[focus] if focus else [],progress=progress,latest=latest,
+                source_ids=list(dict.fromkeys(ident for ident in ids if calibration._text(ident)))[:8],
+                reference_fingerprint=reference_fingerprint,source_fingerprints={})
+    result['source_fingerprints']={ident:fingerprint(facts) for ident,facts in proof if ident in result['source_ids']}
     _validate_record(result)
     return result
 
@@ -76,6 +83,11 @@ def _validate_record(record):
             or not isinstance(record['source_ids'],list) or len(record['source_ids'])>8
             or not all(calibration._text(ident) for ident in record['source_ids'])):
         _error()
+    if (not isinstance(record['source_fingerprints'],dict) or set(record['source_fingerprints'])-set(record['source_ids'])
+            or not all(isinstance(value,str) and re.fullmatch('[0-9a-f]{64}',value) for value in record['source_fingerprints'].values())
+            or record['reference_fingerprint'] is not None and (not isinstance(record['reference_fingerprint'],str)
+                or not re.fullmatch('[0-9a-f]{64}',record['reference_fingerprint']))
+            or not isinstance(record['worked_focus'],list) or len(record['worked_focus'])>8):_error()
     shapes={'baseline':{'id','lap_ids','time_s','range_s'},'reference':{'id','source'},
             'focus':{'id','skill','label','action','reviewed','section_id'},
             'progress':{'result','sample_count','pace_improved','consistency_improved','measure_range_s','measure','text'},
@@ -84,6 +96,12 @@ def _validate_record(record):
         value=record[key]
         if value is not None and (not isinstance(value,dict) or set(value)-allowed):
             _error()
+        if key in ('baseline','reference','focus','latest') and value is not None and set(value)!=allowed:_error()
+    if any(not isinstance(value,dict) or set(value)!=shapes['focus'] for value in record['worked_focus']):_error()
+    for focus in ([record['focus']] if record['focus'] else [])+record['worked_focus']:
+        if (not all(calibration._text(focus[k],600 if k=='action' else 160) for k in ('id','skill','label','action'))
+                or focus['skill'] not in ('braking','throttle','steering','gear','speed','line','pace','consistency')
+                or type(focus['reviewed']) is not bool):_error()
     def bounded(value,depth=0):
         if depth>12:_error()
         if isinstance(value,dict):
@@ -196,6 +214,8 @@ class Store:
             if previous and record['updated_at']<previous['updated_at']:return False
             replacement=copy.deepcopy(record)
             if previous and replacement['latest'] is None:replacement['latest']=copy.deepcopy(previous['latest'])
+            worked={r['id']:r for r in (previous or {}).get('worked_focus',[])+replacement['worked_focus']}
+            replacement['worked_focus']=list(worked.values())[-8:]
             value['entries']=[r for r in value['entries'] if r['id']!=record['id']]+[replacement]
             return True
         return self._edit(owner,save)[0]
@@ -217,3 +237,49 @@ class Store:
             value['deleted']=list(dict.fromkeys(value['deleted']+selected+trainings))[-MAX_RECORDS*2:]
             value['entries']=[r for r in value['entries'] if r['id'] not in selected]
         return self._edit(owner,delete)[1]
+
+
+def expose(document,current,facts,reference_allowed):
+    """A past checkpoint is historical evidence, never a current reference grant."""
+    result=copy.deepcopy(document)
+    lookup={row.get('id'):row for row in (current.get('laps') or [])[-512:] if isinstance(row,dict)}
+    for record in result['entries']:
+        corrected=any(ident in lookup and fingerprint(facts(lookup[ident]))!=digest
+                      for ident,digest in record['source_fingerprints'].items())
+        reference=record['reference']
+        denied=False
+        if reference and reference['id'].startswith('r:'):
+            try:denied=reference_allowed(reference['id'],record['reference_fingerprint']) is not True
+            except (OSError,ValueError,KeyError,TypeError):denied=True
+        record['evidence_status']='corrected' if corrected else 'reference_unavailable' if denied else 'historical'
+        if corrected or denied:
+            record.update(reference=None,reference_fingerprint=None,focus=None,worked_focus=[],progress=None)
+            record['source_ids']=[ident for ident in record['source_ids'] if not ident.startswith('r:')]
+            if corrected:record.update(baseline=None,latest=None)
+            elif record['latest']:record['latest']=_pick(record['latest'],('lap_id','observation'))
+        record.pop('source_fingerprints',None);record.pop('reference_fingerprint',None)
+        worked=record['worked_focus']
+        record['debrief']=dict(
+            worked='; '.join(focus.get('label','Exercise') for focus in worked)[:1000] or 'No retained exercise was scored.',
+            observed=(record.get('latest') or {}).get('observation') or 'No comparable completed-lap observation is available.',
+            interpretation=(record.get('progress') or {}).get('text') or 'Evidence is unavailable; no improvement or cause is inferred.',
+            next='Start fresh personal calibration before choosing the next exercise.' if not worked else
+                 'After fresh personal calibration, consider repeating '+worked[-1]['skill']+'. Cause remains unknown.')
+    return result
+
+
+def suggest(document,state,current):
+    calibrated=state.get('calibration') or {}
+    if calibrated.get('accepted') is not True or not state.get('active') or state.get('pending'):return None
+    if (not all(current.get(k) for k in ('car_id','track_id','definition_fingerprint'))
+            or current.get('settings_confirmed') is not True):return None
+    keys=set(calibration.CONTEXT)-{'session_id','stint_id'}
+    for record in document['entries']:
+        focus=record.get('focus');progress=record.get('progress') or {}
+        if (record['training_id']==calibrated['training_id'] or record['status'] not in ('stopped','interrupted')
+                or record.get('evidence_status')!='historical' or not focus or progress.get('sample_count',0)<1
+                or any(record['context'].get(key)!=current.get(key) for key in keys)):
+            continue
+        return dict(id=record['id'],skill=focus['skill'],text='Previous training suggests '+focus['skill']+
+                    '. Apply only to this fresh calibration; historical times do not become its baseline.')
+    return None

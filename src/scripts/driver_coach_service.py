@@ -359,7 +359,9 @@ class Service:
         if not _allowed(self._grant):return
         doc=self.source()
         if not initial and not self._current(token,model['stamp'],tuple(model['sources'].items())):return
-        record=self._journal_attempt(lambda:history.compact(state,doc.get('current') if _live(doc) else {},self._generation,model['started_at'],self.wall()))
+        working=model['cal']._working
+        record=self._journal_attempt(lambda:history.compact(state,doc.get('current') if _live(doc) else {},self._generation,model['started_at'],self.wall(),
+                                                           proof=tuple(model['sources'].items()),reference_fingerprint=working.digest if working else None))
         if record is not None:
             owner=copy.deepcopy(model['owner'])
             self._journal_current=(owner,record['id'])

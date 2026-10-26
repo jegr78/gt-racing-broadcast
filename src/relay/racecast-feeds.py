@@ -179,6 +179,7 @@ import race_engineer_access
 import driver_radio_access
 import driver_radio_service
 import driver_coach_service
+import driver_coach_history
 import driver_coach_controls
 import driver_coach_calibration
 import driver_radio_providers
@@ -11790,24 +11791,47 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             except race_engineer_access.AccessError:
                                 archives = []  # Driver access does not imply archive grants.
                     result['references'] = references.choices(archives) if result['phase'] != 'busy' else []
+                history_doc=result.pop('_history',None)
+                history_error=None
+                if method=='GET' and actor.journal is not None:
+                    try:history_doc=actor.journal.read(owner,result['generation'])
+                    except driver_coach_calibration.CoachError:history_error='history_unavailable'
+                reference_proofs={}
+                def historical_reference(ident,expected):
+                    if ident not in reference_proofs:
+                        if len(reference_proofs)>=4:return False
+                        reference_proofs[ident]=None
+                        try:
+                            prepared=driver_coach_calibration._prepare(references._load(ident))
+                            reference_proofs[ident]=prepared.digest if prepared else None
+                        except (OSError,ValueError,KeyError,TypeError):
+                            return False
+                    return expected is not None and reference_proofs[ident]==expected
+                if history_doc is not None:
+                    driver_coach_history.expose(history_doc,live.snapshot(),driver_coach_service._facts,historical_reference)
+                current = actor.view(owner)
+                if method == 'GET':
+                    same = (all(current.get(k) == result.get(k) for k in ('epoch', 'revision', 'phase'))
+                            and driver_coach_service._stamp(live.snapshot()) == choice_stamp)
+                    current['references'] = result['references'] if same else []
+                result = current
+                if history_doc is not None:
+                    fresh=live.snapshot()
+                    result['history']=driver_coach_history.expose(history_doc,fresh,driver_coach_service._facts,historical_reference)
+                    result['history_suggestion']=driver_coach_history.suggest(result['history'],result,fresh.get('current') or {})
+                result['history_error']=history_error
                 if authorize() is not True:
                     return self._radio_error('forbidden', 'Coaching access changed during the request', 403)
                 for ident, path in tuple(sources.items()):
                     if archive(ident) != path:
                         raise driver_coach_calibration.CoachError('reference_unavailable')
-                if method == 'GET':
-                    current = actor.view(owner)
-                    same = (all(current.get(k) == result.get(k) for k in ('epoch', 'revision', 'phase'))
-                            and driver_coach_service._stamp(live.snapshot()) == choice_stamp)
-                    current['references'] = result['references'] if same else []
-                    result = current
                 result.update(profile=profile, viewer=owner['subject'])
                 if admin:result['protocol'] = 'racecast-driver-radio-admin-v1'
                 return self._send(result, no_store=True)
             except (driver_coach_calibration.CoachError, driver_radio_access.RadioError, race_engineer_access.AccessError) as error:
                 status = (403 if error.code in ('forbidden', 'feature_disabled') else
                           409 if error.code in ('conflict', 'busy', 'training_busy', 'training_required', 'focus_unavailable', 'incompatible_reference', 'profile_changed') else
-                          503 if error.code in ('source_unavailable', 'settings_unavailable', 'reference_pending') else
+                          503 if error.code in ('source_unavailable', 'settings_unavailable', 'reference_pending', 'history_unavailable') else
                           410 if error.code == 'reference_unavailable' else 400)
                 return self._radio_error(error.code, str(error), status)
             except (OSError, ValueError, TypeError, KeyError):

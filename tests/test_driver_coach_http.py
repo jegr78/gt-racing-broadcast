@@ -223,6 +223,65 @@ def t_control_center_unreadable_settings_preserve_the_unavailable_error_status()
         assert status==503 and not data['ok'] and data['code']=='settings_unavailable'
 
 
+def t_private_history_and_deletion_use_the_verified_driver_and_independent_history_revision():
+    with RadioFixture(coaching=True) as f:
+        state=answer(f)[1]
+        assert state['history']['entries']==[]
+        assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+        f.practice.service.step()
+        for n in (2,3,4):f.practice.complete(n);f.practice.service.step()
+        state=answer(f)[1];history=state['history']
+        assert history['entries'][0]['focus'] and history['entries'][0]['debrief']['observed']
+        local=answer(f,'/driver-radio/admin/coach')[1]
+        assert local['phase']=='busy' and local['history']['entries']==[]
+        bad=dict(expected=history['revision'],action='delete_history',options={'id':None,'owner':'local:producer'})
+        status,error,_=answer(f,method='POST',body=bad)
+        assert status==400 and error['error']['code']=='invalid_body'
+        good=dict(expected=history['revision'],action='delete_history',options={'id':None})
+        status,result,_=answer(f,method='POST',body=good)
+        assert status==200 and result['active'] and result['history']['entries']==[]
+        f.practice.complete(5);f.practice.service.step()
+        assert answer(f)[1]['history']['entries']==[],'Continued training restored deleted private history'
+
+
+def t_history_io_does_not_delay_stop_and_cannot_reply_after_driver_revocation():
+    from unittest.mock import patch
+    for change in ('stop','revoke'):
+        with RadioFixture(coaching=True) as f:
+            state=answer(f)[1]
+            assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+            f.practice.service.step()
+            for n in (2,3):f.practice.complete(n);f.practice.service.step()
+            entered=threading.Event();release=threading.Event();result=[]
+            store=f.practice.service.journal;original=store.read
+            def delayed(*args,original=original,entered=entered,release=release):
+                value=original(*args);entered.set();assert release.wait(5);return value
+            with patch.object(store,'read',delayed):
+                thread=threading.Thread(target=lambda result=result,f=f:result.append(answer(f)));thread.start()
+                try:
+                    assert entered.wait(2)
+                    if change=='stop':
+                        status,stopped,_=answer(f,method='POST',body=dict(expected=0,action='stop',options={}))
+                        assert status==200 and not stopped['active'],'History IO held up Stop acknowledgement'
+                    else:
+                        config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=[]))
+                finally:release.set();thread.join(5)
+            assert not thread.is_alive() and result
+            if change=='revoke':assert result[0][0]==403 and result[0][1]['error']['code']=='forbidden'
+            else:assert result[0][0]==200 and not result[0][1]['active']
+
+
+def t_corrupt_history_does_not_disable_current_coaching_or_shared_radio():
+    with RadioFixture(coaching=True) as f:
+        state=answer(f)[1]
+        assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+        f.practice.service.step()
+        for n in (2,3):f.practice.complete(n);f.practice.service.step()
+        path=next(f.practice.service.journal.directory.glob('*.json'));path.write_text('{broken',encoding='utf8')
+        status,state,_=answer(f)
+        assert status==200 and state['focus']['focus'] and state['history_error']=='history_unavailable'
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)
