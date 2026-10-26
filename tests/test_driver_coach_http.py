@@ -337,6 +337,76 @@ def t_historical_shared_reference_details_require_the_current_separate_engineer_
             assert entry['latest'].get('action') is None
 
 
+def t_the_final_archive_check_cannot_leave_old_live_facts_or_a_revoked_driver_in_the_reply():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import test_ai_package as recording
+    for change in ('context','driver'):
+        with RadioFixture(coaching=True) as f:
+            source=recording.source(f.f.access.path.parent/'telemetry-recordings')
+            f.engineer.update(enabled=True,grant=source.identity,expected=0)
+            f.crew.inject_row(2,name='Driver',race_engineer=True)
+            f.telemetry.engineer.api=SimpleNamespace(reference=lambda _id,_path:dict(laps=[]))
+            state=answer(f)[1]
+            assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+            f.practice.service.step()
+            for n in (2,3,4):f.practice.complete(n);f.practice.service.step()
+            original=f.engineer.reference;calls=[]
+            def last_read(*args,original=original,calls=calls,change=change,f=f):
+                result=original(*args);calls.append(args[0])
+                if len(calls)==2:
+                    if change=='context':f.practice.snap['current']['car_id']=99
+                    else:
+                        settings=f.f.access.read();f.f.access.update(dict(expected=settings['revision'],drivers=[]))
+                return result
+            with patch.object(f.engineer,'reference',last_read):status,result,_=answer(f)
+            assert len(calls)==2
+            if change=='context':assert status==200 and result['phase']=='paused' and result['focus'] is None
+            else:assert status==403 and result['error']['code']=='forbidden'
+
+
+def t_the_actual_local_admin_client_can_read_all_supported_compact_history_entries():
+    import copy
+    import driver_radio_admin
+    with RadioFixture(coaching=True) as f:
+        path='/driver-radio/admin/coach';state=answer(f,path)[1]
+        body=dict(profile='solo-pov',expected=state['revision'],action='start',options={})
+        assert answer(f,path,method='POST',body=body)[0]==200;f.practice.service.step()
+        for n in (2,3,4):f.practice.complete(n);f.practice.service.step()
+        store=f.practice.service.journal;owner={'profile':'solo-pov','subject':'local:producer'}
+        record=store.read(owner,f.practice.service._generation)['entries'][0]
+        for n in range(32):
+            value=copy.deepcopy(record);value.update(id=f'{n:032x}',training_id=f'{n:032x}',status='stopped',ended_at=f.practice.wall)
+            assert store.save(owner,value)
+        result=driver_radio_admin.Client('solo-pov',f.server.server_port).request(coach=True)
+        assert len(result['history']['entries'])==32 and result['focus']['focus']
+
+
+def t_stop_acknowledges_without_reading_unavailable_live_or_history_sources():
+    from unittest.mock import patch
+    with RadioFixture(coaching=True) as f:
+        state=answer(f)[1]
+        assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+        f.practice.service.step()
+        with patch.object(f.telemetry.engineer,'snapshot',side_effect=OSError('Synthetic unavailable source')):
+            status,stopped,_=answer(f,method='POST',body=dict(expected=0,action='stop',options={}))
+        assert status==200 and not stopped['active'] and stopped['pending']
+
+
+def t_local_response_limits_reject_oversized_valid_json_for_both_radio_and_coaching():
+    import io
+    from unittest.mock import patch
+    import driver_radio_admin
+    base=json.dumps(dict(profile='solo-pov',protocol=driver_radio_admin.PROTOCOL)).encode()
+    for coach,limit in ((False,65536),(True,driver_radio_admin.MAX_COACH_RESPONSE)):
+        # The bounded read is still valid JSON; a decoder failure cannot hide a missing size guard.
+        raw=base+b' '*limit
+        with patch.object(driver_radio_admin.http_util,'open_url',return_value=io.BytesIO(raw)):
+            try:driver_radio_admin.Client('solo-pov',8088).request(coach=coach)
+            except ValueError:pass  # Both transports must fail closed on a response exceeding their bound.
+            else:raise AssertionError('The local radio bridge accepted an oversized response')
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)

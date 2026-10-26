@@ -217,6 +217,26 @@ class Service:
         self.radio.cancel_coach(blocking=False)
         return self.view(owner)
 
+    def after_io(self,owner,prior,doc):
+        """Only remove unproven facts after external IO; never invoke grant callbacks."""
+        with self._lock:
+            current=self.snapshot(owner)
+            stamp,expected=self._checks
+        same=all(current.get(k)==prior.get(k) for k in ('epoch','revision'))
+        state=copy.deepcopy(prior if same else current)
+        if state['active']:
+            lookup={row.get('id'):row for row in (doc.get('laps') or [])[-512:] if isinstance(row,dict)}
+            valid=(same and _live(doc) and _stamp(doc)==stamp
+                   and all(ident in lookup and _facts(lookup[ident])==facts for ident,facts in expected))
+            if state['pending'] or not valid:
+                state.update(phase='pending' if state['pending'] else 'paused',calibration=None,focus=None,latest=None)
+                if 'references' in state:state['references']=[]
+        with self._lock:
+            if self._revision!=current['revision'] or self._token!=current.get('epoch',self._token):
+                state=self.snapshot(owner)
+                if state['active']:state.update(phase='pending' if state['pending'] else 'paused',calibration=None,focus=None,latest=None)
+        return state
+
     def _apply(self, command):
         action, options = command['action'], command['options']
         if action == 'stop':

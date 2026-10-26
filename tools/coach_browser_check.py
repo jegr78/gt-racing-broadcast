@@ -140,7 +140,9 @@ def check(browser,outdir,shots=None):
                 f.practice.complete(n,seconds);f.practice.service.step()
             sync(cc,f,'radioAdmin','local:producer');cc.wait_for_function("window.radioAdmin.coach.state?.focus?.focus")
             assert f.practice.service.snapshot({'profile':'solo-pov','subject':'local:producer'})['calibration']['mode']=='time_trial'
-            c.locator('#coach-show-evidence').click();c.scroll_into_view_if_needed()
+            c.locator('#coach-history').evaluate('(node)=>node.open=true')
+            c.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
+            c.locator('#coach-history').scroll_into_view_if_needed()
             shot(cc,'coach-control-center','desktop','cc-telemetry.png')
             apply(cc,c,'#coach-stop',f,'radioAdmin','local:producer')
             config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','director']))

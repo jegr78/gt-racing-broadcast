@@ -294,7 +294,7 @@ def expose(document,current,facts,reference_allowed):
             observed=(record.get('latest') or {}).get('observation') or 'No comparable completed-lap observation is available.',
             interpretation=(record.get('progress') or {}).get('text') or 'Evidence is unavailable; no improvement or cause is inferred.',
             next='Start fresh personal calibration before choosing the next exercise.' if not worked else
-                 'After fresh personal calibration, consider repeating '+worked[-1]['skill']+'. Cause remains unknown.')
+                 'After fresh personal calibration, consider repeating '+worked[-1]['skill']+'.')
     return result
 
 

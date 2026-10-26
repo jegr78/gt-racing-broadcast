@@ -11680,8 +11680,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _coach_controls_rl = console_auth.RateLimiter(limit=30, window_s=60)
 
     class H(BaseHTTPRequestHandler):
-        def _send(self, obj, code=200, no_store=False):
-            body = json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
+        def _send(self, obj, code=200, no_store=False, compact=False):
+            body = json.dumps(obj, ensure_ascii=False, indent=None if compact else 2).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -11811,26 +11811,33 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             return False
                     return expected is not None and reference_proofs[ident]==expected
                 if history_doc is not None:
-                    driver_coach_history.expose(history_doc,live.snapshot(),driver_coach_service._facts,historical_reference)
+                    for record in history_doc['entries']:
+                        reference=record['reference']
+                        if reference and reference['id'].startswith('r:'):
+                            historical_reference(reference['id'],record['reference_fingerprint'])
                 current = actor.view(owner)
                 if method == 'GET':
                     same = (all(current.get(k) == result.get(k) for k in ('epoch', 'revision', 'phase'))
                             and driver_coach_service._stamp(live.snapshot()) == choice_stamp)
                     current['references'] = result['references'] if same else []
                 result = current
-                if history_doc is not None:
-                    fresh=live.snapshot()
-                    result['history']=driver_coach_history.expose(history_doc,fresh,driver_coach_service._facts,historical_reference)
-                    result['history_suggestion']=driver_coach_history.suggest(result['history'],result,fresh.get('current') or {})
-                result['history_error']=history_error
-                if authorize() is not True:
-                    return self._radio_error('forbidden', 'Coaching access changed during the request', 403)
                 for ident, path in tuple(sources.items()):
                     if archive(ident) != path:
                         raise driver_coach_calibration.CoachError('reference_unavailable')
+                if authorize() is not True:
+                    return self._radio_error('forbidden', 'Coaching access changed during the request', 403)
+                needs_live=method=='GET' or history_doc is not None or result['active'] and not result['pending']
+                fresh=live.snapshot() if needs_live else {}
+                result=actor.after_io(owner,result,fresh)
+                if history_doc is not None:
+                    def checked_reference(ident,expected):
+                        return expected is not None and reference_proofs.get(ident)==expected
+                    result['history']=driver_coach_history.expose(history_doc,fresh,driver_coach_service._facts,checked_reference)
+                    result['history_suggestion']=driver_coach_history.suggest(result['history'],result,fresh.get('current') or {})
+                result['history_error']=history_error
                 result.update(profile=profile, viewer=owner['subject'])
                 if admin:result['protocol'] = 'racecast-driver-radio-admin-v1'
-                return self._send(result, no_store=True)
+                return self._send(result, no_store=True, compact=True)
             except (driver_coach_calibration.CoachError, driver_radio_access.RadioError, race_engineer_access.AccessError) as error:
                 status = (403 if error.code in ('forbidden', 'feature_disabled') else
                           409 if error.code in ('conflict', 'busy', 'training_busy', 'training_required', 'focus_unavailable', 'incompatible_reference', 'profile_changed') else
