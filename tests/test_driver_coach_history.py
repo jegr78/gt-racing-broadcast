@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
+from unittest.mock import patch
 
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]/'src/scripts'),str(Path(__file__).parent)]
 import driver_coach_history as history
@@ -77,6 +79,8 @@ def t_deletion_is_revisioned_owner_only_and_an_active_checkpoint_cannot_resurrec
         rejects(lambda:store.delete(REMOTE,current['revision'],record['id']),'conflict')
         deleted=store.delete(LOCAL,current['revision'],record['id'])
         assert deleted['entries']==[] and not store.save(LOCAL,record)
+        same_training=copy.deepcopy(record);same_training['id']='e'*32
+        assert not store.save(LOCAL,same_training),'A context reset resumed deleted active training retention'
         fresh=copy.deepcopy(record);fresh['id']='c'*32;fresh['training_id']='d'*32
         assert store.save(LOCAL,fresh)
         assert store.delete(LOCAL,store.read(LOCAL,GENERATION)['revision'])['entries']==[]
@@ -109,6 +113,62 @@ def t_corrupt_oversized_and_symlinked_private_files_fail_closed():
             path.unlink();path.symlink_to(elsewhere)
             rejects(lambda:store.read(LOCAL,GENERATION),'history_unavailable')
             assert elsewhere.read_text(encoding='utf8')=='private'
+
+
+def coordinated(root):
+    import driver_coach_service as service
+    f=Fixture(Path(root)/'source')
+    store=history.Store(Path(root)/'solo',clock=lambda:f.wall)
+    f.service=service.Service('solo',lambda:copy.deepcopy(f.snap),f.detail,f.radio.service,
+                              clock=lambda:f.at,wall=lambda:f.wall,journal=store)
+    return f,store
+
+
+def t_coordinator_finalizes_private_work_and_context_segments_without_reusing_old_calibration():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3,4):f.complete(n);f.step()
+        before=store.read(LOCAL,f.service._generation)['entries'][0]
+        assert before['focus'] and before['latest']['lap_id']=='lap-4'
+        f.command('stop');f.step()
+        ended=store.read(LOCAL,f.service._generation)['entries'][0]
+        assert ended['status']=='stopped' and ended['baseline']==before['baseline']
+        f.command();state=f.step()
+        assert not state['calibration']['calibration_ids'] and state['focus']['focus'] is None
+        for n in (6,7):f.complete(n);f.step()
+        f.snap['current']['car_id']=99;f.step()
+        entries=store.read(LOCAL,f.service._generation)['entries']
+        assert any(r['status']=='invalidated' and r['reason']=='live_context_changed' for r in entries)
+
+
+def t_blocked_checkpoint_cannot_block_stop_or_revive_deleted_private_work():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        initial=store.read(LOCAL,f.service._generation)
+        entered=threading.Event();release=threading.Event();original=store.save
+        def blocked(*args):
+            entered.set();assert release.wait(5);return original(*args)
+        f.complete(4)
+        with patch.object(store,'save',blocked):
+            worker=threading.Thread(target=f.service.step);worker.start()
+            try:
+                assert entered.wait(2)
+                state=f.command('stop');assert not state['active'] and state['pending']
+                assert store.delete(LOCAL,initial['revision'])['entries']==[]
+            finally:release.set();worker.join(5)
+        assert not worker.is_alive()
+        f.step();assert store.read(LOCAL,f.service._generation)['entries']==[]
+
+
+def t_graceful_worker_close_finishes_the_last_stored_checkpoint():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3):f.complete(n);f.step()
+        f.service.start()
+        f.service.close()
+        record=store.read(LOCAL,f.service._generation)['entries'][0]
+        assert record['status']=='stopped' and record['reason']=='relay_closed'
 
 
 if __name__=='__main__':

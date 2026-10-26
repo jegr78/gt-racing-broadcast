@@ -139,7 +139,7 @@ class Store:
         if (not isinstance(value,dict) or set(value)!={'version','owner','revision','entries','deleted'}
                 or value['version']!=1 or value['owner']!=owner or type(value['revision']) is not int or value['revision']<0
                 or not isinstance(value['entries'],list) or len(value['entries'])>MAX_RECORDS
-                or not isinstance(value['deleted'],list) or len(value['deleted'])>MAX_RECORDS
+                or not isinstance(value['deleted'],list) or len(value['deleted'])>MAX_RECORDS*2
                 or not all(isinstance(ident,str) and _ID.fullmatch(ident) for ident in value['deleted'])):_error()
         for record in value['entries']:_validate_record(record)
         if len({r['id'] for r in value['entries']})!=len(value['entries']):_error()
@@ -190,7 +190,8 @@ class Store:
         _validate_record(record)
         def save(value):
             previous=next((r for r in value['entries'] if r['id']==record['id']),None)
-            if record['id'] in value['deleted'] or previous and (previous['status']!='active' or previous['generation']!=record['generation']):
+            if (record['id'] in value['deleted'] or record['training_id'] in value['deleted']
+                    or previous and (previous['status']!='active' or previous['generation']!=record['generation'])):
                 return False
             if previous and record['updated_at']<previous['updated_at']:return False
             replacement=copy.deepcopy(record)
@@ -212,6 +213,7 @@ class Store:
         def delete(value):
             if type(expected) is not int or expected!=value['revision']:_error('conflict')
             selected=[r['id'] for r in value['entries'] if ident is None or r['id']==ident]
-            value['deleted']=list(dict.fromkeys(value['deleted']+selected))[-MAX_RECORDS:]
+            trainings=[r['training_id'] for r in value['entries'] if r['id'] in selected]
+            value['deleted']=list(dict.fromkeys(value['deleted']+selected+trainings))[-MAX_RECORDS*2:]
             value['entries']=[r for r in value['entries'] if r['id'] not in selected]
         return self._edit(owner,delete)[1]
