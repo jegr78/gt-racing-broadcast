@@ -59,7 +59,8 @@ def t_verified_worker_is_admitted_but_any_weakened_kernel_limit_is_rejected():
         with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
              patch.object(safety,'current_group',return_value=group), \
              patch.object(safety.subprocess,'run',side_effect=AssertionError('Already admitted worker recursed')):
-            assert safety.enter(__file__,[]) is None
+            admitted=safety.enter(__file__,[])
+            assert admitted is None
 
 
 def t_inspection_lease_is_finite_and_waits_in_the_foreground():
@@ -179,7 +180,8 @@ def t_disposable_hosted_runner_uses_its_ci_job_boundary():
     with patch.object(safety.sys,'platform','linux'), \
          patch.dict(safety.os.environ,{'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted'}), \
          patch.object(safety,'current_group',side_effect=AssertionError('Hosted runner needs no user-manager dependency')):
-        assert safety.enter(__file__,[]) is None
+        admitted=safety.enter(__file__,[])
+        assert admitted is None
 
 
 if __name__=='__main__':
