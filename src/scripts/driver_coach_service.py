@@ -162,6 +162,12 @@ class Service:
                     continue
             if not current:
                 state.update(phase='paused', calibration=None, focus=None, latest=None)
+            elif state.get('latest'):
+                state['latest'].update(self.radio.coach_attachment(
+                    owner,state['epoch'],state['latest'].get('message_id')))
+                with self._lock:
+                    if state['revision']!=self._revision or state['epoch']!=self._token:
+                        continue
             return state
         state = self.snapshot(owner)
         if state['active']:
@@ -557,10 +563,12 @@ class Service:
                 completion = completed if assessment.finite(completed) else float('-inf')
                 latest_lap = max((r['lap'] for r in candidates), default=None)
                 self._ready_at = self.clock()+max(0, completion+1.5-self.wall())
-                self.radio.publish_coach(text, evidence, model['owner'], token,
+                published=self.radio.publish_coach(text, evidence, model['owner'], token,
                     authorize=lambda token=token,stamp=stamp,expected=expected:self._current(token, stamp, expected),
                     ready=lambda token=token:self._speak(token), allow_ai=model['allow_ai'] and calibrated['accepted'],
                     completed_at=completion, latest=brief['lap'] == latest_lap)
+                if published is not None:
+                    model['latest']['message_id']=published['id']
             self._cache(token, model)
 
     def close(self):

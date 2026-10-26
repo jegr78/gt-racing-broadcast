@@ -275,15 +275,9 @@ def render_explanation(result,message):
 class _Current:
     def __init__(self,worker,message,kind='audio'):
         self.worker,self.message,self.kind=worker,message,kind
-        self._checked=float('-inf')
-        self._invalid=False
     def is_set(self):
-        if self.worker._stop.is_set() or self._invalid:return True
-        now=self.worker.clock()
-        if now-self._checked>=.25:
-            self._invalid=self.worker.service.remaining_for(self.message['id'],self.message['epoch'],kind=self.kind)<=0
-            self._checked=now
-        return self._invalid
+        return (self.worker._stop.is_set() or not self.worker.service.provider_current(
+            self.message['id'],self.message['epoch'],kind=self.kind))
 
 
 class Enricher:

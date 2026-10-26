@@ -55,3 +55,12 @@ The command acknowledgement wins in either response order, followed by a fresh
 poll. Authorization failures are still handled immediately. Browser acceptance
 first synchronizes the independent journal revision, then explicitly exercises
 both GET/DELETE arrival orders without background polling masking a lost acknowledgement.
+
+Archived history proofs bind raw recording and context-sidecar file identities,
+plus the applied definition revision and at most four relevant local/bundled
+definition paths. Physical definition changes that the engine has not applied
+fail closed. Read the same provenance before and after obtaining detail and check
+it again after the final archive and driver authorization I/O. Resolve that final
+verdict before taking the last live snapshot; history rendering itself uses only
+cached verdicts. A context/definition edit during a slow grant read cannot preserve
+old focus details merely because the recording path and raw grant still match.

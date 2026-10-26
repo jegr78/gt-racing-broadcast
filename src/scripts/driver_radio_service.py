@@ -55,6 +55,7 @@ class Service:
         self._pace_at = float('-inf')
         self._pace_key = None
         self._conversation = collections.deque(maxlen=4)
+        self._coach_cancel = threading.Event()
 
     def start(self):
         with self._lock:
@@ -97,6 +98,13 @@ class Service:
         for message in self._messages.values():
             unfinished = message['state'] in ('queued','playing') or (
                 message['state'] in TEXT_STATES and message['ai_state']=='pending')
+            if now >= message['_deadline'] and unfinished:
+                message['state'] = 'expired'
+                self._audio.pop(message['id'], None)
+                if self._ticket and self._ticket.message['id'] == message['id']:
+                    self._ticket.cancelled.set()
+                self._revision += 1
+                continue
             if unfinished and not message['_native']:
                 valid = {}
                 for requester, authorize in message['_requesters'].items():
@@ -123,12 +131,6 @@ class Service:
                     if self._ticket and self._ticket.message['id'] == message['id']:
                         self._ticket.cancelled.set()
                     self._revision += 1
-            if now >= message['_deadline'] and unfinished:
-                message['state'] = 'expired'
-                self._audio.pop(message['id'], None)
-                if self._ticket and self._ticket.message['id'] == message['id']:
-                    self._ticket.cancelled.set()
-                self._revision += 1
         self._queue = [mid for mid in self._queue if mid in self._messages and self._messages[mid]['state'] == 'queued']
 
     def _public(self, message):
@@ -184,6 +186,7 @@ class Service:
 
     def cancel_coach(self, blocking=True):
         # Signal the owner before waiting for a reader's grant callback.
+        self._coach_cancel.set()
         ticket = self._ticket
         if ticket is not None and ticket.message.get('kind') == 'coach':
             ticket.cancelled.set()
@@ -211,6 +214,7 @@ class Service:
         with self._lock:
             if not self._enabled or not self._live or self._closed:return None
             self.cancel_coach()
+            self._coach_cancel = threading.Event()
             result = dict(answers={'coach':text}, fuel={}, pace={}, tyres={}, uncertainties=[])
             remaining = max(0, min(12, completed_at+12-self.wall())) if assessment.number(completed_at) is not None else 0
             fresh = latest is True and remaining > 0
@@ -218,6 +222,7 @@ class Service:
             public = self._publish('coach', 'coach', 'normal', result, self.clock(), queued=queued)
             message = self._messages[public['id']]
             message.update(evidence=copy.deepcopy(evidence), _coach_owner=copy.deepcopy(owner),
+                           _coach_cancel=self._coach_cancel,
                            _coach_epoch=training_epoch, _coach_guard=authorize, _coach_ready=ready,
                            _deadline=self.clock()+remaining, expires_at=self.wall()+remaining,
                            ai_state='pending' if fresh and allow_ai is True else 'not_requested')
@@ -454,6 +459,30 @@ class Service:
                     or message['state'] not in (TEXT_STATES if kind=='ai' else ('queued','playing'))):
                 return 0
             return max(0,message['_deadline']-self.clock())
+
+    def provider_current(self, message_id, epoch, kind='audio'):
+        """Cancellation only: no locks, grant callbacks or source/settings I/O.
+
+        Admission and attachment perform fresh authorization. A running process
+        must remain able to reach its own deadline while those reads are blocked.
+        Each coach message retains its own never-reset cancellation event.
+        """
+        message=self._messages.get(message_id)
+        return (not self._closed and self._live and epoch==self._epoch
+                and message is not None and message['epoch']==epoch
+                and message['state'] in (TEXT_STATES if kind=='ai' else ('queued','playing'))
+                and self.clock()<message['_deadline']
+                and not (message.get('_coach_cancel') and message['_coach_cancel'].is_set()))
+
+    def coach_attachment(self, owner, training_epoch, message_id):
+        """Project only an authorized actor view's exact current private message."""
+        with self._lock:
+            message=self._messages.get(message_id)
+            if (message is None or self._closed or message.get('_coach_owner')!=owner
+                    or message.get('_coach_epoch')!=training_epoch or message['epoch']!=self._epoch
+                    or message['state'] not in TEXT_STATES or message['_coach_cancel'].is_set()):
+                return {}
+            return {key:copy.deepcopy(message[key]) for key in ('ai_state','ai_error','explanation') if key in message}
 
     def enrichment_work(self, kind):
         self.refresh()

@@ -738,6 +738,85 @@ def t_failed_player_cleanup_keeps_its_slot_and_does_not_abandon_a_pending_radio_
         assert player.closed and errors==['Controlled cleanup failure']
 
 
+def t_running_provider_probe_never_reads_grants_and_keeps_its_deadline():
+    import io
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import driver_radio_process as process
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(allow_ai=True);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        message=f.messages()[-1];owned=[False];grant_reads=[]
+        def grant():
+            grant_reads.append(owned[0])
+            if owned[0]:raise AssertionError('Running provider performed grant I/O')
+            return True
+        f.service._grant=grant
+        current=providers._Current(providers.Enricher(f.radio.service,clock=lambda:f.at),message,'ai')
+        class Reader:
+            def __init__(self,**kwargs):pass
+            def start(self):pass
+            def join(self,*args):pass
+            def is_alive(self):return False
+        proc=SimpleNamespace(pid=12345,returncode=None,stdout=io.BytesIO(),stderr=io.BytesIO(),poll=lambda:None)
+        def spawn(*args,**kwargs):owned[0]=True;f.at+=.3;return proc
+        def retire(child,tree):assert child is proc;owned[0]=False
+        def tick(seconds):f.at+=seconds
+        tree=SimpleNamespace(attach=lambda proc:None,close=lambda:None)
+        began=f.at
+        with patch.object(process.subprocess,'Popen',spawn),patch.object(process.threading,'Thread',Reader), \
+             patch.object(process.time,'monotonic',lambda:f.at),patch.object(process.time,'sleep',tick), \
+             patch.object(process.ai_jobs,'WindowsTree',return_value=tree),patch.object(process.ai_jobs,'terminate_tree',retire):
+            try:process.run_process(SimpleNamespace(argv=['fake'],cwd=None,output=None),None,current,1,{})
+            except providers.ProviderError as error:assert error.code=='timed_out',error.code
+            else:raise AssertionError('Provider deadline was not enforced')
+        assert not any(grant_reads),'Owned provider performed synchronous grant I/O'
+        assert not owned[0] and f.at-began<1.05
+
+
+def t_stop_signals_provider_work_even_while_the_radio_metadata_lock_is_busy():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(allow_ai=True);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        current=providers._Current(providers.Enricher(f.radio.service,clock=lambda:f.at),f.messages()[-1],'ai')
+        entered=threading.Event();release=threading.Event();done=threading.Event();cancelled=[]
+        def hold():
+            with f.radio.service._lock:entered.set();assert release.wait(3)
+        holder=threading.Thread(target=hold);holder.start();assert entered.wait(1)
+        def probe():cancelled.append(current.is_set());done.set()
+        try:
+            f.command('stop');f.at+=.3
+            checking=threading.Thread(target=probe);checking.start()
+            assert done.wait(.5),'Running provider cancellation waited for metadata I/O'
+            assert cancelled==[True]
+        finally:release.set();holder.join(1);checking.join(1)
+
+
+def t_expired_coach_work_is_retired_before_any_external_guard_is_read():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(allow_ai=True);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        reads=[];f.service._grant=lambda:reads.append(True) or True
+        f.at+=13;f.wall+=13
+        f.radio.service.refresh(force=True)
+        assert not reads,'Already expired coaching performed external grant I/O'
+
+
+def t_new_publication_cannot_reset_an_old_provider_cancellation_event():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root);f.command(allow_ai=True);f.step()
+        for n in (2,3):f.complete(n);f.step()
+        worker=providers.Enricher(f.radio.service,clock=lambda:f.at)
+        old=providers._Current(worker,f.messages()[-1],'ai')
+        assert not old.is_set()
+        message=f.radio.service.publish_coach('New current exercise.',{},LOCAL,'new-training-token',
+                    authorize=lambda:True,ready=lambda:True,allow_ai=True,completed_at=f.wall,latest=True)
+        current=providers._Current(worker,message,'ai')
+        assert old.is_set() and not current.is_set(),'New publication revived old work or inherited its cancellation'
+        f.radio.service.cancel_coach(blocking=False)
+        assert old.is_set() and current.is_set()
+
+
 if __name__=='__main__':
     tests=[(n,f) for n,f in globals().copy().items() if n.startswith('t_') and callable(f)]
     for n,f in tests:f();print('PASS',n)

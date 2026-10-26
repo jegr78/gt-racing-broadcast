@@ -407,6 +407,73 @@ def t_local_response_limits_reject_oversized_valid_json_for_both_radio_and_coach
             else:raise AssertionError('The local radio bridge accepted an oversized response')
 
 
+def t_optional_ai_attachment_reaches_only_the_current_owner_review():
+    import driver_radio_providers as providers
+    class AI:
+        def explain(self,*args):
+            return dict(explanation=providers.COACH_EXPLANATIONS[1],evidence=['coach.lap_time_s'],claims=[],exercise='repeat')
+    with RadioFixture(coaching=True) as f:
+        config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','other'],providers=dict(speech=False,agent='fixture')))
+        state=answer(f)[1]
+        assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={'allow_ai':True}))[0]==200
+        f.practice.service.step()
+        for n in (2,3):f.practice.complete(n);f.practice.service.step()
+        f.enricher.ai=AI();assert f.enricher.step('ai')
+        message=f.f.service.history(requester='driver')['messages'][-1]
+        state=answer(f)[1]
+        assert state['latest'].get('explanation')==message['explanation'],'Validated optional AI vanished before the driver review'
+        assert state['latest']['ai_state']=='ready'
+        foreign=answer(f,subject='other')[1]
+        assert foreign['phase']=='busy' and 'latest' not in foreign and message['explanation'] not in json.dumps(foreign)
+        f.practice.complete(4);f.practice.service.step()
+        assert not answer(f)[1]['latest'].get('explanation'),'Old lap AI survived a new completed-lap review'
+
+
+def t_archive_context_correction_during_final_grant_io_redacts_old_history():
+    import copy
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import test_ai_package as recording
+    from test_driver_coach_service import real_lap
+    import gt7_context
+    with RadioFixture(coaching=True) as f:
+        source=recording.source(f.f.access.path.parent/'telemetry-recordings')
+        f.engineer.update(enabled=True,grant=source.identity,expected=0)
+        f.crew.inject_row(2,name='Driver',race_engineer=True)
+        row=real_lap(20,8);row.update(id='r:'+source.identity+':1:20',session_id='recorded')
+        def detail(_ident,grant):
+            grant(source.identity);return dict(state='ready',lap=copy.deepcopy(row))
+        f.telemetry.engineer.api=SimpleNamespace(_detail=detail,reference=lambda *args:dict(laps=[copy.deepcopy(row)]))
+        state=answer(f)[1];assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
+        f.practice.service.step()
+        for n in (2,3):f.practice.complete(n);f.practice.service.step()
+        state=answer(f)[1];assert answer(f,method='POST',body=dict(expected=state['revision'],action='reference',options={'lap_id':row['id']}))[0]==200
+        f.practice.service.step()
+        for n in (4,5):f.practice.complete(n);f.practice.service.step()
+        state=answer(f)[1];assert answer(f,method='POST',body=dict(expected=state['revision'],action='stop',options={}))[0]==200
+        f.practice.service.step()
+        before=answer(f)[1];entry=next(r for r in before['history']['entries'] if r['reference'] and r['reference']['source']=='selected')
+        assert entry['focus'] and entry['evidence_status']=='historical'
+        original=f.engineer.reference;primed=[];changed=[]
+        original_prepare=console.m.driver_coach_calibration._prepare
+        def prepare(value):
+            result=original_prepare(value)
+            if value.get('id')==row['id']:primed.append(True)
+            return result
+        def final_grant(*args):
+            path=original(*args)
+            if primed and not changed:
+                Path(gt7_context._stem(str(path))+'.context.json').write_text('{"corrected":true}',encoding='utf8')
+                row['measurement_hash']='corrected-during-final-archive-io';changed.append(True)
+            return path
+        with patch.object(console.m.driver_coach_calibration,'_prepare',prepare),patch.object(f.engineer,'reference',final_grant):
+            status,current,_=answer(f)
+        assert status==200 and changed
+        result=next(r for r in current['history']['entries'] if r['id']==entry['id'])
+        assert result['reference'] is None and result['focus'] is None,'Corrected archive kept the cached historical focus'
+        assert result['evidence_status']=='reference_unavailable'
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)

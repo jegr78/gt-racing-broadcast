@@ -166,6 +166,8 @@ def check(browser,outdir,shots=None):
             assert not errors,errors
             page.close();cc.close()
             results.append(V.SurfaceResult('driver-coach-controls','desktop',None,[],0,None))
+        optional_ai_visibility(browser)
+        results.append(V.SurfaceResult('driver-coach-optional-ai','desktop',None,[],0,None))
         ordering_and_identity(browser)
         results.append(V.SurfaceResult('driver-coach-privacy-ordering','desktop',None,[],0,None))
         history_lifecycle(browser)
@@ -176,6 +178,31 @@ def check(browser,outdir,shots=None):
         results.append(V.SurfaceResult('driver-coach','desktop',None,[],0,traceback.format_exc()))
     finally:context.close()
     return results
+
+
+def optional_ai_visibility(browser):
+    sys.path.insert(0,str(ROOT/'tests'))
+    from test_driver_radio_ui import RadioFixture
+    import driver_radio_providers as providers
+    class AI:
+        def explain(self,*args):
+            return dict(explanation=providers.COACH_EXPLANATIONS[1],evidence=['coach.lap_time_s'],claims=[],exercise='repeat')
+    context=browser.new_context()
+    try:
+        with RadioFixture(coaching=True) as f:
+            config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],providers=dict(speech=False,agent='fixture')))
+            page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
+            host=page.locator('#driver-radio');host.locator('#coach-ai').check();host.locator('#coach-start').click()
+            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            for n in (2,3):f.practice.complete(n);f.practice.service.step()
+            f.enricher.ai=AI();assert f.enricher.step('ai')
+            page.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('coach-review').textContent.includes('AI interpretation:')")
+            assert providers.COACH_EXPLANATIONS[1] in host.locator('#coach-review').inner_text()
+            f.practice.complete(4);f.practice.service.step()
+            page.wait_for_function("window.radioView.coach.state?.latest?.lap_id==='lap-4'")
+            assert 'AI interpretation:' not in host.locator('#coach-review').inner_text(),'Previous-lap AI survived the current review'
+            page.close()
+    finally:context.close()
 
 
 def ordering_and_identity(browser):

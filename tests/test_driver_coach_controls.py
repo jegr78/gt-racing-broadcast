@@ -273,6 +273,46 @@ def t_reference_choices_do_not_offer_recorded_or_stale_laps_as_current_live_refe
             assert references.choices([])==[], 'Unavailable live evidence was offered as a current reference'
 
 
+def t_history_proof_fences_detail_and_later_sidecar_edits_without_new_grants():
+    import gt7_context
+    for moment in ('detail','after'):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'source.gt7rec';path.write_bytes(b'owned fixture')
+            source='a'*32;row=real_lap(20,8);row.update(id='r:'+source+':1:20',session_id='recorded')
+            context=controls.calibration._context(row);calls=[]
+            def detail(ident,grant,source=source,path=path,moment=moment,row=row):
+                assert grant(source)==path
+                if moment=='detail':Path(gt7_context._stem(str(path))+'.context.json').write_text('{}',encoding='utf8')
+                return dict(state='ready',lap=copy.deepcopy(row))
+            refs=controls.References(SimpleNamespace(api=SimpleNamespace(_detail=detail)),lambda asked,calls=calls,path=path:calls.append(asked) or path)
+            if moment=='detail':rejects(lambda refs=refs,row=row,context=context:refs.history_proof(row['id'],context),'reference_unavailable')
+            else:
+                digest,current=refs.history_proof(row['id'],context)
+                assert digest==controls.calibration._prepare(row).digest and current()
+                Path(gt7_context._stem(str(path))+'.context.json').write_text('{}',encoding='utf8')
+                assert not current(),'Historical proof survived a later sidecar correction'
+            assert calls==[source],'Provenance check re-entered slow permission I/O'
+
+
+def t_history_definition_proof_rejects_unapplied_or_later_corrected_files():
+    import os
+    with tempfile.TemporaryDirectory() as directory:
+        root=Path(directory);path=root/'source.gt7rec';path.write_bytes(b'fixture');(root/'bundled').mkdir()
+        local=root/'track-forward.json';local.write_text('{}',encoding='utf8')
+        def signature(filename):
+            value=os.stat(filename);return (str(filename),value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+        definitions=SimpleNamespace(path=lambda track,reverse:str(root/(track+('-reverse' if reverse else '-forward')+'.json')),bundled=str(root/'bundled'))
+        live=SimpleNamespace(_definitions=definitions,_definition_stamp=())
+        refs=controls.References(live,lambda ident:path);context={'track_id':'track'}
+        rejects(lambda:refs._history_stamp(path,context),'reference_pending')
+        live._definition_stamp=(signature(local),)
+        before=refs._history_stamp(path,context)
+        local.write_text('{"changed":true}',encoding='utf8')
+        rejects(lambda:refs._history_stamp(path,context),'reference_pending')
+        live._definition_stamp=(signature(local),)
+        assert refs._history_stamp(path,context)!=before,'Applied definition correction retained an old history stamp'
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)

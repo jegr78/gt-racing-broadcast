@@ -11825,23 +11825,23 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     except driver_coach_calibration.CoachError:history_error='history_unavailable'
                 reference_proofs={}
                 history_sources=set()
-                def historical_reference(ident,expected):
+                def historical_reference(ident,expected,context):
                     if ident not in reference_proofs:
                         source=ident.split(':')[1]
                         if source not in history_sources and len(history_sources)>=4:return False
                         history_sources.add(source)
                         reference_proofs[ident]=None
                         try:
-                            prepared=driver_coach_calibration._prepare(references._load(ident))
-                            reference_proofs[ident]=prepared.digest if prepared else None
+                            reference_proofs[ident]=references.history_proof(ident,context)
                         except (OSError,ValueError,KeyError,TypeError):
                             return False
-                    return expected is not None and reference_proofs[ident]==expected
+                    proof=reference_proofs[ident]
+                    return expected is not None and proof is not None and proof[0]==expected
                 if history_doc is not None:
                     for record in history_doc['entries']:
                         reference=record['reference']
                         if reference and reference['id'].startswith('r:'):
-                            historical_reference(reference['id'],record['reference_fingerprint'])
+                            historical_reference(reference['id'],record['reference_fingerprint'],record['context'])
                 current = actor.view(owner)
                 if method == 'GET':
                     same = (all(current.get(k) == result.get(k) for k in ('epoch', 'revision', 'phase'))
@@ -11853,12 +11853,18 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         raise driver_coach_calibration.CoachError('reference_unavailable')
                 if authorize() is not True:
                     return self._radio_error('forbidden', 'Coaching access changed during the request', 403)
+                final_reference_proofs={}
+                for ident, proof in reference_proofs.items():
+                    try:
+                        if proof is not None and proof[1]():final_reference_proofs[ident]=proof[0]
+                    except (OSError,ValueError,KeyError,TypeError):
+                        pass  # Changed/unavailable archive provenance removes old conclusions.
                 needs_live=method=='GET' or history_doc is not None or result['active'] and not result['pending']
                 fresh=live.snapshot() if needs_live else {}
                 result=actor.after_io(owner,result,fresh)
                 if history_doc is not None:
                     def checked_reference(ident,expected):
-                        return expected is not None and reference_proofs.get(ident)==expected
+                        return expected is not None and final_reference_proofs.get(ident)==expected
                     result['history']=driver_coach_history.expose(history_doc,fresh,driver_coach_service._facts,checked_reference)
                     result['history_suggestion']=driver_coach_history.suggest(result['history'],result,fresh.get('current') or {})
                 result['history_error']=history_error
