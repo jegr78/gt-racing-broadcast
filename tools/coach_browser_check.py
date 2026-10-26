@@ -53,6 +53,7 @@ def check(browser,outdir,shots=None):
             sync(page,f);apply(page,a,'#coach-keep',f)
             a.locator('#coach-show-evidence').click()
             assert a.locator('#coach-evidence').inner_text().find('Observation')>=0
+            assert all(ident in a.locator('#coach-evidence').inner_text() for ident in f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['focus']['baseline']['lap_ids'])
             # Start a reference read, then let a new lap change the actor revision.
             # Stop must remain actionable while neither the old read nor old GET replies finish.
             resolver=controls.References.resolve

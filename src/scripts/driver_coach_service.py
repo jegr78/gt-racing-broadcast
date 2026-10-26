@@ -143,7 +143,10 @@ class Service:
             with self._lock:
                 state = self.snapshot(owner)
                 stamp, expected = self._checks
-            if not state['active'] or state['pending']:
+            if state['pending']:
+                state.update(calibration=None, focus=None, latest=None)
+                return state
+            if not state['active']:
                 return state
             current = self._current(state['epoch'], stamp, expected)
             with self._lock:

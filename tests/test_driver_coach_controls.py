@@ -97,6 +97,22 @@ def t_voice_and_driver_views_hide_corrected_or_stale_evidence_before_the_cpu_wor
             assert f.service.snapshot(LOCAL)==before, 'A reader mutated the worker model'
 
 
+def t_pending_controls_cannot_reveal_retained_reference_or_focus_after_a_grant_or_context_change():
+    for change in ('grant','context'):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);f.command();f.step()
+            for n in (2,3):f.complete(n);f.step()
+            allowed=[True]
+            f.command('reference',row=real_lap(20,8),authorize=lambda allowed=allowed:allowed[0]);f.step()
+            for n in (4,5):f.complete(n);f.step()
+            assert f.service.view(LOCAL)['calibration']['reference']['source']=='selected'
+            f.command('skill',skill='braking')
+            if change=='grant':allowed[0]=False
+            else:f.snap['current']['car_id']=99
+            view=f.service.view(LOCAL)
+            assert view['pending'] and view['calibration'] is None and view['focus'] is None and view['latest'] is None
+
+
 def t_reference_lookup_cannot_run_for_a_stale_control_or_ungranted_driver():
     with tempfile.TemporaryDirectory() as root:
         f=Fixture(root);f.command();f.step();calls=[]
