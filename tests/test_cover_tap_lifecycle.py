@@ -52,7 +52,8 @@ def t_encoder_exit_during_ring_read_cannot_write_stale_bytes_to_its_pipe():
 
 def generations(unjoinable=False):
     threads=[];encoders=[];streams=[];peak=[0]
-    row=tap(SimpleNamespace(closed=False,read=lambda *a:(b'',0),live_offset=lambda:0))
+    def retired_read(*args):raise AssertionError('Retired generation kept reading its empty ring')
+    row=tap(SimpleNamespace(closed=False,read=retired_read,live_offset=lambda:0))
     class Pump:
         def __init__(self,target,args=(),**kwargs):self.target=target;self.args=args;self.alive=False;threads.append(self)
         def start(self):self.alive=True;peak[0]=max(peak[0],sum(t.alive for t in threads))

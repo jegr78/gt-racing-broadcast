@@ -18,8 +18,14 @@ Local Linux E2E runs use one transient user service with at most two CPU cores,
 512 tasks, 2 GiB RAM and fifteen minutes of lifetime. The service kills its whole
 cgroup at exit, including descendants that created another process group. It
 does not depend on the agent connection staying alive. Local admission fails
-closed when this containment is unavailable. GitHub Actions uses disposable
-runners with finite E2E job timeouts; the portable child supervisor remains active.
+closed when this containment is unavailable. A separate watcher inherits a stable
+pidfd for the caller and a write descriptor opened inside the verified test cgroup.
+Caller death terminates that pinned cgroup, including on an uncatchable abort.
+It never resolves a kill target by process or service name. GitHub-hosted Actions
+uses disposable runners with finite E2E job timeouts; self-hosted Linux runners
+still require kernel containment. Runner identity follows GitHub's documented
+[`RUNNER_ENVIRONMENT`](https://docs.github.com/en/actions/reference/workflows-and-actions/variables)
+values. The portable per-service supervisor remains active on all runner platforms.
 
 `--keep` stays in the foreground for a finite inspection lease. Closing the
 harness closes its control pipes; independent child supervisors then stop their

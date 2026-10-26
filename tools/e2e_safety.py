@@ -3,6 +3,7 @@ import json
 import math
 import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 import time
@@ -34,17 +35,51 @@ def limited(group):
     return True
 
 
+def owner_identity():
+    return os.getpid(),Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19]
+
+
+def watch_owner(fd,kill_fd):
+    try:select.select([fd],[],[],MAX_SECONDS)
+    finally:
+        os.close(fd)
+        # This descriptor was opened inside the verified test cgroup. It cannot
+        # retarget a newer unit or an unrelated PID when ownership changes.
+        try:os.write(kill_fd,b'1')
+        finally:os.close(kill_fd)
+
+
+def owner_watchdog(pid,start):
+    if type(pid) is not int or pid<=1:raise RuntimeError('Invalid E2E admission owner')
+    path=Path('/proc')/str(pid)
+    fd=os.pidfd_open(pid)
+    kill_fd=None
+    try:
+        if path.stat().st_uid!=os.getuid() or path.joinpath('stat').read_text().rsplit(')',1)[1].split()[19]!=start:
+            raise RuntimeError('E2E admission owner changed')
+        group=current_group()
+        if not limited(group):raise RuntimeError('E2E owner watchdog requires verified containment')
+        kill_fd=os.open(group/'cgroup.kill',os.O_WRONLY)
+        subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--watch-owner',str(fd),str(kill_fd)],
+                         pass_fds=(fd,kill_fd),stdin=subprocess.DEVNULL)
+    finally:
+        os.close(fd)
+        if kill_fd is not None:os.close(kill_fd)
+
+
 def enter(script,argv):
     """Return the contained run's exit code, or None inside an admitted worker."""
-    if sys.platform!='linux' or os.environ.get('GITHUB_ACTIONS')=='true':return None
+    if sys.platform!='linux':return None
+    if os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted':return None
     if limited(current_group()):return None
+    pid,start=owner_identity()
     command=['systemd-run','--user','--quiet','--wait','--collect','--pipe',
              '--unit='+UNIT,'--property=CPUQuota=200%',
              '--property=TasksMax='+str(MAX_TASKS),'--property=MemoryMax='+str(MAX_MEMORY),
              '--property=RuntimeMaxSec='+str(MAX_SECONDS),'--property=TimeoutStopSec=10s',
              '--property=KillMode=control-group','--property=CPUWeight=10',
              '--working-directory='+str(Path(script).resolve().parents[1]),
-             sys.executable,str(Path(__file__).resolve()),'--exec',str(Path(script).resolve()),*argv]
+             sys.executable,str(Path(__file__).resolve()),'--exec',str(pid),start,str(Path(script).resolve()),*argv]
     # Forward the environment through stdin, never argv (which can expose secrets).
     try:
         result=subprocess.run(command,input=json.dumps(dict(os.environ))+'\n',text=True)
@@ -68,9 +103,12 @@ def inspect_for(seconds):
 
 
 if __name__=='__main__':
-    if len(sys.argv)<3 or sys.argv[1]!='--exec':raise SystemExit('Internal bounded E2E entrypoint')
+    if len(sys.argv)==4 and sys.argv[1]=='--watch-owner':
+        watch_owner(int(sys.argv[2]),int(sys.argv[3]));raise SystemExit(0)
+    if len(sys.argv)<5 or sys.argv[1]!='--exec':raise SystemExit('Internal bounded E2E entrypoint')
     raw=sys.stdin.buffer.readline(256*1024)
     environment=json.loads(raw)
     if not isinstance(environment,dict) or not all(isinstance(k,str) and isinstance(v,str) for k,v in environment.items()):
         raise SystemExit('Invalid bounded E2E environment')
-    os.execve(sys.executable,[sys.executable,*sys.argv[2:]],environment)
+    owner_watchdog(int(sys.argv[2]),sys.argv[3])
+    os.execve(sys.executable,[sys.executable,*sys.argv[4:]],environment)

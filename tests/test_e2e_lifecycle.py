@@ -138,7 +138,7 @@ os._exit(0)
 
 def t_unsafe_process_id_is_rejected_before_any_signal():
     for pid in (1,0,-1,True,mock.MagicMock()):
-        proc=SimpleNamespace(pid=pid)
+        proc=SimpleNamespace(pid=pid,_group=pid,poll=lambda:None,wait=lambda **kw:0,kill=lambda:None,terminate=lambda:None)
         with mock.patch.object(harness.os,'killpg',side_effect=AssertionError('Unsafe group signal'),create=True):
             try:harness._kill(proc)
             except RuntimeError:pass  # unsafe identities must fail before any signal
