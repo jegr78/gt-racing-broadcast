@@ -169,6 +169,8 @@ def check(browser,outdir,shots=None):
         ordering_and_identity(browser)
         results.append(V.SurfaceResult('driver-coach-privacy-ordering','desktop',None,[],0,None))
         history_lifecycle(browser)
+        history_lifecycle(browser, reverse=True)
+        history_source_ordering(browser)
         results.append(V.SurfaceResult('driver-coach-private-history','desktop',None,[],0,None))
     except Exception:
         results.append(V.SurfaceResult('driver-coach','desktop',None,[],0,traceback.format_exc()))
@@ -252,7 +254,7 @@ def ordering_and_identity(browser):
         finally:context.close()
 
 
-def history_lifecycle(browser):
+def history_lifecycle(browser, reverse=False):
     sys.path.insert(0,str(ROOT/'tests'))
     from test_driver_radio_ui import RadioFixture
     context=browser.new_context()
@@ -263,29 +265,44 @@ def history_lifecycle(browser):
             f.practice.snap['current']=f.practice.current(1)
             page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
             host=page.locator('#driver-radio')
+            def settle():
+                owner={'profile':'solo-pov','subject':'console:driver'}
+                revision=f.practice.service.snapshot(owner)['revision']
+                history_revision=f.practice.service.journal.read(owner,f.practice.service._generation)['revision']
+                page.wait_for_function('([actor,history])=>window.radioView.coach.state?.revision===actor&&window.radioView.coach.state?.history?.revision===history&&!window.radioView.coach.state.pending&&!window.radioView.coach.sending',arg=[revision,history_revision])
+            def command(selector):
+                with page.expect_response(lambda response:response.url.endswith('/coach') and response.request.method=='POST') as response:
+                    host.locator(selector).click()
+                data=response.value.json()
+                assert response.value.status==200,data
+                page.wait_for_function('window.radioView.coach.state?.pending')
+                f.practice.service.step();settle()
             host.locator('#coach-history').wait_for(state='visible',timeout=5000)
-            host.locator('#coach-start').click()
-            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            command('#coach-start')
             for n in (2,3,4):f.practice.complete(n,settings_confirmed=True);f.practice.service.step()
+            settle()
             page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.latest?.lap_id==='lap-4')")
             host.locator('#coach-history').evaluate('(node)=>node.open=true')
             host.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
             assert 'Completed lap' in host.locator('#coach-history-entries').inner_text()
-            host.locator('#coach-stop').click();page.wait_for_function('window.radioView.coach.state?.pending')
-            f.practice.service.step()
+            command('#coach-stop')
             page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.status==='stopped')")
             assert 'fresh' in host.locator('#coach-debrief').inner_text().lower()
             ended=page.evaluate("window.radioView.coach.state.history.entries.find(r=>r.status==='stopped').id")
-            host.locator('#coach-start').click()
-            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            command('#coach-start')
             assert not f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['calibration']['calibration_ids']
             for n in (6,7,8):f.practice.complete(n,settings_confirmed=True);f.practice.service.step()
+            settle()
             page.wait_for_function('window.radioView.coach.state?.history_suggestion')
             hint=page.evaluate('window.radioView.coach.state.history_suggestion.skill')
-            host.locator('#coach-apply-history').click()
-            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            command('#coach-apply-history')
             page.wait_for_function('(skill)=>window.radioView.coach.state?.focus?.skill===skill&&!window.radioView.coach.state.pending',arg=hint)
             assert set(f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['calibration']['baseline']['lap_ids']).isdisjoint({'lap-2','lap-3'})
+            history_revision=f.practice.service.journal.read({'profile':'solo-pov','subject':'console:driver'},f.practice.service._generation)['revision']
+            page.wait_for_function('(revision)=>window.radioView.coach.state?.history?.revision===revision',arg=history_revision)
+            # Drive this ordering explicitly; a scheduled poll must not become the
+            # held GET before the DELETE has entered its journal operation.
+            page.evaluate('clearTimeout(window.radioView.coach.timer);window.radioView.coach.schedule=()=>{};void 0')
             page.wait_for_function('!window.radioView.coach.polling')
             host.locator('#coach-objective').select_option('pace')
             host.locator('[data-history-id="'+ended+'"]').evaluate('(node)=>node.open=true')
@@ -294,17 +311,28 @@ def history_lifecycle(browser):
                 entered.set();assert release.wait(6);return original(*args)
             page.evaluate("""window.__historyFetch=fetch;window.fetch=async(...args)=>{
                 const response=await window.__historyFetch(...args);
+                if(String(args[0]).endsWith('/coach')&&args[1]?.method==='POST'&&window.__reverseHistory)
+                    await new Promise(resolve=>window.__releaseDeleteReply=resolve);
                 if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST'&&!window.__releaseHistoryReply)
                     await new Promise(resolve=>window.__releaseHistoryReply=resolve);
                 return response;};""")
+            page.evaluate('(reverse)=>window.__reverseHistory=reverse',reverse)
             try:
                 with patch.object(store,'delete',delayed):
-                    with page.expect_response(lambda response:response.url.endswith('/coach') and response.request.method=='POST'):
+                    with page.expect_response(lambda response:response.url.endswith('/coach') and response.request.method=='POST') as response:
                         host.locator('[data-history-id="'+ended+'"] button').click()
                         assert entered.wait(2)
                         page.evaluate('clearTimeout(window.radioView.coach.timer);void window.radioView.coach.poll()')
                         page.wait_for_function('typeof window.__releaseHistoryReply==="function"')
                         release.set()
+                    assert response.value.status==200,response.value.json()
+                    if reverse:
+                        page.wait_for_function('typeof window.__releaseDeleteReply==="function"')
+                        page.evaluate('window.__releaseHistoryReply()')
+                        page.wait_for_function('!window.radioView.coach.polling')
+                        page.evaluate('window.__releaseDeleteReply()')
+                        page.wait_for_function('!window.radioView.coach.sending')
+                        assert not page.evaluate('(id)=>window.radioView.coach.state.history.entries.some(r=>r.id===id)',ended),'A newer old-history GET suppressed the successful deletion acknowledgement'
                     page.wait_for_function('(id)=>!window.radioView.coach.sending&&!window.radioView.coach.state.history.entries.some(r=>r.id===id)',arg=ended)
                     deleted_revision=page.evaluate('window.radioView.coach.state.history.revision')
                     page.evaluate('window.__releaseHistoryReply();window.fetch=window.__historyFetch')
@@ -313,7 +341,7 @@ def history_lifecycle(browser):
                     assert page.evaluate('window.radioView.coach.state.history.revision')>=deleted_revision
                     assert host.locator('#coach-objective').input_value()=='pace','History deletion discarded an unsaved objective'
             finally:
-                release.set();page.evaluate('window.__releaseHistoryReply?.();window.fetch=window.__historyFetch')
+                release.set();page.evaluate('window.__releaseHistoryReply?.();window.__releaseDeleteReply?.();window.fetch=window.__historyFetch')
             host.locator('#coach-history-delete-all').click()
             page.wait_for_function('window.radioView.coach.state?.history?.entries.length===0')
             assert not host.locator('#coach-debrief').inner_text()
@@ -322,6 +350,38 @@ def history_lifecycle(browser):
             page.close()
             assert f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})['active']
     finally:context.close()
+
+
+def history_source_ordering(browser):
+    sys.path.insert(0, str(ROOT / 'tests'))
+    from test_driver_radio_ui import RadioFixture
+    context = browser.new_context()
+    try:
+        with RadioFixture(coaching=True) as f:
+            page = context.new_page()
+            page.goto(f.url + '/console/driver-radio?t=' + f.token)
+            host = page.locator('#driver-radio')
+            host.locator('#coach-start').click()
+            page.wait_for_function('window.radioView.coach.state?.pending')
+            f.practice.service.step()
+            for n in (2, 3, 4):
+                f.practice.complete(n)
+                f.practice.service.step()
+            page.wait_for_function('window.radioView.coach.state?.focus?.focus&&window.radioView.coach.state.history?.entries.length')
+            host.locator('#coach-history').evaluate('(node)=>node.open=true')
+            previous = page.evaluate('window.radioView.coach.state.revision')
+            page.evaluate("window.__sourceFetch=fetch;window.fetch=async(...args)=>{\n    const response=await window.__sourceFetch(...args);\n    if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST'&&!window.__releaseSourceReply&&(await response.clone().json()).focus?.focus)\n      await new Promise(resolve=>window.__releaseSourceReply=resolve);\n    return response;};")
+            page.wait_for_function('typeof window.__releaseSourceReply==="function"')
+            f.practice.snap['current']['car_id'] = 99
+            host.locator('#coach-history-delete-all').click()
+            page.wait_for_function('window.radioView.coach.state?.phase==="paused"&&!window.radioView.coach.sending')
+            assert page.evaluate('window.radioView.coach.state.revision') == previous, 'Fixture unexpectedly changed actor revision'
+            page.evaluate('window.__releaseSourceReply();window.fetch=window.__sourceFetch')
+            page.wait_for_function('!window.radioView.coach.polling')
+            assert not page.evaluate('window.radioView.coach.state?.focus?.focus'), 'An old equal-revision GET revived live facts after a newer context-aware acknowledgement'
+            page.close()
+    finally:
+        context.close()
 
 
 def main():

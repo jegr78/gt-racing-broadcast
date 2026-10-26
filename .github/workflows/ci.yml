@@ -83,9 +83,8 @@ jobs:
     # CI must exercise everything the release pipeline exercises: release.yml
     # builds the PyInstaller binary and runs the build-binary smoke test, so a
     # PR that breaks either (e.g. a removed CLI flag still passed by the smoke)
-    # must go red here, not at the v* tag. One OS is enough: the smoke covers
-    # frozen dispatch + bundled data, which drift OS-independently; the release
-    # still builds all three.
+    # must go red here, not at the v* tag. This keeps the established Linux smoke;
+    # native-package additionally exercises Windows/macOS frozen coaching.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -96,6 +95,25 @@ jobs:
         run: python -m pip install pyinstaller
       - name: Build + smoke-test the binary (same step as release.yml)
         run: python tools/build-binary.py --version ci-smoke
+
+  native-package:
+    # Exercise the actual frozen relay and private coaching journal on the other
+    # producer OSes too. binary-smoke and e2e-binary cover Linux; these runs keep
+    # Windows/macOS packaging evidence separate from their stdlib test suites.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller
+      - name: Build and exercise the frozen relay
+        run: python tools/e2e.py --build --coach-only
 
   e2e:
     # Integration outer loop: stand up the relay + Control Center from src/ and

@@ -47,7 +47,7 @@ bug the unit suite (pure functions) can't catch. Maintainer-only (`tools/`, not 
 synthetic-CSV builder, tolerant `http_request`, the `CheckResult`/`run_checks` registry,
 the `check_*` callables, `SYNTHETIC_CHECKS`/`REAL_LEAGUE_CHECKS`), unit-tested in
 `tests/test_e2e.py`; `tools/e2e.py` owns process lifecycle (spawn, readiness-poll,
-guaranteed `finally` teardown, no leaked relays/UI even on failure). Two modes:
+guaranteed `finally` teardown, no leaked relays/UI even on failure). Three modes:
 - **Synthetic** (`tools/e2e.py`, the default, **CI-runnable**): an ephemeral temp profile +
   an in-process CSV schedule server via `--sheet-csv-url`; spawns an enabled relay + a
   cockpit-disabled relay + the Control Center on free `127.0.0.1` ports; runs `SYNTHETIC_CHECKS`.
@@ -57,6 +57,16 @@ guaranteed `finally` teardown, no leaked relays/UI even on failure). Two modes:
   to the relay's PATH (the fake schedule URLs are never pulled). The dedicated **`e2e`
   CI job** (`.github/workflows/ci.yml`, ubuntu) runs exactly this; the matrix `test` job
   already runs `tests/test_e2e.py` via `run-tests.py`.
+- **Solo coaching** (`--coach-only`, **CI-runnable on Linux, Windows and macOS**):
+  copies the shipped Solo profile into an owned temporary app home, clears inherited
+  `RACECAST_*` configuration and uses a loopback OBS stand-in and synthetic replay.
+  It uses no POSIX executable stubs. Signed HTTP exercises explicit Driver assignment,
+  Start, replay exclusion, private owner history and stale-revision Stop through
+  `tools/e2e_coach.py`. No audio/provider operation is enabled. `--build --coach-only`
+  builds and drives the actual PyInstaller binary; `--binary --coach-only` uses the
+  existing native binary. The `native-package` CI jobs build and run it on Windows
+  and macOS; Linux's full source/frozen gates also run the coaching checks. It rejects
+  real-league, keep and interactive browser modes before starting any services.
 - **Real-league** (`--real-league NAME`, **local only, refuses under CI**): drives the
   copied real-league dev build (real Sheet/cookies/`CONSOLE_SECRET`), minting a token for
   a real streamer pulled live from `/schedule/data`. Runs a **non-mutating** subset

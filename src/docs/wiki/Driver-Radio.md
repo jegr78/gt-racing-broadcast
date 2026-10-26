@@ -2,7 +2,8 @@
 
 Driver radio provides English fuel, pace, tyre-temperature and short-status
 answers for a Solo POV profile. It also announces fuel risks and meaningful pace
-changes. The Director card and driver desk share the same session messages.
+changes. Optional coaching adds explicit personal training, one retained exercise
+and a private debrief. The Director card and driver desk share the same radio lane.
 
 ![Driver radio in the Solo POV Director Panel](images/director-panel-solo.png)
 
@@ -14,7 +15,7 @@ verified Console identity. The identity appears beside their Console sign-in.
 Save the settings. Director and Race Engineer roles do not grant radio access.
 The existing Engineer archive and producer permissions remain separate.
 
-![Producer radio setup](images/cc-telemetry.png)
+![Private training history and producer radio settings](images/cc-telemetry.png)
 
 The driver's Console now contains **Driver radio**. A direct Director Panel visit
 uses the same Console identity. Sign in through Console, then choose **Connect
@@ -36,11 +37,65 @@ confirm a new tyre stint. Slower comparable laps can support conditional tyre
 advice, but tyre wear, traffic and weather causes are not directly measured.
 Pace comparisons use completed eligible laps and show their sample basis.
 
-![Driver desk with current evidence and optional setup](images/console-driver-radio-desktop.png)
+![Driver desk with coaching, private history and shared radio](images/console-driver-radio-desktop.png)
 
 If another view changes the setup while you edit it, the save is refused. Reload
 the current form, review its values and enter your changes again. Session/context
 changes clear obsolete work. Revoking access removes the open view's radio data.
+
+## Start and steer personal training
+
+Choose **Practice** or **Time trial**, select **Balanced**, **Consistency** or
+**Pace**, then explicitly choose **Start training**. Opening a view does not start
+training. Calibration counts suitable completed laps after Start; earlier laps and
+the partly driven start lap do not become the new personal baseline.
+
+The view distinguishes the original baseline from the working reference. It shows
+one exercise, provisional versus reviewed geometry, repeated progress and measured
+lap IDs. A faster lap alone does not establish why it improved. Unsuitable laps
+retain the exercise without adding a technique score. **View measured evidence**
+shows the observation, interpretation, action and checks behind the current review.
+
+Apply a skill constraint, **Skip exercise** or **Keep exercise** deliberately. A
+constraint unsupported by current evidence waits for suitable data. An optional
+reference must match current context; shared archives additionally require the
+separate Engineer role and producer grant. Replay and stale data are not offered
+as current live references or scored as live training.
+
+**Stop training** remains available while another change waits or the displayed
+revision has become old. Closing the browser does not stop relay-owned training.
+Changed car, track, definition or corrected evidence can reset the comparison basis.
+If a form conflicts, reload its current values before applying your draft.
+
+Training explanations use the already configured isolated profile agent only when
+**Optional AI explanation** is explicitly checked for that training. It defaults
+off. Deterministic feedback does not wait for the agent, and private training
+history is not uploaded as AI context.
+
+## Private history and the next drive
+
+**Private training history** contains compact checkpoints and end summaries:
+worked focus, observed change, interpretation and the next exercise. It keeps the
+original provenance and distinguishes provisional results from repeated measured
+improvement. Cause remains unknown. A failed final write or interrupted relay
+produces a partial summary from the last stored checkpoint.
+
+History is separate for each profile and verified Console identity. Local Control
+Center/native training uses the separate local producer identity. Another driver's
+active training does not reveal their focus or history. For voice-steered local
+training, start from native voice or Control Center; native commands cannot take
+over a signed Console driver's training.
+
+The limit is 32 recent segments and 90 days per identity, pruned on that identity's
+reads and writes. Raw audio, traces and transcripts are not kept in this journal,
+and keeping a recording is not required. **Delete this summary** and **Delete all
+private history** affect only your history. Deleting active training also prevents
+its later checkpoints from restoring that history until an explicit fresh Start.
+
+A previous skill may be suggested after fresh accepted calibration in a known
+compatible car, track, definition and conditions. **Apply suggested skill** is
+explicit. Historical times never replace the new baseline. Corrected sources or
+unavailable archive permissions remove unproven details from historical views.
 
 ## Enable native voice
 
@@ -73,6 +128,23 @@ question, such as "Hey Jeff, will the fuel last at this pace?" A short context
 supports follow-ups such as "And if I stay out one more lap?" Each answer uses
 refreshed facts. Vehicle and broadcast-control commands are refused. The initial
 version does not listen for spoken interruptions while it plays a reply.
+
+Wake-gated coaching vocabulary is deliberately narrow:
+
+| Request | English | German |
+|---|---|---|
+| Start / stop | `start training` / `stop training` | `Training starten` / `Training stoppen` |
+| Time trial | `start time trial training` | `Zeitfahren starten` |
+| Objective | `objective balanced`, `objective consistency`, `objective pace` | `Ziel ausgewogen`, `Ziel Konstanz`, `Ziel Tempo` |
+| Skill | `focus on braking` or another supported skill | `Fokus Bremsen` or another supported skill |
+| Skip / keep | `skip focus` / `keep focus` | `Übung überspringen` / `Fokus behalten` |
+| Current state | `training status`, `current focus`, `training evidence` | `Trainingsstatus`, `aktueller Fokus`, `Trainingsbelege` |
+
+Supported English/German skills are braking/Bremsen, throttle/Gas,
+steering/Lenken, gear/Schalten, speed/Geschwindigkeit, line/Linie, pace/Tempo and
+consistency/Konstanz. Use `any skill` / `alle Techniken` to remove the constraint. Ambiguous
+coaching requests ask for clarification and do not guess an action. Output stays
+English and uses the shared radio queue; urgent Engineer output has priority.
 
 OBS software mute does not pause Engineer listening. A hardware microphone mute
 removes its input signal too. Questions may remain audible through your normal
