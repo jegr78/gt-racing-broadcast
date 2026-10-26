@@ -105,6 +105,7 @@ class Service:
         self._revision = 0
         self._lowload_at = None
         self._ready_at = 0
+        self._checks = (None, ())
         self._state = dict(active=False, pending=False, phase='inactive', calibration=None, focus=None, latest=None, allow_ai=False)
 
     def start(self):
@@ -135,6 +136,14 @@ class Service:
                 return dict(version=1, revision=self._revision, active=False, pending=False,
                             phase='busy' if self._state['active'] else 'inactive')
             return copy.deepcopy(dict(self._state, version=1, revision=self._revision, epoch=self._token))
+
+    def view(self, owner):
+        with self._lock:
+            state = self.snapshot(owner)
+            stamp, expected = self._checks
+        if state['active'] and not state['pending'] and not self._current(state['epoch'], stamp, expected):
+            state.update(phase='paused', calibration=None, focus=None, latest=None)
+        return state
 
     def command(self, owner, action, expected, options=None, authorize=None):
         if (not isinstance(owner, dict) or set(owner) != {'profile', 'subject'}
@@ -288,8 +297,10 @@ class Service:
                    calibration=calibrated, focus=model['focus'].snapshot(), latest=model['latest'],
                    allow_ai=model['allow_ai'] if calibrated['active'] else False, detail_status=model['detail_status'])
         with self._lock:
-            if token == self._token and self._command is None and new != self._state:
-                self._state = copy.deepcopy(new); self._revision += 1
+            if token == self._token and self._command is None:
+                self._checks = (model['stamp'], tuple(model['sources'].items()))
+                if new != self._state:
+                    self._state = copy.deepcopy(new); self._revision += 1
 
     def step(self):
         with self._work_lock:
