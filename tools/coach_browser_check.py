@@ -265,27 +265,37 @@ def history_lifecycle(browser, reverse=False):
             f.practice.snap['current']=f.practice.current(1)
             page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
             host=page.locator('#driver-radio')
+            def settle():
+                owner={'profile':'solo-pov','subject':'console:driver'}
+                revision=f.practice.service.snapshot(owner)['revision']
+                history_revision=f.practice.service.journal.read(owner,f.practice.service._generation)['revision']
+                page.wait_for_function('([actor,history])=>window.radioView.coach.state?.revision===actor&&window.radioView.coach.state?.history?.revision===history&&!window.radioView.coach.state.pending&&!window.radioView.coach.sending',arg=[revision,history_revision])
+            def command(selector):
+                with page.expect_response(lambda response:response.url.endswith('/coach') and response.request.method=='POST') as response:
+                    host.locator(selector).click()
+                data=response.value.json()
+                assert response.value.status==200,data
+                page.wait_for_function('window.radioView.coach.state?.pending')
+                f.practice.service.step();settle()
             host.locator('#coach-history').wait_for(state='visible',timeout=5000)
-            host.locator('#coach-start').click()
-            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            command('#coach-start')
             for n in (2,3,4):f.practice.complete(n,settings_confirmed=True);f.practice.service.step()
+            settle()
             page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.latest?.lap_id==='lap-4')")
             host.locator('#coach-history').evaluate('(node)=>node.open=true')
             host.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
             assert 'Completed lap' in host.locator('#coach-history-entries').inner_text()
-            host.locator('#coach-stop').click();page.wait_for_function('window.radioView.coach.state?.pending')
-            f.practice.service.step()
+            command('#coach-stop')
             page.wait_for_function("window.radioView.coach.state?.history?.entries.some(r=>r.status==='stopped')")
             assert 'fresh' in host.locator('#coach-debrief').inner_text().lower()
             ended=page.evaluate("window.radioView.coach.state.history.entries.find(r=>r.status==='stopped').id")
-            host.locator('#coach-start').click()
-            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            command('#coach-start')
             assert not f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['calibration']['calibration_ids']
             for n in (6,7,8):f.practice.complete(n,settings_confirmed=True);f.practice.service.step()
+            settle()
             page.wait_for_function('window.radioView.coach.state?.history_suggestion')
             hint=page.evaluate('window.radioView.coach.state.history_suggestion.skill')
-            host.locator('#coach-apply-history').click()
-            page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
+            command('#coach-apply-history')
             page.wait_for_function('(skill)=>window.radioView.coach.state?.focus?.skill===skill&&!window.radioView.coach.state.pending',arg=hint)
             assert set(f.practice.service.view({'profile':'solo-pov','subject':'console:driver'})['calibration']['baseline']['lap_ids']).isdisjoint({'lap-2','lap-3'})
             history_revision=f.practice.service.journal.read({'profile':'solo-pov','subject':'console:driver'},f.practice.service._generation)['revision']
