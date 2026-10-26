@@ -220,7 +220,7 @@ def ordering_and_identity(browser):
                 page.evaluate("""const coach=window.radioView.coach,adopt=coach.adopt;
                     coach.adopt=function(state,...args){const accepted=adopt.call(this,state,...args);
                         if(accepted&&state.viewer==='console:driver'&&state.focus?.focus)window.__privateCoachRevived=true;
-                        return accepted;};""")
+                        return accepted;}; void 0;""")
                 if change=='identity':
                     token=console.m.console_auth.mint_token(console.SECRET,'other')
                     context.add_cookies([dict(name='rc_console',value=token,domain='127.0.0.1',path='/console',httpOnly=True,sameSite='Lax')])
