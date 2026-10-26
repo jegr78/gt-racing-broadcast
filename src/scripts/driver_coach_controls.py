@@ -109,3 +109,60 @@ def voice(service, text, authorize):
     if not orchestration._allowed(authorize):
         raise calibration.CoachError('forbidden')
     return voice_reply(state, plan['topic'])
+
+
+class References:
+    """Only trusted live rows and separately authorized archive sources."""
+    def __init__(self, live, archive):
+        self.live, self.archive = live, archive
+
+    def _load(self, ident):
+        if ident.startswith('r:'):
+            api = getattr(self.live, 'api', None)
+            if api is None:
+                raise calibration.CoachError('reference_unavailable')
+            result = api._detail(ident, self.archive)
+        else:
+            result = self.live.detail(ident)
+        if not isinstance(result, dict) or result.get('state') != 'ready':
+            raise calibration.CoachError('reference_pending' if isinstance(result, dict) and result.get('state') == 'pending' else 'reference_unavailable')
+        row = result.get('lap')
+        if not isinstance(row, dict) or row.get('id') != ident or calibration._prepare(row) is None:
+            raise calibration.CoachError('invalid_reference')
+        return row
+
+    def resolve(self, ident):
+        source = self.live.snapshot()
+        if not orchestration._live(source):
+            raise calibration.CoachError('source_unavailable')
+        anchor = orchestration._stamp(source)
+        row = self._load(ident)
+        context = dict(calibration._context(source['current']), comparison_eligible=True)
+        if not calibration._compatible(row, context):
+            raise calibration.CoachError('incompatible_reference')
+        facts = orchestration._facts(row)
+        def grant():
+            current = self.live.snapshot()
+            if not orchestration._live(current) or orchestration._stamp(current) != anchor:
+                return False
+            same = orchestration._facts(self._load(ident)) == facts
+            current = self.live.snapshot()
+            return same and orchestration._live(current) and orchestration._stamp(current) == anchor
+        if not orchestration._allowed(grant):
+            raise calibration.CoachError('reference_unavailable')
+        return row, grant
+
+    def choices(self, archives):
+        doc = self.live.snapshot()
+        context = dict(calibration._context(doc.get('current') or {}), comparison_eligible=True)
+        rows = [r for r in (doc.get('laps') or [])[-512:] if isinstance(r, dict)
+                and r.get('session_id') == doc.get('session_id') and calibration.eligible(r)
+                and calibration._compatible(r, context)]
+        result = [dict(id=r['id'], label=f"Own live lap {r['lap']} · {r['time_s']:g} s", source='personal') for r in rows[-16:]]
+        api = getattr(self.live, 'api', None)
+        if api is not None:
+            for source in archives[:4]:
+                data = api.reference(source['id'], self.archive(source['id']))
+                usable = [r for r in data.get('laps', []) if calibration.eligible(r) and calibration._compatible(r, context)]
+                result.extend(dict(id=r['id'], label=f"{source['label']} · lap {r['lap']} · {r['time_s']:g} s", source='shared') for r in usable[-4:])
+        return result

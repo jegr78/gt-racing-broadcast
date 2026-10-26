@@ -19,11 +19,12 @@ class AdminError(ValueError):
 
 class Client:
     def __init__(self,profile,port):self.profile=profile;self.url=f'http://127.0.0.1:{int(port)}/driver-radio/admin'
-    def request(self,native=False,body=None):
+    def request(self,native=False,body=None,coach=False):
+        if native and coach:raise ValueError('Choose one radio route')
         encoded=None if body is None else json.dumps(dict(body,profile=self.profile),allow_nan=False).encode()
         if encoded is not None and len(encoded)>16384:raise ValueError('Radio settings are too large')
         try:
-            try:response=http_util.open_url(self.url+('/native' if native else ''),data=encoded,
+            try:response=http_util.open_url(self.url+('/coach' if coach else '/native' if native else ''),data=encoded,
                     headers={'Content-Type':'application/json'},timeout=4,allow_redirects=False)
             except http_util.HTTPError as exc:response=exc
             with response:
@@ -38,3 +39,16 @@ class Client:
         if not isinstance(result,dict) or result.get('profile')!=self.profile or result.get('protocol')!=PROTOCOL:
             raise ValueError('The local relay does not match this profile and radio protocol')
         return result
+
+
+def error_status(code):
+    if code in ('conflict','busy','training_busy','training_required','focus_unavailable','incompatible_reference','profile_changed'):
+        return 409
+    if code in ('source_unavailable','settings_unavailable','reference_pending','coaching_unavailable'):
+        return 503
+    if code in ('forbidden','feature_disabled','foreign_origin'):
+        return 403
+    if code == 'reference_unavailable':return 410
+    if code == 'rate_limited':return 429
+    if code == 'unauthorized':return 401
+    return 400

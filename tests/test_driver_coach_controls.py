@@ -3,6 +3,7 @@
 import copy
 import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]/'src/scripts'),str(Path(__file__).parent)]
 import driver_coach_controls as controls
@@ -104,6 +105,40 @@ def t_reference_lookup_cannot_run_for_a_stale_control_or_ungranted_driver():
         body['expected']=f.service.snapshot(LOCAL)['revision']
         rejects(lambda:controls.command(f.service,LOCAL,body,lambda:False,resolve=resolve),'forbidden')
         assert not calls
+
+
+def t_archive_reference_guard_rechecks_grants_measurements_and_live_context():
+    for change in ('grant','measurement','definition','quality','context','stale'):
+        with tempfile.TemporaryDirectory() as root:
+            f=Fixture(root);row=real_lap(20,8);row['id']='r:'+('a'*32)+':1:20';row['session_id']='recorded'
+            allowed=[True]
+            def archive(_ident,allowed=allowed):
+                if not allowed[0]:raise controls.calibration.CoachError('reference_unavailable')
+                return Path(root)/'granted.gt7rec'
+            def detail(ident,grant,row=row):grant('a'*32);return dict(state='ready',lap=copy.deepcopy(row))
+            live=SimpleNamespace(snapshot=lambda f=f:copy.deepcopy(f.snap),detail=f.detail,
+                                 api=SimpleNamespace(_detail=detail))
+            frozen,grant=controls.References(live,archive).resolve(row['id'])
+            assert frozen['id']==row['id'] and controls.orchestration._allowed(grant)
+            if change=='grant':allowed[0]=False
+            elif change=='measurement':row['measurement_hash']='changed'
+            elif change=='definition':row['definition_fingerprint']='changed'
+            elif change=='quality':row['trace_complete']=False
+            elif change=='context':f.snap['current']['car_id']=2
+            else:f.snap['receipt']['state']='stale'
+            assert not controls.orchestration._allowed(grant),change
+
+
+def t_reference_choices_exclude_incompatible_live_laps_and_are_bounded():
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root)
+        for n in range(2,30):f.complete(n)
+        f.snap['laps'][-1]['car_id']=99;f.rows['lap-29']['car_id']=99
+        live=SimpleNamespace(snapshot=lambda:copy.deepcopy(f.snap),detail=f.detail)
+        references=controls.References(live,lambda _source:None)
+        choices=references.choices([])
+        assert len(choices)<=16 and all(r['id']!='lap-29' for r in choices)
+        rejects(lambda:references.resolve('lap-29'),'incompatible_reference')
 
 
 if __name__=='__main__':

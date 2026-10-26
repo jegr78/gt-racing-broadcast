@@ -17,18 +17,27 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class RadioFixture:
-    def __init__(self,solo=True):self.solo=solo
+    def __init__(self,solo=True,coaching=False):self.solo=solo;self.coaching=coaching
     def __enter__(self):
-        self.temp=tempfile.TemporaryDirectory();self.f=Fixture(Path(self.temp.name)/'solo-pov');self.f.poll()
+        self.temp=tempfile.TemporaryDirectory();self.practice=None
+        if self.coaching:
+            from test_driver_coach_service import Fixture as Practice
+            self.practice=Practice(Path(self.temp.name)/'solo-pov');self.f=self.practice.radio
+            self.practice.service.profile='solo-pov';self.f.service.coach=self.practice.service
+        else:self.f=Fixture(Path(self.temp.name)/'solo-pov')
+        self.f.poll()
         self.workers=[]
         def start(body):w=Worker();self.workers.append(w);return w
         self.native=native.Supervisor(self.f.service,Path(self.temp.name)/'machine',microphone=lambda:'Synthetic microphone',
-                                      worker=start,player=lambda *args:Player(),ready=lambda:True,clock=lambda:self.f.at)
+                                      worker=start,player=lambda *args:Player(),ready=lambda:True,
+                                      clock=lambda:self.practice.at if self.practice else self.f.at)
         self.native.step()
         m=console.m;self.template=patch.object(m,'solo_template',return_value='pov');self.template.start();crew=m.CrewSource('');crew.inject_row(1,name='Director',director=True)
         relay=m.Relay(console._FakeSource([],[]),[53001,53002],self.temp.name,solo=self.solo)
         telemetry=m.gt7_telemetry.TelemetryStore();telemetry.engineer=SimpleNamespace(snapshot=lambda compact=False:copy.deepcopy(self.f.snap))
-        engineer=m.race_engineer_access.Store(self.f.access.path.parent,True)
+        if self.practice:telemetry.engineer.detail=self.practice.detail
+        self.engineer=m.race_engineer_access.Store(self.f.access.path.parent,True)
+        engineer=self.engineer
         handler=m.make_handler(relay,panel_path=str(ROOT/'src/director/director-panel.html'),console_page_path=str(ROOT/'src/console/console.html'),
             console_secret=console.SECRET,crew_source=crew,engineer_access=engineer,telemetry_store=telemetry,
             radio_service=self.f.service,radio_native=self.native)
@@ -46,7 +55,13 @@ class RadioFixture:
         self.cc,self.cc_port=ui._serve(context)
         self.cc_url='http://127.0.0.1:'+str(self.cc_port)
         return self
-    def admin(self,body=None,native=False):
+    def admin(self,body=None,native=False,coach=False):
+        if coach:
+            if body is not None and body.get('expectedProfile')!='solo-pov':return dict(ok=False,error='Profile changed')
+            try:
+                value=None if body is None else {k:v for k,v in body.items() if k!='expectedProfile'}
+                return dict(ok=True,profile='solo-pov',result=admin.Client('solo-pov',self.server.server_port).request(coach=True,body=value))
+            except ValueError as error:return dict(ok=False,error=str(error),code=getattr(error,'code',None))
         if body is None:return dict(ok=True,profile='solo-pov',settings=self.f.access.read(),native=self.native.status(),agents=[])
         if body.get('expectedProfile')!='solo-pov':return dict(ok=False,error='Profile changed')
         try:
@@ -65,6 +80,7 @@ class RadioFixture:
             response=conn.getresponse();raw=response.read();return response.status,raw,dict(response.getheaders())
         finally:conn.close()
     def __exit__(self,*args):
+        if self.practice:self.practice.service.close()
         self.enricher.close();self.native.close();self.f.service.close()
         for server in (self.cc,self.server):server.shutdown();server.server_close()
         self.template.stop();self.temp.cleanup()

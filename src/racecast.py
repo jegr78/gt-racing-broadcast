@@ -7678,7 +7678,7 @@ def _audience_connection_data(provider, body=None):
         return {"ok": False, "error": str(exc)}
 
 
-def driver_radio_data(body=None, native=False):
+def driver_radio_data(body=None, native=False, coach=False):
     import driver_radio_admin
     import ai_agents
     try:
@@ -7690,6 +7690,14 @@ def driver_radio_data(body=None, native=False):
             raise ValueError("Active profile changed; reload driver radio settings")
         client = driver_radio_admin.Client(active, RELAY_PORT)
         settings = client.request()
+        if coach:
+            if _active_profile_name() != active:
+                raise ValueError('Active profile changed; reload coaching controls')
+            value = None if body is None else {k:v for k,v in body.items() if k != 'expectedProfile'}
+            result = client.request(coach=True, body=value)
+            if _active_profile_name() != active:
+                raise ValueError('Active profile changed; reload coaching controls')
+            return dict(ok=True, profile=active, result=result)
         if body is not None:
             if _active_profile_name() != active:
                 raise ValueError("Active profile changed; reload driver radio settings")
