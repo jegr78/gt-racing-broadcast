@@ -15,7 +15,7 @@ MAX_MEMORY=2*1024**3
 
 
 def current_group():
-    for line in Path('/proc/self/cgroup').read_text().splitlines():
+    for line in Path('/proc/self/cgroup').read_text(encoding='utf8',errors='replace').splitlines():
         if line.startswith('0::'):
             relative=Path(line[3:].lstrip('/'))
             if '..' not in relative.parts:return Path('/sys/fs/cgroup')/relative
@@ -25,9 +25,9 @@ def current_group():
 def limited(group):
     if group.name!=UNIT:return False
     try:
-        tasks=int((group/'pids.max').read_text())
-        memory=int((group/'memory.max').read_text())
-        quota,period=map(int,(group/'cpu.max').read_text().split())
+        tasks=int((group/'pids.max').read_text(encoding='utf8',errors='replace'))
+        memory=int((group/'memory.max').read_text(encoding='utf8',errors='replace'))
+        quota,period=map(int,(group/'cpu.max').read_text(encoding='utf8',errors='replace').split())
     except (OSError,ValueError) as error:
         raise RuntimeError('E2E resource limits could not be verified') from error
     if not (0<tasks<=MAX_TASKS and 0<memory<=MAX_MEMORY and 0<quota<=2*period and period>0):
@@ -36,7 +36,7 @@ def limited(group):
 
 
 def owner_identity():
-    return os.getpid(),Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19]
+    return os.getpid(),Path('/proc/self/stat').read_text(encoding='utf8',errors='replace').rsplit(')',1)[1].split()[19]
 
 
 def watch_owner(fd,kill_fd):
@@ -55,7 +55,7 @@ def owner_watchdog(pid,start):
     fd=os.pidfd_open(pid)
     kill_fd=None
     try:
-        if path.stat().st_uid!=os.getuid() or path.joinpath('stat').read_text().rsplit(')',1)[1].split()[19]!=start:
+        if path.stat().st_uid!=os.getuid() or path.joinpath('stat').read_text(encoding='utf8',errors='replace').rsplit(')',1)[1].split()[19]!=start:
             raise RuntimeError('E2E admission owner changed')
         group=current_group()
         if not limited(group):raise RuntimeError('E2E owner watchdog requires verified containment')

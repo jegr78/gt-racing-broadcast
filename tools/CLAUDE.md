@@ -92,7 +92,7 @@ cockpit pills and the Director Panel's confirmed keyboard shortcut, #731; the sh
 check presses NEXT, so `--real-league` leaves it out) use the
 Playwright **Python library** (not the MCP) and SKIP when unavailable (CI omits the
 flag). Visual helpers, all local-only: `--headed`/`--slowmo` (visible browser),
-`--keep` (leave the services up + print the live URLs incl. the cockpit token), and
+`--keep` (print live URLs and supervise the services in the foreground until the finite lease ends), and
 `--shots DIR` (write a screenshot of each surface, a reproducible, MCP-free tour;
 the Control Center shot shows the machine's Tailscale IP, so it is a **local artifact,
 never committed**). The local real-league run (copy the deployed instance's

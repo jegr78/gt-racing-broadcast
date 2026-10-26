@@ -31,7 +31,7 @@ uniform "dev build" across all shots.
 | Discord login page | `/console/login` | `console-login.png` |
 | Race Control desk | `/console/race-control?t=<token>` | `console-race-control.png` |
 
-`cc-telemetry.png` needs a solo POV profile with indexed recordings. Without network and without touching `runtime/`: `runtime/pw-venv/bin/python tools/e2e.py --visual --keep` starts a dev-build solo POV Control Center in a temp dir (a learned demo track plus one indexed demo recording) and prints its URL; capture its Telemetry view, then run the `kill` line it prints (only the processes it started) and delete the temp dir it names.
+`cc-telemetry.png` needs a solo POV profile with indexed recordings. `runtime/pw-venv/bin/python tools/e2e.py --visual --keep --keep-seconds 300` starts a synthetic dev-build Solo Control Center and prints its URL. Keep this command running while capturing its Telemetry view. The inspection lease expires after 300 seconds; Ctrl+C ends it early. Cleanup is automatic, including on failure. Never detach the harness or use process-name kill commands. Local Linux runs require the automatic kernel resource boundary; run heavy capture and verification sequentially.
 
 Wiki screenshots live in **`src/docs/wiki/images/<name>.png`**. The onboarding slides reuse
 the **same images** in **`src/docs/slides/assets/img/<name>.png`**: when a shot is used by a

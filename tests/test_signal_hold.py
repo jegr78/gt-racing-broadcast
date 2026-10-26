@@ -110,6 +110,9 @@ class _Pipe:
     def read(self, _n):
         return self._c.pop(0) if self._c else b""
 
+    def close(self):
+        self._c.clear()
+
 
 class _IdleRing:
     closed = False
@@ -128,11 +131,18 @@ class _IdleRing:
 
 def _fake_ffmpeg(stdout_chunks):
     class P:
+        def __init__(self):
+            self.dead = False
+
         def poll(self):
-            return None
+            return 0 if self.dead else None
 
         def kill(self):
-            pass
+            self.dead = True
+
+        def wait(self, timeout=None):
+            self.dead = True
+            return 0
 
     class In:
         def write(self, _b):
