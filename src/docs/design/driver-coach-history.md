@@ -49,3 +49,9 @@ client-selected owner. Ordinary control/Stop replies perform no journal IO. A
 failed history read leaves current coaching available. Responses recheck driver
 and separate archive permissions after IO; browser state tracks history revisions
 independently so an older response cannot restore a deleted summary.
+GETs started while a command is in flight cannot establish browser state: their
+newer request serial may still contain history from before the command committed.
+The command acknowledgement wins in either response order, followed by a fresh
+poll. Authorization failures are still handled immediately. Browser acceptance
+first synchronizes the independent journal revision, then explicitly exercises
+both GET/DELETE arrival orders without background polling masking a lost acknowledgement.

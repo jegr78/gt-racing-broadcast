@@ -160,8 +160,10 @@ class CoachView {
   }
  }
  async poll(){
-  if(this.dead||this.polling)return;this.polling=true;const generation=this.generation;const profile=this.profile();
-  try{const state=await this.api();this.adopt(state,generation,profile);}
+  if(this.dead||this.polling)return;this.polling=true;const generation=this.generation;const profile=this.profile(),duringWrite=this.sending;
+  // A GET started inside a write can contain older facts with a newer request
+  // serial. Let the command acknowledgement establish state, then poll afresh.
+  try{const state=await this.api();if(!duringWrite)this.adopt(state,generation,profile);}
   catch(error){if(!this.dead&&generation===this.generation)this.fail(error);}
   finally{if(generation===this.generation)this.polling=false;if(!this.dead)this.schedule(this.state?1000:3000);}
  }
