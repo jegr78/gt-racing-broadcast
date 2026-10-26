@@ -870,6 +870,37 @@ def run_synthetic(args):
             print(f"--keep: left tmp at {tmp}")
 
 
+def run_coach_only(args):
+    """Source/frozen Solo acceptance on every producer OS, without POSIX tool stubs."""
+    tmp=tempfile.mkdtemp(prefix='racecast-coach-e2e-');procs=[];servers=[]
+    try:
+        binary=_resolve_binary(args,tmp) if args.binary is not None else None
+        launcher,home=_pov_home(tmp,binary)
+        secret='coach-e2e-secret-0123456789abcdef'
+        profile=os.path.join(home,'profiles',POV_PROFILE,'profile.env')
+        with open(profile,encoding='utf8') as stream:lines=stream.readlines()
+        values={'CONSOLE_SECRET':secret,'SHEET_ID':'','SHEET_PUSH_URL':''}
+        with open(profile,'w',encoding='utf8') as stream:
+            for line in lines:
+                name=line.split('=',1)[0]
+                stream.write(name+'='+values[name]+'\n' if name in values else line)
+        cookies=os.path.join(tmp,'synthetic-cookies.txt')
+        with open(cookies,'w',encoding='utf8') as stream:stream.write('# Netscape HTTP Cookie File\n')
+        env={key:value for key,value in os.environ.items() if not key.startswith('RACECAST_')}
+        obs_port=E.free_port()
+        procs.append(_spawn([sys.executable,os.path.join(ROOT,'tools','obs-sim.py'),
+                             '--image',os.path.join(ROOT,'src','assets','brands','audi.png'),'--port',str(obs_port)],
+                            env,os.path.join(tmp,'obs-sim.log')))
+        _wait_port(obs_port,args.timeout)
+        env.update(RACECAST_PROFILE=POV_PROFILE,RACECAST_CONSOLE_SECRET=secret,RACECAST_SHEET_ID='',
+                   RACECAST_SHEET_PUSH_URL='',RACECAST_UPDATE_CHECK='0',RACECAST_FEED_FANOUT='0',
+                   RACECAST_OBS_WS_HOST='127.0.0.1',RACECAST_OBS_WS_PORT=str(obs_port),RACECAST_OBS_WS_PASSWORD='')
+        _check_relay_replay(launcher,env,tmp,cookies,home,procs,servers,args.timeout)
+        return 0
+    finally:
+        _cleanup(procs,servers,tmp)
+
+
 def _resolve_real_profile(name):
     """Resolve the league profile *name* via src/scripts/config.py against the
     repo's profiles/ tree. Returns a ResolvedConfig, or None when the profile is
@@ -986,6 +1017,8 @@ def main(argv=None):
                          "dist/bin/racecast; pair with --build to build it first")
     ap.add_argument("--build", action="store_true",
                     help="build the binary (tools/build-binary.py) before a --binary run")
+    ap.add_argument('--coach-only',action='store_true',
+                    help='run owned synthetic Solo replay/coaching acceptance without platform shell stubs')
     ap.add_argument("--playwright", action="store_true",
                     help="also run gated rendered checks (skip if unavailable)")
     ap.add_argument("--headed", action="store_true",
@@ -1014,6 +1047,10 @@ def main(argv=None):
     # --build implies binary mode even without an explicit --binary.
     if args.build and args.binary is None:
         args.binary = ""
+    if args.coach_only:
+        if args.real_league or args.visual or args.playwright or args.shots or args.keep:
+            ap.error('--coach-only uses owned synthetic services and cannot be combined with interactive or real-league modes')
+        return run_coach_only(args)
     if args.real_league:
         if args.binary is not None:
             ap.error("--binary is synthetic-only; not supported with --real-league")
