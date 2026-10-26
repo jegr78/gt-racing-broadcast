@@ -52,6 +52,8 @@ def t_owner_profile_and_namespace_are_exact_and_never_selected_from_a_filename()
         _,record=sample(root);store=history.Store(Path(root)/'solo',clock=lambda:1200)
         assert store.save(LOCAL,record)
         assert store.read(REMOTE,GENERATION)['entries']==[]
+        store._path(REMOTE).write_bytes(store._path(LOCAL).read_bytes())
+        rejects(lambda:store.read(REMOTE,GENERATION),'history_unavailable')
         assert history.Store(Path(root)/'other',clock=lambda:1200).read(dict(LOCAL,profile='other'),GENERATION)['entries']==[]
         for owner in (dict(LOCAL,profile='other'),dict(LOCAL,subject='../../elsewhere'),dict(LOCAL,path='elsewhere')):
             rejects(lambda owner=owner:store.read(owner,GENERATION),'invalid_owner')
@@ -107,16 +109,23 @@ def t_corrupt_oversized_and_symlinked_private_files_fail_closed():
         nested=json.loads(original);nested['entries'][0]['worked_focus']=[{}]
         wrong_reference=json.loads(original);wrong_reference['entries'][0]['reference']['id']=[]
         wrong_progress=json.loads(original);wrong_progress['entries'][0]['progress']['sample_count']='many'
-        for raw in (b'{broken',b' '* (history.MAX_BYTES+1),json.dumps({'owner':LOCAL,'entries':[{'trace':'secret'}]}).encode(),
-                    json.dumps(nested).encode(),json.dumps(wrong_reference).encode(),json.dumps(wrong_progress).encode()):
+        extra_record=json.loads(original);extra_record['entries'][0]['unused']=1
+        extra_doc=json.loads(original);extra_doc['unused']=1
+        oversized_record=json.loads(original);oversized_record['entries'][0]['context']['context_settings']={'extra':['x'*1000]*10}
+        nonfinite=json.loads(original);nonfinite['entries'][0]['context']['context_settings']={'extra':float('nan')}
+        wrong_id=json.loads(original);wrong_id['entries'][0]['id']='../private'
+        boolean_count=json.loads(original);boolean_count['entries'][0]['progress']['sample_count']=True
+        for raw in (b'{broken',original+b' '*history.MAX_BYTES,json.dumps({'owner':LOCAL,'entries':[{'trace':'secret'}]}).encode(),
+                    *[json.dumps(value).encode() for value in (nested,wrong_reference,wrong_progress,extra_record,extra_doc,
+                                                             oversized_record,nonfinite,wrong_id,boolean_count)]):
             path.write_bytes(raw)
             rejects(lambda:store.read(LOCAL,GENERATION),'history_unavailable')
         path.write_bytes(original)
         if os.name!='nt':
-            elsewhere=Path(root)/'unrelated';elsewhere.write_text('private',encoding='utf8')
+            elsewhere=Path(root)/'unrelated';elsewhere.write_bytes(original)
             path.unlink();path.symlink_to(elsewhere)
             rejects(lambda:store.read(LOCAL,GENERATION),'history_unavailable')
-            assert elsewhere.read_text(encoding='utf8')=='private'
+            assert elsewhere.read_bytes()==original
 
 
 def coordinated(root):
@@ -215,6 +224,10 @@ def t_history_suggestion_requires_compatible_current_calibration_and_never_suppl
         assert suggestion and set(suggestion)=={'id','skill','text'} and suggestion['skill']==record['focus']['skill']
         assert 'calibration' in suggestion['text'].lower()
         before=copy.deepcopy(state)
+        same_training=copy.deepcopy(state);same_training['calibration']['training_id']=record['training_id']
+        assert history.suggest(exposed,same_training,current) is None
+        unknown=copy.deepcopy(exposed);unknown['entries'][0]['context']['settings_confirmed']=False
+        assert history.suggest(unknown,state,dict(current,settings_confirmed=False)) is None
         for field,value in (('car_id',99),('track_id','different'),('definition_fingerprint','changed'),('settings_confirmed',False)):
             changed=dict(current);changed[field]=value
             assert history.suggest(exposed,state,changed) is None,field
@@ -263,6 +276,60 @@ def t_a_failed_checkpoint_keeps_live_feedback_and_finishes_as_an_honest_partial_
         saved=store.read(LOCAL,f.service._generation)['entries'][0]
         assert saved['status']=='interrupted' and saved['reason']=='checkpoint_unavailable'
         assert saved['latest']['lap_id']=='lap-3'
+
+
+def t_a_late_checkpoint_cannot_replace_newer_progress_or_a_finished_segment():
+    with tempfile.TemporaryDirectory() as root:
+        _,old=sample(root);store=history.Store(Path(root)/'solo',clock=lambda:1200)
+        assert store.save(LOCAL,old)
+        newer=copy.deepcopy(old);newer['updated_at']+=1;newer['progress']['sample_count']=2
+        assert store.save(LOCAL,newer) and not store.save(LOCAL,old)
+        assert store.read(LOCAL,GENERATION)['entries'][0]['progress']['sample_count']==2
+        store.finish(LOCAL,old['id'])
+        assert not store.save(LOCAL,newer)
+
+
+def t_a_linked_history_directory_cannot_change_an_unrelated_directory_permissions():
+    if os.name=='nt':return  # Windows CI verifies ordinary files; creating a symlink requires host privileges.
+    with tempfile.TemporaryDirectory() as root:
+        other=Path(root)/'unrelated';other.mkdir(mode=0o755)
+        profile=Path(root)/'solo';profile.mkdir();(profile/'coach-history').symlink_to(other,target_is_directory=True)
+        before=other.stat().st_mode
+        rejects(lambda:history.Store(profile).read(LOCAL,GENERATION),'history_unavailable')
+        assert other.stat().st_mode==before
+
+
+def t_final_source_proof_removes_stale_facts_without_callbacks_or_restoring_a_masked_view():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3,4):f.complete(n);f.step()
+        before=f.service.view(LOCAL);assert before['focus']['focus']
+        for change in ('context','measurement'):
+            doc=copy.deepcopy(f.snap)
+            if change=='context':doc['current']['car_id']=99
+            else:doc['laps'][-1]['measurement_hash']='corrected-during-final-IO'
+            with patch.object(f.service,'source',side_effect=AssertionError('Final source proof performed external IO')):
+                result=f.service.after_io(LOCAL,before,doc)
+            assert result['phase']=='paused' and result['focus'] is None and result['calibration'] is None
+        masked=dict(before,phase='paused',calibration=None,focus=None,latest=None)
+        assert f.service.after_io(LOCAL,masked,copy.deepcopy(f.snap))['focus'] is None
+        f.command('stop')
+        stopped=f.service.after_io(LOCAL,before,copy.deepcopy(f.snap))
+        assert not stopped['active'] and stopped['focus'] is None
+
+
+def t_a_control_during_the_final_source_proof_cannot_restore_the_previous_actor():
+    import driver_coach_service as service
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3,4):f.complete(n);f.step()
+        before=f.service.view(LOCAL);original=service._facts;changed=[]
+        def facts(row):
+            if not changed:changed.append(True);f.command('stop')
+            return original(row)
+        with patch.object(service,'_facts',facts):
+            result=f.service.after_io(LOCAL,before,copy.deepcopy(f.snap))
+        assert changed and not result['active'] and result['focus'] is None
 
 
 if __name__=='__main__':
