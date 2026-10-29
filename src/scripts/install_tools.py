@@ -32,6 +32,28 @@ MIN_GLIBC_BINARY = (2, 38)
 WINGET_IDS = {"yt-dlp": "yt-dlp.yt-dlp", "streamlink": "Streamlink.Streamlink",
               "ffmpeg": "Gyan.FFmpeg", "deno": "DenoLand.Deno"}
 APT_PACKAGES = {"ffmpeg": "ffmpeg"}
+# Arch carries all four tools current in the official `extra` repo, so none of the
+# managed installs below apply there.
+PACMAN_PACKAGES = {"yt-dlp": "yt-dlp", "streamlink": "streamlink",
+                   "ffmpeg": "ffmpeg", "deno": "deno"}
+# deno, yt-dlp and streamlink get managed installs on Linux rather than apt: the
+# first two have no usable apt package, and apt's streamlink predates
+# --http-cookies-file, which the relay's YouTube serve needs. (#350)
+
+# The Ookla speedtest CLI stays OUT of TOOLS so its absence never turns the
+# preflight tool-chain into a FAIL; a bandwidth check is advisory.
+# Windows takes it from winget; mac/Linux download the official tarball directly
+# because Homebrew refuses the teamookla tap as untrusted.
+SPEEDTEST_WINGET_ID = "Ookla.Speedtest.CLI"
+SPEEDTEST_BIN_NAME = "speedtest"
+SPEEDTEST_VERSION = "1.2.0"
+SPEEDTEST_URL_TMPL = "https://install.speedtest.net/app/cli/ookla-speedtest-{ver}-{tag}.tgz"
+# tag -> sha256 of the official tarball.
+SPEEDTEST_DOWNLOADS = {
+    "macosx-universal": "c9f8192149ebc88f8699998cecab1ce144144045907ece6f53cf50877f4de66f",
+    "linux-x86_64":     "5690596c54ff9bed63fa3732f818a05dbc2db19ad36ed68f21ca5f64d5cfeeb7",
+    "linux-aarch64":    "3953d231da3783e2bf8904b6dd72767c5c6e533e163d3742fd0437affa431bd3",
+}
 
 
 def winget_tool_dirs(missing, packages_dir):
@@ -68,28 +90,6 @@ def winget_tool_dirs(missing, packages_dir):
                 found.append(hits[0])
                 break
     return found
-# Arch carries all four tools current in the official `extra` repo, so none of the
-# managed installs below apply there.
-PACMAN_PACKAGES = {"yt-dlp": "yt-dlp", "streamlink": "streamlink",
-                   "ffmpeg": "ffmpeg", "deno": "deno"}
-# deno, yt-dlp and streamlink get managed installs on Linux rather than apt: the
-# first two have no usable apt package, and apt's streamlink predates
-# --http-cookies-file, which the relay's YouTube serve needs. (#350)
-
-# The Ookla speedtest CLI stays OUT of TOOLS so its absence never turns the
-# preflight tool-chain into a FAIL; a bandwidth check is advisory.
-# Windows takes it from winget; mac/Linux download the official tarball directly
-# because Homebrew refuses the teamookla tap as untrusted.
-SPEEDTEST_WINGET_ID = "Ookla.Speedtest.CLI"
-SPEEDTEST_BIN_NAME = "speedtest"
-SPEEDTEST_VERSION = "1.2.0"
-SPEEDTEST_URL_TMPL = "https://install.speedtest.net/app/cli/ookla-speedtest-{ver}-{tag}.tgz"
-# tag -> sha256 of the official tarball.
-SPEEDTEST_DOWNLOADS = {
-    "macosx-universal": "c9f8192149ebc88f8699998cecab1ce144144045907ece6f53cf50877f4de66f",
-    "linux-x86_64":     "5690596c54ff9bed63fa3732f818a05dbc2db19ad36ed68f21ca5f64d5cfeeb7",
-    "linux-aarch64":    "3953d231da3783e2bf8904b6dd72767c5c6e533e163d3742fd0437affa431bd3",
-}
 
 
 def speedtest_asset_tag(platform, machine):

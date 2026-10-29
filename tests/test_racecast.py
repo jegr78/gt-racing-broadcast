@@ -2600,6 +2600,37 @@ def t_relay_start_still_retries_a_port_error():
         restore()
 
 
+def t_relay_start_waits_out_the_window_before_a_retry():
+    # The verify wait ends early once the child is gone, but a child that died on a
+    # still-clearing port needs the rest of the window before the respawn, or the
+    # retry hits the same port. Waits: verify, pause, verify.
+    restore, calls = _relay_spawn_stubs([False, True])
+    waits = []
+    m.wait_for = lambda probe, wait, **k: (waits.append(wait), probe())[1]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.relay_start([])
+        assert calls["spawn"] == 2
+        assert len(waits) == 3, waits
+        assert 0 < waits[1] <= m.RELAY_START_VERIFY_S, waits
+    finally:
+        restore()
+
+
+def t_relay_start_port_match_is_a_whole_word():
+    # "import"/"export"/"report" contain "port" but are no port error: no retry.
+    restore, calls = _relay_spawn_stubs([False, False])
+    old_tail = m._relay_boot_log_since
+    m._relay_boot_log_since = lambda offset: "ERROR: cannot import the schedule module\n"
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.relay_start([])
+        assert calls["spawn"] == 1, calls
+    finally:
+        m._relay_boot_log_since = old_tail
+        restore()
+
+
 def t_relay_stop_releases_obs_feeds_after_kill():
     # AFTER the kill: a source rebuild against a live relay would reconnect.
     # Against the dead relay it just drops the half-dead connection, freeing

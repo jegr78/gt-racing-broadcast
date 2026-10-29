@@ -557,7 +557,7 @@ def _ensure_tool_path():
     """Prepend the tool dirs `racecast install-tools` writes to but that aren't on
     this process's PATH, so preflight AND the spawned relay resolve them.
 
-    Two sources:
+    Three sources:
     * The racecast-managed bin dir (runtime/bin). Where install-tools drops the
       direct-download tools (deno on Linux, the Ookla speedtest CLI on mac/Linux);
       it is NEVER on the user's shell PATH, so add it on every platform.
@@ -565,9 +565,11 @@ def _ensure_tool_path():
       PATH (/usr/bin:/bin:/usr/sbin:/sbin) that omits Homebrew, so the brew-installed
       yt-dlp/streamlink/ffmpeg/deno look missing (issue #38). Prepend the Homebrew
       bin dirs too.
+    * Windows only: the winget package dir of a tool whose WinGet\\Links alias an
+      upgrade dropped, APPENDED (_append_winget_tool_dirs).
 
-    Both only ever add genuinely-missing dirs that exist on disk (augment_path),
-    so a terminal launch with a full PATH is left untouched. Binary-relative paths
+    All only ever add genuinely-missing dirs that exist on disk, so a terminal
+    launch with a full PATH is left untouched. Binary-relative paths
     (settings/assets) never went through PATH, which is why those already work."""
     candidates = [os.path.join(_runtime_base_dir(), "bin")]  # == speedtest.managed_bin_dir
     if IS_FROZEN and sys.platform == "darwin":
@@ -2620,17 +2622,22 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
             if _relay_http_ok():
                 up.append(True)
                 return True
+            sv._reap_zombie(pid)   # POSIX: an unreaped dead child still "exists"
             return not sv.pid_alive(pid)
 
+        started = time.monotonic()
         wait_for(_settled, verify_s)
         if up:
             return pid
         reason = relay_boot_failure_line(_relay_boot_log_since(offset))
-        if reason and "port" not in reason.lower():
+        if reason and not re.search(r"\bport\b", reason, re.IGNORECASE):
             break   # a config/tool error: a respawn would fail the same way
         if attempt < attempts:
             print(f"  relay not responding on port {RELAY_PORT} yet. The port may still "
                   f"be clearing; retrying ({attempt + 1}/{attempts})…")
+            # A child that died at once on a still-clearing port needs the rest of
+            # the window before the respawn, as the full verify wait used to give it.
+            wait_for(lambda: False, max(0.0, verify_s - (time.monotonic() - started)))
     if reason:
         print(f"  relay exited during startup: {reason}")
     print(f"  ERROR: relay failed to come up on port {RELAY_PORT} after {attempt} "
