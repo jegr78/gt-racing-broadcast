@@ -66,10 +66,12 @@ def main():
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(executable_path=args.browser_executable,
                     args=['--renderer-process-limit=2', '--num-raster-threads=1'])
-                page = browser.new_page(viewport={'width': 1600, 'height': 1100})
+                context = browser.new_context(viewport={'width': 1600, 'height': 1100})
+                page = context.new_page()
                 errors = []
                 page.on('pageerror', lambda error: errors.append(error.stack))
-                legacy = browser.new_page(viewport={'width': 1920, 'height': 1080})
+                legacy = context.new_page()
+                legacy.set_viewport_size({'width': 1920, 'height': 1080})
                 legacy.goto(f'http://127.0.0.1:{relay_port}/splitscreen')
                 legacy.wait_for_function("() => document.getElementById('split-left').textContent === 'Current'")
                 original_label = legacy.locator('#split-left').bounding_box()
@@ -163,7 +165,8 @@ def main():
                     page.wait_for_function("() => !document.getElementById('overlay-save').disabled")
                     page.locator('#ov-modal .ovmodal-card').screenshot(path=str(ROOT / 'src/docs/wiki/images/cc-splitscreen-builder.png'))
                     page.evaluate("draft => { ovState.layout=JSON.parse(draft); document.getElementById('overlayCss').value=ovState.layout.customCss; ovReloadCanvasFromLayout(); }", draft)
-                live = browser.new_page(viewport={'width': 1920, 'height': 1080})
+                live = context.new_page()
+                live.set_viewport_size({'width': 1920, 'height': 1080})
                 live.on('pageerror', lambda error: errors.append(error.stack))
                 live.goto(f'http://127.0.0.1:{relay_port}/splitscreen')
                 live.wait_for_function("() => document.getElementById('split-left').textContent === 'Current'")
@@ -188,6 +191,7 @@ def main():
                 live.reload()
                 live.wait_for_function("() => document.getElementById('split-left').textContent === 'Current'")
                 assert live.locator('#split-left').evaluate("el=>getComputedStyle(el).display") == 'none'
+                live.close()
                 page.reload()
                 page.wait_for_function("() => ovState.page === 'hud' && ovState.slots.length > 0")
                 page.evaluate('openBuilderModal()')
