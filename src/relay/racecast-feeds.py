@@ -9364,6 +9364,9 @@ class Relay:
         self._desync = {"active": False}   # the /status desync block (recomputed each tick)
         self._desync_active = False        # last active state, for the log-on-transition
         self._health_lock = threading.Lock()
+        self._health_webhook_lock = threading.Lock()
+        self._stream_control_lock = threading.Lock()
+        self._event_ending = False   # confirmed final-Part end; report/teardown still runs
         self._hb_stop = threading.Event()
         self._recovery_churn_notified = {}   # feed -> ts of the last churn @here (cooldown)
         self.health_store = None  # assigned by bootstrap (Task 13); always exists
@@ -9677,11 +9680,19 @@ class Relay:
 
     def _send_health_webhook(self, level, reasons, prev):
         """POST a Discord health alert. Fully best-effort, never breaks the
-        heartbeat. The footer names this producer (#317)."""
-        self._discord_post(
-            discord_health_payload(level, reasons, prev, self._event_title(),
-                                   self.producer_name),
-            "health")
+        heartbeat. Return False when the event is deliberately ending, so a
+        refused stop cannot consume a transition while notifications pause."""
+        # Serialize the final-stop intent with the actual send, including a
+        # candidate calculated before the stop. This dedicated lock never holds
+        # up /status's health lock; an existing webhook has its own 5 s timeout.
+        with self._health_webhook_lock:
+            if self._event_ending:
+                return False
+            self._discord_post(
+                discord_health_payload(level, reasons, prev, self._event_title(),
+                                       self.producer_name),
+                "health")
+            return True
 
     def _heartbeat_loop(self):
         """Background tick: refresh health and push to Discord on a level change
@@ -9721,8 +9732,8 @@ class Relay:
             except Exception:  # noqa: BLE001  best-effort
                 pass
         if health_should_notify(self._notified_level, h["notify_level"]):
-            self._send_health_webhook(h["notify_level"], self.health_reasons, self._notified_level)
-            self._notified_level = h["notify_level"]
+            if self._send_health_webhook(h["notify_level"], self.health_reasons, self._notified_level):
+                self._notified_level = h["notify_level"]
         self._maybe_auto_failover(now)
         self._record_render_counts()
         self._record_consumer_overflows(now)
@@ -10939,6 +10950,33 @@ class Relay:
         t = threading.Thread(target=self._run_obs_probe, daemon=True)
         t.start()
         return t
+
+    def _set_obs_stream(self, on, *, final_part=False):
+        """Control OBS and fence health pages before deliberately ending the event.
+
+        OBS can stop before its request returns. The report and Windows service
+        teardown then keep the relay alive across more heartbeats. Retain raw
+        health/history and the regular stream-stop post, but stop health pages
+        until teardown or a successful explicit start. A failed request restores
+        the previous notification state. Never hold the OBS sampling lock here.
+        """
+        with self._stream_control_lock:
+            with self._health_webhook_lock:
+                previous = self._event_ending
+                if final_part and not on:
+                    self._event_ending = True
+            succeeded = False
+            try:
+                ok, note = self._obs.set_stream(on)
+                succeeded = bool(ok)
+                if ok and on:
+                    with self._health_webhook_lock:
+                        self._event_ending = False
+                return ok, note
+            finally:
+                if not succeeded:
+                    with self._health_webhook_lock:
+                        self._event_ending = previous
 
     def _run_obs_probe(self):
         """Body of the OBS probe (own method so it is testable synchronously).
@@ -13947,7 +13985,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if "on" not in body:
                         return self._send({"ok": False,
                                            "error": "stream needs on"}, 400)
-                    ok, note = relay._obs.set_stream(bool(body.get("on")))
+                    ok, note = relay._set_obs_stream(bool(body.get("on")))
                     return self._send({"ok": True} if ok
                                       else {"ok": False, "error": note},
                                       200 if ok else 503)
@@ -14034,7 +14072,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         ref, channel_csv_url, push_url, relay._obs.set_stream_service)
                     if not ok2:
                         return self._send({"ok": False, "error": note}, 502)
-                    ok3, note3 = relay._obs.set_stream(True)
+                    ok3, note3 = relay._set_obs_stream(True)
                     if not ok3:
                         return self._send({"ok": False, "error": note3}, 503)
                     part_store.mark_live(idx)
@@ -14062,13 +14100,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     ok, res = parts_mod.validate_end(body, rows, part_store.get())
                     if not ok:
                         return self._send({"ok": False, "error": res[0]}, res[1])
-                    ok2, note = relay._obs.set_stream(False)
-                    if not ok2:
-                        return self._send({"ok": False, "error": note}, 503)
                     pre_vm = parts_mod.parts_view_model(rows, part_store.get(),
                                                         stream_active=True)
                     is_last = bool(pre_vm.get("live") and pre_vm.get("count")
                                    and pre_vm.get("index") == pre_vm.get("count"))
+                    ok2, note = relay._set_obs_stream(False, final_part=is_last)
+                    if not ok2:
+                        return self._send({"ok": False, "error": note}, 503)
                     part_store.end()
                     if health_store is not None:
                         try:

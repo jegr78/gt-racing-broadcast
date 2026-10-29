@@ -185,6 +185,9 @@ is worth it.
   their own `@here` outside the health level: an auto-failover to Intermission, a feed
   that keeps dropping and recovering (three times in 5 minutes), and an automatic
   step-down to ROBUST.
+  After the final Part is deliberately ended, health-change pings stop while the
+  report and service teardown finish. The regular stream-stop announcement remains;
+  a refused stop or an unexpected off-air transition still raises an alert.
 - **The Director Panel** is where the decision is made: the BEHIND LIVE pill, the health
   pill with the next step, the RESET cost, and the feed-health area with **RE-ARM**.
 - **The [Health Monitor](Health-Monitor)** answers what happened afterwards: the backlog

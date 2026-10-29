@@ -182,6 +182,13 @@ a glance which host raised it. Events ride along with the health history on
 [producer handover](#export-import-and-producer-handover), so the incoming producer's
 monitor shows the takeover marker too.
 
+Ending the final broadcast Part deliberately stops health-alert pings before
+OBS stops. The relay keeps recording health and stream-stop events while the
+post-event report and service teardown finish. The regular stream-stop post
+still appears. A refused stop leaves health alerts enabled, and an unexpected
+stream loss during the event still raises CRITICAL. A successful explicit stream
+start enables health alerts again.
+
 ## Time-range controls
 
 Preset buttons at the top of the page select the window to display:
