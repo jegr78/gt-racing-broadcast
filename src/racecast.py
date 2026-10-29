@@ -575,6 +575,27 @@ def _ensure_tool_path():
     new = augment_path(os.environ.get("PATH", ""), candidates)
     if new:
         os.environ["PATH"] = new
+    if sys.platform.startswith("win"):
+        _append_winget_tool_dirs()
+
+
+def _append_winget_tool_dirs():
+    """Windows: a winget/UniGetUI upgrade of a portable tool (yt-dlp, deno, ffmpeg)
+    can drop its WinGet\\Links alias, so the tool vanishes from PATH while its exe
+    stays in the package dir and the relay refuses to start. APPEND the package dir
+    of every tool PATH no longer resolves: appended, so a working PATH entry always
+    wins; a no-op when every tool resolves."""
+    import install_tools as it
+    missing = [t for t in it.TOOLS if not shutil.which(t)]
+    if not missing:
+        return
+    local = os.environ.get("LOCALAPPDATA", "")
+    packages = os.path.join(local, "Microsoft", "WinGet", "Packages") if local else ""
+    have = os.environ.get("PATH", "")
+    add = [d for d in it.winget_tool_dirs(missing, packages)
+           if d not in have.split(os.pathsep)]
+    if add:
+        os.environ["PATH"] = os.pathsep.join(([have] if have else []) + add)
 
 
 def _script_invocation(rel, args, frozen, base=None):
@@ -2586,17 +2607,69 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
     it never answers, respawn once. The port has had time to clear by then. Returns the
     live PID, or None after giving up. Never lets the caller announce 'relay started' for
     a dead child (which made the failed qualifying bring-up look green)."""
+    reason = None
     for attempt in range(1, attempts + 1):
+        offset = _relay_boot_log_size()
         pid = sv.start_detached(argv, _relay_boot_log_path(), _relay_pid_path(),
                                 env=_frozen_child_env())
-        if wait_for(_relay_http_ok, verify_s):
+        up = []
+
+        def _settled(up=up, pid=pid):
+            # Stop waiting once the relay answers OR its process is gone: a relay
+            # that exits at startup never binds, so the full window is wasted.
+            if _relay_http_ok():
+                up.append(True)
+                return True
+            return not sv.pid_alive(pid)
+
+        wait_for(_settled, verify_s)
+        if up:
             return pid
+        reason = relay_boot_failure_line(_relay_boot_log_since(offset))
+        if reason and "port" not in reason.lower():
+            break   # a config/tool error: a respawn would fail the same way
         if attempt < attempts:
             print(f"  relay not responding on port {RELAY_PORT} yet. The port may still "
                   f"be clearing; retrying ({attempt + 1}/{attempts})…")
-    print(f"  ERROR: relay failed to come up on port {RELAY_PORT} after {attempts} "
+    if reason:
+        print(f"  relay exited during startup: {reason}")
+    print(f"  ERROR: relay failed to come up on port {RELAY_PORT} after {attempt} "
           f"attempt(s). Check: racecast relay logs")
     return None
+
+
+def relay_boot_failure_line(text):
+    """Pure: the line in a relay boot-log chunk that says why the relay died at
+    startup, or None. The relay's own fatal exits print "ERROR: ..."; an uncaught
+    crash ends the chunk with its traceback's exception line. A handled
+    "--- Logging error ---" report (a log-rotation hiccup) ends with its
+    "Arguments:" line, so it never counts."""
+    lines = [ln.rstrip() for ln in (text or "").splitlines() if ln.strip()]
+    for ln in reversed(lines):
+        if ln.startswith("ERROR:"):
+            return ln
+    if lines and "Traceback (most recent call last):" in text \
+            and re.match(r"^[A-Za-z_][\w.]*(Error|Exception|Exit)\b", lines[-1]):
+        return lines[-1]
+    return None
+
+
+def _relay_boot_log_size():
+    try:
+        return os.path.getsize(_relay_boot_log_path())
+    except OSError:
+        return 0
+
+
+def _relay_boot_log_since(offset):
+    """What the relay wrote to its boot log after byte `offset` (this spawn only:
+    the file is appended across starts). "" when unreadable."""
+    try:
+        with open(_relay_boot_log_path(), "rb") as fh:
+            fh.seek(offset)
+            return fh.read(256 * 1024).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 def relay_start(rest):

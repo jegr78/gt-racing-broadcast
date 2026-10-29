@@ -420,6 +420,39 @@ def t_min_os_error_below_at_above_floor():
     assert m.MIN_GLIBC_TOOLS == (2, 35) and m.MIN_GLIBC_BINARY == (2, 38)
 
 
+def _touch(path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "wb").close()
+
+
+def t_winget_tool_dirs_finds_portable_exes_without_links():
+    # A winget/UniGetUI upgrade of a portable package can drop its WinGet\Links
+    # alias, leaving the exe only in its package dir. The finder returns that dir.
+    import tempfile
+    pk = tempfile.mkdtemp()
+    ytd = os.path.join(pk, "yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe")
+    _touch(os.path.join(ytd, "yt-dlp.exe"))
+    # yt-dlp's own FFmpeg build must not be mistaken for the yt-dlp package
+    _touch(os.path.join(pk, "yt-dlp.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe",
+                        "ffmpeg-N-1-win64-gpl", "bin", "ffmpeg.exe"))
+    ffd = os.path.join(pk, "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe",
+                       "ffmpeg-9.0.2-full_build", "bin")
+    _touch(os.path.join(ffd, "ffmpeg.exe"))
+    dd = os.path.join(pk, "DenoLand.Deno_Microsoft.Winget.Source_8wekyb3d8bbwe")
+    _touch(os.path.join(dd, "deno.exe"))
+    assert m.winget_tool_dirs(["yt-dlp"], pk) == [ytd]
+    assert m.winget_tool_dirs(["ffmpeg"], pk) == [ffd]   # nested <ver>\bin layout
+    assert m.winget_tool_dirs(["yt-dlp", "deno"], pk) == [ytd, dd]
+    # streamlink is an installer package, not a portable one: nothing to find
+    assert m.winget_tool_dirs(["streamlink"], pk) == []
+    assert m.winget_tool_dirs([], pk) == []
+
+
+def t_winget_tool_dirs_tolerates_missing_packages_dir():
+    assert m.winget_tool_dirs(["yt-dlp"], os.path.join(HERE, "no-such-dir")) == []
+    assert m.winget_tool_dirs(["yt-dlp"], "") == []
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

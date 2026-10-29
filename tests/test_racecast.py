@@ -1993,16 +1993,46 @@ def t_ensure_tool_path_adds_managed_bin():
         os.environ["PATH"] = orig_path
 
 
+def t_ensure_tool_path_appends_winget_dirs_on_windows():
+    """Windows: a portable winget package whose WinGet\\Links alias an upgrade dropped
+    is still found in its package dir; that dir is APPENDED (never shadows PATH)."""
+    td = tempfile.mkdtemp()
+    ytd = os.path.join(td, "Microsoft", "WinGet", "Packages",
+                       "yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe")
+    os.makedirs(ytd)
+    open(os.path.join(ytd, "yt-dlp.exe"), "wb").close()
+    saved = (m._runtime_base_dir, m.sys.platform, m.shutil.which,
+             os.environ.get("PATH", ""), os.environ.get("LOCALAPPDATA"))
+    m._runtime_base_dir = lambda: os.path.join(td, "runtime")   # no runtime/bin
+    m.sys.platform = "win32"
+    m.shutil.which = lambda name, *a, **k: None if name == "yt-dlp" else "x"
+    try:
+        os.environ["PATH"] = os.path.join(td, "sys")
+        os.environ["LOCALAPPDATA"] = td
+        m._ensure_tool_path()
+        assert os.environ["PATH"].split(os.pathsep) == [os.path.join(td, "sys"), ytd]
+    finally:
+        (m._runtime_base_dir, m.sys.platform, m.shutil.which, path, lad) = saved
+        os.environ["PATH"] = path
+        if lad is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = lad
+
+
 def t_ensure_tool_path_noop_when_bin_absent():
     td = tempfile.mkdtemp()                # runtime/bin does NOT exist here
     orig_rt, orig_path = m._runtime_base_dir, os.environ.get("PATH", "")
+    orig_winget = m._append_winget_tool_dirs
     m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+    m._append_winget_tool_dirs = lambda: None   # this machine's winget dirs stay out
     try:
         os.environ["PATH"] = os.path.join("/usr", "bin")
         m._ensure_tool_path()
         assert os.environ["PATH"] == os.path.join("/usr", "bin")   # unchanged
     finally:
         m._runtime_base_dir = orig_rt
+        m._append_winget_tool_dirs = orig_winget
         os.environ["PATH"] = orig_path
 
 
@@ -2517,6 +2547,56 @@ def t_relay_start_reports_failure_when_relay_never_comes_up():
         assert "ERROR" in out
         assert "relay started" not in out
     finally:
+        restore()
+
+
+def t_relay_boot_failure_line():
+    # The relay's sys.exit("ERROR: ...") lands in the boot log; that is the reason.
+    assert m.relay_boot_failure_line(
+        "noise\nERROR: 'yt-dlp' not found on PATH (brew install yt-dlp).\n") \
+        == "ERROR: 'yt-dlp' not found on PATH (brew install yt-dlp)."
+    # An uncaught crash: the traceback's final exception line.
+    tb = ("Traceback (most recent call last):\n  File \"x.py\", line 1, in <module>\n"
+          "ValueError: bad schedule\n")
+    assert m.relay_boot_failure_line(tb) == "ValueError: bad schedule"
+    # Handled "--- Logging error ---" noise is not a startup failure.
+    noise = ("--- Logging error ---\nTraceback (most recent call last):\n"
+             "PermissionError: [WinError 32] locked\nCall stack:\n"
+             "Message: 'relay starting'\nArguments: ('',)\n")
+    assert m.relay_boot_failure_line(noise) is None
+    assert m.relay_boot_failure_line("") is None
+
+
+def t_relay_start_names_the_boot_error_and_skips_a_pointless_retry():
+    # A relay that exits on a config/tool error (not a still-clearing port) must
+    # surface that reason, not "the port may still be clearing", and not respawn.
+    restore, calls = _relay_spawn_stubs([False, False])
+    old_tail = m._relay_boot_log_since
+    m._relay_boot_log_since = lambda offset: "ERROR: 'yt-dlp' not found on PATH (x).\n"
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            m.relay_start([])
+        out = buf.getvalue()
+        assert calls["spawn"] == 1, f"no retry for a tool error, got {calls['spawn']}"
+        assert "'yt-dlp' not found on PATH" in out
+        assert "may still be clearing" not in out
+        assert "relay started" not in out
+    finally:
+        m._relay_boot_log_since = old_tail
+        restore()
+
+
+def t_relay_start_still_retries_a_port_error():
+    restore, calls = _relay_spawn_stubs([False, True])
+    old_tail = m._relay_boot_log_since
+    m._relay_boot_log_since = lambda offset: "ERROR: control port 8088 already in use\n"
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.relay_start([])
+        assert calls["spawn"] == 2
+    finally:
+        m._relay_boot_log_since = old_tail
         restore()
 
 
