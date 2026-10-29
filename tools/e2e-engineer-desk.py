@@ -49,7 +49,11 @@ async def main():
     with tempfile.TemporaryDirectory(prefix='racecast-desk-browser-') as root:
         fixture=Fixture(root)
         fixture.access().update(enabled=True,expected=0)
-        server=fixture.console(with_live=True)
+        notes=gate.m.EventNotesSource(None)
+        notes.rows=[dict(heading='Broadcast briefing',note='Mention our league partners before the start.',priority='important')]
+        documents=gate.m.EventDocumentsSource(None)
+        documents.rows=[dict(title='Season 21 Rulebook',url='https://docs.google.com/document/d/EXAMPLE/edit')]
+        server=fixture.console(with_live=True,event_notes_source=notes,event_documents_source=documents)
         if '--shots' in sys.argv:
             from test_gt7_track_definitions import definition
             fixture.live._definitions.save(definition(), 0)
@@ -379,7 +383,11 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.stopped')
                 assert await page.locator('#protected').evaluate('(el) => el.hidden'), 'revocation left protected view visible'
                 release.set();await page.unroute_all(behavior='wait')
-                count=[];page.on('request',lambda r:count.append(r.url))
+                # Common public Event Notes polling remains independent of Engineer access.
+                count=[]
+                def record_protected(request):
+                    if '/event-notes/data' not in request.url:count.append(request.url)
+                page.on('request',record_protected)
                 await asyncio.sleep(1.2)
                 assert not count, 'role removal did not stop protected polling'
                 assert not await page.locator('#chart path').count() and await page.locator('#speed').inner_text() == 'N/A'

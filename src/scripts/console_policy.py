@@ -142,8 +142,8 @@ def min_capability(segments, method="GET"):
        (len(p) == 3 and p[:2] == ["health-monitor", "assets"]):
         return Requirement(ANY, False)
 
-    # Event notes: one shared read-only list for director, commentator and race
-    # control. No stream URLs, so the same tier as the cockpit monitors.
+    # Event notes and public document links: shared read-only crew information.
+    # No stream URLs, so the same tier as the cockpit monitors.
     if p == ["event-notes", "data"]:
         return Requirement(ANY, False)
 

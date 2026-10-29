@@ -14,7 +14,7 @@
 button:disabled{opacity:.5;cursor:default}
 #fuel-avg-note,#fuel-time-note{display:block}
 </style><script>window.RC_API_BASE="__RC_API_BASE__";window.RC_API=p=>(window.RC_API_BASE||'')+p;if(location.search)history.replaceState({},'',location.pathname);</script></head><body><main>
-<header><div><a href="/console">Console</a><h1>Race Engineer</h1></div><span class="sub">Read-only · one GT7 source</span></header>
+<header class="event-info-header"><div><a href="/console">Console</a><h1>Race Engineer</h1></div><span class="sub">Read-only · one GT7 source</span><button type="button" id="notesBtn" class="notesbtn event-info-trigger" hidden aria-haspopup="dialog" aria-controls="notesModal">Notes</button></header>
 <p id="status" role="status">Checking access…</p><p id="receipt" class="sub">Waiting for measured telemetry</p><p id="notice" role="status"></p>
 <div id="protected" hidden>
 <section aria-label="Live instruments">
@@ -274,4 +274,5 @@ function trcDraw(){requestAnimationFrame(trcDraw);const c=$('input-trace'),w=Mat
   ctx.stroke();}}
 setInterval(trcPoll,250);requestAnimationFrame(trcDraw);
 window.EngineerDesk={state,tick,age,trc};timer=setInterval(tick,500);setInterval(age,250);tick();
-</script></body></html>
+</script><!--__EVENT_INFO__-->
+</body></html>

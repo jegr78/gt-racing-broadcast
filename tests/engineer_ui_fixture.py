@@ -64,7 +64,7 @@ class Fixture(Base):
         ctx.update(crew_read=crew_read,crew_write=crew_write)
         return ctx
 
-    def console(self, with_live=False, solo=False):
+    def console(self, with_live=False, solo=False, event_notes_source=None, event_documents_source=None):
         m=gate.m
         relay=m.Relay(gate._FakeSource([],[]),[53001,53002],str(self.root),solo=solo)
         self.relay = relay
@@ -92,6 +92,9 @@ class Fixture(Base):
             hud_source=m.HudSource("", "", str(self.root/"hud-cache.json")), console_secret=gate.SECRET,crew_source=self.crew,setup_ctl=control,
             chat_store=m.ChatStore(str(self.root/'chat.json')),
             console_page_path=str(gate.ROOT+'/src/console/console.html'),
+            cockpit_page_path=str(Path(gate.ROOT)/'src/cockpit/cockpit.html'),
+            race_control_page_path=str(Path(gate.ROOT)/'src/racecontrol/race-control.html'),
+            event_notes_source=event_notes_source, event_documents_source=event_documents_source,
             telemetry_store=telemetry, engineer_access=self.console_access,engineer_page_path=str(Path(gate.ROOT)/'src/console/race-engineer.html'))
         server=m.ThreadingHTTPServer(('127.0.0.1',0),handler)
         self.console_server=server

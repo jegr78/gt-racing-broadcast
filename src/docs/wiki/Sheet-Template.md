@@ -42,6 +42,7 @@ with **no leading blank rows**. Most tabs locate their columns **by header text*
 | [Assets](#assets-tab) | `Assets` | `--assets-tab` | `racecast graphics` / `media` | Links to the broadcast graphics + intro/outro/trailer clips |
 | [Brands](#brands-tab) | `Brands` | — | `racecast brands` | Per-league brand-logo overrides for the HUD (optional) |
 | [Event Notes](#event-notes-tab) | `Event Notes` | `--event-notes-tab` | relay | League-owner notes shown as a modal in the console pages (optional) |
+| [Documents](#documents-tab) | `Documents` | `--documents-tab` | relay | Public document links in the existing Notes dialog (optional) |
 
 ---
 
@@ -545,7 +546,7 @@ Cupra   | https://drive.google.com/file/d/<ID>/view?usp=sharing
 
 ## Event Notes tab
 
-**Optional.** League-owner notes shown as a toggleable `📋 Notes` modal in the Director Panel, Commentator Cockpit, and Race Control desk. The tab is read-only / admin-owned, the league owner maintains it directly in the Sheet per event, and it is never written from the consoles. If the tab is absent or contains no notes, the modal button self-hides.
+**Optional.** League-owner notes shown through the existing **Notes** button in the Director Panel, Commentator Cockpit, Race Control and Race Engineer desks. Its dialog separates **Notes** and **Documents** into two tabs, keeping one entry in the desk header. The league owner maintains the read-only Sheet tabs. When both lists are empty, the button hides.
 
 Header row in row 1, three columns:
 
@@ -562,7 +563,26 @@ Pit Strategy   | Box on even hours for driver swap      |
 Weather        | Rain expected after hour 2             | Info
 ```
 
-The relay reads this tab via `--event-notes-tab` (default `Event Notes`). Disable the modal with `--no-event-notes`, or a custom `--sheet-csv-url` also disables it (same as the Channel and Crew tabs).
+The relay reads this tab via `--event-notes-tab` (default `Event Notes`). Disable this reader with `--no-event-notes`; document links remain independent. A custom `--sheet-csv-url` disables both readers, like the Channel and Crew tabs.
+
+## Documents tab
+
+**Optional.** Public document references, kept separate from broadcast graphics and media. Use two header-located columns:
+
+| Column header | Required? | Meaning |
+|---|---|---|
+| `Title` | yes | Link label, such as Rulebook or Event Document; `Name` and `Label` also work |
+| `URL` | yes | Public HTTP(S) link; `Link` also works |
+
+Google Docs share links, published Google Docs HTML links and PDF URLs are all ordinary links. Clicking one opens the original in a new browser tab. The relay reads only this Sheet list; it never downloads or converts the documents. Blank/incomplete rows and unsupported URL schemes are skipped. Sheet order is retained.
+
+Use **Notes → Documents** in any crew desk. If only documents are configured, the same Notes button opens that tab directly. Existing notes-only Sheets keep working. An empty tab shows its empty-state message. The dialog supports keyboard tab switching and Escape to close.
+
+![Existing Notes dialog with separate Notes and Documents tabs](images/event-info-documents.png)
+
+The default tab name is `Documents`, configurable with `--documents-tab`. `--no-documents` disables only document links. Edits are picked up on the normal Sheet/dialog polling cycle. A temporary network failure retains the last received list.
+
+Start with [Documents.csv](https://github.com/jegr78/gt-racing-broadcast/blob/main/src/docs/sheet-template/Documents.csv), then replace its placeholders with your public links. This tab needs no Sheet write-back script changes.
 
 ---
 

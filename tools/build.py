@@ -79,6 +79,7 @@ def main():
     cp("console/health-monitor.html", "health-monitor.html")  # /health-monitor dashboard
     cp("console/driver-radio.html", "driver-radio.html")
     cp("console/driver-radio.js", "driver-radio.js")
+    cp("console/event-info.html", "event-info.html")
     cp("console/crew-frame.html", "crew-frame.html")   # cockpit/race-control tab bar (#745)
     cp("setup-assets.py", "setup-assets.py")
     cp("racecast.py", "racecast.py")
@@ -213,6 +214,7 @@ def main():
         "console launcher shipped": os.path.isfile(os.path.join(PKG, "console.html")),
         "console buttons page shipped": os.path.isfile(os.path.join(PKG, "buttons.html")),
         "health monitor page shipped": os.path.isfile(os.path.join(PKG, "health-monitor.html")),
+        "event info shipped": os.path.isfile(os.path.join(PKG, "event-info.html")),
         "crew frame shipped": os.path.isfile(os.path.join(PKG, "crew-frame.html")),
         "uplot vendored": os.path.isfile(os.path.join(PKG, "assets", "vendor", "uplot", "uPlot.iife.min.js")),
         "preview backdrop shipped": os.path.isfile(os.path.join(PKG, "assets", "preview-bg.jpg")),

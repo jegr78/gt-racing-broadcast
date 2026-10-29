@@ -125,6 +125,7 @@ class _RelayObsFacade:
 import chat_admin  # required (ChatStore); src/scripts is on sys.path via the block above
 import broadcast_chat  # read-only YouTube broadcast-chat reader (#294); pure parsers
 import event_notes   # noqa: E402  (pure Event Notes tab parser)
+import event_documents  # noqa: E402  (public document link parser)
 import resources  # noqa: E402, F401 - machine resource sampler (health history)
 import cue_admin   # director text-cue channel (#243)
 import flag_graphic   # flag-status graphics: value->source + persisted store (#flag-graphic)
@@ -3776,8 +3777,10 @@ class EventNotesSource:
     """Reads the Sheet `Event Notes` tab (CSV) -> [{heading, note, priority}].
 
     Thin fetch+parse wrapper (parsing is the pure event_notes.parse_event_notes).
-    A missing/empty/unreachable tab is non-fatal -- it simply yields no notes, so
-    the console modal button self-hides."""
+    A missing/empty tab yields no rows. A temporary fetch failure retains the
+    last received rows; the shared dialog can also show independent documents."""
+
+    parse_rows = staticmethod(event_notes.parse_event_notes)
 
     def __init__(self, csv_url, cache_path=None):
         self.csv_url = csv_url
@@ -3801,7 +3804,7 @@ class EventNotesSource:
         text = self._fetch_text(timeout)
         if text is None:
             return False
-        rows = event_notes.parse_event_notes(text)
+        rows = self.parse_rows(text)
         with self.lock:
             self.rows = rows
             self.last_error = None
@@ -3810,6 +3813,11 @@ class EventNotesSource:
     def get(self):
         with self.lock:
             return list(self.rows)
+
+
+class EventDocumentsSource(EventNotesSource):
+    """Refresh Sheet link metadata only; browsers open the original documents."""
+    parse_rows = staticmethod(event_documents.parse_event_documents)
 
 
 class _BroadcastReader:
@@ -11655,7 +11663,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
-                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None):
+                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
+                 event_documents_source=None):
     radio_access = (driver_radio_access.Store(engineer_access.root, engineer_access.available)
                     if engineer_access is not None else None)
     def radio_source():
@@ -11728,6 +11737,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Shared tab bar and live strip of the cockpit and the Race Control desk.
     crew_frame_path = (os.path.join(os.path.dirname(console_page_path), "crew-frame.html")
                        if console_page_path else None)
+    event_info_path = os.path.join(radio_page_dir, "event-info.html")
     _cockpit_chat_rl = console_auth.RateLimiter(limit=10, window_s=60)
     # Submit is a PUBLIC write path (funnelled). Keyed on the authed identity
     # (not the shared proxy IP, like chat) so one commentator can't exhaust the
@@ -12072,6 +12082,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 except (OSError, TypeError):
                     frame = b""
                 body = body.replace(b"<!--__CREW_FRAME__-->", frame)
+            if b"<!--__EVENT_INFO__-->" in body:
+                try:
+                    with open(event_info_path, "rb") as fh:
+                        event_info = fh.read()
+                except OSError:
+                    event_info = b""  # Component absent from an older package.
+                body = body.replace(b"<!--__EVENT_INFO__-->", event_info)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -13545,13 +13562,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                          "discord": x or "", "race_engineer": bool(re)}
                         for (n, d, pr, c, rc, x, re) in (CrewSource._member(row) for row in rows)]})
                 if p == ["event-notes", "data"]:
-                    # League-owner notes shown as a modal in the three console
-                    # pages. Read-only; one shared list for all roles. Mirrored
+                    # Notes and public document links in the shared crew dialog.
+                    # Read-only; one shared list for all roles. Mirrored
                     # at /console/event-notes/data (ANY-auth) via the gate's
                     # generic ALLOW fall-through. Disabled -> available:false ->
                     # the front-end hides the button.
                     notes = event_notes_source.get() if event_notes_source else []
-                    return self._send({"available": bool(notes), "notes": notes})
+                    documents = event_documents_source.get() if event_documents_source else []
+                    return self._send({"available": bool(notes or documents), "notes": notes,
+                                       "documents": documents})
                 if p == ["qualifying", "data"]:
                     qs = relay.qual_source
                     if not qs:
@@ -14480,7 +14499,11 @@ def main():
                          "(default 'Event Notes'). Disabled by a custom "
                          "--sheet-csv-url or --no-event-notes.")
     ap.add_argument("--no-event-notes", action="store_true",
-                    help="Disable the Event Notes reader/modal.")
+                    help="Disable the Event Notes reader (document links stay independent).")
+    ap.add_argument("--documents-tab", default="Documents",
+                    help="Sheet tab with public Title/URL document links (default Documents).")
+    ap.add_argument("--no-documents", action="store_true",
+                    help="Disable the Documents reader.")
     ap.add_argument("--qualifying", action="store_true",
                     help="Start in QUALIFYING mode: serve the qualifying tab on "
                          "Feed A instead of the race schedule (different-day "
@@ -14693,6 +14716,13 @@ def main():
         event_notes_cache = os.path.join(runtime, "event-notes.cache.txt")
         event_notes_source = EventNotesSource(event_notes_csv_url, event_notes_cache)
         event_notes_source.refresh()   # non-fatal: empty/unreachable = no notes
+
+    event_documents_source = None
+    if not args.sheet_csv_url and not args.no_documents:
+        documents_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
+                             f"/gviz/tq?tqx=out:csv&headers=1&sheet={quote(args.documents_tab)}")
+        event_documents_source = EventDocumentsSource(documents_csv_url)
+        event_documents_source.refresh()  # Missing/empty tab is optional.
 
     # Optionally auto-export cookies from a logged-in browser first (yt-dlp)
     if args.cookies_from_browser:
@@ -14914,6 +14944,9 @@ def main():
     if event_notes_source:
         threading.Thread(target=poller, args=(event_notes_source, args.poll, stop_evt),
                          daemon=True).start()
+    if event_documents_source:
+        threading.Thread(target=poller, args=(event_documents_source, args.poll, stop_evt),
+                         daemon=True).start()
     if producer_source is not None:
         # Parts change rarely; the same cadence as the other sheet-tab readers is fine.
         threading.Thread(target=poller, args=(producer_source, args.poll, stop_evt),
@@ -15056,6 +15089,7 @@ def main():
         brands_dir=brands_dir,
         crew_source=crew_source,
         event_notes_source=event_notes_source,
+        event_documents_source=event_documents_source,
         broadcast_chat_store=broadcast_chat_store,
         broadcast_chat_supervisor=_bc_supervisor,
         logo_path=args.logo,

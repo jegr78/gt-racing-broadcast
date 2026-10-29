@@ -59,7 +59,7 @@ def t_missing_columns_and_empty_degrade():
     assert out == [{"heading": "", "note": "just a note", "priority": "info"}], out
 
 
-def _event_notes_client(event_notes_source):
+def _event_notes_client(event_notes_source, event_documents_source=None):
     """make_handler over a real ThreadingHTTPServer. Returns (srv, get)."""
     import json as _json
     import threading as _t
@@ -74,7 +74,8 @@ def _event_notes_client(event_notes_source):
         def __init__(self):
             self.feeds = {"A": _StubFeed(0), "B": _StubFeed(1)}
 
-    handler = m.make_handler(_StubRelay(), event_notes_source=event_notes_source)
+    handler = m.make_handler(_StubRelay(), event_notes_source=event_notes_source,
+                             event_documents_source=event_documents_source)
     srv = m.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     _t.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
