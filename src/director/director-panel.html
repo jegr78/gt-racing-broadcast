@@ -690,7 +690,7 @@
     <div class="appmeta">
       <a class="ver" href="https://github.com/jegr78/gt-racing-broadcast/releases"
          target="_blank" rel="noopener" title="Running racecast version. View releases">__RC_VERSION__ ↗</a>
-      <button type="button" id="notesBtn" class="notesbtn" hidden onclick="openNotes()">📋 Notes</button>
+      <button type="button" id="notesBtn" class="notesbtn" hidden aria-haspopup="dialog" aria-controls="notesModal">📋 Notes</button>
       <a class="help" href="https://jegr78.github.io/gt-racing-broadcast/director.html"
          target="_blank" rel="noopener">? Help</a>
     </div>
@@ -3856,45 +3856,11 @@ $("#partActionBtn").addEventListener("click", () => {
 });
 partsPoll(); setInterval(partsPoll, 2000);
 flagGfxPoll(); setInterval(flagGfxPoll, 2000);
-  function openNotes() { document.getElementById('notesModal').showModal(); }
-  function closeNotes() { document.getElementById('notesModal').close(); }
-  function renderNotes(d) {
-    const notes = (d && d.available && Array.isArray(d.notes)) ? d.notes : [];
-    document.getElementById('notesBtn').hidden = notes.length === 0;
-    const body = document.getElementById('notesBody');
-    body.textContent = '';
-    notes.forEach(function (n) {
-      const item = document.createElement('div');
-      item.className = 'noteitem' + (n.priority === 'important' ? ' important' : '');
-      if (n.heading) {
-        const h = document.createElement('div');
-        h.className = 'notehd';
-        h.textContent = n.heading;
-        item.appendChild(h);
-      }
-      const t = document.createElement('div');
-      t.className = 'notetxt';
-      t.textContent = n.note;
-      item.appendChild(t);
-      body.appendChild(item);
-    });
-  }
-  async function pollNotes() {
-    try {
-      const r = await fetch('/event-notes/data', { cache: 'no-store' });
-      if (r.ok) renderNotes(await r.json());
-    } catch (e) { /* transient; keep last state */ }
-    setTimeout(pollNotes, 30000);
-  }
-  pollNotes();
+
 loadCuePresets(); loadCueTargets(); pollCueRecent(); setInterval(pollCueRecent, 2000);
 pollCueBacks(); setInterval(pollCueBacks, 2000);
 </script>
-<dialog id="notesModal" class="notesmodal">
-  <h3>Event Notes</h3>
-  <div id="notesBody" class="notesbody"></div>
-  <div class="notesactions"><button type="button" onclick="closeNotes()" autofocus>Close</button></div>
-</dialog>
+<!--__EVENT_INFO__-->
 <dialog id="partModal" class="notesmodal partmodal">
   <h3 id="partModalTitle">Confirm</h3>
   <div id="partModalBody" class="notesbody"></div>

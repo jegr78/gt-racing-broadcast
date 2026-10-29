@@ -1,0 +1,130 @@
+<!-- Shared Event Notes dialog. Injected into crew desks by the relay. -->
+<style>
+.event-info-trigger{font:inherit;cursor:pointer;background:transparent;color:inherit;border:1px solid #303946;border-radius:6px;padding:5px 9px;white-space:nowrap}
+.event-info-header{flex-wrap:wrap;gap:8px}
+.event-info{box-sizing:border-box;max-width:580px;width:90vw;max-height:85vh;padding:18px;border:1px solid #303946;border-radius:10px;background:#111820;color:#e7edf3;font:inherit}
+.event-info::backdrop{background:rgba(0,0,0,.55)}
+.event-info h3{margin:0 0 12px;font-size:18px}
+.event-info-tabs{display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid #303946;padding-bottom:8px}
+.event-info button{font:inherit;cursor:pointer;color:inherit;background:#1b2533;border:1px solid #344155;border-radius:6px;padding:7px 12px}
+.event-info-tabs button[aria-selected="true"]{background:#234d79;border-color:#5ba8ef}
+.event-info :focus-visible{outline:2px solid #8ac6ff;outline-offset:3px}
+.event-info-panel{max-height:55vh;overflow:auto;overflow-wrap:anywhere}
+.event-info-panel[hidden]{display:none}
+.event-info-notes{display:flex;flex-direction:column;gap:10px}
+.event-info-note{padding:10px 12px;border-left:3px solid #344155;background:#17202b;border-radius:4px}
+.event-info-note.important{border-color:#ffb454;background:#302719}
+.event-info-heading{font-weight:700;margin-bottom:4px}
+.event-info-text{white-space:pre-wrap}
+.event-info-documents{display:flex;flex-direction:column;gap:8px;list-style:none;padding:0;margin:0}
+.event-info-documents a{display:block;color:#8ac6ff;border:1px solid #344155;border-radius:6px;padding:11px 12px;text-decoration:underline;overflow-wrap:anywhere}
+.event-info-empty,.event-info-hint{color:#aeb8c5;font-size:13px}
+.event-info-actions{display:flex;justify-content:flex-end;margin-top:14px}
+</style>
+<dialog id="notesModal" class="event-info" aria-labelledby="eventInfoTitle">
+  <h3 id="eventInfoTitle">Event information</h3>
+  <div class="event-info-tabs" role="tablist" aria-label="Event information">
+    <button type="button" id="eventNotesTab" role="tab" aria-selected="true" aria-controls="eventNotesPanel" tabindex="0">Notes</button>
+    <button type="button" id="eventDocumentsTab" role="tab" aria-selected="false" aria-controls="eventDocumentsPanel" tabindex="-1">Documents</button>
+  </div>
+  <div id="eventNotesPanel" class="event-info-panel" role="tabpanel" aria-labelledby="eventNotesTab" tabindex="0">
+    <div id="notesBody" class="event-info-notes"></div>
+  </div>
+  <div id="eventDocumentsPanel" class="event-info-panel" role="tabpanel" aria-labelledby="eventDocumentsTab" tabindex="0" hidden>
+    <p class="event-info-hint">Links open in a new browser tab.</p>
+    <ul id="documentsBody" class="event-info-documents"></ul>
+  </div>
+  <div class="event-info-actions"><button type="button" id="eventInfoClose">Close</button></div>
+</dialog>
+<script>
+(() => {
+  'use strict';
+  const get = id => document.getElementById(id);
+  const trigger = get('notesBtn'), dialog = get('notesModal');
+  if (!trigger || !dialog) return;
+  const tabs = [get('eventNotesTab'), get('eventDocumentsTab')];
+  const panels = [get('eventNotesPanel'), get('eventDocumentsPanel')];
+  let selected = 0, notes = [], documents = [], notesKey, documentsKey, timer, controller, stopped = false, generation = 0;
+  function choose(index, focus = false) {
+    selected = index;
+    tabs.forEach((tab, i) => {
+      tab.setAttribute('aria-selected', String(i === index)); tab.tabIndex = i === index ? 0 : -1;
+      panels[i].hidden = i !== index;
+    });
+    if (focus) tabs[index].focus();
+  }
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => choose(index));
+    tab.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') next = 1 - index;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = 1;
+      if (next !== undefined) { event.preventDefault(); choose(next, true); }
+    });
+  });
+  trigger.addEventListener('click', () => {
+    if (!notes.length && !documents.length) return;
+    choose(notes.length ? 0 : 1); dialog.showModal(); tabs[selected].focus();
+  });
+  get('eventInfoClose').addEventListener('click', () => dialog.close());
+  function empty(parent, text) {
+    const item = document.createElement(parent.tagName === 'UL' ? 'li' : 'p');
+    item.className = 'event-info-empty'; item.textContent = text; parent.append(item);
+  }
+  function validDocument(item) {
+    if (!item || typeof item.title !== 'string' || !item.title.trim() || typeof item.url !== 'string') return false;
+    try {
+      const url = new URL(item.url);
+      return ['https:', 'http:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password;
+    } catch (error) { return false; }
+  }
+  function render(data) {
+    notes = Array.isArray(data.notes) ? data.notes.filter(n => n && typeof n.note === 'string' && n.note.trim()) : [];
+    documents = Array.isArray(data.documents) ? data.documents.filter(validDocument) : [];
+    trigger.hidden = !notes.length && !documents.length;
+    // A normal poll must not replace links while a reader is focusing one.
+    const nk = JSON.stringify(notes), dk = JSON.stringify(documents);
+    if (nk !== notesKey) {
+      notesKey = nk; const body = get('notesBody'); body.replaceChildren();
+      notes.forEach(note => {
+        const item = document.createElement('div'); item.className = 'event-info-note' + (note.priority === 'important' ? ' important' : '');
+        if (note.heading) {
+          const heading = document.createElement('div'); heading.className = 'event-info-heading'; heading.textContent = note.heading; item.append(heading);
+        }
+        const text = document.createElement('div'); text.className = 'event-info-text'; text.textContent = note.note; item.append(text); body.append(item);
+      });
+      if (!notes.length) empty(body, 'No event notes.');
+    }
+    if (dk !== documentsKey) {
+      documentsKey = dk; const body = get('documentsBody'); body.replaceChildren();
+      documents.forEach(doc => {
+        const item = document.createElement('li'), link = document.createElement('a');
+        link.textContent = doc.title; link.href = doc.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        item.append(link); body.append(item);
+      });
+      if (!documents.length) empty(body, 'No documents.');
+    }
+  }
+  async function poll() {
+    if (stopped) return;
+    const request = new AbortController(), epoch = generation;
+    controller = request; const timeout = setTimeout(() => request.abort(), 8000);
+    try {
+      const path = window.RC_API ? window.RC_API('/event-notes/data') : '/event-notes/data';
+      const response = await fetch(path, {cache: 'no-store', signal: request.signal});
+      if (stopped || epoch !== generation) return;
+      if (response.status === 401 || response.status === 403) { render({}); dialog.close(); }
+      else if (response.ok) {
+        const data = await response.json();
+        if (!stopped && epoch === generation && data && typeof data === 'object') render(data);
+      }
+    } catch (error) { /* A transient failure retains the last received list. */ }
+    finally { clearTimeout(timeout); if (controller === request) controller = null; }
+    if (!stopped && epoch === generation) timer = setTimeout(poll, 30000);
+  }
+  window.addEventListener('pagehide', () => { stopped = true; generation++; clearTimeout(timer); if (controller) controller.abort(); });
+  window.addEventListener('pageshow', event => { if (event.persisted && stopped) { stopped = false; poll(); } });
+  poll();
+})();
+</script>

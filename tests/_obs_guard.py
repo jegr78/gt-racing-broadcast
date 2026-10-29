@@ -26,6 +26,7 @@ _UNREACHABLE = {
     "get_health_stats": (False, {}, NOTE),
     "get_program_screenshot": (None, NOTE),
     "get_scene_collection": (None, NOTE),
+    "get_scene_items": ({}, NOTE),
     "get_source_screenshot": (None, NOTE),
     "probe": (False, NOTE),
     "probe_device_options": ([], NOTE),
