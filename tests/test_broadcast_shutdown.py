@@ -114,7 +114,9 @@ def t_final_end_keeps_stop_marker_and_report_without_late_health_pings():
 def t_failed_final_stop_restores_alarm_and_does_not_consume_the_transition():
     with _event() as (relay, obs, posts, teardown, parts, port):
         obs.result = (False, "OBS refused stop")
-        obs.effect = lambda on: _off_air(relay)
+        def stop(on):
+            _off_air(relay)
+        obs.effect = stop
         code, reply = _post(port, "parts/end", {"intent": "END PART 1"})
         assert code == 503 and reply["error"] == "OBS refused stop"
         _off_air(relay)
@@ -145,7 +147,9 @@ def t_new_explicit_start_rearms_health_after_a_completed_final_stop():
 
 def t_qualifying_end_also_finishes_health_notifications():
     with _event(qualifying=True) as (relay, obs, posts, teardown, parts, port):
-        obs.effect = lambda on: _off_air(relay)
+        def stop(on):
+            _off_air(relay)
+        obs.effect = stop
         code, reply = _post(port, "parts/end", {"intent": "END PART Q"})
         assert code == 200 and reply["final"] is True
         _off_air(relay)
