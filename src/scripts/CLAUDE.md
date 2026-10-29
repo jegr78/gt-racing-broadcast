@@ -182,7 +182,9 @@ update|status`. Spec: `docs/superpowers/specs/2026-10-07-gt7-telemetry-recording
 #   (sub/follower-only) Twitch feeds.
 # - install-tools: deno has no apt package, so it is a pinned, SHA-256-verified
 #   GitHub-release download into runtime/bin (racecast adds that to PATH); brew is
-#   bootstrapped on macOS; Linux apt runs via sudo.
+#   bootstrapped on macOS; Linux apt runs via sudo. Windows: a winget/UniGetUI upgrade
+#   can drop a portable tool's WinGet\Links alias; _ensure_tool_path then APPENDS the
+#   tool's %LOCALAPPDATA%\Microsoft\WinGet\Packages dir (install_tools.winget_tool_dirs).
 # - obs-browser: Linux/aarch64 only: no distro/PPA ships obs-browser there and the relay
 #   HUD/timer need a Browser Source. Pins CEF per OBS version (obs_browser_linux.py).
 #   On no-GPU/VM hosts also disable OBS Browser Source Hardware Acceleration.

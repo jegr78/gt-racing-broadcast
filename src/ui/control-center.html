@@ -915,7 +915,7 @@
 const $ = id => document.getElementById(id);
 let jobES = null, logES = null;
 
-let setupLoaded = false, preflightRun = false, assetsLoaded = false,
+let preflightRun = false, assetsLoaded = false,
     settingsLoaded = false, streamsLoaded = false, docsLoaded = false,
     wizardLoaded = false, profilesLoaded = false, logsLoaded = false;
 // op name -> the last job exit code run from the wizard, as a string. It lets a
@@ -933,11 +933,11 @@ function showView(name) {
   document.querySelectorAll('[data-nav]').forEach(n => {
     n.classList.toggle('active', n.dataset.nav === name);
   });
-  // lazy first-load: tool/app probes, preflight and asset listing are on-demand
-  // (they shell out / scan disk), so run them only when first opened.
-  if ((name === 'apps' || name === 'tools') && !setupLoaded) {
-    setupLoaded = true; fetchSetup();
-  }
+  // On-demand: tool/app probes, preflight and asset listing shell out / scan disk,
+  // so they run only when their view opens. The tool/app probes re-run on EVERY
+  // open: a package manager (winget, UniGetUI, brew) can update or drop a tool while
+  // the Control Center runs, and a once-per-session result would show it as fine.
+  if (name === 'apps' || name === 'tools') fetchSetup();
   if (name === 'apps') fetchObsCollection();
   // Profile view: switcher/profile.env loaded once; graphics/media gallery
   // (the old 'assets' view's job) likewise re-uses fetchAssetFiles.

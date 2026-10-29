@@ -56,6 +56,42 @@ SPEEDTEST_DOWNLOADS = {
 }
 
 
+def winget_tool_dirs(missing, packages_dir):
+    """Package dirs under winget's portable root (%LOCALAPPDATA%\\Microsoft\\WinGet\\
+    Packages) that hold the exe of a tool in `missing`. winget puts a portable
+    package on PATH only through its WinGet\\Links alias, and an upgrade (winget
+    or UniGetUI) can drop that alias while the exe stays in the package dir, so the
+    relay dies with "'yt-dlp' not found on PATH" on an otherwise healthy machine.
+    Checks <pkg>\\<tool>.exe, then <pkg>\\<version>\\bin\\<tool>.exe (the Gyan.FFmpeg
+    layout). One dir per tool, in `missing` order; [] when nothing is found."""
+    try:
+        entries = sorted(os.listdir(packages_dir), reverse=True) if packages_dir else []
+    except OSError:
+        return []
+    found = []
+    for tool in missing:
+        wid = WINGET_IDS.get(tool)
+        if not wid:
+            continue
+        exe = tool + ".exe"
+        for entry in entries:
+            if not entry.startswith(wid + "_"):
+                continue
+            pkg = os.path.join(packages_dir, entry)
+            hits = [pkg] if os.path.isfile(os.path.join(pkg, exe)) else []
+            if not hits:
+                try:
+                    subs = sorted(os.listdir(pkg), reverse=True)
+                except OSError:
+                    subs = []
+                hits = [os.path.join(pkg, s, "bin") for s in subs
+                        if os.path.isfile(os.path.join(pkg, s, "bin", exe))]
+            if hits:
+                found.append(hits[0])
+                break
+    return found
+
+
 def speedtest_asset_tag(platform, machine):
     """Map (sys.platform, platform.machine()) to a SPEEDTEST_DOWNLOADS tag, or
     None for Windows (winget handles it) and unsupported arches."""
