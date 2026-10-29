@@ -2567,6 +2567,22 @@ def t_relay_boot_failure_line():
     assert m.relay_boot_failure_line("") is None
 
 
+def t_relay_boot_log_since_survives_a_rotation():
+    # start_detached may rotate the boot log after relay_start measured the offset:
+    # the fresh file is then shorter than the offset, so read it from the top.
+    td = tempfile.mkdtemp()
+    path = os.path.join(td, "relay.boot.log")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("=== start x ===\nERROR: 'yt-dlp' not found on PATH\n")
+    old = m._relay_boot_log_path
+    m._relay_boot_log_path = lambda: path
+    try:
+        assert "not found" in m._relay_boot_log_since(10_000)
+        assert m._relay_boot_log_since(os.path.getsize(path)) == ""
+    finally:
+        m._relay_boot_log_path = old
+
+
 def t_relay_start_names_the_boot_error_and_skips_a_pointless_retry():
     # A relay that exits on a config/tool error (not a still-clearing port) must
     # surface that reason, not "the port may still be clearing", and not respawn.

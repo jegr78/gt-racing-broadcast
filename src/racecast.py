@@ -2670,11 +2670,14 @@ def _relay_boot_log_size():
 
 def _relay_boot_log_since(offset):
     """What the relay wrote to its boot log after byte `offset` (this spawn only:
-    the file is appended across starts). "" when unreadable."""
+    the file is appended across starts). A file now shorter than `offset` was
+    rotated by the spawn (services.open_boot_log), so it holds only this spawn's
+    output: read it from the top. "" when unreadable."""
     try:
         with open(_relay_boot_log_path(), "rb") as fh:
-            fh.seek(offset)
-            return fh.read(256 * 1024).decode("utf-8", errors="replace")
+            fh.seek(0, os.SEEK_END)
+            fh.seek(offset if offset <= fh.tell() else 0)
+            return fh.read(sv.BOOT_LOG_CAP).decode("utf-8", errors="replace")
     except OSError:
         return ""
 
