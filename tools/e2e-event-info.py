@@ -65,7 +65,7 @@ async def main():
         fixture.relay.feeds['A'].paused = False
         fixture.relay.feeds['A'].phase = 'serving'
         fixture.relay.feeds['A'].served_ok = True
-        cookies = Path(root)/'synthetic-cookies.txt'; cookies.write_text('# Netscape HTTP Cookie File\n')
+        cookies = Path(root)/'synthetic-cookies.txt'; cookies.write_text('# Netscape HTTP Cookie File\n', encoding='utf-8')
         fixture.relay.cookies = str(cookies)
         fixture.feed_live()
         token = gate.m.console_auth.mint_token(gate.SECRET, 'producer')

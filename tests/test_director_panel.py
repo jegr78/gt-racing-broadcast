@@ -666,6 +666,11 @@ def _func_src(html, name):
 
 def t_old_controls_survive_the_frame():
     h = _html()
+    # Notes now live in the relay-injected component. Keep checking every old
+    # control against the composed document, including the injection marker.
+    assert '<!--__EVENT_INFO__-->' in h
+    with open(os.path.join(ROOT, 'src', 'console', 'event-info.html'), encoding='utf-8') as fh:
+        h = h.replace('<!--__EVENT_INFO__-->', fh.read())
     missing = [i for i in OLD_IDS if f'id="{i}"' not in h]
     assert not missing, f"controls dropped by the frame: {missing}"
     for gone in ("ctlCols", "feedsCol", "txArmed"):
