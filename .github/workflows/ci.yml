@@ -65,6 +65,23 @@ jobs:
       - name: Run test suite (stdlib, each file is a runnable script)
         run: python tools/run-tests.py
 
+      - name: Install native browser for builder verification
+        if: runner.os != 'Linux'
+        timeout-minutes: 5
+        run: |
+          python -m pip install playwright==1.63.0
+          python -m playwright install chromium
+
+      - name: Native scene builder drag, size inputs and saved layouts
+        if: runner.os != 'Linux'
+        timeout-minutes: 2
+        run: python tools/e2e-scene-layouts.py
+
+      - name: Native Splitscreen builder geometry
+        if: runner.os != 'Linux'
+        timeout-minutes: 2
+        run: python tools/e2e-splitscreen.py
+
   build:
     # Build self-verify (tokenization, blanked password, no secrets shipped, no
     # shell scripts). OS-independent: it asserts the assembled dist/ contents,
@@ -175,6 +192,10 @@ jobs:
         run: python tools/e2e-telemetry-replay.py
       - name: Cached asset alias browser workflow
         run: python tools/e2e-asset-aliases.py
+      - name: Scene builder aspect ratios and saved layouts
+        run: python tools/e2e-scene-layouts.py
+      - name: Splitscreen builder geometry
+        run: python tools/e2e-splitscreen.py
       - name: Upload the report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2

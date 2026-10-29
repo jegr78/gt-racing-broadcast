@@ -137,7 +137,24 @@ opens the builder in a larger modal over the Control Center; **Save** writes the
 **Preview ↗** opens the live HUD preview at `/hud/preview` (the real base page with
 live Sheet data over your `Overlay.png` frame).
 
-![Control Center. Overlay Builder modal: drag/resize the HUD slots on a canvas over the Overlay.png frame, style them in the property panel, here the Streamer box with its Auto-fit max/min](images/cc-overlay-builder.png)
+![Overlay Builder with the Webcam selected and aspect-ratio controls beside its dimensions](images/cc-overlay-builder.png)
+
+### Keep proportions while resizing
+
+**Lock aspect ratio** links Width and Height for both the resize handles and the
+numeric fields. It starts enabled for Webcam and Capture frames and disabled for
+other elements. Enabling it keeps the current shape; it does not assume every
+capture is 16:9. The choice is saved separately for each element and scene.
+
+Use **Aspect ratio** to repair a stretched frame with **16:9**, **4:3**, **1:1**,
+or a **Custom ratio** such as `3:2`. A preset retains the width and position and
+adjusts the height. **Keep current ratio** locks the existing shape without
+resizing it. Hold **Shift** while dragging to temporarily switch the lock. After
+a free resize, an enabled lock retains that new shape.
+
+Undo/Redo includes the paired dimensions and lock setting. Grid snapping applies
+to the leading dimension; the other follows the ratio. Save retains the setting;
+**Apply in OBS** uses the resulting dimensions as usual.
 
 ### Splitscreen layouts
 

@@ -309,7 +309,7 @@
          only, the look stays in the CSS rules above. "webcam" also drives the OBS
          "Solo Webcam" transform on export and live, mirroring #pov (#324). -->
     <div id="tele-panel" class="el" data-edit="Telemetry panel" data-edit-kind="box"></div>
-    <div id="webcam" class="el" data-edit="Webcam" data-edit-kind="box"></div>
+    <div id="webcam" class="el" data-edit="Webcam" data-edit-kind="box" data-edit-lock-aspect="true"></div>
     <div id="tele-tyres" class="el" data-edit="Tyre temps" data-edit-kind="box">
       <span class="tw" data-w="fl">--<small class="ta" data-a="fl"></small></span><span class="tw" data-w="fr">--<small class="ta" data-a="fr"></small></span>
       <span class="tw" data-w="rl">--<small class="ta" data-a="rl"></small></span><span class="tw" data-w="rr">--<small class="ta" data-a="rr"></small></span>
@@ -335,7 +335,7 @@
        telemetry block so it stays builder-editable in a Commentary profile, where
        #tele is hidden. The OBS source exists only in the Commentary collection, so
        the box to OBS map entry is a no-op elsewhere (#300). -->
-  <div id="tyres-capture" class="el" data-edit="Tyres/Fuel capture" data-edit-kind="box"></div>
+  <div id="tyres-capture" class="el" data-edit="Tyres/Fuel capture" data-edit-kind="box" data-edit-lock-aspect="true"></div>
   <div id="clock" class="el white" data-edit="Clock" data-edit-kind="text"></div>
 
 <script src="/overlay-fit.js" data-fit-live></script>

@@ -17,6 +17,7 @@ import test_console_gate as gate
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--shots', action='store_true')
+    parser.add_argument('--browser-executable', help='Use an installed browser with an isolated test profile')
     args = parser.parse_args()
     from playwright.sync_api import sync_playwright
     m = cli.m
@@ -63,11 +64,14 @@ def main():
         relay_port = relay.server_address[1]
         try:
             with sync_playwright() as pw:
-                browser = pw.chromium.launch()
-                page = browser.new_page(viewport={'width': 1600, 'height': 1100})
+                browser = pw.chromium.launch(executable_path=args.browser_executable,
+                    args=['--renderer-process-limit=2', '--num-raster-threads=1'])
+                context = browser.new_context(viewport={'width': 1600, 'height': 1100})
+                page = context.new_page()
                 errors = []
                 page.on('pageerror', lambda error: errors.append(error.stack))
-                legacy = browser.new_page(viewport={'width': 1920, 'height': 1080})
+                legacy = context.new_page()
+                legacy.set_viewport_size({'width': 1920, 'height': 1080})
                 legacy.goto(f'http://127.0.0.1:{relay_port}/splitscreen')
                 legacy.wait_for_function("() => document.getElementById('split-left').textContent === 'Current'")
                 original_label = legacy.locator('#split-left').bounding_box()
@@ -96,12 +100,16 @@ def main():
                 assert page.evaluate("ovState.layout.slots['split-feed-a'].left") > 0, 'Feed drag must change its own bounds'
                 page.click('#overlay-undo')
                 page.select_option('#ov-slotpick', 'split-feed-a')
+                assert not page.locator('#ov-aspect-lock').is_checked()
+                page.locator('#ov-aspect-lock').check()
                 handle = page.locator('#ov-stage').locator('.ov-h-e').bounding_box()
                 page.mouse.move(handle['x']+handle['width']/2, handle['y']+handle['height']/2)
                 page.mouse.down()
                 page.mouse.move(handle['x']+handle['width']/2+25, handle['y']+handle['height']/2)
                 page.mouse.up()
                 assert page.evaluate("ovState.layout.slots['split-feed-a'].width") > 960, 'Resize handle must change feed bounds'
+                resized = page.evaluate("ovState.layout.slots['split-feed-a']")
+                assert abs(resized['height'] - resized['width'] * 9 / 16) < 0.0011
                 page.click('#overlay-undo')
                 for prop, value in [('left', 80), ('top', 100), ('width', 1200), ('height', 675)]:
                     page.evaluate("([p,v]) => { const f=ovState.fields[p]; f.value=v; f.dispatchEvent(new Event('input')); f.dispatchEvent(new Event('change')); }", [prop, value])
@@ -157,7 +165,8 @@ def main():
                     page.wait_for_function("() => !document.getElementById('overlay-save').disabled")
                     page.locator('#ov-modal .ovmodal-card').screenshot(path=str(ROOT / 'src/docs/wiki/images/cc-splitscreen-builder.png'))
                     page.evaluate("draft => { ovState.layout=JSON.parse(draft); document.getElementById('overlayCss').value=ovState.layout.customCss; ovReloadCanvasFromLayout(); }", draft)
-                live = browser.new_page(viewport={'width': 1920, 'height': 1080})
+                live = context.new_page()
+                live.set_viewport_size({'width': 1920, 'height': 1080})
                 live.on('pageerror', lambda error: errors.append(error.stack))
                 live.goto(f'http://127.0.0.1:{relay_port}/splitscreen')
                 live.wait_for_function("() => document.getElementById('split-left').textContent === 'Current'")
@@ -182,6 +191,7 @@ def main():
                 live.reload()
                 live.wait_for_function("() => document.getElementById('split-left').textContent === 'Current'")
                 assert live.locator('#split-left').evaluate("el=>getComputedStyle(el).display") == 'none'
+                live.close()
                 page.reload()
                 page.wait_for_function("() => ovState.page === 'hud' && ovState.slots.length > 0")
                 page.evaluate('openBuilderModal()')

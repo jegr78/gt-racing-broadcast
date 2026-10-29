@@ -7935,6 +7935,8 @@ def _validate_layout(layout, page):
         return False, "fonts must be a list"
     if not isinstance(layout.get("customCss", ""), str):
         return False, "customCss must be a string"
+    if any(not ob.valid_aspect_settings(slot) for slot in layout.get("slots", {}).values()):
+        return False, "aspect ratio must contain two positive finite numbers; lockAspect must be a boolean"
     return True, None
 
 
