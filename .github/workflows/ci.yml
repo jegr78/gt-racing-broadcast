@@ -175,6 +175,10 @@ jobs:
         run: python tools/e2e-telemetry-replay.py
       - name: Cached asset alias browser workflow
         run: python tools/e2e-asset-aliases.py
+      - name: Scene builder aspect ratios and saved layouts
+        run: python tools/e2e-scene-layouts.py
+      - name: Splitscreen builder geometry
+        run: python tools/e2e-splitscreen.py
       - name: Upload the report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2

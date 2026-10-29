@@ -10,6 +10,7 @@ markers from the base page (src/obs/hud.html), so the markup is the single sourc
 of truth and a new marked element becomes editable automatically.
 """
 from html import escape, unescape
+import math
 import re
 
 # Font name and type whitelist, DUPLICATED from src/relay/racecast-feeds.py and
@@ -316,8 +317,9 @@ def extract_slots(html):
     Each is {id, label, props}. props is the KIND_PROPS set for the element's
     data-edit-kind, with any data-edit-props appended as extras; the explicit
     data-edit-props comma list when no kind is given, for back-compat; else
-    DEFAULT_PROPS. Every text slot then gets the fit bounds (_with_fit). The markup
-    is the single source of truth, so there is no hardcoded slot list to drift."""
+    DEFAULT_PROPS. Every text slot then gets the fit bounds (_with_fit). Markup
+    can also declare data-edit-lock-aspect="true" as the editor's default lock.
+    It is the single source of truth, so there is no hardcoded slot list to drift."""
     slots = []
     for tag in re.finditer(r"<[^>]*\bdata-edit=\"[^\"]*\"[^>]*>", html):
         text = tag.group(0)
@@ -335,8 +337,29 @@ def extract_slots(html):
             props = extras                                   # back-compat
         else:
             props = list(DEFAULT_PROPS)
-        slots.append({"id": mid.group(1), "label": label, "props": _with_fit(props)})
+        slot = {"id": mid.group(1), "label": label, "props": _with_fit(props)}
+        if re.search(r'\bdata-edit-lock-aspect="true"', text):
+            slot["lockAspect"] = True
+        slots.append(slot)
     return slots
+
+
+def valid_aspect_settings(slot):
+    """Validate editor-only aspect metadata; it never becomes a CSS declaration."""
+    if not isinstance(slot, dict):
+        return True  # The compiler already ignores non-object slot overrides.
+    if "lockAspect" in slot and type(slot["lockAspect"]) is not bool:
+        return False
+    if "aspectRatio" not in slot:
+        return True
+    pair = slot["aspectRatio"]
+    if not isinstance(pair, list) or len(pair) != 2:
+        return False
+    try:
+        return (all(type(n) in (int, float) and math.isfinite(n) and n > 0 for n in pair)
+                and math.isfinite(pair[0] / pair[1]) and pair[0] / pair[1] > 0)
+    except (OverflowError, ZeroDivisionError):
+        return False  # JSON integers can exceed the float range.
 
 
 def _with_fit(props):

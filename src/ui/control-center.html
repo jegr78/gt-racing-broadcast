@@ -3023,8 +3023,9 @@ const OV_SHADOW_CSS =
   '.ov-hidden::after{content:"hidden";position:absolute;top:0;left:0;z-index:60;' +
   'font:700 9px/1.4 system-ui,sans-serif;background:#f59e0b;color:#111;padding:0 3px;border-radius:2px}' +
   '.ov-grid{position:absolute;inset:0;pointer-events:none}' +
-  '[data-solo]::before,[data-video]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
-  'content:attr(data-edit) " preview";font:32px system-ui;color:#fff}';
+  '[data-solo]::before,[data-video]::before,[data-edit-lock-aspect="true"]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
+  'content:attr(data-edit) " preview";font:32px system-ui;color:#fff}' +
+  '.el[data-edit-lock-aspect="true"]::before{font-size:16px}';
 
 async function loadOverlay(retry = 0) {
   const sequence = ++ovLoadSequence;
@@ -3105,8 +3106,10 @@ function ovUseTemplate(id) {
   const template = (ovState.templates || []).find(t => t.id === id);
   if (!template || ovState.page !== overlayPage) return;
   Object.entries(template.slots).forEach(([slot, patch]) => {
-    if (ovState.slots.some(s => s.id === slot))
+    if (ovState.slots.some(s => s.id === slot)) {
       ovState.layout.slots[slot] = Object.assign({}, ovState.layout.slots[slot] || {}, patch);
+      if ('width' in patch || 'height' in patch) delete ovState.layout.slots[slot].aspectRatio;
+    }
   });
   ovReloadCanvasFromLayout();
   ovCommit();
@@ -4035,6 +4038,149 @@ function ovSetProp(id, prop, value) {
   ovPositionSel();
 }
 
+// Editor metadata, not CSS. Keep the original ratio across rounded pixel edits.
+function ovAspectPair(value) {
+  if (!Array.isArray(value) || value.length !== 2 ||
+      !value.every(n => typeof n === 'number' && Number.isFinite(n) && n > 0)) return null;
+  const ratio = value[0] / value[1];
+  return Number.isFinite(ratio) && ratio > 0 ? value.slice() : null;
+}
+
+function ovAspectState(id, box) {
+  const meta = ovState.slots.find(s => s.id === id) || {};
+  const slot = ovState.layout.slots[id] || {};
+  const props = meta.props || [];
+  const editable = props.includes('width') && props.includes('height');
+  const locked = editable && (typeof slot.lockAspect === 'boolean' ? slot.lockAspect : meta.lockAspect === true);
+  box = box || ovBuilderBox(ovState.shadow.getElementById(id));
+  const current = ovAspectPair([box.width, box.height]);
+  return {locked, pair: locked ? ovAspectPair(slot.aspectRatio) || current : current};
+}
+
+function ovAspectDimensions(axis, value, pair, minimum = 0) {
+  pair = ovAspectPair(pair);
+  if (!pair || !Number.isFinite(value) || value <= 0) return null;
+  const ratio = pair[0] / pair[1];
+  value = Math.max(value, minimum, minimum * (axis === 'width' ? ratio : 1 / ratio));
+  const other = axis === 'width' ? value / ratio : value * ratio;
+  const rounded = Math.round(other * 1000) / 1000;
+  if (!Number.isFinite(rounded) || rounded <= 0) return null;
+  return axis === 'width' ? {width: value, height: rounded} : {width: rounded, height: value};
+}
+
+function ovWriteSize(id, size) {
+  ovSetProp(id, 'width', size.width);
+  ovSetProp(id, 'height', size.height);
+}
+
+function ovChangeSize(id, prop, value) {
+  const el = ovState.shadow.getElementById(id), aspect = ovAspectState(id);
+  if (!aspect.locked || !aspect.pair) { ovSetProp(id, prop, value); ovUpdateAspectReadout(); return; }
+  const other = prop === 'width' ? 'height' : 'width';
+  let size;
+  if (value === '' || value <= 0) {
+    // Unsetting a dimension restores its base value; derive its mate from that
+    // fallback too, instead of leaving a locked box at two unrelated sizes.
+    const previous = (ovState.layout.slots[id] || {})[prop];
+    ovSetProp(id, prop, value);
+    size = ovAspectDimensions(prop, ovBuilderBox(el)[prop], aspect.pair);
+    if (!size) { ovSetProp(id, prop, previous); return; }
+  } else {
+    size = ovAspectDimensions(prop, value, aspect.pair);
+    if (!size) return;
+    ovSetProp(id, prop, size[prop]);
+  }
+  ovState.layout.slots[id].aspectRatio = aspect.pair;
+  ovSetProp(id, other, size[other]);
+  ovUpdateAspectReadout();
+}
+
+function ovAspectText(pair) {
+  pair = ovAspectPair(pair);
+  if (!pair) return '';
+  let [w, h] = pair;
+  if (Number.isSafeInteger(w) && Number.isSafeInteger(h)) {
+    let a = w, b = h;
+    while (b) { const remainder = a % b; a = b; b = remainder; }
+    w /= a; h /= a;
+  }
+  return Number(w.toPrecision(8)) + ':' + Number(h.toPrecision(8));
+}
+
+function ovUpdateAspectReadout() {
+  const ui = ovState.aspectUi;
+  if (!ui || ui.id !== ovState.sel) return;
+  const aspect = ovAspectState(ui.id);
+  ui.lock.checked = aspect.locked;
+  ui.readout.textContent = aspect.pair ? 'Current ratio ' + ovAspectText(aspect.pair) : 'Set a positive width and height.';
+}
+
+function ovApplyAspect(id, pair, resize) {
+  pair = ovAspectPair(pair);
+  if (!pair) return false;
+  const box = ovBuilderBox(ovState.shadow.getElementById(id));
+  const size = resize && ovAspectDimensions(box.width > 0 ? 'width' : 'height',
+    box.width > 0 ? box.width : box.height, pair);
+  if (resize && !size) return false;
+  const slot = ovState.layout.slots[id] || (ovState.layout.slots[id] = {});
+  slot.lockAspect = true; slot.aspectRatio = pair;
+  if (size) ovWriteSize(id, size);
+  ovCommit(); ovRenderPanel();
+  return true;
+}
+
+function ovAspectField(id) {
+  const wrap = document.createElement('div'); wrap.style.gridColumn = '1 / -1';
+  const label = document.createElement('label'); label.style.display = 'flex'; label.style.alignItems = 'center'; label.style.gap = '6px';
+  const lock = document.createElement('input'); lock.type = 'checkbox'; lock.id = 'ov-aspect-lock'; lock.style.width = 'auto';
+  lock.checked = ovAspectState(id).locked;
+  label.append(lock, document.createTextNode('Lock aspect ratio')); wrap.appendChild(label);
+  const readout = document.createElement('p'); readout.className = 'envhint'; wrap.appendChild(readout);
+  const selectLabel = document.createElement('label'); selectLabel.textContent = 'Aspect ratio'; selectLabel.htmlFor = 'ov-aspect-preset';
+  const preset = document.createElement('select'); preset.id = 'ov-aspect-preset';
+  [['current','Keep current ratio'],['16:9','16:9'],['4:3','4:3'],['1:1','1:1'],['custom','Custom ratio']].forEach(([v,t]) => {
+    const option = document.createElement('option'); option.value = v; option.textContent = t; preset.appendChild(option);
+  });
+  const customLabel = document.createElement('label'); customLabel.textContent = 'Custom ratio (width:height)'; customLabel.htmlFor = 'ov-aspect-custom';
+  const custom = document.createElement('input'); custom.type = 'text'; custom.id = 'ov-aspect-custom'; custom.placeholder = 'e.g. 3:2';
+  const pair = lock.checked ? ovAspectPair((ovState.layout.slots[id] || {}).aspectRatio) : null;
+  preset.value = !pair ? 'current' : ['16:9','4:3','1:1'].find(v => {
+    const [w,h] = v.split(':').map(Number); return Math.abs(w/h - pair[0]/pair[1]) < 1e-9;
+  }) || 'custom';
+  custom.value = ovAspectText(pair || ovAspectState(id).pair);
+  const error = document.createElement('p'); error.className = 'err'; error.id = 'ov-aspect-error'; error.setAttribute('role','status');
+  const hint = document.createElement('p'); hint.className = 'envhint'; hint.textContent = 'Drag or edit either size. Hold Shift while resizing to switch the lock temporarily.';
+  wrap.append(selectLabel, preset, customLabel, custom, error, hint);
+  const showCustom = () => {
+    customLabel.hidden = custom.hidden = preset.value !== 'custom';
+    customLabel.style.display = custom.style.display = preset.value === 'custom' ? '' : 'none';
+  };
+  showCustom();
+  lock.onchange = () => {
+    if (lock.checked) {
+      const box = ovBuilderBox(ovState.shadow.getElementById(id));
+      if (!ovApplyAspect(id, [box.width, box.height], false)) { lock.checked = false; error.textContent = 'Set a positive width and height first.'; }
+    } else {
+      const slot = ovState.layout.slots[id] || (ovState.layout.slots[id] = {});
+      slot.lockAspect = false; ovCommit(); ovRenderPanel();
+    }
+  };
+  preset.onchange = () => {
+    error.textContent = ''; showCustom();
+    if (preset.value === 'custom') { custom.focus(); return; }
+    const box = ovBuilderBox(ovState.shadow.getElementById(id));
+    const ratio = preset.value === 'current' ? [box.width, box.height] : preset.value.split(':').map(Number);
+    if (!ovApplyAspect(id, ratio, preset.value !== 'current')) error.textContent = 'Set a positive width or height first.';
+  };
+  custom.onchange = () => {
+    const values = custom.value.trim().split(':');
+    if (values.length !== 2 || !ovApplyAspect(id, values.map(Number), true))
+      error.textContent = 'Enter two positive numbers, for example 3:2.';
+  };
+  ovState.aspectUi = {id, lock, readout}; ovUpdateAspectReadout();
+  return wrap;
+}
+
 // Undo/redo (issue: builder editor aids)
 // Snapshot stacks of the in-memory layout, for visual edits only: the Advanced-CSS
 // textarea keeps its own native browser undo and is never tracked here. The invariant
@@ -4217,8 +4363,13 @@ function ovWithoutCustom(fn) {
 
 // A slot's box as the builder lays it out (base CSS + slot values, no customCss).
 function ovBuilderBox(el) {
-  return ovWithoutCustom(() => ({left: el.offsetLeft, top: el.offsetTop,
-                                 width: el.offsetWidth, height: el.offsetHeight}));
+  if (!el) return {left: 0, top: 0, width: 0, height: 0};
+  return ovWithoutCustom(() => {
+    const css = getComputedStyle(el);
+    return {left: el.offsetLeft, top: el.offsetTop,
+            width: parseFloat(css.width) || el.offsetWidth,
+            height: parseFloat(css.height) || el.offsetHeight};
+  });
 }
 
 function ovSlotJson(id) {
@@ -4264,19 +4415,48 @@ function ovStartResize(e) {
   const el = ovState.shadow.getElementById(id);
   const box = ovBuilderBox(el), before = ovSlotJson(id);
   const sx = e.clientX, sy = e.clientY, sw = box.width, sh = box.height;
+  const aspect = ovAspectState(id, box), scale = ovState.scale;
+  const owner = ovState.layout;
+  let moved = false, lastLocked = aspect.locked;
   function move(ev) {
-    const dx = Math.round((ev.clientX - sx) / ovState.scale);
-    const dy = Math.round((ev.clientY - sy) / ovState.scale);
-    if (dir === 'se' || dir === 'e') ovSetProp(id, 'width', Math.max(8, ovSnap(sw + dx)));
-    if (dir === 'se' || dir === 's') ovSetProp(id, 'height', Math.max(8, ovSnap(sh + dy)));
+    if (ovState.layout !== owner) { up(); return; }
+    const dx = Math.round((ev.clientX - sx) / scale);
+    const dy = Math.round((ev.clientY - sy) / scale);
+    lastLocked = aspect.locked !== ev.shiftKey;
+    if (lastLocked && aspect.pair) {
+      const axis = dir === 's' ? 'height' : 'width';
+      let target = axis === 'width' ? sw + dx : sh + dy;
+      if (dir === 'se') {
+        // Project the corner onto the ratio guide: opposite-axis motion must
+        // never jump between growing and shrinking the box.
+        const ratio = aspect.pair[0] / aspect.pair[1], length = Math.hypot(ratio, 1);
+        const x = ratio / length, y = 1 / length;
+        target = ((sw + dx) * x + (sh + dy) * y) * x;
+      }
+      const size = ovAspectDimensions(axis, Math.max(8, ovSnap(target)), aspect.pair, 8);
+      if (!size) return;
+      ovWriteSize(id, size);
+      if (aspect.locked) ovState.layout.slots[id].aspectRatio = aspect.pair;
+    } else {
+      if (dir === 'se' || dir === 'e') ovSetProp(id, 'width', Math.max(8, ovSnap(sw + dx)));
+      if (dir === 'se' || dir === 's') ovSetProp(id, 'height', Math.max(8, ovSnap(sh + dy)));
+    }
+    moved = true; ovUpdateAspectReadout();
   }
   function up() {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    if (ovSlotJson(id) !== before) ovCommit();
+    window.removeEventListener('pointercancel', up);
+    if (ovState.layout !== owner) return;
+    if (moved && aspect.locked && !lastLocked) {
+      const finalBox = ovBuilderBox(el);
+      ovState.layout.slots[id].aspectRatio = [finalBox.width, finalBox.height];
+    }
+    if (ovSlotJson(id) !== before) { ovCommit(); ovRenderPanel(); }
   }
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 // Inject @font-face for the given font files into the main document head, merging
@@ -4373,8 +4553,13 @@ function ovNumField(prop, label, ov) {
   const wrap = document.createElement('div');
   const l = document.createElement('label'); l.textContent = label; wrap.appendChild(l);
   const i = document.createElement('input'); i.type = 'number';
+  i.id = 'ov-prop-' + prop; l.htmlFor = i.id;
   i.value = (ov[prop] !== undefined ? ov[prop] : '');
-  i.oninput = () => ovSetProp(ovState.sel, prop, i.value === '' ? '' : Number(i.value));
+  i.oninput = () => {
+    const value = i.value === '' ? '' : Number(i.value);
+    if (prop === 'width' || prop === 'height') ovChangeSize(ovState.sel, prop, value);
+    else ovSetProp(ovState.sel, prop, value);
+  };
   i.onchange = () => ovCommit();
   ovState.fields[prop] = i; wrap.appendChild(i);
   return wrap;
@@ -4555,6 +4740,7 @@ function ovRenderPanel() {
   const panel = $('ov-panel');
   panel.textContent = '';
   ovState.fields = {};
+  ovState.aspectUi = null;
   const id = ovState.sel;
   const meta = ovState.slots.find(s => s.id === id);
   if (!meta) {
@@ -4606,6 +4792,7 @@ function ovRenderPanel() {
     const g = grid();
     if (has('width')) g.appendChild(ovNumField('width', 'Width (px)', view));
     if (has('height')) g.appendChild(ovNumField('height', 'Height (px)', view));
+    if (has('width') && has('height')) g.appendChild(ovAspectField(id));
     if (has('padding')) g.appendChild(ovNumField('padding', 'Padding (px)', view));
     panel.appendChild(g);
   }
@@ -4796,6 +4983,14 @@ async function saveOverlay() {
       const v = (ov[p] !== undefined) ? ov[p] : base[p];
       if (v !== undefined && v !== '' && allowed.has(p)) merged[p] = v;
     });
+    // Save-all normally keeps CSS properties only. Persist the editor constraint
+    // separately, including an explicit opt-out from a video's default lock.
+    if (allowed.has('width') && allowed.has('height')) {
+      const aspect = ovAspectState(s.id);
+      merged.lockAspect = aspect.locked;
+      const pair = ovAspectPair(ov.aspectRatio) || (aspect.locked && aspect.pair);
+      if (pair) merged.aspectRatio = pair;
+    }
     if (Object.keys(merged).length) fullSlots[s.id] = merged;
   });
   const layout = Object.assign({}, ovState.layout, {

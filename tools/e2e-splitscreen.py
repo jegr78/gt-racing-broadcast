@@ -17,6 +17,7 @@ import test_console_gate as gate
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--shots', action='store_true')
+    parser.add_argument('--browser-executable', help='Use an installed browser with an isolated test profile')
     args = parser.parse_args()
     from playwright.sync_api import sync_playwright
     m = cli.m
@@ -63,7 +64,8 @@ def main():
         relay_port = relay.server_address[1]
         try:
             with sync_playwright() as pw:
-                browser = pw.chromium.launch()
+                browser = pw.chromium.launch(executable_path=args.browser_executable,
+                    args=['--renderer-process-limit=2', '--num-raster-threads=1'])
                 page = browser.new_page(viewport={'width': 1600, 'height': 1100})
                 errors = []
                 page.on('pageerror', lambda error: errors.append(error.stack))
@@ -96,12 +98,16 @@ def main():
                 assert page.evaluate("ovState.layout.slots['split-feed-a'].left") > 0, 'Feed drag must change its own bounds'
                 page.click('#overlay-undo')
                 page.select_option('#ov-slotpick', 'split-feed-a')
+                assert not page.locator('#ov-aspect-lock').is_checked()
+                page.locator('#ov-aspect-lock').check()
                 handle = page.locator('#ov-stage').locator('.ov-h-e').bounding_box()
                 page.mouse.move(handle['x']+handle['width']/2, handle['y']+handle['height']/2)
                 page.mouse.down()
                 page.mouse.move(handle['x']+handle['width']/2+25, handle['y']+handle['height']/2)
                 page.mouse.up()
                 assert page.evaluate("ovState.layout.slots['split-feed-a'].width") > 960, 'Resize handle must change feed bounds'
+                resized = page.evaluate("ovState.layout.slots['split-feed-a']")
+                assert abs(resized['height'] - resized['width'] * 9 / 16) < 0.0011
                 page.click('#overlay-undo')
                 for prop, value in [('left', 80), ('top', 100), ('width', 1200), ('height', 675)]:
                     page.evaluate("([p,v]) => { const f=ovState.fields[p]; f.value=v; f.dispatchEvent(new Event('input')); f.dispatchEvent(new Event('change')); }", [prop, value])
