@@ -179,16 +179,37 @@ def status_line(name, pid, alive, extra=""):
     return f"{name:<14} {state}  {extra}".rstrip()
 
 
+BOOT_LOG_CAP = 256 * 1024   # bytes; a larger boot log moves to <name>.1 at the next start
+
+
+def open_boot_log(path, cap=BOOT_LOG_CAP, now=time.time):
+    """Open a daemon's boot log (raw stdout/stderr) for appending, ready for a new
+    start. Every start appends to the same file, so its mtime never ages and
+    prune_old_logs never deletes it: past `cap` it moves to <path>.1 first
+    (best-effort; a held file stays in place). A stamped "=== start ... ===" header
+    then separates this start's output from older starts'."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        if os.path.getsize(path) > cap:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass   # absent (first start) or held open: keep appending
+    fh = open(path, "ab")  # noqa: SIM115  returned: the caller's `with` closes it
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now()))
+    fh.write(f"=== start {stamp} ===\n".encode("ascii"))
+    fh.flush()
+    return fh
+
+
 def start_detached(argv, log_path, pid_path, env=None):
     """Spawn argv detached, stdout/stderr -> log_path, write pid_path. Returns PID.
     Caller must verify it is not already running first.
     env: optional full environment dict for the child (defaults to inherited)."""
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
     os.makedirs(os.path.dirname(pid_path), exist_ok=True)
     kwargs = spawn_kwargs(os.name)
     # Open the log in a `with` so the parent's fd is closed after Popen dups it
     # into the child, avoiding a parent-side fd leak that would also pin the file.
-    with open(log_path, "ab") as log:
+    with open_boot_log(log_path) as log:
         proc = subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, env=env, **kwargs)
     with open(pid_path, "w") as fh:

@@ -187,6 +187,60 @@ def t_start_detached_uses_boot_log_when_given(tmp):
         assert "boom" in fh.read()
 
 
+def t_open_boot_log_marks_each_start(tmp):
+    # The boot log is appended across starts; a stamped header line tells one
+    # start's output from the next, so months-old noise cannot pass for today's.
+    boot = os.path.join(tmp, "marks", "x.boot.log")
+    with sv.open_boot_log(boot, now=lambda: 0) as fh:
+        fh.write(b"first\n")
+    with sv.open_boot_log(boot, now=lambda: 86400) as fh:
+        fh.write(b"second\n")
+    with open(boot, encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    headers = [ln for ln in lines if ln.startswith("=== start ")]
+    assert len(headers) == 2, lines
+    assert lines.index(headers[0]) < lines.index("first") < lines.index(headers[1]) \
+        < lines.index("second"), lines
+
+
+def t_open_boot_log_rotates_past_the_cap(tmp):
+    # prune_old_logs deletes by mtime, and every start refreshes the boot log's
+    # mtime, so without a cap it grows forever. Past the cap it moves to .1.
+    boot = os.path.join(tmp, "cap", "x.boot.log")
+    os.makedirs(os.path.dirname(boot))
+    with open(boot, "wb") as fh:
+        fh.write(b"old noise\n" * 20)
+    with sv.open_boot_log(boot, cap=100) as fh:
+        fh.write(b"fresh\n")
+    assert os.path.exists(boot + ".1"), "an over-cap boot log must move to .1"
+    with open(boot + ".1", encoding="utf-8") as fh:
+        assert "old noise" in fh.read()
+    with open(boot, encoding="utf-8") as fh:
+        body = fh.read()
+    assert "old noise" not in body and "fresh" in body, body
+    # under the cap: appended, nothing rotated
+    with sv.open_boot_log(boot, cap=10_000) as fh:
+        fh.write(b"again\n")
+    with open(boot, encoding="utf-8") as fh:
+        assert "fresh" in fh.read()
+
+
+def t_start_detached_stamps_the_boot_log(tmp):
+    boot = os.path.join(tmp, "stamp", "relay.boot.log")
+    pidf = os.path.join(tmp, "stamp", "relay.pid")
+    argv = [sys.executable, "-c", "import sys; sys.stderr.write('boom\\n')"]
+    pid = sv.start_detached(argv, boot, pidf)
+    for _ in range(50):
+        if not sv.pid_alive(pid):
+            break
+        time.sleep(0.1)
+    sv.stop_pid(pid, pidf, timeout=5)
+    with open(boot, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "=== start " in text and "boom" in text, text
+    assert text.index("=== start ") < text.index("boom"), text
+
+
 def t_tail_merged_prefixes_sources(tmp):
     import io, contextlib
     a = os.path.join(tmp, "feed_A.log"); b = os.path.join(tmp, "feed_B.log")

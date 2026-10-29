@@ -9,6 +9,7 @@ PUBLIC channels only. The unlisted flow is the relay (`racecast relay start`).
 """
 import argparse, json, os, re, shutil, subprocess, sys
 from urllib.parse import urlparse
+import services   # src/scripts sibling, stdlib-only (boot-log helper)
 
 
 def state_dir(here):
@@ -134,7 +135,7 @@ def main():
     for i, (ch, port) in enumerate(load_feeds(sdir), 1):
         feed_log = os.path.join(logdir, f"feed_{port}.log")
         boot_log = os.path.join(logdir, f"feed_{port}.boot.log")
-        with open(boot_log, "ab") as boot:
+        with services.open_boot_log(boot_log) as boot:   # stamped, size-capped
             p = subprocess.Popen(
                 feed_argv(frozen, sys.executable, loop, ch, port, feed_log),
                 stdout=boot, stderr=subprocess.STDOUT,
