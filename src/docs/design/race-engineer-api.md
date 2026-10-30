@@ -25,7 +25,10 @@ Errors use `{error: {code, message}}` with generic messages.
   theoretical values from the bounded retained pool. `theoretical_s` composes the best
   larger sectors (`theoretical_sectors` names the variant, `theoretical_confirmed` is
   false for provisional or unreviewed sectors and unconfirmed context); without larger
-  sectors it is null. `mini_sector_sum_s` is the 200 m best-segment sum, a diagnostic
+  sectors it is null. Only laps on one definition fingerprint compose, so without a
+  saved definition the store keeps the first automatic provisional proposal of a
+  regular complete lap per layout (`_SteadyDefinitions`) instead of proposing from
+  every lap's own trace. `mini_sector_sum_s` is the 200 m best-segment sum, a diagnostic
   only (#813). No history or trace payload.
 - `history?since=REVISION`: sessions and retained lap summaries. An unchanged revision
   returns `changed: false` without arrays. A changed revision returns a bounded replacement
