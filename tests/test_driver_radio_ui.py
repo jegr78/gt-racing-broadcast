@@ -299,6 +299,32 @@ console.log(JSON.stringify({cleared:cleared403,cleared401:view.state===null}));
     assert second['cleared401'] is True,'a 401 without a code still clears the view'
 
 
+def t_coach_badge_says_unavailable_while_a_load_error_shows():
+    out=_coach_js(r"""
+const view=Object.create(CoachView.prototype);
+Object.assign(view,{host,admin:false,compact:false,profile:()=>null,sending:false,stopping:false,dirty:false,controllers:new Set(),
+  actionError:'',generation:0,editVersion:0,off:false,state:null});
+const phase=()=>view.q('phase').textContent;
+view.render();const connecting=phase();
+// A failed first load: the error line and the badge agree, without waiting for another render.
+view.fail(Object.assign(new Error('Live coaching is unavailable for this source'),{status:503,code:'source_unavailable'}));
+const failed=[phase(),view.q('error').textContent];
+// A failed poll after a good state keeps the controls but no longer claims the old phase.
+view.state={version:1,generation:'g',profile:'p',viewer:'v',revision:3,active:true,pending:false,phase:'ready'};view.loadError=false;
+view.render();const ready=phase();
+view.fail(Object.assign(new Error(''),{status:503}));const transient=phase();
+// A rejected action is not a load failure: the badge keeps the current phase.
+view.loadError=false;view.render();
+view.fail(Object.assign(new Error('changed'),{status:409,code:'conflict'}),true);const action=phase();
+console.log(JSON.stringify({connecting,failed,ready,transient,action}));
+""")
+    if out is None:return
+    got=json.loads(out)
+    assert got['connecting']=='Connecting',got
+    assert got['failed']==['Unavailable','Live coaching is unavailable for this source'],got
+    assert got['ready']=='Ready' and got['transient']=='Unavailable' and got['action']=='Ready',got
+
+
 # The shared component under node with a minimal fake DOM: every element that the
 # component's HTML names by id or class is registered, unknown ids are created on demand,
 # and fetch answers from a per-scenario route table. Skipped where node is not installed.

@@ -154,7 +154,7 @@ class CoachView {
  messages(list){const box=this.q('radio'),items=this.q('messages');if(!box||!items)return;const current=(list||[]).filter(m=>m.state!=='cancelled').slice(-4).reverse();items.replaceChildren();box.hidden=this.off||!current.length;if(!this.off)for(const message of current)items.append(messageItem(message));}
  abort(){for(const controller of this.controllers)controller.abort();this.controllers.clear();}
  clear(message='Connecting'){
-  this.generation++;this.abort();this.state=null;this.scope=null;this.historyFloor=0;this.adoptedSerial=0;this.base=null;this.dirty=false;this.actionError='';this.editVersion++;this.polling=false;this.sending=false;this.stopping=false;
+  this.generation++;this.abort();this.state=null;this.scope=null;this.historyFloor=0;this.adoptedSerial=0;this.base=null;this.dirty=false;this.actionError='';this.editVersion++;this.polling=false;this.sending=false;this.stopping=false;this.loadError=false;
   this.q('error').textContent=message;this.q('reference-choice').replaceChildren(new Option('Automatic personal reference',''));this.q('mode').value='practice';this.q('objective').value='balanced';this.q('skill').value='';this.q('ai').checked=false;this.q('reload').hidden=true;this.render();
  }
  schedule(delay=1000){if(this.dead)return;clearTimeout(this.timer);this.timer=setTimeout(()=>{this.timer=null;this.poll();},delay);}
@@ -185,7 +185,7 @@ class CoachView {
   else if(state.history&&state.history.revision<this.historyFloor)state={...state,history:this.state?.history||null,history_suggestion:this.state?.history_suggestion||null};
   else if(state.history)this.historyFloor=state.history.revision;
   else if(this.scope===scope&&this.state?.history)state={...state,history:this.state.history,history_suggestion:this.state.history_suggestion};
-  this.adoptedSerial=state._clientSerial;this.serviceKey=key;this.scope=scope;this.state=state;this.q('error').textContent=this.actionError;this.feature(true);this.render();return true;
+  this.adoptedSerial=state._clientSerial;this.serviceKey=key;this.scope=scope;this.state=state;this.loadError=false;this.q('error').textContent=this.actionError;this.feature(true);this.render();return true;
  }
  fail(error,action=false){
   if(disabled(error)){this.clear('');this.feature(false);}
@@ -195,8 +195,11 @@ class CoachView {
    this.q('error').textContent=messages[error.code]||error.message||'Coaching is unavailable.';
    if(action&&error.code&&error.status<500)this.actionError=this.q('error').textContent;
    // A transient failure (no code or 5xx) only reports the error: the last good
-   // state and its controls stay, so the buttons do not flicker between polls.
-   this.q('reload').hidden=error.code!=='conflict';
+   // state and its controls stay, so the buttons do not flicker between polls. A failed
+   // load or poll (not a rejected action) turns the badge to Unavailable, like the
+   // engineer section, so it never reads Connecting next to an error.
+   if(!action)this.loadError=true;
+   this.q('reload').hidden=error.code!=='conflict';this.render();
   }
  }
  async poll(){
@@ -227,7 +230,7 @@ class CoachView {
  render(){
   const s=this.state,c=s?.calibration||{},f=s?.focus||{},focus=f.focus,latest=s?.latest;const active=!!s?.active,pending=!!s?.pending;
   const phases={inactive:'Not training',stopped:'Stopped',pending:'Updating',calibrating:'Calibrating',provisional:'Provisional',ready:'Ready',paused:'Waiting for live evidence',unavailable:'Unavailable',forbidden:'Access changed'};
-  this.q('phase').textContent=this.off?'Off':this.stopping?'Stopping':pending?'Updating':phases[s?.phase]||(!s&&this.q('error').textContent?'Unavailable':'Connecting');
+  this.q('phase').textContent=this.off?'Off':this.stopping?'Stopping':this.loadError?'Unavailable':pending?'Updating':phases[s?.phase]||(!s&&this.q('error').textContent?'Unavailable':'Connecting');
   this.q('start').disabled=!s||active||pending||this.sending;this.q('stop').disabled=!active||this.stopping;
   this.q('goal').disabled=!active||pending||this.sending;for(const id of ['set-skill','use-reference'])this.q(id).disabled=!active||pending||this.sending;
   for(const id of ['skip','keep'])this.q(id).disabled=!focus||pending||this.sending;
