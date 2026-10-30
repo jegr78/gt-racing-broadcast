@@ -17,6 +17,8 @@ ROUTINE_TTL = 30
 URGENT_TTL = 15
 PACE_COOLDOWN = 60
 TEXT_STATES = ('queued','playing','text_only','spoken','failed')
+# A message leaves the HUD in these states even before it expires.
+HUD_GONE = ('superseded','cancelled','expired')
 
 
 @dataclass
@@ -48,6 +50,7 @@ class Service:
         self._binding = None
         self._live = False
         self._enabled = False
+        self._features = dict.fromkeys(access.FEATURES, False)
         self._fuel_level = 0
         self._previous_fuel = None
         self._refuel_total = 0
@@ -136,7 +139,8 @@ class Service:
     def _public(self, message):
         return copy.deepcopy({k:v for k,v in message.items() if not k.startswith('_')})
 
-    def _publish(self, preset, kind, severity, result, now, requester=None, authorization=None, queued=True):
+    def _publish(self, preset, kind, severity, result, now, requester=None, authorization=None, queued=True,
+                 source=None):
         # Superseded routine answers cannot form a spoken backlog.
         for mid in list(self._queue):
             old = self._messages[mid]
@@ -166,8 +170,9 @@ class Service:
         elif kind == 'pace':
             text = (f"Recent comparable pace is {result['pace']['delta_s']:.1f} seconds slower. "
                     'Tyres may contribute. Consider changing them at the next stop; causes remain unknown.')
+        source = source or ('coach' if kind == 'coach' else 'engineer')
         message = dict(id=mid, version=1, epoch=self._epoch, binding=self._binding,
-                       kind=kind, preset=preset, severity=severity, text=text,
+                       source=source, kind=kind, preset=preset, severity=severity, text=text,
                        evidence={k:result[k] for k in ('fuel','pace','tyres','uncertainties')},
                        created_at=self.wall(), expires_at=self.wall()+ttl, state='queued' if queued else 'text_only',
                        audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now,
@@ -212,7 +217,7 @@ class Service:
             return None
         self.refresh(force=True)
         with self._lock:
-            if not self._enabled or not self._live or self._closed:return None
+            if not self._features['coach'] or not self._live or self._closed:return None
             self.cancel_coach()
             self._coach_cancel = threading.Event()
             result = dict(answers={'coach':text}, fuel={}, pace={}, tyres={}, uncertainties=[])
@@ -250,6 +255,8 @@ class Service:
                 self._invalidate()
                 self._key = copy.deepcopy(key)
             self._binding, self._enabled = bound, enabled
+            self._features = {name: bool(enabled and config['features'][name]['enabled'] is True)
+                              for name in access.FEATURES}
             self._voice_enabled = config['voice']['enabled'] and enabled
             now = self.clock()
             self._expire(now)
@@ -263,7 +270,8 @@ class Service:
                 self._live = result['live']
                 self._signature = copy.deepcopy(signature)
                 self._revision += 1
-                if self._live:
+                if self._live and self._features['engineer']:
+                    # Proactive fuel/pace notices are AI Race Engineer work only.
                     self._announcements(result, now)
             return self._state()
 
@@ -331,8 +339,8 @@ class Service:
                 raise access.RadioError('unauthorized', 'Console request authorization was revoked')
             if preset not in assessment.PRESETS:
                 raise access.RadioError('invalid_body', 'Choose a supported radio preset')
-            if not self._enabled or self._closed:
-                raise access.RadioError('feature_disabled', 'Driver radio is not enabled')
+            if not self._features['engineer'] or self._closed:
+                raise access.RadioError('feature_disabled', access.DISABLED['engineer'])
             if binding != self._binding:
                 raise access.RadioError('conflict', 'Radio session changed; reload before requesting')
             now = self.clock()
@@ -363,6 +371,8 @@ class Service:
             self.refresh(force=True)
             if not self._voice_enabled or self._closed:
                 raise access.RadioError('feature_disabled', 'Native voice is not enabled')
+            if not self._features['engineer']:
+                raise access.RadioError('feature_disabled', access.DISABLED['engineer'])
             if binding != self._binding:
                 raise access.RadioError('conflict', 'Voice session changed; ask again')
             result = copy.deepcopy(self._assessment or assessment.assess({}))
@@ -384,6 +394,44 @@ class Service:
                 self._queue.remove(message['id'])
             self._conversation.append(dict(id=message['id'],question=text.strip(),preset=preset,answer=stored['text'][:1200]))
             return self._public(stored)
+
+    def refusal(self, feature, binding):
+        """Internal native entry: a voice request for a switched-off feature gets the
+        feature_disabled hint as text, spoken too while the session is live."""
+        with access._LOCK, self._lock:
+            self.refresh(force=True)
+            if feature not in access.FEATURES:
+                raise access.RadioError('invalid_body', 'Unknown radio feature')
+            if not self._voice_enabled or self._closed:
+                raise access.RadioError('feature_disabled', 'Native voice is not enabled')
+            if self._features[feature]:
+                raise access.RadioError('conflict', 'The feature is enabled; ask again')
+            if binding != self._binding:
+                raise access.RadioError('conflict', 'Voice session changed; ask again')
+            result = dict(answers={'refusal':access.DISABLED[feature]}, fuel={}, pace={}, tyres={}, uncertainties=[])
+            message = self._publish('refusal', 'refusal', 'normal', result, self.clock(),
+                                    queued=self._live, source=feature)
+            stored = self._messages[message['id']]
+            stored['ai_state'] = 'not_requested'
+            return self._public(stored)
+
+    def hud_text(self, source, now=None):
+        """The text of the newest message of one source while it is still valid.
+
+        The newest message decides: once it expired, was superseded, cancelled or
+        invalidated, the slot is empty rather than falling back to an older one.
+        Refusal hints never reach the broadcast picture."""
+        self.refresh()
+        with self._lock:
+            if self._closed or not self._live or not self._features.get(source):
+                return None
+            newest = next((m for m in reversed(self._messages.values())
+                           if m['source'] == source and m['kind'] != 'refusal'), None)
+            now = self.wall() if now is None else now
+            if (newest is None or newest['epoch'] != self._epoch or newest['binding'] != self._binding
+                    or newest['state'] in HUD_GONE or now >= newest['expires_at']):
+                return None
+            return newest['text']
 
     def pending_count(self):
         with self._lock:return len(self._queue)

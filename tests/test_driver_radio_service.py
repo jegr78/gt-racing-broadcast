@@ -397,6 +397,63 @@ def t_coach_messages_reach_every_console_view():
             assert all('_coach_owner' not in m for m in coach)
 
 
+def t_engineer_off_refuses_presets_but_coach_runs():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'features':features(False,True)});f.poll()
+        try:f.request('fuel')
+        except access.RadioError as exc:
+            assert exc.code=='feature_disabled' and str(exc)==access.DISABLED['engineer'],(exc.code,str(exc))
+        else:raise AssertionError('Expected feature_disabled')
+        error(lambda:f.service.question('Fuel status?',assessment.binding(f.snap)),'feature_disabled')
+        f.snap['instruments']['fuel_l']=3;f.snap['revision']+=1;f.poll()
+        assert [m for m in f.service.history()['messages'] if m['kind']=='fuel']==[], 'no engineer alert while it is off'
+        owner={'profile':Path(d).name,'subject':'local:producer'}
+        published=f.service.publish_coach('Brake a little later into turn one.',{},owner,'training-token',
+                                          authorize=lambda:True,ready=lambda:True)
+        assert published is not None and published['source']=='coach'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'features':features(True,False)});f.poll()
+        assert f.request('fuel')['source']=='engineer'
+        f.snap['instruments']['fuel_l']=3;f.snap['revision']+=1;f.poll()
+        alert=f.service.history()['messages'][-1]
+        assert alert['kind']=='fuel' and alert['source']=='engineer'
+        owner={'profile':Path(d).name,'subject':'local:producer'}
+        assert f.service.publish_coach('Brake later.',{},owner,'training-token',
+                                       authorize=lambda:True,ready=lambda:True) is None, 'coach off publishes nothing'
+
+
+def t_hud_text_follows_message_life():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll()
+        assert f.service.hud_text('engineer') is None
+        first=f.request('pace')
+        now=first['created_at']
+        assert f.service.hud_text('engineer',now)==first['text']
+        assert f.service.hud_text('coach',now) is None
+        assert f.service.hud_text('engineer',first['expires_at']) is None, 'expired text must leave the HUD'
+        second=f.request('status')
+        assert second['id']!=first['id']
+        assert f.service.hud_text('engineer',second['created_at'])==second['text'], 'newer engineer message replaces it'
+        f.snap['context_revision']+=1;f.poll()
+        assert f.service.hud_text('engineer',second['created_at']) is None, 'invalidation clears the HUD'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();message=f.request('pace')
+        ticket=f.service.take_playback();f.service.finish_playback(ticket.id,'spoken')
+        assert f.service.hud_text('engineer',message['created_at'])==message['text']
+        f.snap['replay']['active']=True;f.snap['revision']+=1;f.poll()
+        assert f.service.hud_text('engineer',message['created_at']) is None, 'a non-live session clears the HUD'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();allowed=[True]
+        message=f.service.request('pace',assessment.binding(f.snap),requester='driver',
+                                  authorization=lambda:allowed[0])
+        assert f.service.hud_text('engineer',message['created_at'])==message['text']
+        allowed[0]=False;f.poll()
+        assert f.service.history()['messages'][-1]['state']=='cancelled'
+        assert f.service.hud_text('engineer',message['created_at']) is None, 'a cancelled message leaves the HUD'
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

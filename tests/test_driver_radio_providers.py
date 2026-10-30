@@ -167,6 +167,29 @@ def t_native_text_completion_does_not_discard_inflight_ai():
 
 
 
+def t_explanation_uses_the_feature_agent():
+    from pathlib import Path
+    agents={'engineer':{'enabled':True,'agent':'engineer-agent'},'coach':{'enabled':True,'agent':'coach-agent'}}
+    for source in ('engineer','coach'):
+        with tempfile.TemporaryDirectory() as d:
+            f=Fixture(d)
+            f.access.update({'expected':1,'providers':{'speech':False},'features':agents});f.poll()
+            if source=='engineer':message=f.request()
+            else:
+                owner={'profile':Path(d).name,'subject':'local:producer'}
+                message=f.service.publish_coach('Brake a little later into turn one.',{},owner,'training-token',
+                    authorize=lambda:True,ready=lambda:True,allow_ai=True,completed_at=f.service.wall(),latest=True)
+            assert message['source']==source and message['ai_state']=='pending'
+            class AI:
+                requested=[]
+                def explain(self,agent,*args):
+                    self.requested.append(agent);raise providers.ProviderError('provider_failed')
+            ai=AI();requested=ai.requested
+            worker=providers.Enricher(f.service,ai=ai)
+            worker.step('ai');worker.close()
+            assert requested==[source+'-agent'],(source,requested)
+
+
 def t_stopped_enricher_cannot_publish_a_completed_attachment():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d)
