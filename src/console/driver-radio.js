@@ -153,10 +153,8 @@ class CoachView {
    this.q('error').textContent=messages[error.code]||error.message||'Coaching is unavailable.';
    if(action&&error.code&&error.status<500)this.actionError=this.q('error').textContent;
    this.q('reload').hidden=error.code!=='conflict';
-   if(!error.code||error.status>=500){
-    if(this.state)this.state={version:1,generation:this.state.generation,profile:this.state.profile,viewer:this.state.viewer,revision:this.state.revision,epoch:this.state.epoch,allow_ai:this.state.allow_ai,active:this.state.active,pending:false,phase:'unavailable'};
-    this.q('reference-choice').replaceChildren(new Option('Automatic personal reference',''));this.render();
-   }
+   // A transient failure (no code or 5xx) only reports the error: the last good
+   // state and its controls stay, so the buttons do not flicker between polls.
   }
  }
  async poll(){
