@@ -12,7 +12,9 @@ and a private debrief. The Director card and driver desk share the same radio la
 Start the relay for the Solo POV profile, then open **Telemetry** in the Control
 Center. Under **Driver radio setup**, enable driver radio and enter the driver's
 verified Console identity. The identity appears beside their Console sign-in.
-Save the settings. Director and Race Engineer roles do not grant radio access.
+It uses lowercase letters, digits and hyphens; saving folds case and surrounding
+spaces the way Console writes it (**JeGr** is saved as **jegr**) and names an entry
+that still is not a Console identity. Save the settings. Director and Race Engineer roles do not grant radio access.
 The existing Engineer archive and producer permissions remain separate.
 
 ![Private training history and producer radio settings](images/cc-telemetry.png)

@@ -407,6 +407,26 @@ def t_local_response_limits_reject_oversized_valid_json_for_both_radio_and_coach
             else:raise AssertionError('The local radio bridge accepted an oversized response')
 
 
+def t_admin_errors_carry_the_relay_reason():
+    import io
+    from unittest.mock import patch
+    import driver_radio_admin
+    def answer(error):
+        raw=json.dumps({'error':error}).encode()
+        with patch.object(driver_radio_admin.http_util,'open_url',return_value=io.BytesIO(raw)):
+            try:driver_radio_admin.Client('solo-pov',8088).request(coach=True)
+            except driver_radio_admin.AdminError as exc:return exc.code,str(exc)
+        raise AssertionError('an error answer must raise')
+    reason='Enable driver radio for this profile to use coaching'
+    assert answer({'code':'feature_disabled','message':reason})==('feature_disabled',reason)
+    named='Driver identity is not a Console sign-in name'
+    assert answer({'code':'invalid_settings','message':named})[1]==named, 'the relay names what is invalid'
+    assert answer({'code':'feature_disabled'})[1]=='Enable driver radio for this profile first'
+    assert answer({'code':'odd','message':'x'*400})[1]=='Radio administration unavailable', \
+        'an oversized relay message is not shown'
+    assert answer({'code':'odd','message':'line\nbreak'})[1]=='Radio administration unavailable'
+
+
 def t_optional_ai_attachment_reaches_only_the_current_owner_review():
     import driver_radio_providers as providers
     class AI:
