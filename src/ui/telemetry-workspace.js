@@ -1088,6 +1088,7 @@ async function tmShowSetTrack(track, session = null) {
     sel.appendChild(o);
   });
   $('tm-settrack-session').textContent = session == null ? '' : 'Session ' + session;
+  $('tm-settrack-session').hidden = session == null;
   $('tm-settrack').hidden = false;
 }
 
