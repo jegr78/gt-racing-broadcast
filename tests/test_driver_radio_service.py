@@ -355,7 +355,11 @@ def t_signed_http_clients_share_messages_and_revalidate_access():
             f.service.finish_playback(playing.id)
             m.console_admin.write_versions(versions,{})  # Restore fixture identity for the independent feature check.
             f.access.update({'expected':1,'features':features(coach=True)})
+            # The message lane serves either feature; with the engineer off, no engineer
+            # message reaches the coach-only view and engineer facts stay refused.
             status,doc,_=request('messages')
+            assert status==200 and doc['messages']==[],(status,doc)
+            status,doc,_=request('snapshot')
             assert status==403 and doc['error']['code']=='feature_disabled'
             assert f.service.history()['messages']==[]
         finally:server.shutdown();server.server_close();f.service.close()

@@ -26,3 +26,28 @@ edits made during that save. Explicit reload, session/profile change or a curren
 access denial clears the draft. A view generation discards old successful replies
 after denial or context change, so an in-flight authorized poll cannot restore
 revoked data. Prior validated interpretations remain visible with their messages.
+
+## Two AI features (epic #1023, issue #1028)
+
+The component shows the AI Race Engineer and the AI Coach as two labelled sections
+in the driver desk and the Director Solo card, and the Control Center form as three
+cards: AI Race Engineer (switch and agent), AI Coach (switch and agent) and the
+shared Voice. Messages are split by their `source`; a `refusal` is labelled
+"Feature off". Each section handles its own switch: a 403 `feature_disabled` from
+the engineer routes empties and hides only the engineer section, a 403
+`feature_disabled` from the coach route (or `whoami.ai_coach` false) does the same
+for the coach section, and both show "Off · enable it in the Control Center". A 401
+or any other 403 still denies the whole view. The relay serves
+`messages` and `native` while either feature is on (403 `feature_disabled` naming
+both only when both are off) and filters `messages` to the sources whose feature
+is on; `snapshot`, `setup`, `service` and `request` stay engineer-only. The view
+polls the shared pair and the engineer pair independently, so a coach-only view
+keeps its coach messages and the shared Voice row (pause, mute, volume, input
+language), which sits above both sections.
+The single coach owner per profile removed the "busy, another driver" phase and the
+`training_busy` handling from the coach view. Tests: `t_admin_form_saves_two_features`,
+`t_sections_split_messages_by_source`,
+`t_a_disabled_feature_turns_off_only_its_own_section`,
+`t_coach_only_view_keeps_the_voice_controls_and_coach_messages` (node, fake DOM),
+`t_messages_and_native_serve_either_feature_and_only_enabled_sources` (signed HTTP)
+plus the two Playwright checks.
