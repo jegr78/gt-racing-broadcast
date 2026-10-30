@@ -114,8 +114,13 @@ refreshes it in the background. Its displayed distance identifies that prefix.
 The map uses the complete selected reference lap as its outline, or the latest
 confirmed session lap when no reference is available. Its outline and full-distance
 chart range stay stable while the live trace grows, including during preparation.
-The displayed best uses retained eligible summaries. The theoretical value uses
-the retained detailed pool, not an unlimited full-session archive.
+The displayed best uses retained eligible summaries. The theoretical best composes the
+best **larger sectors** over the same retained pool, not an unlimited full-session
+archive: the layout's selected sector variant, or the automatic provisional thirds
+when no reviewed track definition exists. It reads **unconfirmed** until reviewed
+sectors and confirmed context back it. The tooltip also shows the 200 m mini-sector
+sum; that is a diagnostic only, since picking the best of every 200 m runs below what
+a driven lap allows.
 
 Change the chart channel or distance limits to inspect braking, throttle, speed,
 steering or gear. **Full distance** resets zoom. The map uses measured world

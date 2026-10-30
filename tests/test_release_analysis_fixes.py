@@ -141,7 +141,7 @@ def t_best_lap_detail_survives_default_eviction_and_backs_the_theory():
         times = (20., 16.) + tuple(20. + i * .1 for i in range(18))
         path = write_circle_recording(directory, lap_secs=times, n=200)
         with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(),
-                        queue_max=8192) as store:
+                        queue_max=8192, runtime_base=directory) as store:
             feed(store, path)
             snap = store.snapshot()
             best = next(r for r in snap['laps'] if r['lap'] == 2)
@@ -152,11 +152,13 @@ def t_best_lap_detail_survives_default_eviction_and_backs_the_theory():
             assert store.stats()['details'] <= live.DETAILS_MAX
             assert snap['best_s'] == 16.
             assert snap['theoretical_s'] == 16.
+            assert snap['mini_sector_sum_s'] == 16.
             api = race_engineer_api.Service(store)
             try:
                 assert api.snapshot()['theoretical_s'] == 16.
                 public = api.history(None)['laps']
-                assert all('sectors' not in row and 'trace' not in row for row in public)
+                assert all('sectors' not in row and 'trace' not in row
+                           and 'larger_sectors' not in row for row in public)
             finally:
                 api.close()
 
@@ -183,13 +185,16 @@ def t_theory_composes_evicted_and_retained_sectors_instead_of_only_clamping():
         expected = gt7_laps.theoretical_best([r for r in index['laps'] if r['pace_eligible']])
         assert expected < 15., 'fixture must combine sectors from different laps'
         with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(),
-                        queue_max=4096, details_max=1) as store:
+                        queue_max=4096, details_max=1, runtime_base=directory) as store:
             feed(store, writer.path)
             snap = store.snapshot()
             # Lap 2 is the best lap and keeps its detail; lap 3's fast first sector is evicted.
             assert store.detail(next(r['id'] for r in snap['laps'] if r['lap'] == 3))['state'] == 'evicted'
-            assert snap['theoretical_s'] == expected
-            assert snap['theoretical_s'] < snap['best_s']
+            assert snap['mini_sector_sum_s'] == expected
+            # #813: the headline composes larger sectors from the same retained pool, so
+            # it also beats the best lap here, yet stays above the 200 m sum.
+            assert snap['theoretical_sectors'] == 'Provisional thirds'
+            assert expected < snap['theoretical_s'] < snap['best_s'], snap['theoretical_s']
 
 
 if __name__ == '__main__':

@@ -79,6 +79,7 @@ SUMMARY_FIELDS = frozenset((
     "provisional_comparison_eligible",
     "definition_fingerprint",
     "sector_variant_id",
+    "larger_sectors",
     "track_definition_warnings",
     "context_confirmed",
     "context_warnings",
@@ -174,6 +175,63 @@ def lap_time_average(laps, session_id):
     """Mean lap time (s) over the live session's completed eligible laps, else None."""
     times = _session_measurements(laps, session_id, "time_s")
     return round(sum(times) / len(times), 3) if times else None
+
+
+def theoretical(laps):
+    """The headline theoretical best (#813): the best larger-sector composition over
+    `laps`, the eligible pool, via the same gt7_track_definitions.theoretical the
+    report and workspace use. The newest lap's definition and variant decide, and only
+    laps on exactly that variant compose. A dict {time_s, confirmed, sectors}, or None
+    without larger sectors: the 200 m mini-sector sum never stands in for it."""
+    rows = [r for r in laps if r.get("larger_sectors")]
+    if not rows:
+        return None
+    larger, fingerprint = rows[-1]["larger_sectors"], rows[-1].get("definition_fingerprint")
+    same = [r for r in rows if r.get("definition_fingerprint") == fingerprint
+            and r["larger_sectors"].get("variant_id") == larger.get("variant_id")
+            and r["larger_sectors"].get("bounds_m") == larger.get("bounds_m")]
+    definition = {"fingerprint": fingerprint, "reviewed": bool(larger.get("reviewed")),
+                  "version": None,
+                  "variants": [{"id": larger.get("variant_id"), "name": larger.get("name"),
+                                "kind": larger.get("kind"), "reviewed": bool(larger.get("reviewed")),
+                                "bounds_m": larger.get("bounds_m"),
+                                "sector_names": larger.get("names") or []}]}
+    try:
+        result = gt7_track_definitions.theoretical(same, definition, larger.get("variant_id"))
+    except (ValueError, TypeError, KeyError):
+        return None
+    if _finite(result.get("time_s")) is None:
+        return None
+    times = [r["time_s"] for r in same if _finite(r.get("time_s")) is not None]
+    # Rounding every sector can sum a few ms above the lap that set them all.
+    value = round(min([result["time_s"]] + times), 3)
+    return {"time_s": value, "confirmed": bool(result.get("confirmed")),
+            "sectors": larger.get("name")}
+
+
+def _carry_larger_sectors(new, old):
+    """A retained summary has no trace, so re-annotating it (a context change) can
+    rebuild no larger-sector times: the automatic provisional definition even needs a
+    trace to exist. Keep the times measured earlier when the re-annotation produced
+    no definition or the same one without times; a genuinely different definition
+    stays empty until a lap with a trace measures it."""
+    measured = old.get("larger_sectors")
+    current = new.get("larger_sectors")
+    if not measured or not measured.get("times_s") or all(t is None for t in measured["times_s"]):
+        return new
+    if current and current.get("times_s") and any(t is not None for t in current["times_s"]):
+        return new
+    if current and (new.get("definition_fingerprint") != old.get("definition_fingerprint")
+                    or current.get("bounds_m") != measured.get("bounds_m")):
+        return new
+    return dict(new, larger_sectors=measured,
+                definition_fingerprint=old.get("definition_fingerprint"),
+                sector_variant_id=old.get("sector_variant_id"))
+
+
+def mini_sector_sum(laps):
+    """Diagnostic only: the best 200 m mini-sector times summed (#813)."""
+    return gt7_laps.theoretical_best(laps)
 
 
 def instruments(pkt):
@@ -497,6 +555,9 @@ class Store:
             "fuel_avg_laps": 0,
             "lap_avg_s": None,
             "theoretical_s": None,
+            "theoretical_confirmed": False,
+            "theoretical_sectors": None,
+            "mini_sector_sum_s": None,
             "history": (
                 "recording-backed"
                 if self._recording and self._recording_current
@@ -932,6 +993,7 @@ class Store:
         ]
         fuel_avg, fuel_laps = fuel_average(self._summaries.values(), sid)
         best = min(eligible, key=lambda r: r["time_s"], default=None)
+        theory = theoretical(eligible)
         doc.update(
             revision=self._revision,
             current=current,
@@ -946,7 +1008,10 @@ class Store:
             fuel_avg_l=fuel_avg,
             fuel_avg_laps=fuel_laps,
             lap_avg_s=lap_time_average(self._summaries.values(), sid),
-            theoretical_s=gt7_laps.theoretical_best(eligible),
+            theoretical_s=theory["time_s"] if theory else None,
+            theoretical_confirmed=bool(theory and theory["confirmed"]),
+            theoretical_sectors=theory["sectors"] if theory else None,
+            mini_sector_sum_s=mini_sector_sum(eligible),
             warnings=[self._context_error] if self._context_error else [],
         )
         digest = hashlib.sha256(
@@ -1460,7 +1525,7 @@ class Store:
                 self._summaries = collections.OrderedDict(
                     (
                         lid,
-                        _summary(self._annotate(row))
+                        _summary(_carry_larger_sectors(self._annotate(row), row))
                         if row.get("_context_source") == key[0]
                         else row,
                     )
@@ -1481,7 +1546,7 @@ class Store:
                     (lid, self._annotate(row)) for lid, row in self._details.items()
                 )
                 self._summaries = collections.OrderedDict(
-                    (lid, _summary(self._annotate(row)))
+                    (lid, _summary(_carry_larger_sectors(self._annotate(row), row)))
                     for lid, row in self._summaries.items()
                 )
                 self._trim_details(self._published["session_id"])

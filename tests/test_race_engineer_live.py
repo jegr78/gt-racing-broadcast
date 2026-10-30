@@ -725,7 +725,8 @@ def t_confirmed_best_and_theory_respect_known_strategy_changes():
                         'compound': 'RM', 'strategy': {'fuel_map': 1},
                         'strategy_changes': [{'lap': 3, 'recording_s': 36.0,
                                               'strategy': {'fuel_map': 2}}]}]}}}, 0)
-        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096,
+                        runtime_base=d) as store:
             store.bind_recording(path)
             store._read_context()
             feed(store, path)
@@ -733,6 +734,7 @@ def t_confirmed_best_and_theory_respect_known_strategy_changes():
             assert snap['current']['strategy']['fuel_map'] == 2
             assert snap['best_s'] == 20.0, 'known incompatible fuel strategy contaminated best'
             assert snap['theoretical_s'] == 20.0
+            assert snap['mini_sector_sum_s'] == 20.0, 'the diagnostic shares the filtered pool'
 
 
 def t_prefix_byte_boundary_excludes_later_packets():
@@ -826,6 +828,73 @@ def t_recorded_prefix_ending_midlap_waits_until_the_known_lap_end():
             assert store.detail(brief['id'])['state'] == 'pending'
             assert store.wait_recovery(10)
             assert store.detail(brief['id'])['state'] == 'ready'
+
+
+def _theory_row(lap, time_s, mini, larger, fp='fp1', variant='provisional-3'):
+    return {'lap': lap, 'time_s': time_s, 'track_id': 'ring01', 'car_id': 1, 'sectors': mini,
+            'pace_eligible': True, 'comparison_eligible': True, 'capture_complete': True,
+            'trace_complete': True, 'time_valid': True, 'analysis_role': 'regular',
+            'definition_fingerprint': fp,
+            'larger_sectors': {'variant_id': variant, 'name': 'Provisional thirds',
+                               'kind': 'provisional', 'reviewed': False,
+                               'bounds_m': [0.0, 400.0, 800.0, 1200.0],
+                               'names': ['Section 1', 'Section 2', 'Section 3'],
+                               'times_s': larger}}
+
+
+def t_theory_headline_composes_larger_sectors_not_mini_sectors():
+    # #813: the headline theoretical best is the larger-sector composition; the
+    # 200 m mini-sector best sum stays a diagnostic. Lap 1 wins sectors 1 and 3
+    # by tiny mini-sector margins, lap 2 wins the middle mini-sectors: the mini
+    # sum picks the best of every 200 m and lands below what any section allows.
+    a = _theory_row(1, 30.0, [5.0, 4.8, 5.2, 5.0, 4.9, 5.1], [9.8, 10.2, 10.0])
+    b = _theory_row(2, 30.1, [5.1, 4.9, 5.0, 5.1, 5.0, 5.0], [10.0, 10.1, 10.0])
+    theory = live.theoretical([a, b])
+    assert theory['time_s'] == 29.9, theory          # 9.8 + 10.1 + 10.0
+    assert theory['confirmed'] is False and theory['sectors'] == 'Provisional thirds', theory
+    assert live.mini_sector_sum([a, b]) == 29.7       # 5.0+4.8+5.0+5.0+4.9+5.0: below every section
+    # laps on another definition or variant never mix into one composition
+    other = _theory_row(3, 29.0, [4.0] * 6, [9.0, 9.0, 9.0], fp='fp-other')
+    assert live.theoretical([a, b, other])['time_s'] == 27.0, 'the newest definition decides'
+    assert live.theoretical([other, a, b])['time_s'] == 29.9
+    # without larger sectors there is no headline value, never a mini-sector stand-in
+    bare = {k: v for k, v in a.items() if k != 'larger_sectors'}
+    assert live.theoretical([bare]) is None
+
+
+def t_snapshot_reports_larger_sector_theory_and_the_mini_diagnostic():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d, lap_secs=(20.0, 16.0, 20.0, 20.0))
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096,
+                        runtime_base=d) as store:
+            feed(store, path)
+            snap = store.snapshot()
+            assert snap['theoretical_s'] is not None, snap['theoretical_s']
+            assert snap['theoretical_sectors'] == 'Provisional thirds', snap.get('theoretical_sectors')
+            assert snap['theoretical_confirmed'] is False
+            assert snap['mini_sector_sum_s'] is not None
+
+
+def t_larger_sector_times_survive_a_context_reannotation_without_detail():
+    # A context change re-annotates retained summaries, which carry no trace. Their
+    # measured larger-sector times must survive it, as the mini-sector times do.
+    import gt7_context
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d, lap_secs=(20.0, 16.0, 20.0, 20.0))
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096,
+                        details_max=1, runtime_base=d) as store:
+            store.bind_recording(path)
+            feed(store, path)
+            before = store.snapshot()['theoretical_s']
+            assert before == 16.0, before
+            context = gt7_context.Store.for_recording(path)
+            context.save({'notes': [], 'sessions': {'1': {'confirmed': False, 'stints': []}}}, 0)
+            store._read_context()
+            snap = store.snapshot()
+            times = [(r.get('larger_sectors') or {}).get('times_s') for r in store._summaries.values()
+                     if r.get('state') == 'confirmed']
+            assert times and all(t and None not in t for t in times), times
+            assert snap['theoretical_s'] == before, snap['theoretical_s']
 
 
 if __name__ == '__main__':
