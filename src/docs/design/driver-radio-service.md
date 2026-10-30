@@ -62,7 +62,9 @@ feature switch changes the settings revision and so invalidates current history.
 A native voice request for a switched-off feature is refused with that
 feature's `feature_disabled` text as a `refusal` message (`source` = the refused
 feature, no AI interpretation). It is shown as text and queued for speech while
-voice is on and the session is live; it is never stored as an answer. A voice
+voice is on, the session is live and the playback queue has room; a hint never
+evicts queued work, so with a full queue it stays text only. It is never stored
+as an answer. A voice
 question while the engineer is off gets the engineer text; a recognised coaching
 command or question while the coach is off gets "Enable the AI Coach for this
 profile".
