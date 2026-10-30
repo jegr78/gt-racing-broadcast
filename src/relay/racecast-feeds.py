@@ -2460,9 +2460,10 @@ def apply_signal_hold_notice(data, notice):
 
 def radio_hud_lines(radio_service):
     """The /hud/data AI Race Engineer and AI Coach lines, "" when there is nothing to
-    show: no radio service (a non-Solo profile), the feature switched off, or no
-    current message or review. Read on every poll, so an OBS reload shows the
-    current text again. A radio fault blanks the lines, never the whole HUD."""
+    show: the feature switched off (always so on a non-Solo profile, whose radio
+    service sits on an unavailable Store), no current message or review, or no
+    radio service at all (a bare handler). Read on every poll, so an OBS reload
+    shows the current text again. A radio fault blanks the lines, never the HUD."""
     if radio_service is None:
         return {"raceEngineer": "", "coach": ""}
     try:

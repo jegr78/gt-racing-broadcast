@@ -941,6 +941,39 @@ def t_new_hud_slots_default_hidden():
     assert "display" not in rc, rc
 
 
+def t_ai_slots_default_clear_of_the_solo_pov_layout():
+    # The two AI lines only ever show text on a Solo POV profile, so their default
+    # boxes must sit in a free area of that HUD: clear of the webcam, chat, tyre
+    # capture, telemetry, POV and race-control boxes and of each other, wide enough
+    # for long engineer answers. Checked against the base page and the shipped
+    # solo-pov overlay CSS (which moves the chat).
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        base = ob.base_style(f.read())
+    with open(os.path.join(ROOT, "profiles", "solo-pov", "overlay", "hud.css"), encoding="utf-8") as f:
+        solo = f.read()
+    others = ("webcam", "chat", "tyres-capture", "tele-panel", "tele-car", "tele-steer",
+              "tele-delta", "tele-clock", "pov", "pov-name", "race-control", "flag-status",
+              "stint", "clock", "league-logo")
+
+    def box(sid, css):
+        b = {**ob.box_from_css(base, sid), **ob.box_from_css(css, sid)}
+        return (b["left"], b["top"], b["left"] + b.get("width", 0), b["top"] + b.get("height", 0))             if "left" in b and "top" in b else None
+
+    def overlap(a, b):
+        return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+    for css in ("", solo):
+        mine = {sid: box(sid, css) for sid in ob.DEFAULT_HIDDEN_SLOTS}
+        assert not overlap(mine["race-engineer"], mine["coach"]), mine
+        for sid, a in mine.items():
+            assert a[2] - a[0] >= 1000, (sid, a)                 # long answers stay readable
+            assert 0 <= a[0] and a[2] <= 1920 and 0 <= a[1] and a[3] <= 1080, (sid, a)
+            for other in others:
+                b = box(other, css)
+                if b is not None:
+                    assert not overlap(a, b), (sid, a, other, b)
+
+
 def t_ob_visible_is_a_box_prop():
     # every slot (box + text) accepts visible
     assert "visible" in ob.KIND_BOX

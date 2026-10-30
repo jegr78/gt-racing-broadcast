@@ -1178,6 +1178,18 @@ def t_hud_data_carries_engineer_and_coach_text():
         assert d["coach"] == line, d.get("coach")
         f.command("stop"); f.step()
         assert _radio_hud_route(radio)["coach"] == ""
+    # A non-Solo profile: production builds the radio service on an unavailable
+    # Store, so the feature gate keeps both lines blank even with both features
+    # switched on in the profile's radio settings.
+    access = m.driver_radio_access
+    with tempfile.TemporaryDirectory() as root:
+        access.Store(root, True).update({"expected": 0, "features": {
+            "engineer": {"enabled": True, "agent": None}, "coach": {"enabled": True, "agent": None}},
+            "voice": {"enabled": True, "microphone": None, "input_language": "en"}})
+        radio = m.driver_radio_service.Service(access.Store(root, False), access.Session(), lambda: {})
+        assert m.driver_coach_service.attach(radio, None) is None
+        d = _radio_hud_route(radio)
+        assert d["raceEngineer"] == "" and d["coach"] == "", d
     d = _radio_hud_route(None)
     assert d["raceEngineer"] == "" and d["coach"] == "", d
 
