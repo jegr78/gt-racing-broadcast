@@ -36,6 +36,21 @@ def t_access_is_explicit_profile_scoped_and_revocable():
         rejected(store.read, 'settings_unavailable')
 
 
+def t_driver_identities_are_saved_as_console_writes_them():
+    with tempfile.TemporaryDirectory() as d:
+        store = radio.Store(Path(d) / 'solo', available=True)
+        doc = store.update({'expected': 0, 'enabled': True, 'drivers': ['JeGr', ' Jens ', 'jegr']})
+        assert doc['drivers'] == ['jegr', 'jens'], doc['drivers']
+        assert store.authorize('jegr')['enabled'] is True
+        try:
+            store.update({'expected': 1, 'drivers': ['Jens Gross']})
+        except radio.RadioError as exc:
+            assert exc.code == 'invalid_settings' and 'Jens Gross' in str(exc) \
+                and 'lowercase letters, digits and hyphens' in str(exc), str(exc)
+        else:
+            raise AssertionError('an identity with a space is not a Console sign-in')
+
+
 def t_settings_symlink_cannot_import_foreign_profile_grants():
     import os
     if not hasattr(os, 'symlink'):
