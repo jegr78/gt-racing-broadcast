@@ -111,7 +111,7 @@ def voice_result(service, text, authorize, training_authorize=None):
         return None
     if not orchestration._allowed(authorize):
         raise calibration.CoachError('forbidden')
-    owner = dict(profile=service.profile, subject='local:producer')
+    owner = dict(profile=service.profile, subject=orchestration.PROFILE_OWNER_SUBJECT)
     state = service.view(owner)
     if state['phase'] == 'busy':
         return _spoken(voice_reply(state, 'status'), state, 'question')

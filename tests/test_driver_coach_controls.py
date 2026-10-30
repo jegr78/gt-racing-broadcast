@@ -245,7 +245,7 @@ def t_actual_native_requests_cannot_control_a_console_owner_or_read_its_exercise
             assert f.service.snapshot(REMOTE)==before
             reply=f.messages()[-1]
             assert 'Another driver' in reply['text'] and before['focus']['focus']['action'] not in reply['text']
-            assert reply['id'] not in [m['id'] for m in f.messages('driver')]
+            assert reply['id'] in [m['id'] for m in f.messages('driver')],'A profile view missed the native reply'
         finally:owner.close()
 
 

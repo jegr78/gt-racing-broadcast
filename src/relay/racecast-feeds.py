@@ -11830,7 +11830,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             and bool(radio_access.authorize('coach')))
                 if authorize() is not True:
                     return self._radio_error('forbidden', 'Coaching requires a current Console sign-in', 403)
-                owner = dict(profile=profile, subject='local:producer' if admin else 'console:'+subject)
+                # One driver per Solo POV profile: every view shares one training
+                # and one history. The viewer stays the verified requester.
+                owner = dict(profile=profile, subject=driver_coach_service.PROFILE_OWNER_SUBJECT)
+                viewer = 'local:producer' if admin else 'console:'+subject
                 query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
                 if set(query)-{'t'} or len(query.get('t', [])) > 1:
                     return self._radio_error('invalid_query', 'Unknown coaching query', 400)
@@ -11854,7 +11857,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         if body.get('profile') != profile:
                             return self._radio_error('profile_changed', 'The coaching profile changed; reload', 409)
                         body = {k:v for k,v in body.items() if k != 'profile'}
-                    if body.get('action') != 'stop' and not _coach_controls_rl.allow(owner['subject']):
+                    if body.get('action') != 'stop' and not _coach_controls_rl.allow(viewer):
                         return self._radio_error('rate_limited', 'Too many coaching controls; retry later', 429)
                     result = driver_coach_controls.command(actor, owner, body, authorize, resolve=references.resolve)
                 else:
@@ -11924,7 +11927,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     result['history']=driver_coach_history.expose(history_doc,fresh,driver_coach_service._facts,checked_reference)
                     result['history_suggestion']=driver_coach_history.suggest(result['history'],result,fresh.get('current') or {})
                 result['history_error']=history_error
-                result.update(profile=profile, viewer=owner['subject'])
+                result.update(profile=profile, viewer=viewer)
                 if admin:result['protocol'] = 'racecast-driver-radio-admin-v1'
                 return self._send(result, no_store=True, compact=True)
             except (driver_coach_calibration.CoachError, driver_radio_access.RadioError, race_engineer_access.AccessError) as error:
