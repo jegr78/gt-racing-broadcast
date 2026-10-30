@@ -529,6 +529,7 @@ async function tmSelectB(l) {
   tmState.b = key;
   tmRenderLaps();
   if (l.rec === tmState.rec) tmShowSetTrack(tmSessionTrack(l.session), l.session);
+  else { tmSeq.track++; $('tm-settrack').hidden = true; }   // a lap B of another recording
   tmClearPair('Loading comparable laps…');
   const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
                                  track: l.track_id == null ? '' : l.track_id});

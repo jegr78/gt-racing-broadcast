@@ -3975,14 +3975,22 @@ if (!$('tm-settrack').hidden) {
 const sent = body;
 answer('/learn', {ok: false, error: 'stop'});
 await tick();
+tmSelectB(unknown);
+await tick();
+const again = $('tm-settrack').hidden;
+tmSelectB(Object.assign(lap('Y', 1, 90, 7), {session: 5, track_id: null, track: ''}));
+await tick();
+const other = $('tm-settrack').hidden;
 tmSelectB(known);
 await tick();
-console.log(JSON.stringify([shown, sent, asked.split('\\n')[0], $('tm-settrack').hidden]));""")
+console.log(JSON.stringify([shown, sent, asked.split('\\n')[0], again, other,
+                            $('tm-settrack').hidden]));""")
     if out is not None:
         assert json.loads(out) == [
             "false Session 5", '{"rec":"X","track_id":"5","session":5}',
-            "Set the track of session 5 of X to Suzuka - Circuit?", True], \
-            f"Set track acts on lap B's unknown session and hides for a known one: {out}"
+            "Set the track of session 5 of X to Suzuka - Circuit?", False, True, True], \
+            (f"Set track acts on lap B's unknown session, hides for a lap of another "
+             f"recording and for a known session: {out}")
 
 
 def t_telemetry_set_track_failed_list_retries():
