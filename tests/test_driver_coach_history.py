@@ -401,6 +401,21 @@ def t_starting_the_coach_merges_the_profile_histories_once():
         assert calls==[store.profile_root],calls
 
 
+def t_a_failing_history_merge_never_stops_the_coach_from_starting():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root)
+        def broken(_path):raise RuntimeError('unexpected merge failure in '+str(store.directory))
+        with patch.object(history,'merge_profile_histories',broken),patch.object(history.LOG,'warning') as warning:
+            try:f.service.start()
+            except RuntimeError:pass  # Without the guard the failure escapes; the assertion below names it.
+        try:
+            assert f.service._thread is not None and f.service._thread.is_alive(),'A failing merge stopped the coach'
+        finally:f.service.close()
+        assert warning.call_count==1
+        logged=' '.join(str(a) for call in warning.call_args_list for a in call.args)
+        assert root not in logged and 'coach-history' not in logged,logged
+
+
 if __name__=='__main__':
     tests=[(name,fn) for name,fn in globals().copy().items() if name.startswith('t_') and callable(fn)]
     for name,fn in tests:fn();print('PASS',name)

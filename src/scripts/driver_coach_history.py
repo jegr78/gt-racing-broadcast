@@ -20,6 +20,9 @@ MAX_RECORDS=32
 RETENTION_S=90*86400
 _LOCK=threading.RLock()
 LOG=logging.getLogger('racecast.relay.coach')
+# One Solo POV profile has one driver: every view (Control Center, Console,
+# voice) acts on the same training and history under this owner subject.
+PROFILE_OWNER_SUBJECT='local:producer'
 _ID=re.compile(r'[0-9a-f]{32}')
 _FIELDS={'id','training_id','generation','started_at','updated_at','ended_at','status','reason',
          'context','objective','baseline','reference','focus','worked_focus','progress','latest','source_ids',
@@ -146,7 +149,7 @@ class Store:
 
     def _path(self,owner):
         if (not calibration.valid_owner(owner) or owner['profile']!=self.profile_root.name
-                or not (owner['subject']=='local:producer' or owner['subject'].startswith('console:') and len(owner['subject'])>8)):
+                or not (owner['subject']==PROFILE_OWNER_SUBJECT or owner['subject'].startswith('console:') and len(owner['subject'])>8)):
             _error('invalid_owner')
         name=hashlib.sha256(json.dumps(owner,sort_keys=True).encode()).hexdigest()
         return self.directory/(name+'.json')
@@ -330,7 +333,7 @@ def merge_profile_histories(profile_root):
     An unreadable file is skipped and kept on disk. Returns the number of entries moved.
     """
     store=Store(profile_root)
-    owner=dict(profile=store.profile_root.name,subject='local:producer')
+    owner=dict(profile=store.profile_root.name,subject=PROFILE_OWNER_SUBJECT)
     try:
         if store.profile_root.is_symlink() or store.directory.is_symlink() or not store.directory.is_dir():
             return 0
@@ -349,7 +352,7 @@ def merge_profile_histories(profile_root):
                 with open(path,'rb') as stream:raw=json.loads(stream.read(MAX_BYTES+1))
                 theirs=raw.get('owner') if isinstance(raw,dict) else None
                 if (not isinstance(theirs,dict) or store._path(theirs)!=path
-                        or theirs['subject']=='local:producer'):_error()
+                        or theirs['subject']==PROFILE_OWNER_SUBJECT):_error()
                 loaded.append((path,store._load(path,theirs)))
         except (calibration.CoachError,OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError):
             LOG.warning('coach history merge skipped one unreadable owner journal; it stays on disk')

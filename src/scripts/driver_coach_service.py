@@ -12,9 +12,8 @@ import driver_coach_calibration as calibration
 import driver_coach_focus as focus
 import driver_coach_history as history
 
-# One Solo POV profile has one driver: every view (Control Center, Console,
-# voice) acts on the same training and history under this owner subject.
-PROFILE_OWNER_SUBJECT = 'local:producer'
+# Re-exported for the relay; defined once next to the journal that keys on it.
+PROFILE_OWNER_SUBJECT = history.PROFILE_OWNER_SUBJECT
 COMMANDS = frozenset(('start', 'stop', 'objective', 'skill', 'skip', 'keep', 'reference'))
 ROWS_PER_STEP = 4
 COHORT_MAX = 8
@@ -122,7 +121,12 @@ class Service:
             merge = self._thread is None and not self._stop.is_set() and self.journal is not None
         if merge:
             # Fold per-Console-subject journals of older builds into the profile's one history.
-            history.merge_profile_histories(self.journal.profile_root)
+            # Best-effort: a failed merge must never keep the coach from starting.
+            try:
+                history.merge_profile_histories(self.journal.profile_root)
+            except Exception as exc:  # noqa: BLE001 - startup must survive any merge failure
+                history.LOG.warning('coach history merge failed (%s); coaching starts without it',
+                                    type(exc).__name__)
         with self._lock:
             if self._thread is None and not self._stop.is_set():
                 self._thread = threading.Thread(target=self._run, name='driver-coach', daemon=True)
@@ -184,7 +188,7 @@ class Service:
 
     def command(self, owner, action, expected, options=None, authorize=None, training_authorize=None):
         if (not calibration.valid_owner(owner) or owner.get('profile') != self.profile
-                or not (owner['subject'] == 'local:producer' or owner['subject'].startswith('console:'))):
+                or not (owner['subject'] == PROFILE_OWNER_SUBJECT or owner['subject'].startswith('console:'))):
             raise calibration.CoachError('invalid_owner')
         if not _allowed(authorize) or training_authorize is not None and not _allowed(training_authorize):
             raise calibration.CoachError('forbidden')
