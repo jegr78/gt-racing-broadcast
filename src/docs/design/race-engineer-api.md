@@ -22,7 +22,11 @@ selector. All successful data responses have `version: 1` and a relay `generatio
 Errors use `{error: {code, message}}` with generic messages.
 
 - `snapshot`: measured instruments, receipt and age, current lap summary, best and
-  theoretical values from the bounded retained pool. No history or trace payload.
+  theoretical values from the bounded retained pool. `theoretical_s` composes the best
+  larger sectors (`theoretical_sectors` names the variant, `theoretical_confirmed` is
+  false for provisional or unreviewed sectors and unconfirmed context); without larger
+  sectors it is null. `mini_sector_sum_s` is the 200 m best-segment sum, a diagnostic
+  only (#813). No history or trace payload.
 - `history?since=REVISION`: sessions and retained lap summaries. An unchanged revision
   returns `changed: false` without arrays. A changed revision returns a bounded replacement
   list, including explicit detail eviction. Clients discard IDs no longer present.
