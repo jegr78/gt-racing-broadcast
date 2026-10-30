@@ -140,6 +140,9 @@ class Supervisor:
             return not (self._closed or self._paused or self._control_changed) and self._signature == signature
 
     def _coaching(self, text, signature):
+        if coaching.voice_plan(text) is not None and not self.service.settings.enabled('coach'):
+            self.service.refusal('coach', self._binding)
+            return True
         actor = getattr(self.service, 'coach', None)
         if actor is None:
             return False
@@ -157,6 +160,15 @@ class Supervisor:
         self.service.publish_coach(result['text'], {}, owner, result['epoch'], authorize=current,
                                    ready=lambda:True, completed_at=self.service.wall(), latest=True)
         return True
+
+    def _question(self, text):
+        try:
+            self.service.question(text, self._binding)
+        except access.RadioError as exc:
+            # A question while the AI Race Engineer is off gets its hint, never an answer.
+            if exc.code != 'feature_disabled' or self.service.settings.enabled('engineer'):
+                raise
+            self.service.refusal('engineer', self._binding)
 
     def step(self):
         # Only the owner loop touches process references. HTTP controls use the
@@ -233,7 +245,7 @@ class Supervisor:
                                 or current['epoch']!=state['epoch']):return
                         try:
                             if not self._coaching(event.get('text'),signature):
-                                self.service.question(event.get('text'),self._binding)
+                                self._question(event.get('text'))
                         except (access.RadioError, coaching.calibration.CoachError):self._set('error','question_rejected')
                         else:self._set('responding')
                         return

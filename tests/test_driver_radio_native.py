@@ -201,6 +201,25 @@ def t_stalled_transcription_is_cancelled_at_its_own_short_deadline():
         h.n.close()
 
 
+def t_voice_requests_for_a_disabled_feature_are_refused_with_its_hint():
+    for off,on,text in (('engineer','coach','Fuel status?'),('coach','engineer','Start training')):
+        with tempfile.TemporaryDirectory() as d:
+            h=Harness(d)
+            h.f.access.update({'expected':1,'features':{off:{'enabled':False,'agent':None},on:{'enabled':True,'agent':None}}})
+            h.f.poll();h.n.step();assert h.workers
+            h.workers[-1].events=[{'event':'question','text':text}]
+            h.n.step()
+            messages=h.f.service.history()['messages']
+            assert len(messages)==1,(off,messages)
+            refusal=messages[0]
+            assert refusal['text']==access.DISABLED[off] and refusal['source']==off,(off,refusal)
+            assert refusal['kind']=='refusal' and refusal['state']=='queued' and refusal['ai_state']=='not_requested'
+            assert 'question' not in refusal, 'the refused request is not stored as an answer'
+            assert h.f.service.pending_count()==1, 'voice on: the hint is spoken'
+            assert h.f.service.hud_text(off) is None, 'a refusal hint never reaches the broadcast HUD'
+            h.n.close()
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)
