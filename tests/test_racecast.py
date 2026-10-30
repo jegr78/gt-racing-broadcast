@@ -5160,6 +5160,8 @@ def t_path_loaded_module_imports_are_frozen():
         for node in nodes:
             if isinstance(node, ast.Import):
                 found |= {a.name for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                found.add(node.module)
         return found
 
     seen_by_scan = imported_names(os.path.join(src_dir, "racecast.py"),

@@ -344,18 +344,26 @@ def terminate_tree(proc, tree=None):
             # Darwin returns EPERM for a zombie-only group. Reap the owned
             # leader, then accept only proven group absence. Never retry SIGKILL:
             # a new process could have reused the released group identity.
+            deadline = time.monotonic() + 10
             try:
                 proc.wait(timeout=10)
             except (OSError, subprocess.TimeoutExpired) as reap_error:
                 raise JobError("cleanup_failed", "Could not reap the owned analysis process") from reap_error
-            try:
-                os.killpg(pid, 0)
-            except ProcessLookupError:
-                pass  # The non-destructive probe confirms the group disappeared.
-            except OSError as probe_error:
-                raise JobError("cleanup_failed", "Could not confirm analysis process group termination") from probe_error
-            else:
-                raise JobError("cleanup_failed", "The analysis process group remains after termination")
+            while True:
+                try:
+                    os.killpg(pid, 0)
+                except ProcessLookupError:
+                    break
+                except PermissionError as probe_error:
+                    # Darwin can retain a descendant's zombie group briefly after its leader is reaped.
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise JobError("cleanup_failed", "Could not confirm analysis process group termination") from probe_error
+                    time.sleep(min(0.01, remaining))
+                except OSError as probe_error:
+                    raise JobError("cleanup_failed", "Could not confirm analysis process group termination") from probe_error
+                else:
+                    raise JobError("cleanup_failed", "The analysis process group remains after termination")
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:

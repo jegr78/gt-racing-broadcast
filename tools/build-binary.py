@@ -106,6 +106,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            # PyInstaller's scan never sees it. Guarded by
            # tests/test_racecast.py::t_path_loaded_module_imports_are_frozen.
            "--hidden-import", "bundle_cache",
+           "--hidden-import", "http_server",
            "--hidden-import", "placeholders",
            "--hidden-import", "asset_metadata", "--hidden-import", "atomic_replace",
            "--hidden-import", "tailscale", "--hidden-import", "init_setup",

@@ -208,14 +208,47 @@ def t_darwin_zombie_group_is_only_accepted_after_reap_and_absence_probe():
     assert proc.wait.called
 
 
+def t_darwin_cleanup_waits_for_transient_zombie_group_absence_without_resignalling():
+    proc = mock.Mock(pid=12345)
+    proc.wait.return_value = 0
+    clock = [100.0]
+    probes = iter([PermissionError(1, 'zombie-only group'), PermissionError(1, 'zombie-only group'), ProcessLookupError()])
+    def signal_group(_pid, sig):
+        if sig == 9:
+            raise PermissionError(1, 'zombie-only group')
+        assert proc.wait.called, 'Group absence must follow leader reap'
+        raise next(probes)
+    def sleep(seconds):
+        clock[0] += seconds
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill, mock.patch.object(j.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(j.time, 'sleep', side_effect=sleep):
+        j.terminate_tree(proc)
+    assert kill.call_args_list == [mock.call(proc.pid, 9)] + [mock.call(proc.pid, 0)] * 3, 'Only read-only probes may repeat after reaping'
+    assert 100 < clock[0] < 110, 'Transient absence must resolve within the existing cleanup budget'
+
+
 def t_darwin_cleanup_does_not_accept_a_remaining_or_unsignalable_group():
     for probe in (None, PermissionError(1, 'group exists')):
         proc = mock.Mock(pid=12345)
         proc.poll.return_value = None
         proc.wait.return_value = 0
-        with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=[PermissionError(1, 'group exists'), probe]) as kill:
+        with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=[PermissionError(1, 'group exists'), probe]) as kill, mock.patch.object(j.time, 'monotonic', side_effect=[100.0, 110.0]):
             error(lambda owned=proc: j.terminate_tree(owned), 'cleanup_failed')
         assert kill.call_args_list == [mock.call(proc.pid, 9), mock.call(proc.pid, 0)]
+
+
+def t_darwin_group_probe_uses_the_remaining_leader_reap_budget():
+    proc = mock.Mock(pid=12345)
+    clock = [100.0]
+    def reap(timeout):
+        assert timeout == 10
+        clock[0] += 9.999
+    def sleep(seconds):
+        clock[0] += seconds
+    proc.wait.side_effect = reap
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'group exists')) as kill, mock.patch.object(j.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(j.time, 'sleep', side_effect=sleep):
+        error(lambda: j.terminate_tree(proc), 'cleanup_failed')
+    assert abs(clock[0] - 110) < 0.000001, 'Group probes must share the existing ten-second leader reap budget'
+    assert [call for call in kill.call_args_list if call.args[1] != 0] == [mock.call(proc.pid, 9)], 'Never signal a potentially reused group again'
 
 
 def t_darwin_cleanup_timeout_stays_a_failure():
