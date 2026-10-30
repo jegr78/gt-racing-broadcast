@@ -190,11 +190,9 @@ class CoachView {
    const messages={conflict:'Training changed. Reload the current values before applying your draft.',busy:'A training change is still being applied.',reference_pending:'Reference data is being prepared. Try again shortly.',incompatible_reference:'Choose a comparable reference for this car and track.',reference_unavailable:'The selected reference is no longer available.'};
    this.q('error').textContent=messages[error.code]||error.message||'Coaching is unavailable.';
    if(action&&error.code&&error.status<500)this.actionError=this.q('error').textContent;
+   // A transient failure (no code or 5xx) only reports the error: the last good
+   // state and its controls stay, so the buttons do not flicker between polls.
    this.q('reload').hidden=error.code!=='conflict';
-   if(!error.code||error.status>=500){
-    if(this.state)this.state={version:1,generation:this.state.generation,profile:this.state.profile,viewer:this.state.viewer,revision:this.state.revision,epoch:this.state.epoch,allow_ai:this.state.allow_ai,active:this.state.active,pending:false,phase:'unavailable'};
-    this.q('reference-choice').replaceChildren(new Option('Automatic personal reference',''));this.render();
-   }
   }
  }
  async poll(){
