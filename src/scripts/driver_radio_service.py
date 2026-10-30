@@ -339,7 +339,9 @@ class Service:
                 raise access.RadioError('unauthorized', 'Console request authorization was revoked')
             if preset not in assessment.PRESETS:
                 raise access.RadioError('invalid_body', 'Choose a supported radio preset')
-            if not self._features['engineer'] or self._closed:
+            if not self._enabled or self._closed:
+                raise access.RadioError('feature_disabled', 'Driver radio is not enabled')
+            if not self._features['engineer']:
                 raise access.RadioError('feature_disabled', access.DISABLED['engineer'])
             if binding != self._binding:
                 raise access.RadioError('conflict', 'Radio session changed; reload before requesting')
@@ -409,8 +411,9 @@ class Service:
             if binding != self._binding:
                 raise access.RadioError('conflict', 'Voice session changed; ask again')
             result = dict(answers={'refusal':access.DISABLED[feature]}, fuel={}, pace={}, tyres={}, uncertainties=[])
+            # A hint never evicts queued work: with the queue full it is text only.
             message = self._publish('refusal', 'refusal', 'normal', result, self.clock(),
-                                    queued=self._live, source=feature)
+                                    queued=self._live and len(self._queue) < QUEUE_MAX, source=feature)
             stored = self._messages[message['id']]
             stored['ai_state'] = 'not_requested'
             return self._public(stored)

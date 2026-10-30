@@ -454,6 +454,25 @@ def t_hud_text_follows_message_life():
         assert f.service.hud_text('engineer',message['created_at']) is None, 'a cancelled message leaves the HUD'
 
 
+def t_refusal_never_evicts_queued_work_and_closed_is_not_a_disabled_feature():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'features':features(True,False)});f.poll()
+        queued=[f.request(preset) for preset in assessment.PRESETS]
+        assert f.service.pending_count()==radio.QUEUE_MAX
+        refusal=f.service.refusal('coach',assessment.binding(f.snap))
+        assert refusal['state']=='text_only' and refusal['text']==access.DISABLED['coach']
+        states={m['id']:m['state'] for m in f.service.history()['messages']}
+        assert all(states[m['id']]=='queued' for m in queued),states
+        assert f.service.pending_count()==radio.QUEUE_MAX
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();f.service.close()
+        try:f.request('fuel')
+        except access.RadioError as exc:
+            assert exc.code=='feature_disabled' and str(exc)!=access.DISABLED['engineer'],str(exc)
+        else:raise AssertionError('Expected a closed-service error')
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)
