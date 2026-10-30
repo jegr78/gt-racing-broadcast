@@ -10,6 +10,7 @@ hostname remains the socket's responsibility.
 | Requirement | Path | Positive test | Failure test | Runtime evidence |
 | --- | --- | --- | --- | --- |
 | No reverse DNS at bind | Shared server, relay, Control Center | Real HTTP status response with bound port | Reverse lookup raises immediately | macOS CI startup profile and suite duration |
+| Frozen imports | Binary build and path-loaded UI | Frozen UI serves its identity ping | Missing from-import peer fails the packaging guard | Native binary smoke tests |
 | Preserve bind scope | Shared server | Loopback and explicit wildcard keep their socket addresses | No implicit wildcard substitution | Real local listeners |
 | Preserve bind failure | Shared server | Ephemeral port assigned | Occupied listener raises EADDRINUSE | Two listeners contend for one port |
 | Preserve HTTP errors and teardown | Shared server | 200 response and listener shutdown | 404 response retains error body | Real local requests and joined worker |
@@ -26,3 +27,6 @@ The HTTP server's `server_name` contains its numeric bound address. The operatin
 system still owns bind errors and address resolution. Request routing, listener
 scope and authentication do not depend on reverse DNS. The stdlib server remains
 unmodified for other consumers in the process.
+
+Frozen builds declare `http_server` as a hidden import. The path-loaded UI
+packaging guard checks both `import` and `from ... import` dependencies.
