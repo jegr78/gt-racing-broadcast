@@ -315,8 +315,9 @@ class Enricher:
             error_key='audio_error' if kind=='audio' else 'ai_error'
             try:
                 settings=self.service.settings.read()
-                # Per-source agents come later; the AI Race Engineer's agent serves both.
-                config=dict(settings['providers'],agent=settings['features']['engineer']['agent'])
+                # Each feature explains its own messages with its own agent.
+                feature=settings['features'].get(message.get('source')) or {}
+                config=dict(settings['providers'],agent=feature.get('agent'))
                 if kind=='audio':
                     if not config['speech'] or not self.service.refresh()['voice_enabled']:
                         raise ProviderError('unconfigured')
