@@ -1,12 +1,13 @@
 """A local foreign port holder must never receive provider credentials."""
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
 import sys
 import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src/scripts"))
+from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 import audience_proxy as proxy
 
 

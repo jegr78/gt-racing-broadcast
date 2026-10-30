@@ -67,7 +67,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
 """
 
 import argparse, collections, csv, datetime, hashlib, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode, urljoin
 from urllib.request import Request, urlopen
 
@@ -121,6 +121,8 @@ class _RelayObsFacade:
     def close(self):
         self._shot.close()
         self._ctrl.close()
+
+from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
 import chat_admin  # required (ChatStore); src/scripts is on sys.path via the block above
 import broadcast_chat  # read-only YouTube broadcast-chat reader (#294); pure parsers

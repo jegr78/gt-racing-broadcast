@@ -5,13 +5,14 @@ CI with no real Sheet, cookies, OBS or Tailscale; --real-league NAME is local-on
 
 Maintainer tool, not shipped. Stdlib only."""
 import argparse, contextlib, importlib.util, json, os, shutil, signal, socket, subprocess, sys, tempfile, threading, time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import e2e_checks as E
 import e2e_visual as V
+from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 import console_auth
 import gt7_data
 import e2e_safety

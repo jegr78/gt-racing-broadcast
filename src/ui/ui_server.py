@@ -6,7 +6,8 @@ bind and auth seams.
 Spec: docs/superpowers/specs/2026-06-07-control-center-design.md."""
 import base64
 import json, os, queue, shutil, tempfile, threading, time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 import logsetup   # re-open-per-poll log tailing (scripts/ on sys.path via racecast)
