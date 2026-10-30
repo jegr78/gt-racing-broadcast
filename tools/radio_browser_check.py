@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def check(browser,outdir,shots=None):
     sys.path.insert(0,str(ROOT/'tests'))
-    from test_driver_radio_ui import RadioFixture,console
+    from test_driver_radio_ui import RadioFixture,console,switch
     import e2e_visual as V
     out=Path(outdir);out.mkdir(parents=True,exist_ok=True)
     results=[]
@@ -106,8 +106,7 @@ def check(browser,outdir,shots=None):
             first.set_viewport_size({'width':1440,'height':1000})
             menu=context.new_page();menu.goto(f.url+'/console');menu.get_by_text('Driver radio',exact=True).wait_for()
             shot(menu,'driver-radio-console',wiki='console-driver-radio-launcher.png')
-            # A Director receives radio only through a separate explicit assignment.
-            config=f.f.access.read();f.f.access.update({'expected':config['revision'],'drivers':['driver','director']})
+            # Any signed-in Console subject, here a Director, uses the enabled AI Race Engineer.
             f.f.request('fuel');f.enricher.step('audio')
             panel_context=browser.new_context(viewport={'width':1440,'height':1000})
             panel_context.route('https://fonts.googleapis.com/**',lambda route:route.fulfill(status=200,content_type='text/css',body='/* Offline fixture. */'))
@@ -123,7 +122,7 @@ def check(browser,outdir,shots=None):
             cc=context.new_page();cc.goto(f.cc_url)
             cc.wait_for_function("document.body.classList.contains('tpl-pov')")
             cc.evaluate("showView('telemetry')")
-            cc.locator('#driver-radio-admin').locator('#enabled').wait_for(state='visible')
+            cc.locator('#driver-radio-admin').locator('#ai-engineer-enabled').wait_for(state='visible')
             cc.wait_for_function("document.getElementById('ver-note').textContent==='dev build'")
             assert cc.locator('#driver-radio-admin').locator('#voice-enabled').is_checked()
             cc.locator('#driver-radio-admin').scroll_into_view_if_needed()
@@ -141,7 +140,7 @@ def check(browser,outdir,shots=None):
                     return response;
                 };""")
             first.wait_for_function("window.__radioReplies===4&&typeof window.__releaseRadioPoll==='function'")
-            config=f.f.access.read();f.f.access.update({'expected':config['revision'],'drivers':['director']})
+            switch(f,coach=True)  # The producer switches the AI Race Engineer off.
             a.locator('[data-preset=fuel]').click()
             first.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('content').hidden")
             first.evaluate('window.__releaseRadioPoll();window.fetch=window.__realRadioFetch')

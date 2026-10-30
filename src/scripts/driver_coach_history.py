@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -18,6 +19,10 @@ MAX_BYTES=512*1024
 MAX_RECORDS=32
 RETENTION_S=90*86400
 _LOCK=threading.RLock()
+LOG=logging.getLogger('racecast.relay.coach')
+# One Solo POV profile has one driver: every view (Control Center, Console,
+# voice) acts on the same training and history under this owner subject.
+PROFILE_OWNER_SUBJECT='local:producer'
 _ID=re.compile(r'[0-9a-f]{32}')
 _FIELDS={'id','training_id','generation','started_at','updated_at','ended_at','status','reason',
          'context','objective','baseline','reference','focus','worked_focus','progress','latest','source_ids',
@@ -144,7 +149,7 @@ class Store:
 
     def _path(self,owner):
         if (not calibration.valid_owner(owner) or owner['profile']!=self.profile_root.name
-                or not (owner['subject']=='local:producer' or owner['subject'].startswith('console:') and len(owner['subject'])>8)):
+                or not (owner['subject']==PROFILE_OWNER_SUBJECT or owner['subject'].startswith('console:') and len(owner['subject'])>8)):
             _error('invalid_owner')
         name=hashlib.sha256(json.dumps(owner,sort_keys=True).encode()).hexdigest()
         return self.directory/(name+'.json')
@@ -313,3 +318,79 @@ def suggest(document,state,current):
         return dict(id=record['id'],skill=focus['skill'],text='Previous training suggests '+focus['skill']+
                     '. Apply only to this fresh calibration; historical times do not become its baseline.')
     return None
+
+
+def _order(record):
+    ended=record['ended_at'] if record['ended_at'] is not None else record['updated_at']
+    return (ended,record['started_at'])
+
+
+def merge_profile_histories(profile_root):
+    """Fold every other owner's journal of one profile into the profile driver's journal.
+
+    One Solo POV profile has one driver, so its trainings share one history. Older
+    builds kept one file per Console subject; this folds them in once at coach start.
+    An unreadable file is skipped and kept on disk. Returns the number of entries moved.
+    """
+    store=Store(profile_root)
+    owner=dict(profile=store.profile_root.name,subject=PROFILE_OWNER_SUBJECT)
+    try:
+        if store.profile_root.is_symlink() or store.directory.is_symlink() or not store.directory.is_dir():
+            return 0
+        target=store._path(owner)
+        sources=sorted(path for path in store.directory.glob('*.json') if path.name!=target.name)
+    except (OSError,calibration.CoachError):
+        LOG.warning('coach history merge skipped: the history directory is unreadable')
+        return 0
+    if not sources:
+        return 0
+    loaded=[]
+    for path in sources:
+        try:
+            with gt7_context._file_lock(str(path)):
+                store._check_path(path)
+                with open(path,'rb') as stream:raw=json.loads(stream.read(MAX_BYTES+1))
+                theirs=raw.get('owner') if isinstance(raw,dict) else None
+                if (not isinstance(theirs,dict) or store._path(theirs)!=path
+                        or theirs['subject']==PROFILE_OWNER_SUBJECT):_error()
+                loaded.append((path,store._load(path,theirs)))
+        except (calibration.CoachError,OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError):
+            LOG.warning('coach history merge skipped one unreadable owner journal; it stays on disk')
+    if not loaded:
+        return 0
+    moved=0
+    try:
+        with _LOCK:
+            store._prepare()
+            with gt7_context._file_lock(str(target)):
+                value=store._load(target,owner);before=copy.deepcopy(value)
+                cutoff=store.clock()-RETENTION_S
+                deleted=list(value['deleted'])
+                for _path,other in loaded:deleted.extend(other['deleted'])
+                deleted=list(dict.fromkeys(deleted))[-MAX_RECORDS*2:]
+                hidden=set(deleted)
+                merged={r['id']:r for r in value['entries']}
+                for _path,other in loaded:
+                    for record in other['entries']:
+                        if record['id'] in hidden or record['training_id'] in hidden:continue
+                        known=merged.get(record['id'])
+                        if known is None or record['updated_at']>known['updated_at']:
+                            merged[record['id']]=copy.deepcopy(record)
+                kept=sorted((r for r in merged.values() if r['updated_at']>=cutoff),key=_order,reverse=True)[:MAX_RECORDS]
+                own={r['id'] for r in value['entries']}
+                moved=sum(1 for r in kept if r['id'] not in own)
+                value.update(entries=kept,deleted=deleted)
+                if value!=before:
+                    value['revision']+=1;store._write(target,value)
+    except (calibration.CoachError,OSError,ValueError,TypeError,KeyError,RecursionError,OverflowError):
+        LOG.warning('coach history merge failed: the profile journal is unreadable; owner journals stay on disk')
+        return 0
+    for path,_other in loaded:
+        try:
+            path.unlink()
+        except OSError:
+            LOG.warning('coach history merge could not remove a merged owner journal')
+            continue
+        try:os.unlink(str(path)+'.lock')
+        except OSError:pass  # The advisory lock file is harmless if another reader still holds it.
+    return moved

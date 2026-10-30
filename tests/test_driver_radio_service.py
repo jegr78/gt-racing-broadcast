@@ -12,12 +12,16 @@ import driver_radio_service as radio
 from test_driver_radio_assessment import snapshot
 
 
+def features(engineer=False,coach=False,agent=None):
+    return {'engineer':{'enabled':engineer,'agent':agent},'coach':{'enabled':coach,'agent':agent}}
+
+
 class Fixture:
     def __init__(self,d, snap=None):
         self.at=100.0
         self.snap=snap or snapshot((90,90,90,90,90,90))
         self.access=access.Store(d,True)
-        self.access.update({'expected':0,'enabled':True,'drivers':['driver'],
+        self.access.update({'expected':0,'features':features(True,True),
                             'voice':{'enabled':True,'microphone':None,'input_language':'en'}})
         self.session=access.Session()
         self.service=radio.Service(self.access,self.session,lambda:copy.deepcopy(self.snap),clock=lambda:self.at)
@@ -132,7 +136,7 @@ def t_context_pause_revocation_and_late_attachment():
         assert not f.service.history()['messages']
         assert not f.service.attach(message['id'],message['epoch'],{'explanation':'Obsolete'})
         error(lambda:f.service.request('fuel',{'generation':'old'}),'conflict')
-        f.access.update({'expected':1,'drivers':[]});f.poll()
+        f.access.update({'expected':1,'features':features()});f.poll()
         assert not f.service.history()['messages']
         assert f.service.take_playback() is None
 
@@ -234,7 +238,7 @@ def t_native_playback_requires_explicit_profile_voice_enablement():
         f.access.update({'expected':1,'voice':{'enabled':False,'microphone':None,'input_language':'en'}})
         f.poll();message=f.request()
         assert message['text'] and f.service.take_playback() is None
-        f.access.update({'expected':2,'enabled':False,'voice':{'enabled':True,'microphone':None,'input_language':'en'}})
+        f.access.update({'expected':2,'features':features(),'voice':{'enabled':True,'microphone':None,'input_language':'en'}})
         assert not f.poll()['enabled']
         error(f.request,'feature_disabled')
 
@@ -284,7 +288,7 @@ def t_existing_profile_settings_migrate_limits_and_invalid_limits_never_write():
         store.update({'expected':1,'limits':{'fuel_warning_laps':3,'fuel_urgent_laps':1}})
         assert store.read()['limits']['fuel_warning_laps']==3
         error(lambda:store.update({'expected':2,'limits':{'fuel_warning_laps':1,'fuel_urgent_laps':2}}),'invalid_settings')
-        assert store.read()['revision']==2 and store.read()['drivers']==['driver']
+        assert store.read()['revision']==2 and store.read()['features']==features(True,True)
 
 
 def t_urgent_work_precedes_queued_routine_answers():
@@ -342,17 +346,17 @@ def t_signed_http_clients_share_messages_and_revalidate_access():
                 status,doc,cache=request(path,method,payload,headers=headers)
                 assert status==code and doc['error']['code']==want and cache=='no-store',(status,doc)
             assert request(subject=None)[0]==401
-            assert request(subject='director')[1]['error']['code']=='forbidden'
+            assert request(subject='director')[0]==200, 'any signed-in Console subject may use the engineer'
             playing=f.service.take_playback()
             m.console_admin.bump_version(versions,'driver')
             f.service.refresh(force=True)
             assert playing.cancelled.is_set(), 'queued HTTP request must observe token revocation'
             assert request('messages')[0]==401
             f.service.finish_playback(playing.id)
-            m.console_admin.write_versions(versions,{})  # Restore fixture identity for the independent assignment check.
-            f.access.update({'expected':1,'drivers':[]})
+            m.console_admin.write_versions(versions,{})  # Restore fixture identity for the independent feature check.
+            f.access.update({'expected':1,'features':features(coach=True)})
             status,doc,_=request('messages')
-            assert status==403 and doc['error']['code']=='forbidden'
+            assert status==403 and doc['error']['code']=='feature_disabled'
             assert f.service.history()['messages']==[]
         finally:server.shutdown();server.server_close();f.service.close()
 
@@ -378,6 +382,19 @@ def t_automatic_urgent_speech_is_brief_while_presets_keep_complete_measurements(
         assert len(urgent['text'].split())<=25
         f.at+=3;requested=f.request('fuel')
         assert 'Consumption ' in requested['text']
+
+
+def t_coach_messages_reach_every_console_view():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll()
+        owner={'profile':Path(d).name,'subject':'local:producer'}
+        published=f.service.publish_coach('Brake a little later into turn one.',{},owner,'training-token',
+                                          authorize=lambda:True,ready=lambda:True)
+        assert published is not None
+        for requester in (None,'alice','bob'):
+            coach=[m for m in f.service.history(requester=requester)['messages'] if m['kind']=='coach']
+            assert [m['id'] for m in coach]==[published['id']],requester
+            assert all('_coach_owner' not in m for m in coach)
 
 
 if __name__=='__main__':

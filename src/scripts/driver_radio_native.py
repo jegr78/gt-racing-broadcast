@@ -126,7 +126,7 @@ class Supervisor:
     def _local_training_rights(self):
         settings = self.service.settings.read()
         actor = getattr(self.service, 'coach', None)
-        return (self.service.settings.available and settings['enabled'] is True and actor is not None
+        return (self.service.settings.available and settings['features']['coach']['enabled'] is True and actor is not None
                 and actor.profile == self.service.settings.path.parent.name)
 
     def _input_authorized(self, signature):
@@ -147,7 +147,7 @@ class Supervisor:
                                        training_authorize=self._local_training_rights)
         if result is None:
             return False
-        owner = dict(profile=actor.profile, subject='local:producer')
+        owner = dict(profile=actor.profile, subject=coaching.orchestration.PROFILE_OWNER_SUBJECT)
         def current():
             if not self._input_authorized(signature):
                 return False
@@ -166,7 +166,8 @@ class Supervisor:
             settings,state=self._radio_read(lambda:(self.service.settings.read(),self.service.refresh()))
             voice=settings['voice'];native=config.settings(settings.get('native'))
             signature=(settings['revision'],state['binding'],state['epoch'])
-            enabled=settings['enabled'] and self.service.settings.available and voice['enabled']
+            enabled=(any(f['enabled'] for f in settings['features'].values())
+                     and self.service.settings.available and voice['enabled'])
             if signature!=self._signature:
                 old_binding=self._binding
                 self._stop_capture();self._stop_output('text_only')

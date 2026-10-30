@@ -1,26 +1,26 @@
 # Private coaching history and debrief
 
-History belongs to the exact profile and server-derived `local:producer` or
-`console:<verified subject>` identity. Opening a desk, Engineer access or a shared
-recording grant does not select another driver's history. Display names and raw
-owner selectors are never accepted from a browser.
+History belongs to the exact profile and its server-derived `local:producer`
+owner (see "One driver per profile" below). Opening a desk, Engineer access or a
+shared recording grant does not select another profile's history. Display names
+and raw owner selectors are never accepted from a browser.
 
 | Requirement | Production path | Positive test | Failure test | Runtime evidence |
 |---|---|---|---|---|
-| Private stable identity | Profile-local hashed journal selector | Local and full-length Console owners retain their own sessions | Foreign profile/owner, malformed selector, forged HTTP owner | Signed HTTP owner matrix |
+| Private stable identity | Profile-local hashed journal selector | Control Center and every Console view share the profile's one history | Foreign profile/owner, malformed selector, forged HTTP owner | Signed HTTP owner matrix |
 | Compact provenance | Strict journal projection from accepted actor evidence | Original baseline, worked focus, latest observed change and source IDs survive without a recording | Trace/audio/transcript/provider fields never enter the journal | Real synthetic lap checkpoint and JSON inspection |
 | Honest debrief | Completed/interrupted/context-invalidated segment summary | Stopped training retains provisional versus repeated improvement and unknown cause | A crash cannot invent a completed session or a causal result | Restart and session-end integration |
 | Current reuse | Compatible current context plus explicit skill action | A prior skill may be suggested after current personal calibration | No historic timing becomes a new baseline; changed car/track/definition/grant cannot authorize reuse | Fresh-session replay |
-| Bounded private storage | Atomic bounded JSON, advisory lock, private directory | At most 32 recent segments per owner, expired records pruned on access | Symlink/path/corruption/oversize/conflicting edits fail closed | Actual temporary filesystem, OS CI |
+| Bounded private storage | Atomic bounded JSON, advisory lock, private directory | At most 32 recent segments per profile, expired records pruned on access | Symlink/path/corruption/oversize/conflicting edits fail closed | Actual temporary filesystem, OS CI |
 | Responsive controls | Existing actor worker performs journal IO outside state locks | Stop acknowledges and cancels speech while persistence is blocked | Late checkpoints cannot reactivate stopped/deleted history | Blocking IO integration |
 | Retention and deletion | Owner-only revisioned deletion and bounded tombstones | Delete one/all; later checkpoints cannot restore deleted active training | Wrong owner/revision and delayed read after revocation | HTTP and browser concurrency |
-| Private views | Shared detailed driver/producer component | Own history and end debrief are readable while another driver is training | Late responses cannot restore previous identity/deleted private DOM | Desktop/tablet/phone browser evidence |
+| Private views | Shared detailed driver/producer component | The profile history and end debrief are readable in every view during training | Late responses cannot restore previous identity/deleted private DOM | Desktop/tablet/phone browser evidence |
 
 The journal stores compact structured measurements and provenance, never raw
 traces, audio, transcripts, credentials or arbitrary agent output. A training may
 contain several context/calibration segments. Each segment preserves its own
 baseline and definition; history never compares measurements across segments.
-The limit is 32 segments and 90 days per owner, pruned on that owner's reads and
+The limit is 32 segments and 90 days per profile, pruned on reads and
 writes. Explicit deletion is available independently of recording retention.
 Deleting an active segment also suppresses further retention for that training,
 including later context segments, until an explicit fresh Start. At most eight
@@ -64,3 +64,21 @@ it again after the final archive and driver authorization I/O. Resolve that fina
 verdict before taking the last live snapshot; history rendering itself uses only
 cached verdicts. A context/definition edit during a slow grant read cannot preserve
 old focus details merely because the recording path and raw grant still match.
+
+## One driver per profile
+
+A Solo POV profile has one history: the relay always reads and writes the
+`local:producer` journal of the profile, for the Control Center and every Console
+view alike. A deletion from any view changes that one history, guarded by the same
+history revision.
+
+Builds before this change kept one journal per verified Console subject.
+`driver_coach_history.merge_profile_histories(profile_root)` folds those into the
+profile journal once, when the relay starts the coach. It merges entries and
+tombstones, deduplicates by `id` (the later `updated_at` wins), keeps deleted
+trainings deleted, orders entries newest first by `ended_at` then `started_at`,
+and applies the 32-segment and 90-day bounds. Merged files are removed. A file that
+cannot be read or validated is skipped, kept on disk and logged at WARNING without
+its path. The merge returns the number of entries moved and is idempotent: a second
+run finds no other journal and returns 0.
+

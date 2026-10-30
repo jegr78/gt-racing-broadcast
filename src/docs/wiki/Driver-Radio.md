@@ -10,16 +10,21 @@ and a private debrief. The Director card and driver desk share the same radio la
 ## Enable access
 
 Start the relay for the Solo POV profile, then open **Telemetry** in the Control
-Center. Under **Driver radio setup**, enable driver radio and enter the driver's
-verified Console identity. The identity appears beside their Console sign-in.
-It uses lowercase letters, digits and hyphens; saving folds case and surrounding
-spaces the way Console writes it (**JeGr** is saved as **jegr**) and names an entry
-that still is not a Console identity. Save the settings. Director and Race Engineer roles do not grant radio access.
-The existing Engineer archive and producer permissions remain separate.
+Center. Under **Driver radio setup**, tick **Enable AI Race Engineer**, **Enable AI
+Coach** or both, and save. The two switches are independent: the AI Race Engineer
+covers the radio presets, setup and service declarations, the AI Coach covers
+personal training. The **Optional live AI** agent applies to both.
+
+There is no driver list. Anyone signed in to this profile's Console can use an
+enabled feature, whatever their Crew role (commentators, Race Control, Race
+Engineer desk users and Discord sign-ins included). Console sign-in is still
+required for every driver radio page and request. Switching a feature off refuses
+its next request. The existing Engineer archive and producer permissions remain
+separate.
 
 ![Private training history and producer radio settings](images/cc-telemetry.png)
 
-The driver's Console now contains **Driver radio**. A direct Director Panel visit
+While either feature is on, every signed-in Console shows **Driver radio**. A direct Director Panel visit
 uses the same Console identity. Sign in through Console, then choose **Connect
 driver radio** in the Solo POV card. Existing Director controls keep working when
 radio access is unavailable.
@@ -43,7 +48,7 @@ Pace comparisons use completed eligible laps and show their sample basis.
 
 If another view changes the setup while you edit it, the save is refused. Reload
 the current form, review its values and enter your changes again. Session/context
-changes clear obsolete work. Revoking access removes the open view's radio data.
+changes clear obsolete work. Switching the AI Race Engineer off removes the open view's radio data.
 
 ## Start and steer personal training
 
@@ -82,17 +87,18 @@ original provenance and distinguishes provisional results from repeated measured
 improvement. Cause remains unknown. A failed final write or interrupted relay
 produces a partial summary from the last stored checkpoint.
 
-History is separate for each profile and verified Console identity. Local Control
-Center/native training uses the separate local producer identity. Another driver's
-active training does not reveal their focus or history. For voice-steered local
-training, start from native voice or Control Center; native commands cannot take
-over a signed Console driver's training.
+A Solo POV profile has one driver, so it has one training and one history.
+Control Center, native voice and every signed-in Console view show the same
+active training and the same history, and any of them can stop it. Histories
+that older builds kept per Console identity are merged into the profile's
+history once, when the relay starts the coach.
 
-The limit is 32 recent segments and 90 days per identity, pruned on that identity's
-reads and writes. Raw audio, traces and transcripts are not kept in this journal,
-and keeping a recording is not required. **Delete this summary** and **Delete all
-private history** affect only your history. Deleting active training also prevents
-its later checkpoints from restoring that history until an explicit fresh Start.
+The limit is 32 recent segments and 90 days per profile, pruned on reads and
+writes. Raw audio, traces and transcripts are not kept in this journal, and
+keeping a recording is not required. **Delete this summary** and **Delete all
+private history** affect the profile's history in every view. Deleting active
+training also prevents its later checkpoints from restoring that history until
+an explicit fresh Start.
 
 A previous skill may be suggested after fresh accepted calibration in a known
 compatible car, track, definition and conditions. **Apply suggested skill** is

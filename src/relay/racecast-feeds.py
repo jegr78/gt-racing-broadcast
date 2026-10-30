@@ -11669,6 +11669,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  event_documents_source=None):
     radio_access = (driver_radio_access.Store(engineer_access.root, engineer_access.available)
                     if engineer_access is not None else None)
+    def radio_page_access():
+        # The driver page hosts both AI features: either switch opens it. Callers
+        # have already verified the Console token; there is no per-driver grant.
+        for feature in driver_radio_access.FEATURES:
+            try:
+                return radio_access.authorize(feature)
+            except driver_radio_access.RadioError as exc:
+                if exc.code != 'feature_disabled':
+                    raise
+        raise driver_radio_access.RadioError(
+            'feature_disabled', 'Enable the AI Race Engineer or the AI Coach for this profile')
     def radio_source():
         engine = getattr(telemetry_store, "engineer", None)
         return engine.snapshot() if engine is not None else {}
@@ -11815,16 +11826,16 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 token = self._cockpit_token() if not admin else None
                 def authorize():
                     if admin:
-                        config = radio_access.read()
-                        if not config['enabled']:
-                            raise driver_radio_access.RadioError('feature_disabled', 'Enable driver radio for this profile to use coaching')
-                        return radio_access.available
+                        return bool(radio_access.authorize('coach'))
                     versions = console_admin.load_versions(console_versions_path) if console_versions_path else {}
                     return (console_auth.verify_token(console_secret, token, versions) == subject
-                            and bool(radio_access.authorize(subject)))
+                            and bool(radio_access.authorize('coach')))
                 if authorize() is not True:
-                    return self._radio_error('forbidden', 'Explicit driver coaching access is required', 403)
-                owner = dict(profile=profile, subject='local:producer' if admin else 'console:'+subject)
+                    return self._radio_error('forbidden', 'Coaching requires a current Console sign-in', 403)
+                # One driver per Solo POV profile: every view shares one training
+                # and one history. The viewer stays the verified requester.
+                owner = dict(profile=profile, subject=driver_coach_service.PROFILE_OWNER_SUBJECT)
+                viewer = 'local:producer' if admin else 'console:'+subject
                 query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
                 if set(query)-{'t'} or len(query.get('t', [])) > 1:
                     return self._radio_error('invalid_query', 'Unknown coaching query', 400)
@@ -11848,7 +11859,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         if body.get('profile') != profile:
                             return self._radio_error('profile_changed', 'The coaching profile changed; reload', 409)
                         body = {k:v for k,v in body.items() if k != 'profile'}
-                    if body.get('action') != 'stop' and not _coach_controls_rl.allow(owner['subject']):
+                    if body.get('action') != 'stop' and not _coach_controls_rl.allow(viewer):
                         return self._radio_error('rate_limited', 'Too many coaching controls; retry later', 429)
                     result = driver_coach_controls.command(actor, owner, body, authorize, resolve=references.resolve)
                 else:
@@ -11918,7 +11929,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     result['history']=driver_coach_history.expose(history_doc,fresh,driver_coach_service._facts,checked_reference)
                     result['history_suggestion']=driver_coach_history.suggest(result['history'],result,fresh.get('current') or {})
                 result['history_error']=history_error
-                result.update(profile=profile, viewer=owner['subject'])
+                result.update(profile=profile, viewer=viewer)
                 if admin:result['protocol'] = 'racecast-driver-radio-admin-v1'
                 return self._send(result, no_store=True, compact=True)
             except (driver_coach_calibration.CoachError, driver_radio_access.RadioError, race_engineer_access.AccessError) as error:
@@ -11958,7 +11969,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     else:
                         if self._console_subject() != subject:
                             return self._radio_error("unauthorized", "Console identity changed; sign in again", 401)
-                        access = radio_access.authorize(subject)
+                        access = radio_access.authorize('engineer')
                         if route == "access":
                             result = access
                         elif route == "native":
@@ -11979,7 +11990,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             def still_authorized():
                                 versions = console_admin.load_versions(console_versions_path) if console_versions_path else {}
                                 return (console_auth.verify_token(console_secret, token, versions) == subject
-                                        and bool(radio_access.authorize(subject)))
+                                        and bool(radio_access.authorize('engineer')))
                             result = {"message": radio_service.request(body["preset"], body["binding"],
                                       requester=subject, authorization=still_authorized)}
                         else:
@@ -12073,7 +12084,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             body = body.replace(b"__RC_OAUTH__", oauth_flag)
             body = body.replace(b"__RC_VERSION__", (app_version or "dev").encode())
             try:
-                radio_allowed = bool(radio_access and radio_access.authorize(self._console_subject()))
+                radio_allowed = bool(radio_access and self._console_subject() and radio_page_access())
             except (driver_radio_access.RadioError, OSError, ValueError):
                 radio_allowed = False
             body = body.replace(b"__RC_RADIO_ACCESS__", b"1" if radio_allowed else b"0")
@@ -12597,11 +12608,16 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             has_step_up = bool(presented) and console_auth.secret_matches(presented, console_secret)
             # /console-only: identity introspection for the launcher (any auth).
             if sub == ["whoami"]:
-                try:
-                    radio_allowed = bool(radio_access and radio_access.authorize(subject))
-                except (driver_radio_access.RadioError, OSError, ValueError):
-                    radio_allowed = False
-                self._send({"subject": subject, "roles": sorted(roles), "driver_radio": radio_allowed})
+                features = {}
+                for feature in driver_radio_access.FEATURES:
+                    try:
+                        features[feature] = bool(radio_access and radio_access.enabled(feature))
+                    except (driver_radio_access.RadioError, OSError, ValueError):
+                        features[feature] = False
+                # The page opens for either switch; each view re-checks its own one.
+                self._send({"subject": subject, "roles": sorted(roles),
+                            "driver_radio": any(features.values()),
+                            "ai_engineer": features["engineer"], "ai_coach": features["coach"]})
                 return None
             # Read-only broadcast-chat mirror (#294): any authenticated /console
             # subject (commentator, director, race_control) may read it. Funnelled
@@ -12662,7 +12678,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if radio_access is None:
                         return self._radio_error("source_unavailable", "Driver radio is unavailable for this profile", 503)
                     try:
-                        radio_access.authorize(subject)
+                        radio_page_access()
                     except driver_radio_access.RadioError as exc:
                         return self._radio_error(exc.code, str(exc), 403)
                     page = os.path.join(radio_page_dir, "driver-radio.html")
@@ -14287,9 +14303,11 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     radio = driver_radio_access.Store(access.root, access.available)
 
     def ingestion_enabled():
-        for feature in (access, radio):
+        checks = [lambda: access.available and access.read()["enabled"]]
+        checks += [lambda f=f: radio.enabled(f) for f in driver_radio_access.FEATURES]
+        for check in checks:
             try:
-                if feature.available and feature.read()["enabled"]:
+                if check():
                     return True
             except (race_engineer_access.AccessError, driver_radio_access.RadioError):
                 # One corrupt feature's settings must not disable the other.

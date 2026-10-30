@@ -658,7 +658,7 @@ def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, ti
         time.sleep(.1)
     assert advanced, "Replay did not advance HUD, status and signed Engineer"
     import e2e_coach
-    coaching=e2e_coach.check(base,runtime.name,token,console_auth.streamer_key('Engineer'),timeout)
+    coaching=e2e_coach.check(base,runtime.name,token,timeout)
     assert coaching['status']=='pass' and coaching['scored_laps']==0
     print(f"  [PASS] source/frozen private coach controls, replay exclusion and journal debrief ({coaching['elapsed_s']:.3f}s)")
     status, stopped = E._get_json(base + "/telemetry/replay/stop")

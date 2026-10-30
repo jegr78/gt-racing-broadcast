@@ -85,7 +85,7 @@ Blocking process startup or termination never holds the radio access/state locks
 Admission rechecks current consent and the radio epoch after process I/O, including
 control changes received while a previous worker was stopping.
 
-`GET/POST /console/driver-radio/native` requires the current explicit driver grant.
+`GET/POST /console/driver-radio/native` requires a current Console sign-in and the AI Race Engineer switch.
 Controls are revisioned and bound to the current radio context. Local producer
 administration uses `/driver-radio/admin` and `/driver-radio/admin/native` with the
 existing loopback/Host/Origin boundary. Persistent enablement and provider selection

@@ -7,7 +7,7 @@ import driver_radio_admin
 import e2e_checks as http
 
 
-def check(base,profile,token,subject,timeout=20):
+def check(base,profile,token,timeout=20):
     """Exercise source/frozen operation during synthetic recording replay, without audio."""
     location=urlparse(base)
     if location.scheme!='http' or location.hostname!='127.0.0.1' or not location.port:
@@ -17,12 +17,13 @@ def check(base,profile,token,subject,timeout=20):
     url=base+'/console/driver-radio/coach?'+urlencode({'t':token})
     status,raw,_=http.http_request(url)
     denied=json.loads(raw)
-    assert status==403 and denied['error']['code'] in ('forbidden','feature_disabled'), 'Crew roles alone granted driver coaching'
+    assert status==403 and denied['error']['code']=='feature_disabled', 'Coaching answered before the AI Coach was switched on'
     settings=client.request()
-    changed=client.request(body=dict(expected=settings['revision'],enabled=True,drivers=[subject],
+    on=dict(enabled=True,agent=None)
+    changed=client.request(body=dict(expected=settings['revision'],features=dict(engineer=on,coach=on),
                                     voice=dict(settings['voice'],enabled=False),
-                                    providers=dict(settings['providers'],speech=False,agent=None)))
-    assert changed['enabled'] and not changed['voice']['enabled'] and not changed['providers']['speech']
+                                    providers=dict(settings['providers'],speech=False)))
+    assert changed['features']['coach']['enabled'] and not changed['voice']['enabled'] and not changed['providers']['speech']
     first=client.request(coach=True)
     assert not first['active'] and not first['history']['entries']
     started=client.request(coach=True,body=dict(expected=first['revision'],action='start',options=dict(allow_ai=False)))
@@ -39,8 +40,10 @@ def check(base,profile,token,subject,timeout=20):
     row=current['history']['entries'][0]
     assert row['baseline'] is None and row['focus'] is None and row['latest'] is None and not row['source_ids']
     status,raw,_=http.http_request(url);remote=json.loads(raw)
-    assert status==200 and remote['phase']=='busy' and not remote['history']['entries']
-    assert 'focus' not in remote and 'latest' not in remote,'Driver namespace received local producer coaching'
+    # One driver per Solo POV profile: the Console shows the same training and history.
+    assert status==200 and remote['active'] and remote['epoch']==current['epoch'],'The Console missed the profile training'
+    assert [r['id'] for r in remote['history']['entries']]==[r['id'] for r in current['history']['entries']]
+    assert remote['focus'] is None and remote['latest'] is None,'Replay produced Console coaching'
     stopped=client.request(coach=True,body=dict(expected=0,action='stop',options={}))
     assert not stopped['active']
     end=time.monotonic()+timeout
