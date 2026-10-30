@@ -3967,9 +3967,11 @@ await tick();
 answer('/tracks', tracks);
 await tick();
 const shown = [$('tm-settrack').hidden, $('tm-settrack-session').textContent].join(' ');
-$('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
-tmLearn();
-await tick();
+if (!$('tm-settrack').hidden) {
+  $('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+  tmLearn();
+  await tick();
+}
 const sent = body;
 answer('/learn', {ok: false, error: 'stop'});
 await tick();
