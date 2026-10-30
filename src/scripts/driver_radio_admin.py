@@ -7,15 +7,19 @@ MAX_COACH_RESPONSE=1024*1024  # 32 compact journal records, debriefs and the cur
 
 
 class AdminError(ValueError):
-    def __init__(self,code):
+    """`reason` is the relay's own message for `code`: it names what to fix (which
+    identity is invalid, that driver radio is off), so it wins when it is one short line."""
+    def __init__(self,code,reason=None):
         self.code=code
         messages={'conflict':'Radio settings changed; reload the current form',
                   'invalid_settings':'Invalid radio settings', 'invalid_body':'Invalid radio command',
                   'source_unavailable':'Driver radio requires a Solo POV telemetry profile',
                   'settings_unavailable':'Radio settings are unreadable; repair them locally',
                   'profile_changed':'Active profile changed; reload the current form',
-                  'foreign_origin':'Radio administration requires the local server origin'}
-        super().__init__(messages.get(code,'Radio administration unavailable'))
+                  'foreign_origin':'Radio administration requires the local server origin',
+                  'feature_disabled':'Enable driver radio for this profile first'}
+        shown=isinstance(reason,str) and 0<len(reason)<=200 and reason.isprintable()
+        super().__init__(reason if shown else messages.get(code,'Radio administration unavailable'))
 
 
 class Client:
@@ -37,7 +41,7 @@ class Client:
             raise ValueError('Radio relay unavailable; start the relay for this profile') from None
         if isinstance(result,dict) and isinstance(result.get('error'),dict):
             code=result['error'].get('code')
-            raise AdminError(code if isinstance(code,str) else 'unavailable')
+            raise AdminError(code if isinstance(code,str) else 'unavailable',result['error'].get('message'))
         if not isinstance(result,dict) or result.get('profile')!=self.profile or result.get('protocol')!=PROTOCOL:
             raise ValueError('The local relay does not match this profile and radio protocol')
         return result
