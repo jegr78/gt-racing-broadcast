@@ -152,9 +152,9 @@ class CoachView {
    const messages={conflict:'Training changed. Reload the current values before applying your draft.',busy:'A training change is still being applied.',reference_pending:'Reference data is being prepared. Try again shortly.',incompatible_reference:'Choose a comparable reference for this car and track.',reference_unavailable:'The selected reference is no longer available.'};
    this.q('error').textContent=messages[error.code]||error.message||'Coaching is unavailable.';
    if(action&&error.code&&error.status<500)this.actionError=this.q('error').textContent;
-   this.q('reload').hidden=error.code!=='conflict';
    // A transient failure (no code or 5xx) only reports the error: the last good
    // state and its controls stay, so the buttons do not flicker between polls.
+   this.q('reload').hidden=error.code!=='conflict';
   }
  }
  async poll(){

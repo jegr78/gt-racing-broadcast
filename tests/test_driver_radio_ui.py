@@ -209,7 +209,10 @@ view.fail(Object.assign(new Error(''),{status:503,code:'coaching_unavailable'}))
 view.render();const after=snap();
 console.log(JSON.stringify({before,after,error:view.q('error').textContent,phase:view.state&&view.state.phase,active:view.state&&view.state.active}));
 view.fail(Object.assign(new Error('Access changed.'),{status:403,code:'forbidden'}));
-console.log(JSON.stringify({cleared:view.state===null}));
+const cleared403=view.state===null;
+view.state={version:1,generation:'g',profile:'p',viewer:'v',revision:3,active:true,pending:false,phase:'ready'};
+view.fail(Object.assign(new Error('Signed out.'),{status:401}));
+console.log(JSON.stringify({cleared:cleared403,cleared401:view.state===null}));
 """)
     if out is None:return
     first,second=[json.loads(line) for line in out.splitlines()]
@@ -217,6 +220,7 @@ console.log(JSON.stringify({cleared:view.state===null}));
     assert first['error']=='Coaching is unavailable.',first['error']
     assert first['phase']=='ready' and first['active'] is True
     assert second['cleared'] is True
+    assert second['cleared401'] is True,'a 401 without a code still clears the view'
 
 
 if __name__=='__main__':
