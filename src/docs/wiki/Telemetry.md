@@ -240,13 +240,15 @@ The illustration uses authored synthetic reference values; no external curve is 
 ![Data management: choose a reference layout before recording](images/telemetry-reference-data-management.png)
 
 ![Track definition prepared before the first recording](images/telemetry-reference-track-editor.png)
-- **Set track.** When racecast does not recognise the layout of a recording, or two
-  layouts fit, pick it from the list. racecast assigns the recording to that layout. For
-  a layout with a downloaded racing line, or the reverse of one, that is all. For any
-  other layout racecast also learns the line from the recording's longest counted lap,
-  so later recordings on it are recognised. A downloaded racing line always takes
-  precedence over a learned one. The note under the button says which of the two
-  happened.
+- **Set track.** When racecast does not recognise the layout of a GT7 session, or two
+  layouts fit, pick it from the list. The row acts on the session of the analysed lap B
+  and names it ("Session 5"), because one recording often holds several tracks; it is
+  hidden while lap B's session has a known layout. racecast assigns that session to the
+  layout. For a layout with a downloaded racing line, or the reverse of one, that is
+  all. For any other layout racecast also learns the line from the session's longest
+  counted lap, so later recordings on it are recognised. A downloaded racing line always
+  takes precedence over a learned one. The note under the button says which of the two
+  happened. A recording without laps offers the row for the recording as a whole.
 
 The racing lines are not part of the package. Until racecast has downloaded them
 (`racecast gt7-data update`, or an explicitly enabled relay-start update), it recognises

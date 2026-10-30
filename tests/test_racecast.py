@@ -1239,6 +1239,57 @@ def t_telemetry_learn_data_records_the_assignment():
         assert {lap["track_id"] for lap in laps} == {tid}, "the assignment wins for every session"
 
 
+def _sessions_recording(rec_dir, tgl):
+    """Three GT7 sessions of counted laps: session 2 on a 1000 m ring, session 3 on a
+    longer one."""
+    import random
+
+    class _Steady(random.Random):        # no paused packet, no jitter
+        def random(self):
+            return 0.5
+    return tgl._write_sessions(rec_dir, _Steady(7))
+
+
+def t_telemetry_learn_data_learns_one_session_only():
+    import gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(_sessions_recording(rec_dir, tgl))
+        base, bundled = m._runtime_base_dir(), m.resource_path("assets/gt7")
+        tid = gt7_tracks.TrackDB.load(base, bundled).layouts()[0]["id"]
+        d = m.telemetry_learn_data(stem, tid, session=2)
+        assert d["ok"] and d["learned"] is True, d
+        db = gt7_tracks.TrackDB.load(base, bundled)
+        assert db.assignment(f"solo/{stem}") is None, "the recording as a whole stays unassigned"
+        assert db.assignment(f"solo/{stem}#2") == tid
+        assert abs(db.line_length(tid) - 1000.0) < 30.0, \
+            f"the line comes from session 2's 1000 m ring, not the longest lap: {db.line_length(tid)}"
+        laps = m.telemetry_laps_data(rec=stem)
+        by_session = {}
+        for lap in laps["laps"]:
+            by_session.setdefault(lap["session"], set()).add(lap["track_id"])
+        assert by_session[2] == {tid} and by_session[3] == {None}, by_session
+        assert laps["recording"]["sessions"]["2"]["id"] == tid, laps["recording"]["sessions"]
+
+
+def t_telemetry_learn_data_needs_a_session_with_counted_laps():
+    import gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(_sessions_recording(rec_dir, tgl))
+        base, bundled = m._runtime_base_dir(), m.resource_path("assets/gt7")
+        tid = gt7_tracks.TrackDB.load(base, bundled).layouts()[0]["id"]
+        d = m.telemetry_learn_data(stem, tid)
+        assert d == {"ok": False, "error": "this recording holds counted laps of several "
+                                           "sessions: set the track of one session"}, d
+        for bad in (0, -1, True, "2"):
+            assert m.telemetry_learn_data(stem, tid, session=bad) == {
+                "ok": False, "error": "invalid session"}, bad
+        d = m.telemetry_learn_data(stem, tid, session=9)
+        assert d == {"ok": False, "error": "session 9 has no counted lap to learn the "
+                                           "track from"}, d
+        assert not os.path.exists(os.path.join(base, "gt7", "learned-tracks.json")), \
+            "a refused learn writes nothing"
+
+
 def t_telemetry_learn_data_keeps_a_downloaded_line():
     import gt7_data, gt7_tracks
     with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
@@ -1266,10 +1317,13 @@ def t_telemetry_learn_data_keeps_a_downloaded_line():
         m._telemetry_full_index = no_replay
         try:
             d = m.telemetry_learn_data(stem, tid)
+            one = m.telemetry_learn_data(stem, tid, session=3)
         finally:
             m._telemetry_full_index = full
         assert d["ok"] and d["learned"] is False, f"only the recording is assigned: {d}"
         assert db().assignment(f"solo/{stem}") == tid
+        assert one["ok"] and one["learned"] is False, one
+        assert db().assignment(f"solo/{stem}#3") == tid, "a session is assigned on its own key"
         assert abs(db().line_length(tid) - 38.0) < 0.5, f"the downloaded line stays: {db().line_length(tid)}"
 
 
