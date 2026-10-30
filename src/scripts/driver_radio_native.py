@@ -147,7 +147,7 @@ class Supervisor:
                                        training_authorize=self._local_training_rights)
         if result is None:
             return False
-        owner = dict(profile=actor.profile, subject='local:producer')
+        owner = dict(profile=actor.profile, subject=coaching.orchestration.PROFILE_OWNER_SUBJECT)
         def current():
             if not self._input_authorized(signature):
                 return False

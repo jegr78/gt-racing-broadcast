@@ -40,8 +40,10 @@ def check(base,profile,token,timeout=20):
     row=current['history']['entries'][0]
     assert row['baseline'] is None and row['focus'] is None and row['latest'] is None and not row['source_ids']
     status,raw,_=http.http_request(url);remote=json.loads(raw)
-    assert status==200 and remote['phase']=='busy' and not remote['history']['entries']
-    assert 'focus' not in remote and 'latest' not in remote,'Driver namespace received local producer coaching'
+    # One driver per Solo POV profile: the Console shows the same training and history.
+    assert status==200 and remote['active'] and remote['epoch']==current['epoch'],'The Console missed the profile training'
+    assert [r['id'] for r in remote['history']['entries']]==[r['id'] for r in current['history']['entries']]
+    assert remote['focus'] is None and remote['latest'] is None,'Replay produced Console coaching'
     stopped=client.request(coach=True,body=dict(expected=0,action='stop',options={}))
     assert not stopped['active']
     end=time.monotonic()+timeout

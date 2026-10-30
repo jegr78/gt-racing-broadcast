@@ -316,13 +316,13 @@ class Service:
                     and self._binding == binding and self._epoch == epoch)
 
     def history(self, since=None, requester=None):
+        """Every view of the profile sees the same messages: one driver per Solo POV
+        profile, so coach messages are not filtered by requester."""
         self.refresh()
         with self._lock:
             changed = since != self._revision
             return dict(version=1, revision=self._revision, epoch=self._epoch, binding=copy.deepcopy(self._binding),
-                        changed=changed, messages=[self._public(m) for m in self._messages.values()
-                            if requester is None or m.get('_coach_owner') is None
-                            or m['_coach_owner'].get('subject') == 'console:'+requester] if changed else [])
+                        changed=changed, messages=[self._public(m) for m in self._messages.values()] if changed else [])
 
     def request(self, preset, binding, requester=None, authorization=None):
         with access._LOCK, self._lock:

@@ -71,14 +71,14 @@ def t_explicit_start_watermark_excludes_old_history_and_partial_current_lap():
         assert f.messages() and all(m['ai_state']=='not_requested' for m in f.messages())
 
 
-def t_current_private_text_is_visible_only_to_its_owner_and_native_output():
+def t_current_text_is_private_to_its_owner_and_its_messages_reach_every_profile_view():
     with tempfile.TemporaryDirectory() as root:
         f=Fixture(root);f.command(owner=REMOTE);f.step()
         for n in (2,3,4):f.complete(n);f.step()
         own=f.service.snapshot(REMOTE);foreign=f.service.snapshot(LOCAL)
         assert own['focus']['focus'] and foreign['phase']=='busy'
         assert 'focus' not in foreign and 'latest' not in foreign
-        assert f.messages('driver') and not f.messages('another-driver')
+        assert f.messages('driver') and f.messages('another-driver')==f.messages('driver')
         assert f.messages() and all('_coach_owner' not in m for m in f.messages())
         rejects(lambda:f.command('stop',owner=LOCAL),'training_busy')
 

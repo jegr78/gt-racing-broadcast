@@ -8,6 +8,9 @@ sys.path.insert(0,str(Path(__file__).parent))
 from test_driver_radio_ui import RadioFixture,console,features,switch
 
 
+PROFILE_OWNER={'profile':'solo-pov','subject':'local:producer'}
+
+
 def answer(f,path='/console/driver-radio/coach',**kwargs):
     status,raw,headers=f.request(path,**kwargs)
     return status,json.loads(raw),headers
@@ -53,7 +56,7 @@ def t_coach_switch_gates_every_signed_in_subject_and_foreign_writes_fail_closed(
         assert not answer(f)[1]['active']
 
 
-def t_local_producer_and_second_driver_cannot_impersonate_the_active_driver():
+def t_local_producer_starts_the_profile_training_only_from_its_own_origin_and_profile():
     with RadioFixture(coaching=True) as f:
         path='/driver-radio/admin/coach'
         status,state,_=answer(f,path);assert status==200 and state['viewer']=='local:producer'
@@ -66,11 +69,31 @@ def t_local_producer_and_second_driver_cannot_impersonate_the_active_driver():
         status,_,_=answer(f,path,method='POST',body=body);assert status==200
         f.practice.service.step()
         for n in (2,3):f.practice.complete(n);f.practice.service.step()
-        status,busy,_=answer(f)
-        assert status==200 and busy['phase']=='busy' and 'focus' not in busy and 'latest' not in busy
-        status,result,_=answer(f,method='POST',body=dict(expected=busy['revision'],action='stop',options={}))
-        assert status==409 and result['error']['code']=='training_busy'
-        assert answer(f,path)[1]['active']
+        # One driver per profile: the Console sees and may stop the same training.
+        status,shared,_=answer(f)
+        assert status==200 and shared['phase']!='busy' and shared['focus']['focus'] and shared['latest']
+        status,result,_=answer(f,method='POST',body=dict(expected=shared['revision'],action='stop',options={}))
+        assert status==200 and not result['active']
+        assert not answer(f,path)[1]['active']
+
+
+def t_one_training_across_local_and_console():
+    with RadioFixture(coaching=True) as f:
+        path='/driver-radio/admin/coach'
+        local=answer(f,path)[1]
+        body=dict(profile='solo-pov',expected=local['revision'],action='start',options={})
+        status,started,_=answer(f,path,method='POST',body=body)
+        assert status==200 and started['active']
+        f.practice.service.step()
+        for n in (2,3):f.practice.complete(n);f.practice.service.step()
+        local=answer(f,path)[1]
+        for subject in ('driver','director'):
+            status,remote,_=answer(f,subject=subject)
+            assert status==200 and remote['active'] and remote['phase']!='busy',(subject,remote)
+            assert remote['epoch']==local['epoch'] and remote['viewer']=='console:'+subject
+        status,stopped,_=answer(f,subject='director',method='POST',body=dict(expected=remote['revision'],action='stop',options={}))
+        assert status==200 and not stopped['active'],stopped
+        assert not answer(f,path)[1]['active']
 
 
 def t_live_reference_selection_is_server_resolved_and_driver_grants_do_not_open_archives():
@@ -84,7 +107,7 @@ def t_live_reference_selection_is_server_resolved_and_driver_grants_do_not_open_
         status,_,_=answer(f,method='POST',body=dict(expected=state['revision'],action='reference',options={'lap_id':selected}))
         assert status==200;f.practice.service.step()
         state=answer(f)[1];assert state['calibration']['reference']['source']=='selected'
-        actor=f.f.service.coach;before=actor.snapshot({'profile':'solo-pov','subject':'console:driver'})
+        actor=f.f.service.coach;before=actor.snapshot(PROFILE_OWNER)
         # Resolve a known archive selector through its real permission callback;
         # no archive file can be read without the separate Engineer grant.
         original=console.m.driver_coach_controls.References._load
@@ -95,7 +118,7 @@ def t_live_reference_selection_is_server_resolved_and_driver_grants_do_not_open_
         with patch.object(console.m.driver_coach_controls.References,'_load',load):
             status,result,_=answer(f,method='POST',body=dict(expected=state['revision'],action='reference',options={'lap_id':'r:'+('a'*32)+':1:2'}))
         assert status==403 and result['error']['code']=='forbidden'
-        assert actor.snapshot({'profile':'solo-pov','subject':'console:driver'})==before
+        assert actor.snapshot(PROFILE_OWNER)==before
 
 
 def t_stop_remains_available_after_the_control_rate_budget_is_exhausted():
@@ -183,7 +206,7 @@ def t_delayed_reference_choices_cannot_publish_old_context_or_revive_stopped_tra
                     worker=threading.Thread(target=lambda f=f,replies=replies:replies.append(answer(f)));worker.start();assert entered.wait(1)
                     if change=='context':f.practice.snap['current']['car_id']=99
                     else:
-                        state=f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})
+                        state=f.practice.service.snapshot(PROFILE_OWNER)
                         status,stopped,_=answer(f,method='POST',body=dict(expected=state['revision'],action='stop',options={}))
                         assert status==200 and not stopped['active']
                     release.set();worker.join(5)
@@ -204,10 +227,10 @@ def t_driver_cannot_select_an_unoffered_previous_session_live_reference():
         assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
         f.practice.service.step();row=f.practice.complete(20,session_id='previous-driver-session')
         state=answer(f)[1];assert state['references']==[]
-        before=f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})
+        before=f.practice.service.snapshot(PROFILE_OWNER)
         status,result,_=answer(f,method='POST',body=dict(expected=state['revision'],action='reference',options={'lap_id':row['id']}))
         assert status==410 and result['error']['code']=='reference_unavailable'
-        assert f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})==before
+        assert f.practice.service.snapshot(PROFILE_OWNER)==before
 
 
 def t_a_maximum_length_console_identity_can_train_without_truncation():
@@ -229,7 +252,7 @@ def t_control_center_unreadable_settings_preserve_the_unavailable_error_status()
         assert status==503 and not data['ok'] and data['code']=='settings_unavailable'
 
 
-def t_private_history_and_deletion_use_the_verified_driver_and_independent_history_revision():
+def t_profile_history_and_deletion_use_one_shared_history_with_an_independent_revision():
     with RadioFixture(coaching=True) as f:
         state=answer(f)[1]
         assert state['history']['entries']==[]
@@ -239,7 +262,8 @@ def t_private_history_and_deletion_use_the_verified_driver_and_independent_histo
         state=answer(f)[1];history=state['history']
         assert history['entries'][0]['focus'] and history['entries'][0]['debrief']['observed']
         local=answer(f,'/driver-radio/admin/coach')[1]
-        assert local['phase']=='busy' and local['history']['entries']==[]
+        assert local['phase']!='busy' and local['epoch']==state['epoch']
+        assert [r['id'] for r in local['history']['entries']]==[r['id'] for r in history['entries']]
         bad=dict(expected=history['revision'],action='delete_history',options={'id':None,'owner':'local:producer'})
         status,error,_=answer(f,method='POST',body=bad)
         assert status==400 and error['error']['code']=='invalid_body'
@@ -291,7 +315,7 @@ def t_corrupt_history_does_not_disable_current_coaching_or_shared_radio():
         assert status==200 and state['focus']['focus'] and state['history_error']=='history_unavailable'
 
 
-def t_a_busy_local_producer_can_read_and_delete_its_past_history_without_touching_the_active_driver():
+def t_the_local_producer_reads_and_deletes_the_profile_history_while_a_console_training_runs():
     with RadioFixture(coaching=True) as f:
         path='/driver-radio/admin/coach';local=answer(f,path)[1]
         body=dict(profile='solo-pov',expected=local['revision'],action='start',options={})
@@ -300,16 +324,18 @@ def t_a_busy_local_producer_can_read_and_delete_its_past_history_without_touchin
         body.update(expected=0,action='stop')
         assert answer(f,path,method='POST',body=body)[0]==200;f.practice.service.step()
         remote=answer(f)[1]
+        assert remote['history']['entries'][0]['status']=='stopped','The Console missed the producer-started training'
         assert answer(f,method='POST',body=dict(expected=remote['revision'],action='start',options={}))[0]==200
         f.practice.service.step()
         for n in (6,7,8):f.practice.complete(n);f.practice.service.step()
-        owner={'profile':'solo-pov','subject':'console:driver'};before=f.practice.service.snapshot(owner)
+        owner=PROFILE_OWNER;before=f.practice.service.snapshot(owner)
         status,local,_=answer(f,path)
-        assert status==200 and local['phase']=='busy' and local['history']['entries'][0]['status']=='stopped'
-        assert 'focus' not in local and 'latest' not in local
+        assert status==200 and local['active'] and local['phase']!='busy' and local['focus']['focus']
+        assert [r['status'] for r in local['history']['entries']]==['active','stopped']
         body=dict(profile='solo-pov',expected=local['history']['revision'],action='delete_history',options={'id':None})
         status,result,_=answer(f,path,method='POST',body=body)
         assert status==200 and result['history']['entries']==[]
+        assert answer(f)[1]['history']['entries']==[],'The Console still saw deleted profile history'
         assert f.practice.service.snapshot(owner)==before
 
 
@@ -436,7 +462,7 @@ def t_admin_errors_carry_the_relay_reason():
     assert answer({'code':'odd','message':'line\nbreak'})[1]=='Radio administration unavailable'
 
 
-def t_optional_ai_attachment_reaches_only_the_current_owner_review():
+def t_optional_ai_attachment_reaches_every_view_of_the_current_review():
     import driver_radio_providers as providers
     class AI:
         def explain(self,*args):
@@ -452,8 +478,8 @@ def t_optional_ai_attachment_reaches_only_the_current_owner_review():
         state=answer(f)[1]
         assert state['latest'].get('explanation')==message['explanation'],'Validated optional AI vanished before the driver review'
         assert state['latest']['ai_state']=='ready'
-        foreign=answer(f,subject='other')[1]
-        assert foreign['phase']=='busy' and 'latest' not in foreign and message['explanation'] not in json.dumps(foreign)
+        other=answer(f,subject='other')[1]
+        assert other['phase']!='busy' and other['latest'].get('explanation')==message['explanation'],'A second view missed the shared review'
         f.practice.complete(4);f.practice.service.step()
         assert not answer(f)[1]['latest'].get('explanation'),'Old lap AI survived a new completed-lap review'
 

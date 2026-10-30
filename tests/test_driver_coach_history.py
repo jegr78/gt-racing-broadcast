@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 from unittest.mock import patch
 
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]/'src/scripts'),str(Path(__file__).parent)]
@@ -332,6 +333,72 @@ def t_a_control_during_the_final_source_proof_cannot_restore_the_previous_actor(
         with patch.object(service,'_facts',facts):
             result=f.service.after_io(LOCAL,before,copy.deepcopy(f.snap))
         assert changed and not result['active'] and result['focus'] is None
+
+
+def _records(record,count,first,step,start):
+    """Finished copies of a real compact record with distinct ids and times."""
+    rows=[]
+    for n in range(count):
+        row=copy.deepcopy(record);at=start+(first+n*step)*60
+        row.update(id='%032x'%(first+n*step+1),training_id='%032x'%(first+n*step+1001),
+                   started_at=at-50,updated_at=at,ended_at=at,status='stopped',reason='explicit_stop')
+        rows.append(row)
+    return rows
+
+
+def t_merge_profile_histories_keeps_newest_32():
+    now=time.time()
+    with tempfile.TemporaryDirectory() as root:
+        _,record=sample(root)
+        store=history.Store(Path(root)/'solo',clock=lambda:now)
+        local=_records(record,20,0,2,now-10_000)   # even slots
+        remote=_records(record,20,1,2,now-10_000)  # odd slots
+        for row in local:assert store.save(LOCAL,row)
+        for row in remote:assert store.save(REMOTE,row)
+        assert len(list(store.directory.glob('*.json')))==2
+        moved=history.merge_profile_histories(Path(root)/'solo')
+        expected=sorted(local+remote,key=lambda r:r['ended_at'],reverse=True)[:history.MAX_RECORDS]
+        assert moved==sum(1 for r in expected if r in remote)==16,moved
+        assert [p.name for p in store.directory.glob('*.json')]==[store._path(LOCAL).name],'The merged owner file stayed'
+        raw=json.loads(store._path(LOCAL).read_text(encoding='utf8'))
+        assert [r['id'] for r in raw['entries']]==[r['id'] for r in expected],'Merged history is not newest first'
+        assert len(store.read(LOCAL,GENERATION)['entries'])==history.MAX_RECORDS
+        assert history.merge_profile_histories(Path(root)/'solo')==0
+        assert [r['id'] for r in json.loads(store._path(LOCAL).read_text(encoding='utf8'))['entries']]==[r['id'] for r in expected]
+
+
+def t_merge_profile_histories_dedupes_by_id_and_keeps_unreadable_files():
+    now=time.time()
+    with tempfile.TemporaryDirectory() as root:
+        _,record=sample(root)
+        store=history.Store(Path(root)/'solo',clock=lambda:now)
+        mine,shared,deleted,extra=_records(record,4,0,1,now-10_000)
+        for row in (mine,shared,deleted):assert store.save(LOCAL,row)
+        store.delete(LOCAL,store.read(LOCAL,GENERATION)['revision'],deleted['id'])
+        newer=copy.deepcopy(shared);newer['updated_at']+=5
+        for row in (copy.deepcopy(mine),newer,deleted,extra):assert store.save(REMOTE,row)
+        broken=dict(LOCAL,subject='console:broken')
+        assert store.save(broken,extra);store._path(broken).write_text('{broken',encoding='utf8')
+        with patch.object(history.LOG,'warning') as warning:
+            moved=history.merge_profile_histories(Path(root)/'solo')
+        assert moved==1,moved
+        entries=store.read(LOCAL,GENERATION)['entries']
+        assert sorted(r['id'] for r in entries)==sorted([mine['id'],shared['id'],extra['id']]),'Duplicate or deleted entries came back'
+        assert next(r for r in entries if r['id']==shared['id'])['updated_at']==newer['updated_at']
+        assert not store._path(REMOTE).exists() and store._path(broken).exists(),'An unreadable file was removed'
+        assert warning.call_count==1 and history.LOG.name.startswith('racecast')
+        logged=' '.join(str(a) for call in warning.call_args_list for a in call.args)
+        assert root not in logged and '.json' not in logged and 'coach-history' not in logged,logged
+        assert history.merge_profile_histories(Path(root)/'missing')==0
+
+
+def t_starting_the_coach_merges_the_profile_histories_once():
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);calls=[]
+        with patch.object(history,'merge_profile_histories',lambda path:calls.append(path) or 0):
+            f.service.start();f.service.start()
+        f.service.close()
+        assert calls==[store.profile_root],calls
 
 
 if __name__=='__main__':

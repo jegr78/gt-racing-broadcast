@@ -12,6 +12,9 @@ import driver_coach_calibration as calibration
 import driver_coach_focus as focus
 import driver_coach_history as history
 
+# One Solo POV profile has one driver: every view (Control Center, Console,
+# voice) acts on the same training and history under this owner subject.
+PROFILE_OWNER_SUBJECT = 'local:producer'
 COMMANDS = frozenset(('start', 'stop', 'objective', 'skill', 'skip', 'keep', 'reference'))
 ROWS_PER_STEP = 4
 COHORT_MAX = 8
@@ -115,6 +118,11 @@ class Service:
         self._state = dict(active=False, pending=False, phase='inactive', calibration=None, focus=None, latest=None, allow_ai=False)
 
     def start(self):
+        with self._lock:
+            merge = self._thread is None and not self._stop.is_set() and self.journal is not None
+        if merge:
+            # Fold per-Console-subject journals of older builds into the profile's one history.
+            history.merge_profile_histories(self.journal.profile_root)
         with self._lock:
             if self._thread is None and not self._stop.is_set():
                 self._thread = threading.Thread(target=self._run, name='driver-coach', daemon=True)

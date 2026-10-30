@@ -9,11 +9,11 @@ of these views starts training or owns native audio merely by opening.
 |---|---|---|---|---|
 | Explicit start/stop/objective | Exact coach subroute and actor optimistic revision | Start captures fresh watermark; objective updates and Stop cancels output | Stale revision, wrong profile, forged owner/trace/provider/options rejected | Signed HTTP and browser actions |
 | Calibration and reference | Sanitized actor snapshot + bounded reference choices | Calibration count, original baseline and working reference remain distinct | Missing live data/detail, revoked archive grant, incompatible row | Synthetic production lap data |
-| One retained focus | Shared driver component | One exercise, attempt result, structured review and current evidence | Busy other owner discloses no focus/history; revoked user clears private DOM | Browser desktop/tablet/phone |
+| One retained focus | Shared driver component | One exercise, attempt result, structured review and current evidence | Revoked user clears private DOM | Browser desktop/tablet/phone |
 | Driver adjustments | Skill/skip/keep exact commands | Actor applies chosen skill or explicit skip/retention | Unsupported skill, pending/busy conflict, stale epoch/revision | HTTP + retained-focus replay |
-| Narrow rights | Existing driver assignment + verified subject namespace | Assigned driver and trusted local producer can control their own training | Director/Engineer/archive permissions alone never imply driver rights; no owner impersonation | Role matrix HTTP |
+| Narrow rights | Existing driver assignment + verified subject namespace | Every signed-in Console view and the trusted local producer control the profile's one training | Director/Engineer/archive permissions alone never imply driver rights; no owner impersonation | Role matrix HTTP |
 | Optional selected reference | Server-only lap resolution + current source/grant callback | Own usable live lap or separately authorized shared archive | Client raw rows/paths forbidden; changed raw/context/grant cannot remain frozen-valid | Grant/context mutation HTTP replay |
-| Native voice without browser | Existing Supervisor handles bounded coaching vocabulary | Exact English/German commands, status/focus/evidence question; grounded English reply on same Ticket lane | Ambiguous/unsupported coaching utterance clarifies without writes; native cannot control Console owner | Actual Supervisor fake worker/player |
+| Native voice without browser | Existing Supervisor handles bounded coaching vocabulary | Exact English/German commands, status/focus/evidence question; grounded English reply on same Ticket lane | Ambiguous/unsupported coaching utterance clarifies without writes; native shares the profile training | Actual Supervisor fake worker/player |
 | Consent | Explicit training allow_ai checkbox plus existing isolated profile agent | Actor reports the consent it actually accepted | Default off; cannot select/enable provider through training request | Browser + service state |
 | Current asynchronous state | Separate generation/revision per profile/owner/component | New replies update current state, unsaved inputs retained | Older GET/POST reply after revoke/profile switch cannot revive private state or overwrite newer edits | Browser delayed responses |
 | Shared radio output | Existing radio owner, English Studio-Q, selected input language | Coach commands/questions and lap feedback use same native capture/playback lifecycle | Urgent Engineer output first, expired/cancelled coach cannot revive | Native and radio regression suite |
@@ -35,11 +35,10 @@ English/German wake-gated vocabulary includes explicit start/stop, objective,
 skill and skip/keep, plus status/current focus/evidence questions. Matching is
 bounded and deterministic. Unknown or conflicting coaching requests return a
 short clarification; they never guess an action or create a new technique.
-Native coaching always uses local:producer and cannot impersonate a Console
-owner. Ordinary telemetry questions retain the existing radio path.
+Native coaching uses the profile owner `local:producer`, like every other view. Ordinary telemetry questions retain the existing radio path.
 
 The UI distinguishes inactive, waiting for live data, calibrating, provisional,
-ready, pending, paused, detail unavailable and another owner's busy state. The
+ready, pending, paused and detail unavailable. The
 passage label explicitly identifies reviewed versus provisional geometry.
 Evidence uses existing measured IDs/values and text nodes, without raw trace
 or private earlier-session history. Detailed debrief/history follows in #983.
@@ -64,3 +63,20 @@ A skill may be selected during calibration. The preference is retained until
 comparable evidence supports that skill; an unrelated fallback exercise does
 not silently replace the constraint. Console owner identifiers preserve the
 complete existing driver identity plus the server namespace.
+
+## One driver per profile
+
+A Solo POV profile has one driver. The relay runs every coaching request under
+the one profile owner `local:producer` (`driver_coach_service.PROFILE_OWNER_SUBJECT`),
+whether it comes from the Control Center, native voice or a signed-in Console
+view. All of them see the same active training and can steer or stop it; no view
+gets `training_busy` because another view started the training. The reply's
+`viewer` is still the verified requester (`local:producer` or `console:<subject>`),
+so a browser can tell when its own identity changed. The control rate budget is
+kept per requester. Console access still requires a verified sign-in and the AI
+Coach switch; only the owner selector is shared. Coach messages in the radio
+history are visible to every view of the profile.
+
+The coordinator still refuses a foreign owner internally, but no relay route
+produces one.
+

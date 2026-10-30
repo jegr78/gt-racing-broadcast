@@ -384,6 +384,19 @@ def t_automatic_urgent_speech_is_brief_while_presets_keep_complete_measurements(
         assert 'Consumption ' in requested['text']
 
 
+def t_coach_messages_reach_every_console_view():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll()
+        owner={'profile':Path(d).name,'subject':'local:producer'}
+        published=f.service.publish_coach('Brake a little later into turn one.',{},owner,'training-token',
+                                          authorize=lambda:True,ready=lambda:True)
+        assert published is not None
+        for requester in (None,'alice','bob'):
+            coach=[m for m in f.service.history(requester=requester)['messages'] if m['kind']=='coach']
+            assert [m['id'] for m in coach]==[published['id']],requester
+            assert all('_coach_owner' not in m for m in coach)
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)
