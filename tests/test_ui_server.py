@@ -249,7 +249,8 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "telemetry_tracks": lambda: {"ok": True, "tracks": [
                 {"id": "suzuka01", "track": "Suzuka Circuit", "layout": "Full Course",
                  "reverse": False}]},
-            "telemetry_learn": lambda rec, track_id, build=True: {"ok": True, "track": {"id": track_id}},
+            "telemetry_learn": lambda rec, track_id, build=True, session=None: {
+                "ok": True, "track": {"id": track_id}},
             "telemetry_delete": lambda rec: ({"ok": True, "deleted": rec + ".gt7rec", "notes": []}
                                              if rec == "r" else
                                              {"ok": False, "error": f"no recording named {rec!r}"}),
@@ -2352,7 +2353,9 @@ def t_telemetry_set_track_confirms_then_learns():
     assert "tmDropLaps()" in learn and "tmSelectRec(" in learn
     assert "/api/telemetry/tracks" in tm
     sel = tm[tm.index("async function tmSelectRec("):tm.index("function tmRenderLaps()")]
-    assert "tmShowSetTrack(d.recording.track)" in sel
+    assert "tmShowSetTrack(d.recording.track)" in sel, "a recording without laps still offers it"
+    b = tm[tm.index("async function tmSelectB("):tm.index("function tmRecordingLabel(")]
+    assert "tmShowSetTrack(tmSessionTrack(l.session), l.session)" in b, "lap B's session decides"
 
 
 _TM_MAP_COUNT = """
@@ -3945,6 +3948,51 @@ console.log([one, ambiguous, known, $('tm-settrack').hidden, opts(),
             f"candidates first, the rest by track and layout, one track list per view load: {out!r}"
 
 
+def t_telemetry_set_track_follows_the_session_of_lap_b():
+    out = _tm_node(_TM_TRACKS + """
+let body = null, asked = '';
+globalThis.confirmModal = async (text) => { asked = text; return true; };
+const realFetch = globalThis.fetch;
+globalThis.fetch = (url, opts) => { if (opts && opts.body && url.includes('/learn')) body = opts.body;
+                                    return realFetch(url, opts); };
+tmState.recs = [{rec: 'X', indexed: true}];
+const known = Object.assign(lap('X', 1, 80, 7), {session: 3});
+const unknown = Object.assign(lap('X', 2, 95, 7), {session: 5, track_id: null, track: ''});
+tmSelectRec('X');
+await tick();
+answer('rec=X', {ok: true, recording: {rec: 'X', track: {id: '3', track: 'Brands Hatch', layout: 'Indy'},
+  sessions: {'3': {id: '3', track: 'Brands Hatch', layout: 'Indy'}, '5': null}},
+  laps: [known, unknown]});
+await tick();
+answer('/tracks', tracks);
+await tick();
+const shown = [$('tm-settrack').hidden, $('tm-settrack-session').textContent].join(' ');
+if (!$('tm-settrack').hidden) {
+  $('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+  tmLearn();
+  await tick();
+}
+const sent = body;
+answer('/learn', {ok: false, error: 'stop'});
+await tick();
+tmSelectB(unknown);
+await tick();
+const again = $('tm-settrack').hidden;
+tmSelectB(Object.assign(lap('Y', 1, 90, 7), {session: 5, track_id: null, track: ''}));
+await tick();
+const other = $('tm-settrack').hidden;
+tmSelectB(known);
+await tick();
+console.log(JSON.stringify([shown, sent, asked.split('\\n')[0], again, other,
+                            $('tm-settrack').hidden]));""")
+    if out is not None:
+        assert json.loads(out) == [
+            "false Session 5", '{"rec":"X","track_id":"5","session":5}',
+            "Set the track of session 5 of X to Suzuka - Circuit?", False, True, True], \
+            (f"Set track acts on lap B's unknown session, hides for a lap of another "
+             f"recording and for a known session: {out}")
+
+
 def t_telemetry_set_track_failed_list_retries():
     out = _tm_node(_TM_TRACKS + """
 tmShowSetTrack(null); tmShowSetTrack(null);
@@ -4202,10 +4250,12 @@ def t_telemetry_routes_pass_their_arguments():
         assert code == 200 and json.loads(body)["tracks"][0]["id"] == "suzuka01"
         code, _ = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
         assert code == 400, "a refused learn is a client error"
+        _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x", "session": 5})
         assert calls == [("laps", "20261007-201503", None, None, None, {"build": False}),
                          ("laps", "r", "2", "", "3424", {"build": False}),
                          ("lap", "r", "1", "3", {"build": False}),
-                         ("learn", "r", "x", {"build": False})], \
+                         ("learn", "r", "x", {"build": False, "session": None}),
+                         ("learn", "r", "x", {"build": False, "session": 5})], \
             f"no request builds a lap index: {calls}"
     finally:
         httpd.shutdown()

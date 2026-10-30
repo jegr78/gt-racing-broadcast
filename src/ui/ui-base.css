@@ -556,6 +556,7 @@
   .tm-dot-b { fill:var(--tm-b); stroke:var(--bg); stroke-width:1.5; }
   .tmset { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:2px 0 8px; }
   .tmset select { flex:1; min-width:0; font:12px var(--mono); }
+  .tmset .sub { flex-basis:100%; }          /* the session it acts on, above the picker */
   .tmnote { color:var(--dim); font:11px/1.5 var(--mono); margin:0 0 8px; }
   table.tmsec { font-size:12px; }
   .tmsecwrap {max-width:100%;overflow-x:auto}
