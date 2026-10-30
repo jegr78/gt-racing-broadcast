@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_radio_native as native
 import driver_radio_access as access
-from test_driver_radio_service import Fixture
+from test_driver_radio_service import Fixture,features
 
 
 class Worker:
@@ -69,7 +69,7 @@ def t_revocation_expiry_mute_and_shutdown_stop_owned_output_before_reuse():
             h=Harness(d);h.n.step();message=h.f.request('pace')
             h.f.service.attach(message['id'],message['epoch'],{'audio':b'fixture audio','audio_state':'ready'})
             h.n.step();assert len(h.players)==1 and h.workers[0].closed
-            if action=='revocation':h.f.access.update({'expected':1,'enabled':False})
+            if action=='revocation':h.f.access.update({'expected':1,'features':features()})
             elif action=='expiry':h.f.at+=31
             elif action=='mute':h.control(muted=True)
             else:h.n.close()
@@ -124,7 +124,7 @@ def t_blocked_cleanup_does_not_block_status_controls_or_consent_updates():
         def control():
             state=h.n.status()
             h.n.control(dict(binding=state['binding'],expected=state['revision'],paused=True))
-            h.f.access.update({'expected':1,'enabled':False})
+            h.f.access.update({'expected':1,'features':features()})
             completed.set()
         request=threading.Thread(target=control);request.start()
         try:assert completed.wait(.5), 'native process I/O blocked controls or profile consent'
@@ -139,7 +139,7 @@ def t_consent_revoked_while_a_worker_stops_cannot_admit_its_replacement():
         h.workers[0].close=slow_close
         h.f.access.update({'expected':1,'voice':dict(enabled=True,microphone='New mic',input_language='en')})
         thread=threading.Thread(target=h.n.step);thread.start();assert entered.wait(1)
-        try:h.f.access.update({'expected':2,'enabled':False})
+        try:h.f.access.update({'expected':2,'features':features()})
         finally:release.set();thread.join(3)
         assert len(h.workers)==1,'cleanup admitted replacement capture after consent revocation'
         h.n.step();assert not h.n.status()['enabled'];h.n.close()
@@ -171,7 +171,7 @@ def t_disabled_startup_never_opens_a_microphone_or_player():
     for field in ('profile','voice'):
         with tempfile.TemporaryDirectory() as d:
             h=Harness(d)
-            body={'expected':1,'enabled':False} if field=='profile' else {
+            body={'expected':1,'features':features()} if field=='profile' else {
                 'expected':1,'voice':{'enabled':False,'microphone':None,'input_language':'en'}}
             h.f.access.update(body)
             for _ in range(3):h.n.step()

@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]/'src/scripts'),str(Path(__file__).parent)]
 import driver_coach_controls as controls
 from test_driver_coach_service import Fixture,LOCAL,REMOTE,rejects,real_lap
+from test_driver_radio_service import features
 
 
 def t_http_commands_have_exact_shapes_and_no_client_selected_identity_or_raw_reference():
@@ -223,7 +224,7 @@ def t_native_listening_pause_preserves_training_but_profile_revocation_ends_it()
             assert f.step()['active'] and owner.status()['paused']
             config=f.radio.access.read();f.radio.access.update(dict(expected=config['revision'],voice=dict(enabled=False,microphone=None,input_language='en')))
             owner.step();assert f.step()['active']
-            config=f.radio.access.read();f.radio.access.update(dict(expected=config['revision'],enabled=False))
+            config=f.radio.access.read();f.radio.access.update(dict(expected=config['revision'],features=features()))
             assert not f.step()['active']
         finally:owner.close()
 

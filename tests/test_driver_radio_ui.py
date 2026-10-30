@@ -89,19 +89,48 @@ class RadioFixture:
         self.template.stop();self.temp.cleanup()
 
 
-def t_driver_only_page_launcher_and_static_component_preserve_narrow_rights():
+def features(engineer=False,coach=False,agent=None):
+    return {'engineer':{'enabled':engineer,'agent':agent},'coach':{'enabled':coach,'agent':agent}}
+
+
+def switch(f,**kwargs):
+    config=f.f.access.read();return f.f.access.update({'expected':config['revision'],'features':features(**kwargs)})
+
+
+def t_page_launcher_and_static_component_follow_the_feature_switches():
     with RadioFixture() as f:
         status,raw,headers=f.request('/console/driver-radio')
         assert status==200 and b'DriverRadio.mount' in raw and headers['Cache-Control']=='no-store'
         assert 'HttpOnly' in headers['Set-Cookie'] and 'Path=/console' in headers['Set-Cookie']
         status,raw,_=f.request('/console/whoami');assert json.loads(raw)['driver_radio'] is True
         for path in ('/console/driver-radio','/console/driver-radio/native','/console/driver-radio/snapshot'):
-            status,raw,_=f.request(path,subject='director');assert status==403 and json.loads(raw)['error']['code']=='forbidden'
+            status,raw,_=f.request(path,subject='director');assert status==200,(path,status,raw)
         assert f.request('/console/race-engineer/access')[0]==403
         status,raw,_=f.request('/console/driver-radio-ui.js',subject=None)
         assert status==200 and b'class View' in raw and b'console.SECRET' not in raw
-        f.f.access.update({'expected':1,'drivers':[]})
-        assert f.request('/console/driver-radio')[0]==403
+        switch(f,coach=True)  # The page hosts both features: the coach alone still opens it.
+        assert f.request('/console/driver-radio')[0]==200
+        assert json.loads(f.request('/console/whoami')[1])['driver_radio'] is True
+        status,raw,_=f.request('/console/driver-radio/snapshot')
+        assert status==403 and json.loads(raw)['error']['code']=='feature_disabled'
+        switch(f)
+        status,raw,_=f.request('/console/driver-radio')
+        assert status==403 and json.loads(raw)['error']['code']=='feature_disabled'
+        assert json.loads(f.request('/console/whoami')[1])['driver_radio'] is False
+
+
+def t_any_signed_in_console_subject_reaches_the_engineer_without_an_assignment():
+    with RadioFixture() as f:
+        switch(f,engineer=True)
+        status,raw,_=f.request('/console/driver-radio/snapshot',subject='never-assigned')
+        assert status==200,(status,raw)
+        switch(f,coach=True)
+        status,raw,_=f.request('/console/driver-radio/snapshot',subject='never-assigned')
+        doc=json.loads(raw)['error']
+        assert status==403 and doc['code']=='feature_disabled' and doc['message']=='Enable the AI Race Engineer for this profile',(status,doc)
+        switch(f,engineer=True)
+        status,raw,_=f.request('/console/driver-radio/snapshot',subject=None)
+        assert status==401 and json.loads(raw)['error']['code']=='unauthorized',(status,raw)
 
 
 def t_producer_proxy_rejects_foreign_origin_wrong_profile_and_stale_revision():
@@ -111,9 +140,9 @@ def t_producer_proxy_rejects_foreign_origin_wrong_profile_and_stale_revision():
         assert status==403 and json.loads(raw)['ok'] is False
         status,raw,_=f.request('/api/driver-radio',method='POST',body={'expectedProfile':'other'},cc=True)
         assert status==400 and json.loads(raw)['ok'] is False
-        status,raw,_=f.request('/api/driver-radio',method='POST',body={'expectedProfile':'solo-pov','expected':0,'enabled':False},cc=True)
+        status,raw,_=f.request('/api/driver-radio',method='POST',body={'expectedProfile':'solo-pov','expected':0,'features':features()},cc=True)
         assert status==400 and json.loads(raw)['ok'] is False
-        assert f.f.access.read()['enabled'] is True
+        assert f.f.access.enabled('engineer') is True
         client=admin.Client('solo-pov',f.server.server_port)
         assert client.request()['protocol']==admin.PROTOCOL
         try:admin.Client('other',f.server.server_port).request()
@@ -161,15 +190,15 @@ def t_control_center_proxy_checks_owned_relay_and_profile_before_writes():
          patch.object(m.sv,'pid_is_relay',return_value=True),patch.object(m,'RELAY_PORT',f.server.server_port), \
          patch.object(m,'_runtime_base_dir',return_value=f.temp.name):
         result=m.driver_radio_data();assert result['ok'] and result['profile']=='solo-pov'
-        result=m.driver_radio_data({'expectedProfile':'solo-pov','expected':0,'enabled':False})
+        result=m.driver_radio_data({'expectedProfile':'solo-pov','expected':0,'features':features()})
         assert not result['ok'] and result['code']=='conflict'
         with patch.object(m.sv,'pid_is_relay',return_value=False),patch.object(admin,'Client') as client:
-            assert not m.driver_radio_data({'expectedProfile':'solo-pov','expected':1,'enabled':False})['ok']
+            assert not m.driver_radio_data({'expectedProfile':'solo-pov','expected':1,'features':features()})['ok']
             client.assert_not_called()
         with patch.object(admin,'Client') as client:
-            assert not m.driver_radio_data({'expectedProfile':'other','expected':1,'enabled':False})['ok']
+            assert not m.driver_radio_data({'expectedProfile':'other','expected':1,'features':features()})['ok']
             client.assert_not_called()
-        assert f.f.access.read()['enabled'] is True
+        assert f.f.access.enabled('engineer') is True
 
 
 if __name__=='__main__':

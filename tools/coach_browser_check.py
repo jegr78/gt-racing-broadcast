@@ -154,7 +154,6 @@ def check(browser,outdir,shots=None):
             c.locator('#coach-history').scroll_into_view_if_needed()
             shot(cc,'coach-control-center','desktop','cc-telemetry.png')
             apply(cc,c,'#coach-stop',f,'radioAdmin','local:producer')
-            config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','director']))
             panel_context=browser.new_context(viewport={'width':1440,'height':1000})
             panel_context.route('https://fonts.googleapis.com/**',lambda route:route.fulfill(status=200,content_type='text/css',body='/* Offline fixture. */'))
             try:
@@ -191,7 +190,7 @@ def check(browser,outdir,shots=None):
 
 def optional_ai_visibility(browser):
     sys.path.insert(0,str(ROOT/'tests'))
-    from test_driver_radio_ui import RadioFixture
+    from test_driver_radio_ui import RadioFixture,features
     import driver_radio_providers as providers
     class AI:
         def explain(self,*args):
@@ -199,7 +198,7 @@ def optional_ai_visibility(browser):
     context=browser.new_context()
     try:
         with RadioFixture(coaching=True) as f:
-            config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],providers=dict(speech=False,agent='fixture')))
+            config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],features=features(True,True,'fixture'),providers=dict(speech=False)))
             page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
             host=page.locator('#driver-radio');host.locator('#coach-ai').check();host.locator('#coach-start').click()
             page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
@@ -216,7 +215,7 @@ def optional_ai_visibility(browser):
 
 def ordering_and_identity(browser):
     sys.path.insert(0,str(ROOT/'tests'))
-    from test_driver_radio_ui import RadioFixture,console
+    from test_driver_radio_ui import RadioFixture,console,switch
     import driver_coach_service as service
     context=browser.new_context()
     try:
@@ -254,7 +253,6 @@ def ordering_and_identity(browser):
         context=browser.new_context()
         try:
             with RadioFixture(coaching=True) as f:
-                config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','other']))
                 page=context.new_page();page.goto(f.url+'/console/driver-radio?t='+f.token)
                 a=page.locator('#driver-radio');a.locator('#coach-start').click()
                 page.wait_for_function('window.radioView.coach.state?.pending');f.practice.service.step()
@@ -274,7 +272,7 @@ def ordering_and_identity(browser):
                     token=console.m.console_auth.mint_token(console.SECRET,'other')
                     context.add_cookies([dict(name='rc_console',value=token,domain='127.0.0.1',path='/console',httpOnly=True,sameSite='Lax')])
                 else:
-                    config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=[]));f.practice.service.step()
+                    switch(f,engineer=True);f.practice.service.step()  # The producer switches the AI Coach off.
                 page.evaluate('window.__releasePrivateCoach();window.fetch=window.__scopeFetch')
                 page.wait_for_function('!window.radioView.coach.polling')
                 assert not page.evaluate('window.__privateCoachRevived'),'A delayed private reply rendered before the next current-identity poll'

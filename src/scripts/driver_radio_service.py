@@ -234,7 +234,8 @@ class Service:
             if self._closed:
                 return self._state()
             config = self.settings.read()
-            enabled = self.settings.available and config['enabled'] and bool(config['drivers'] or config['voice']['enabled'])
+            # Either AI feature needs the shared live assessment (the coach publishes through it).
+            enabled = self.settings.available and any(f['enabled'] for f in config['features'].values())
             now = self.clock()
             if (not force and self._key is not None and config['revision'] == self._key[1]
                     and now-self._read_at < .25):

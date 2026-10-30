@@ -8,7 +8,7 @@ MAX_COACH_RESPONSE=1024*1024  # 32 compact journal records, debriefs and the cur
 
 class AdminError(ValueError):
     """`reason` is the relay's own message for `code`: it names what to fix (which
-    identity is invalid, that driver radio is off), so it wins when it is one short line."""
+    setting is invalid, which AI feature is off), so it wins when it is one short line."""
     def __init__(self,code,reason=None):
         self.code=code
         messages={'conflict':'Radio settings changed; reload the current form',
@@ -17,7 +17,7 @@ class AdminError(ValueError):
                   'settings_unavailable':'Radio settings are unreadable; repair them locally',
                   'profile_changed':'Active profile changed; reload the current form',
                   'foreign_origin':'Radio administration requires the local server origin',
-                  'feature_disabled':'Enable driver radio for this profile first'}
+                  'feature_disabled':'Enable the AI Race Engineer or the AI Coach for this profile first'}
         shown=isinstance(reason,str) and 0<len(reason)<=200 and reason.isprintable()
         super().__init__(reason if shown else messages.get(code,'Radio administration unavailable'))
 

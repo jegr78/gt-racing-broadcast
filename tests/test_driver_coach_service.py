@@ -11,7 +11,7 @@ import driver_coach_calibration as calibration
 import driver_radio_providers as providers
 COACH_EXPLANATIONS=providers.COACH_EXPLANATIONS
 from test_driver_coach_focus import real_lap,real_definition
-from test_driver_radio_service import Fixture as RadioFixture
+from test_driver_radio_service import Fixture as RadioFixture,features
 
 LOCAL={'profile':'solo','subject':'local:producer'}
 REMOTE={'profile':'solo','subject':'console:driver'}
@@ -321,7 +321,7 @@ def t_optional_ai_requires_training_consent_and_uses_guarded_current_progress_on
                         evidence=['coach.lap_time_s'],claims=[],exercise='repeat')
     for consent in (False,True):
         with tempfile.TemporaryDirectory() as root:
-            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'agent':'fixture','speech':False}})
+            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'speech':False},'features':features(True,True,'fixture')})
             ai=AI();worker=providers.Enricher(f.radio.service,ai=ai,clock=lambda f=f:f.at)
             f.command(allow_ai=consent);f.step()
             for n in (2,3):f.complete(n);f.step()
@@ -356,7 +356,7 @@ def t_invalid_or_late_ai_keeps_grounded_text_and_cannot_change_the_focus():
          dict(explanation='The result may be provisional.',exercise='invented')]
     for change in bad:
         with tempfile.TemporaryDirectory() as root:
-            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'agent':'fixture','speech':False}})
+            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'speech':False},'features':features(True,True,'fixture')})
             f.command(allow_ai=True);f.step()
             for n in (2,3):f.complete(n);f.step()
             message=f.messages()[-1];before=f.service.snapshot(LOCAL)['focus']['focus']
@@ -369,7 +369,7 @@ def t_invalid_or_late_ai_keeps_grounded_text_and_cannot_change_the_focus():
             assert f.service.snapshot(LOCAL)['focus']['focus']==before
     for stale in ('deadline','focus'):
         with tempfile.TemporaryDirectory() as root:
-            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'agent':'fixture','speech':False}})
+            f=Fixture(root);f.radio.access.update({'expected':1,'providers':{'speech':False},'features':features(True,True,'fixture')})
             f.command(allow_ai=True);f.step()
             for n in (2,3):f.complete(n);f.step()
             original=f.messages()[-1]['text']

@@ -18,9 +18,9 @@ of these views starts training or owns native audio merely by opening.
 | Current asynchronous state | Separate generation/revision per profile/owner/component | New replies update current state, unsaved inputs retained | Older GET/POST reply after revoke/profile switch cannot revive private state or overwrite newer edits | Browser delayed responses |
 | Shared radio output | Existing radio owner, English Studio-Q, selected input language | Coach commands/questions and lap feedback use same native capture/playback lifecycle | Urgent Engineer output first, expired/cancelled coach cannot revive | Native and radio regression suite |
 
-Console coaching requires an explicitly assigned DRIVER_RADIO identity. Its
-subject is derived from the verified token; it cannot be supplied in JSON. An
-Engineer role or access to a shared archive does not grant coaching controls.
+Console coaching requires a verified Console sign-in and the profile's AI Coach
+switch (#1025 removed the per-driver assignment). Its subject is derived from the
+verified token; it cannot be supplied in JSON.
 Selecting an archive additionally requires the existing Engineer/reference
 permission; coaching never expands the archive grant. Local producer routes use
 existing loopback, Host, Origin, Referer and Fetch Metadata checks, fixed local

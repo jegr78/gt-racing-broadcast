@@ -5,7 +5,7 @@ import threading
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent))
-from test_driver_radio_ui import RadioFixture,console
+from test_driver_radio_ui import RadioFixture,console,features,switch
 
 
 def answer(f,path='/console/driver-radio/coach',**kwargs):
@@ -30,11 +30,18 @@ def t_signed_driver_can_start_steer_and_stop_only_its_own_training():
         assert status==200 and not stopped['active']
 
 
-def t_roles_and_driver_assignment_remain_separate_and_foreign_writes_fail_closed():
+def t_coach_switch_gates_every_signed_in_subject_and_foreign_writes_fail_closed():
     with RadioFixture(coaching=True) as f:
         for subject in ('director','unknown'):
             status,body,_=answer(f,subject=subject)
-            assert status==403 and body['error']['code']=='forbidden'
+            assert status==200 and body['viewer']=='console:'+subject,(subject,status,body)
+        status,body,_=answer(f,subject=None)
+        assert status==401,(status,body)
+        switch(f,engineer=True)
+        for path in ('/console/driver-radio/coach','/driver-radio/admin/coach'):
+            status,body,_=answer(f,path)
+            assert status==403 and body['error']=={'code':'feature_disabled','message':'Enable the AI Coach for this profile'},(path,status,body)
+        switch(f,engineer=True,coach=True)
         status,body,_=answer(f,method='POST',body={},headers={'Origin':'https://foreign.invalid'})
         assert status==403 and body['error']['code']=='foreign_origin'
         status,state,_=answer(f)
@@ -203,10 +210,9 @@ def t_driver_cannot_select_an_unoffered_previous_session_live_reference():
         assert f.practice.service.snapshot({'profile':'solo-pov','subject':'console:driver'})==before
 
 
-def t_a_maximum_length_assigned_driver_identity_can_train_without_truncation():
+def t_a_maximum_length_console_identity_can_train_without_truncation():
     with RadioFixture(coaching=True) as f:
         subject='x'*160
-        config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=[subject]))
         status,state,_=answer(f,subject=subject);assert status==200
         status,state,_=answer(f,subject=subject,method='POST',body=dict(expected=state['revision'],action='start',options={}))
         assert status==200 and state['active'], 'A valid driver identity exceeded the namespaced owner budget'
@@ -244,7 +250,7 @@ def t_private_history_and_deletion_use_the_verified_driver_and_independent_histo
         assert answer(f)[1]['history']['entries']==[],'Continued training restored deleted private history'
 
 
-def t_history_io_does_not_delay_stop_and_cannot_reply_after_driver_revocation():
+def t_history_io_does_not_delay_stop_and_cannot_reply_after_the_coach_is_switched_off():
     from unittest.mock import patch
     for change in ('stop','revoke'):
         with RadioFixture(coaching=True) as f:
@@ -264,10 +270,10 @@ def t_history_io_does_not_delay_stop_and_cannot_reply_after_driver_revocation():
                         status,stopped,_=answer(f,method='POST',body=dict(expected=0,action='stop',options={}))
                         assert status==200 and not stopped['active'],'History IO held up Stop acknowledgement'
                     else:
-                        config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=[]))
+                        switch(f,engineer=True)
                 finally:release.set();thread.join(5)
             assert not thread.is_alive() and result
-            if change=='revoke':assert result[0][0]==403 and result[0][1]['error']['code']=='forbidden'
+            if change=='revoke':assert result[0][0]==403 and result[0][1]['error']['code']=='feature_disabled',result
             else:assert result[0][0]==200 and not result[0][1]['active']
 
 
@@ -337,7 +343,7 @@ def t_historical_shared_reference_details_require_the_current_separate_engineer_
             assert entry['latest'].get('action') is None
 
 
-def t_the_final_archive_check_cannot_leave_old_live_facts_or_a_revoked_driver_in_the_reply():
+def t_the_final_archive_check_cannot_leave_old_live_facts_or_a_switched_off_coach_in_the_reply():
     from types import SimpleNamespace
     from unittest.mock import patch
     import test_ai_package as recording
@@ -357,12 +363,12 @@ def t_the_final_archive_check_cannot_leave_old_live_facts_or_a_revoked_driver_in
                 if len(calls)==2:
                     if change=='context':f.practice.snap['current']['car_id']=99
                     else:
-                        settings=f.f.access.read();f.f.access.update(dict(expected=settings['revision'],drivers=[]))
+                        switch(f,engineer=True)
                 return result
             with patch.object(f.engineer,'reference',last_read):status,result,_=answer(f)
             assert len(calls)==2
             if change=='context':assert status==200 and result['phase']=='paused' and result['focus'] is None
-            else:assert status==403 and result['error']['code']=='forbidden'
+            else:assert status==403 and result['error']['code']=='feature_disabled',result
 
 
 def t_the_actual_local_admin_client_can_read_all_supported_compact_history_entries():
@@ -417,11 +423,11 @@ def t_admin_errors_carry_the_relay_reason():
             try:driver_radio_admin.Client('solo-pov',8088).request(coach=True)
             except driver_radio_admin.AdminError as exc:return exc.code,str(exc)
         raise AssertionError('an error answer must raise')
-    reason='Enable driver radio for this profile to use coaching'
+    reason='Enable the AI Coach for this profile'
     assert answer({'code':'feature_disabled','message':reason})==('feature_disabled',reason)
-    named='Driver identity is not a Console sign-in name'
+    named='Invalid radio limits or service selection'
     assert answer({'code':'invalid_settings','message':named})[1]==named, 'the relay names what is invalid'
-    assert answer({'code':'feature_disabled'})[1]=='Enable driver radio for this profile first'
+    assert answer({'code':'feature_disabled'})[1]=='Enable the AI Race Engineer or the AI Coach for this profile first'
     assert answer({'code':'odd','message':'x'*400})[1]=='Radio administration unavailable', \
         'an oversized relay message is not shown'
     assert answer({'code':'odd','message':'line\nbreak'})[1]=='Radio administration unavailable'
@@ -433,7 +439,7 @@ def t_optional_ai_attachment_reaches_only_the_current_owner_review():
         def explain(self,*args):
             return dict(explanation=providers.COACH_EXPLANATIONS[1],evidence=['coach.lap_time_s'],claims=[],exercise='repeat')
     with RadioFixture(coaching=True) as f:
-        config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],drivers=['driver','other'],providers=dict(speech=False,agent='fixture')))
+        config=f.f.access.read();f.f.access.update(dict(expected=config['revision'],features=features(True,True,'fixture'),providers=dict(speech=False)))
         state=answer(f)[1]
         assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={'allow_ai':True}))[0]==200
         f.practice.service.step()
