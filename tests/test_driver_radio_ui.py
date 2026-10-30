@@ -103,7 +103,8 @@ def t_page_launcher_and_static_component_follow_the_feature_switches():
         status,raw,headers=f.request('/console/driver-radio')
         assert status==200 and b'DriverRadio.mount' in raw and headers['Cache-Control']=='no-store'
         assert 'HttpOnly' in headers['Set-Cookie'] and 'Path=/console' in headers['Set-Cookie']
-        status,raw,_=f.request('/console/whoami');assert json.loads(raw)['driver_radio'] is True
+        status,raw,_=f.request('/console/whoami');me=json.loads(raw)
+        assert me['driver_radio'] is True and me['ai_engineer'] is True and me['ai_coach'] is True,me
         for path in ('/console/driver-radio','/console/driver-radio/native','/console/driver-radio/snapshot'):
             status,raw,_=f.request(path,subject='director');assert status==200,(path,status,raw)
         assert f.request('/console/race-engineer/access')[0]==403
@@ -111,13 +112,19 @@ def t_page_launcher_and_static_component_follow_the_feature_switches():
         assert status==200 and b'class View' in raw and b'console.SECRET' not in raw
         switch(f,coach=True)  # The page hosts both features: the coach alone still opens it.
         assert f.request('/console/driver-radio')[0]==200
-        assert json.loads(f.request('/console/whoami')[1])['driver_radio'] is True
+        me=json.loads(f.request('/console/whoami')[1])
+        assert me['driver_radio'] is True and me['ai_engineer'] is False and me['ai_coach'] is True,me
+        switch(f,engineer=True)  # The coach view re-checks its own switch, not the page's.
+        me=json.loads(f.request('/console/whoami')[1])
+        assert me['driver_radio'] is True and me['ai_engineer'] is True and me['ai_coach'] is False,me
+        switch(f,coach=True)
         status,raw,_=f.request('/console/driver-radio/snapshot')
         assert status==403 and json.loads(raw)['error']['code']=='feature_disabled'
         switch(f)
         status,raw,_=f.request('/console/driver-radio')
         assert status==403 and json.loads(raw)['error']['code']=='feature_disabled'
-        assert json.loads(f.request('/console/whoami')[1])['driver_radio'] is False
+        me=json.loads(f.request('/console/whoami')[1])
+        assert me['driver_radio'] is False and me['ai_engineer'] is False and me['ai_coach'] is False,me
 
 
 def t_any_signed_in_console_subject_reaches_the_engineer_without_an_assignment():

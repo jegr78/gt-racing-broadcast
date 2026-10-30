@@ -240,7 +240,8 @@ def t_signed_http_boundaries_and_session_writes():
             error('feature_disabled', 403)
             access.update({'expected': 0, 'features': features(engineer=True)})
             status, doc, cache = request()
-            assert status == 200 and doc == {'version': 2, 'enabled': True, 'revision': 1, 'feature': 'engineer'}                 and cache == 'no-store', (status, doc)
+            assert status == 200 and doc == {'version': 2, 'enabled': True, 'revision': 1, 'feature': 'engineer'} \
+                and cache == 'no-store', (status, doc)
             status, native, _ = request('/console/driver-radio/native')
             assert status == 200 and native['phase'] == 'disabled', (status, native)
             assert 'microphone' not in native and 'google_key' not in native

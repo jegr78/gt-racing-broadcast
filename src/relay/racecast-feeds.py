@@ -12603,11 +12603,16 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             has_step_up = bool(presented) and console_auth.secret_matches(presented, console_secret)
             # /console-only: identity introspection for the launcher (any auth).
             if sub == ["whoami"]:
-                try:
-                    radio_allowed = bool(radio_access and radio_page_access())
-                except (driver_radio_access.RadioError, OSError, ValueError):
-                    radio_allowed = False
-                self._send({"subject": subject, "roles": sorted(roles), "driver_radio": radio_allowed})
+                features = {}
+                for feature in driver_radio_access.FEATURES:
+                    try:
+                        features[feature] = bool(radio_access and radio_access.enabled(feature))
+                    except (driver_radio_access.RadioError, OSError, ValueError):
+                        features[feature] = False
+                # The page opens for either switch; each view re-checks its own one.
+                self._send({"subject": subject, "roles": sorted(roles),
+                            "driver_radio": any(features.values()),
+                            "ai_engineer": features["engineer"], "ai_coach": features["coach"]})
                 return None
             # Read-only broadcast-chat mirror (#294): any authenticated /console
             # subject (commentator, director, race_control) may read it. Funnelled

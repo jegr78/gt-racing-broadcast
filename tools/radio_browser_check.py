@@ -122,7 +122,7 @@ def check(browser,outdir,shots=None):
             cc=context.new_page();cc.goto(f.cc_url)
             cc.wait_for_function("document.body.classList.contains('tpl-pov')")
             cc.evaluate("showView('telemetry')")
-            cc.locator('#driver-radio-admin').locator('#engineer-enabled').wait_for(state='visible')
+            cc.locator('#driver-radio-admin').locator('#ai-engineer-enabled').wait_for(state='visible')
             cc.wait_for_function("document.getElementById('ver-note').textContent==='dev build'")
             assert cc.locator('#driver-radio-admin').locator('#voice-enabled').is_checked()
             cc.locator('#driver-radio-admin').scroll_into_view_if_needed()

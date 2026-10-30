@@ -12,7 +12,11 @@ recorded in the spec `2026-10-30-ai-race-engineer-and-coach-design.md`). Sign-in
 stays mandatory for every route. The sections below describe version 2; the
 historical acceptance table and review evidence still mention the version 1 grant.
 
-## Requirements before implementation
+## Requirements before implementation (historical, version 1)
+
+This table is the #970 acceptance set for the version 1 grant. Since #1025 there is
+no assigned identity: any signed-in subject passes, and the AI Race Engineer or AI
+Coach switch decides. See the access matrix below for the current rules.
 
 | Criterion | Production path | Positive test | Failure test | Runtime evidence |
 | --- | --- | --- | --- | --- |
@@ -102,7 +106,11 @@ Origin/Referer and cross-site browser requests. Native configuration is never
 returned on remote routes. Revocation stops the next request; future message/audio
 workers must also bind their work to current access revision before publishing.
 
-## Review and measured evidence
+## Review and measured evidence (historical, version 1)
+
+This records the #970 review of the version 1 grant. Since #1025 the assignment
+checks it mentions are replaced by the feature switches; the delayed-body test now
+switches the AI Race Engineer off instead of revoking an assignment.
 
 The signed HTTP fixture exercises the production relay handler with current
 Console tokens, assignment changes, same-origin rejection, producer profile
