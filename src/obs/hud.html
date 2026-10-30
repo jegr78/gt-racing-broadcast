@@ -210,6 +210,21 @@
     font-size: 34px; background: #243039; padding: 14px; border-radius: 8px;
     color: #eef0f2; }
 
+  /* AI Race Engineer and AI Coach lines (Solo POV), styled like race control. Off
+     unless the profile turns Visible on in the overlay builder, which compiles
+     `#<id> { display: flex }`. The `.empty` rules outrank that by specificity, so
+     an empty line stays hidden even with Visible on. A long line auto-fits from
+     28px down to 14px (#957); the builder's fit bounds override these. */
+  #race-engineer, #coach { display: none; font-size: 28px; background: #243039;
+    padding: 14px; border-radius: 8px; color: #eef0f2;
+    --fit-max: 28px; --fit-min: 14px; }
+  /* Defaults sit in the free band of the Solo POV HUD: right of the webcam (ends
+     x350), left of the telemetry panel and POV box (start x1496), above race
+     control (y864), stacked coach over engineer. */
+  #race-engineer { left: 370px; top: 800px; width: 1110px; height: 50px; }
+  #coach { left: 370px; top: 740px; width: 1110px; height: 50px; }
+  #race-engineer.empty, #coach.empty { display: none; }
+
   /* Race-condition flag. Hidden when empty, colour-coded per state via
      data-state. */
   #flag-status { left: 780px; top: 96px; width: 360px; height: 50px;
@@ -294,6 +309,8 @@
   <div id="team3-brand" class="el team-brand white" data-edit="Team 3 brand name" data-edit-kind="text"></div>
   <div id="team3-quali" class="el team-quali white" data-edit="Team 3 quali lap" data-edit-kind="text"></div>
   <div id="race-control" class="el white" data-edit="Race control" data-edit-kind="text"></div>
+  <div id="race-engineer" class="el white empty" data-edit="Race engineer" data-edit-kind="text"></div>
+  <div id="coach" class="el white empty" data-edit="Coach" data-edit-kind="text"></div>
   <div id="flag-status" class="el" data-edit="Flag status" data-edit-kind="text"></div>
   <div id="pov" class="el" data-edit="POV box" data-edit-kind="box"></div>
   <div id="pov-name" class="el" data-edit="POV name" data-edit-kind="text"></div>
@@ -637,6 +654,8 @@
       // team needs setTeam's `.empty` class so its lower-third box hides.
       { const _teams = d.teams || []; for (let i = 0; i < 3; i++) setTeam(i, _teams[i]); }
       setText("race-control", d.raceControl);
+      setText("race-engineer", d.raceEngineer);
+      setText("coach", d.coach);
       setFlag("flag-status", d.flag);
       const povOn = !!d.povActive;
       document.getElementById("pov").classList.toggle("empty", !povOn);

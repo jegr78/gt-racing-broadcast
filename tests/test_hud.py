@@ -1126,6 +1126,139 @@ def t_hud_data_route_carries_the_quali_lap():
     assert d["teams"][0]["qualiLap"] == "1:38.973", d["teams"][0]
 
 
+
+def _radio_hud_route(radio_service):
+    """GET /hud/data off a real make_handler server whose relay carries an optional
+    driver radio service (None = a non-Solo profile without one)."""
+    import json as _json, threading as _t
+    from types import SimpleNamespace
+    from urllib.request import urlopen
+
+    class _StubRelay:
+        mode = "race"
+
+        def pov_active(self):
+            return False
+
+        def pov_name(self):
+            return ""
+
+    hs = _quali_hud(None)
+    hs.refresh()
+    handler = m.make_handler(_StubRelay(), hud_source=hs, radio_service=radio_service,
+                             radio_native=SimpleNamespace() if radio_service else None)
+    srv = m.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    _t.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with urlopen(f"http://127.0.0.1:{srv.server_address[1]}/hud/data", timeout=5) as r:
+            return _json.loads(r.read().decode("utf-8"))
+    finally:
+        srv.shutdown()
+
+
+def t_hud_data_carries_engineer_and_coach_text():
+    # The HUD reads both lines from /hud/data on every poll, so an OBS browser-source
+    # reload shows the current text again: nothing lives only in page JS.
+    import sys as _sys, tempfile
+    _sys.path.insert(0, HERE)
+    import test_driver_coach_service as coach_t
+    with tempfile.TemporaryDirectory() as root:
+        f = coach_t.Fixture(root)
+        f.command(); f.step()
+        for n in (2, 3):
+            f.complete(n); f.step()
+        line = f.service.hud_line()
+        assert line and ": " in line, line
+        radio = f.radio.service
+        radio.coach = f.service
+        engineer = radio.request("fuel", m.driver_radio_service.assessment.binding(f.snap))
+        assert radio.hud_text("engineer") == engineer["text"]
+        d = _radio_hud_route(radio)
+        assert d["raceEngineer"] == engineer["text"], d.get("raceEngineer")
+        assert d["coach"] == line, d.get("coach")
+        f.command("stop"); f.step()
+        assert _radio_hud_route(radio)["coach"] == ""
+    # A non-Solo profile: production builds the radio service on an unavailable
+    # Store, so the feature gate keeps both lines blank even with both features
+    # switched on in the profile's radio settings.
+    access = m.driver_radio_access
+    with tempfile.TemporaryDirectory() as root:
+        access.Store(root, True).update({"expected": 0, "features": {
+            "engineer": {"enabled": True, "agent": None}, "coach": {"enabled": True, "agent": None}},
+            "voice": {"enabled": True, "microphone": None, "input_language": "en"}})
+        radio = m.driver_radio_service.Service(access.Store(root, False), access.Session(), lambda: {})
+        assert m.driver_coach_service.attach(radio, None) is None
+        d = _radio_hud_route(radio)
+        assert d["raceEngineer"] == "" and d["coach"] == "", d
+    d = _radio_hud_route(None)
+    assert d["raceEngineer"] == "" and d["coach"] == "", d
+
+
+def _css_rules(css):
+    """(selector, display, important) for every top-level rule's display declaration."""
+    import re
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out = []
+    for match in re.finditer(r"([^{}]*)\{([^{}]*)\}", css):
+        sel, body = match.group(1).strip(), match.group(2)
+        if sel.startswith("@"):
+            continue
+        for decl in body.split(";"):
+            if ":" not in decl:
+                continue
+            name, value = decl.split(":", 1)
+            if name.strip() == "display":
+                important = "!important" in value.replace(" ", "")
+                value = value.replace("!important", "").strip()
+                for one in sel.split(","):
+                    out.append((one.strip(), value, important))
+    return out
+
+
+def _display(sid, classes, rule_sets):
+    """The cascaded `display` of <div id=sid class=classes> under the base page CSS
+    then the compiled override CSS, for compound #id/.class selectors (the only kind
+    that can name a top-level HUD slot without matching its position in the DOM)."""
+    import re
+    best, order = None, 0
+    for css in rule_sets:
+        for sel, value, important in _css_rules(css):
+            order += 1
+            if not re.fullmatch(r"(?:[#.][\w-]+)+", sel):
+                continue
+            parts = re.findall(r"([#.])([\w-]+)", sel)
+            if not all((name == sid) if kind == "#" else (name in classes) for kind, name in parts):
+                continue
+            ids = sum(1 for kind, _ in parts if kind == "#")
+            key = (important, ids, len(parts) - ids, order)
+            if best is None or key > best[0]:
+                best = (key, value)
+    return best[1] if best else "inline"
+
+
+def t_hud_slots_hidden_when_empty_even_if_visible():
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
+    import overlay_build as ob
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    base, slots = ob.base_style(html), ob.extract_slots(html)
+    for sid, key in (("race-engineer", "raceEngineer"), ("coach", "coach")):
+        # the tick feeds the slot from /hud/data through setText, which sets .empty
+        assert f'setText("{sid}", d.{key})' in html, sid
+        on = ob.compile_overlay_css({"slots": {sid: {"visible": True}}}, slots)
+        unset = ob.compile_overlay_css({"slots": {sid: {"left": 300}}}, slots)
+        filled, empty = {"el", "white"}, {"el", "white", "empty"}
+        assert _display(sid, empty, [base, on]) == "none", "Visible on, empty value: hidden"
+        assert _display(sid, filled, [base, on]) == "flex", "Visible on, text: shown"
+        assert _display(sid, filled, [base, unset]) == "none", "Visible unset: hidden"
+        assert _display(sid, filled, [base]) == "none", "no profile overlay: hidden"
+        # Until the first /hud/data reply fills it, the slot starts empty, so a Visible
+        # slot shows no blank box on page load (or ever, if that fetch fails).
+        import re
+        m = re.search(r'<div id="%s" class="([^"]*)"' % sid, html)
+        assert m and "empty" in m.group(1).split(), (sid, m and m.group(1))
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -418,6 +418,12 @@ class Service:
             stored['ai_state'] = 'not_requested'
             return self._public(stored)
 
+    def feature_enabled(self, feature):
+        """Whether one AI feature is switched on for this profile right now."""
+        self.refresh()
+        with self._lock:
+            return not self._closed and self._features.get(feature) is True
+
     def hud_text(self, source, now=None):
         """The text of the newest message of one source while it is still valid.
 

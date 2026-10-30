@@ -142,16 +142,24 @@ def t_any_signed_in_console_subject_reaches_the_engineer_without_an_assignment()
 
 
 def t_messages_and_native_serve_either_feature_and_only_enabled_sources():
+    import driver_radio_access as access
     def lane(f):
         status,raw,_=f.request('/console/driver-radio/messages');doc=json.loads(raw)
         return status,doc.get('messages',doc.get('error'))
+    def hint(messages,feature):
+        # A switched-off feature's refusal passes the lane (the driver view shows it in the
+        # Voice row); it carries only the fixed hint text, no engineer or coach data.
+        rows=[m for m in messages if m['source']==feature]
+        assert [m['kind'] for m in rows]==['refusal'] and rows[0]['text']==access.DISABLED[feature],rows
+        assert all(not value for value in rows[0]['evidence'].values()),rows[0]
     owner={'profile':'solo-pov','subject':'local:producer'}
     with RadioFixture() as f:
         switch(f,coach=True);f.f.poll()
         assert f.f.service.publish_coach('Brake later into turn one.',{},owner,'training',authorize=lambda:True,ready=lambda:True)
         f.f.service.refusal('engineer',f.f.service.refresh()['binding'])
         status,messages=lane(f)
-        assert status==200 and [m['source'] for m in messages]==['coach'],(status,messages)
+        assert status==200 and [m['source'] for m in messages]==['coach','engineer'],(status,messages)
+        hint(messages,'engineer')
         status,raw,_=f.request('/console/driver-radio/native');assert status==200 and json.loads(raw)['enabled'] in (True,False),(status,raw)
         for path in ('/console/driver-radio/snapshot','/console/driver-radio/setup'):
             status,raw,_=f.request(path);assert status==403 and json.loads(raw)['error']['code']=='feature_disabled',(path,status)
@@ -159,7 +167,13 @@ def t_messages_and_native_serve_either_feature_and_only_enabled_sources():
         switch(f,engineer=True);f.f.poll()
         f.f.request('fuel');f.f.service.refusal('coach',f.f.service.refresh()['binding'])
         status,messages=lane(f)
-        assert status==200 and messages and {m['source'] for m in messages}=={'engineer'},(status,messages)
+        assert status==200 and {m['source'] for m in messages}=={'engineer','coach'},(status,messages)
+        assert any(m['source']=='engineer' and m['kind']!='refusal' for m in messages),messages
+        hint(messages,'coach')
+        # The engineer's own answers stay in the relay once it is switched off.
+        switch(f,coach=True);f.f.poll()
+        status,messages=lane(f)
+        assert status==200 and not [m for m in messages if m['source']=='engineer' and m['kind']!='refusal'],(status,messages)
         switch(f);f.f.poll()
         for path in ('/console/driver-radio/messages','/console/driver-radio/native'):
             status,raw,_=f.request(path);doc=json.loads(raw)['error']
@@ -285,6 +299,32 @@ console.log(JSON.stringify({cleared:cleared403,cleared401:view.state===null}));
     assert second['cleared401'] is True,'a 401 without a code still clears the view'
 
 
+def t_coach_badge_says_unavailable_while_a_load_error_shows():
+    out=_coach_js(r"""
+const view=Object.create(CoachView.prototype);
+Object.assign(view,{host,admin:false,compact:false,profile:()=>null,sending:false,stopping:false,dirty:false,controllers:new Set(),
+  actionError:'',generation:0,editVersion:0,off:false,state:null});
+const phase=()=>view.q('phase').textContent;
+view.render();const connecting=phase();
+// A failed first load: the error line and the badge agree, without waiting for another render.
+view.fail(Object.assign(new Error('Live coaching is unavailable for this source'),{status:503,code:'source_unavailable'}));
+const failed=[phase(),view.q('error').textContent];
+// A failed poll after a good state keeps the controls but no longer claims the old phase.
+view.state={version:1,generation:'g',profile:'p',viewer:'v',revision:3,active:true,pending:false,phase:'ready'};view.loadError=false;
+view.render();const ready=phase();
+view.fail(Object.assign(new Error(''),{status:503}));const transient=phase();
+// A rejected action is not a load failure: the badge keeps the current phase.
+view.loadError=false;view.render();
+view.fail(Object.assign(new Error('changed'),{status:409,code:'conflict'}),true);const action=phase();
+console.log(JSON.stringify({connecting,failed,ready,transient,action}));
+""")
+    if out is None:return
+    got=json.loads(out)
+    assert got['connecting']=='Connecting',got
+    assert got['failed']==['Unavailable','Live coaching is unavailable for this source'],got
+    assert got['ready']=='Ready' and got['transient']=='Unavailable' and got['action']=='Ready',got
+
+
 # The shared component under node with a minimal fake DOM: every element that the
 # component's HTML names by id or class is registered, unknown ids are created on demand,
 # and fetch answers from a per-scenario route table. Skipped where node is not installed.
@@ -351,10 +391,11 @@ def _driver_routes(messages=(),engineer=True,coach=True):
            '/console/driver-radio/messages':[200,{'epoch':1,'binding':_BINDING,'messages':list(messages)}],
            '/console/driver-radio/native':[200,{'binding':_BINDING,'revision':0,'phase':'idle','enabled':True,'paused':False,'muted':False,'volume':1,'input_language':'en'}],
            '/console/driver-radio/setup':[200,{'binding':_BINDING,'revision':0,'setup':{}}]}
-    # The relay serves messages (enabled sources only) and native voice for either feature.
+    # The relay serves messages (enabled sources and refusal hints) and native voice for
+    # either feature.
     shared=('/console/driver-radio/messages','/console/driver-radio/native')
     keep={name for name,on in (('engineer',engineer),('coach',coach)) if on}
-    radio['/console/driver-radio/messages'][1]['messages']=[m for m in messages if m['source'] in keep]
+    radio['/console/driver-radio/messages'][1]['messages']=[m for m in messages if m['source'] in keep or m['kind']=='refusal']
     if not engineer:radio={path:(doc if coach and path in shared else off('AI Race Engineer')) for path,doc in radio.items()}
     radio['/console/driver-radio/coach']=[200,_COACH_STATE] if coach else off('AI Coach')
     radio['/console/whoami']=[200,{'subject':'driver','ai_engineer':engineer,'ai_coach':coach}]
@@ -390,19 +431,22 @@ def t_sections_split_messages_by_source():
     messages=[dict(id=1,source='engineer',kind='requested',state='done',text='Fuel for 12 laps.'),
               dict(id=2,source='coach',kind='coach',state='done',text='Brake two metres later.'),
               dict(id=3,source='coach',kind='refusal',state='text_only',text='Enable the AI Coach for this profile'),
-              dict(id=4,source='engineer',kind='refusal',state='text_only',text='Enable the AI Race Engineer for this profile')]
+              dict(id=4,source='engineer',kind='refusal',state='text_only',text='Enable the AI Race Engineer for this profile',epoch=1)]
     out=_run_component("""
      Object.assign(routes,%s);
      const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
-     const result={engineer:byId('history').textContent,coach:byId('coach-messages').textContent,latest:byId('latest').textContent};
+     const result={engineer:byId('history').textContent,coach:byId('coach-messages').textContent,latest:byId('latest').textContent,
+       hint:byId('voice-hint').textContent};
      view.destroy();console.log(JSON.stringify(result));
     """%_driver_routes(messages))
     if out is None:return
     assert 'Fuel for 12 laps.' in out['engineer'] and 'Fuel for 12 laps.' not in out['coach'],out
     assert 'Brake two metres later.' in out['coach'] and 'Brake two metres later.' not in out['engineer'],out
-    assert 'Enable the AI Coach' in out['coach'] and 'Enable the AI Coach' not in out['engineer'],out
-    assert 'Feature off' in out['engineer'] and 'Automatic advice' not in out['engineer'],out
-    assert out['latest']=='Enable the AI Race Engineer for this profile',out
+    # Refusal hints belong to the shared Voice row, not to either feature's section.
+    for section in ('engineer','coach'):
+        assert 'Feature off' not in out[section] and 'Enable the' not in out[section],(section,out)
+    assert out['latest']=='Fuel for 12 laps.',out
+    assert out['hint']=='Feature off Enable the AI Race Engineer for this profile',out
 
 
 def t_a_disabled_feature_turns_off_only_its_own_section():
@@ -436,6 +480,43 @@ def t_coach_only_view_keeps_the_voice_controls_and_coach_messages():
     assert out['content'] is False and out['engineerOff'] is False,out
     assert out['voice'] is False and out['pause'] is False and out['phase'].startswith('Native voice'),out
     assert 'Brake two metres later.' in out['coach'],out
+
+
+def t_a_refusal_shows_in_the_voice_row_where_the_driver_looks():
+    # Coach alone: asking the switched-off AI Race Engineer by voice gets its hint as text in
+    # the Voice row (its own section only says Off), also when speech is muted or not live.
+    messages=[dict(id=1,source='coach',kind='coach',state='done',text='Brake two metres later.'),
+              dict(id=2,source='engineer',kind='refusal',state='text_only',text='Enable the AI Race Engineer for this profile',epoch=1)]
+    probe="""
+     Object.assign(routes,%s);
+     const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
+     const result={hint:byId('voice-hint').textContent,hidden:byId('voice-hint').hidden,voice:byId('voice-section').hidden,
+       coach:byId('coach-messages').textContent,engineerOff:byId('engineer-off').hidden};
+     view.destroy();console.log(JSON.stringify(result));"""
+    out=_run_component(probe%_driver_routes(messages,engineer=False))
+    if out is None:return
+    assert out['voice'] is False and out['hidden'] is False and out['engineerOff'] is False,out
+    assert out['hint']=='Feature off Enable the AI Race Engineer for this profile',out
+    assert 'Enable the' not in out['coach'],out
+    # A later message replaces the hint: it answers that one request, not every poll.
+    later=messages+[dict(id=3,source='coach',kind='coach',state='done',text='Lift earlier into turn four.')]
+    out=_run_component(probe%_driver_routes(later,engineer=False))
+    assert out['hidden'] is True and out['hint']=='',out
+
+
+def t_a_native_refusal_with_both_features_off_hides_the_voice_row():
+    out=_run_component("""
+     Object.assign(routes,%s);
+     const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
+     const before=byId('voice-section').hidden;
+     routes['/console/driver-radio/native']=[403,{error:{code:'feature_disabled',message:'Enable the AI Race Engineer or the AI Coach for this profile'}}];
+     clearTimeout(view.timer);await view.send('/native',{binding:view.native.binding,expected:0,muted:true});
+     const result={before,voice:byId('voice-section').hidden,native:view.native,pause:byId('pause').disabled,engineerOff:byId('engineer-off').hidden};
+     view.destroy();console.log(JSON.stringify(result));
+    """%_driver_routes(engineer=False))
+    if out is None:return
+    assert out['before'] is False,out
+    assert out['voice'] is True and out['native'] is None and out['pause'] is True and out['engineerOff'] is False,out
 
 
 if __name__=='__main__':
