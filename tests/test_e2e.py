@@ -2,6 +2,7 @@
 """Unit tests for the pure pieces of tools/e2e_checks.py (stdlib, no pytest)."""
 import os, sys, socket
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "scripts"))
 import e2e_checks as e
 
 
@@ -40,7 +41,8 @@ def t_free_port_is_bindable():
 
 def _stub_relay():
     import json, threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
     state = {"token": "good"}
 
     class H(BaseHTTPRequestHandler):
@@ -94,7 +96,8 @@ def _stub_relay2():
     at the top level) plus /cockpit/timer, /chat/* round-trip and
     /cockpit/submit -> /submissions. Token-gated like the real relay."""
     import json, threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
     chat = []          # mutable closure state, the round-trip target
     pending = []
     event = {"title": ""}   # /event/title round-trip target (#207)
@@ -203,7 +206,8 @@ def t_check_event_title_round_trip():
 
 def t_check_cc_api_cockpit():
     import json, threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass
@@ -232,7 +236,8 @@ def t_check_cc_api_cockpit():
 
 def t_http_request_returns_status_even_on_4xx():
     import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass
@@ -334,7 +339,8 @@ def t_check_health_monitor_v3():
     Also verifies that a missing key returns fail, and that a disabled-monitor
     response ({"error": "..."}) is surfaced as fail."""
     import json, threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     # The synthetic relay returns None-valued bands/series when OBS/Tailscale absent.
     BANDS = {
@@ -645,7 +651,8 @@ def t_check_program_audio_stream_passes_against_stub_probe():
     relay's probe route never starts the encoder, so this stub never needs to
     simulate streaming."""
     import json, threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass
@@ -677,7 +684,8 @@ def t_check_program_audio_stream_fails_when_unavailable():
     CheckResult, never an uncaught exception. The disabled-path 404 itself is
     covered in tests/test_program_audio.py and tests/test_console.py."""
     import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass
@@ -713,7 +721,8 @@ def t_race_control_check_skips_without_token():
 
 def t_program_monitor_fails_on_503():
     import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass

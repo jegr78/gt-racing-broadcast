@@ -406,6 +406,45 @@ def _bounded_recording(
     }
 
 
+class _SteadyDefinitions:
+    """The track-definition store as the live engineer reads it. The live store
+    annotates one lap at a time, so without a saved definition the automatic
+    provisional thirds were proposed anew from every lap's own trace: each lap got its
+    own bounds and fingerprint and no two laps composed a theoretical best (#813). The
+    first proposal from a regular complete lap is kept per layout, as the report and
+    workspace keep one proposal per recording; a saved definition always wins."""
+
+    _IRREGULAR = {"first", "pit", "warmup", "partial"}
+
+    def __init__(self, store):
+        self._store = store
+        self._kept = {}
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    def read(self, layout, reverse):
+        saved = self._store.read(layout, reverse)
+        if saved["definition"] is None:
+            with self._lock:
+                kept = self._kept.get((layout, reverse))
+            if kept is not None:
+                return dict(saved, definition=kept)
+        return saved
+
+    def keep(self, row, annotated):
+        """Keep the provisional definition `annotated` (annotate_index's answer for
+        the one lap `row`) when that lap is a regular complete lap."""
+        if row.get("lap_role") in self._IRREGULAR or not row.get("trace_complete"):
+            return
+        for definition in annotated.get("track_definition_snapshots", {}).values():
+            if definition.get("default_variant") != "provisional-3" or definition.get("reviewed"):
+                continue
+            with self._lock:
+                self._kept.setdefault((definition["layout_id"], definition["reverse"]), definition)
+
+
 def _decorate(row, context, definitions, tracks):
     result = dict(row)
     result["notes"] = [
@@ -418,9 +457,12 @@ def _decorate(row, context, definitions, tracks):
     if definitions is not None and tracks is not None:
         session = result["session"]
         measured = dict(result, session=result.get("recording_session", session))
-        result = gt7_track_definitions.annotate_index(
+        annotated = gt7_track_definitions.annotate_index(
             {"laps": [measured]}, context, definitions, tracks
-        )["laps"][0]
+        )
+        if isinstance(definitions, _SteadyDefinitions):
+            definitions.keep(measured, annotated)
+        result = annotated["laps"][0]
         result["session"] = session
     return result
 
@@ -457,14 +499,14 @@ class Store:
         self._pending_data = None
         self._runtime_base, self._bundled = runtime_base, bundled
         self._definitions = (
-            gt7_track_definitions.Store(
+            _SteadyDefinitions(gt7_track_definitions.Store(
                 runtime_base,
                 os.path.join(
                     bundled
                     or os.path.join(os.path.dirname(__file__), "..", "assets", "gt7"),
                     "track-definitions",
                 ),
-            )
+            ))
             if runtime_base
             else None
         )

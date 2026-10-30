@@ -26,7 +26,9 @@ Lap and sector times use **m:ss.SSS** throughout the desk and Telemetry workspac
 (for example, **+0.125 s**).
 
 Current lap, live delta, best completed time, race position and average fuel use lead
-the desk. **Avg fuel · L/lap** averages every completed lap of the live session from
+the desk. Under the current lap, **Predicted** is the lap time at the current pace: the
+reference lap A's time plus the live delta. It reads **N/A** while there is no live
+delta or the reference has no lap time. **Avg fuel · L/lap** averages every completed lap of the live session from
 the first lap on, pit laps included; only a lap without an official time (the out lap)
 is left out. A lap's use is the fuel it burned, so a refuel during a pit lap does not
 cancel it; a lap without a fuel reading is left out, never counted as zero. Below it,
@@ -117,7 +119,8 @@ chart range stay stable while the live trace grows, including during preparation
 The displayed best uses retained eligible summaries. The theoretical best composes the
 best **larger sectors** over the same retained pool, not an unlimited full-session
 archive: the layout's selected sector variant, or the automatic provisional thirds
-when no reviewed track definition exists. It reads **unconfirmed** until reviewed
+when no reviewed track definition exists. The desk proposes those thirds once per layout,
+from the first regular complete lap, so every later lap is cut at the same points. It reads **unconfirmed** until reviewed
 sectors and confirmed context back it. The tooltip also shows the 200 m mini-sector
 sum; that is a diagnostic only, since picking the best of every 200 m runs below what
 a driven lap allows.

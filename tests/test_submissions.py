@@ -474,7 +474,8 @@ def _recording_webhook():
     """A tiny local HTTP server that captures POSTed Discord payloads. Returns
     (url, captured_list, shutdown_fn)."""
     import threading as _t
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     captured = []
 
