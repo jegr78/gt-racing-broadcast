@@ -172,6 +172,57 @@ def t_control_center_proxy_checks_owned_relay_and_profile_before_writes():
         assert f.f.access.read()['enabled'] is True
 
 
+def _coach_js(body):
+    """Run CoachView (extracted from the browser file) under node with a minimal fake DOM."""
+    import shutil,subprocess
+    node=shutil.which('node')
+    if not node:
+        print('  (node not installed, JS check skipped)');return None
+    src=(ROOT/'src/console/driver-radio.js').read_text(encoding='utf-8')
+    helpers=src[src.index('function el('):src.index('const COMPOUNDS')]
+    klass=src[src.index('class CoachView'):src.index('window.DriverRadio')]
+    harness=r"""
+const els={};
+const mk=()=>({textContent:'',value:'',disabled:false,hidden:false,checked:false,open:false,dataset:{},children:[],
+  append(...c){this.children.push(...c);},replaceChildren(...c){this.children=c;},querySelectorAll(){return [];},
+  get options(){return this.children;}});
+const host={querySelector:sel=>els[sel]||(els[sel]=mk()),replaceChildren(){}};
+class Option{constructor(label,value){this.label=label;this.value=value;}}
+const document={createElement:()=>mk()};
+"""
+    out=subprocess.run([node,'-'],input=harness+helpers+klass+body,capture_output=True,text=True,
+                       encoding='utf-8',errors='replace',check=True,timeout=30)
+    return out.stdout
+
+
+def t_coach_buttons_survive_a_transient_failure():
+    out=_coach_js(r"""
+const view=Object.create(CoachView.prototype);
+Object.assign(view,{host,admin:true,compact:false,profile:()=>null,sending:false,stopping:false,dirty:false,controllers:new Set(),
+  actionError:'',generation:0,editVersion:0});
+view.state={version:1,generation:'g',profile:'p',viewer:'v',revision:3,epoch:1,allow_ai:false,active:true,pending:false,phase:'ready',
+  calibration:{phase:'ready',mode:'practice',objective:'balanced'},focus:{focus:'braking',label:'Brake point',action:'Brake later',progress:{text:'1 of 3'}}};
+const ids=['start','stop','goal','set-skill','use-reference','skip','keep','show-evidence','mode','objective','ai','skill','reference-choice'];
+const snap=()=>ids.map(id=>id+':'+view.q(id).disabled).join(',');
+view.render();const before=snap();
+view.fail(Object.assign(new Error(''),{status:503,code:'coaching_unavailable'}));
+view.render();const after=snap();
+console.log(JSON.stringify({before,after,error:view.q('error').textContent,phase:view.state&&view.state.phase,active:view.state&&view.state.active}));
+view.fail(Object.assign(new Error('Access changed.'),{status:403,code:'forbidden'}));
+const cleared403=view.state===null;
+view.state={version:1,generation:'g',profile:'p',viewer:'v',revision:3,active:true,pending:false,phase:'ready'};
+view.fail(Object.assign(new Error('Signed out.'),{status:401}));
+console.log(JSON.stringify({cleared:cleared403,cleared401:view.state===null}));
+""")
+    if out is None:return
+    first,second=[json.loads(line) for line in out.splitlines()]
+    assert first['before']==first['after'],"a transient failure keeps the last controls"
+    assert first['error']=='Coaching is unavailable.',first['error']
+    assert first['phase']=='ready' and first['active'] is True
+    assert second['cleared'] is True
+    assert second['cleared401'] is True,'a 401 without a code still clears the view'
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)
