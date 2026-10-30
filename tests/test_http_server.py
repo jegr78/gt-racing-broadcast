@@ -85,18 +85,19 @@ def t_occupied_port_still_fails():
                 with server_type(holder.getsockname(), Handler):
                     raise AssertionError('HTTP listener silently accepted an occupied port')
             except OSError as exc:
-                assert exc.errno in {errno.EADDRINUSE, getattr(errno, 'WSAEACCES', errno.EACCES)}, exc
+                assert exc.errno in {errno.EADDRINUSE, errno.EACCES}, exc
 
 
 def t_socket_bind_error_is_propagated_unchanged():
-    failure = OSError(errno.EADDRINUSE, 'fixture port is occupied')
-    for server_type in (relay.ThreadingHTTPServer, relay.QuietThreadingHTTPServer, ui_server.UiHTTPServer):
-        with patch('http_server.TCPServer.server_bind', side_effect=failure):
-            try:
-                with server_type(('127.0.0.1', 0), Handler):
-                    raise AssertionError('HTTP listener swallowed a socket bind failure')
-            except OSError as exc:
-                assert exc is failure, 'HTTP listener must preserve the original socket bind error'
+    for code in (errno.EADDRINUSE, errno.EACCES):
+        failure = OSError(code, 'fixture port is occupied')
+        for server_type in (relay.ThreadingHTTPServer, relay.QuietThreadingHTTPServer, ui_server.UiHTTPServer):
+            with patch('http_server.TCPServer.server_bind', side_effect=failure):
+                try:
+                    with server_type(('127.0.0.1', 0), Handler):
+                        raise AssertionError('HTTP listener swallowed a socket bind failure')
+                except OSError as exc:
+                    assert exc is failure, 'HTTP listener must preserve the original socket bind error'
 
 
 if __name__ == '__main__':
