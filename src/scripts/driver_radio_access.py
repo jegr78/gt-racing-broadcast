@@ -100,6 +100,8 @@ class Store:
                 _require(type(body.get('expected')) is int and body['expected'] == doc['revision'],
                          'conflict', 'Radio settings changed; reload before saving')
                 doc.update(copy.deepcopy({k: v for k, v in body.items() if k != 'expected'}))
+                if isinstance(doc.get('drivers'), list):
+                    doc['drivers'] = _driver_identities(doc['drivers'])
                 try:
                     doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
                     doc['providers'] = _provider_settings(doc.get('providers',{}))
@@ -120,6 +122,21 @@ class Store:
         _require(doc['enabled'], 'feature_disabled', 'The producer has disabled driver radio')
         _require(subject in doc['drivers'], 'forbidden', 'Explicit driver radio assignment is required')
         return dict(version=1, enabled=True, revision=doc['revision'])
+
+
+def _driver_identities(values):
+    """Driver identities as the Console signs people in: lowercase, trimmed, each once
+    ("JeGr" is the identity jegr). Anything else is not a Console identity."""
+    out = []
+    for value in values:
+        key = value.strip().lower() if isinstance(value, str) else value
+        _require(isinstance(key, str) and re.fullmatch(r'[a-z0-9-]{1,160}', key) is not None,
+                 'invalid_settings',
+                 f'Driver identity {str(value)[:40]!r} is not a Console sign-in name: '
+                 'use lowercase letters, digits and hyphens, as shown beside the Console sign-in')
+        if key not in out:
+            out.append(key)
+    return out
 
 
 def validate_setup(value):
