@@ -2458,6 +2458,28 @@ def apply_signal_hold_notice(data, notice):
     return data
 
 
+def radio_hud_lines(radio_service):
+    """The /hud/data AI Race Engineer and AI Coach lines, "" when there is nothing to
+    show: the feature switched off (always so on a non-Solo profile, whose radio
+    service sits on an unavailable Store), no current message or review, or no
+    radio service at all (a bare handler). Read on every poll, so an OBS reload
+    shows the current text again. A radio fault blanks the lines, never the HUD."""
+    if radio_service is None:
+        return {"raceEngineer": "", "coach": ""}
+    try:
+        engineer = radio_service.hud_text("engineer")
+    except Exception as exc:  # noqa: BLE001 - the HUD frame must survive any radio fault
+        LOG.debug("HUD race-engineer line unavailable: %s", exc)
+        engineer = None
+    coach = getattr(radio_service, "coach", None)
+    try:
+        line = coach.hud_line() if coach is not None else None
+    except Exception as exc:  # noqa: BLE001 - the HUD frame must survive any coach fault
+        LOG.debug("HUD coach line unavailable: %s", exc)
+        line = None
+    return {"raceEngineer": engineer or "", "coach": line or ""}
+
+
 def _parse_preset_column(text, headers):
     """Shared: first matching header column -> de-duped, non-blank values in order."""
     rows = list(csv.reader(io.StringIO(text)))
@@ -11969,7 +11991,23 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     else:
                         if self._console_subject() != subject:
                             return self._radio_error("unauthorized", "Console identity changed; sign in again", 401)
-                        access = radio_access.authorize('engineer')
+                        if route in ("messages", "native"):
+                            # The message lane and the native voice serve both AI features:
+                            # either switch opens them; messages keep only enabled sources.
+                            features = set()
+                            for feature in driver_radio_access.FEATURES:
+                                try:
+                                    radio_access.authorize(feature)
+                                    features.add(feature)
+                                except driver_radio_access.RadioError as exc:
+                                    if exc.code != "feature_disabled":
+                                        raise
+                            if not features:
+                                raise driver_radio_access.RadioError(
+                                    "feature_disabled", "Enable the AI Race Engineer or the AI Coach for this profile")
+                            access = None
+                        else:
+                            access = radio_access.authorize('engineer')
                         if route == "access":
                             result = access
                         elif route == "native":
@@ -11983,6 +12021,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     or values and not (values[0].isascii() and values[0].isdigit() and len(values[0]) <= 18)):
                                 return self._radio_error("invalid_query", "Use one nonnegative message revision", 400)
                             result = radio_service.history(int(values[0]) if values else None, requester=subject)
+                            result["messages"] = [m for m in result["messages"] if m.get("source") in features
+                                                  or m.get("kind") == "refusal"]
                         elif route == "request":
                             if set(body) != {"preset", "binding"}:
                                 return self._radio_error("invalid_body", "Expected preset and current binding", 400)
@@ -13069,6 +13109,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # body[data-mode] (#555). Relay state, like povActive, and
                     # deliberately not part of HudSource.
                     data["mode"] = relay.mode
+                    data.update(radio_hud_lines(radio_service))
                     return self._send(data)
                 if p == ["hud", "preview"]:
                     if not preview_path:

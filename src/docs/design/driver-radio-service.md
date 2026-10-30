@@ -48,6 +48,37 @@ slot until the owner has stopped and acknowledged completion. This prevents
 simultaneous output even if a worker is slow to react. No browser playback claim
 or public audio-control API is added.
 
+## Message source and feature gating
+
+Every public message carries `source`: `coach` for AI Coach messages, `engineer`
+for everything else (preset answers, voice-question answers, proactive fuel and
+pace notices). The service runs while either feature is switched on, but each
+feature's work is gated on its own switch: presets (`request`) and voice
+questions (`question`) raise `feature_disabled` with "Enable the AI Race Engineer
+for this profile" while the engineer is off, and proactive fuel/pace notices are
+not published; `publish_coach` returns nothing while the coach is off. Any
+feature switch changes the settings revision and so invalidates current history.
+
+A native voice request for a switched-off feature is refused with that
+feature's `feature_disabled` text as a `refusal` message (`source` = the refused
+feature, no AI interpretation). It is shown as text and queued for speech while
+voice is on, the session is live and the playback queue has room; a hint never
+evicts queued work, so with a full queue it stays text only. It is never stored
+as an answer. A voice
+question while the engineer is off gets the engineer text; a recognised coaching
+command or question while the coach is off gets "Enable the AI Coach for this
+profile".
+
+`hud_text(source, now=None)` gives the broadcast HUD the deterministic `text` of
+the newest message of that source. It is empty (`None`) when that newest
+message is superseded, cancelled or expired, when its wall-clock `expires_at` is
+reached, when its epoch or binding is no longer current (session, context or
+setup change clears history), when the session is not live (pause or replay),
+or when the feature is off. It does not fall back to an older message and never
+returns the spoken question or an AI interpretation. Refusal hints exist only
+while their feature is off, so they never reach the HUD.
+It reuses the existing refresh transitions; no separate timer exists.
+
 ## Routes
 
 Current assignment and profile enablement are rechecked for every Console route.

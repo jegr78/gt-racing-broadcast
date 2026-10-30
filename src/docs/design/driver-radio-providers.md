@@ -15,7 +15,11 @@ it never delays deterministic text, relay HTTP, telemetry or broadcast workers.
 
 ## Defaults and consent
 
-Profile settings add `providers` with `speech=false` and `agent=null`. Speech
+Profile settings hold `providers` with `speech=false`, and each AI feature
+(`features.engineer`, `features.coach`) has its own optional `agent` (default
+`null`). A message's explanation uses the agent of the feature named by its
+`source`, so an AI Coach message never runs on the AI Race Engineer's agent and
+the reverse. A feature without an agent leaves its messages `unconfigured`. Speech
 requires both profile voice enablement and explicit Google speech selection,
 plus the established machine environment key `RACECAST_GCLOUD_TTS_KEY`. The key
 is sent as a header to the fixed HTTPS Google endpoint; redirects are refused.

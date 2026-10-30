@@ -355,7 +355,11 @@ def t_signed_http_clients_share_messages_and_revalidate_access():
             f.service.finish_playback(playing.id)
             m.console_admin.write_versions(versions,{})  # Restore fixture identity for the independent feature check.
             f.access.update({'expected':1,'features':features(coach=True)})
+            # The message lane serves either feature; with the engineer off, no engineer
+            # message reaches the coach-only view and engineer facts stay refused.
             status,doc,_=request('messages')
+            assert status==200 and doc['messages']==[],(status,doc)
+            status,doc,_=request('snapshot')
             assert status==403 and doc['error']['code']=='feature_disabled'
             assert f.service.history()['messages']==[]
         finally:server.shutdown();server.server_close();f.service.close()
@@ -395,6 +399,82 @@ def t_coach_messages_reach_every_console_view():
             coach=[m for m in f.service.history(requester=requester)['messages'] if m['kind']=='coach']
             assert [m['id'] for m in coach]==[published['id']],requester
             assert all('_coach_owner' not in m for m in coach)
+
+
+def t_engineer_off_refuses_presets_but_coach_runs():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'features':features(False,True)});f.poll()
+        try:f.request('fuel')
+        except access.RadioError as exc:
+            assert exc.code=='feature_disabled' and str(exc)==access.DISABLED['engineer'],(exc.code,str(exc))
+        else:raise AssertionError('Expected feature_disabled')
+        error(lambda:f.service.question('Fuel status?',assessment.binding(f.snap)),'feature_disabled')
+        f.snap['instruments']['fuel_l']=3;f.snap['revision']+=1;f.poll()
+        assert [m for m in f.service.history()['messages'] if m['kind']=='fuel']==[], 'no engineer alert while it is off'
+        owner={'profile':Path(d).name,'subject':'local:producer'}
+        published=f.service.publish_coach('Brake a little later into turn one.',{},owner,'training-token',
+                                          authorize=lambda:True,ready=lambda:True)
+        assert published is not None and published['source']=='coach'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'features':features(True,False)});f.poll()
+        assert f.request('fuel')['source']=='engineer'
+        f.snap['instruments']['fuel_l']=3;f.snap['revision']+=1;f.poll()
+        alert=f.service.history()['messages'][-1]
+        assert alert['kind']=='fuel' and alert['source']=='engineer'
+        owner={'profile':Path(d).name,'subject':'local:producer'}
+        assert f.service.publish_coach('Brake later.',{},owner,'training-token',
+                                       authorize=lambda:True,ready=lambda:True) is None, 'coach off publishes nothing'
+
+
+def t_hud_text_follows_message_life():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll()
+        assert f.service.hud_text('engineer') is None
+        first=f.request('pace')
+        now=first['created_at']
+        assert f.service.hud_text('engineer',now)==first['text']
+        assert f.service.hud_text('coach',now) is None
+        assert f.service.hud_text('engineer',first['expires_at']) is None, 'expired text must leave the HUD'
+        second=f.request('status')
+        assert second['id']!=first['id']
+        assert f.service.hud_text('engineer',second['created_at'])==second['text'], 'newer engineer message replaces it'
+        f.snap['context_revision']+=1;f.poll()
+        assert f.service.hud_text('engineer',second['created_at']) is None, 'invalidation clears the HUD'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();message=f.request('pace')
+        ticket=f.service.take_playback();f.service.finish_playback(ticket.id,'spoken')
+        assert f.service.hud_text('engineer',message['created_at'])==message['text']
+        f.snap['replay']['active']=True;f.snap['revision']+=1;f.poll()
+        assert f.service.hud_text('engineer',message['created_at']) is None, 'a non-live session clears the HUD'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();allowed=[True]
+        message=f.service.request('pace',assessment.binding(f.snap),requester='driver',
+                                  authorization=lambda:allowed[0])
+        assert f.service.hud_text('engineer',message['created_at'])==message['text']
+        allowed[0]=False;f.poll()
+        assert f.service.history()['messages'][-1]['state']=='cancelled'
+        assert f.service.hud_text('engineer',message['created_at']) is None, 'a cancelled message leaves the HUD'
+
+
+def t_refusal_never_evicts_queued_work_and_closed_is_not_a_disabled_feature():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':1,'features':features(True,False)});f.poll()
+        queued=[f.request(preset) for preset in assessment.PRESETS]
+        assert f.service.pending_count()==radio.QUEUE_MAX
+        refusal=f.service.refusal('coach',assessment.binding(f.snap))
+        assert refusal['state']=='text_only' and refusal['text']==access.DISABLED['coach']
+        states={m['id']:m['state'] for m in f.service.history()['messages']}
+        assert all(states[m['id']]=='queued' for m in queued),states
+        assert f.service.pending_count()==radio.QUEUE_MAX
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();f.service.close()
+        try:f.request('fuel')
+        except access.RadioError as exc:
+            assert exc.code=='feature_disabled' and str(exc)!=access.DISABLED['engineer'],str(exc)
+        else:raise AssertionError('Expected a closed-service error')
 
 
 if __name__=='__main__':

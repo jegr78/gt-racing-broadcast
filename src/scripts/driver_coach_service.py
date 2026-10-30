@@ -158,6 +158,32 @@ class Service:
                             phase='busy' if self._state['active'] else 'inactive')
             return copy.deepcopy(dict(self._state, version=1, generation=self._generation, revision=self._revision, epoch=self._token))
 
+    def hud_line(self):
+        """The HUD Coach line: "<focus>: <action>" of the latest review, the action
+        alone before the training names a focus. It follows the coach's state, not
+        the short-lived radio message, so it lasts until the next review. None with
+        the AI Coach switched off, before the first review, after Stop and while
+        the live context is invalid (stale, replay, another car or session)."""
+        if not self.radio.feature_enabled('coach'):
+            return None
+        with self._lock:
+            state, token, revision = self._state, self._token, self._revision
+            stamp, expected = self._checks
+            latest = state.get('latest') or {}
+            exercise = (state.get('focus') or {}).get('focus')
+            if not state['active'] or state['pending'] or self._command is not None:
+                return None
+            action = latest.get('action')
+            label = exercise.get('label') if isinstance(exercise, dict) else None
+        if not isinstance(action, str) or not action.strip():
+            return None
+        if not self._current(token, stamp, expected):
+            return None
+        with self._lock:
+            if revision != self._revision or token != self._token:
+                return None
+        return f'{label}: {action}' if isinstance(label, str) and label.strip() else action
+
     def view(self, owner):
         for _ in range(2):
             with self._lock:

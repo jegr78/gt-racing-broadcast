@@ -97,6 +97,10 @@ def check(browser,outdir,shots=None):
             f.f.service.question('Will the fuel last at this pace?',binding);f.enricher.step('audio')
             first.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('question').textContent.includes('Will the fuel')")
             a.locator('summary').filter(has_text='Measurement evidence').click()
+            # Two labelled sections: engineer answers stay in the AI Race Engineer section.
+            assert a.locator('#engineer-section h3').first.inner_text()=='AI Race Engineer'
+            assert a.locator('#coach-section h3').first.inner_text()=='AI Coach'
+            assert a.locator('#engineer-section #history li').count()>0
             for width,view,wiki in ((1440,'desktop','console-driver-radio-desktop.png'),(1024,'tablet','console-driver-radio-tablet.png'),(390,'phone','console-driver-radio-phone.png')):
                 first.set_viewport_size({'width':width,'height':1000})
                 assert first.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),'driver desk overflows viewport'
@@ -142,11 +146,23 @@ def check(browser,outdir,shots=None):
             first.wait_for_function("window.__radioReplies===4&&typeof window.__releaseRadioPoll==='function'")
             switch(f,coach=True)  # The producer switches the AI Race Engineer off.
             a.locator('[data-preset=fuel]').click()
-            first.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('content').hidden")
+            # Only the AI Race Engineer section switches off; the AI Coach section stays.
+            first.wait_for_function("document.getElementById('driver-radio').shadowRoot.getElementById('engineer-body').hidden")
             first.evaluate('window.__releaseRadioPoll();window.fetch=window.__realRadioFetch')
             first.wait_for_timeout(200)
-            assert first.evaluate("document.getElementById('driver-radio').shadowRoot.getElementById('content').hidden"),'late authorized poll revived a revoked view'
+            assert first.evaluate("document.getElementById('driver-radio').shadowRoot.getElementById('engineer-body').hidden"),'late authorized poll revived a revoked section'
             assert first.evaluate("document.getElementById('driver-radio').shadowRoot.getElementById('question').textContent===''"),'revoked view retained transcript'
+            assert a.locator('#engineer-off').inner_text()=='Off · enable it in the Control Center'
+            assert not first.evaluate("document.getElementById('driver-radio').shadowRoot.getElementById('content').hidden"),'engineer switch-off hid the AI Coach section'
+            a.locator('#coach-start').wait_for(state='visible')
+            # The shared Voice row serves the AI Coach too and stays usable.
+            first.wait_for_timeout(1200)
+            assert a.locator('#voice-section').is_visible() and a.locator('#pause').is_enabled(),'engineer switch-off removed the shared voice controls'
+            # A voice request for the switched-off engineer shows its hint as text in the Voice row.
+            f.f.service.refusal('engineer',f.f.service.refresh()['binding'])
+            a.locator('#voice-hint').wait_for(state='visible')
+            assert a.locator('#voice-hint').inner_text().startswith('Feature off'),a.locator('#voice-hint').inner_text()
+            assert 'Enable the' not in a.locator('#coach-section').inner_text(),'refusal hint leaked into the AI Coach section'
             shot(first,'driver-radio-denied',wiki='console-driver-radio-access.png')
             # Finish only synthetic queued work, then closing views must not pause native service.
             for _ in range(12):
