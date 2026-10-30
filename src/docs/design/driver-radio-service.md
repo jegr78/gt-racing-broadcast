@@ -72,8 +72,9 @@ the newest message of that source. It is empty (`None`) when that newest
 message is superseded, cancelled or expired, when its wall-clock `expires_at` is
 reached, when its epoch or binding is no longer current (session, context or
 setup change clears history), when the session is not live (pause or replay),
-or when the feature is off. It does not fall back to an older message, never
-returns the spoken question or an AI interpretation, and skips refusal hints.
+or when the feature is off. It does not fall back to an older message and never
+returns the spoken question or an AI interpretation. Refusal hints exist only
+while their feature is off, so they never reach the HUD.
 It reuses the existing refresh transitions; no separate timer exists.
 
 ## Routes

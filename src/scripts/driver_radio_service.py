@@ -420,13 +420,15 @@ class Service:
 
         The newest message decides: once it expired, was superseded, cancelled or
         invalidated, the slot is empty rather than falling back to an older one.
-        Refusal hints never reach the broadcast picture."""
+        A switched-off feature has no HUD text, so its refusal hints never reach
+        the broadcast picture (switching it on changes the settings revision and
+        clears them)."""
         self.refresh()
         with self._lock:
             if self._closed or not self._live or not self._features.get(source):
                 return None
             newest = next((m for m in reversed(self._messages.values())
-                           if m['source'] == source and m['kind'] != 'refusal'), None)
+                           if m['source'] == source), None)
             now = self.wall() if now is None else now
             if (newest is None or newest['epoch'] != self._epoch or newest['binding'] != self._binding
                     or newest['state'] in HUD_GONE or now >= newest['expires_at']):
