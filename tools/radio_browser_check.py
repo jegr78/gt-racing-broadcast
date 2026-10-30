@@ -155,6 +155,9 @@ def check(browser,outdir,shots=None):
             assert a.locator('#engineer-off').inner_text()=='Off · enable it in the Control Center'
             assert not first.evaluate("document.getElementById('driver-radio').shadowRoot.getElementById('content').hidden"),'engineer switch-off hid the AI Coach section'
             a.locator('#coach-start').wait_for(state='visible')
+            # The shared Voice row serves the AI Coach too and stays usable.
+            first.wait_for_timeout(1200)
+            assert a.locator('#voice-section').is_visible() and a.locator('#pause').is_enabled(),'engineer switch-off removed the shared voice controls'
             shot(first,'driver-radio-denied',wiki='console-driver-radio-access.png')
             # Finish only synthetic queued work, then closing views must not pause native service.
             for _ in range(12):

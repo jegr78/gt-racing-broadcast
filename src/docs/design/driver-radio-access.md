@@ -37,9 +37,12 @@ admin response identifies its profile; writes must echo that profile plus the
 expected settings revision so a stale producer client cannot edit a new profile.
 A `drivers` or top-level `enabled` key in a write is `invalid_settings`.
 
-`GET /console/driver-radio/access`, `/snapshot`, `/messages`, `/native` and `/setup`,
-and `POST` of presets, `/setup`, `/service` and `/native`, require a current Console
-token plus the AI Race Engineer switch (`authorize('engineer')`). `/console/driver-radio/coach`
+`GET /console/driver-radio/access`, `/snapshot` and `/setup`, and `POST` of presets,
+`/setup` and `/service`, require a current Console token plus the AI Race Engineer
+switch (`authorize('engineer')`). `GET /messages` and `GET`/`POST /native` serve both
+features: they require the token plus either switch (`feature_disabled` naming both
+only when both are off), and `/messages` returns only messages whose `source`
+feature is on. `/console/driver-radio/coach`
 requires the token plus the AI Coach switch (`authorize('coach')`); the local
 `/driver-radio/admin/coach` route checks the same switch. The page itself, the
 launcher entry and `whoami.driver_radio` open while either switch is on. The relay

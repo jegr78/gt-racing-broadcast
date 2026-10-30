@@ -19,15 +19,17 @@ by either switch.
 |---|---|---|
 | Text on a second device | **AI Race Engineer** section of the Console driver desk and the Director Panel Solo card: presets, latest answer and its messages | **AI Coach** section of the same views: training controls, focus, review, debrief, private history and its messages |
 | Audio | Native voice on the relay PC, when the shared **Voice** settings enable it | The same native voice and the same single playback slot |
+| Voice controls | **Voice** row above both sections (pause listening, reply mute, volume, input language), shown while either feature is on | The same row |
 | Control Center | **AI Race Engineer** card (switch and agent) | **AI Coach** card (switch and agent) and **AI Coach training** below the settings |
 
 Every message carries its source, so an engineer answer never appears in the
 AI Coach section and a coach review never appears in the AI Race Engineer
 section. A message labelled **Feature off** is the hint a switched-off feature
-gives when someone asks it something. The **AI Coach messages** list on the
-desk is read from the shared radio lane, which the relay serves only while the
-AI Race Engineer is on; with the AI Coach alone, the section still shows the
-current focus and review.
+gives when someone asks it something. The relay serves the shared message lane
+and the native voice controls while either feature is on, and sends each view
+only the messages of the features that are switched on: with the AI Coach alone,
+the desk shows the coach messages and the **Voice** row, and no engineer
+messages; with the AI Race Engineer alone, no coach messages leave the relay.
 
 ![Driver radio in the Solo POV Director Panel](images/director-panel-solo.png)
 
@@ -69,9 +71,7 @@ The four buttons request **Fuel status**, **Pace**, **Tyre temperatures** and
 **Short status**. Text appears before optional speech or AI explanation. The desk
 adds bounded message history, measurement evidence, optional race length,
 starting compound and fuel reserve. Missing setup limits finish estimates and
-strategy conclusions; it does not prevent measured status answers. The section
-also holds the native voice controls (pause listening, reply mute, volume and
-input language); they need the AI Race Engineer on.
+strategy conclusions; it does not prevent measured status answers.
 
 Confirm a tyre change only after it has happened. An inferred stop does not
 confirm a new tyre stint. Slower comparable laps can support conditional tyre
@@ -154,8 +154,8 @@ read text; it does not become a remote microphone or speaker.
    `racecast radio provision`. Provisioning verifies checksums and the prepared
    phrase fixtures. A relay start downloads nothing.
 3. In the **Voice** card of **Driver radio setup**, deliberately enable native voice for the profile.
-   It uses the microphone selected in Control Center unless you enter an Engineer
-   override. On Windows/macOS the override is the native device name; on Linux it
+   It uses the microphone selected in Control Center unless you enter a
+   **Microphone override**. On Windows/macOS the override is the native device name; on Linux it
    is the PulseAudio source identifier.
 4. Choose a validated prepared wake phrase and English or German input. Output
    remains English. Arbitrary typed wake-model generation is unavailable.
@@ -191,7 +191,7 @@ consistency/Konstanz. Use `any skill` / `alle Techniken` to remove the constrain
 coaching requests ask for clarification and do not guess an action. Output stays
 English and uses the shared radio queue; urgent Engineer output has priority.
 
-OBS software mute does not pause Engineer listening. A hardware microphone mute
+OBS software mute does not pause listening. A hardware microphone mute
 removes its input signal too. Questions may remain audible through your normal
 broadcast microphone. Radio does not alter OBS sources, microphone filters or
 routing. Deliberately capture the PC output if you want replies in the broadcast.

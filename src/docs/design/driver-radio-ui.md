@@ -37,10 +37,17 @@ shared Voice. Messages are split by their `source`; a `refusal` is labelled
 the engineer routes empties and hides only the engineer section, a 403
 `feature_disabled` from the coach route (or `whoami.ai_coach` false) does the same
 for the coach section, and both show "Off · enable it in the Control Center". A 401
-or any other 403 still denies the whole view. The coach section's message list is
-fed by the engineer `messages` route, so it is empty while only the AI Coach is on.
+or any other 403 still denies the whole view. The relay serves
+`messages` and `native` while either feature is on (403 `feature_disabled` naming
+both only when both are off) and filters `messages` to the sources whose feature
+is on; `snapshot`, `setup`, `service` and `request` stay engineer-only. The view
+polls the shared pair and the engineer pair independently, so a coach-only view
+keeps its coach messages and the shared Voice row (pause, mute, volume, input
+language), which sits above both sections.
 The single coach owner per profile removed the "busy, another driver" phase and the
 `training_busy` handling from the coach view. Tests: `t_admin_form_saves_two_features`,
-`t_sections_split_messages_by_source` and
-`t_a_disabled_feature_turns_off_only_its_own_section` (node, fake DOM) plus the two
-Playwright checks.
+`t_sections_split_messages_by_source`,
+`t_a_disabled_feature_turns_off_only_its_own_section`,
+`t_coach_only_view_keeps_the_voice_controls_and_coach_messages` (node, fake DOM),
+`t_messages_and_native_serve_either_feature_and_only_enabled_sources` (signed HTTP)
+plus the two Playwright checks.

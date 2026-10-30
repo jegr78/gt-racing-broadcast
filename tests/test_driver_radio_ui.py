@@ -141,6 +141,31 @@ def t_any_signed_in_console_subject_reaches_the_engineer_without_an_assignment()
         assert status==401 and json.loads(raw)['error']['code']=='unauthorized',(status,raw)
 
 
+def t_messages_and_native_serve_either_feature_and_only_enabled_sources():
+    def lane(f):
+        status,raw,_=f.request('/console/driver-radio/messages');doc=json.loads(raw)
+        return status,doc.get('messages',doc.get('error'))
+    owner={'profile':'solo-pov','subject':'local:producer'}
+    with RadioFixture() as f:
+        switch(f,coach=True);f.f.poll()
+        assert f.f.service.publish_coach('Brake later into turn one.',{},owner,'training',authorize=lambda:True,ready=lambda:True)
+        f.f.service.refusal('engineer',f.f.service.refresh()['binding'])
+        status,messages=lane(f)
+        assert status==200 and [m['source'] for m in messages]==['coach'],(status,messages)
+        status,raw,_=f.request('/console/driver-radio/native');assert status==200 and json.loads(raw)['enabled'] in (True,False),(status,raw)
+        for path in ('/console/driver-radio/snapshot','/console/driver-radio/setup'):
+            status,raw,_=f.request(path);assert status==403 and json.loads(raw)['error']['code']=='feature_disabled',(path,status)
+    with RadioFixture() as f:
+        switch(f,engineer=True);f.f.poll()
+        f.f.request('fuel');f.f.service.refusal('coach',f.f.service.refresh()['binding'])
+        status,messages=lane(f)
+        assert status==200 and messages and {m['source'] for m in messages}=={'engineer'},(status,messages)
+        switch(f);f.f.poll()
+        for path in ('/console/driver-radio/messages','/console/driver-radio/native'):
+            status,raw,_=f.request(path);doc=json.loads(raw)['error']
+            assert status==403 and doc['code']=='feature_disabled' and 'AI Race Engineer' in doc['message'] and 'AI Coach' in doc['message'],(path,status,doc)
+
+
 def t_producer_proxy_rejects_foreign_origin_wrong_profile_and_stale_revision():
     with RadioFixture() as f:
         status,raw,_=f.request('/api/driver-radio',cc=True);assert status==200 and json.loads(raw)['profile']=='solo-pov'
@@ -275,7 +300,11 @@ def _driver_routes(messages=(),engineer=True,coach=True):
            '/console/driver-radio/messages':[200,{'epoch':1,'binding':_BINDING,'messages':list(messages)}],
            '/console/driver-radio/native':[200,{'binding':_BINDING,'revision':0,'phase':'idle','enabled':True,'paused':False,'muted':False,'volume':1,'input_language':'en'}],
            '/console/driver-radio/setup':[200,{'binding':_BINDING,'revision':0,'setup':{}}]}
-    if not engineer:radio={path:off('AI Race Engineer') for path in radio}
+    # The relay serves messages (enabled sources only) and native voice for either feature.
+    shared=('/console/driver-radio/messages','/console/driver-radio/native')
+    keep={name for name,on in (('engineer',engineer),('coach',coach)) if on}
+    radio['/console/driver-radio/messages'][1]['messages']=[m for m in messages if m['source'] in keep]
+    if not engineer:radio={path:(doc if coach and path in shared else off('AI Race Engineer')) for path,doc in radio.items()}
     radio['/console/driver-radio/coach']=[200,_COACH_STATE] if coach else off('AI Coach')
     radio['/console/whoami']=[200,{'subject':'driver','ai_engineer':engineer,'ai_coach':coach}]
     return json.dumps(radio)
@@ -341,6 +370,21 @@ def t_a_disabled_feature_turns_off_only_its_own_section():
     assert out['engineerOff'] is True and out['engineerBody'] is False,out
     assert out['coachOff'] is False and out['coachBody'] is True and out['coachState'] is False,out
     assert out['coachText']=='Off · enable it in the Control Center',out
+
+
+def t_coach_only_view_keeps_the_voice_controls_and_coach_messages():
+    messages=[dict(id=1,source='coach',kind='coach',state='done',text='Brake two metres later.')]
+    out=_run_component("""
+     Object.assign(routes,%s);
+     const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
+     const result={voice:byId('voice-section').hidden,pause:byId('pause').disabled,phase:byId('phase').textContent,
+       coach:byId('coach-messages').textContent,engineerOff:byId('engineer-off').hidden,content:byId('content').hidden};
+     view.destroy();console.log(JSON.stringify(result));
+    """%_driver_routes(messages,engineer=False))
+    if out is None:return
+    assert out['content'] is False and out['engineerOff'] is False,out
+    assert out['voice'] is False and out['pause'] is False and out['phase'].startswith('Native voice'),out
+    assert 'Brake two metres later.' in out['coach'],out
 
 
 if __name__=='__main__':
