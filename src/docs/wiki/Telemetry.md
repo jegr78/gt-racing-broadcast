@@ -251,6 +251,10 @@ The illustration uses authored synthetic reference values; no external curve is 
 The racing lines are not part of the package. Until racecast has downloaded them
 (`racecast gt7-data update`, or an explicitly enabled relay-start update), it recognises
 only layouts learned with Set track, and every other recording starts as track unknown.
+Some layouts have no downloadable racing line at all (the upstream data drops captures
+that do not close into a lap, for example Autopolis Short Course); those are recognised
+only after a Set track. When a counted lap matches no layout, the relay log says so once
+per session: `GT7 track: no match for a <length> m lap`.
 
 > **CLI alternative:** `racecast telemetry export <name>` writes laps/channels CSV,
 > `sectors.csv`, and current `context.json` and `track-definitions.json` snapshots

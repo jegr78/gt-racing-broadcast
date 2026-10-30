@@ -496,7 +496,8 @@ def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
 
 
 def t_resume_state_covers_every_engine_attribute():
-    hud_only = {"_trace", "_trace_last_t", "_tyre_hist", "_delta_hist", "track", "_official"}
+    hud_only = {"_trace", "_trace_last_t", "_tyre_hist", "_delta_hist", "track",
+                "_track_miss_logged", "_official"}
     wiring = {"on_lap", "track_db", "_log"}
     attrs = set(vars(tm.TelemetryEngine()))
     assert attrs == set(tm.TelemetryEngine.RESUMED_ATTRS) | hud_only | wiring, \
