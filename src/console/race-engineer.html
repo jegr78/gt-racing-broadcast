@@ -21,13 +21,13 @@ button:disabled{opacity:.5;cursor:default}
 <p id="source-state" class="sub"></p>
 <div class="live-grid"><div class="live-main">
 <div id="instruments" class="headline">
-<div class="tile value"><span>Current lap</span><strong id="lap-time">N/A</strong><small>Measured lap clock</small></div>
+<div class="tile value"><span>Current lap</span><strong id="lap-time">N/A</strong><small>Measured lap clock<br>Predicted <b id="predicted" title="Reference lap time plus the live delta: the lap time at the current pace">N/A</b></small></div>
 <div class="tile value delta-tile"><span>Live delta · s</span><b id="delta-trend" class="trend" role="img" aria-label="No trend"></b><strong id="delta">N/A</strong><small id="delta-note">Against the selected reference</small></div>
 <div class="tile value"><span>Best completed</span><strong id="best">N/A</strong><small id="best-note">Eligible completed laps</small></div>
 <div class="tile value"><span>Race position</span><strong id="race-position">N/A</strong><small>Measured by GT7</small></div>
 <div class="tile value"><span>Avg fuel · L/lap</span><strong id="fuel-avg">N/A</strong><small id="fuel-avg-note">No completed lap with fuel use</small><small id="fuel-time-note">N/A</small></div>
 </div>
-<div class="support"><div class="value"><span class="sub">Fuel · L </span><strong id="fuel">N/A</strong><span class="sub"> · theoretical best </span><strong id="theory">N/A</strong><span class="sub" id="theory-note"></span><span class="sub"> · predicted lap </span><strong id="predicted" title="Reference lap time plus the live delta: the lap time at the current pace">N/A</strong></div><div class="value"><span class="sub">Tyres FL / FR · °C </span><strong id="tyres-front">N/A</strong><span class="sub"> · RL / RR </span><strong id="tyres-rear">N/A</strong></div></div>
+<div class="support"><div class="value"><span class="sub">Fuel · L </span><strong id="fuel">N/A</strong><span class="sub"> · theoretical best </span><strong id="theory">N/A</strong><span class="sub" id="theory-note"></span></div><div class="value"><span class="sub">Tyres FL / FR · °C </span><strong id="tyres-front">N/A</strong><span class="sub"> · RL / RR </span><strong id="tyres-rear">N/A</strong></div></div>
 
 <div class="inputs"><div class="value"><span>Speed</span><strong id="speed">N/A</strong><small data-unit-for="speed">km/h</small></div><div class="value"><span>Gear</span><strong id="gear">N/A</strong></div><div class="value"><span>Engine</span><strong id="rpm">N/A</strong><small data-unit-for="rpm">RPM</small></div><div class="value"><span>Throttle</span><strong id="throttle">N/A</strong><small data-unit-for="throttle">%</small></div><div class="value"><span>Brake</span><strong id="brake">N/A</strong><small data-unit-for="brake">%</small></div><div class="value"><span>Steering</span><strong id="steer">N/A</strong></div></div>
 <div class="trace-box"><canvas id="input-trace" role="img" aria-label="Throttle and brake trace, last 5 seconds"></canvas><p class="legend"><span class="thr">Throttle</span> · <span class="brk">Brake</span> · <span id="trace-note">Waiting for input samples</span></p></div>
