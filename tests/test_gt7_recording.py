@@ -741,6 +741,25 @@ def t_projected_distance_stays_continuous_across_the_line():
         assert float(lap1[-1]["lap_dist_m"]) == 485.0
 
 
+class _KeyedTracks(_Tracks):
+    """Assignments by key, like the learned-tracks file."""
+    def __init__(self, assignments):
+        super().__init__()
+        self.assignments = assignments
+
+    def assignment(self, key):
+        return self.assignments.get(key)
+
+
+def t_session_tracks_prefer_a_session_assignment():
+    with tempfile.TemporaryDirectory() as d:
+        _h, laps, _dropped = rec.replay_laps(_xy_session(d))
+        got = rec.session_tracks(laps, _KeyedTracks({"p/s": "rec01", "p/s#1": "ses01"}), key="p/s")
+        assert got[1]["id"] == "ses01", f"a session's own assignment wins over the recording's: {got}"
+        got = rec.session_tracks(laps, _KeyedTracks({"p/s#2": "ses02"}), key="p/s")
+        assert got[1]["id"] == "aaa001", f"another session's assignment leaves this one matched: {got}"
+
+
 class _NanAwareTracks(_Tracks):
     """project() mirrors gt7_tracks.TrackDB.project: None for a non-finite point."""
     def project(self, points, oid):

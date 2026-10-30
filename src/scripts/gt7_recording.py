@@ -535,13 +535,20 @@ def brief_track(found):
     return {k: found[k] for k in ("id", "track", "layout", "reverse")}
 
 
+def session_key(key, session):
+    """The learned-assignment key of one GT7 session of the recording `key`."""
+    return f"{key}#{session}"
+
+
 def session_tracks(laps, tracks, key=None):
-    """The track of each GT7 session: a learned assignment, else the longest lap that matches."""
+    """The track of each GT7 session: the session's learned assignment, else the
+    recording's, else the longest lap that matches."""
     if tracks is None:
         return {}
-    assigned = tracks.assignment(key) if key else None
+    whole = tracks.assignment(key) if key else None
     out = {}
     for session in sorted({lap["session"] for lap in laps}):
+        assigned = (tracks.assignment(session_key(key, session)) if key else None) or whole
         info = tracks.name(assigned) if assigned else None
         if info:
             out[session] = brief_track(info)

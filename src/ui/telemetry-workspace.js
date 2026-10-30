@@ -3,7 +3,8 @@
 const TM_NS = 'http://www.w3.org/2000/svg';
 const tmState = {included: null, available: [], anchor: null, loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
-                 chart: null, map: null, cursor: null, positionD:0, positionKey:null, profile: null, summary: null};
+                 chart: null, map: null, cursor: null, positionD:0, positionKey:null, profile: null, summary: null,
+                 recTrack: null, sessionTracks: null, trackSession: null};
 const tmLapCache = new Map();
 const TM_STEP = 5;                        // gt7_laps.STEP_M: one trace point per 5 m
 const TM_PAD = {l: 104, r: 10, t: 4, gap: 10, b: 22};
@@ -29,7 +30,7 @@ function tmTickText(c, v) {
 }
 const tmLapsReq = new Map();     // url -> pending request, so a cold index runs once
 let tmLapGen = 0;                // bumped when cached laps go stale; older answers are not cached
-const tmSeq = {load: 0, rec: 0, b: 0, pair: 0};   // only the newest call of each kind renders
+const tmSeq = {load: 0, rec: 0, b: 0, pair: 0, track: 0};   // only the newest call of each kind renders
 
 function tmKey(l) { return l.rec + '|' + l.session + '|' + l.lap; }
 function tmTime(s) {
@@ -392,6 +393,8 @@ async function tmSelectRec(rec) {
   if (seq !== tmSeq.rec) return;
   if (!d.ok) { tmClear(''); tmErr(d.error || 'could not read the recording'); return; }
   tmState.recLaps = (d.laps || []).concat(d.open_lap ? [d.open_lap] : []);
+  tmState.recTrack = d.recording.track || null;
+  tmState.sessionTracks = d.recording.sessions || null;
   tmRenderSummary(d.summary);
   const row = tmState.recs.find(r => r.rec === rec);
   if (row) {
@@ -403,7 +406,7 @@ async function tmSelectRec(rec) {
   const pick = (counted.length ? counted : tmState.recLaps).slice(-1)[0];
   if (!pick) tmClear('This recording has no laps.');
   $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
-  tmShowSetTrack(d.recording.track);
+  if (!pick) tmShowSetTrack(d.recording.track);    // with a lap, lap B's session decides
   if (pick) await tmSelectB(pick);
 }
 
@@ -525,6 +528,7 @@ async function tmSelectB(l) {
   tmState.anchor = l;
   tmState.b = key;
   tmRenderLaps();
+  if (l.rec === tmState.rec) tmShowSetTrack(tmSessionTrack(l.session), l.session);
   tmClearPair('Loading comparable laps…');
   const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
                                  track: l.track_id == null ? '' : l.track_id});
@@ -1049,15 +1053,25 @@ function tmRefit() {
   tmSeek(tmState.positionD);
 }
 
-// The Set track row for an unknown or ambiguous recording; candidates come first.
-async function tmShowSetTrack(track) {
-  const seq = tmSeq.rec;
+// The track of one GT7 session of the open recording; an index without per-session
+// tracks falls back to the recording's.
+function tmSessionTrack(session) {
+  const all = tmState.sessionTracks, k = String(session);
+  return all && Object.prototype.hasOwnProperty.call(all, k) ? all[k] : tmState.recTrack;
+}
+
+// The Set track row for an unknown or ambiguous session (or a recording without laps);
+// one recording often holds several tracks, so it acts on lap B's session. Candidates
+// come first.
+async function tmShowSetTrack(track, session = null) {
+  const seq = tmSeq.rec, mine = ++tmSeq.track;
   const row = tmState.recs.find(r => r.rec === tmState.rec);
   $('tm-settrack').hidden = true;
+  tmState.trackSession = session;
   if ((track && !track.candidates) || (row && row.recording)) return;
   if (!tmState.tracks) {
     const d = await tmShared('/api/telemetry/tracks');
-    if (seq !== tmSeq.rec) return;
+    if (seq !== tmSeq.rec || mine !== tmSeq.track) return;
     if (!d.ok) { tmErr(d.error || 'could not load the track list'); return; }
     tmState.tracks = (d.tracks || []).slice().sort((a, b) =>
       a.track.localeCompare(b.track) || (a.layout || '').localeCompare(b.layout || ''));
@@ -1073,6 +1087,7 @@ async function tmShowSetTrack(track) {
     o.textContent = tmTrackName(t);
     sel.appendChild(o);
   });
+  $('tm-settrack-session').textContent = session == null ? '' : 'Session ' + session;
   $('tm-settrack').hidden = false;
 }
 
@@ -1081,16 +1096,19 @@ async function tmLearn() {
   const row = tmState.recs.find(r => r.rec === rec);
   if (!sel.value || !rec || (row && row.recording)) return;
   const label = sel.options[sel.selectedIndex].textContent, trackId = sel.value;
-  if (!(await confirmModal('Set the track of ' + rec + ' to ' + label + '?\n'
+  const session = tmState.trackSession, what = session == null ? rec : 'session ' + session + ' of ' + rec;
+  if (!(await confirmModal('Set the track of ' + what + ' to ' + label + '?\n'
       + 'Without a downloaded racing line for this layout, racecast learns it from the '
-      + 'longest counted lap, so later recordings on it are recognised.', {title: 'Set track'}))) return;
+      + 'longest counted lap' + (session == null ? '' : ' of that session')
+      + ', so later recordings on it are recognised.', {title: 'Set track'}))) return;
   if (seq !== tmSeq.rec) return;
   const btn = $('tm-learn');
   btn.disabled = true;
   try {
     const r = await tmIndexed(rec, async () => (await fetch('/api/telemetry/learn', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rec, track_id: trackId})})).json(), () => seq !== tmSeq.rec,
+      body: JSON.stringify(session == null ? {rec, track_id: trackId}
+                                           : {rec, track_id: trackId, session})})).json(), () => seq !== tmSeq.rec,
       on => { btn.textContent = on ? 'Indexing…' : 'Set track'; });
     if (r.ok) {                           // every cached index is now stale
       tmDropLaps();
@@ -1100,7 +1118,8 @@ async function tmLearn() {
     if (!r.ok) { tmErr(r.error || 'could not set the track'); return; }
     tmErr('');
     tmSelectRec(rec);
-    $('tm-note').textContent = rec + ' now uses ' + label + '. ' + (r.learned
+    $('tm-note').textContent = (session == null ? rec : 'Session ' + session + ' of ' + rec)
+      + ' now uses ' + label + '. ' + (r.learned
       ? 'racecast learned the line from its longest counted lap, so later recordings on it are recognised.'
       : 'The downloaded racing line for it stays as it is.');
     $('tm-note').hidden = false;

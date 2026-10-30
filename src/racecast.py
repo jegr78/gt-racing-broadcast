@@ -4449,7 +4449,7 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
                     return {"ok": False, "error": f"{rec} is not a readable recording"}
             idx = _telemetry_with_context(idx, path)
             head = {k: idx.get(k) for k in ("rec", "name", "started", "start_ts", "end_ts",
-                                            "dropped", "track")}
+                                            "dropped", "track", "sessions")}
             head["completed_laps"] = sum(bool(lap.get("capture_complete")) for lap in idx["laps"])
             head["partial_segments"] = len(idx["laps"]) - head["completed_laps"] + bool(idx.get("open_lap"))
             return {"ok": True, "recording": head, "laps": [dict(lap) for lap in idx["laps"]],
@@ -4862,12 +4862,16 @@ def telemetry_tracks_data():
                 "error": f"could not load the track list: {_telemetry_reason(exc)}"}
 
 
-def telemetry_learn_data(rec, track_id, build=True):
-    """Assign a recording to a layout. Without a downloaded racing line for the layout,
-    also learn its line from the longest counted lap, so later recordings on it are
-    recognised; `learned` in the answer says whether that happened. Learning needs the
-    lap index: without `build` a recording without a valid one answers `unindexed: 1`.
-    Never raises."""
+def telemetry_learn_data(rec, track_id, build=True, session=None):
+    """Assign GT7 session `session` of a recording to a layout (without a session the
+    whole recording). Without a downloaded racing line for the layout, also learn its
+    line from the longest counted lap of that session, so later recordings on it are
+    recognised; `learned` in the answer says whether that happened. Without a session
+    that needs the counted laps to come from one session: a recording often holds
+    several tracks. Learning needs the lap index: without `build` a recording without a
+    valid one answers `unindexed: 1`. Never raises."""
+    if session is not None and (type(session) is not int or session < 1):
+        return {"ok": False, "error": "invalid session"}
     try:
         import gt7_laps
         import gt7_recording as gr
@@ -4881,6 +4885,8 @@ def telemetry_learn_data(rec, track_id, build=True):
         key = _telemetry_track_key(path)
         if key is None:
             return {"ok": False, "error": "no active profile"}
+        if session is not None:
+            key = gr.session_key(key, session)
         tracks, cars = _telemetry_dbs()
         info = tracks.name(str(track_id or ""))
         if info is None:
@@ -4898,10 +4904,15 @@ def telemetry_learn_data(rec, track_id, build=True):
             except gr.RecordingError:
                 return {"ok": False, "error": f"{rec} is not a readable recording"}
         counted = [lap for lap in idx["laps"]
-                   if lap["status"] in gt7_laps.COUNTED and lap.get("points")]
+                   if lap["status"] in gt7_laps.COUNTED and lap.get("points")
+                   and session in (None, lap["session"])]
         if not counted:
-            return {"ok": False, "error": "this recording has no counted lap to learn the "
+            where = "this recording" if session is None else f"session {session}"
+            return {"ok": False, "error": f"{where} has no counted lap to learn the "
                                           "track from"}
+        if len({lap["session"] for lap in counted}) > 1:
+            return {"ok": False, "error": "this recording holds counted laps of several "
+                                          "sessions: set the track of one session"}
         best = max(counted, key=lambda lap: lap["distance_m"])
         learned = tracks.learn(info["id"], best["points"], best["distance_m"], key=key)
         return {"ok": True, "track": gr.brief_track(info), "learned": bool(learned)}
