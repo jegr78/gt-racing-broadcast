@@ -404,6 +404,7 @@ class TelemetryEngine:
         self.on_lap = None            # callable(dict) per closed lap; the recording exporter sets it
         self.track_db = None    # gt7_tracks.TrackDB, or None (no track recognition)
         self.track = None       # recognised layout, or {"candidates": [...]}
+        self._track_miss_logged = False   # the "no match" line is logged once per session
 
     def _session_boundary(self, pkt):
         """How a new session starts, or None. GT7 sends no session-change event, so it
@@ -449,6 +450,7 @@ class TelemetryEngine:
         self._lap_num = pkt.lap
         self._acc = _LapAccumulator(now, started_at_boundary=at_line)
         self.track = None
+        self._track_miss_logged = False
 
     def update(self, pkt, now):
         pkt = _sanitize(pkt, self._last)
@@ -584,6 +586,12 @@ class TelemetryEngine:
         try:
             found = self.track_db.match(acc.points, acc.distance)
             if not isinstance(found, dict):   # also covers None: no match
+                if not self._track_miss_logged:
+                    self._track_miss_logged = True
+                    self._log.info("GT7 track: no match for a %.0f m lap (%d points). "
+                                   "A layout without a downloaded or learned line stays "
+                                   "unrecognised: record a session, then Set track on it",
+                                   acc.distance, len(acc.points))
                 return
             if "id" in found:
                 self._log.info("GT7 track: %s %s%s", found.get("track"), found.get("layout"),

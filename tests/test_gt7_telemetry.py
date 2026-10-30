@@ -1264,6 +1264,29 @@ def t_engine_sets_track_after_a_matching_lap_and_resets_on_session_change():
     assert eng.track is None
 
 
+def t_engine_logs_an_unmatched_lap_once_per_session():
+    # A layout without a downloaded or learned line (e.g. Autopolis Short Course,
+    # whose upstream capture was dropped) never matches. Say so once per session,
+    # with the measured lap length, instead of failing silently.
+    eng = tm.TelemetryEngine()
+    eng.track_db = _FakeTracks(None)
+    with _LapLog() as cap:
+        eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+        t = _drive_xy(eng, 0.1, 2, 10.0)
+        eng.update(tm.parse_packet(_packet(lap=3)), t)
+        t = _drive_xy(eng, t + 0.1, 3, 10.0)
+        eng.update(tm.parse_packet(_packet(lap=4)), t)
+        misses = [s for s in cap.lines if s.startswith("GT7 track: no match")]
+        assert len(misses) == 1, cap.lines
+        assert "495 m" in misses[0] and "Set track" in misses[0], misses[0]
+        eng.update(tm.parse_packet(_packet(lap=0)), t + 0.1)   # new session
+        t = _drive_xy(eng, t + 0.2, 1, 10.0)
+        eng.update(tm.parse_packet(_packet(lap=2)), t)
+        misses = [s for s in cap.lines if s.startswith("GT7 track: no match")]
+        assert len(misses) == 2, cap.lines
+    assert len(eng.track_db.calls) >= 3, "an unmatched layout keeps being tried"
+
+
 def t_engine_keeps_trying_while_ambiguous_and_survives_matcher_errors():
     eng = tm.TelemetryEngine()
     fake = _FakeTracks({"candidates": ["a", "b"]})
