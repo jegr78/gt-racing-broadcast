@@ -117,7 +117,8 @@ chart range stay stable while the live trace grows, including during preparation
 The displayed best uses retained eligible summaries. The theoretical best composes the
 best **larger sectors** over the same retained pool, not an unlimited full-session
 archive: the layout's selected sector variant, or the automatic provisional thirds
-when no reviewed track definition exists. It reads **unconfirmed** until reviewed
+when no reviewed track definition exists. The desk proposes those thirds once per layout,
+from the first regular complete lap, so every later lap is cut at the same points. It reads **unconfirmed** until reviewed
 sectors and confirmed context back it. The tooltip also shows the 200 m mini-sector
 sum; that is a diagnostic only, since picking the best of every 200 m runs below what
 a driven lap allows.

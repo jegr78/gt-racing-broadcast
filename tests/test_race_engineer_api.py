@@ -131,7 +131,8 @@ def t_growing_provisional_pair_serves_completed_prefix_and_refreshes():
                     assert store.flush(10)
                     current = store.snapshot()["current"]
                     assert current["track_definition"]["storage_source"] == "unsupported"
-                    assert current["definition_fingerprint"] != previous["b"]["definition_fingerprint"], "fixture must also grow its automatic geometry proposal"
+                    assert current["definition_fingerprint"] == previous["b"]["definition_fingerprint"], \
+                        "the growing lap keeps the layout's one automatic proposal"
                     assert current["id"] == b and current["state"] == "provisional"
                     result = query()
                     assert result["state"] == "ready", "growing trace hid the completed pair"

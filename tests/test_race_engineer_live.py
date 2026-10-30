@@ -2,6 +2,7 @@
 """Shared live preparation uses the exact offline packets and numerical helpers."""
 import concurrent.futures
 import json
+import math
 import os
 import sys
 import tempfile
@@ -895,6 +896,74 @@ def t_larger_sector_times_survive_a_context_reannotation_without_detail():
                      if r.get('state') == 'confirmed']
             assert times and all(t and None not in t for t in times), times
             assert snap['theoretical_s'] == before, snap['theoretical_s']
+
+
+def _thirds_recording(d, laps):
+    """One lap per (t1, t2, t3) entry around the 1000 m circle, each third driven in its
+    own time on a slightly different line; lap 1 is the engine's partial lap."""
+    import struct
+    import gt7_recording
+    from test_gt7_laps import R, _pkt
+    w = gt7_recording.RecordingWriter(d, "Solo", "dev", flush_s=0.05, queue_max=0)
+    t, last_ms, plan = 1_700_000_000.0, -1, list(laps) + [laps[-1]]
+    for li, thirds in enumerate(plan):
+        k = 0
+        for part, secs in enumerate(thirds):
+            n = 90 + 7 * part + 3 * li                       # a distinct sampling per lap
+            for i in range(n if li < len(laps) else 4):
+                if li >= 2 and k == 5:
+                    last_ms = round(sum(plan[li - 1]) * 1000)
+                angle = 2 * math.pi * (part + i / n) / 3
+                pkt = bytearray(_pkt(li + 1, (1000.0 / 3) / secs, angle, last_ms))
+                r = R + 0.7 * li                             # each lap drives its own line
+                struct.pack_into("<3f", pkt, tm.OFF_POS, r * math.cos(angle), 0.0, r * math.sin(angle))
+                w.put(t, "~", bytes(pkt))
+                t += secs / n
+                k += 1
+    w.close()
+    return w.path
+
+
+def t_theory_composes_sectors_of_different_laps_on_the_automatic_thirds():
+    # The live store annotates one lap at a time. Proposing the automatic thirds from
+    # every lap's own trace gave each lap its own bounds and fingerprint, so the
+    # headline was always just the newest lap's time.
+    with tempfile.TemporaryDirectory() as d:
+        path = _thirds_recording(d, [(7.0, 7.0, 7.0), (6.0, 7.0, 7.0), (7.0, 7.0, 6.0),
+                                     (7.0, 7.0, 7.0)])
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096,
+                        runtime_base=d) as store:
+            feed(store, path)
+            snap = store.snapshot()
+            fps = {r.get('definition_fingerprint') for r in store._summaries.values()
+                   if r.get('state') == 'confirmed'}
+            assert len(fps) == 1, f"one automatic definition for the layout: {fps}"
+            assert snap['best_s'] == 20.0, snap['best_s']
+            assert snap['theoretical_s'] is not None and snap['theoretical_s'] < 19.5, \
+                f"lap 2's first and lap 3's last third compose below the best lap: {snap['theoretical_s']}"
+
+
+def t_steady_definitions_keep_one_regular_proposal_and_yield_to_a_saved_one():
+    class Saved:
+        definition = None
+
+        def read(self, layout, reverse):
+            return {'definition': self.definition, 'source': 'none'}
+    store = Saved()
+    steady = live._SteadyDefinitions(store)
+    proposal = lambda fp: {'track_definition_snapshots': {fp: {
+        'layout_id': 'L1', 'reverse': False, 'reviewed': False,
+        'default_variant': 'provisional-3', 'mark': fp}}}
+    regular = {'lap_role': 'regular', 'trace_complete': True}
+    steady.keep(dict(regular, lap_role='first'), proposal('out'))
+    steady.keep(dict(regular, trace_complete=False), proposal('cut'))
+    assert steady.read('L1', False)['definition'] is None, 'an irregular lap seeds nothing'
+    steady.keep(regular, proposal('one'))
+    steady.keep(regular, proposal('two'))
+    assert steady.read('L1', False)['definition']['mark'] == 'one', 'the first proposal stays'
+    assert steady.read('L1', True)['definition'] is None, 'per direction'
+    store.definition = {'mark': 'saved'}
+    assert steady.read('L1', False)['definition'] == {'mark': 'saved'}, 'a saved definition wins'
 
 
 if __name__ == '__main__':
