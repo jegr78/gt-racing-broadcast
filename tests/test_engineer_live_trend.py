@@ -208,7 +208,8 @@ console.log(seen.join('|'));""")
 def t_predicted_lap_is_the_reference_time_plus_the_live_delta():
     h = _html()
     assert 'id="predicted"' in h, "the desk shows a predicted lap time"
-    assert "showDelta(last?.delta??null,last?.d,live.a?.time_s)" in h, \n        "the live delta of a lap B other than the current lap predicts from its own reference"
+    assert "showDelta(last?.delta??null,last?.d,live.a?.time_s)" in h, \
+        "the live delta of a lap B other than the current lap predicts from its own reference"
     src = "\n".join([_const_src(h, "TREND_S")] + [_func_src(h, n) for n in (
         "lapTime", "trend", "referenceText", "showDelta")])
     out = _run_js(_HARNESS + "const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);\n" + src + """
