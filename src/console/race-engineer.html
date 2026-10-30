@@ -21,7 +21,7 @@ button:disabled{opacity:.5;cursor:default}
 <p id="source-state" class="sub"></p>
 <div class="live-grid"><div class="live-main">
 <div id="instruments" class="headline">
-<div class="tile value"><span>Current lap</span><strong id="lap-time">N/A</strong><small>Measured lap clock</small></div>
+<div class="tile value"><span>Current lap</span><strong id="lap-time">N/A</strong><small>Measured lap clock<br>Predicted <b id="predicted" title="Reference lap time plus the live delta: the lap time at the current pace">N/A</b></small></div>
 <div class="tile value delta-tile"><span>Live delta · s</span><b id="delta-trend" class="trend" role="img" aria-label="No trend"></b><strong id="delta">N/A</strong><small id="delta-note">Against the selected reference</small></div>
 <div class="tile value"><span>Best completed</span><strong id="best">N/A</strong><small id="best-note">Eligible completed laps</small></div>
 <div class="tile value"><span>Race position</span><strong id="race-position">N/A</strong><small>Measured by GT7</small></div>
@@ -64,7 +64,8 @@ function lapTime(value){
 }
 const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,outline:null,mapFrame:null,sectionView:'',sectionOpen:new Set(),sectionFocus:null,note:'',resizeFrame:0,known:new Set(),rejected:new Set(),newLaps:0,pick:null,aKind:'',pinFail:null,trend:{key:'',rows:[]},analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
 let timer;
-function showDelta(value,distance){trend(value,distance);const el=$('delta');el.textContent=signed(value);$('delta-note').textContent=referenceText()+(Number.isFinite(value)&&Number.isFinite(distance)?` · through ${num(distance,0)} m`:'');el.classList.toggle('gain',Number.isFinite(value)&&value<0);el.classList.toggle('loss',Number.isFinite(value)&&value>0);}
+// The predicted lap: the reference's lap time plus the live delta, the lap at the current pace.
+function showDelta(value,distance,referenceTime){trend(value,distance);$('predicted').textContent=Number.isFinite(value)&&Number.isFinite(referenceTime)?lapTime(referenceTime+value):NA;const el=$('delta');el.textContent=signed(value);$('delta-note').textContent=referenceText()+(Number.isFinite(value)&&Number.isFinite(distance)?` · through ${num(distance,0)} m`:'');el.classList.toggle('gain',Number.isFinite(value)&&value<0);el.classList.toggle('loss',Number.isFinite(value)&&value>0);}
 function say(text){$('notice').textContent=text;}
 // Trend like the HUD: the live delta now against TREND_S ago. Only a new distance adds a
 // sample (renders repeat values); a new reference or live lap starts over.
@@ -194,7 +195,7 @@ function render(){const B=state.detail,pair=state.pair?.a?.id===state.a?state.pa
  }
  if(!B)return;
  const observed=trace.at(-1)?.d||0;const sectors=pair?.mini_sectors||{a:[],b:(B.sectors||[]).map((v,i)=>B.state==='provisional'&&(i+1)*200>observed?null:v),delta:[]},body=$('sectors').tBodies[0];for(const item of miniRows(fullSectors(sectors,length),length)){const row=body.insertRow(),future=B.state==='provisional'&&item.end>observed;row.insertCell().textContent=item.label;cellValue(row.insertCell(),item.a,false,A?NA:'No reference');cellValue(row.insertCell(),item.b,future);cellValue(row.insertCell(),item.delta,future,NA,true);}
- const end=pair?.delta?.at(-1);$('selection-summary').textContent=state.note||(!comparable(B)?(B.state==='provisional'?'Lap B is not comparable yet: out lap, pit lap or first lap of a stint':'Lap B is outside the comparable pool: out lap, pit lap, first lap of a stint or incomplete data'):pair?.compatible&&A?`Lap B ${B.lap} compared with A ${A.lap} · ${pair.provisional?(end?'delta through '+num(end.d,0)+' m':'Waiting for matching distance samples'):(Number.isFinite(pair.lap_delta_s)?signed(pair.lap_delta_s)+' s B − A':'Comparison time unavailable')}`:pair&&!pair.compatible?'Selected laps are outside the comparable pool':state.a?'Preparing selected comparison':'Choose an eligible reference to compare the selected lap');showDelta(pair?.compatible&&end&&B.id===state.snapshot?.current?.id?end.delta:null,end?.d);
+ const end=pair?.delta?.at(-1);$('selection-summary').textContent=state.note||(!comparable(B)?(B.state==='provisional'?'Lap B is not comparable yet: out lap, pit lap or first lap of a stint':'Lap B is outside the comparable pool: out lap, pit lap, first lap of a stint or incomplete data'):pair?.compatible&&A?`Lap B ${B.lap} compared with A ${A.lap} · ${pair.provisional?(end?'delta through '+num(end.d,0)+' m':'Waiting for matching distance samples'):(Number.isFinite(pair.lap_delta_s)?signed(pair.lap_delta_s)+' s B − A':'Comparison time unavailable')}`:pair&&!pair.compatible?'Selected laps are outside the comparable pool':state.a?'Preparing selected comparison':'Choose an eligible reference to compare the selected lap');showDelta(pair?.compatible&&end&&B.id===state.snapshot?.current?.id?end.delta:null,end?.d,A?.time_s);
  $('context').textContent=readableContext(B);
  $('notes').replaceChildren();for(const n of B.notes||[]){const li=document.createElement('li');li.textContent=n.text;$('notes').append(li);}
  $('limitations').textContent=[...(pair?.warnings||B.context_warnings||[]),...(B.track_definition_warnings||[])].filter((x,i,a)=>a.indexOf(x)===i).join(' · ');
@@ -229,7 +230,7 @@ async function refreshAnalysis(snap){if(state.analysisBusy||state.stopped)return
   if(h.changed){if(!state.follow&&state.historyRevision!==null)state.newLaps+=h.laps.filter(r=>!state.known.has(r.id)).length;state.laps=h.laps;state.sessions=h.sessions;state.known=new Set(h.laps.map(r=>r.id));}state.historyRevision=h.revision;}
  if(state.refSource){const ref=await request('/race-engineer/reference',{id:state.refSource});if(ref.state==='ready')state.refLaps=ref.laps;else state.note=ref.state==='pending'?'Preparing shared reference':'Shared reference unavailable';}
  selections();await selection();
- if(state.a&&state.b!==state.snapshot?.current?.id&&state.snapshot?.current){const a=state.a,b=state.snapshot.current.id,live=await request('/race-engineer/compare',{a,b});if(a===state.a&&b===state.snapshot?.current?.id){const last=live.state==='ready'&&live.compatible?live.delta.at(-1):null;showDelta(last?.delta??null,last?.d);}}
+ if(state.a&&state.b!==state.snapshot?.current?.id&&state.snapshot?.current){const a=state.a,b=state.snapshot.current.id,live=await request('/race-engineer/compare',{a,b});if(a===state.a&&b===state.snapshot?.current?.id){const last=live.state==='ready'&&live.compatible?live.delta.at(-1):null;showDelta(last?.delta??null,last?.d,live.a?.time_s);}}
  const now=performance.now();if(now-state.lastChat>=3000){await chat();state.lastChat=now;}
  }catch(e){if(e instanceof ReferenceLost){revoke(e.message);selections();}else if(!(e instanceof AccessLost)){state.note='Analysis temporarily unavailable';$('selection-summary').textContent=state.note;}}finally{state.analysisBusy=false;}}
 function changed(){state.epoch++;state.note='';clearPlots();state.zoom=null;selections();tick();}

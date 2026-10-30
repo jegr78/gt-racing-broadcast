@@ -26,7 +26,9 @@ Lap and sector times use **m:ss.SSS** throughout the desk and Telemetry workspac
 (for example, **+0.125 s**).
 
 Current lap, live delta, best completed time, race position and average fuel use lead
-the desk. **Avg fuel · L/lap** averages every completed lap of the live session from
+the desk. Under the current lap, **Predicted** is the lap time at the current pace: the
+reference lap A's time plus the live delta. It reads **N/A** while there is no live
+delta or the reference has no lap time. **Avg fuel · L/lap** averages every completed lap of the live session from
 the first lap on, pit laps included; only a lap without an official time (the out lap)
 is left out. A lap's use is the fuel it burned, so a refuel during a pit lap does not
 cancel it; a lap without a fuel reading is left out, never counted as zero. Below it,
