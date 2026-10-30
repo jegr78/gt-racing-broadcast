@@ -348,6 +348,12 @@ open the card, `ffmpeg` exits immediately and the feed shows *capture device bus
 missing: close any other program using it*, with the full ffmpeg line in the feed log.
 After five failed attempts the feed pauses until `/next` or `/reload`.
 
+When OBS is already running, `racecast event start` switches it to the profile's scene
+collection before the relay arms the local feed, so a capture source in the previous
+collection (the Solo one, for example) has let go of the card by then. If the switch
+frees the card after a feed has already paused on it, `event start` reloads that feed
+once, and never touches a feed that is playing.
+
 A failure in the middle of a local stint takes no special path: the same stall watchdog
 and retries as for a remote feed apply, the feed goes red on the panel, and the director
 decides whether to hand over early or cut to Intermission.
