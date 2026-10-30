@@ -5851,21 +5851,30 @@ def tailscale_status_cmd(_rest):
 
 
 OBS_READY_TIMEOUT_S = 30      # OBS loading a big scene collection is not quick
+# An OBS that is already running answers at once; this bound only stops a hung OBS from
+# holding up the relay start (#1038). The late check after the launches still runs.
+OBS_EARLY_READY_TIMEOUT_S = 5
 
 
-def _wait_for_obs_ready(timeout=OBS_READY_TIMEOUT_S):
+def _wait_for_obs_ready(timeout=OBS_READY_TIMEOUT_S, early=False):
     """Give a just-launched OBS time to answer obs-websocket. Best effort: a
-    timeout is a note, never a blocked bring-up (OBS may simply not be there)."""
+    timeout is a note, never a blocked bring-up (OBS may simply not be there).
+    Returns True when OBS answers. `early` marks event start's probe before the relay
+    starts: the late probe after the launches follows it, so its note says so."""
     try:
         import obs_ws
         ok, note = obs_ws.wait_until_ready(timeout=timeout)
     except Exception as exc:                         # noqa: BLE001  best effort
         print(f"obs: readiness check skipped ({exc}).")
-        return
-    if not ok:
+        return False
+    if not ok and early:
+        print(f"obs: not answering obs-websocket after {timeout:.0f}s yet. The scene "
+              f"collection check will retry after the launches ({note}).")
+    elif not ok:
         print(f"obs: not answering obs-websocket after {timeout:.0f}s. "
               f"The scene collection, page refresh and Standby switch may be "
               f"skipped ({note}).")
+    return ok
 
 
 def _check_scene_collection():
@@ -5874,17 +5883,21 @@ def _check_scene_collection():
     behaviour). Best-effort: never blocks bring-up. Safe to automate here because OBS
     refuses a collection switch while an output is active (set_scene_collection returns
     (False, ...)), and no output is active during bring-up. The manual fallback stays
-    `racecast obs collection set` / the Control Center OBS row."""
+    `racecast obs collection set` / the Control Center OBS row.
+    Returns True when it switched the collection, False when OBS answered but no
+    switch happened (already correct, switch off or refused, collection missing), and
+    None when OBS was not reached."""
     try:
         import obs_ws
         status, note = obs_ws.get_scene_collection(expected=_active_obs_collection())
     except Exception as exc:                         # noqa: BLE001  best effort
         print(f"obs: scene collection check skipped ({exc}).")
-        return
+        return None
     action, detail = obs_ws.scene_collection_action(
         status, note, _collection_switch_enabled())
     if action == "skip":
         print(f"obs: scene collection check skipped. {detail}.")
+        return None
     elif action == "ok":
         print(f"obs: scene collection '{detail}' active. Correct.")
     elif action == "switch":
@@ -5892,6 +5905,7 @@ def _check_scene_collection():
         if ok:
             print(f"obs: scene collection switched to '{detail}' "
                   f"(was '{status['current']}').")
+            return True
         else:
             print(f"obs: WARNING. Could not switch to scene collection '{detail}'. "
                   f"{snote}. Switch with `racecast obs collection set` (or the OBS row "
@@ -5904,6 +5918,70 @@ def _check_scene_collection():
         print(f"obs: WARNING. Scene collection '{detail['current']}' active, expected "
               f"'{detail['expected']}' not found in OBS. Import it with `racecast setup` "
               f"before going live.")
+    return False
+
+
+# #1038: how racecast.py recognises, in the relay's /status `last_error`, a local
+# capture feed that gave up because the card was busy. Both are substrings of the
+# relay's own strings (LOCAL_DEVICE_BUSY and the dead-serve pause message);
+# t_local_busy_marks_match_the_relay pins them.
+LOCAL_BUSY_MARK = "capture device busy"
+FEED_PAUSED_MARK = "paused after"
+# Relay.reload() re-reads the Sheet (source.refresh(timeout=6)) before it answers.
+RELAY_RELOAD_TIMEOUT_S = 10
+
+
+def busy_paused_local_feeds(status):
+    """Feed letters the relay paused because the capture card was busy: idle (the
+    dead-serve pause), never serving or operator-stopped, and the error names both
+    the pause and the busy card. Anything malformed yields []."""
+    feeds = status.get("feeds") if isinstance(status, dict) else None
+    if not isinstance(feeds, dict):
+        return []
+    out = []
+    for name, feed in sorted(feeds.items()):
+        if not isinstance(feed, dict) or feed.get("state") != "idle":
+            continue
+        err = feed.get("last_error") or ""
+        if LOCAL_BUSY_MARK in err and FEED_PAUSED_MARK in err:
+            out.append(name)
+    return out
+
+
+def _reload_busy_local_feeds(fetch=None):
+    """After a scene-collection switch freed the capture card, retry every feed the
+    relay paused on a busy card, once, through the same GET /reload/<feed> route as
+    the Director Panel's RELOAD button. A playing feed is never touched. Best effort:
+    each failure prints one line and nothing raises. Returns the reloaded feeds."""
+    fetch = fetch or _relay_fetch_json
+    base = f"http://127.0.0.1:{RELAY_PORT}"
+    try:
+        status = fetch(f"{base}/status")
+    except Exception as exc:                         # noqa: BLE001  best effort
+        print(f"relay: busy capture feed check skipped ({exc}).")
+        return []
+    reloaded = []
+    for name in busy_paused_local_feeds(status):
+        try:
+            fetch(f"{base}/reload/{name}", timeout=RELAY_RELOAD_TIMEOUT_S)
+        except Exception as exc:                     # noqa: BLE001  best effort
+            print(f"relay: could not retry Feed {name} after the collection switch "
+                  f"({exc}). Press RELOAD {name} on the Director Panel.")
+            continue
+        print(f"relay: Feed {name} retried: the collection switch freed the capture card.")
+        reloaded.append(name)
+    return reloaded
+
+
+def _align_scene_collection(relay_up=None):
+    """Align OBS's scene collection; when that actually switched it, retry the local
+    feeds a card held by the previous collection had paused (#1038). `relay_up` gates
+    the retry (no relay yet = nothing can be paused). Returns _check_scene_collection's
+    outcome (None = OBS not reached)."""
+    outcome = _check_scene_collection()
+    if outcome and (relay_up is None or relay_up()):
+        _reload_busy_local_feeds()
+    return outcome
 
 
 def _switch_to_standby():
@@ -5966,6 +6044,15 @@ def event_start(rest, _autojoin=True, _new_session=True):
         print("discord: already running.")
     else:
         _event_launch(ev, "discord")
+    # 2b. OBS already running: align its scene collection BEFORE the relay arms a
+    # local capture feed. A collection that still holds the capture card (e.g. the
+    # Solo one) would otherwise make the feed spend its retries on a busy card and
+    # pause (#1038). The short bound keeps a hung OBS from holding up bring-up; the
+    # late check after the launches below still runs.
+    early_collection = None      # None = step 2b did not reach OBS
+    if ev.app_running("obs") and _wait_for_obs_ready(timeout=OBS_EARLY_READY_TIMEOUT_S,
+                                                     early=True):
+        early_collection = _align_scene_collection(relay_up=_relay_http_ok)
     # 3. Relay (before OBS, see docstring). A takeover forwards --stint so the feeds
     # start at the stint on air right now, --qualifying brings the stack up in
     # qualifying mode, and --title sets the event title. Reset the broadcast-Part
@@ -6030,7 +6117,10 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # replying 207 "not ready" meanwhile, and the three steps below skip silently
     # inside that window. (#572)
     _wait_for_obs_ready()
-    _check_scene_collection()
+    # Step 2b already reached OBS: checking again would only repeat its result (e.g. a
+    # refused switch on a recovery restart while OBS streams would warn twice).
+    if early_collection is None:
+        _align_scene_collection()
     _refresh_obs_pages()
     _switch_to_standby()          # park OBS on Standby, ready to Start Streaming
     print()

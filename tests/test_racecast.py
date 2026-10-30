@@ -3148,7 +3148,8 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
         ev = m._event_modules()[0]
         calls = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running,
-                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start)
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start,
+                 m._wait_for_obs_ready)
         restore = _stub_relay_signals((4242,) if http_ok else (), 4242 if http_ok else None,
                                       http_ok, running_profile, active_profile)
         with tempfile.TemporaryDirectory() as tmp:
@@ -3157,6 +3158,7 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
             ev.app_running = lambda app, platform=None: True
             m._runtime_dir = lambda: tmp
             m._sync_live_telemetry_record = lambda: calls.append("sync")
+            m._wait_for_obs_ready = lambda timeout=0, early=False: False   # no OBS probe
 
             def _boom(_rest):
                 raise _Reached()
@@ -3169,7 +3171,8 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
             finally:
                 restore()
                 (m._event_gate_results, m._tailscale_connect, ev.app_running,
-                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start) = saved
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start,
+                 m._wait_for_obs_ready) = saved
 
     assert _drive(True, "demo", "demo") == ["sync"], "same relay, same profile: push it"
     assert _drive(False, "", "demo") == [], "no relay yet: relay_start seeds state from scratch"
@@ -7391,6 +7394,325 @@ def t_ai_analysis_cli_routes_and_defaults_to_preview():
         assert json.loads(out.getvalue())['ok'] is True
         assert 'telemetry analyze' in m.usage_for('telemetry')
     finally:m.ai_request_data=original
+
+
+# --- #1038: switch the OBS collection before arming a local capture feed ---------
+
+_BUSY_PAUSED = ("stint source unavailable: paused after 5 attempts; /next or /reload "
+                "to retry (capture device busy or missing. Close any other program "
+                "using it (OBS capture source, Elgato utility); see feed log)")
+
+
+def _drive_event_start_to_relay(obs_running, switched, relay_up=True, fetch=None):
+    """Run event_start up to relay_start (which raises) with every side effect stubbed.
+    Returns the ordered call log."""
+    class _Reached(Exception):
+        pass
+
+    ev = m._event_modules()[0]
+    calls = []
+    saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+             m._wait_for_obs_ready, m._check_scene_collection, m._relay_http_ok,
+             m._relay_fetch_json, m.relay_start)
+    with tempfile.TemporaryDirectory() as tmp:
+        m._event_gate_results = lambda e, p: []
+        m._tailscale_connect = lambda e: "ok"
+        ev.app_running = lambda app, platform=None: obs_running if app == "obs" else True
+        m._runtime_dir = lambda: tmp
+
+        def _ready(timeout=m.OBS_READY_TIMEOUT_S, early=False):
+            calls.append("obs-ready")
+            return True
+        m._wait_for_obs_ready = _ready
+
+        def _check():
+            calls.append("collection")
+            return switched
+        m._check_scene_collection = _check
+        m._relay_http_ok = lambda: relay_up
+
+        def _fetch(url, timeout=3):
+            calls.append(url.rsplit(str(m.RELAY_PORT), 1)[1])
+            if fetch is not None:
+                return fetch(url)
+            return {"feeds": {"A": {"state": "idle", "last_error": _BUSY_PAUSED}}}
+        m._relay_fetch_json = _fetch
+
+        def _boom(_rest):
+            calls.append("relay_start")
+            raise _Reached()
+        m.relay_start = _boom
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.event_start([], _new_session=False)
+            raise AssertionError("expected to reach relay_start")
+        except _Reached:
+            return calls
+        finally:
+            (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+             m._wait_for_obs_ready, m._check_scene_collection, m._relay_http_ok,
+             m._relay_fetch_json, m.relay_start) = saved
+
+
+def t_event_start_checks_collection_before_relay_when_obs_running():
+    calls = _drive_event_start_to_relay(obs_running=True, switched=False)
+    assert calls == ["obs-ready", "collection", "relay_start"], calls
+    # OBS not running yet: nothing to align, the late check after the launch covers it.
+    calls = _drive_event_start_to_relay(obs_running=False, switched=False)
+    assert calls == ["relay_start"], calls
+
+
+def t_event_start_early_switch_retries_busy_feeds_of_a_running_relay():
+    calls = _drive_event_start_to_relay(obs_running=True, switched=True)
+    assert calls == ["obs-ready", "collection", "/status", "/reload/A", "relay_start"], calls
+    # No relay up yet: nothing can be paused, no status probe at all.
+    calls = _drive_event_start_to_relay(obs_running=True, switched=True, relay_up=False)
+    assert calls == ["obs-ready", "collection", "relay_start"], calls
+
+
+def t_event_start_survives_a_failed_busy_feed_retry():
+    def _fail(url):
+        raise OSError("connection refused")
+    calls = _drive_event_start_to_relay(obs_running=True, switched=True, fetch=_fail)
+    assert calls[-1] == "relay_start", calls
+
+
+def _reload_busy(status, fail_reload=False, fail_status=False, timeouts=None):
+    urls = []
+
+    def _fetch(url, timeout=3):
+        path = url.rsplit(str(m.RELAY_PORT), 1)[1]
+        urls.append(path)
+        if timeouts is not None:
+            timeouts[path] = timeout
+        if path == "/status":
+            if fail_status:
+                raise OSError("timed out")
+            return status
+        if fail_reload:
+            raise OSError("connection reset")
+        return {"ok": True}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        got = m._reload_busy_local_feeds(fetch=_fetch)
+    return got, urls, buf.getvalue()
+
+
+def t_reload_busy_local_feeds_only_touches_busy_paused_feeds():
+    status = {"feeds": {
+        "A": {"state": "idle", "last_error": _BUSY_PAUSED},            # the #1038 case
+        "B": {"state": "serving", "last_error": _BUSY_PAUSED},         # playing: never
+    }}
+    got, urls, out = _reload_busy(status)
+    assert got == ["A"] and urls == ["/status", "/reload/A"], (got, urls)
+    assert "Feed A" in out, out
+    # A remote feed paused on dead serves is a real source problem, not the card.
+    status = {"feeds": {
+        "A": {"state": "idle", "last_error": "stint source unavailable: paused after 5 "
+              "attempts; /next or /reload to retry"},
+        "B": {"state": "connecting", "last_error": None},
+    }}
+    got, urls, _ = _reload_busy(status)
+    assert got == [] and urls == ["/status"], (got, urls)
+    # Still retrying on its own (busy, but not yet paused): leave it to its own backoff.
+    status = {"feeds": {"A": {"state": "connecting",
+                              "last_error": "capture device busy or missing. Close"}}}
+    got, urls, _ = _reload_busy(status)
+    assert got == [] and urls == ["/status"], (got, urls)
+    # Idle between attempts with a busy error but no pause: not the relay giving up.
+    status = {"feeds": {"A": {"state": "idle",
+                              "last_error": "capture device busy or missing. Close"}}}
+    got, urls, _ = _reload_busy(status)
+    assert got == [] and urls == ["/status"], (got, urls)
+    # A deactivated (stopped) feed is the operator's choice.
+    status = {"feeds": {"A": {"state": "stopped", "last_error": _BUSY_PAUSED}}}
+    got, urls, _ = _reload_busy(status)
+    assert got == [] and urls == ["/status"], (got, urls)
+
+
+def t_reload_busy_local_feeds_failure_is_one_line_never_raises():
+    status = {"feeds": {"A": {"state": "idle", "last_error": _BUSY_PAUSED}}}
+    got, urls, out = _reload_busy(status, fail_reload=True)
+    assert got == [] and urls == ["/status", "/reload/A"], (got, urls)
+    assert len(out.strip().splitlines()) == 1 and "RELOAD A" in out, out
+    got, urls, out = _reload_busy(status, fail_status=True)
+    assert got == [] and urls == ["/status"], (got, urls)
+    assert len(out.strip().splitlines()) == 1, out
+    # A malformed status (solo mode has empty feeds; junk has none) is a no-op.
+    for junk in ({"feeds": {}}, {}, None, {"feeds": {"A": "x"}}):
+        got, urls, _ = _reload_busy(junk)
+        assert got == [] and urls == ["/status"], (junk, got, urls)
+
+
+def t_align_scene_collection_retries_only_after_a_switch():
+    saved = (m._check_scene_collection, m._reload_busy_local_feeds)
+    calls = []
+    try:
+        m._reload_busy_local_feeds = lambda: calls.append("reload") or []
+        m._check_scene_collection = lambda: False
+        m._align_scene_collection()
+        assert calls == [], "no switch -> no feed reload"
+        m._check_scene_collection = lambda: True
+        assert m._align_scene_collection() is True
+        assert calls == ["reload"], calls
+        # The outcome passes through, so event start can tell "OBS not reached".
+        m._check_scene_collection = lambda: None
+        assert m._align_scene_collection() is None and calls == ["reload"], calls
+    finally:
+        m._check_scene_collection, m._reload_busy_local_feeds = saved
+
+
+def t_check_scene_collection_returns_whether_it_switched():
+    obs_ws = _obsws_module()
+    expected = "GT Racing Endurance — demo"
+    saved = (obs_ws.get_scene_collection, obs_ws.set_scene_collection,
+             m._active_obs_collection, m._collection_switch_enabled)
+    try:
+        m._active_obs_collection = lambda: expected
+        m._collection_switch_enabled = lambda: True
+        mismatch = obs_ws.scene_collection_status(
+            "Solo", ["Solo", expected], expected=expected)
+        match = obs_ws.scene_collection_status(expected, ["Solo", expected],
+                                               expected=expected)
+        for st, set_ok, want in ((mismatch, True, True), (mismatch, False, False),
+                                 (match, True, False), (None, True, None)):
+            obs_ws.get_scene_collection = lambda st=st, **kw: (st, "refused")
+            obs_ws.set_scene_collection = lambda name, set_ok=set_ok, **kw: (set_ok, "x")
+            with contextlib.redirect_stdout(io.StringIO()):
+                got = m._check_scene_collection()
+            assert got is want, (st, set_ok, got)
+
+        def _raise(**kw):
+            raise OSError("refused")
+        obs_ws.get_scene_collection = _raise
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert m._check_scene_collection() is None, "an exception is not reaching OBS"
+    finally:
+        (obs_ws.get_scene_collection, obs_ws.set_scene_collection,
+         m._active_obs_collection, m._collection_switch_enabled) = saved
+
+
+def t_local_busy_marks_match_the_relay():
+    # racecast.py recognises a busy-paused local feed by text from the relay's
+    # /status last_error. Pin the marks to the relay's own strings.
+    spec2 = importlib.util.spec_from_file_location(
+        "feeds_busy", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
+    feeds = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(feeds)
+    assert m.LOCAL_BUSY_MARK in feeds.LOCAL_DEVICE_BUSY, feeds.LOCAL_DEVICE_BUSY
+    with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
+              encoding="utf-8") as fh:
+        src = fh.read()
+    assert f'"stint source unavailable: {m.FEED_PAUSED_MARK}' in src
+
+
+def t_reload_busy_local_feeds_outlasts_the_relays_sheet_refresh():
+    # Relay.reload() runs source.refresh(timeout=6) before it answers, so the reload
+    # call needs more than the 3 s default or a slow Sheet prints a false failure.
+    status = {"feeds": {"A": {"state": "idle", "last_error": _BUSY_PAUSED}}}
+    timeouts = {}
+    got, _, out = _reload_busy(status, timeouts=timeouts)
+    assert got == ["A"], out
+    assert timeouts["/reload/A"] == m.RELAY_RELOAD_TIMEOUT_S >= 10, timeouts
+
+
+def t_wait_for_obs_ready_early_probe_says_it_will_retry():
+    obs_ws = _obsws_module()
+    saved = obs_ws.wait_until_ready
+    try:
+        obs_ws.wait_until_ready = lambda timeout=0, **kw: (False, "207 not ready")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert m._wait_for_obs_ready(timeout=5, early=True) is False
+        out = buf.getvalue()
+        assert "may be skipped" not in out, out
+        assert "after the launches" in out, out
+        # The late (default) probe keeps its warning: nothing retries after it.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert m._wait_for_obs_ready(timeout=5) is False
+        assert "may be skipped" in buf.getvalue(), buf.getvalue()
+    finally:
+        obs_ws.wait_until_ready = saved
+
+
+def _drive_event_start_to_late_obs(obs_running, early_ready, early_outcome):
+    """Run event_start through to the late OBS steps (stops at the page refresh) with
+    every side effect stubbed. Returns the ordered call log."""
+    import install_apps
+
+    class _Reached(Exception):
+        pass
+
+    ev = m._event_modules()[0]
+    calls = []
+    names = ("_event_gate_results", "_tailscale_connect", "_runtime_dir",
+             "_wait_for_obs_ready", "_check_scene_collection", "_relay_http_ok",
+             "relay_start", "_event_launch", "companion_start", "_companion_cmds",
+             "_funnel_auto_enabled", "_refresh_obs_pages")
+    saved = {n: getattr(m, n) for n in names}
+    saved_ev = (ev.app_running, ev.wait_until_up)
+    saved_present = install_apps.app_present
+    with tempfile.TemporaryDirectory() as tmp:
+        m._event_gate_results = lambda e, p: []
+        m._tailscale_connect = lambda e: "ok"
+        ev.app_running = lambda app, platform=None: obs_running if app == "obs" else True
+        ev.wait_until_up = lambda probes: {}
+        m._runtime_dir = lambda: tmp
+
+        def _ready(timeout=m.OBS_READY_TIMEOUT_S, early=False):
+            calls.append("obs-ready-early" if early else "obs-ready")
+            return early_ready if early else True
+        m._wait_for_obs_ready = _ready
+
+        def _check():
+            calls.append("collection")
+            return early_outcome if "relay_start" not in calls else False
+        m._check_scene_collection = _check
+        m._relay_http_ok = lambda: False
+        m.relay_start = lambda rest: calls.append("relay_start")
+        m._event_launch = lambda e, app: calls.append("launch-" + app)
+        m.companion_start = lambda rest: None
+        m._companion_cmds = lambda cc: None
+        m._funnel_auto_enabled = lambda: False
+        install_apps.app_present = lambda app, platform: False
+
+        def _refresh():
+            calls.append("refresh")
+            raise _Reached()
+        m._refresh_obs_pages = _refresh
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.event_start([], _new_session=False)
+            raise AssertionError("expected to reach the page refresh")
+        except _Reached:
+            return calls
+        finally:
+            for n, v in saved.items():
+                setattr(m, n, v)
+            ev.app_running, ev.wait_until_up = saved_ev
+            install_apps.app_present = saved_present
+
+
+def t_event_start_skips_the_late_collection_check_after_step_2b_reached_obs():
+    # Step 2b reached OBS (here: a refused switch while OBS streams): the late check
+    # would only print the same warning twice. Page refresh still runs.
+    calls = _drive_event_start_to_late_obs(True, True, False)
+    assert calls == ["obs-ready-early", "collection", "relay_start", "obs-ready",
+                     "refresh"], calls
+    calls = _drive_event_start_to_late_obs(True, True, True)
+    assert calls.count("collection") == 1 and calls[-1] == "refresh", calls
+    # Step 2b ran but OBS did not answer the collection request: check again late.
+    calls = _drive_event_start_to_late_obs(True, True, None)
+    assert calls == ["obs-ready-early", "collection", "relay_start", "obs-ready",
+                     "collection", "refresh"], calls
+    # The early readiness probe timed out: step 2b never asked, the late check runs.
+    calls = _drive_event_start_to_late_obs(True, False, False)
+    assert calls == ["obs-ready-early", "relay_start", "obs-ready", "collection",
+                     "refresh"], calls
+    # OBS launched by event start: only the late check.
+    calls = _drive_event_start_to_late_obs(False, True, False)
+    assert calls == ["relay_start", "launch-obs", "obs-ready", "collection",
+                     "refresh"], calls
 
 
 if __name__ == "__main__":
