@@ -76,7 +76,11 @@ Loaded when working under `src/ui/`.
   `report_telemetry.telemetry_block` without the map), so the view's summary row shows the
   post-event report's figures. The recording the relay is writing is listed but refused by
   laps/lap/learn/delete. `learn` only assigns a layout that has a downloaded racing line
-  (`TrackDB.has_downloaded_line`) and learns the line otherwise. Charts and map are
+  (`TrackDB.has_downloaded_line`) and learns the line otherwise. The page sends lap B's
+  GT7 `session`: the assignment key is then `<profile>/<stem>#<session>` (it wins over a
+  whole-recording `<profile>/<stem>` key in `gt7_recording.session_tracks`) and the line
+  comes from that session's longest counted lap. Without a session, learning refuses
+  counted laps of several sessions. `?rec=` answers carry `recording.sessions`. Charts and map are
   inline SVG rendered by `telemetry-workspace.js` in `telemetry.html`. Demo data for
   Expanded channel detail is decoded on demand by `gt7_channels.py` and
   `gt7_channel_detail.py`, through `GET /api/telemetry/channels`. Catalog requests are

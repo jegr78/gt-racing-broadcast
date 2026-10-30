@@ -1396,7 +1396,7 @@ def make_handler(ctx):
                                       code=400)
                 try:
                     result = ctx["telemetry_learn"](body.get("rec"), body.get("track_id"),
-                                                    build=False)
+                                                    build=False, session=body.get("session"))
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not set the track: "
