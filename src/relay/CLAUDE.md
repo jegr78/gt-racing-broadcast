@@ -135,7 +135,10 @@ that never created the tab simply stays empty. A lap is matched per **car**: the
 `Team` cell first, then the `#NNN`-stripped name, so two cars of one team keep their own
 lap while a bare row still matches every car. The Configuration tab's `BG Color`/`Text
 Color` columns surface as `teams[].bgColor`/`textColor`, and `/hud/data` also carries the
-relay's `mode`. Tests: `tests/test_hud.py`.
+relay's `mode` and the Solo POV AI lines `raceEngineer` (`driver_radio_service.hud_text
+('engineer')`) and `coach` (`driver_coach_service.Service.hud_line()`), both `""` without a
+radio service or with the feature off (`radio_hud_lines`; a radio fault blanks them, never
+the HUD). Tests: `tests/test_hud.py`.
 
 The panel's **sheet controls** write back through one Apps Script webhook
 (`RACECAST_SHEET_PUSH_URL`, injected by the CLI from the active profile's

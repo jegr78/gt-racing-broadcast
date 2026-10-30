@@ -128,6 +128,16 @@ Loaded when working under `src/ui/`.
   each DOM change via a MutationObserver; hidden or zero-width slots keep their size.
   The canvas calls the same `RacecastFit.fit` with its zoom. Tests:
   `tests/test_overlay_fit.py`.
+- **Default-hidden slots.** `overlay_build.DEFAULT_HIDDEN_SLOTS` = `race-engineer`
+  ("Race engineer") and `coach` ("Coach"), the AI Race Engineer / AI Coach HUD lines
+  (`/hud/data` `raceEngineer` / `coach`). `hud.html` hides them; only an explicit
+  `visible: true` compiles `#<id> { display: flex }` (flex, not block: they are `.el`
+  text boxes). `#race-engineer.empty` / `#coach.empty` outrank that rule, so an empty
+  line stays hidden with Visible on. `extract_slots` marks them `defaultHidden`; the
+  builder's Visible toggle then starts unchecked and writes `true` / unset, and the
+  canvas draws them (`ovDefaultHiddenCss`) dimmed until Visible is on. Tests:
+  `t_new_hud_slots_default_hidden` (`tests/test_overlay.py`),
+  `t_hud_slots_hidden_when_empty_even_if_visible` (`tests/test_hud.py`).
 
 ## Wiki screenshots for UI changes (full rule, moved from the root CLAUDE.md)
 

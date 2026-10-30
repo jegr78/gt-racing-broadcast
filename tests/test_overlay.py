@@ -243,7 +243,10 @@ def t_ob_extract_slots_from_real_hud():
                    "team2-brand", "team2-quali",
                    "team3-bar", "team3-logo", "team3-num", "team3-name",
                    "team3-brand", "team3-quali",
-                   "race-control", "flag-status", "pov", "pov-name", "league-logo",
+                   "race-control",
+                   # AI Race Engineer + AI Coach lines, hidden by default (Solo POV)
+                   "race-engineer", "coach",
+                   "flag-status", "pov", "pov-name", "league-logo",
                    # Stream-chat slot (Solo Commentary HUD): a self-gating box
                    # rendering the read-only broadcast chat, hidden when
                    # /broadcast-chat/data is 404 or empty. (#300, #294)
@@ -903,6 +906,39 @@ def t_ob_compile_visible():
     assert "display" not in _css_x({})
     assert "display" not in _css_x({"visible": "no"})
     assert "display" not in _css_x({"visible": 0})
+
+
+def t_new_hud_slots_default_hidden():
+    # The AI Race Engineer and AI Coach slots are off unless the profile turns
+    # Visible on: hud.html hides them, and only an explicit `visible: true`
+    # compiles a display rule that shows them. They stay .el flex boxes so their
+    # align/valign keep working once shown.
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        slots = ob.extract_slots(f.read())
+    by_id = {s["id"]: s for s in slots}
+    assert ob.DEFAULT_HIDDEN_SLOTS == ("race-engineer", "coach")
+    assert by_id["race-engineer"]["label"] == "Race engineer"
+    assert by_id["coach"]["label"] == "Coach"
+    for sid in ob.DEFAULT_HIDDEN_SLOTS:
+        assert by_id[sid]["props"] == list(ob.KIND_TEXT), sid
+        assert by_id[sid].get("defaultHidden") is True, sid   # the builder's unchecked default
+        unset = ob.compile_overlay_css({"slots": {sid: {"left": 10}}}, slots)
+        assert "display" not in unset, unset
+        shown = ob.compile_overlay_css({"slots": {sid: {"visible": True}}}, slots)
+        assert f"#{sid} {{ display: flex; }}" in shown, shown
+        hidden = ob.compile_overlay_css({"slots": {sid: {"visible": False}}}, slots)
+        assert "display: none" in hidden and "display: flex" not in hidden, hidden
+    # The builder's Visible toggle reads the default: unchecked until shown.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        cc = f.read()
+    panel = cc[cc.index("if (has('visible')) {"):]
+    panel = panel[:panel.index("panel.appendChild(wrap)")]
+    assert "off ? ov.visible === true : ov.visible !== false" in panel, panel
+    assert "off ? (cb.checked ? true : '')" in panel, panel
+    # every other slot keeps the shown-unless-hidden default
+    assert "defaultHidden" not in by_id["race-control"]
+    rc = ob.compile_overlay_css({"slots": {"race-control": {"visible": True}}}, slots)
+    assert "display" not in rc, rc
 
 
 def t_ob_visible_is_a_box_prop():

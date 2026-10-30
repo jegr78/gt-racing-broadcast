@@ -103,6 +103,9 @@ SAMPLE = {
         "team3-num": "99", "team3-name": "Night Shift Motorsport", "team3-brand": "Ferrari",
         "team3-quali": "1:40.512",
         "race-control": "FCY: Full Course Yellow",
+        "race-engineer": "Fuel 15.0 litres, usable range 5.0 laps. Comparable pace is stable.",
+        "coach": ("Personal lap consistency: Consider repeating the same approach over "
+                  "several suitable laps before making another change."),
         "clock": "1:23:45",
         "pov-name": "John Doe",
         "flag-status": "Safety Car",
@@ -319,7 +322,8 @@ def extract_slots(html):
     data-edit-props comma list when no kind is given, for back-compat; else
     DEFAULT_PROPS. Every text slot then gets the fit bounds (_with_fit). Markup
     can also declare data-edit-lock-aspect="true" as the editor's default lock.
-    It is the single source of truth, so there is no hardcoded slot list to drift."""
+    A DEFAULT_HIDDEN_SLOTS slot carries defaultHidden. It is the single source
+    of truth, so there is no hardcoded slot list to drift."""
     slots = []
     for tag in re.finditer(r"<[^>]*\bdata-edit=\"[^\"]*\"[^>]*>", html):
         text = tag.group(0)
@@ -340,6 +344,8 @@ def extract_slots(html):
         slot = {"id": mid.group(1), "label": label, "props": _with_fit(props)}
         if re.search(r'\bdata-edit-lock-aspect="true"', text):
             slot["lockAspect"] = True
+        if slot["id"] in DEFAULT_HIDDEN_SLOTS:
+            slot["defaultHidden"] = True    # the builder's Visible starts unchecked
         slots.append(slot)
     return slots
 
@@ -435,6 +441,12 @@ def slot_scene(slot_id, solo):
     tgt = OVERLAY_SLOT_OBS_SOURCES[slot_id]
     return tgt.get("solo_scene", tgt["scene"]) if solo else tgt["scene"]
 
+
+# HUD slots that stay off unless the profile turns Visible on: the AI Race Engineer
+# and AI Coach lines exist only in Solo POV, so hud.html hides them and only an
+# explicit `visible: true` compiles the rule that shows them. extract_slots marks
+# them `defaultHidden` so the builder's Visible toggle starts unchecked.
+DEFAULT_HIDDEN_SLOTS = ("race-engineer", "coach")
 
 # Slots whose OBS item visibility the profile CSS owns (#766): `display: none` on the
 # slot hides the item, any other state shows it. Feed POV is deliberately absent: the
@@ -706,6 +718,10 @@ def _slot_rule(slot_id, overrides, allowed):
     if (slot_id in SCENE_SLOT_OBS_SOURCES.get("intermission", {})
             and "visible" in allowed and overrides.get("visible") is True):
         decls.append("display: block")
+    if slot_id in DEFAULT_HIDDEN_SLOTS and "visible" in allowed and overrides.get("visible") is True:
+        # flex, not block: these are .el text boxes whose align/valign are flex props.
+        # hud.html's `#<id>.empty` still outranks this, so an empty line stays hidden.
+        decls.append("display: flex")
     for prop in PROP_ORDER:
         if prop in ("rotation", "shear"):
             continue

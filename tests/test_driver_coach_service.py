@@ -83,6 +83,35 @@ def t_current_text_is_private_to_its_owner_and_its_messages_reach_every_profile_
         rejects(lambda:f.command('stop',owner=LOCAL),'training_busy')
 
 
+def t_coach_hud_line_lives_with_the_review():
+    # The HUD slot follows the coach's current state, never the short-lived radio
+    # message: no line before the first review, "<focus>: <action>" while the
+    # training runs in a valid context, the action alone before a named focus, and
+    # nothing after Stop, a stale context or with the AI Coach switched off.
+    with tempfile.TemporaryDirectory() as root:
+        f=Fixture(root)
+        assert f.service.hud_line() is None, 'no training'
+        f.command();f.step()
+        assert f.service.hud_line() is None, 'no line before the first review'
+        f.complete(2);state=f.step()
+        assert not state['focus']['focus'] and state['latest']['action']
+        assert f.service.hud_line()==state['latest']['action'], 'no named focus yet: the action alone'
+        f.complete(3);state=f.step()
+        label=state['focus']['focus']['label'];action=state['latest']['action']
+        assert label and action
+        assert f.service.hud_line()==label+': '+action
+        f.snap['receipt']['state']='stale'
+        assert f.service.hud_line() is None, 'an invalid context hides the line'
+        f.snap['receipt']['state']='live'
+        assert f.service.hud_line()==label+': '+action
+        f.radio.access.update({'expected':1,'features':features(True,False)})
+        assert f.service.hud_line() is None, 'a switched-off AI Coach has no HUD line'
+        f.radio.access.update({'expected':2,'features':features(True,True)})
+        assert f.service.hud_line()==label+': '+action
+        f.command('stop');f.step()
+        assert f.service.hud_line() is None, 'Stop ends the line'
+
+
 def t_stale_replay_context_and_revoked_grants_cannot_publish_old_advice():
     for change in ('stale','replay','context','grant'):
         with tempfile.TemporaryDirectory() as root:

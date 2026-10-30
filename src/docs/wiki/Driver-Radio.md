@@ -21,6 +21,7 @@ by either switch.
 | Audio | Native voice on the relay PC, when the shared **Voice** settings enable it | The same native voice and the same single playback slot |
 | Voice controls | **Voice** row above both sections (pause listening, reply mute, volume, input language), shown while either feature is on | The same row |
 | Control Center | **AI Race Engineer** card (switch and agent) | **AI Coach** card (switch and agent) and **AI Coach training** below the settings |
+| HUD in OBS | **Race engineer** slot, off until its **Visible** is switched on in the overlay builder | **Coach** slot, off until its **Visible** is switched on |
 
 Every message carries its source, so an engineer answer never appears in the
 AI Coach section and a coach review never appears in the AI Race Engineer
@@ -32,6 +33,32 @@ the desk shows the coach messages and the **Voice** row, and no engineer
 messages; with the AI Race Engineer alone, no coach messages leave the relay.
 
 ![Driver radio in the Solo POV Director Panel](images/director-panel-solo.png)
+
+## HUD slots
+
+The HUD has two text slots for the broadcast picture, **Race engineer** and
+**Coach**. Each is its own slot in the Control Center **Overlay Builder** (scene
+**HUD / Program**) that you position and style like any other text slot. By
+default both look like the **Race control** banner and sit above it.
+
+- **Race engineer** shows the text of the current AI Race Engineer message: a
+  preset answer, a voice-question answer, or a proactive fuel or pace notice. It
+  never shows the spoken question or an AI explanation. The slot clears when the
+  message expires, is replaced by a newer one, or becomes invalid (another
+  session, car or setup, a pause in live telemetry).
+- **Coach** shows the latest lap review of the running training as one line,
+  `<focus>: <action>`, or the action alone until the training names a focus. It
+  stays until the next review replaces it and clears on **Stop training**, when
+  the training context becomes invalid, and before the first review. Calibration
+  progress and the debrief are not shown.
+
+Both slots start **hidden**: **Visible** is off by default, so nothing reaches the
+stream until the producer switches it on for that slot. With **Visible** on, a slot
+still hides while it has nothing to show, and it stays empty while its feature is
+switched off or on a profile that is not Solo POV. A long line shrinks to fit the
+slot (from 28px down to 14px by default; the builder's fit bounds change that).
+The relay serves both lines with the rest of the HUD data, so a refreshed OBS
+browser source shows the current text again.
 
 ## Enable the features
 

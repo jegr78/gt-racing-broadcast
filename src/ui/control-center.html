@@ -3624,6 +3624,21 @@ function ovFontFaceCss() {
   return css;
 }
 
+// A slot the HUD keeps off unless the profile turns Visible on (overlay_build
+// DEFAULT_HIDDEN_SLOTS, marked defaultHidden): its Visible toggle starts unchecked.
+function ovDefaultHidden(id) {
+  const meta = (ovState.allSlots || ovState.slots || []).find(s => s.id === id);
+  return !!(meta && meta.defaultHidden);
+}
+
+// The base page CSS hides a default-hidden slot outright; the canvas still draws it
+// (dimmed by .ov-hidden while Visible is off) so it can be placed and styled. An
+// empty preview value keeps it hidden, like on air.
+function ovDefaultHiddenCss() {
+  return (ovState.slots || []).filter(s => s.defaultHidden)
+    .map(s => '#' + s.id + ':not(.empty){display:flex}').join('');
+}
+
 function ovBuildCanvas() {
   ovState.slots = (ovState.allSlots || ovState.slots).filter(s => !s.id.startsWith('audience-') ||
     Object.prototype.hasOwnProperty.call(ovState.layout.slots, s.id));
@@ -3638,7 +3653,7 @@ function ovBuildCanvas() {
   // customCss here while losing to it on air. The builder chrome goes last.
   sh.innerHTML = '<style>' + ovState.baseCss + '\n' + ovFontFaceCss() + '</style>' +
     '<style id="ov-slot-css"></style><style id="ov-custom-css"></style>' +
-    '<style>' + OV_SHADOW_CSS + '</style>' + ovState.body;
+    '<style>' + OV_SHADOW_CSS + ovDefaultHiddenCss() + '</style>' + ovState.body;
   sh.querySelectorAll('[data-audience-widget]').forEach(el => {
     if (!Object.prototype.hasOwnProperty.call(ovState.layout.slots, el.id)) el.remove();
   });
@@ -3986,7 +4001,8 @@ function ovApplyProp(el, prop, value) {
       return;
     }
     if (prop === 'visible') {
-      el.classList.toggle('ov-hidden', value === false);   // canvas: dim, don't remove
+      // canvas: dim, don't remove; a default-hidden slot is off until Visible is on
+      el.classList.toggle('ov-hidden', ovDefaultHidden(el.id) ? value !== true : value === false);
       return;
     }
     if (prop === 'slant') { st.clipPath = ovSlantClip(value); return; }
@@ -4768,10 +4784,15 @@ function ovRenderPanel() {
   if (has('visible')) {
     const wrap = document.createElement('div'); wrap.className = 'ovinline';
     const cb = document.createElement('input'); cb.type = 'checkbox';
-    cb.checked = ov.visible !== false;                 // shown unless explicitly hidden
+    // Shown unless explicitly hidden; a default-hidden slot is off until explicitly shown.
+    const off = ovDefaultHidden(id);
+    cb.checked = off ? ov.visible === true : ov.visible !== false;
     const lab = document.createElement('label'); lab.textContent = 'Visible';
     lab.style.margin = '0 0 0 6px';
-    cb.onchange = () => { ovSetProp(id, 'visible', cb.checked ? '' : false); ovCommit(); };
+    cb.onchange = () => {
+      ovSetProp(id, 'visible', off ? (cb.checked ? true : '') : (cb.checked ? '' : false));
+      ovCommit();
+    };
     wrap.append(cb, lab); panel.appendChild(wrap);
   }
   const grid = () => { const g = document.createElement('div'); g.className = 'ovgrid2'; return g; };
