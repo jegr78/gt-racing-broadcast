@@ -157,7 +157,8 @@ def t_covered_files_have_no_bare_urllib():
 
 def t_no_redirect_policy_never_forwards_credential_headers():
     import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
 
     received = []
 

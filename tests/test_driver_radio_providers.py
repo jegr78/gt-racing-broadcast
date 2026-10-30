@@ -261,7 +261,8 @@ def t_real_http_trickle_is_stopped_before_the_server_finishes():
                 finished.set();self.wfile.write(payload[20:])
             except OSError:
                 return  # Client deadline closed the response before all bytes arrived.
-    server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    from http_server import NumericThreadingHTTPServer as ThreadingHTTPServer
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     def open_url(url,**kwargs):
         return http_util.open_url('http://127.0.0.1:'+str(server.server_port)+'/',**kwargs)

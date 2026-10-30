@@ -80,7 +80,7 @@ def t_get_manifest_sends_the_cookie_jar_and_browser_agent():
             if ok:
                 self.wfile.write(MEDIA_ULL.encode())
 
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    srv = m.ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     jar = os.path.join(tempfile.mkdtemp(), "yt-cookies.txt")
     with open(jar, "w", encoding="utf-8") as fh:
