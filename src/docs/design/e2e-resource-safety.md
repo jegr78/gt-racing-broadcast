@@ -12,6 +12,7 @@ effective if either cleanup or an application worker regresses.
 | Owner death closes test descendants | E2E child supervisor | Ordinary child exit is reaped | Parent pipe EOF, deadline and termination release descendant listeners | Real controlled child/grandchild on each CI OS |
 | Kernel resource ceiling | Local Linux E2E admission | Current cgroup has verified task/memory/CPU limits | Missing or weakened limits fail closed; competing run is refused | Owned user systemd unit, finite runtime and explicit property readback |
 | One heavy local run | Fixed machine-user E2E unit | One bounded run completes and releases admission | A second run cannot add another relay/browser fleet | Two tiny overlapping admission probes |
+| Darwin group retirement | terminate_tree | Transient EPERM then proven absence | Permanent EPERM, live group and exhausted shared budget fail | Synthetic E2E teardown on macOS |
 | Diagnostic retention | Cleanup failure reporting | Successful cleanup removes owned temporary files | Failure retains logs and reports failure | Isolated temporary directories |
 
 Local Linux E2E runs use one transient user service with at most two CPU cores,
@@ -32,3 +33,9 @@ harness closes its control pipes; independent child supervisors then stop their
 owned process trees. No process-name matching or system-wide kill is used.
 Resource-heavy local verification is sequential and bounded. A passing test result
 is insufficient until its owned services and worker threads have also stopped.
+
+On macOS, a reaped leader can leave a zombie-only process group briefly visible
+as `EPERM`. Cleanup repeats only the non-destructive group-absence probe within
+the existing ten-second leader-reap budget. It never signals the released group
+identity again. A persistent permission error or a remaining live group still
+fails cleanup and retains the diagnostics.
