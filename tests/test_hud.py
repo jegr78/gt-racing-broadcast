@@ -1253,6 +1253,11 @@ def t_hud_slots_hidden_when_empty_even_if_visible():
         assert _display(sid, filled, [base, on]) == "flex", "Visible on, text: shown"
         assert _display(sid, filled, [base, unset]) == "none", "Visible unset: hidden"
         assert _display(sid, filled, [base]) == "none", "no profile overlay: hidden"
+        # Until the first /hud/data reply fills it, the slot starts empty, so a Visible
+        # slot shows no blank box on page load (or ever, if that fetch fails).
+        import re
+        m = re.search(r'<div id="%s" class="([^"]*)"' % sid, html)
+        assert m and "empty" in m.group(1).split(), (sid, m and m.group(1))
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

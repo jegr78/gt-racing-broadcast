@@ -12021,7 +12021,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     or values and not (values[0].isascii() and values[0].isdigit() and len(values[0]) <= 18)):
                                 return self._radio_error("invalid_query", "Use one nonnegative message revision", 400)
                             result = radio_service.history(int(values[0]) if values else None, requester=subject)
-                            result["messages"] = [m for m in result["messages"] if m.get("source") in features]
+                            result["messages"] = [m for m in result["messages"] if m.get("source") in features
+                                                  or m.get("kind") == "refusal"]
                         elif route == "request":
                             if set(body) != {"preset", "binding"}:
                                 return self._radio_error("invalid_body", "Expected preset and current binding", 400)

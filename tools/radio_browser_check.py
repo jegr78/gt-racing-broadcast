@@ -158,6 +158,11 @@ def check(browser,outdir,shots=None):
             # The shared Voice row serves the AI Coach too and stays usable.
             first.wait_for_timeout(1200)
             assert a.locator('#voice-section').is_visible() and a.locator('#pause').is_enabled(),'engineer switch-off removed the shared voice controls'
+            # A voice request for the switched-off engineer shows its hint as text in the Voice row.
+            f.f.service.refusal('engineer',f.f.service.refresh()['binding'])
+            a.locator('#voice-hint').wait_for(state='visible')
+            assert a.locator('#voice-hint').inner_text().startswith('Feature off'),a.locator('#voice-hint').inner_text()
+            assert 'Enable the' not in a.locator('#coach-section').inner_text(),'refusal hint leaked into the AI Coach section'
             shot(first,'driver-radio-denied',wiki='console-driver-radio-access.png')
             # Finish only synthetic queued work, then closing views must not pause native service.
             for _ in range(12):

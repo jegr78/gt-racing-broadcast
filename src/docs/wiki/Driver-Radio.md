@@ -26,9 +26,12 @@ by either switch.
 Every message carries its source, so an engineer answer never appears in the
 AI Coach section and a coach review never appears in the AI Race Engineer
 section. A message labelled **Feature off** is the hint a switched-off feature
-gives when someone asks it something. The relay serves the shared message lane
-and the native voice controls while either feature is on, and sends each view
-only the messages of the features that are switched on: with the AI Coach alone,
+gives when someone asks it something by voice. It appears in the **Voice** row,
+because the switched-off feature's own section only says Off, and it stays there
+until the next message arrives; it never reaches the HUD. The relay serves the
+shared message lane and the native voice controls while either feature is on,
+and sends each view only the messages of the features that are switched on
+(plus those hints): with the AI Coach alone,
 the desk shows the coach messages and the **Voice** row, and no engineer
 messages; with the AI Race Engineer alone, no coach messages leave the relay.
 
