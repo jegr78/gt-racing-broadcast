@@ -77,7 +77,8 @@ def check(browser,outdir,shots=None):
                 clearTimeout(coach.timer);return true;}""")
             page.evaluate("""window.__coachFetch=window.fetch;window.__heldCoachGets=[];
                 window.fetch=async(...args)=>{const response=await window.__coachFetch(...args);
-                    if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST')
+                    // A GET whose real fetch is still in flight at release time must not hold.
+                    if(String(args[0]).endsWith('/coach')&&args[1]?.method!=='POST'&&!window.__coachReleased)
                         await new Promise(resolve=>window.__heldCoachGets.push(resolve));
                     return response;};""")
             try:
@@ -92,7 +93,7 @@ def check(browser,outdir,shots=None):
                     page.wait_for_function("!window.radioView.coach.sending")
                     assert not f.practice.service.snapshot(PROFILE)['active'],'Stale display revision prevented Stop during reference I/O'
             finally:
-                release.set();page.evaluate('window.__heldCoachGets.forEach(resolve=>resolve());window.fetch=window.__coachFetch')
+                release.set();page.evaluate('window.__coachReleased=true;window.__heldCoachGets.forEach(resolve=>resolve());window.fetch=window.__coachFetch')
             f.practice.service.step()
             sync(page,f)
             # Draft edits made while a control response is delayed remain visible.
@@ -154,7 +155,8 @@ def check(browser,outdir,shots=None):
             page.wait_for_function("([epoch])=>window.radioView.coach.state?.active&&window.radioView.coach.state.epoch===epoch",arg=[f.practice.service.snapshot(PROFILE)['epoch']])
             c.locator('#coach-history').evaluate('(node)=>node.open=true')
             c.locator('#coach-history-entries details').first.evaluate('(node)=>node.open=true')
-            c.locator('#coach-history').scroll_into_view_if_needed()
+            # Frame the three settings cards (AI Race Engineer, AI Coach, Voice) above the training.
+            c.evaluate("(node)=>node.scrollIntoView({block:'start'})")
             shot(cc,'coach-control-center','desktop','cc-telemetry.png')
             apply(cc,c,'#coach-stop',f,'radioAdmin')
             panel_context=browser.new_context(viewport={'width':1440,'height':1000})

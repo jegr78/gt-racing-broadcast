@@ -26,3 +26,21 @@ edits made during that save. Explicit reload, session/profile change or a curren
 access denial clears the draft. A view generation discards old successful replies
 after denial or context change, so an in-flight authorized poll cannot restore
 revoked data. Prior validated interpretations remain visible with their messages.
+
+## Two AI features (epic #1023, issue #1028)
+
+The component shows the AI Race Engineer and the AI Coach as two labelled sections
+in the driver desk and the Director Solo card, and the Control Center form as three
+cards: AI Race Engineer (switch and agent), AI Coach (switch and agent) and the
+shared Voice. Messages are split by their `source`; a `refusal` is labelled
+"Feature off". Each section handles its own switch: a 403 `feature_disabled` from
+the engineer routes empties and hides only the engineer section, a 403
+`feature_disabled` from the coach route (or `whoami.ai_coach` false) does the same
+for the coach section, and both show "Off · enable it in the Control Center". A 401
+or any other 403 still denies the whole view. The coach section's message list is
+fed by the engineer `messages` route, so it is empty while only the AI Coach is on.
+The single coach owner per profile removed the "busy, another driver" phase and the
+`training_busy` handling from the coach view. Tests: `t_admin_form_saves_two_features`,
+`t_sections_split_messages_by_source` and
+`t_a_disabled_feature_turns_off_only_its_own_section` (node, fake DOM) plus the two
+Playwright checks.

@@ -209,6 +209,140 @@ def t_control_center_proxy_checks_owned_relay_and_profile_before_writes():
         assert f.f.access.enabled('engineer') is True
 
 
+# The shared component under node with a minimal fake DOM: every element that the
+# component's HTML names by id or class is registered, unknown ids are created on demand,
+# and fetch answers from a per-scenario route table. Skipped where node is not installed.
+_FAKE_DOM=r"""
+const registry={},classes={},written=[];
+class El{
+ constructor(tag){this.tagName=String(tag).toUpperCase();this.children=[];this._text='';this.hidden=false;this.disabled=false;this.checked=false;this.value='';this.dataset={};this.options=[];this.className='';
+  this.classList={toggle:(n,on)=>{this['_cls_'+n]=on;}};}
+ set textContent(v){this._text=String(v);this.children=[];}
+ get textContent(){return [this._text,...this.children.map(c=>c.textContent)].filter(Boolean).join(' ');}
+ set innerHTML(html){this.children=[];register(html);}
+ insertAdjacentHTML(_where,html){register(html);}
+ append(...nodes){for(const n of nodes){if(this.tagName==='SELECT')this.options.push(n);this.children.push(n);}}
+ prepend(...nodes){this.children.unshift(...nodes);}
+ replaceChildren(...nodes){this.children=[];this.options=[];this.append(...nodes);}
+ querySelector(sel){return sel[0]==='#'?byId(sel.slice(1)):sel[0]==='.'?(classes[sel.slice(1)]||new El('div')):new El('div');}
+ querySelectorAll(){return [];}
+ getElementById(id){return byId(id);}
+ attachShadow(){return this.shadowRoot=new El('root');}
+ scrollIntoView(){}
+}
+function byId(id){return registry[id]||(registry[id]=new El('div'));}
+function register(html){
+ written.push(html);
+ for(const match of html.matchAll(/<(\w+)([^>]*)>/g)){
+  const attrs=match[2],id=/\bid="([^"]+)"/.exec(attrs),cls=/\bclass="([^"]+)"/.exec(attrs);
+  if(!id&&!cls)continue;const node=new El(match[1]);node.hidden=/\shidden(\s|$)/.test(attrs+' ');
+  const text=/^([^<]*)</.exec(html.slice(match.index+match[0].length));if(text)node._text=text[1];
+  if(id)registry[id[1]]=node;if(cls&&!classes[cls[1]])classes[cls[1]]=node;
+ }
+}
+class Option extends El{constructor(text,value){super('option');this.textContent=text;this.value=value;}}
+const document={createElement:tag=>new El(tag)};
+const window={addEventListener(){},removeEventListener(){}};
+const routes={},posts=[];
+async function fetch(url,options={}){
+ if(options.method==='POST')posts.push({url,body:JSON.parse(options.body)});
+ const [status,data]=routes[url]||[404,{error:{message:'missing '+url}}];
+ return {ok:status<300,status,json:async()=>JSON.parse(JSON.stringify(data))};
+}
+const tick=()=>new Promise(resolve=>setTimeout(resolve,30));
+"""
+
+
+def _run_component(scenario):
+    import shutil,subprocess
+    node=shutil.which('node')
+    if not node:
+        print('  (node not installed, JS check skipped)');return None
+    script=(ROOT/'src/console/driver-radio.js').read_text(encoding='utf8')
+    program=_FAKE_DOM+script+'\n(async()=>{'+scenario+'\n})().then(()=>process.exit(0),e=>{console.error(e);process.exit(1);});'
+    out=subprocess.run([node,'-'],input=program,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=30)
+    assert out.returncode==0,out.stderr
+    return json.loads(out.stdout)
+
+
+_BINDING={'generation':'g','session_id':'s','context_revision':1}
+_COACH_STATE={'version':1,'revision':1,'profile':'solo-pov','viewer':'console:driver','generation':'c1','phase':'inactive','active':False}
+
+
+def _driver_routes(messages=(),engineer=True,coach=True):
+    def off(name):return [403,{'error':{'code':'feature_disabled','message':'Enable the '+name+' for this profile'}}]
+    radio={'/console/driver-radio/snapshot':[200,{'epoch':1,'binding':_BINDING,'live':True,'assessment':{}}],
+           '/console/driver-radio/messages':[200,{'epoch':1,'binding':_BINDING,'messages':list(messages)}],
+           '/console/driver-radio/native':[200,{'binding':_BINDING,'revision':0,'phase':'idle','enabled':True,'paused':False,'muted':False,'volume':1,'input_language':'en'}],
+           '/console/driver-radio/setup':[200,{'binding':_BINDING,'revision':0,'setup':{}}]}
+    if not engineer:radio={path:off('AI Race Engineer') for path in radio}
+    radio['/console/driver-radio/coach']=[200,_COACH_STATE] if coach else off('AI Coach')
+    radio['/console/whoami']=[200,{'subject':'driver','ai_engineer':engineer,'ai_coach':coach}]
+    return json.dumps(radio)
+
+
+def t_admin_form_saves_two_features():
+    settings={'revision':3,'features':features(engineer=True),'voice':{'enabled':True,'microphone':None,'input_language':'en'},
+              'native':{'wake':'hey_jeff','stt':'vosk'},'providers':{'speech':False}}
+    data={'ok':True,'profile':'solo-pov','settings':settings,'native':{'phase':'idle','phrases':['hey_jeff']},
+          'agents':[{'id':'agent-a','name':'Agent A'},{'id':'agent-b','name':'Agent B'}]}
+    out=_run_component("""
+     Object.assign(routes,{'/api/driver-radio':[200,%s],'/api/driver-radio/coach':[403,{ok:false,error:'Enable the AI Coach for this profile',code:'feature_disabled'}]});
+     const view=window.DriverRadio.mountAdmin(new El('div'));await tick();
+     // The first profile read restarts coaching once; poll it again now instead of in 3 s.
+     clearTimeout(view.coach.timer);await view.coach.poll();
+     byId('ai-engineer-enabled').checked=true;byId('ai-engineer-agent').value='agent-a';
+     byId('ai-coach-enabled').checked=true;byId('ai-coach-agent').value='agent-b';
+     byId('admin-form').onsubmit({preventDefault(){}});await tick();
+     const form=written.find(html=>html.includes('id="admin-form"'));
+     const result={posts,form,coachOff:byId('coach-off').hidden};view.destroy();console.log(JSON.stringify(result));
+    """%json.dumps(data))
+    if out is None:return
+    body=out['posts'][0]['body']
+    assert body['features']=={'engineer':{'enabled':True,'agent':'agent-a'},'coach':{'enabled':True,'agent':'agent-b'}},body
+    assert 'drivers' not in json.dumps(body) and body['expected']==3 and body['expectedProfile']=='solo-pov',body
+    cards=[out['form'].find('<h3>'+title+'</h3>') for title in ('AI Race Engineer','AI Coach','Voice')]
+    assert -1 not in cards and cards==sorted(cards),cards
+    assert out['coachOff'] is False,'A disabled AI Coach must show its Off line in the Control Center'
+
+
+def t_sections_split_messages_by_source():
+    messages=[dict(id=1,source='engineer',kind='requested',state='done',text='Fuel for 12 laps.'),
+              dict(id=2,source='coach',kind='coach',state='done',text='Brake two metres later.'),
+              dict(id=3,source='coach',kind='refusal',state='text_only',text='Enable the AI Coach for this profile'),
+              dict(id=4,source='engineer',kind='refusal',state='text_only',text='Enable the AI Race Engineer for this profile')]
+    out=_run_component("""
+     Object.assign(routes,%s);
+     const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
+     const result={engineer:byId('history').textContent,coach:byId('coach-messages').textContent,latest:byId('latest').textContent};
+     view.destroy();console.log(JSON.stringify(result));
+    """%_driver_routes(messages))
+    if out is None:return
+    assert 'Fuel for 12 laps.' in out['engineer'] and 'Fuel for 12 laps.' not in out['coach'],out
+    assert 'Brake two metres later.' in out['coach'] and 'Brake two metres later.' not in out['engineer'],out
+    assert 'Enable the AI Coach' in out['coach'] and 'Enable the AI Coach' not in out['engineer'],out
+    assert 'Feature off' in out['engineer'] and 'Automatic advice' not in out['engineer'],out
+    assert out['latest']=='Enable the AI Race Engineer for this profile',out
+
+
+def t_a_disabled_feature_turns_off_only_its_own_section():
+    probe="""
+     const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
+     const result={content:byId('content').hidden,engineerOff:byId('engineer-off').hidden,engineerBody:byId('engineer-body').hidden,
+       coachOff:byId('coach-off').hidden,coachBody:byId('coach-body').hidden,coachState:!!view.coach.state,
+       problem:byId('problem').textContent,engineerText:byId('engineer-off').textContent,coachText:byId('coach-off').textContent};
+     view.destroy();console.log(JSON.stringify(result));"""
+    out=_run_component('Object.assign(routes,%s);'%_driver_routes(engineer=False)+probe)
+    if out is None:return
+    assert out['content'] is False and out['engineerOff'] is False and out['engineerBody'] is True,out
+    assert out['coachOff'] is True and out['coachBody'] is False and out['coachState'] is True,out
+    assert out['engineerText']=='Off · enable it in the Control Center' and out['problem']=='',out
+    out=_run_component('Object.assign(routes,%s);'%_driver_routes(coach=False)+probe)
+    assert out['engineerOff'] is True and out['engineerBody'] is False,out
+    assert out['coachOff'] is False and out['coachBody'] is True and out['coachState'] is False,out
+    assert out['coachText']=='Off · enable it in the Control Center',out
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

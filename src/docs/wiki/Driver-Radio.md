@@ -1,28 +1,60 @@
 # Driver radio
 
-Driver radio provides English fuel, pace, tyre-temperature and short-status
-answers for a Solo POV profile. It also announces fuel risks and meaningful pace
-changes. Optional coaching adds explicit personal training, one retained exercise
-and a private debrief. The Director card and driver desk share the same radio lane.
+A Solo POV profile has two separate AI features for its driver:
+
+- **AI Race Engineer**: English fuel, pace, tyre-temperature and short-status
+  answers, plus proactive fuel warnings and completed-lap pace notices. It runs
+  whenever it is enabled and live telemetry is present. There is no start button.
+- **AI Coach**: explicit personal training with one exercise at a time, progress,
+  a debrief and a private history. Enabling it does not start training; only
+  **Start training** does.
+
+Neither is a Crew role. The human **Race Engineer** (the Crew role and its
+read-only `/console/race-engineer` desk) is a different thing and is not changed
+by either switch.
+
+## Where each feature appears
+
+| Output | AI Race Engineer | AI Coach |
+|---|---|---|
+| Text on a second device | **AI Race Engineer** section of the Console driver desk and the Director Panel Solo card: presets, latest answer and its messages | **AI Coach** section of the same views: training controls, focus, review, debrief, private history and its messages |
+| Audio | Native voice on the relay PC, when the shared **Voice** settings enable it | The same native voice and the same single playback slot |
+| Control Center | **AI Race Engineer** card (switch and agent) | **AI Coach** card (switch and agent) and **AI Coach training** below the settings |
+
+Every message carries its source, so an engineer answer never appears in the
+AI Coach section and a coach review never appears in the AI Race Engineer
+section. A message labelled **Feature off** is the hint a switched-off feature
+gives when someone asks it something. The **AI Coach messages** list on the
+desk is read from the shared radio lane, which the relay serves only while the
+AI Race Engineer is on; with the AI Coach alone, the section still shows the
+current focus and review.
 
 ![Driver radio in the Solo POV Director Panel](images/director-panel-solo.png)
 
-## Enable access
+## Enable the features
 
 Start the relay for the Solo POV profile, then open **Telemetry** in the Control
-Center. Under **Driver radio setup**, tick **Enable AI Race Engineer**, **Enable AI
-Coach** or both, and save. The two switches are independent: the AI Race Engineer
-covers the radio presets, setup and service declarations, the AI Coach covers
-personal training. The **Optional live AI** agent applies to both.
+Center. **Driver radio setup** has three cards:
+
+- **AI Race Engineer**: **Enable AI Race Engineer** and its own **Optional live AI**
+  agent.
+- **AI Coach**: **Enable AI Coach** and its own **Optional live AI** agent.
+- **Voice**: native voice, microphone override, input language, wake phrase,
+  transcription and Google speech. Both features use this one voice
+  configuration.
+
+Choose **Save profile radio settings**. The two switches are independent. A
+switched-off feature's section in every view shows **Off · enable it in the
+Control Center**, while the other feature's section keeps working.
 
 There is no driver list. Anyone signed in to this profile's Console can use an
 enabled feature, whatever their Crew role (commentators, Race Control, Race
 Engineer desk users and Discord sign-ins included). Console sign-in is still
 required for every driver radio page and request. Switching a feature off refuses
-its next request. The existing Engineer archive and producer permissions remain
-separate.
+its next request and removes its data from open views. The existing Engineer
+archive and producer permissions remain separate.
 
-![Private training history and producer radio settings](images/cc-telemetry.png)
+![Driver radio setup: AI Race Engineer, AI Coach and Voice cards](images/cc-telemetry.png)
 
 While either feature is on, every signed-in Console shows **Driver radio**. A direct Director Panel visit
 uses the same Console identity. Sign in through Console, then choose **Connect
@@ -31,26 +63,31 @@ radio access is unavailable.
 
 ![Driver-only Console launcher](images/console-driver-radio-launcher.png)
 
-## Use the desk
+## Use the AI Race Engineer
 
 The four buttons request **Fuel status**, **Pace**, **Tyre temperatures** and
 **Short status**. Text appears before optional speech or AI explanation. The desk
-adds bounded session history, measurement evidence, optional race length,
+adds bounded message history, measurement evidence, optional race length,
 starting compound and fuel reserve. Missing setup limits finish estimates and
-strategy conclusions; it does not prevent measured status answers.
+strategy conclusions; it does not prevent measured status answers. The section
+also holds the native voice controls (pause listening, reply mute, volume and
+input language); they need the AI Race Engineer on.
 
 Confirm a tyre change only after it has happened. An inferred stop does not
 confirm a new tyre stint. Slower comparable laps can support conditional tyre
 advice, but tyre wear, traffic and weather causes are not directly measured.
 Pace comparisons use completed eligible laps and show their sample basis.
 
-![Driver desk with coaching, private history and shared radio](images/console-driver-radio-desktop.png)
+![Driver desk with the AI Race Engineer and AI Coach sections](images/console-driver-radio-desktop.png)
 
 If another view changes the setup while you edit it, the save is refused. Reload
 the current form, review its values and enter your changes again. Session/context
-changes clear obsolete work. Switching the AI Race Engineer off removes the open view's radio data.
+changes clear obsolete work. Switching the AI Race Engineer off empties its
+section in open views and leaves the AI Coach section running.
 
-## Start and steer personal training
+![AI Race Engineer switched off, AI Coach section still shown](images/console-driver-radio-access.png)
+
+## Train with the AI Coach
 
 Choose **Practice** or **Time trial**, select **Balanced**, **Consistency** or
 **Pace**, then explicitly choose **Start training**. Opening a view does not start
@@ -74,7 +111,7 @@ revision has become old. Closing the browser does not stop relay-owned training.
 Changed car, track, definition or corrected evidence can reset the comparison basis.
 If a form conflicts, reload its current values before applying your draft.
 
-Training explanations use the already configured isolated profile agent only when
+Training explanations use the agent chosen in the **AI Coach** card only when
 **Optional AI explanation** is explicitly checked for that training. It defaults
 off. Deterministic feedback does not wait for the agent, and private training
 history is not uploaded as AI context.
@@ -116,7 +153,7 @@ read text; it does not become a remote microphone or speaker.
 2. Explicitly install the pinned local wake and transcription models:
    `racecast radio provision`. Provisioning verifies checksums and the prepared
    phrase fixtures. A relay start downloads nothing.
-3. In **Driver radio setup**, deliberately enable native voice for the profile.
+3. In the **Voice** card of **Driver radio setup**, deliberately enable native voice for the profile.
    It uses the microphone selected in Control Center unless you enter an Engineer
    override. On Windows/macOS the override is the native device name; on Linux it
    is the PulseAudio source identifier.
@@ -191,7 +228,7 @@ Transcription and synthesis have separate short work budgets. Recognized questio
 and answers stay in bounded volatile session history. Session/context changes and
 relay shutdown invalidate pending work and old playback.
 
-Optional live AI uses an already configured isolated agent. Its small fact package
+Optional live AI uses the isolated agent chosen in the feature's own card. Its small fact package
 contains the current allowed telemetry and short question context. Busy, missing,
 invalid or late AI leaves deterministic text intact. Numerical claims are checked
 against supplied facts; optional interpretations remain labelled separately.
