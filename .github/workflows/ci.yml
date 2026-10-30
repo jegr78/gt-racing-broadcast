@@ -62,31 +62,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Profile macOS startup for issue 1033
-        if: runner.os == 'macOS'
-        timeout-minutes: 5
-        run: |
-          python - <<'PYPROFILE'
-          import cProfile, faulthandler, importlib.util, pstats, runpy, time
-          from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-          faulthandler.dump_traceback_later(5, repeat=True)
-          profile = cProfile.Profile()
-          profile.enable()
-          start = time.monotonic()
-          spec = importlib.util.spec_from_file_location('startup_probe', 'src/relay/racecast-feeds.py')
-          module = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(module)
-          print('RELAY IMPORT SECONDS', time.monotonic() - start, flush=True)
-          start = time.monotonic()
-          with ThreadingHTTPServer(('127.0.0.1', 0), BaseHTTPRequestHandler):
-              pass
-          print('HTTP BIND SECONDS', time.monotonic() - start, flush=True)
-          runpy.run_path('tests/test_solo.py', run_name='__main__')
-          profile.disable()
-          faulthandler.cancel_dump_traceback_later()
-          pstats.Stats(profile).sort_stats('cumulative').print_stats(35)
-          PYPROFILE
-
       - name: Run test suite (stdlib, each file is a runnable script)
         run: python tools/run-tests.py
 
