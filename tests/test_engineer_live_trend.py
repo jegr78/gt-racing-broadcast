@@ -205,6 +205,24 @@ console.log(seen.join('|'));""")
                                "Against ref · Lap 3"), out
 
 
+def t_predicted_lap_is_the_reference_time_plus_the_live_delta():
+    h = _html()
+    assert 'id="predicted"' in h, "the desk shows a predicted lap time"
+    assert "showDelta(last?.delta??null,last?.d,live.a?.time_s)" in h, \n        "the live delta of a lap B other than the current lap predicts from its own reference"
+    src = "\n".join([_const_src(h, "TREND_S")] + [_func_src(h, n) for n in (
+        "lapTime", "trend", "referenceText", "showDelta")])
+    out = _run_js(_HARNESS + "const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);\n" + src + """
+const seen = [];
+state.snapshot = {current: live(30)}; state.laps = [lap(17, 90)]; state.a = 'L17'; state.aKind = 'best';
+showDelta(1.234, 430, 90); seen.push($('predicted').textContent);
+showDelta(-0.5, 800, 90); seen.push($('predicted').textContent);
+showDelta(0.5, 400, null); seen.push($('predicted').textContent);
+showDelta(null); seen.push($('predicted').textContent);
+console.log(seen.join('|'));""")
+    if out is not None:
+        assert out.strip() == "1:31.234|1:29.500|N/A|N/A", out
+
+
 def t_pin_note_waits_for_the_first_history():
     h = _html()
     out = _run_js(_HARNESS + _reference_src(h) + """
@@ -238,7 +256,7 @@ let request = async (route, q) => route === '/race-engineer/compare'
 def t_render_drops_a_pair_for_another_reference():
     h = _html()
     src = "\n".join([_const_src(h, "TREND_S")] + [_func_src(h, n) for n in (
-        "comparable", "trend", "referenceText", "showDelta", "render")])
+        "lapTime", "comparable", "trend", "referenceText", "showDelta", "render")])
     out = _run_js(_HARNESS + """
 const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);
 const clearPlots = () => {}, graph = () => {}, renderMarker = () => {}, renderSections = () => {};
@@ -249,11 +267,12 @@ els.notes = {replaceChildren() {}, append() {}};
 const B = {...live(5), trace: [{d: 400}]}, pair = {compatible: true, a: {...lap(3, 90)}, b: B, delta: [{d: 400, delta: 0.5}]};
 state.snapshot = {current: live(5)}; state.laps = [lap(3, 90), lap(4, 88)]; state.detail = B;
 state.pair = pair; state.a = 'L3'; state.aKind = 'best'; render();
-const fresh = $('delta').textContent;
+const fresh = $('delta').textContent + ' ' + $('predicted').textContent;
 state.pair = pair; state.a = 'L4'; render();
-console.log(fresh + '|' + $('delta').textContent + '|' + $('delta-note').textContent + '|' + (state.pair === null));""")
+console.log(fresh + '|' + $('delta').textContent + ' ' + $('predicted').textContent + '|'
+            + $('delta-note').textContent + '|' + (state.pair === null));""")
     if out is not None:
-        assert out.strip() == "+0.500|N/A|Against best · Lap 4|true", out
+        assert out.strip() == "+0.500 1:30.500|N/A N/A|Against best · Lap 4|true", out
 
 
 def t_delta_trend_arrow_follows_the_hud_rule():
