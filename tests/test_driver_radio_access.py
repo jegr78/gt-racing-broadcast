@@ -39,7 +39,10 @@ def t_access_is_explicit_profile_scoped_and_revocable():
 def t_driver_identities_are_saved_as_console_writes_them():
     with tempfile.TemporaryDirectory() as d:
         store = radio.Store(Path(d) / 'solo', available=True)
-        doc = store.update({'expected': 0, 'enabled': True, 'drivers': ['JeGr', ' Jens ', 'jegr']})
+        try:
+            doc = store.update({'expected': 0, 'enabled': True, 'drivers': ['JeGr', ' Jens ', 'jegr']})
+        except radio.RadioError as exc:
+            raise AssertionError(f'a mixed-case Console name is refused: {exc}') from None
         assert doc['drivers'] == ['jegr', 'jens'], doc['drivers']
         assert store.authorize('jegr')['enabled'] is True
         try:
