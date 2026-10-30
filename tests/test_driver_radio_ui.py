@@ -43,6 +43,7 @@ class RadioFixture:
         engineer=self.engineer
         handler=m.make_handler(relay,panel_path=str(ROOT/'src/director/director-panel.html'),console_page_path=str(ROOT/'src/console/console.html'),
             console_secret=console.SECRET,crew_source=crew,engineer_access=engineer,telemetry_store=telemetry,
+            console_versions_path=str(Path(self.temp.name)/'console-versions.json'),
             radio_service=self.f.service,radio_native=self.native)
         self.server=m.ThreadingHTTPServer(('127.0.0.1',0),handler);threading.Thread(target=self.server.serve_forever,daemon=True).start()
         self.url='http://127.0.0.1:'+str(self.server.server_port)

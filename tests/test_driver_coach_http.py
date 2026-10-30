@@ -252,7 +252,7 @@ def t_private_history_and_deletion_use_the_verified_driver_and_independent_histo
 
 def t_history_io_does_not_delay_stop_and_cannot_reply_after_the_coach_is_switched_off():
     from unittest.mock import patch
-    for change in ('stop','revoke'):
+    for change in ('stop','revoke','sign-out'):
         with RadioFixture(coaching=True) as f:
             state=answer(f)[1]
             assert answer(f,method='POST',body=dict(expected=state['revision'],action='start',options={}))[0]==200
@@ -269,11 +269,14 @@ def t_history_io_does_not_delay_stop_and_cannot_reply_after_the_coach_is_switche
                     if change=='stop':
                         status,stopped,_=answer(f,method='POST',body=dict(expected=0,action='stop',options={}))
                         assert status==200 and not stopped['active'],'History IO held up Stop acknowledgement'
-                    else:
+                    elif change=='revoke':
                         switch(f,engineer=True)
+                    else:  # The Console token is revoked while the reply is still being built.
+                        console.m.console_admin.bump_version(str(Path(f.temp.name)/'console-versions.json'),'driver')
                 finally:release.set();thread.join(5)
             assert not thread.is_alive() and result
             if change=='revoke':assert result[0][0]==403 and result[0][1]['error']['code']=='feature_disabled',result
+            elif change=='sign-out':assert result[0][0]==403 and result[0][1]['error']['code']=='forbidden',result
             else:assert result[0][0]==200 and not result[0][1]['active']
 
 
