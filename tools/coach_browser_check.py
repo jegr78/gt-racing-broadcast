@@ -158,9 +158,14 @@ def check(browser,outdir,shots=None):
             # Frame the three settings cards (AI Race Engineer, AI Coach, Voice) above the training.
             c.evaluate("(node)=>node.scrollIntoView({block:'start'})")
             shot(cc,'coach-control-center','desktop','cc-telemetry.png')
+            # Views are optional; closing the Console driver page cannot stop relay-owned training.
+            assert f.practice.service.snapshot(PROFILE)['active']
+            page.close();f.practice.service.step()
+            assert f.practice.service.snapshot(PROFILE)['active'],'closing the driver page stopped the training'
             apply(cc,c,'#coach-stop',f,'radioAdmin')
+            assert not f.practice.service.snapshot(PROFILE)['active'],'only Stop training ends it'
             assert not errors,errors
-            page.close();cc.close()
+            cc.close()
             results.append(V.SurfaceResult('driver-coach-controls','desktop',None,[],0,None))
         optional_ai_visibility(browser)
         results.append(V.SurfaceResult('driver-coach-optional-ai','desktop',None,[],0,None))
