@@ -86,7 +86,29 @@ def wait_port_file(path,proc):
         assert proc.poll() is None,'Controlled listener exited before binding'
         time.sleep(.01)
     assert path.exists(),'Controlled listener did not bind'
-    return int(path.read_text())
+    while True:
+        try:return int(path.read_text())
+        except PermissionError:
+            # Windows: a scanner can briefly hold the just-renamed file (#1037).
+            if time.monotonic()>=deadline:raise
+            time.sleep(.01)
+
+
+def t_wait_port_file_retries_a_windows_sharing_violation():
+    # Windows: a scanner or the indexer can hold the just-renamed file for a moment,
+    # so reading it raises PermissionError although the writer is done (#1037).
+    with tempfile.TemporaryDirectory() as directory:
+        ready=Path(directory)/'ready';ready.write_text('4321')
+        real=Path.read_text;calls=[]
+        def flaky(self,*args,**kwargs):
+            calls.append(1)
+            if len(calls)==1:raise PermissionError(13,'The process cannot access the file')
+            return real(self,*args,**kwargs)
+        alive=mock.Mock();alive.poll.return_value=None
+        with mock.patch.object(Path,'read_text',flaky):
+            try:port=wait_port_file(ready,alive)
+            except PermissionError:raise AssertionError('a sharing violation must be retried') from None
+        assert (port,len(calls))==(4321,2),(port,calls)
 
 
 def can_bind(port):
