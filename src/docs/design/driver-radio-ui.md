@@ -1,7 +1,12 @@
 # Driver radio browser controls
 
-Epic #969, delivery #974. One shared component drives the Solo POV Director card
-and the dedicated authenticated driver desk. It never captures or plays audio;
+Epic #969, delivery #974. One shared component drives the dedicated authenticated
+driver desk and the Control Center form. It also drove a compact Solo POV card in
+the Director Panel until 2026-10-31, when that card was removed as redundant: the
+Control Center holds the controls (AI Race Engineer, AI Coach and Voice cards), the
+driver reads the text on the Console driver desk, the broadcast shows the HUD slots
+and the crew uses the human Race Engineer desk. The rows below that name the
+Director card or the direct panel describe the original delivery. It never captures or plays audio;
 the deliberately enabled native relay service owns those lifetimes.
 
 | Requirement | Production path | Positive test | Failure test | Runtime evidence |
@@ -30,7 +35,7 @@ revoked data. Prior validated interpretations remain visible with their messages
 ## Two AI features (epic #1023, issue #1028)
 
 The component shows the AI Race Engineer and the AI Coach as two labelled sections
-in the driver desk and the Director Solo card, and the Control Center form as three
+in the driver desk (and, until 2026-10-31, the Director Solo card), and the Control Center form as three
 cards: AI Race Engineer (switch and agent), AI Coach (switch and agent) and the
 shared Voice. Messages are split by their `source`; a `refusal` (the fixed
 `feature_disabled` hint of a switched-off feature, no engineer data) is labelled

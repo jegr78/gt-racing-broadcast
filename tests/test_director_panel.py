@@ -677,6 +677,27 @@ def t_old_controls_survive_the_frame():
         assert f'id="{gone}"' not in h, f"#{gone} belongs to the old layout"
 
 
+def t_hidden_bus_cards_stay_hidden():
+    # `.bus{display:flex}` beats the browser's [hidden] rule, so a card the markup or the
+    # script hides (the empty graphics-request list) showed on every profile. Every
+    # hidden-capable .bus needs an author [hidden] rule.
+    h = _html()
+    hidden_bus = re.findall(r'<section class="bus" id="([^"]+)"[^>]*\bhidden\b', h)
+    assert "gfxReqSec" in hidden_bus, hidden_bus
+    css = re.sub(r"/\*.*?\*/", "", h[:h.index("</style>")], flags=re.S)
+    assert re.search(r"\.bus\[hidden\]\s*\{\s*display\s*:\s*none", css), \
+        "a hidden .bus card must not be shown by .bus{display:flex}"
+
+
+def t_no_driver_radio_card():
+    # Driver radio lives in the Control Center (controls), the Console driver page (text),
+    # the HUD (broadcast) and the Race Engineer desk (crew); the panel card was redundant.
+    h = _html()
+    assert "driver-radio-card" not in h, "the Director Panel has no driver radio card"
+    assert "driver-radio-ui.js" not in h, "the Director Panel does not load the radio component"
+    assert "__RC_RADIO_ACCESS__" not in h, "the panel needs no radio access placeholder"
+
+
 def t_frame_columns_in_order():
     _order(_html(), '<div class="frame">', '<nav id="areaNav"', '<section id="liveCol"',
            '<main id="workspace">', '<aside class="rail" id="chatRail"')

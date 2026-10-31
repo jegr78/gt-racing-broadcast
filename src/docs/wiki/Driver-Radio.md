@@ -17,7 +17,7 @@ by either switch.
 
 | Output | AI Race Engineer | AI Coach |
 |---|---|---|
-| Text on a second device | **AI Race Engineer** section of the Console driver desk and the Director Panel Solo card: presets, latest answer and its messages | **AI Coach** section of the same views: training controls, focus, review, debrief, private history and its messages |
+| Text on a second device | **AI Race Engineer** section of the Console driver desk: presets, latest answer and its messages | **AI Coach** section of the same desk: training controls, focus, review, debrief, private history and its messages |
 | Audio | Native voice on the relay PC, when the shared **Voice** settings enable it | The same native voice and the same single playback slot |
 | Voice controls | **Voice** row above both sections (pause listening, reply mute, volume, input language), shown while either feature is on | The same row |
 | Control Center | **AI Race Engineer** card (switch and agent) | **AI Coach** card (switch and agent) and **AI Coach training** below the settings |
@@ -34,8 +34,6 @@ and sends each view only the messages of the features that are switched on
 (plus those hints): with the AI Coach alone,
 the desk shows the coach messages and the **Voice** row, and no engineer
 messages; with the AI Race Engineer alone, no coach messages leave the relay.
-
-![Driver radio in the Solo POV Director Panel](images/director-panel-solo.png)
 
 ## HUD slots
 
@@ -88,10 +86,11 @@ archive and producer permissions remain separate.
 
 ![Driver radio setup: AI Race Engineer, AI Coach and Voice cards](images/cc-telemetry.png)
 
-While either feature is on, every signed-in Console shows **Driver radio**. A direct Director Panel visit
-uses the same Console identity. Sign in through Console, then choose **Connect
-driver radio** in the Solo POV card. Existing Director controls keep working when
-radio access is unavailable.
+While either feature is on, every signed-in Console shows **Driver radio**, which
+opens the driver desk. The Director Panel has no driver radio card: the switches and
+the training controls live in the Control Center, the driver reads the text on the
+Console driver desk, the broadcast shows the HUD slots, and the crew follows along on
+the human **Race Engineer** desk.
 
 ![Driver-only Console launcher](images/console-driver-radio-launcher.png)
 
