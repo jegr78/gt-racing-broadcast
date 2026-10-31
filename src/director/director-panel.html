@@ -126,6 +126,7 @@
     border:1px solid var(--edge);background:linear-gradient(180deg,var(--panel-2),var(--panel));
     border-radius:12px;padding:9px 12px;margin-bottom:12px;
     box-shadow:0 6px 20px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03)}
+  .bus[hidden]{display:none}   /* .bus's display:flex above beats the UA [hidden] rule */
   .bus .cap{flex:0 0 auto;font-family:var(--head);font-weight:700;letter-spacing:.12em;font-size:13px;
     color:var(--ink);text-transform:uppercase;display:flex;align-items:center;gap:8px;
     padding:0 0 6px;border-bottom:1px solid #222a33}

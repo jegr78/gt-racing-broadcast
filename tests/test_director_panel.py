@@ -677,6 +677,18 @@ def t_old_controls_survive_the_frame():
         assert f'id="{gone}"' not in h, f"#{gone} belongs to the old layout"
 
 
+def t_hidden_bus_cards_stay_hidden():
+    # `.bus{display:flex}` beats the browser's [hidden] rule, so a card the markup or the
+    # script hides (the Solo-only driver radio card, the empty graphics-request list)
+    # showed on every profile. Every hidden-capable .bus needs an author [hidden] rule.
+    h = _html()
+    hidden_bus = re.findall(r'<section class="bus" id="([^"]+)"[^>]*\bhidden\b', h)
+    assert "driver-radio-card" in hidden_bus and "gfxReqSec" in hidden_bus, hidden_bus
+    css = re.sub(r"/\*.*?\*/", "", h[:h.index("</style>")], flags=re.S)
+    assert re.search(r"\.bus\[hidden\]\s*\{\s*display\s*:\s*none", css), \
+        "a hidden .bus card must not be shown by .bus{display:flex}"
+
+
 def t_frame_columns_in_order():
     _order(_html(), '<div class="frame">', '<nav id="areaNav"', '<section id="liveCol"',
            '<main id="workspace">', '<aside class="rail" id="chatRail"')
