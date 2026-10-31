@@ -13,7 +13,7 @@ PROFILE={'profile':'solo-pov','subject':'local:producer'}
 
 def check(browser,outdir,shots=None):
     sys.path.insert(0,str(ROOT/'tests'))
-    from test_driver_radio_ui import RadioFixture,console
+    from test_driver_radio_ui import RadioFixture
     import driver_coach_controls as controls
     import e2e_visual as V
     out=Path(outdir);out.mkdir(parents=True,exist_ok=True);results=[]
@@ -159,23 +159,6 @@ def check(browser,outdir,shots=None):
             c.evaluate("(node)=>node.scrollIntoView({block:'start'})")
             shot(cc,'coach-control-center','desktop','cc-telemetry.png')
             apply(cc,c,'#coach-stop',f,'radioAdmin')
-            panel_context=browser.new_context(viewport={'width':1440,'height':1000})
-            panel_context.route('https://fonts.googleapis.com/**',lambda route:route.fulfill(status=200,content_type='text/css',body='/* Offline fixture. */'))
-            try:
-                panel=panel_context.new_page();token=console.m.console_auth.mint_token(console.SECRET,'director')
-                panel.goto(f.url+'/console/panel?t='+token)
-                p=panel.locator('#radio-component');p.locator('#coach-start').wait_for(state='visible')
-                assert p.locator('#coach-skill').is_hidden(),'Compact panel exposed the full review form'
-                sync(panel,f,'radioView');apply(panel,p,'#coach-start',f,'radioView')
-                for n,seconds in ((20,88.5),(21,88.4),(22,88.3),(23,88.4)):
-                    f.practice.complete(n,seconds);f.practice.service.step()
-                sync(panel,f,'radioView');panel.wait_for_function("window.radioView.coach.state?.focus?.focus")
-                assert panel.locator('#driver-radio-card').bounding_box()['y']<900
-                shot(panel,'coach-panel','desktop','director-panel-solo.png')
-                # Views are optional; closing one cannot stop relay-owned training.
-                panel.close()
-                assert f.practice.service.snapshot(PROFILE)['active']
-            finally:panel_context.close()
             assert not errors,errors
             page.close();cc.close()
             results.append(V.SurfaceResult('driver-coach-controls','desktop',None,[],0,None))

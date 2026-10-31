@@ -110,17 +110,12 @@ def check(browser,outdir,shots=None):
             first.set_viewport_size({'width':1440,'height':1000})
             menu=context.new_page();menu.goto(f.url+'/console');menu.get_by_text('Driver radio',exact=True).wait_for()
             shot(menu,'driver-radio-console',wiki='console-driver-radio-launcher.png')
-            # Any signed-in Console subject, here a Director, uses the enabled AI Race Engineer.
             f.f.request('fuel');f.enricher.step('audio')
+            # A Director's Console landing; the Director Panel has no driver radio card.
             panel_context=browser.new_context(viewport={'width':1440,'height':1000})
             panel_context.route('https://fonts.googleapis.com/**',lambda route:route.fulfill(status=200,content_type='text/css',body='/* Offline fixture. */'))
-            panel=panel_context.new_page();token=console.m.console_auth.mint_token(console.SECRET,'director')
-            panel.goto(f.url+'/console/panel?t='+token)
-            panel.locator('#driver-radio-card').wait_for(state='visible')
-            panel.locator('#radio-component').locator('[data-preset=fuel]').wait_for(state='visible')
-            assert panel.locator('#driver-radio-card').bounding_box()['y']<900,'Solo radio card must be in the initial workspace'
-            shot(panel,'driver-radio-panel',wiki='director-panel-solo.png')
-            landing=panel_context.new_page();landing.goto(f.url+'/console')
+            token=console.m.console_auth.mint_token(console.SECRET,'director')
+            landing=panel_context.new_page();landing.goto(f.url+'/console?t='+token)
             landing.get_by_text('Director Panel',exact=True).wait_for()
             shot(landing,'driver-radio-director-console',wiki='console-landing.png')
             cc=context.new_page();cc.goto(f.cc_url)

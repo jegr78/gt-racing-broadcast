@@ -12123,11 +12123,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             oauth_flag = b"1" if (discord_client_id and discord_client_secret) else b""
             body = body.replace(b"__RC_OAUTH__", oauth_flag)
             body = body.replace(b"__RC_VERSION__", (app_version or "dev").encode())
-            try:
-                radio_allowed = bool(radio_access and self._console_subject() and radio_page_access())
-            except (driver_radio_access.RadioError, OSError, ValueError):
-                radio_allowed = False
-            body = body.replace(b"__RC_RADIO_ACCESS__", b"1" if radio_allowed else b"0")
             if b"<!--__CREW_FRAME__-->" in body:
                 try:
                     with open(crew_frame_path, "rb") as fh:

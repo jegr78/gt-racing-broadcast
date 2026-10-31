@@ -127,7 +127,6 @@
     border-radius:12px;padding:9px 12px;margin-bottom:12px;
     box-shadow:0 6px 20px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03)}
   .bus[hidden]{display:none}   /* .bus's display:flex above beats the UA [hidden] rule */
-  #radio-entry a{color:var(--ink)}   /* the signed-out driver radio entry, not a browser-default link */
   .bus .cap{flex:0 0 auto;font-family:var(--head);font-weight:700;letter-spacing:.12em;font-size:13px;
     color:var(--ink);text-transform:uppercase;display:flex;align-items:center;gap:8px;
     padding:0 0 6px;border-bottom:1px solid #222a33}
@@ -786,7 +785,6 @@
     </section>
     <main id="workspace">
       <div class="nextstep" id="nextStep" hidden><span class="nslbl">Next step</span><span id="nextStepText"></span></div>
-      <section class="bus" id="driver-radio-card" hidden><div class="cap">Driver radio</div><div id="radio-entry" class="body"><p>Sign in to Console, then connect driver radio.</p><a href="/console">Open Console sign-in</a> <button type="button" class="k" id="radio-connect">Connect driver radio</button></div><div id="radio-component"></div></section>
       <div class="area" data-area="handover">
         <section class="bus" id="handoverSec"><div class="cap">Handover</div>
           <div class="hocards"><div class="hocard air" id="hoOnAir"></div><div class="hocard" id="hoNext"></div></div>
@@ -2998,8 +2996,6 @@ function applyMode(qualifying){
 // card. Endurance reports solo=false and no class is set.
 function applySolo(isSolo, template){
   document.body.classList.toggle("solo", !!isSolo);
-  const radio = document.getElementById('driver-radio-card');
-  if (radio) {radio.hidden = !(isSolo && template === 'pov');window.__radioSolo = !radio.hidden;window.__showRadio?.();}
   const box = $("#urlsBox");
   if (box && isSolo) box.open = true;   // POV lives in the schedule <details>;
                                         // force it open so the POV card shows.
@@ -3874,11 +3870,5 @@ pollCueBacks(); setInterval(pollCueBacks, 2000);
     <button type="button" id="partModalConfirm" onclick="submitPart()" disabled>Confirm</button>
   </div>
 </dialog>
-<script src="/console/driver-radio-ui.js"></script><script>
-window.__radioAllowed = "__RC_RADIO_ACCESS__" === "1";
-function connectDriverRadio(){if(window.radioView)return;document.getElementById('radio-entry').hidden=true;window.radioView=DriverRadio.mount(document.getElementById('radio-component'),{compact:true});}
-document.getElementById('radio-connect').onclick=connectDriverRadio;
-window.__showRadio=()=>{if(window.__radioSolo&&window.__radioAllowed)connectDriverRadio();};window.__showRadio();
-</script>
 </body>
 </html>
