@@ -118,13 +118,15 @@ def t_endpoint_available_false_when_disabled():
 def _event_info_poll_delays(responses):
     """Run the Event Info poll under node; return the delay (ms) each poll schedules next.
     `responses` is a list of 'fail' | 'ok' | 401, one per poll in order. None without node."""
-    import json, re, shutil, subprocess
+    import json, shutil, subprocess
     node = shutil.which("node")
     if not node:
         print("  (node not installed, JS check skipped)")
         return None
     with open(os.path.join(ROOT, "src", "console", "event-info.html"), encoding="utf-8") as fh:
-        script = re.search(r"<script>(.*?)</script>", fh.read(), re.S).group(1)
+        page = fh.read()
+    start = page.index("<script>") + len("<script>")
+    script = page[start:page.index("</script>", start)]   # the component's one inline script
     harness = r"""
 const mk = () => ({hidden: false, tabIndex: 0, tagName: 'DIV', children: [], setAttribute() {}, addEventListener() {},
   replaceChildren() {}, append() {}, focus() {}, showModal() {}, close() {}});
