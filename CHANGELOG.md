@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.15.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.14.1...v1.15.0) (2026-10-31)
+
+
+### Features
+
+* **builder:** preserve element aspect ratios during resize ([#1011](https://github.com/jegr78/gt-racing-broadcast/issues/1011)) ([1a98d9a](https://github.com/jegr78/gt-racing-broadcast/commit/1a98d9a5d9d25ad203550ffa326c6adf6a695af3))
+* **coach:** add explicit calibration and stable personal references ([#999](https://github.com/jegr78/gt-racing-broadcast/issues/999)) ([8ebb6c6](https://github.com/jegr78/gt-racing-broadcast/commit/8ebb6c619f0b4980a4232e512ff129d4134d38f7))
+* **coach:** add private driver training controls and native questions ([#1003](https://github.com/jegr78/gt-racing-broadcast/issues/1003)) ([562c44b](https://github.com/jegr78/gt-racing-broadcast/commit/562c44b89cb6e32317a3562a358d72a5377203a6))
+* **coach:** ground live lap experiments in measured evidence ([#1000](https://github.com/jegr78/gt-racing-broadcast/issues/1000)) ([6b8ae3b](https://github.com/jegr78/gt-racing-broadcast/commit/6b8ae3b3f7645cb2733fa710e241d4be2dcd32d1))
+* **coach:** retain focus and verify repeated baseline progress ([#1001](https://github.com/jegr78/gt-racing-broadcast/issues/1001)) ([77aa0b5](https://github.com/jegr78/gt-racing-broadcast/commit/77aa0b5ace8072c5de7b3d5bc2abc764153f5efb))
+* **coach:** retain private training history and context-safe debriefs ([#1004](https://github.com/jegr78/gt-racing-broadcast/issues/1004)) ([f163f98](https://github.com/jegr78/gt-racing-broadcast/commit/f163f988154f9091e5c64691054273a98920520a))
+* **coach:** schedule private live feedback through native radio ([#1002](https://github.com/jegr78/gt-racing-broadcast/issues/1002)) ([b2caa65](https://github.com/jegr78/gt-racing-broadcast/commit/b2caa658778ec1e3b86c7a47c3931d3ed998ea01))
+* **console:** add document links inside Event Notes ([#1015](https://github.com/jegr78/gt-racing-broadcast/issues/1015)) ([c7b14cf](https://github.com/jegr78/gt-racing-broadcast/commit/c7b14cfd0693d20c0cd3b608d641547d1c941dfa))
+* **engineer:** show the predicted lap time on the Race Engineer desk ([#1020](https://github.com/jegr78/gt-racing-broadcast/issues/1020)) ([7f79470](https://github.com/jegr78/gt-racing-broadcast/commit/7f79470e3ffb286cc4bc0300e4f9c563b2c0c7f6))
+* **hud:** show AI Race Engineer and AI Coach messages in their own HUD slots ([#1040](https://github.com/jegr78/gt-racing-broadcast/issues/1040)) ([ab2b5f4](https://github.com/jegr78/gt-racing-broadcast/commit/ab2b5f4701f9224ee565832310f5e3c0c3653d4c))
+* **radio:** add bounded Studio-Q speech and grounded live explanations ([#994](https://github.com/jegr78/gt-racing-broadcast/issues/994)) ([3fea370](https://github.com/jegr78/gt-racing-broadcast/commit/3fea3701dd29585f90415143c1bdca38127ae6ba))
+* **radio:** add explicit driver access and revisioned race setup ([#990](https://github.com/jegr78/gt-racing-broadcast/issues/990)) ([cfe44da](https://github.com/jegr78/gt-racing-broadcast/commit/cfe44da62e2a0861f29753f04f59087fe19df0f4))
+* **radio:** add native voice questions and shared driver views ([#996](https://github.com/jegr78/gt-racing-broadcast/issues/996)) ([41253b4](https://github.com/jegr78/gt-racing-broadcast/commit/41253b4584d87d060300284d4b65cfda4ef553da))
+* **radio:** assess fuel range and comparable multi-lap pace ([#992](https://github.com/jegr78/gt-racing-broadcast/issues/992)) ([bd151fc](https://github.com/jegr78/gt-racing-broadcast/commit/bd151fc4bb403dd858b26833846313b0c2f00dea))
+* **radio:** attribute messages to AI Race Engineer or AI Coach and gate each ([#1036](https://github.com/jegr78/gt-racing-broadcast/issues/1036)) ([829ee39](https://github.com/jegr78/gt-racing-broadcast/commit/829ee39b5ab793b404a3c99b9cab62c7ae31a104))
+* **radio:** separate AI Race Engineer and AI Coach in the driver view and Control Center ([#1039](https://github.com/jegr78/gt-racing-broadcast/issues/1039)) ([55762f4](https://github.com/jegr78/gt-racing-broadcast/commit/55762f47860504fcf358f789cc65808aedac70f6))
+* **radio:** separate AI Race Engineer and AI Coach switches, one coach training per profile ([#1032](https://github.com/jegr78/gt-racing-broadcast/issues/1032)) ([ec89fcb](https://github.com/jegr78/gt-racing-broadcast/commit/ec89fcbff7e180922e51e04aaa7b2fbf6429a29a))
+* **radio:** share bounded messages and exclusive native playback work ([#993](https://github.com/jegr78/gt-racing-broadcast/issues/993)) ([ff99386](https://github.com/jegr78/gt-racing-broadcast/commit/ff9938640bfa063c91df8c6a5a1961cdf4e72c89))
+
+
+### Bug Fixes
+
+* **ci:** synchronize coach browser reference selection ([#1008](https://github.com/jegr78/gt-racing-broadcast/issues/1008)) ([53e95d1](https://github.com/jegr78/gt-racing-broadcast/commit/53e95d12058d85f39f41098d6d9ea031996478ec))
+* **coach:** preserve cancellation and current private evidence ([#1007](https://github.com/jegr78/gt-racing-broadcast/issues/1007)) ([49bba18](https://github.com/jegr78/gt-racing-broadcast/commit/49bba18d34a1e338b5be705e92c75408475fbd5c))
+* **console:** retry a failed Event Info poll after 5 s instead of 30 s ([#1044](https://github.com/jegr78/gt-racing-broadcast/issues/1044)) ([f737088](https://github.com/jegr78/gt-racing-broadcast/commit/f737088ab2ac78436aa7ae18ef8ad9cd41255966))
+* **director:** remove the driver radio card and keep hidden cards hidden ([#1045](https://github.com/jegr78/gt-racing-broadcast/issues/1045)) ([ad24756](https://github.com/jegr78/gt-racing-broadcast/commit/ad24756876b000c1f2bfdf78d29d651b85679a9a))
+* **engineer:** compose the desk's theoretical best from larger sectors ([#1017](https://github.com/jegr78/gt-racing-broadcast/issues/1017)) ([f72f8d3](https://github.com/jegr78/gt-racing-broadcast/commit/f72f8d34115c732bafcaa290dfd347557daf4268))
+* **engineer:** compose the live theoretical best across laps on one automatic thirds proposal ([#1019](https://github.com/jegr78/gt-racing-broadcast/issues/1019)) ([8024d25](https://github.com/jegr78/gt-racing-broadcast/commit/8024d25e99e4974802b5fc7013156c4ffdd9ae6b))
+* **event:** switch the OBS collection before arming a local capture feed ([#1042](https://github.com/jegr78/gt-racing-broadcast/issues/1042)) ([0559fe0](https://github.com/jegr78/gt-racing-broadcast/commit/0559fe08b830aeed8a9ef65e07dbbf455315ff84))
+* **health:** silence alerts after final broadcast part ends ([#1010](https://github.com/jegr78/gt-racing-broadcast/issues/1010)) ([f62e0b6](https://github.com/jegr78/gt-racing-broadcast/commit/f62e0b6451b6f09600348cd68f9bcd1aa558ce0c))
+* **http:** avoid reverse DNS during listener startup ([#1034](https://github.com/jegr78/gt-racing-broadcast/issues/1034)) ([f2d2e25](https://github.com/jegr78/gt-racing-broadcast/commit/f2d2e254291f2e3a963eac481212aa5ff6593884)), closes [#1033](https://github.com/jegr78/gt-racing-broadcast/issues/1033)
+* **logs:** stamp and cap the daemon boot logs ([#1014](https://github.com/jegr78/gt-racing-broadcast/issues/1014)) ([7321b75](https://github.com/jegr78/gt-racing-broadcast/commit/7321b75d735dc1424c672388c739737f7e13dade))
+* **radio:** cap live AI budgets after deadline rounding ([#995](https://github.com/jegr78/gt-racing-broadcast/issues/995)) ([b8dda5a](https://github.com/jegr78/gt-racing-broadcast/commit/b8dda5a233e3bb9d7c5a69ea042a730e726a8556))
+* **radio:** keep coaching controls through a transient poll failure ([#1030](https://github.com/jegr78/gt-racing-broadcast/issues/1030)) ([6dbebc2](https://github.com/jegr78/gt-racing-broadcast/commit/6dbebc2985ae628147ec346a2c82c4d64b0f2ec7))
+* **radio:** resolve lifecycle, platform and access review findings ([#997](https://github.com/jegr78/gt-racing-broadcast/issues/997)) ([d79bb66](https://github.com/jegr78/gt-racing-broadcast/commit/d79bb665ee79f7ad93b0d2eb44be90bc8cfb921a))
+* **radio:** save driver identities as Console writes them and show the relay's reason ([#1021](https://github.com/jegr78/gt-racing-broadcast/issues/1021)) ([09714ea](https://github.com/jegr78/gt-racing-broadcast/commit/09714eaac8d40e9a83c034723c1046ba88102630))
+* **relay:** bound cover workers and E2E resource ownership ([#1006](https://github.com/jegr78/gt-racing-broadcast/issues/1006)) ([58f0c48](https://github.com/jegr78/gt-racing-broadcast/commit/58f0c4830d971d2dcebc18a9ad8dfb8ff3c8143f))
+* **telemetry:** log when a counted lap matches no track layout ([#1016](https://github.com/jegr78/gt-racing-broadcast/issues/1016)) ([5ac442d](https://github.com/jegr78/gt-racing-broadcast/commit/5ac442d575de359b74b6ddccd3d7297d49aa1c12))
+* **telemetry:** set the track per GT7 session, not per recording ([#1018](https://github.com/jegr78/gt-racing-broadcast/issues/1018)) ([70b15aa](https://github.com/jegr78/gt-racing-broadcast/commit/70b15aa236c7bb8ec7de052ec8490335bf1cb374))
+* **tools:** find winget tools whose PATH alias an upgrade dropped ([#1013](https://github.com/jegr78/gt-racing-broadcast/issues/1013)) ([1a9430d](https://github.com/jegr78/gt-racing-broadcast/commit/1a9430d14b43d5d3fd70e16d09cbc85329f8e4e3))
+
 ## [1.14.1](https://github.com/jegr78/gt-racing-broadcast/compare/v1.14.0...v1.14.1) (2026-10-24)
 
 
