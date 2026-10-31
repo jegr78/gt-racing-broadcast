@@ -687,6 +687,10 @@ def t_hidden_bus_cards_stay_hidden():
     css = re.sub(r"/\*.*?\*/", "", h[:h.index("</style>")], flags=re.S)
     assert re.search(r"\.bus\[hidden\]\s*\{\s*display\s*:\s*none", css), \
         "a hidden .bus card must not be shown by .bus{display:flex}"
+    entry = h[h.index('id="radio-entry"'):h.index('id="radio-component"')]
+    assert 'class="k" id="radio-connect"' in entry, "the connect button uses the panel button style"
+    assert re.search(r"#radio-entry a\s*\{[^}]*color\s*:\s*var\(--ink\)", css), \
+        "the sign-in link is styled for the dark panel"
 
 
 def t_frame_columns_in_order():

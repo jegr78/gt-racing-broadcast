@@ -127,6 +127,7 @@
     border-radius:12px;padding:9px 12px;margin-bottom:12px;
     box-shadow:0 6px 20px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.03)}
   .bus[hidden]{display:none}   /* .bus's display:flex above beats the UA [hidden] rule */
+  #radio-entry a{color:var(--ink)}   /* the signed-out driver radio entry, not a browser-default link */
   .bus .cap{flex:0 0 auto;font-family:var(--head);font-weight:700;letter-spacing:.12em;font-size:13px;
     color:var(--ink);text-transform:uppercase;display:flex;align-items:center;gap:8px;
     padding:0 0 6px;border-bottom:1px solid #222a33}
@@ -785,7 +786,7 @@
     </section>
     <main id="workspace">
       <div class="nextstep" id="nextStep" hidden><span class="nslbl">Next step</span><span id="nextStepText"></span></div>
-      <section class="bus" id="driver-radio-card" hidden><div class="cap">Driver radio</div><div id="radio-entry" class="body"><p>Sign in to Console, then connect driver radio.</p><a href="/console">Open Console sign-in</a> <button type="button" id="radio-connect">Connect driver radio</button></div><div id="radio-component"></div></section>
+      <section class="bus" id="driver-radio-card" hidden><div class="cap">Driver radio</div><div id="radio-entry" class="body"><p>Sign in to Console, then connect driver radio.</p><a href="/console">Open Console sign-in</a> <button type="button" class="k" id="radio-connect">Connect driver radio</button></div><div id="radio-component"></div></section>
       <div class="area" data-area="handover">
         <section class="bus" id="handoverSec"><div class="cap">Handover</div>
           <div class="hocards"><div class="hocard air" id="hoOnAir"></div><div class="hocard" id="hoNext"></div></div>
