@@ -110,18 +110,22 @@
     if (stopped) return;
     const request = new AbortController(), epoch = generation;
     controller = request; const timeout = setTimeout(() => request.abort(), 8000);
+    let answered = false;
     try {
       const path = window.RC_API ? window.RC_API('/event-notes/data') : '/event-notes/data';
       const response = await fetch(path, {cache: 'no-store', signal: request.signal});
       if (stopped || epoch !== generation) return;
-      if (response.status === 401 || response.status === 403) { render({}); dialog.close(); }
+      if (response.status === 401 || response.status === 403) { answered = true; render({}); dialog.close(); }
       else if (response.ok) {
+        answered = true;
         const data = await response.json();
         if (!stopped && epoch === generation && data && typeof data === 'object') render(data);
       }
     } catch (error) { /* A transient failure retains the last received list. */ }
     finally { clearTimeout(timeout); if (controller === request) controller = null; }
-    if (!stopped && epoch === generation) timer = setTimeout(poll, 30000);
+    // A failed poll retries soon, so a relay hiccup at page load does not hide the
+    // Notes button for a whole refresh period (#1031).
+    if (!stopped && epoch === generation) timer = setTimeout(poll, answered ? 30000 : 5000);
   }
   window.addEventListener('pagehide', () => { stopped = true; generation++; clearTimeout(timer); if (controller) controller.abort(); });
   window.addEventListener('pageshow', event => { if (event.persisted && stopped) { stopped = false; poll(); } });
