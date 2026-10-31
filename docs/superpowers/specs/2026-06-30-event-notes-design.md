@@ -99,8 +99,10 @@ card.
   left border. A close button.
 - **Polling:** via the patched `fetch`/`RC_API` shim, call the bare path
   `/event-notes/data` (the shim prepends `/console` under Funnel automatically). Cadence
-  30 s, self-rescheduling like `pollSchedule`. The poll result drives both the modal body
-  and the button's visibility.
+  30 s, self-rescheduling like `pollSchedule`; a poll that gets no answer (network error,
+  8 s abort, non-auth error status) retries after 5 s instead, so a relay hiccup at page
+  load does not hide the button for a whole period (#1031). The poll result drives both the
+  modal body and the button's visibility.
 - The three pages already duplicate the shim/header boilerplate; the notes button + modal +
   poll is the same snippet in each, consistent with the codebase.
 

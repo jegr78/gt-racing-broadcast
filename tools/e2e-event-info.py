@@ -98,8 +98,15 @@ async def main():
                     page = await context.new_page(); errors = []
                     page.on('pageerror', lambda error, errors=errors: errors.append(str(error)))
                     await page.clock.install()
+                    notes_status = []
+                    page.on('response', lambda r, seen=notes_status: seen.append(r.status)
+                            if '/event-notes/data' in r.url else None)
                     await page.goto(base+path+'?t='+token)
-                    await page.locator('#notesBtn').wait_for(state='visible')
+                    try:
+                        await page.locator('#notesBtn').wait_for(state='visible')
+                    except Exception as exc:  # noqa: BLE001  name what the page saw (#1031)
+                        raise AssertionError(f'#notesBtn never shown on {path}: notes responses '
+                                             f'{notes_status}, page errors {errors}') from exc
                     if args.shots and shot:
                         # The production markup and synthetic HTTP callbacks own the page.
                         await page.wait_for_timeout(2500)

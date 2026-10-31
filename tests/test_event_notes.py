@@ -115,6 +115,61 @@ def t_endpoint_available_false_when_disabled():
         srv.shutdown()
 
 
+def _event_info_poll_delays(responses):
+    """Run the Event Info poll under node; return the delay (ms) each poll schedules next.
+    `responses` is a list of 'fail' | 'ok' | 401, one per poll in order. None without node."""
+    import json, shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return None
+    with open(os.path.join(ROOT, "src", "console", "event-info.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    start = page.index("<script>") + len("<script>")
+    script = page[start:page.index("</script>", start)]   # the component's one inline script
+    harness = r"""
+const mk = () => ({hidden: false, tabIndex: 0, tagName: 'DIV', children: [], setAttribute() {}, addEventListener() {},
+  replaceChildren() {}, append() {}, focus() {}, showModal() {}, close() {}});
+const els = {}; const document = {getElementById: id => els[id] || (els[id] = mk()), createElement: () => mk()};
+const listeners = {}; const window = {addEventListener: (k, f) => { listeners[k] = f; }};
+const answers = %s; const delays = []; let pending = null;
+global.setTimeout = (fn, ms) => { if (ms === 8000) return 0; delays.push(ms); pending = fn; return delays.length; };
+global.clearTimeout = () => {};
+global.AbortController = class { constructor() { this.signal = {}; } abort() {} };
+global.fetch = async () => { const a = answers.shift();
+  if (a === 'fail') throw new Error('network');
+  if (a === 401) return {ok: false, status: 401};
+  return {ok: true, status: 200, json: async () => ({notes: [{note: 'Hello'}], documents: []})}; };
+const tick = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)); };
+(async () => {
+%s
+  const total = answers.length; await tick();
+  while (answers.length) { const f = pending; pending = null; f(); await tick(); }
+  console.log(JSON.stringify({delays, shown: !els.notesBtn.hidden}));
+})();
+""" % (json.dumps(responses), script)
+    out = subprocess.run([node, "-"], input=harness, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", check=True, timeout=30)
+    return json.loads(out.stdout)
+
+
+def t_event_info_retries_a_failed_poll_soon():
+    # A failed first poll (relay hiccup, slow first request) must not hide the Notes
+    # button for a full 30 s refresh period (#1031).
+    out = _event_info_poll_delays(["fail", "ok", "ok"])
+    if out is None:
+        return
+    assert out["delays"][:3] == [5000, 30000, 30000], out
+    assert out["shown"] is True, out
+
+
+def t_event_info_keeps_the_slow_period_for_a_definite_answer():
+    out = _event_info_poll_delays([401, "ok"])
+    if out is None:
+        return
+    assert out["delays"][:2] == [30000, 30000], out
+
+
 def run():
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
