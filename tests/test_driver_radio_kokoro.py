@@ -50,7 +50,7 @@ FAKE_WORKER = textwrap.dedent("""
             raise SystemExit(3)
         if request["text"] == "slow":
             time.sleep(1.5)
-        if request["text"] == "bad":
+        if request["text"] == "bad" or "5.7" in request["text"]:
             print(json.dumps({"id": request["id"], "error": "speech_failed"}), flush=True)
             continue
         print(json.dumps({"id": request["id"], "audio": audio}), flush=True)
@@ -84,6 +84,21 @@ def t_worker_answers_caches_and_bounds_a_late_reply():
         finally:
             s.close()
         assert s._proc is None
+
+
+def t_numbers_are_spoken_with_their_point():
+    assert kokoro.speakable('Fuel for 5.7 laps.') == 'Fuel for 5 point 7 laps.'
+    assert kokoro.speakable('Lap 14, 1:23.5. Fuel for 4.5 laps.') == 'Lap 14, 1 minute 23 point 5. Fuel for 4 point 5 laps.'
+    assert kokoro.speakable('2:05.1') == '2 minutes 5 point 1'
+    assert kokoro.speakable('Last lap 83.467 seconds.') == 'Last lap 83 point 4 6 7 seconds.'
+    assert kokoro.speakable('Best lap 1:23.467.') == 'Best lap 1 minute 23 point 4 6 7.'
+    assert kokoro.speakable('Lap 14 of 20, RM.') == 'Lap 14 of 20, RM.'
+    with tempfile.TemporaryDirectory() as d:
+        s = speech(d)
+        try:
+            assert s.synthesize('Fuel for 5.7 laps.', threading.Event(), 30) == wav(), 'the worker gets the spoken form'
+        finally:
+            s.close()
 
 
 def t_a_crashed_worker_restarts_after_its_backoff():

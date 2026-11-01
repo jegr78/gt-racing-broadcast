@@ -41,6 +41,30 @@ def t_lap_text_uses_the_newest_confirmed_lap():
     assert review({})['lap_text'] is None
 
 
+def t_pace_answer_gives_lap_times_as_minutes_seconds_millis():
+    answer=review(snapshot((83.467,83.25)))['answers']['pace']
+    assert 'Last eligible comparable lap 1:23.250.' in answer and 'Best eligible comparable lap 1:23.250.' in answer,answer
+    assert radio._lap_clock(59.9996)=='1:00.000.' and radio._lap_clock(58.1234)=='58.123 seconds.'
+
+
+def t_fastest_lap_is_named_only_when_a_comparable_lap_beats_the_earlier_ones():
+    fastest=review(snapshot((90,91,89)))
+    assert 'Last lap was your fastest.' in fastest['answers']['status'] and ', your fastest lap.' in fastest['lap_text'],fastest['lap_text']
+    for times in ((90,),(90,91),(90,90),(89,90,91)):
+        data=review(snapshot(times))
+        assert 'fastest' not in data['answers']['status'] and 'fastest' not in data['lap_text'],times
+    snap=snapshot((90,91,89));snap['laps'][-1]['analysis_role']='pit'
+    assert 'fastest' not in review(snap)['lap_text'],'a lap outside the comparison is never the fastest'
+    # Per session: a tyre stop starts a new pace comparison, not a new fastest lap.
+    stop={'lap_id':'L2','compound':'RH','confirmed_at':100}
+    snap=snapshot((88,90,91,92,89))
+    assert 'fastest' not in review(snap,{'setup':{},'service':stop})['lap_text'],'an earlier stint holds the fastest lap'
+    snap=snapshot((88,90,91,92,87))
+    assert 'your fastest lap' in review(snap,{'setup':{},'service':stop})['lap_text']
+    snap=snapshot((90,91,89));snap['receipt']={'state':'stale'}
+    assert 'fastest' not in review(snap)['answers']['status']
+
+
 def t_all_presets_have_evidence_and_no_provider_dependency():
     data=review(snapshot(), {'setup':{}, 'service':None})
     assert set(data['answers'])=={'fuel','pace','tyres','status'}

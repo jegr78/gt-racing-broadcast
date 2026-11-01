@@ -112,6 +112,9 @@ the human **Race Engineer** desk.
 **Short status after every lap** in the **AI Race Engineer** card is off by default. With
 it on, each confirmed lap produces one short message, spoken and shown like any other, for
 example `Lap 12, 1:32.4. Fuel for 9.5 laps.` Fuel is left out until a range is measured.
+When a lap beats every earlier one of the session, the update and the **Short status**
+answer name it as your fastest lap. A tyre stop does not reset this. Out laps, pit laps
+and cut laps do not count.
 Warnings take priority over a queued update.
 
 ## Pace comparison
