@@ -82,6 +82,11 @@ jobs:
         timeout-minutes: 2
         run: python tools/e2e-splitscreen.py
 
+      - name: Native Control Center operator actions
+        if: runner.os != 'Linux'
+        timeout-minutes: 2
+        run: python tools/e2e-operator-actions.py
+
       - name: Native Event Notes and document links
         if: runner.os != 'Linux'
         timeout-minutes: 2
@@ -201,6 +206,8 @@ jobs:
         run: python tools/e2e-scene-layouts.py
       - name: Splitscreen builder geometry
         run: python tools/e2e-splitscreen.py
+      - name: Control Center operator actions
+        run: python tools/e2e-operator-actions.py
       - name: Shared Event Notes and document links in crew desks
         run: python tools/e2e-event-info.py
       - name: Upload the report

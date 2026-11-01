@@ -16,6 +16,12 @@ OPS = {
     "companion-restart": ["companion", "restart"],
     "streams-start": ["streams", "start"],
     "streams-stop": ["streams", "stop"],
+    "streams-restart": ["streams", "restart"],
+    "relay-open-panel": ["relay", "open-panel"],
+    "relay-open-hud": ["relay", "open-hud"],
+    "relay-open-status": ["relay", "open-status"],
+    "companion-open-buttons": ["companion", "open-buttons"],
+    "companion-open-admin": ["companion", "open-admin"],
     "tailscale-up": ["tailscale", "up"],
     "tailscale-down": ["tailscale", "down"],
     "tailscale-start": ["app", "launch", "tailscale"],
@@ -27,6 +33,10 @@ OPS = {
     "discord-voice-join": ["discord", "join"],
     "discord-voice-leave": ["discord", "leave"],
     "obs-refresh": ["obs", "refresh"],
+    "obs-benchmark": ["obs", "benchmark"],
+    "smoketest": ["smoketest"],
+    "companion-enable-control": ["companion", "enable-control"],
+    "obs-browser": ["obs-browser", "--yes"],
     "obs-collection-set": ["obs", "collection", "set"],
     "event-start": ["event", "start"],
     "event-stop": ["event", "stop"],
@@ -48,8 +58,18 @@ OPS = {
     "install-apps": ["install-apps", "--yes"],
     "update": ["update", "--yes"],   # optional `tag` param installs a preview build
     "chat-clear": ["chat", "clear"],
+    "chat-pull": ["chat", "pull"],
+    "chat-import": ["chat", "import"],
+    "chat-export": ["chat", "export"],
     "health-export": ["health", "export"],
     "health-import": ["health", "import"],
+    "health-pull": ["health", "pull"],
+    "console-pull-versions": ["console", "pull-versions"],
+    "console-setup-funnel": ["console", "setup-funnel"],
+    "console-apply-funnel": ["console", "setup-funnel", "--apply"],
+    "telemetry-record-start": ["telemetry", "record", "start"],
+    "telemetry-record-stop": ["telemetry", "record", "stop"],
+    "telemetry-record-status": ["telemetry", "record", "status"],
     "gt7-data-update": ["gt7-data", "update"],
     "radio-provision": ["radio", "provision"],
     "radio-kokoro-install": ["radio", "provision", "--kokoro"],
@@ -64,6 +84,13 @@ OPS = {
     "shift-reference-update": ["telemetry", "shift-update"],
     "report-generate": ["report", "generate"],   # builds lap indexes, so never in a request
 }
+
+# Freeze the broadcast profile before starting operations that transfer or write
+# its data. The client must echo that selection; a stale view never starts work.
+PROFILE_OPS=frozenset({'chat-clear','chat-pull','chat-import','chat-export',
+    'health-export','health-import','health-pull','console-pull-versions',
+    'telemetry-record-start','telemetry-record-stop','telemetry-record-status',
+    'obs-benchmark','streams-restart','smoketest'})
 
 # Browsers get-cookies can export from (yt-dlp --cookies-from-browser names).
 BROWSERS = ("firefox", "chrome", "edge", "brave", "safari")
@@ -96,7 +123,7 @@ _HOST_RE = re.compile(r"^[A-Za-z0-9.\-]{1,253}\Z")
 
 def _ip_arg(value):
     s = str(value)
-    if not _HOST_RE.match(s):
+    if s.startswith('-') or not _HOST_RE.match(s):
         raise ValueError("invalid host/IP")
     return [s]
 
@@ -165,9 +192,24 @@ def _number_arg(flag, value, minimum, maximum):
     return [flag, str(number)]
 
 
+def _integer_arg(flag,value,minimum,maximum):
+    text=str(value)
+    if not text.isascii() or not text.isdigit() or not minimum<=int(text)<=maximum:
+        raise ValueError(f'{flag} must be a whole number from {minimum} to {maximum}')
+    return [flag,str(int(text))]
+
+
 # op name -> {param name: validator(value) -> argv fragment}. Ops absent here
 # accept no parameters at all.
 PARAMS = {
+    "smoketest":{"minutes":lambda v:_integer_arg("--minutes",v,1,120)},
+    "obs-benchmark":{"window":lambda v:_integer_arg('--window',v,10,600),
+                     "settle":lambda v:_integer_arg('--settle',v,3,120)},
+    "chat-pull":{"ip":_ip_arg,"port":lambda v:_integer_arg('--port',v,1,65535)},
+    "health-pull":{"ip":_ip_arg,"port":lambda v:_integer_arg('--port',v,1,65535)},
+    "console-pull-versions":{"ip":_ip_arg,"port":lambda v:_integer_arg('--port',v,1,65535)},
+    "chat-import":{"file":_file_arg},
+    "chat-export":{"out":lambda v:['--out',*_file_arg(v)]},
     "telemetry-replay-start": {"name": _recording_arg,
         "speed": lambda v: _number_arg("--speed", v, .001, 100),
         "from": lambda v: _number_arg("--from", v, 0, 10080),
@@ -190,6 +232,8 @@ PARAMS = {
 # op name -> tuple of param names that must be present (non-empty). Params not
 # listed here are optional; build_argv skips an absent or empty one.
 REQUIRED = {
+    "chat-pull":("ip",),"health-pull":("ip",),"console-pull-versions":("ip",),
+    "chat-import":("file",),
     "telemetry-replay-start": ("name",),
     "telemetry-import": ("file",),
     "telemetry-export": ("name",),

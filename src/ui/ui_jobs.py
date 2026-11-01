@@ -4,7 +4,7 @@ operation, keep its combined stdout/stderr lines in memory for the web UI
 Jobs are subprocesses, not threads, because sys.stdout is process-global, so
 parallel in-process ops would interleave output, and a child can be killed.
 Spec: docs/superpowers/specs/2026-06-07-control-center-design.md."""
-import os, subprocess, threading, uuid
+import os, subprocess, tempfile, threading, uuid
 
 # A frozen --windowed app (racecast-ui.exe) has no console, so spawning the console
 # sibling racecast.exe pops a terminal window per job (#23). CREATE_NO_WINDOW gives
@@ -12,7 +12,9 @@ import os, subprocess, threading, uuid
 # flag at the job root suppresses the whole tree. The constant is inlined because
 # ui_jobs is import-isolated from scripts/ in its test.
 _NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
-MACHINE_OPS = frozenset({"gt7-data-update", "shift-reference-update"})
+MACHINE_OPS = frozenset({"gt7-data-update", "shift-reference-update", "obs-benchmark",
+                         "console-setup-funnel", "console-apply-funnel", "smoketest",
+                         "companion-enable-control", "obs-browser"})
 
 
 class Job:
@@ -40,22 +42,31 @@ class JobManager:
         self.jobs = {}           # job_id -> Job, kept for the session; the op set is finite
         self.lock = threading.Lock()
 
-    def _spawn(self, argv):
+    def _spawn(self, argv, input_text=None):
+        if input_text is not None:
+            # A finite, already typed confirmation, never an interactive stdin
+            # bridge or automatic yes. A file avoids blocking on a child pipe.
+            with tempfile.TemporaryFile() as confirmed:
+                confirmed.write(input_text.encode('utf-8'));confirmed.seek(0)
+                return subprocess.Popen(argv, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, stdin=confirmed, env=self.env, **_NO_WINDOW)
         return subprocess.Popen(argv, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, env=self.env,
                                 **_NO_WINDOW)
 
-    def start(self, op, op_args):
+    def start(self, op, op_args, input_text=None):
         """Start `op` unless one is still running. Returns (job_id, None), or the
         running job's id and an error text."""
+        if input_text is not None and (op != 'smoketest' or not isinstance(input_text,str) or len(input_text)>512):
+            raise ValueError('Only a finite typed smoke confirmation is accepted')
         with self.lock:
             profile = op_args[1] if op_args[:1] == ["--profile"] else None
             for job in self.jobs.values():
                 if job.op == op and (job.profile == profile or op in MACHINE_OPS) and job.exit_code is None:  # exit_code writes are atomic
                     return job.id, f"{op} is already running"
             argv = self.argv_for(op_args)
-            proc = self.spawn(argv)
+            proc = self.spawn(argv) if input_text is None else self.spawn(argv, input_text=input_text)
             job = Job(uuid.uuid4().hex[:12], op, proc, profile)
             self.jobs[job.id] = job
         if self.logger:
@@ -109,7 +120,8 @@ class JobManager:
         if job is None:
             return None
         with job.lock:
-            if job.exit_code is not None:
+            # TerminateProcess/SIGTERM bypass the smoke CLI's event teardown.
+            if job.exit_code is not None or job.op == "smoketest":
                 return False
             job.cancelled = True
         try:

@@ -2041,6 +2041,12 @@ def t_csrf_cross_origin_blocked():
                                    "Origin": "https://youtube.com"})
 
 
+def t_csrf_opaque_or_malformed_origin_and_referer_are_blocked():
+    for key in ('Origin','Referer'):
+        for value in ('','ftp://localhost','null','file:///tmp/local.html','data:text/html,example','http://[invalid','localhost'):
+            assert not us.request_csrf_ok({'Host':'127.0.0.1:8089',key:value}),(key,value)
+
+
 def t_csrf_guard_blocks_foreign_host_on_real_server():
     # A forged Host header is refused with 403 by the live server.
     import http.client
@@ -2974,7 +2980,7 @@ def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
         before = len(seen)
         for headers, error in (({'Origin': 'https://foreign.example'}, 'cross-origin request blocked'),
                                ({'Host': f'foreign.example:{port}'}, 'cross-origin request blocked'),
-                               ({'Origin': 'null'}, 'foreign context origin'),
+                               ({'Origin': 'null'}, 'cross-origin request blocked'),
                                ({'Origin': f'http://localhost:{port + 1}'}, 'foreign context origin')):
             request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/context',
                                              method='POST', data=b'{}', headers=headers)

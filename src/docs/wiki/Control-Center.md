@@ -153,10 +153,14 @@ and shows its live status. It reads its schedule and HUD data from the **active
 profile's** Google Sheet, and applies that profile's overlay CSS; there are no local
 relay knobs: ports and bind mode use safe defaults.
 
+The same view opens the Director panel, HUD and relay status. Crew chat can be
+pulled from another producer or imported/exported as a local JSON file. Health
+history can also be pulled, imported or exported. Transfers use the active profile.
+
 ![Control Center: Static Streams](images/cc-streams.png)
 
 **Static Streams** is the **fallback** for plain public channels when the relay
-mode can't be used. Edit the channel/port list here and start/stop the set.
+mode can't be used. Edit the channel/port list here and start, stop or restart the set.
 
 > **CLI alternative:** `racecast relay start|stop|restart|status|logs`,
 > `racecast streams start|stop`.
@@ -168,6 +172,9 @@ mode can't be used. Edit the channel/port list here and start/stop the set.
 **Apps** installs, launches, quits and shows the status of OBS, Companion,
 Tailscale and Discord. **Tools** does the same for the command-line tools
 (`yt-dlp`, `streamlink`, `ffmpeg`, `deno`), with **Install all** / **Update all**.
+Companion also offers Restart, Web buttons and Admin. On Linux, the installation
+actions use the same job/output workflow as Install all and retain the existing
+installer authorization requirements.
 
 OBS launch waits up to 30 seconds for an existing OBS process to exit. If it is
 still running, or its status cannot be checked, Racecast refuses to start another
@@ -176,6 +183,11 @@ if shutdown is still in progress. It never forces OBS to terminate. The same
 launch check applies to `racecast event start`.
 
 ![Control Center: Tools](images/cc-tools.png)
+
+Tools also provides the OBS benchmark with bounded sample/settle durations, and
+the post-update smoke test. The smoke test asks for the typed
+`CLEAR SCHEDULE <profile>` confirmation before changing the Sheet. It runs through
+the existing job console with the selected profile fixed in its command.
 
 > **CLI alternative:** `racecast install-apps`, `racecast install-tools` (add `--update` to
 > upgrade), `racecast app launch|quit obs|discord|tailscale`.
@@ -226,6 +238,10 @@ so this view is **zero-config**.
   person's link (bumps their version), which also invalidates their Discord session, without
   touching anyone else.
 
+The Funnel setup controls inspect prerequisites or, after confirmation, apply
+missing prerequisites. Pull revoked-link versions imports the active profile's
+revocation state from another producer.
+
 Roles per person come from the [Crew editor](#profile) (and the Schedule). Start the relay
 first: links and the secret only exist once it is running.
 
@@ -275,6 +291,11 @@ It also retains **Broadcast replay**: select a finalized recording, speed and st
 minute. Replay reaches the streaming HUD, Director and Engineer. Confirm on-air
 replay when prompted; the relay checks fresh OBS state too. **Stop replay** returns
 the consumers to live UDP. Recording continues to capture the original live packets.
+
+![Control Center: live GT7 recording controls](images/cc-telemetry-recording.png)
+
+**Live GT7 recording** starts, stops or queries recording for the active broadcast
+profile. It records live packets independently of Broadcast replay.
 
 Archive import/export/deletion, lap comparisons, context, track/sector edits, vehicle
 references and AI are in the Telemetry workspace. Closing either browser tab leaves

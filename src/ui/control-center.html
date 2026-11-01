@@ -89,12 +89,20 @@
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>Free feed ports</button></div>
           <div class="row"><span class="name">Crew chat</span>
             <span class="dim grow"></span>
+            <button id="op-chat-pull" onclick="pullHistory('chat-pull')">Pull from producer…</button>
+            <button id="op-chat-import" onclick="importChat()">Import…</button>
+            <button id="op-chat-export" onclick="exportChat()">Export…</button>
             <button class="danger" onclick="op('chat-clear', true)">Clear chat</button></div>
           <div class="row"><span class="name">Health Monitor</span>
             <span class="dim grow">relay must be running</span>
             <a class="linkbtn" id="rel-health-open" target="_blank" rel="noopener" hidden>Open monitor ↗</a>
             <button onclick="op('health-export')">Export history</button>
-            <button onclick="importHealth()">Import history…</button></div>
+            <button onclick="importHealth()">Import history…</button>
+            <button id="op-health-pull" onclick="pullHistory('health-pull')">Pull from producer…</button></div>
+          <div class="row"><span class="name">Relay pages</span><span class="dim grow">Open locally in your browser</span>
+            <button onclick="op('relay-open-panel')">Director panel</button>
+            <button onclick="op('relay-open-hud')">HUD</button>
+            <button onclick="op('relay-open-status')">Relay status</button></div>
         </section>
         <p class="envhint">The relay reads its <b>schedule and HUD data from the Google Sheet</b> and is configured through <b>Settings</b>: <span class="mono">RACECAST_SHEET_ID</span> (the sheet) and <span class="mono">RACECAST_SHEET_PUSH_URL</span> (write-back for the timer + panel). There are no other local relay settings. Tab names, ports and the bind mode use safe defaults.</p>
       </div>
@@ -108,7 +116,8 @@
           <button onclick="op('streams-start')">
             <svg viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></svg>Start all</button>
           <button class="danger" onclick="op('streams-stop', true)">
-            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>Stop all</button></div>
+            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>Stop all</button>
+          <button id="op-streams-restart" onclick="op('streams-restart', true)">Restart all</button></div>
         <div class="note-warn"><b>Fallback only.</b> The <b>relay</b> is the normal way to serve the commentator feeds (unlisted streams, automatic per-stint handover). Use Static Streams <b>only when the relay isn't working</b>, and only with <b>public</b> YouTube or Twitch channels.</div>
         <div class="enverr" id="streams-err" hidden></div>
         <div class="envpath" id="streams-path"></div>
@@ -448,6 +457,13 @@
         </div></section>
         <p class="envhint" id="obscoll">OBS scene collection: <span class="dim">checking…</span></p>
         <p class="envhint">The badge shows whether each app is running. Start or stop any app here; OBS and Discord are also brought up automatically by <b>Start event</b> on Home. OBS additionally exports the scene collection and refreshes its browser sources. For Tailscale, <b>Start/Stop</b> launches or quits the app, while <b>Connect/Disconnect</b> brings the tunnel up or down.</p>
+        <section id="linux-admin-actions" hidden><h3>Linux installation</h3>
+          <p class="sub">Uses the same job and output log as Install all. Existing installer authorization requirements apply.</p>
+          <div class="row" style="flex-wrap:wrap">
+            <button id="op-companion-control" onclick="op('companion-enable-control', true)">Set up Companion control…</button>
+            <button id="op-obs-browser" onclick="op('obs-browser', true)">Install OBS Browser Source…</button>
+          </div>
+        </section>
       </div>
 
       <!-- Tools -->
@@ -460,6 +476,20 @@
         <section><div id="toollist">
           <div class="item miss"><span class="idot"></span><span class="dim grow">loading…</span></div>
         </div></section>
+        <section><h3>Broadcast checks</h3>
+          <p class="sub">Run these checks off air. The benchmark records OBS and reconnects the feed twice. The smoke test requires you to type the active league's confirmation phrase before it changes the Schedule.</p>
+          <div class="row" style="flex-wrap:wrap">
+            <span class="name">OBS benchmark</span>
+            <label>Window (s) <input id="op-benchmark-window" type="number" min="10" max="600" step="1" value="60" style="width:80px"></label>
+            <label>Settle (s) <input id="op-benchmark-settle" type="number" min="3" max="120" step="1" value="10" style="width:80px"></label>
+            <button id="op-benchmark" onclick="op('obs-benchmark', true, {window:$('op-benchmark-window').value,settle:$('op-benchmark-settle').value})">Run benchmark…</button>
+          </div>
+          <div class="row" style="flex-wrap:wrap">
+            <span class="name">Post-update smoke test</span>
+            <label>Observe (min) <input id="op-smoke-minutes" type="number" min="1" max="120" step="1" value="2" style="width:80px"></label>
+            <button id="op-smoketest" onclick="runSmokeTest()">Run smoke test…</button>
+          </div>
+        </section>
       </div>
 
       <!-- Setup wizard -->
@@ -665,9 +695,15 @@
             + the <code>funnel</code> nodeAttr in the tailnet policy (one-time admin step).
             Auto-enable is <b>on by default</b> (opt-out). The Funnel is the preferred
             produce path; uncheck to keep the relay tailnet/loopback-only.</p>
+          <div class="row" style="flex-wrap:wrap">
+            <button id="op-funnel-plan" onclick="op('console-setup-funnel')">Check prerequisites</button>
+            <button id="op-funnel-apply" onclick="op('console-apply-funnel', true)">Apply missing prerequisites…</button>
+          </div>
+          <p class="sub">Prerequisite checks use the machine's configured Tailscale API token. Applying changes enables MagicDNS and adds the Funnel policy entry; HTTPS certificates still need enabling in the Tailscale admin console.</p>
         </section>
         <section>
           <div class="viewhead"><h3>Crew links</h3></div>
+          <button id="op-console-pull-versions" onclick="pullHistory('console-pull-versions')">Pull revoked-link versions from producer…</button>
           <p class="sub"><b>Funnel link</b> is the public HTTPS link (needs the Funnel ON
             above). <b>Internal link</b> reaches the relay over Tailscale (the producer's
             tailnet IP, or <code>127.0.0.1</code> when the tailnet is down) without the
@@ -747,6 +783,14 @@
         <p class="sub">Analyse recordings in the local workspace. These controls affect Engineer sharing and the broadcast HUD.</p>
         <p id="tm-err" class="enverr" hidden></p>
         <section aria-label="Driver radio settings"><div id="driver-radio-admin"></div></section>
+        <section aria-label="Telemetry recording controls"><h3>Live recording</h3>
+          <p class="sub">Requires the active league's solo POV relay. Results appear in the action log.</p>
+          <div class="row" style="flex-wrap:wrap">
+            <button id="op-record-start" onclick="op('telemetry-record-start')">Start recording</button>
+            <button id="op-record-stop" onclick="op('telemetry-record-stop')">Stop recording</button>
+            <button id="op-record-status" onclick="op('telemetry-record-status')">Recording status</button>
+          </div>
+        </section>
         <section aria-label="Telemetry replay controls"><h3>Broadcast replay</h3><div class="row" style="flex-wrap:wrap">
           <label>Recording <select id="tm-replay-recording" onchange="tmState.rec=this.value;tmReplaySelection()" aria-label="Replay recording"></select></label>
           <button onclick="tmLoad()">Refresh recordings</button><button id="tm-replay" onclick="tmReplayStart()" disabled>Replay selected recording</button>
@@ -1409,6 +1453,7 @@ async function refresh() {
   } catch (e) { return; }            // server gone (quit), keep the last state
   if (!s.ok) return;                 // status provider error, keep the last state
   lastStatus = s;
+  $('linux-admin-actions').hidden = !(s.os || '').startsWith('linux');
   $('ver').textContent = s.version;
   const relayUp = s.relay.alive;
   setBadge('relay', relayUp, 'RUNNING', 'stopped',
@@ -1577,6 +1622,12 @@ async function runWizardAction(key) {
 }
 
 const CONFIRM_TEXT = {
+  'companion-enable-control': 'Set up Companion control using the existing installer workflow?',
+  'obs-browser': 'Build and install OBS Browser Source using the existing installer workflow?',
+  'obs-benchmark': 'Run the OBS benchmark off air? It records OBS and reconnects the feed twice. Streaming or recording OBS output is refused.',
+  'streams-restart': 'Restart all static streams? Their outputs stop and start again.',
+  'companion-restart': 'Restart Companion? Its web buttons disconnect briefly.',
+  'console-apply-funnel': 'Apply the missing Tailscale prerequisites? This can enable MagicDNS and rewrite the policy with a Funnel entry. The existing policy is backed up; HuJSON comments are not retained.',
   'obs-stop': 'Quit OBS? (this closes OBS on this machine)',
   'discord-stop': 'Quit Discord?',
   'companion-stop': 'Stop Companion?',
@@ -1591,13 +1642,13 @@ const CONFIRM_TEXT = {
   'kill-relay': 'Kill a stale relay? Frees the relay control port 8088 by killing the process holding it — use this when the relay is orphaned (unknown PID) and the Stop button can\'t reach it. A healthy, running relay is left untouched (use Stop Relay instead).'
 };
 
-async function op(name, confirmFirst, params) {
+async function op(name, confirmFirst, params, confirmation) {
   if (confirmFirst && !(await confirmModal(CONFIRM_TEXT[name] || ('Run ' + name + '?')))) return;
   let r;
   try {
     r = await (await fetch('/api/op/' + name, {method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({params: params || {}})})).json();
+        body: JSON.stringify({params: params || {}, profile: activeProfile, confirmation})})).json();
   } catch (e) { alertModal('Control Center not reachable.'); return; }
   if (!r.ok) { alertModal(r.error); return; }
   watchJob(name, r.job_id);
@@ -1741,7 +1792,7 @@ function watchJob(name, id, onDone) {
   title.classList.remove('idle');
   $('jobspin').hidden = false;
   $('jobchip').hidden = true;
-  $('jobcancel').hidden = false;
+  $('jobcancel').hidden = name === 'smoketest';
   $('joblog').textContent = '';
   jobES = new EventSource('/api/jobs/' + id + '/stream');
   jobES.onmessage = e => {
@@ -1875,7 +1926,10 @@ const APP_ACTION = {
             {label: 'Leave voice', op: 'discord-voice-leave'}],
   companion: [{label: 'Start', op: 'companion-start'},
               {label: 'Stop', op: 'companion-stop', danger: true, confirm: true},
-              {label: 'Export config', op: 'export-companion'}],
+              {label: 'Restart', op: 'companion-restart', confirm: true},
+              {label: 'Export config', op: 'export-companion'},
+              {label: 'Web buttons', op: 'companion-open-buttons'},
+              {label: 'Admin', op: 'companion-open-admin'}],
   tailscale: [{label: 'Start', op: 'tailscale-start', title: 'Launch the Tailscale app',
                guiApp: true},
               {label: 'Stop', op: 'tailscale-stop', danger: true, confirm: true,
@@ -5117,6 +5171,30 @@ function importHealth() {
   const path = prompt('Path to health history file (.jsonl):');
   if (!path || !path.trim()) return;
   op('health-import', false, {file: path.trim()});
+}
+
+function pullHistory(name) {
+  const ip=prompt('Other producer\'s Tailscale IP or host:');
+  if(!ip || !ip.trim())return;
+  const port=prompt('Relay port:','8088');
+  if(!port || !port.trim())return;
+  op(name,false,{ip:ip.trim(),port:port.trim()});
+}
+
+function importChat() {
+  const file=prompt('Path to crew-chat file (.json):');
+  if(file && file.trim())op('chat-import',false,{file:file.trim()});
+}
+
+function exportChat() {
+  const out=prompt('Save crew-chat export to:','chat-export.json');
+  if(out && out.trim())op('chat-export',false,{out:out.trim()});
+}
+
+function runSmokeTest() {
+  const typed=prompt('This clears the active league Schedule URL column and overwrites its first stint rows. Type exactly: CLEAR SCHEDULE '+activeProfile);
+  if(typed===null)return;
+  op('smoketest',false,{minutes:$('op-smoke-minutes').value},typed);
 }
 
 // Open the relay's HUD design preview (/hud/preview) in a new tab. The relay serves
