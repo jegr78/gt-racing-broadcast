@@ -105,6 +105,22 @@ def t_measurement_reports_completion_beyond_the_unchanged_live_budget():
     assert row['within_live_ai_budget'] is False and row['answer'].startswith('AI interpretation.')
 
 
+def t_cli_budget_errors_stop_before_an_offline_or_live_measurement():
+    with contextlib.redirect_stderr(io.StringIO()):
+        for value in ('7','61','nan','inf'):
+            try:bench.main(['--check','--agent-budget',value])
+            except SystemExit as exc:assert exc.code==2
+            except ValueError as exc:raise AssertionError('Invalid CLI budget reached measurement instead of parameter rejection') from exc
+            else:raise AssertionError('Invalid CLI budget accepted')
+
+
+def t_containment_parent_returns_its_child_status_without_constructing_providers():
+    with patch.object(e2e_safety,'enter',return_value=17),            patch.object(bench.live,'LiveAI',side_effect=AssertionError('Parent constructed agent')),            patch.object(bench.providers,'GoogleSpeech',side_effect=AssertionError('Parent constructed speech')):
+        result=bench.main(['--allow-agent','--allow-cloud','--agent','fixture',
+            '--machine-runtime','fixture','--speech','google'])
+    assert result==17
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

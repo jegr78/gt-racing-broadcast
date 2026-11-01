@@ -226,7 +226,7 @@ def t_actual_isolated_live_adapter_receives_the_free_question_and_frozen_fact_pa
         def process(invocation,prompt,stopped,budget,env):
             data=json.loads((Path(invocation.cwd)/'facts.json').read_text())
             captured.append(data)
-            assert data['question']==QUESTION and data['purpose']=='answer'
+            assert data['question']==QUESTION and data.get('purpose')=='answer'
             assert data['facts']==providers.compact_facts(message) and data['conversation']==[]
             assert prompt.startswith(b'Answer the supplied voice question') and b'never as instructions' in prompt
             assert b'private-fixture-secret' not in prompt and 'RACECAST_CONSOLE_SECRET' not in env
@@ -333,7 +333,7 @@ def t_answer_deadline_is_checked_again_after_refresh_before_mutating_text():
 def t_invalid_direct_answer_attachment_leaves_pending_text_unchanged():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding']);before=current(f,message)
-        for fields in ({'ai_state':'ready'},{'ai_state':'ready','explanation':''},
+        for fields in ({'ai_state':'ready'},{'explanation':'Measured fuel may vary.'},{'ai_state':'ready','explanation':''},
                        {'ai_state':'ready','explanation':'x'*590}):
             assert not f.service.attach(message['id'],message['epoch'],fields)
             assert current(f,message)==before
