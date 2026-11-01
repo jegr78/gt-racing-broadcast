@@ -76,7 +76,7 @@ def t_classify_bad_tag_is_error():
 def _versioned_release(tag, with_assets=True):
     return {"tag_name": tag, "assets": [
         {"name": name, "browser_download_url": "https://example.test/" + name}
-        for name in ("racecast-windows.zip", "racecast-macos.tar.gz", "racecast-linux.tar.gz")
+        for name in ("racecast-windows.zip", "racecast-macos.tar.gz", "racecast-linux.tar.gz", "racecast-linux-arm64.tar.gz")
     ] if with_assets else []}
 
 
