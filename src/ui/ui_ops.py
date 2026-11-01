@@ -51,6 +51,8 @@ OPS = {
     "health-export": ["health", "export"],
     "health-import": ["health", "import"],
     "gt7-data-update": ["gt7-data", "update"],
+    "radio-provision": ["radio", "provision"],
+    "radio-smoke": ["radio", "smoke", "--allow-cloud"],   # the button click is the consent to the billed calls
     "telemetry-replay-start": ["telemetry", "replay", "start"],
     "telemetry-replay-stop": ["telemetry", "replay", "stop"],
     "telemetry-replay-status": ["telemetry", "replay", "status"],
@@ -99,6 +101,10 @@ def _ip_arg(value):
 
 def _update_flag(value):
     return ["--update"] if value else []
+
+
+def _whisper_flag(value):
+    return ["--whisper"] if value else []
 
 
 def _qualifying_flag(value):
@@ -175,6 +181,7 @@ PARAMS = {
     "install-tools": {"update": _update_flag},
     "install-apps": {"update": _update_flag},
     "update": {"tag": _tag_arg},
+    "radio-provision": {"whisper": _whisper_flag},
     "health-import": {"file": _file_arg},
 }
 

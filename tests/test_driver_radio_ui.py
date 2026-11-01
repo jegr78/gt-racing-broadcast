@@ -519,6 +519,33 @@ def t_a_native_refusal_with_both_features_off_hides_the_voice_row():
     assert out['voice'] is True and out['native'] is None and out['pause'] is True and out['engineerOff'] is False,out
 
 
+def t_voice_card_runs_the_radio_cli_actions():
+    settings={'revision':3,'features':features(engineer=True),'voice':{'enabled':True,'microphone':None,'input_language':'en'},
+              'native':{'wake':'hey_jeff','stt':'vosk'},'providers':{'speech':False}}
+    data={'ok':True,'profile':'solo-pov','settings':settings,'native':{'phase':'error','error':'models_unavailable','phrases':[]},'agents':[]}
+    out=_run_component("""
+     Object.assign(routes,{'/api/driver-radio':[200,%s],'/api/driver-radio/coach':[403,{ok:false,code:'feature_disabled',error:'Off'}],
+       '/api/op/radio-provision':[200,{ok:true,job_id:'j1'}],'/api/jobs/j1?tail=5':[200,{ok:true,running:false,exit_code:0,lines:['{}']}],
+       '/api/op/radio-smoke':[200,{ok:true,job_id:'j2'}],'/api/jobs/j2?tail=5':[200,{ok:true,running:false,exit_code:1,lines:['racecast radio speech check: unconfigured']}]});
+     const view=window.DriverRadio.mountAdmin(new El('div'));await tick();
+     const seen={models:byId('models').textContent};
+     await byId('radio-whisper').onclick();seen.whisper=byId('voice-op').textContent;
+     await byId('radio-provision').onclick();seen.provision=byId('voice-op').textContent;
+     await byId('radio-smoke').onclick();seen.smoke=byId('voice-op').textContent;seen.disabled=byId('radio-smoke').disabled;
+     routes['/api/op/radio-provision']=[409,{ok:false,error:'another job is running'}];
+     await byId('radio-provision').onclick();seen.busy=byId('voice-op').textContent;
+     seen.posts=posts.filter(p=>p.url.startsWith('/api/op/'));
+     view.destroy();console.log(JSON.stringify(seen));
+    """%json.dumps(data))
+    if out is None:return
+    assert 'Install voice models' in out['models'] and 'racecast radio' not in out['models'],out
+    assert [p['url'] for p in out['posts']]==['/api/op/radio-provision','/api/op/radio-provision','/api/op/radio-smoke','/api/op/radio-provision'],out
+    assert out['posts'][0]['body']=={'params':{'whisper':True}} and out['posts'][1]['body']=={'params':{}},out
+    assert 'installed' in out['whisper'] and 'installed' in out['provision'],out
+    assert 'unconfigured' in out['smoke'] and out['disabled'] is False,out
+    assert 'another job is running' in out['busy'],out
+
+
 def _messages_view_script():
     html=(ROOT/'src/console/driver-radio-messages.html').read_text(encoding='utf8')
     return re.search(r'<script id="messages-view">(.*?)</script>',html,re.S).group(1)
