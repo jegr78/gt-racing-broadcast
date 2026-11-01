@@ -18,7 +18,7 @@ The relay, microphone and output run on the same local Solo PC.
 | Free questions and short follow-ups | refreshed fuel/pace/tyre question tests | Four-turn volatile topic context; old session/context/setup epoch rejected; vehicle/broadcast commands refused |
 | No raw-audio persistence | Whisper stdin test, private capture worker and bounded PCM tests | Raw microphone PCM stays in memory; model downloads and bundled fixtures contain no personal recording |
 | One native audio owner and cancellation | real nested-process cancellation, fake-player lifecycle and urgency tests | Stops before releasing slot; expiry, mute, pause, settings loss and shutdown cancel owned work; no barge-in |
-| Optional bounded Studio-Q/AI | provider and private-transport tests from #973 | Text first, no silent voice/provider fallback; unchanged deterministic facts on failure; fixed safe diagnostics |
+| Optional bounded Studio-Q/AI | provider and private-transport tests from #973 | Text waits at most 10 s for the audio to start, no silent voice/provider fallback; unchanged deterministic facts on failure; fixed safe diagnostics |
 | Shared driver UI and narrow access | real signed HTTP and `tools/radio_browser_check.py` | Driver-only desk, Solo card, shared IDs, setup conflicts, XSS, revocation and closing views covered |
 | Producer controls stay local | owned-relay/profile preflight and Origin/Host tests | Driver assignments and provider consent cannot be changed through the public Console |
 | Source/package/frozen discovery | explicit binary imports, private-entry tests and distributable build | No mandatory Python package dependency; optional native libraries/models install explicitly with pinned digests |

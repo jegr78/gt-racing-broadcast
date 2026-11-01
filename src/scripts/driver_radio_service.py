@@ -17,6 +17,9 @@ ROUTINE_TTL = 30
 URGENT_TTL = 15
 PACE_COOLDOWN = 60
 TEXT_STATES = ('queued','playing','text_only','spoken','failed')
+# With speech on, a message's text waits for its audio, at most this long: the 8 s
+# synthesis budget plus the start of playback. A failed or slow voice never hides text.
+AUDIO_HOLD_S = 10.0
 # A message leaves the HUD in these states even before it expires.
 HUD_GONE = ('superseded','cancelled','expired')
 
@@ -55,6 +58,8 @@ class Service:
         self._previous_fuel = None
         self._refuel_total = 0
         self._voice_enabled = False
+        self._speech_enabled = False
+        self._audio_output = False
         self._pace_at = float('-inf')
         self._pace_key = None
         self._conversation = collections.deque(maxlen=4)
@@ -258,6 +263,7 @@ class Service:
             self._features = {name: bool(enabled and config['features'][name]['enabled'] is True)
                               for name in access.FEATURES}
             self._voice_enabled = config['voice']['enabled'] and enabled
+            self._speech_enabled = config['providers']['speech'] is True
             now = self.clock()
             self._expire(now)
             signature = (key, snapshot.get('revision'), snapshot.get('receipt', {}).get('state'),
@@ -323,14 +329,43 @@ class Service:
             return (not self._closed and self._enabled and self._voice_enabled
                     and self._binding == binding and self._epoch == epoch)
 
+    def _text_held(self, message):
+        """True while a message's text waits for its audio to start. The native
+        supervisor reports whether it can play at all, so paused or muted output,
+        speech switched off and a failed synthesis all show the text at once."""
+        return (self._voice_enabled and self._speech_enabled and self._audio_output
+                and message['state'] in ('queued','playing') and not message.get('_audio_started')
+                and message['audio_state'] in ('pending','ready')
+                and self.clock()-message['_created'] < AUDIO_HOLD_S)
+
+    def text_held(self, message_id):
+        with self._lock:
+            message = self._messages.get(message_id)
+            return message is not None and self._text_held(message)
+
+    def set_audio_output(self, available):
+        with self._lock:
+            self._audio_output = bool(available)
+
+    def playback_started(self, ticket_id):
+        with self._lock:
+            if self._ticket is None or self._ticket.id != ticket_id:
+                return False
+            message = self._messages.get(self._ticket.message['id'])
+            if message is not None:
+                message['_audio_started'] = True
+            self._revision += 1
+            return True
+
     def history(self, since=None, requester=None):
         """Every view of the profile sees the same messages: one driver per Solo POV
         profile, so coach messages are not filtered by requester."""
         self.refresh()
         with self._lock:
-            changed = since != self._revision
+            shown = [m for m in self._messages.values() if not self._text_held(m)]
+            changed = since != self._revision or len(shown) != len(self._messages)
             return dict(version=1, revision=self._revision, epoch=self._epoch, binding=copy.deepcopy(self._binding),
-                        changed=changed, messages=[self._public(m) for m in self._messages.values()] if changed else [])
+                        changed=changed, messages=[self._public(m) for m in shown] if changed else [])
 
     def request(self, preset, binding, requester=None, authorization=None):
         with access._LOCK, self._lock:
@@ -437,7 +472,7 @@ class Service:
             if self._closed or not self._live or not self._features.get(source):
                 return None
             newest = next((m for m in reversed(self._messages.values())
-                           if m['source'] == source), None)
+                           if m['source'] == source and not self._text_held(m)), None)
             now = self.wall() if now is None else now
             if (newest is None or newest['epoch'] != self._epoch or newest['binding'] != self._binding
                     or newest['state'] in HUD_GONE or now >= newest['expires_at']):

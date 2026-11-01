@@ -192,6 +192,8 @@ class Supervisor:
             with self._lock:
                 self._enabled=enabled
                 changed=self._control_changed;self._control_changed=False
+                output=enabled and not self._closed and not self._paused and not self._muted
+            self.service.set_audio_output(output)
             if changed:
                 self._stop_capture();self._stop_output('text_only')
             if self._closed or not enabled or self._paused:
@@ -210,7 +212,9 @@ class Supervisor:
                     return
                 if audio is not None:
                     if not self._current(signature,output=True):return
-                    try:self._player_proc=self.player_factory(audio,self._volume)
+                    try:
+                        self._player_proc=self.player_factory(audio,self._volume)
+                        self.service.playback_started(self._ticket.id)
                     except (OSError,ValueError):
                         self._stop_output('failed');self._set('error','playback_unavailable')
                     if not self._current(signature,output=True):self._stop_output('text_only')
@@ -232,7 +236,9 @@ class Supervisor:
                         audio=self._radio_read(lambda:self.service.audio_for(self._ticket.id))
                         if audio is not None:
                             if not self._current(signature,output=True):self._stop_output('text_only');return
-                            try:self._player_proc=self.player_factory(audio,self._volume)
+                            try:
+                                self._player_proc=self.player_factory(audio,self._volume)
+                                self.service.playback_started(self._ticket.id)
                             except (OSError,ValueError):self._stop_output('failed');self._set('error','playback_unavailable')
                             if not self._current(signature,output=True):self._stop_output('text_only')
                     return
