@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Radio messages</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#0b1018;color:#edf3fc;font:clamp(20px,2.4vw,32px)/1.35 system-ui,sans-serif}main{padding:clamp(12px,2vw,28px)}a{color:#a9ccff}
+#status{margin:0 0 .6em;color:#ffd27a}#status:empty{display:none}#empty{color:#b7c7dc;margin:0}
+ol{list-style:none;margin:0;padding:0;display:grid;gap:.6em}li{background:#121c2b;border:1px solid #41536b;border-left:.3em solid #41536b;border-radius:8px;padding:.6em .8em}li:first-child{font-size:1.3em}li.coach{border-left-color:#a9ccff}li.engineer{border-left-color:#7fd6a8}li.urgent{border-color:#ff7a6b;background:#2a1518}
+.meta{display:flex;justify-content:space-between;gap:1em;font-size:max(14px,.62em);color:#b7c7dc}.source{font-weight:700;color:#edf3fc}.text{margin:.15em 0 0;overflow-wrap:anywhere}.note{margin:.2em 0 0;font-size:.72em;color:#b7c7dc;overflow-wrap:anywhere}
+</style></head><body><main><p id="status" role="status"></p><p id="empty" hidden>No messages yet.</p><ol id="messages"></ol></main><script id="messages-view">
+/* Read-only view of the shared radio message lane for a tablet or second monitor. */
+(function () {
+'use strict';
+const LANE='/console/driver-radio/messages',POLL_MS=1000,TIMEOUT_MS=4000;
+const LABELS={engineer:'AI Race Engineer',coach:'AI Coach'};
+const list=document.getElementById('messages'),status=document.getElementById('status'),empty=document.getElementById('empty');
+let shown=null,timer=null,stopped=false;
+function el(tag,text,cls){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
+function sourceOf(message){return message.source==='coach'||message.source==='engineer'?message.source:message.kind==='coach'?'coach':'engineer';}
+function clock(seconds){return typeof seconds==='number'?new Date(seconds*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';}
+// A refusal is the hint that a feature is off, not advice, and a cancelled message is withdrawn.
+function visible(messages){return (messages||[]).filter(m=>m.kind!=='refusal'&&m.state!=='cancelled').reverse();}
+function row(message){
+ const source=sourceOf(message),li=el('li'),meta=el('div',undefined,'meta');
+ li.className=source+(message.severity==='urgent'?' urgent':'');
+ meta.append(el('span',LABELS[source],'source'),el('span',clock(message.created_at)));
+ li.append(meta);
+ if(message.question)li.append(el('p','You asked: '+message.question,'note'));
+ li.append(el('p',message.text,'text'));
+ if(message.explanation)li.append(el('p','Interpretation: '+message.explanation,'note'));
+ return li;
+}
+function render(messages){
+ const key=JSON.stringify(messages);
+ if(key===shown)return;
+ shown=key;list.replaceChildren(...messages.map(row));empty.hidden=messages.length>0;
+}
+// A refused view drops what it showed: a switched-off feature leaves no data on screen.
+function refuse(text,link){
+ shown=null;list.replaceChildren();empty.hidden=true;status.textContent=text;
+ if(link){status.append(' ');const a=el('a','Open Console');a.href='/console';status.append(a);}
+}
+async function poll(){
+ const controller=new AbortController(),abort=setTimeout(()=>controller.abort(),TIMEOUT_MS);
+ try{
+  const response=await fetch(LANE,{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+  if(response.status===401)refuse('Sign in to the Console to see radio messages.',true);
+  else if(response.status===403)refuse('Off · enable the AI Race Engineer or the AI Coach in the Control Center');
+  else if(!response.ok)status.textContent='Connection lost · retrying';
+  else{const data=await response.json();status.textContent='';render(visible(data.messages));}
+ }catch(error){status.textContent='Connection lost · retrying';}
+ finally{clearTimeout(abort);if(!stopped){clearTimeout(timer);timer=setTimeout(poll,POLL_MS);}}
+}
+function stop(){stopped=true;clearTimeout(timer);}
+window.addEventListener('pagehide',stop,{once:true});
+window.radioMessages={poll,stop};
+poll();
+})();
+</script></body></html>

@@ -110,6 +110,14 @@ def check(browser,outdir,shots=None):
             first.set_viewport_size({'width':1440,'height':1000})
             menu=context.new_page();menu.goto(f.url+'/console');menu.get_by_text('Driver radio',exact=True).wait_for()
             shot(menu,'driver-radio-console',wiki='console-driver-radio-launcher.png')
+            display=context.new_page();display.goto(f.url+'/console/driver-radio/messages-view')
+            display.locator('#messages li').first.wait_for()
+            assert display.locator('button,input,select,textarea').count()==0
+            for width,view in ((1024,'tablet'),(390,'phone'),(1440,'desktop')):
+                display.set_viewport_size({'width':width,'height':1000})
+                assert display.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),'messages display overflows viewport'
+                shot(display,'driver-radio-messages',view,'console-driver-radio-messages.png' if view=='desktop' else None)
+            display.close()
             f.f.request('fuel');f.enricher.step('audio')
             # A Director's Console landing; the Director Panel has no driver radio card.
             panel_context=browser.new_context(viewport={'width':1440,'height':1000})

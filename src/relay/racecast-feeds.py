@@ -11662,7 +11662,8 @@ def engineer_page_for(console_page):
 
 
 _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
-                                ("health-monitor",), ("race-control",), ("race-engineer",), ("driver-radio",), ("buttons",)})
+                                ("health-monitor",), ("race-control",), ("race-engineer",), ("driver-radio",),
+                                ("driver-radio", "messages-view"), ("buttons",)})
 
 
 # The largest request body the control server reads (a parsed POST, or one drained
@@ -12709,14 +12710,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send_file(path, ctype)
                 return None
             if sub and sub[0] == "driver-radio":
-                if sub == ["driver-radio"] and method == "GET":
+                if sub in (["driver-radio"], ["driver-radio", "messages-view"]) and method == "GET":
                     if radio_access is None:
                         return self._radio_error("source_unavailable", "Driver radio is unavailable for this profile", 503)
                     try:
                         radio_page_access()
                     except driver_radio_access.RadioError as exc:
                         return self._radio_error(exc.code, str(exc), 403)
-                    page = os.path.join(radio_page_dir, "driver-radio.html")
+                    page = os.path.join(radio_page_dir, "driver-radio.html" if len(sub) == 1 else "driver-radio-messages.html")
                     return self._send_page(page, "/console", cookie_token=self._cockpit_token(), cookie_path="/console")
                 if console_policy.min_capability(sub, method) is None:
                     return self._radio_error("not_found", "Unknown driver radio route", 404)

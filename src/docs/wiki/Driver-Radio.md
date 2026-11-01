@@ -17,7 +17,7 @@ by either switch.
 
 | Output | AI Race Engineer | AI Coach |
 |---|---|---|
-| Text on a second device | **AI Race Engineer** section of the Console driver desk: presets, latest answer and its messages | **AI Coach** section of the same desk: training controls, focus, review, debrief, private history and its messages |
+| Text on a second device | **AI Race Engineer** section of the Console driver desk: presets, latest answer and its messages. The messages alone: **Radio messages** display | **AI Coach** section of the same desk: training controls, focus, review, debrief, private history and its messages. The messages alone: **Radio messages** display |
 | Audio | Native voice on the relay PC, when the shared **Voice** settings enable it | The same native voice and the same single playback slot |
 | Voice controls | **Voice** row above both sections (pause listening, reply mute, volume, input language), shown while either feature is on | The same row |
 | Control Center | **AI Race Engineer** card (switch and agent) | **AI Coach** card (switch and agent) and **AI Coach training** below the settings |
@@ -34,6 +34,18 @@ and sends each view only the messages of the features that are switched on
 (plus those hints): with the AI Coach alone,
 the desk shows the coach messages and the **Voice** row, and no engineer
 messages; with the AI Race Engineer alone, no coach messages leave the relay.
+
+## Radio messages display
+
+**Radio messages** on the Console launcher opens
+`/console/driver-radio/messages-view`: a read-only display for a tablet or a second
+monitor. It lists the messages of the switched-on features, newest first and in
+large type, each with its source (**AI Race Engineer** or **AI Coach**) and time.
+It has no controls and needs the same Console sign-in as the driver desk. Switching
+both features off, or signing out, empties it at the next poll; after a connection
+loss it keeps the last messages and retries.
+
+![Radio messages display](images/console-driver-radio-messages.png)
 
 ## HUD slots
 

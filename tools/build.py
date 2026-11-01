@@ -79,6 +79,7 @@ def main():
     cp("console/health-monitor.html", "health-monitor.html")  # /health-monitor dashboard
     cp("console/driver-radio.html", "driver-radio.html")
     cp("console/driver-radio.js", "driver-radio.js")
+    cp("console/driver-radio-messages.html", "driver-radio-messages.html")
     cp("console/event-info.html", "event-info.html")
     cp("console/crew-frame.html", "crew-frame.html")   # cockpit/race-control tab bar (#745)
     cp("setup-assets.py", "setup-assets.py")
