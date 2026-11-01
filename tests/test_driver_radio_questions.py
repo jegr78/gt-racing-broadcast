@@ -6,6 +6,97 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 from test_driver_radio_service import Fixture
 import driver_radio_questions as q
 import driver_radio_access as access
+from test_driver_radio_assessment import snapshot,review,lap
+
+
+def t_fastest_and_last_lap_questions_use_session_facts_across_a_tyre_stop():
+    snap=snapshot((83.25,90,85.125,86.5))
+    stop={'lap_id':'L2','compound':'RH','confirmed_at':100}
+    data=review(snap,{'setup':{},'service':stop})
+    for text in ("What's my fastest lap so far?",'best lap','schnellste Runde','beste Runde'):
+        route,answer=q.answer(text,data)
+        assert route['preset']=='fastest_lap' and '1:23.250, lap 1.' in answer,(text,route,answer)
+    for text in ('last lap','previous lap time','letzte Runde','letzte Rundenzeit'):
+        route,answer=q.answer(text,data)
+        assert route['preset']=='last_lap' and '1:26.500, lap 4.' in answer,(text,route,answer)
+    assert q.answer('And that lap? ',data,'last_lap')[0]['preset']=='last_lap'
+    assert q.answer('pace',data)[0]['preset']=='pace'
+
+
+def t_lap_questions_exclude_ineligible_laps_and_other_sessions():
+    for change in ({'comparison_eligible':False},{'analysis_role':'first'},{'analysis_role':'pit'},
+                   {'analysis_role':'warmup'},{'analysis_role':'partial'},
+                   {'capture_complete':False},{'state':'provisional'},
+                   {'time_s':float('nan')},{'time_s':0},{'session_id':'old'}):
+        snap=snapshot((83.25,70));snap['laps'][-1].update(change)
+        data=review(snap)
+        for text in ('fastest lap','last lap'):
+            route,answer=q.answer(text,data)
+            assert route['preset'] in ('fastest_lap','last_lap') and '1:23.250, lap 1.' in answer,(change,text,answer)
+    snap=snapshot((59.9996,60.125))
+    assert '1:00.000, lap 1.' in q.answer('best lap',review(snap))[1]
+    snap['laps']=[lap(1,58.123)]
+    assert '0:58.123, lap 1.' in q.answer('best lap',review(snap))[1]
+    for text in ('fastest lap','last lap'):
+        assert 'unavailable' in q.answer(text,review(snapshot(())))[1].lower()
+        for field,value in (('receipt',{'state':'stale'}),('replay',{'active':True})):
+            snap=snapshot((83.25,));snap[field]=value
+            answer=q.answer(text,review(snap))[1]
+            assert 'unavailable' in answer.lower() and '1:23.250' not in answer,answer
+
+
+def t_unknown_question_is_explicit_and_never_silently_returns_status():
+    data=review(snapshot())
+    route,answer=q.answer('What is the weather tomorrow?',data)
+    assert not route['recognized'] and answer.startswith("I can't answer that yet."),answer
+    assert 'fuel' in answer and 'fastest lap' in answer and answer!=data['answers']['status']
+    for text in ('status','give me a summary','How am I doing?','Zusammenfassung'):
+        route,answer=q.answer(text,data)
+        assert route['recognized'] and route['preset']=='status' and answer==data['answers']['status'],(text,route,answer)
+    route,answer=q.answer('And one more lap?',data,'fuel')
+    assert route['recognized'] and route['extra_lap'] and 'extra full lap' in answer
+    for text in ('delete fastest lap','mute OBS','box now'):
+        route,answer=q.answer(text,data)
+        assert route['rejected'] and 'control commands are unavailable' in answer
+
+
+def t_service_lap_questions_freeze_matching_evidence_and_unknown_questions_skip_ai():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d,snapshot((83.25,86.5)));state=f.poll()
+        answer=f.service.question('fastest lap',state['binding'])
+        assert answer['preset']=='fastest_lap' and '1:23.250, lap 1.' in answer['text']
+        assert answer['evidence']['laps']['fastest_s']==83.25 and answer['evidence']['laps']['fastest_lap']==1
+        f.snap['laps'].append(lap(3,82.875));f.snap['revision']+=1;f.poll()
+        latest=f.service.question('last lap',state['binding'])
+        assert '1:22.875, lap 3.' in latest['text'] and latest['evidence']['laps']['last_s']==82.875
+        assert answer['evidence']['laps']['fastest_s']==83.25,'published evidence must remain frozen'
+        for message in (answer,latest):
+            assert f.service.attach(message['id'],message['epoch'],{'ai_state':'not_requested'})
+        unknown=f.service.question('What is the weather tomorrow?',state['binding'])
+        assert unknown['text'].startswith("I can't answer that yet.") and unknown['ai_state']=='not_requested'
+        assert f.service.enrichment_work('ai') is None
+        f.snap['context_revision']+=1;state=f.poll()
+        followup=f.service.question('And one more lap?',state['binding'])
+        assert followup['text'].startswith("I can't answer that yet.") and followup['conversation']==[]
+
+
+def t_optional_lap_interpretation_only_accepts_exact_lap_evidence():
+    import driver_radio_providers as providers
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d,snapshot((83.25,86.5)));state=f.poll()
+        message=f.service.question('fastest lap',state['binding'])
+        facts=providers.compact_facts(message)
+        assert facts['laps.fastest_s']=={'value':83.25,'unit':'seconds'}
+        assert facts['laps.fastest_lap']=={'value':1,'unit':'laps'}
+        assert facts['laps.last_s']=={'value':86.5,'unit':'seconds'}
+        result=dict(explanation='The recorded lap times can be compared.',evidence=['laps.fastest_s'],
+                    claims=[dict(fact='laps.fastest_s',value=83.25,unit='seconds')])
+        assert 'Fastest recorded eligible lap time: 83.25 seconds.' in providers.render_explanation(result,message)
+        for change in ({'value':82},{'unit':'laps'},{'fact':'laps.fastest_lap'}):
+            invalid=dict(result,claims=[dict(result['claims'][0],**change)])
+            try:providers.render_explanation(invalid,message)
+            except providers.ProviderError as exc:assert exc.code=='invalid_explanation'
+            else:raise AssertionError('Ungrounded lap claim accepted')
 
 
 def t_natural_questions_and_context_are_grounded_in_refreshed_facts():

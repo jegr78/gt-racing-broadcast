@@ -189,6 +189,8 @@ class Service:
                        created_at=self.wall(), expires_at=self.wall()+ttl, state='queued' if queued else 'text_only',
                        audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now,
                        _native=requester is None, _requesters={requester:authorization} if requester is not None else {})
+        if 'laps' in result:
+            message['evidence']['laps']=result['laps']
         self._messages[mid] = copy.deepcopy(message)
         if queued:self._queue.append(mid)
         self._queue.sort(key=lambda ident:self._messages[ident]['severity'] != 'urgent')
@@ -466,7 +468,7 @@ class Service:
             stored = self._messages[message['id']]
             stored['question'] = text.strip()
             stored['conversation'] = [{k:v for k,v in turn.items() if k!='id'} for turn in self._conversation]
-            if route['rejected']:
+            if route['rejected'] or not route['recognized']:
                 stored['ai_state'] = 'not_requested'
             if not self._live:
                 stored['state'] = 'text_only'

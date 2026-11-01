@@ -145,6 +145,17 @@ def _is_fastest(latest, snapshot):
     return bool(times) and latest['time_s'] < min(times)
 
 
+def _lap_answer(row, fastest, live):
+    subject='fastest recorded lap' if fastest else 'last eligible lap'
+    if not live or row is None:
+        return f'Your {subject} time is unavailable for this session.'
+    minutes,remainder=divmod(round(row['time_s']*1000),60000)
+    seconds,millis=divmod(remainder,1000)
+    text=f'Your {subject} is {minutes}:{seconds:02d}.{millis:03d}'
+    lap=number(row.get('lap'),True)
+    return text+(f', lap {lap:g}.' if lap is not None else '.')
+
+
 def _position(snapshot, live):
     value = number((snapshot.get('instruments') or {}).get('race_position'), True)
     return f'P{value:g}' if live and value is not None else None
@@ -325,11 +336,19 @@ def assess(snapshot, session=None, limits=None):
     status_go = _to_go(total, completed) if race_laps and live else None
     status_text = ((f'{position}. ' if position else '')+(f'{status_go} ' if status_go else '')+status_fuel+' '+status_pace
                    +(' Last lap was your fastest.' if fastest and live else ''))
-    best = [r['time_s'] for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
+    eligible = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
             if r.get('session_id') == snapshot.get('session_id') and _counts_for_fastest(r)]
+    best=min(eligible,key=lambda r:r['time_s'],default=None)
+    last=eligible[-1] if eligible else None
+    lap_facts={}
+    for label,row in (('fastest',best),('last',last)):
+        lap_facts[label+'_s']=row['time_s'] if live and row else None
+        lap_facts[label+'_lap']=number(row.get('lap'),True) if live and row else None
     answers = dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_text)
+    lap_answers=dict(fastest_lap=_lap_answer(best,True,live),last_lap=_lap_answer(last,False,live))
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
-                tyres=tyres, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
+                tyres=tyres, laps=lap_facts, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
                 position=position, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
-                finish_text=_finish_text(position, min(best) if best else None),
-                lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None) if lap else None, answers=answers)
+                finish_text=_finish_text(position, best['time_s'] if best else None),
+                lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None) if lap else None,
+                answers=answers,lap_answers=lap_answers)

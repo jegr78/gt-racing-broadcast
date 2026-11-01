@@ -157,6 +157,8 @@ FACT_LABELS = {
     'fuel.usable_laps':'Fuel range after reserve', 'pace.delta_s':'Recent pace change',
     'pace.baseline_s':'Baseline lap time', 'pace.recent_s':'Recent lap time',
     'pace.last_s':'Last eligible lap time', 'pace.best_s':'Best eligible lap time',
+    'laps.fastest_s':'Fastest recorded eligible lap time', 'laps.fastest_lap':'Fastest recorded eligible lap number',
+    'laps.last_s':'Last eligible lap time', 'laps.last_lap':'Last eligible lap number',
     'tyres.front_left':'Front left tyre temperature', 'tyres.front_right':'Front right tyre temperature',
     'tyres.rear_left':'Rear left tyre temperature', 'tyres.rear_right':'Rear right tyre temperature',
 }
@@ -188,7 +190,9 @@ def compact_facts(message):
     facts={}
     for section,keys,unit in (('fuel',('current_l','consumption_l','reserve_l'),'litres'),
                               ('fuel',('range_laps','usable_laps'),'laps'),
-                              ('pace',('delta_s','baseline_s','recent_s','last_s','best_s'),'seconds')):
+                              ('pace',('delta_s','baseline_s','recent_s','last_s','best_s'),'seconds'),
+                              ('laps',('fastest_s','last_s'),'seconds'),
+                              ('laps',('fastest_lap','last_lap'),'laps')):
         for key in keys:
             value=evidence.get(section,{}).get(key)
             if type(value) in (int,float) and -1e9<=value<=1e9:
