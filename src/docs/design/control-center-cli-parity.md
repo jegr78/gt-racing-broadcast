@@ -28,6 +28,9 @@ smoke runs, even with an AI interruption acknowledgement. Admission closes under
 the job lock when shutdown is accepted, so a concurrent smoke request cannot
 slip past the check. Smoke owns a non-daemon output reader: natural main exit or
 Ctrl+C cannot close its output pipe before the child finishes its cleanup.
+Its output reader is admitted before the confirmed child starts; exhausted thread
+capacity rejects the action without spawning. A failed process launch releases
+the waiting reader instead of stranding a non-daemon thread.
 
 The independent review found that the existing global CSRF guard accepted
 `Origin: null`. It now rejects explicit opaque, blank, malformed and non-HTTP

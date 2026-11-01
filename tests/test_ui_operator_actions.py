@@ -221,6 +221,23 @@ const document={body:{innerHTML:'unchanged',replaceChildren:()=>{throw new Error
                 'alerts':['Wait for smoke cleanup'],'body':'unchanged'},output
 
 
+def t_smoke_reader_admission_failure_never_spawns_or_reports_a_running_child_finished():
+    import io
+    from unittest.mock import patch
+    calls=[]
+    class Process:
+        def __init__(self,argv,**kwargs):calls.append(argv);self.stdout=io.BytesIO(b'')
+        def wait(self):return 0
+    class NoThread:
+        def __init__(self,*args,**kwargs):pass
+        def start(self):raise RuntimeError('fixture thread budget exhausted')
+    jobs=ui_jobs.JobManager(list,spawn=Process)
+    with patch.object(ui_jobs.threading,'Thread',NoThread):
+        job,error=jobs.start('smoketest',['smoketest'],input_text='CLEAR SCHEDULE demo\n')
+    assert job is None and 'output reader' in error and calls==[] and jobs.jobs=={},(job,error,calls)
+    assert jobs.prepare_shutdown() is True
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

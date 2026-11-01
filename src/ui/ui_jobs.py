@@ -77,6 +77,29 @@ class JobManager:
                 if job.op == op and (job.profile == profile or op in MACHINE_OPS) and job.exit_code is None:  # exit_code writes are atomic
                     return job.id, f"{op} is already running"
             argv = self.argv_for(op_args)
+            if op == "smoketest":
+                # Admit its output owner before any confirmed child can execute.
+                ready = threading.Event()
+                pending = []
+                def read_when_ready():
+                    ready.wait()
+                    if pending:
+                        self._reader(pending[0])
+                reader = threading.Thread(target=read_when_ready, daemon=False)
+                try:
+                    reader.start()
+                except RuntimeError:
+                    return None, "Could not start smoke output reader. No action was started"
+                try:
+                    proc = self.spawn(argv) if input_text is None else self.spawn(argv, input_text=input_text)
+                    job = Job(uuid.uuid4().hex[:12], op, proc, profile)
+                    pending.append(job)
+                    self.jobs[job.id] = job
+                    if self.logger:
+                        self.logger.info("[%s] action started, argv: %s", op, " ".join(argv))
+                    return job.id, None
+                finally:
+                    ready.set()   # Also releases the reader after a spawn failure.
             proc = self.spawn(argv) if input_text is None else self.spawn(argv, input_text=input_text)
             job = Job(uuid.uuid4().hex[:12], op, proc, profile)
             self.jobs[job.id] = job
