@@ -24,6 +24,7 @@ AUDIO_MAX = 2*1024*1024
 CACHE_MAX = 8*1024*1024
 CACHE_ENTRIES = 16
 BUDGET = 8.0
+ANSWER_PREFIX = "AI interpretation. "
 
 
 def validate_wav(audio):
@@ -356,6 +357,8 @@ class Enricher:
                     result=self.ai.explain(config['agent'],message,stopped,
                         min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
                     explanation=render_explanation(result,message)
+                    if message.get('answer_mode')=='live_ai' and len(ANSWER_PREFIX+explanation)>600:
+                        raise ProviderError('invalid_explanation')
                     fields={'explanation':explanation,state_key:'ready',error_key:None}
                 if stopped.is_set():return False
             except ProviderError as exc:

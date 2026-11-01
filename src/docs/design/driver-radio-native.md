@@ -44,8 +44,10 @@ partial and cut laps are excluded. Spoken answers say "fastest recorded lap" or
 "last eligible lap" and retain millisecond precision and the known lap number.
 Unavailable or non-live evidence produces an explicit unavailable answer.
 
-Unrecognized prompts list supported subjects and do not request an optional AI
-interpretation. Explicit status questions retain the status answer. Bounded
+Without a selected engineer agent, unrecognized prompts list supported subjects
+and do not request AI. With the existing live agent selected, free native
+questions use the grounded answer path described in
+[Live voice questions](driver-radio-live-questions.md). Explicit status questions retain the status answer. Bounded
 follow-ups retain their current topic; session/context changes clear it. Vehicle
 and broadcast control requests are refused before telemetry keyword routing.
 

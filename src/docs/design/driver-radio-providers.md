@@ -1,7 +1,10 @@
-# Driver radio speech and optional explanations
+# Driver radio speech, live answers and optional explanations
 
 Epic #969, delivery #973. Provider work attaches to the shared message service;
 it never delays deterministic text, relay HTTP, telemetry or broadcast workers.
+Unknown native questions may use the same selected agent for a direct answer;
+their speech waits for the validated result or the existing bounded fallback.
+See [Live voice questions](driver-radio-live-questions.md).
 
 | Requirement | Production path | Positive test | Failure test | Runtime evidence |
 | --- | --- | --- | --- | --- |

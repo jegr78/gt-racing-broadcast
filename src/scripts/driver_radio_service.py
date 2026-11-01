@@ -2,6 +2,7 @@
 
 import collections
 import copy
+import math
 import threading
 import time
 import uuid
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_radio_questions as questions
+from driver_radio_providers import BUDGET as LIVE_AI_BUDGET, ANSWER_PREFIX
 
 HISTORY_MAX = 32
 QUEUE_MAX = 4
@@ -116,6 +118,12 @@ class Service:
         self._start_reported = False
         self._live = False
 
+    def _answer_text(self, message, text):
+        message['text'] = text
+        for turn in self._conversation:
+            if turn['id'] == message['id']:
+                turn['answer'] = text[:1200]
+
     def _expire(self, now):
         for message in self._messages.values():
             unfinished = message['state'] in ('queued','playing') or (
@@ -127,6 +135,11 @@ class Service:
                     self._ticket.cancelled.set()
                 self._revision += 1
                 continue
+            if (message.get('answer_mode')=='live_ai' and message['ai_state']=='pending'
+                    and now>=message['_answer_deadline']):
+                message.update(ai_state='failed',ai_error='timed_out')
+                self._answer_text(message,message['_fallback_text'])
+                self._revision += 1
             if unfinished and not message['_native']:
                 valid = {}
                 for requester, authorize in message['_requesters'].items():
@@ -474,6 +487,11 @@ class Service:
             stored['conversation'] = [{k:v for k,v in turn.items() if k!='id'} for turn in self._conversation]
             if route['rejected'] or not route['recognized']:
                 stored['ai_state'] = 'not_requested'
+            if (not route['recognized'] and not route['rejected'] and self._live
+                    and self.settings.read()['features']['engineer']['agent']):
+                stored.update(answer_mode='live_ai',ai_state='pending',
+                    _answer_deadline=min(stored['_deadline'],math.nextafter(stored['_created']+LIVE_AI_BUDGET,-math.inf)),
+                    _fallback_text=answer,text='Checking the current telemetry for that question.')
             if not self._live:
                 stored['state'] = 'text_only'
                 self._queue.remove(message['id'])
@@ -523,7 +541,8 @@ class Service:
                            if m['source'] == source and not self._text_held(m)), None)
             now = self.wall() if now is None else now
             if (newest is None or newest['epoch'] != self._epoch or newest['binding'] != self._binding
-                    or newest['state'] in HUD_GONE or now >= newest['expires_at']):
+                    or newest['state'] in HUD_GONE or now >= newest['expires_at']
+                    or newest.get('answer_mode')=='live_ai'):
                 return None
             return newest['text']
 
@@ -579,15 +598,30 @@ class Service:
             if any(fields.get(k) is not None and (not isinstance(fields[k],str) or len(fields[k])>64
                    or not all(c.isascii() and (c.isalnum() or c=='_') for c in fields[k])) for k in ('audio_error','ai_error')):
                 return False
+            live_answer = message.get('answer_mode')=='live_ai'
+            answer_text = None
+            if live_answer and ('ai_state' in fields or 'explanation' in fields):
+                if message['ai_state']!='pending':return False
+                if fields.get('ai_state')=='ready':
+                    explanation=fields.get('explanation')
+                    if (not isinstance(explanation,str) or not explanation.strip()
+                            or len(ANSWER_PREFIX+explanation)>600
+                            or self.clock()>=message['_answer_deadline']):return False
+                    answer_text = ANSWER_PREFIX+explanation
+                elif 'explanation' in fields:return False
+                elif fields.get('ai_state') in ('failed','unconfigured','not_requested'):
+                    answer_text = message['_fallback_text']
             if 'audio' in fields:
+                if live_answer and message['ai_state']=='pending':return False
                 if not self._voice_enabled:
                     return False
                 if not isinstance(fields['audio'],bytes) or len(fields['audio'])>2*1024*1024:
                     return False
                 self._audio[message_id] = fields['audio']
                 message['audio_state'] = 'ready'
-            message.update({k:v for k,v in fields.items() if k!='audio'})
-            if 'explanation' in fields:
+            if answer_text is not None:self._answer_text(message,answer_text)
+            message.update({k:v for k,v in fields.items() if k!='audio' and not (live_answer and k=='explanation')})
+            if 'explanation' in fields and not live_answer:
                 for turn in self._conversation:
                     if turn['id']==message_id:
                         turn['answer']=(message['text'][:1200]+' Interpretation: '+fields['explanation'])[:1820]
@@ -615,6 +649,8 @@ class Service:
                 and message is not None and message['epoch']==epoch
                 and message['state'] in (TEXT_STATES if kind=='ai' else ('queued','playing'))
                 and self.clock()<message['_deadline']
+                and (kind!='ai' or message.get('answer_mode')!='live_ai'
+                     or message['ai_state']=='pending' and self.clock()<message['_answer_deadline'])
                 and not (message.get('_coach_cancel') and message['_coach_cancel'].is_set()))
 
     def coach_attachment(self, owner, training_epoch, message_id):
@@ -633,7 +669,9 @@ class Service:
         with self._lock:
             if self._closed or not self._live:return None
             states=TEXT_STATES if kind=='ai' else ('queued','playing')
-            pending=[m for m in self._messages.values() if m['state'] in states and m[field]=='pending']
+            pending=[m for m in self._messages.values() if m['state'] in states and m[field]=='pending'
+                     and not (kind=='audio' and self._speech_enabled and m.get('answer_mode')=='live_ai'
+                              and m['ai_state']=='pending')]
             pending.sort(key=lambda message:message['severity']!='urgent')
             return self._public(pending[0]) if pending else None
 
