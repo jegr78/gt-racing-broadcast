@@ -107,7 +107,9 @@ def main(argv=None):
         parser.error('Live measurement requires --allow-agent, --machine-runtime, --agent and --speech')
     if args.speech=='google' and not args.allow_cloud:parser.error('Google speech requires --allow-cloud')
     try:message=sample(args.question)  # Validate before provider construction or admission.
-    except ValueError:parser.error('Use a bounded telemetry question')
+    except ValueError:
+        parser.error('Use a bounded telemetry question')
+        return 2
     import e2e_safety
     contained=e2e_safety.enter(__file__,list(sys.argv[1:] if argv is None else argv))
     if contained is not None:return contained
