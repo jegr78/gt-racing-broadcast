@@ -221,9 +221,8 @@ class Supervisor:
                         self._stop_output('failed');self._set('error','playback_unavailable')
                     if not self._current(signature,output=True):self._stop_output('text_only')
                     return
-                history=self._radio_read(self.service.history)
-                message=next((m for m in history['messages'] if m['id']==self._ticket.message['id']),None)
-                if message is None or message['audio_state'] in ('unconfigured','failed','not_requested'):
+                state=self._radio_read(lambda:self.service.ticket_audio_state(self._ticket.id))
+                if state is None or state in ('unconfigured','failed','not_requested'):
                     self._stop_output('text_only');return
                 self._set('responding');return
             if self.service.pending_count():
