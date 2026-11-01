@@ -27,6 +27,28 @@ all readiness reads and profile writes to finish within 500 ms. Those filesystem
 operations are independent of process termination. Finite cleanup waits and
 thread joins still bound the fixture; they are not a response-time benchmark.
 
+### Deterministic lap questions and unsupported prompts (#1063, #1064)
+
+| Requirement | Production path | Positive test | Failure test | Runtime evidence |
+| --- | --- | --- | --- | --- |
+| Fastest/best lap in English and German | Question routing and assessment session lap facts | Fixed `m:ss.mmm` answer with lap number, including an earlier tyre stint | Out/pit/cut/incomplete/provisional laps and other sessions excluded | Actual service question text and frozen numerical evidence |
+| Last eligible lap | Same eligibility as the fastest-lap note | Most recent eligible time in the same format | No completed eligible lap, stale or replay data | Current-fact answer plus no queued stale speech |
+| Clear unsupported-question answer | Question routing and native service | Unknown prompts explain supported subjects | No silent status answer or optional AI attempt | Published question text and provider eligibility |
+| Preserve intent and authority | Question context and control refusal | Fuel/lap follow-ups and explicit status questions | Control requests refused before keyword routing; changed binding clears context | Refusal text, refreshed facts and actual session changes |
+| Ground optional lap interpretation | Public message evidence and provider fact allowlist | Exact supplied lap times/numbers accepted | Changed numeric claim rejected | Fake interpretation schema, no provider calls |
+
+Fastest and last-lap questions use confirmed, complete, comparison-eligible laps
+from the current session's bounded shared history. A declared tyre stop changes
+the pace cohort but preserves these recorded session facts. Out, pit, warmup,
+partial and cut laps are excluded. Spoken answers say "fastest recorded lap" or
+"last eligible lap" and retain millisecond precision and the known lap number.
+Unavailable or non-live evidence produces an explicit unavailable answer.
+
+Unrecognized prompts list supported subjects and do not request an optional AI
+interpretation. Explicit status questions retain the status answer. Bounded
+follow-ups retain their current topic; session/context changes clear it. Vehicle
+and broadcast control requests are refused before telemetry keyword routing.
+
 ## Engine research and validation
 
 Vosk's Apache-2.0 C API and small English/German models support local streaming

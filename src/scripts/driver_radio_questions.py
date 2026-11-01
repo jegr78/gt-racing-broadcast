@@ -10,20 +10,27 @@ def plan(text, previous=None):
     clean=text.casefold()
     rejected=bool(re.search(r'\b(?:mute|unmute|disconnect|execute|delete|shutdown|switch scene|box now|pit now|stumm|lösche|ausschalten)\b',clean))
     extra=bool(re.search(r'\b(?:one more lap|extra lap|another lap|noch eine runde|eine runde länger|weitere runde)\b',clean))
+    recognized=True
     if rejected:preset='status'
+    elif re.search(r'\b(?:(?:fastest|best) lap|(?:schnellste|beste) runde)\b',clean):preset='fastest_lap'
+    elif re.search(r'\b(?:(?:last|previous|latest) lap|letzte(?:n|r)? (?:runde|rundenzeit))\b',clean):preset='last_lap'
     elif re.search(r'\b(?:fuel|range|reserve|finish|consumption|sprit|benzin|tank|treibstoff|verbrauch|reichweite)\b',clean):preset='fuel'
     elif re.search(r'\b(?:tyres?|tires?|temperature|temperatures|reifen|reifentemperatur|reifentemperaturen)\b',clean):preset='tyres'
     elif re.search(r'\b(?:pace|slower|faster|lap time|lap times|langsamer|schneller|tempo|rundenzeit)\b',clean):preset='pace'
-    elif previous in ('fuel','pace','tyres') and (extra or re.match(r'\s*(?:and|what about|und|was wäre)',clean)):preset=previous
-    else:preset='status'
-    return dict(preset=preset,extra_lap=extra and preset=='fuel',rejected=rejected)
+    elif previous in ('fuel','pace','tyres','fastest_lap','last_lap') and (extra or re.match(r'\s*(?:and|what about|und|was wäre)',clean)):preset=previous
+    elif re.search(r'\b(?:status|summary|overview|how am i doing|überblick|zusammenfassung)\b',clean):preset='status'
+    else:preset='status';recognized=False
+    return dict(preset=preset,extra_lap=extra and preset=='fuel',rejected=rejected,recognized=recognized)
 
 
 def answer(text, assessment, previous=None):
     route=plan(text,previous)
-    result=assessment['answers'][route['preset']]
+    answers=assessment['lap_answers'] if route['preset'] in ('fastest_lap','last_lap') else assessment['answers']
+    result=answers[route['preset']]
     if route['rejected']:
         return route,'I can explain current telemetry. Vehicle and broadcast control commands are unavailable.'
+    if not route['recognized']:
+        return route,"I can't answer that yet. Ask about fuel, pace, tyres, your fastest lap or your last lap."
     if route['extra_lap']:
         fuel=assessment['fuel']
         current=number(fuel.get('current_l'));burn=number(fuel.get('consumption_l'),True)
