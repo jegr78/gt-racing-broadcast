@@ -159,7 +159,7 @@ def t_ops_registry_routes_in_rc():
     for name, argv in ui_ops.OPS.items():
         action = rc.route(list(argv))
         assert action["kind"] in ("service", "oneshot", "export", "chat", "discord",
-                                  "freeport", "health", "report"), name
+                                  "freeport", "health", "report", "smoketest", "console"), name
 
 
 def t_build_argv_plain_and_unknown():
