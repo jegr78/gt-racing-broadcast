@@ -195,3 +195,8 @@ as the deep-architecture reference.
 Source execution requires **Python 3.12 or newer**, matching the lowest CI version.
 The packaged Racecast binaries include their interpreter. Linux applications and
 libraries are listed in the [Linux producer guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Linux-Producer).
+
+## License
+
+MIT, see [LICENSE](LICENSE). Third-party components are listed in
+[Third-party licenses](src/docs/wiki/Third-Party-Licenses.md).

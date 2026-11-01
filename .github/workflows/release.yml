@@ -64,11 +64,11 @@ jobs:
           mkdir staging
           cp -R "${{ matrix.built }}" "staging/${{ matrix.binary }}"
           cp -R "${{ matrix.built_ui }}" "staging/${{ matrix.binary_ui }}"
-          cp .env.example staging/
+          cp .env.example LICENSE staging/
           cd staging
           case "${{ matrix.asset }}" in
-            *.zip)    python -m zipfile -c "../${{ matrix.asset }}" "${{ matrix.binary }}" "${{ matrix.binary_ui }}" .env.example ;;
-            *.tar.gz) tar czf "../${{ matrix.asset }}" "${{ matrix.binary }}" "${{ matrix.binary_ui }}" .env.example ;;
+            *.zip)    python -m zipfile -c "../${{ matrix.asset }}" "${{ matrix.binary }}" "${{ matrix.binary_ui }}" .env.example LICENSE ;;
+            *.tar.gz) tar czf "../${{ matrix.asset }}" "${{ matrix.binary }}" "${{ matrix.binary_ui }}" .env.example LICENSE ;;
             *)        echo "Unknown asset format: ${{ matrix.asset }}"; exit 1 ;;
           esac
       - name: Upload release asset
