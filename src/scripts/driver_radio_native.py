@@ -11,6 +11,7 @@ from pathlib import Path
 import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_coach_controls as coaching
+import driver_radio_kokoro
 import driver_radio_voice_config as config
 from driver_radio_voice_process import Owned
 
@@ -49,11 +50,12 @@ class Supervisor:
 
     def status(self):
         phrases=list(config.PHRASES) if self.ready() else []
+        kokoro=driver_radio_kokoro.ready(self.machine)
         with self._lock:
             return copy.deepcopy(dict(version=1,revision=self._revision,binding=self._binding,
                 enabled=self._enabled and not self._closed,paused=self._paused,phase=self._phase,error=self._error,
                 volume=self._volume,muted=self._muted,input_language=self._language,wake=self._wake,
-                phrases=phrases,topology='local_pc'))
+                phrases=phrases,kokoro=kokoro,topology='local_pc'))
 
     def control(self,body):
         with self._lock:

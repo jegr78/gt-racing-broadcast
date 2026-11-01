@@ -414,6 +414,7 @@ def t_admin_form_saves_two_features():
      clearTimeout(view.coach.timer);await view.coach.poll();
      byId('ai-engineer-enabled').checked=true;byId('ai-engineer-agent').value='agent-a';
      byId('ai-coach-enabled').checked=true;byId('ai-coach-agent').value='agent-b';
+     byId('speech-engine').value='kokoro';byId('speech-voice').value='am_fenrir';
      byId('admin-form').onsubmit({preventDefault(){}});await tick();
      const form=written.find(html=>html.includes('id="admin-form"'));
      const result={posts,form,coachOff:byId('coach-off').hidden};view.destroy();console.log(JSON.stringify(result));
@@ -421,6 +422,7 @@ def t_admin_form_saves_two_features():
     if out is None:return
     body=out['posts'][0]['body']
     assert body['features']=={'engineer':{'enabled':True,'agent':'agent-a'},'coach':{'enabled':True,'agent':'agent-b'}},body
+    assert body['providers']=={'speech':False,'engine':'kokoro','voice':'am_fenrir'},body
     assert 'drivers' not in json.dumps(body) and body['expected']==3 and body['expectedProfile']=='solo-pov',body
     cards=[out['form'].find('<h3>'+title+'</h3>') for title in ('AI Race Engineer','AI Coach','Voice')]
     assert -1 not in cards and cards==sorted(cards),cards

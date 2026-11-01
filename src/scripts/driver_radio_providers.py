@@ -281,9 +281,11 @@ class _Current:
 
 
 class Enricher:
-    def __init__(self,service,speech=None,ai=None,clock=time.monotonic):
+    def __init__(self,service,speech=None,ai=None,clock=time.monotonic,kokoro=None):
         self.service=service
         self.speech=speech or GoogleSpeech()
+        self.kokoro=kokoro
+        self._prepared_at=float('-inf')
         self.ai=ai
         self.clock=clock
         self._stop=threading.Event()
@@ -305,7 +307,15 @@ class Enricher:
                 continue  # Temporary unreadable profile settings do not kill the worker.
             self._stop.wait(.1)
 
+    def _warm_kokoro(self):
+        """Load the local model before the first message needs it."""
+        if self.kokoro is None or self.clock()-self._prepared_at<2:return
+        self._prepared_at=self.clock()
+        settings=self.service.settings.read()['providers']
+        if settings['speech'] and settings['engine']=='kokoro':self.kokoro.prepare()
+
     def step(self,kind):
+        if kind=='audio':self._warm_kokoro()
         with self._step_locks[kind]:
             work=self.service.enrichment_work(kind)
             if work is None or self._stop.is_set():return False
@@ -321,8 +331,13 @@ class Enricher:
                 if kind=='audio':
                     if not config['speech'] or not self.service.refresh()['voice_enabled']:
                         raise ProviderError('unconfigured')
-                    audio=self.speech.synthesize(message['text'],stopped,
-                        min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
+                    budget=min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind))
+                    # No fallback between engines: answer text never reaches a cloud unasked.
+                    if config.get('engine')=='kokoro':
+                        if self.kokoro is None:raise ProviderError('unconfigured')
+                        audio=self.kokoro.synthesize(message['text'],stopped,budget,voice=config['voice'])
+                    else:
+                        audio=self.speech.synthesize(message['text'],stopped,budget)
                     fields={'audio':audio,state_key:'ready',error_key:None}
                 else:
                     if not config['agent'] or self.ai is None:
@@ -345,6 +360,7 @@ class Enricher:
     def close(self):
         self._stop.set()
         for thread in self._threads:thread.join(2)
+        if self.kokoro is not None:self.kokoro.close()
 
 
 def smoke(allow_cloud=False,speech_factory=None,clock=time.monotonic,key=None):

@@ -28,7 +28,8 @@
   racecast telemetry analyze <name> --session N --agent ID [--laps N,N] [--template TEMPLATE] [--goal TEXT] [--questions TEXT] [--model NAME] [--language LANG] [--reference REC:S:L]   # preview selected cloud-provider input
   racecast telemetry analyze <name> --session N --agent ID --start --confirm-preview HASH   # explicitly start the reviewed immutable input
   racecast telemetry analyze --status | --cancel JOB_ID   # one machine-wide analysis; cancellation does not recover quota
-  racecast radio provision [--whisper]       # explicitly install validated local voice models
+  racecast radio provision [--whisper] [--kokoro]   # explicitly install validated local voice models; --kokoro: local speech only
+  racecast radio smoke --kokoro              # two local syntheses; measure model load and speed
   racecast radio smoke --allow-cloud         # two configured Studio-Q calls; measure cold/warm/cache latency
   racecast telemetry index   # build the missing lap indexes (the Control Center runs it for lap comparison)
   racecast telemetry shifts <name> --lap N [--session N]   # offline shift references and recorded phases
@@ -6465,10 +6466,15 @@ def radio_provision_cmd(rest):
     import driver_radio_models
     parser = argparse.ArgumentParser(prog="racecast radio provision")
     parser.add_argument("--whisper", action="store_true", help="also download multilingual tiny weights; install whisper-cli separately")
+    parser.add_argument("--kokoro", action="store_true", help="install only the local Kokoro speech runtime (about 400 MB)")
     args = parser.parse_args(rest)
     try:
+        if args.kokoro:
+            import driver_radio_kokoro
+            print(json.dumps(driver_radio_kokoro.provision(_runtime_base_dir())))
+            return
         print(json.dumps(driver_radio_models.provision(_runtime_base_dir(), whisper=args.whisper)))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         sys.exit(f"Native voice provisioning failed ({exc}); verify network, disk space and the local model directory")
 
 
@@ -6478,7 +6484,18 @@ def radio_smoke_cmd(rest):
     parser = argparse.ArgumentParser(prog="racecast radio smoke")
     parser.add_argument("--allow-cloud", action="store_true",
                         help="Allow two short, potentially billed Google Studio-Q requests")
+    parser.add_argument("--kokoro", action="store_true", help="Test the installed local Kokoro speech instead; no network")
     args = parser.parse_args(rest)
+    if args.kokoro:
+        import driver_radio_kokoro
+        from driver_radio_process import ProviderError
+        if not driver_radio_kokoro.ready(_runtime_base_dir()):
+            sys.exit("Install the local Kokoro speech first: racecast radio provision --kokoro")
+        try:
+            print(json.dumps(driver_radio_kokoro.smoke(_runtime_base_dir())))
+        except ProviderError as exc:
+            sys.exit("racecast radio speech check: " + exc.code)
+        return
     if not args.allow_cloud:
         sys.exit("racecast radio smoke requires --allow-cloud for two configured Google requests")
     try:
