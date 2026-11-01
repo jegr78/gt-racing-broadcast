@@ -2931,7 +2931,7 @@ def t_shift_route_keeps_domain_errors_and_blocks_foreign_origins():
         try:
             _urlopen(request)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403 and json.loads(exc.read()) == {'ok': False, 'error': 'foreign context origin'}
+            assert exc.code == 403 and json.loads(exc.read()) == {'ok': False, 'error': 'cross-origin request blocked'}
         else:
             raise AssertionError('foreign shift reads must be refused')
         assert len(seen) == 1, 'blocked shift reads cannot reach recording analysis'
