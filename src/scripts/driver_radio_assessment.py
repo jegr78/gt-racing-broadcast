@@ -119,11 +119,35 @@ def _latest_lap(snapshot):
     return None
 
 
-def _lap_text(row, usable):
+def _lap_clock(seconds):
+    """A lap time as drivers read it: 1:23.467, or 58.123 seconds under a minute."""
+    minutes, rest = divmod(round(seconds, 3), 60)
+    return f"{int(minutes)}:{rest:06.3f}." if minutes else f"{rest:.3f} seconds."
+
+
+def _counts_for_fastest(row):
+    return (row.get('state') == 'confirmed' and row.get('comparison_eligible') and row.get('capture_complete') is not False
+            and row.get('analysis_role') not in ('first', 'pit', 'warmup', 'partial')
+            and number(row.get('time_s'), True) is not None)
+
+
+def _is_fastest(latest, snapshot):
+    """The newest lap beats every earlier one of the whole session. Unlike the pace
+    comparison, a tyre stop starts nothing new here. A first counted lap has nothing to
+    beat, and a lap outside the comparison (out lap, pit, cut) never counts."""
+    if not _counts_for_fastest(latest):
+        return False
+    times = [r['time_s'] for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
+             if r.get('session_id') == snapshot.get('session_id') and r.get('id') != latest.get('id') and _counts_for_fastest(r)]
+    return bool(times) and latest['time_s'] < min(times)
+
+
+def _lap_text(row, usable, fastest):
     minutes, seconds = divmod(row['time_s'], 60)
-    text = f"{int(minutes)}:{seconds:04.1f}."
+    text = f"{int(minutes)}:{seconds:04.1f}"
     if number(row.get('lap'), True) is not None:
         text = f"Lap {row['lap']:g}, {text}"
+    text += ', your fastest lap.' if fastest else '.'
     return text+(f' Fuel for {usable:.1f} laps.' if usable is not None else '')
 
 
@@ -254,8 +278,8 @@ def assess(snapshot, session=None, limits=None):
             pace_text += ' Tyres may be contributing. Consider changing them at the next stop; traffic or other causes remain unknown.'
     if live:
         prefix = []
-        if pace['last_s'] is not None:prefix.append(f"Last eligible comparable lap {pace['last_s']:.3f} seconds.")
-        if pace['best_s'] is not None:prefix.append(f"Best eligible comparable lap {pace['best_s']:.3f} seconds.")
+        if pace['last_s'] is not None:prefix.append(f"Last eligible comparable lap {_lap_clock(pace['last_s'])}")
+        if pace['best_s'] is not None:prefix.append(f"Best eligible comparable lap {_lap_clock(pace['best_s'])}")
         pace_text = ' '.join([*prefix,pace_text])
     temperature_text = ', '.join(f'{label} {value:.0f} C' if value is not None else label+' unavailable'
                                  for label,value in zip(('front left','front right','rear left','rear right'),temps, strict=True))
@@ -271,7 +295,9 @@ def assess(snapshot, session=None, limits=None):
                    else f"Comparable pace is {abs(pace['delta_s']):.1f} seconds {pace['state']}.")
     if tyres['concern']:status_pace += ' Tyres may contribute; consider tyres at the next stop. Causes remain uncertain.'
     lap = _latest_lap(snapshot)
-    answers = dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_fuel+' '+status_pace)
+    fastest = lap is not None and _is_fastest(lap, snapshot)
+    status_text = status_fuel+' '+status_pace+(' Last lap was your fastest.' if fastest and live else '')
+    answers = dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_text)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
-                lap_text=_lap_text(lap, usable) if lap else None, answers=answers)
+                lap_text=_lap_text(lap, usable, fastest) if lap else None, answers=answers)
