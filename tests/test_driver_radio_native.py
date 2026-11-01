@@ -51,6 +51,18 @@ def t_native_output_releases_the_text_when_its_player_starts():
         h.n.close()
 
 
+def t_playback_waits_for_slow_speech_while_the_text_is_held():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);settings=h.f.access.read()
+        h.f.access.update({'expected':settings['revision'],'providers':{'speech':True}})
+        h.f.poll();h.n.step();first=h.f.request('pace')
+        for _ in range(4):h.n.step()  # Speech still synthesizing: the slot must stay open.
+        assert h.f.service.provider_current(first['id'],first['epoch'],kind='audio'),'playback gave up on held text'
+        assert h.f.service.attach(first['id'],first['epoch'],{'audio':b'wav','audio_state':'ready'})
+        h.n.step();assert len(h.players)==1,'the speech never reached the player'
+        h.n.close()
+
+
 def t_enabled_startup_pause_resume_and_device_override_do_not_depend_on_views():
     with tempfile.TemporaryDirectory() as d:
         h=Harness(d);h.n.step();assert len(h.workers)==1 and h.args[-1]['microphone']=='Machine Mic'

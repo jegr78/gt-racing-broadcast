@@ -347,6 +347,15 @@ class Service:
         with self._lock:
             self._audio_output = bool(available)
 
+    def ticket_audio_state(self, ticket_id):
+        """The playback owner's view: the history hides a message whose text is held."""
+        self.refresh()
+        with self._lock:
+            if self._ticket is None or self._ticket.id != ticket_id:
+                return None
+            message = self._messages.get(self._ticket.message['id'])
+            return None if message is None else message['audio_state']
+
     def playback_started(self, ticket_id):
         with self._lock:
             if self._ticket is None or self._ticket.id != ticket_id:
