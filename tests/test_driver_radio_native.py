@@ -35,6 +35,22 @@ class Harness:
         return self.n.control(dict(binding=state['binding'],expected=state['revision'],**fields))
 
 
+def t_native_output_releases_the_text_when_its_player_starts():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);settings=h.f.access.read()
+        h.f.access.update({'expected':settings['revision'],'providers':{'speech':True}})
+        h.f.poll();h.n.step();first=h.f.request('pace')
+        assert h.f.service.history()['messages']==[]
+        h.n.step();assert h.f.service.history()['messages']==[] and not h.players
+        assert h.f.service.attach(first['id'],first['epoch'],{'audio':b'wav','audio_state':'ready'})
+        h.n.step();assert len(h.players)==1
+        assert [m['id'] for m in h.f.service.history()['messages']]==[first['id']]
+        h.control(paused=True);h.n.step()
+        second=h.f.request('status')
+        assert second['id'] in [m['id'] for m in h.f.service.history()['messages']],'paused output holds nothing'
+        h.n.close()
+
+
 def t_enabled_startup_pause_resume_and_device_override_do_not_depend_on_views():
     with tempfile.TemporaryDirectory() as d:
         h=Harness(d);h.n.step();assert len(h.workers)==1 and h.args[-1]['microphone']=='Machine Mic'

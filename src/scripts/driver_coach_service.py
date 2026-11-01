@@ -175,6 +175,9 @@ class Service:
                 return None
             action = latest.get('action')
             label = exercise.get('label') if isinstance(exercise, dict) else None
+            spoken = latest.get('message_id')
+        if spoken and self.radio.text_held(spoken):
+            return None
         if not isinstance(action, str) or not action.strip():
             return None
         if not self._current(token, stamp, expected):

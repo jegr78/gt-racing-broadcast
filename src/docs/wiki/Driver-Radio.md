@@ -109,7 +109,10 @@ the human **Race Engineer** desk.
 ## Use the AI Race Engineer
 
 The four buttons request **Fuel status**, **Pace**, **Tyre temperatures** and
-**Short status**. Text appears before optional speech or AI explanation. The desk
+**Short status**. With speech on, the answer's text appears when its audio starts, in
+the desk, the **Radio messages** display and the HUD. If no audio can follow (speech
+off, reply mute, paused listening, failed synthesis), the text appears at once; it
+never waits longer than 10 seconds. An AI explanation is added later. The desk
 adds bounded message history, measurement evidence, optional race length,
 starting compound and fuel reserve. Missing setup limits finish estimates and
 strategy conclusions; it does not prevent measured status answers.
