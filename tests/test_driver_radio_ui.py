@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real signed radio pages and loopback-only producer controls with synthetic state."""
-import copy,http.client,json,sys,tempfile,threading
+import copy,http.client,json,re,sys,tempfile,threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -517,6 +517,87 @@ def t_a_native_refusal_with_both_features_off_hides_the_voice_row():
     if out is None:return
     assert out['before'] is False,out
     assert out['voice'] is True and out['native'] is None and out['pause'] is True and out['engineerOff'] is False,out
+
+
+def _messages_view_script():
+    html=(ROOT/'src/console/driver-radio-messages.html').read_text(encoding='utf8')
+    return re.search(r'<script id="messages-view">(.*?)</script>',html,re.S).group(1)
+
+
+def _run_messages_view(scenario):
+    import shutil,subprocess
+    node=shutil.which('node')
+    if not node:
+        print('  (node not installed, JS check skipped)');return None
+    setup="document.getElementById=byId;register('<ol id=\"messages\"></ol><p id=\"status\"></p>');"
+    program=(_FAKE_DOM+setup+"const view=(()=>{"+_messages_view_script()+"\nreturn window.radioMessages;})();"
+             +"\n(async()=>{"+scenario+"\n})().then(()=>process.exit(0),e=>{console.error(e);process.exit(1);});")
+    out=subprocess.run([node,'-'],input=program,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=30)
+    assert out.returncode==0,out.stderr
+    return json.loads(out.stdout)
+
+
+_LANE='/console/driver-radio/messages'
+
+
+def t_messages_view_is_served_read_only_behind_the_console_gate():
+    with RadioFixture() as f:
+        status,raw,headers=f.request('/console/driver-radio/messages-view')
+        assert status==200 and b'id="messages"' in raw and headers['Cache-Control']=='no-store',(status,raw[:80])
+        assert b'<button' not in raw and b'<input' not in raw and b'<select' not in raw and b'__CREW_FRAME__' not in raw
+        assert b"method:'POST'" not in raw and b'driver-radio-ui.js' not in raw
+        assert f.request('/console/driver-radio/messages-view',subject=None)[0]==401
+        assert f.request('/console/driver-radio/messages-view',method='POST',body={})[0]==404
+        switch(f,coach=True)  # The lane opens for either switch, and so does its page.
+        assert f.request('/console/driver-radio/messages-view')[0]==200
+        switch(f)
+        status,raw,_=f.request('/console/driver-radio/messages-view')
+        assert status==403 and json.loads(raw)['error']['code']=='feature_disabled'
+
+
+def t_messages_view_ships_in_the_package():
+    assert '"console/driver-radio-messages.html", "driver-radio-messages.html"' in (ROOT/'tools/build.py').read_text(encoding='utf8')
+
+
+def t_messages_view_lists_newest_first_with_its_source():
+    messages=[dict(id=1,source='engineer',kind='requested',severity='routine',state='spoken',text='Fuel for 12 laps.',created_at=100),
+              dict(id=2,source='coach',kind='refusal',state='text_only',text='Enable the AI Coach for this profile',created_at=101),
+              dict(id=3,kind='coach',severity='routine',state='cancelled',text='Withdrawn advice.',created_at=102),
+              dict(id=4,source='coach',kind='coach',severity='routine',state='text_only',text='<img src=x> Brake later.',created_at=103),
+              dict(id=5,source='engineer',kind='question',severity='urgent',state='queued',text='Box this lap.',question='Fuel?',explanation='Low margin.',created_at=104)]
+    out=_run_messages_view("""
+     routes[%r]=[200,{epoch:1,messages:%s}];
+     await view.poll();view.stop();
+     const rows=byId('messages').children;
+     console.log(JSON.stringify({text:rows.map(r=>r.textContent),urgent:rows.map(r=>r.className),status:byId('status').textContent}));
+    """%(_LANE,json.dumps(messages)))
+    if out is None:return
+    assert len(out['text'])==3,out  # A refusal is a hint, not advice; a cancelled message is gone.
+    assert 'AI Race Engineer' in out['text'][0] and 'Box this lap.' in out['text'][0],out
+    assert 'You asked: Fuel?' in out['text'][0] and 'Interpretation: Low margin.' in out['text'][0],out
+    assert 'AI Coach' in out['text'][1] and '<img src=x> Brake later.' in out['text'][1],out
+    assert 'AI Race Engineer' in out['text'][2] and 'Fuel for 12 laps.' in out['text'][2],out
+    assert 'urgent' in out['urgent'][0] and 'urgent' not in out['urgent'][1],out
+    assert out['status']=='',out
+
+
+def t_messages_view_keeps_text_on_a_network_error_and_clears_it_when_refused():
+    good=[dict(id=1,source='engineer',kind='requested',severity='routine',state='spoken',text='Fuel for 12 laps.',created_at=100)]
+    out=_run_messages_view("""
+     const text=()=>byId('messages').textContent,status=()=>byId('status').textContent,seen={};
+     routes[%r]=[200,{messages:%s}];await view.poll();seen.good=text();
+     routes[%r]=[503,{error:{message:'down'}}];await view.poll();seen.down=[text(),status()];
+     routes[%r]=[403,{error:{code:'feature_disabled',message:'Off'}}];await view.poll();seen.off=[text(),status()];
+     routes[%r]=[200,{messages:%s}];await view.poll();seen.back=[text(),status()];
+     routes[%r]=[401,{error:{code:'unauthorized'}}];await view.poll();seen.out=[text(),status()];
+     view.stop();console.log(JSON.stringify(seen));
+    """%(_LANE,json.dumps(good),_LANE,_LANE,_LANE,json.dumps(good),_LANE))
+    if out is None:return
+    assert 'Fuel for 12 laps.' in out['good'],out
+    assert 'Fuel for 12 laps.' in out['down'][0] and 'retrying' in out['down'][1],out
+    assert 'Fuel for 12 laps.' not in out['off'][0] and 'Control Center' in out['off'][1],out
+    assert 'Fuel for 12 laps.' in out['back'][0] and out['back'][1]=='',out
+    assert 'Fuel for 12 laps.' not in out['out'][0] and 'Sign in' in out['out'][1],out
 
 
 if __name__=='__main__':
