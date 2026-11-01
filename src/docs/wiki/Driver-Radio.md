@@ -111,18 +111,27 @@ the human **Race Engineer** desk.
 
 **Short status after every lap** in the **AI Race Engineer** card is off by default. With
 it on, each confirmed lap produces one short message, spoken and shown like any other, for
-example `Lap 12, 1:32.4. Fuel for 9.5 laps.` Fuel is left out until a range is measured.
+example `Lap 12, 1:32.4. P3. Fuel for 9.5 laps.` The position, like the one in **Short
+status**, appears only while GT7 reports one. Fuel is left out until a range is measured.
 When a lap beats every earlier one of the session, the update and the **Short status**
 answer name it as your fastest lap. A tyre stop does not reset this. Out laps, pit laps
 and cut laps do not count.
 Warnings take priority over a queued update.
+
+With a race length in laps saved in **Optional race setup**, the update also counts down at
+`10 to go`, `5 to go`, `4 to go`, `3 to go`, `2 to go` and `Final lap`, and **Short status**
+always names the laps left. The last lap gives a closing message instead, for example
+`Started P5, finished P3, best lap: 1:22.015.` The start position needs the relay to be
+listening before the first lap ends. A driver who is lapped and flagged before reaching
+the declared lap count gets no closing message.
 
 ## Pace comparison
 
 A pace trend is available after three comparable completed laps: two as the baseline and
 one as the current lap. The out lap and pit laps do not count. With more laps the windows
 grow to three laps each. A single slow lap shows in the status answer, but the automatic
-pace notice waits for a second slow lap, so one spin or traffic does not trigger it.
+pace notice waits for a second slow lap, so one spin or traffic does not trigger it. Once
+the newest lap is back on pace, the trend is no longer reported as slower.
 
 ## Use the AI Race Engineer
 
@@ -136,9 +145,7 @@ starting compound and fuel reserve. Missing setup limits finish estimates and
 strategy conclusions; it does not prevent measured status answers.
 
 Confirm a tyre change only after it has happened. An inferred stop does not
-confirm a new tyre stint. Slower comparable laps can support conditional tyre
-advice, but tyre wear, traffic and weather causes are not directly measured.
-Pace comparisons use completed eligible laps and show their sample basis.
+confirm a new tyre stint. Pace comparisons use completed eligible laps and show their sample basis.
 
 ![Driver desk with the AI Race Engineer and AI Coach sections](images/console-driver-radio-desktop.png)
 

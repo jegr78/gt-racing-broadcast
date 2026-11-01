@@ -9,7 +9,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_radio_service as radio
-from test_driver_radio_assessment import snapshot
+from test_driver_radio_assessment import lap as lap_row,snapshot
 
 
 def features(engineer=False,coach=False,agent=None):
@@ -485,6 +485,47 @@ def t_one_slow_lap_reports_pace_but_sends_no_notice():
         f.at+=61;f.snap['laps'].append(dict(f.snap['laps'][-1],id='L4',lap=4));f.snap['current']['lap']=5
         f.snap['revision']+=1;f.poll()
         assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1,'a repeat is a trend'
+
+
+def _race(d):
+    f=Fixture(d,snapshot(()))
+    f.snap['instruments']['race_position']=5
+    f.access.update({'expected':f.access.read()['revision'],'announcements':{'lap_updates':True}})
+    f.poll()
+    binding=f.service.refresh()['binding']
+    declared=f.session.read(binding)
+    f.session.update(binding,dict(binding=binding,expected=declared['revision'],setup={'laps':2}))
+    f.snap['revision']+=1;f.poll()
+    return f
+
+
+def _race_lap(f,n,seconds,position):
+    f.snap['laps'].append(dict(lap_row(n,seconds)));f.snap['instruments']['race_position']=position
+    f.snap['current']['lap']=n+1;f.snap['revision']+=1;f.poll()
+
+
+def t_race_end_reports_start_finish_and_best_lap():
+    with tempfile.TemporaryDirectory() as d:
+        f=_race(d)
+        _race_lap(f,1,90,4)
+        assert 'Final lap.' in _lap_rows(f)[-1]['text'],_lap_rows(f)
+        _race_lap(f,2,89.5,3)
+        assert _lap_rows(f)[-1]['text']=='Started P5, finished P3, best lap: 1:29.500.',_lap_rows(f)
+        f.snap['revision']+=1;f.poll()
+        assert len(_lap_rows(f))==2,'one closing message'
+
+
+def t_race_end_without_a_known_start_leaves_it_out():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)  # Relay started after laps were completed.
+        f.snap['instruments']['race_position']=7
+        f.access.update({'expected':f.access.read()['revision'],'announcements':{'lap_updates':True}})
+        f.poll()
+        binding=f.service.refresh()['binding']
+        declared=f.session.read(binding)
+        f.session.update(binding,dict(binding=binding,expected=declared['revision'],setup={'laps':7}))
+        f.snap['revision']+=1;f.poll();_race_lap(f,7,88,6)
+        assert _lap_rows(f)[-1]['text']=='Finished P6, best lap: 1:28.000.',_lap_rows(f)
 
 
 def _lap_rows(f):

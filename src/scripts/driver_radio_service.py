@@ -59,6 +59,7 @@ class Service:
         self._refuel_total = 0
         self._voice_enabled = False
         self._lap_updates = False
+        self._start_position = None
         self._lap_seen, self._lap_key = False, None
         self._speech_enabled = False
         self._audio_output = False
@@ -103,6 +104,7 @@ class Service:
         self._fuel_level, self._previous_fuel, self._refuel_total = 0, None, 0
         self._pace_key, self._pace_at = None, float('-inf')
         self._lap_seen, self._lap_key = False, None
+        self._start_position = None
         self._live = False
 
     def _expire(self, now):
@@ -176,8 +178,7 @@ class Service:
                     + f"Estimated range after reserve {fuel['usable_laps']:.1f} laps. Fuel {fuel['current_l']:.1f} litres.")
             if fuel['state'] == 'provisional':text += ' This estimate is provisional.'
         elif kind == 'pace':
-            text = (f"Recent comparable pace is {result['pace']['delta_s']:.1f} seconds slower. "
-                    'Tyres may contribute. Consider changing them at the next stop; causes remain unknown.')
+            text = f"Recent comparable pace is {result['pace']['delta_s']:.1f} seconds slower."
         source = source or ('coach' if kind == 'coach' else 'engineer')
         message = dict(id=mid, version=1, epoch=self._epoch, binding=self._binding,
                        source=source, kind=kind, preset=preset, severity=severity, text=text,
@@ -321,13 +322,20 @@ class Service:
                 self._publish('pace', 'pace', 'normal', result, now)
                 self._pace_at = now
             self._pace_key = pace_key
+        # The grid position: only known when listening from before the first completed lap.
+        if self._start_position is None and not result.get('completed_laps'):
+            self._start_position = result.get('position')
         # Only a lap completed while listening is news, not one found at start-up.
         lap_id = result.get('latest_lap_id')
         if lap_id != self._lap_key:
             announce = self._lap_seen and self._lap_updates and lap_id is not None
             self._lap_seen, self._lap_key = True, lap_id
             if announce:
-                spoken = dict(result, answers=dict(result['answers'], lap=result['lap_text']))
+                text = result['lap_text']
+                if result.get('race_finished'):
+                    text = result['finish_text']
+                    text = f'Started {self._start_position}, {text}' if self._start_position else text[0].upper()+text[1:]
+                spoken = dict(result, answers=dict(result['answers'], lap=text))
                 message = self._publish('lap', 'lap', 'normal', spoken, now)
                 self._messages[message['id']]['ai_state'] = 'not_requested'
         self._lap_seen = True  # An empty first read still means later laps are new.

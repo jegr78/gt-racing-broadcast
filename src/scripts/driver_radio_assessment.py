@@ -11,6 +11,7 @@ DEFAULTS = dict(fuel_warning_laps=2.0, fuel_urgent_laps=1.0, consumption_laps=5,
                 noise_multiplier=3.0)
 MAX_ROWS = 512
 MIN_PACE_LAPS = 3
+TO_GO_MARKS = (10, 5, 4, 3, 2, 1)
 
 
 def number(value, positive=False):
@@ -101,7 +102,9 @@ def _pace(rows, limits):
     threshold = max(limits['pace_min_s'], baseline * limits['pace_fraction'], mad * limits['noise_multiplier'])
     delta = latest - baseline
     repeats = sum(r['time_s'] - baseline >= threshold for r in recent)
+    # A slow window whose newest lap is back on pace is over, not a trend to report.
     state = ('slower' if delta >= threshold and repeats >= math.ceil(recent_count * 2/3)
+             and recent[-1]['time_s'] - baseline >= threshold
              else 'faster' if delta <= -threshold else 'stable')
     return dict(result, state=state, repeated=repeats >= 2, baseline_ids=[r['id'] for r in base],
                 recent_ids=[r['id'] for r in recent], baseline_s=round(baseline, 3),
@@ -142,12 +145,34 @@ def _is_fastest(latest, snapshot):
     return bool(times) and latest['time_s'] < min(times)
 
 
-def _lap_text(row, usable, fastest):
+def _position(snapshot, live):
+    value = number((snapshot.get('instruments') or {}).get('race_position'), True)
+    return f'P{value:g}' if live and value is not None else None
+
+
+def _to_go(total, completed, milestones_only=False):
+    """Laps left in a race with a declared length, counted from the completed laps."""
+    left = int(total-completed)
+    if left < 1 or (milestones_only and left not in TO_GO_MARKS):
+        return None
+    return 'Final lap.' if left == 1 else f'{left} to go.'
+
+
+def _finish_text(position, best_s):
+    text = f'finished {position}' if position else 'finished'
+    return text+(f', best lap: {_lap_clock(best_s)}' if best_s is not None else '.')
+
+
+def _lap_text(row, usable, fastest, position, to_go=None):
     minutes, seconds = divmod(row['time_s'], 60)
     text = f"{int(minutes)}:{seconds:04.1f}"
     if number(row.get('lap'), True) is not None:
         text = f"Lap {row['lap']:g}, {text}"
     text += ', your fastest lap.' if fastest else '.'
+    if position:
+        text += f' {position}.'
+    if to_go:
+        text += f' {to_go}'
     return text+(f' Fuel for {usable:.1f} laps.' if usable is not None else '')
 
 
@@ -274,8 +299,6 @@ def assess(snapshot, session=None, limits=None):
         pace_text = f"Recent comparable pace is {abs(pace['delta_s']):.1f} seconds {pace['state']}."
         if pace['state']=='stable':
             pace_text = 'Recent comparable pace is stable within the measured noise margin.'
-        if tyres['concern']:
-            pace_text += ' Tyres may be contributing. Consider changing them at the next stop; traffic or other causes remain unknown.'
     if live:
         prefix = []
         if pace['last_s'] is not None:prefix.append(f"Last eligible comparable lap {_lap_clock(pace['last_s'])}")
@@ -293,11 +316,20 @@ def assess(snapshot, session=None, limits=None):
     status_pace = ('Live pace is unavailable.' if not live else 'Pace trend is not yet available.' if pace['state']=='insufficient'
                    else 'Comparable pace is stable.' if pace['state']=='stable'
                    else f"Comparable pace is {abs(pace['delta_s']):.1f} seconds {pace['state']}.")
-    if tyres['concern']:status_pace += ' Tyres may contribute; consider tyres at the next stop. Causes remain uncertain.'
     lap = _latest_lap(snapshot)
     fastest = lap is not None and _is_fastest(lap, snapshot)
-    status_text = status_fuel+' '+status_pace+(' Last lap was your fastest.' if fastest and live else '')
+    position = _position(snapshot, live)
+    total = number(setup.get('laps'), True)
+    completed = number(lap.get('lap'), True) if lap else None
+    race_laps = total is not None and completed is not None
+    status_go = _to_go(total, completed) if race_laps and live else None
+    status_text = ((f'{position}. ' if position else '')+(f'{status_go} ' if status_go else '')+status_fuel+' '+status_pace
+                   +(' Last lap was your fastest.' if fastest and live else ''))
+    best = [r['time_s'] for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
+            if r.get('session_id') == snapshot.get('session_id') and _counts_for_fastest(r)]
     answers = dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_text)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
-                lap_text=_lap_text(lap, usable, fastest) if lap else None, answers=answers)
+                position=position, race_finished=race_laps and completed >= total, completed_laps=completed,
+                finish_text=_finish_text(position, min(best) if best else None),
+                lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None) if lap else None, answers=answers)

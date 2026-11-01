@@ -90,6 +90,7 @@ def t_numbers_are_spoken_with_their_point():
     assert kokoro.speakable('Fuel for 5.7 laps.') == 'Fuel for 5 point 7 laps.'
     assert kokoro.speakable('Lap 14, 1:23.5. Fuel for 4.5 laps.') == 'Lap 14, 1 minute 23 point 5. Fuel for 4 point 5 laps.'
     assert kokoro.speakable('2:05.1') == '2 minutes 5 point 1'
+    assert kokoro.speakable('Lap 8, 1:22.0. P3.') == 'Lap 8, 1 minute 22 point 0. position 3.'
     assert kokoro.speakable('Last lap 83.467 seconds.') == 'Last lap 83 point 4 6 7 seconds.'
     assert kokoro.speakable('Best lap 1:23.467.') == 'Best lap 1 minute 23 point 4 6 7.'
     assert kokoro.speakable('Lap 14 of 20, RM.') == 'Lap 14 of 20, RM.'
