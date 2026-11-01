@@ -3,6 +3,7 @@
 :root{color-scheme:dark}*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#0b1018;color:#edf3fc;font:clamp(20px,2.4vw,32px)/1.35 system-ui,sans-serif}main{padding:clamp(12px,2vw,28px)}a{color:#a9ccff}
 #status{margin:0 0 .6em;color:#ffd27a}#status:empty{display:none}#empty{color:#b7c7dc;margin:0}
 ol{list-style:none;margin:0;padding:0;display:grid;gap:.6em}li{background:#121c2b;border:1px solid #41536b;border-left:.3em solid #41536b;border-radius:8px;padding:.6em .8em}li:first-child{font-size:1.3em}li.coach{border-left-color:#a9ccff}li.engineer{border-left-color:#7fd6a8}li.urgent{border-color:#ff7a6b;background:#2a1518}
+li.old,li.old:first-child{font-size:max(14px,.55em);padding:.3em .6em;background:transparent;border-color:#26303d;border-left-color:#26303d}li.old .text,li.old .note,li.old .meta,li.old .source{color:#8493a8;font-weight:400}
 .meta{display:flex;justify-content:space-between;gap:1em;font-size:max(14px,.62em);color:#b7c7dc}.source{font-weight:700;color:#edf3fc}.text{margin:.15em 0 0;overflow-wrap:anywhere}.note{margin:.2em 0 0;font-size:.72em;color:#b7c7dc;overflow-wrap:anywhere}
 </style></head><body><main><p id="status" role="status"></p><p id="empty" hidden>No messages yet.</p><ol id="messages"></ol></main><script id="messages-view">
 /* Read-only view of the shared radio message lane for a tablet or second monitor. */
@@ -17,9 +18,11 @@ function sourceOf(message){return message.source==='coach'||message.source==='en
 function clock(seconds){return typeof seconds==='number'?new Date(seconds*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';}
 // A refusal is the hint that a feature is off, not advice, and a cancelled message is withdrawn.
 function visible(messages){return (messages||[]).filter(m=>m.kind!=='refusal'&&m.state!=='cancelled').reverse();}
-function row(message){
- const source=sourceOf(message),li=el('li'),meta=el('div',undefined,'meta');
- li.className=source+(message.severity==='urgent'?' urgent':'');
+// Past its validity a message is history: its values may no longer hold.
+function isOld(message,now){return ['expired','superseded'].includes(message.state)||(typeof message.expires_at==='number'&&now>=message.expires_at);}
+function row(message,now){
+ const source=sourceOf(message),li=el('li'),meta=el('div',undefined,'meta'),old=isOld(message,now);
+ li.className=source+(old?' old':message.severity==='urgent'?' urgent':'');
  meta.append(el('span',LABELS[source],'source'),el('span',clock(message.created_at)));
  li.append(meta);
  if(message.question)li.append(el('p','You asked: '+message.question,'note'));
@@ -27,11 +30,13 @@ function row(message){
  if(message.explanation)li.append(el('p','Interpretation: '+message.explanation,'note'));
  return li;
 }
-function render(messages){
- const key=JSON.stringify(messages);
+function render(messages,now){
+ const key=JSON.stringify([messages,messages.map(message=>isOld(message,now))]);
  if(key===shown)return;
- shown=key;list.replaceChildren(...messages.map(row));empty.hidden=messages.length>0;
+ shown=key;list.replaceChildren(...messages.map(message=>row(message,now)));empty.hidden=messages.length>0;
 }
+// The relay's clock decides validity, so a tablet with a wrong clock still dims correctly.
+function serverNow(response){const sent=Date.parse(response.headers?.get('Date'));return (Number.isNaN(sent)?Date.now():sent)/1000;}
 // A refused view drops what it showed: a switched-off feature leaves no data on screen.
 function refuse(text,link){
  shown=null;list.replaceChildren();empty.hidden=true;status.textContent=text;
@@ -44,7 +49,7 @@ async function poll(){
   if(response.status===401)refuse('Sign in to the Console to see radio messages.',true);
   else if(response.status===403)refuse('Off · enable the AI Race Engineer or the AI Coach in the Control Center');
   else if(!response.ok)status.textContent='Connection lost · retrying';
-  else{const data=await response.json();status.textContent='';render(visible(data.messages));}
+  else{const data=await response.json();status.textContent='';render(visible(data.messages),serverNow(response));}
  }catch(error){status.textContent='Connection lost · retrying';}
  finally{clearTimeout(abort);if(!stopped){clearTimeout(timer);timer=setTimeout(poll,POLL_MS);}}
 }

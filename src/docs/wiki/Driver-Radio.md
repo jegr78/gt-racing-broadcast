@@ -40,7 +40,10 @@ messages; with the AI Race Engineer alone, no coach messages leave the relay.
 **Radio messages** on the Console launcher opens
 `/console/driver-radio/messages-view`: a read-only display for a tablet or a second
 monitor. It lists the messages of the switched-on features, newest first and in
-large type, each with its source (**AI Race Engineer** or **AI Coach**) and time.
+large type, each with its source (**AI Race Engineer** or **AI Coach**) and time. A
+message past its validity (30 seconds, urgent ones 15) stays listed, small and dimmed,
+because its values may no longer hold. The list empties on a new session or relay restart
+and keeps the last 32 messages.
 It has no controls and needs the same Console sign-in as the driver desk. Switching
 both features off, or signing out, empties it at the next poll; after a connection
 loss it keeps the last messages and retries.
