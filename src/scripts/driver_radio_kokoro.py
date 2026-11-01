@@ -156,7 +156,7 @@ class KokoroSpeech:
 
     def prepare(self):
         try:self._start()
-        except (OSError,ValueError):pass
+        except (OSError,ValueError):pass  # Warming is optional; synthesize reports a real failure.
 
     def _read(self,proc):
         try:
@@ -168,7 +168,7 @@ class KokoroSpeech:
                     if doc.get('ready') is True:self._loaded=True
                     else:self._reply=doc
                     self._state.notify_all()
-        except (OSError,ValueError,RecursionError,AttributeError):pass
+        except (OSError,ValueError,RecursionError,AttributeError):pass  # A broken stream ends this reader; waiters see the dead process.
         with self._state:self._state.notify_all()
 
     def _wait(self,done,stopped,deadline):
@@ -217,7 +217,7 @@ class KokoroSpeech:
             ai_jobs.terminate_tree(proc,tree)
             for stream in (proc.stdin,proc.stdout):
                 try:stream.close()
-                except OSError:pass
+                except OSError:pass  # The process is gone; a failed close changes nothing.
         elif tree is not None:tree.close()
 
     def close(self):

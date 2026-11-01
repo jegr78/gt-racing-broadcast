@@ -166,7 +166,7 @@ def t_unsupported_platform_and_pins_are_explicit():
     try:
         kokoro.target('Darwin', 'x86_64')
     except ValueError:
-        pass
+        pass  # The expected refusal.
     else:
         raise AssertionError('Intel macOS has no ONNX Runtime wheel')
     for url, digest in [*kokoro.RUNTIMES.values(), *kokoro.MODEL_FILES.values()]:
