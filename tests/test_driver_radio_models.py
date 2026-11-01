@@ -78,6 +78,24 @@ def t_corrupt_download_unsafe_archives_and_failed_validation_publish_nothing():
         assert not (Path(d)/'radio-voice').exists()
 
 
+def t_download_survives_a_slow_host_within_its_deadline():
+    payload=b'x'*4
+    class Reply:
+        def __init__(self):self.left=[b'x']*4+[b'']
+        def __enter__(self):return self
+        def __exit__(self,*a):return False
+        def read(self,_size):return self.left.pop(0)
+    checksum=m.hashlib.sha256(payload).hexdigest()
+    ticks=iter(range(0,10000,60))
+    with patch.object(m.time,'monotonic',lambda:next(ticks)):  # 240 s for this file
+        assert m.download('https://fixture.invalid/archive',checksum,64,open_url=lambda *a,**k:Reply())==payload
+    ticks=iter(range(0,100000,m.DOWNLOAD_DEADLINE_S+1))
+    with patch.object(m.time,'monotonic',lambda:next(ticks)):
+        try:m.download('https://fixture.invalid/archive',checksum,64,open_url=lambda *a,**k:Reply())
+        except ValueError as exc:assert 'exceeded' in str(exc)
+        else:raise AssertionError('A stalled download must stop at its deadline')
+
+
 def t_archive_rejects_original_names_even_when_the_reader_normalizes_them():
     class NormalizedArchive:
         def __enter__(self):return self
