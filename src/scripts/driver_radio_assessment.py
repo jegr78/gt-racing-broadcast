@@ -330,6 +330,6 @@ def assess(snapshot, session=None, limits=None):
     answers = dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_text)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
-                position=position, race_finished=race_laps and completed >= total, completed_laps=completed,
+                position=position, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
                 finish_text=_finish_text(position, min(best) if best else None),
                 lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None) if lap else None, answers=answers)

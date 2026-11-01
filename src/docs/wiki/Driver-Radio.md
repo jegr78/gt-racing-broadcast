@@ -120,7 +120,11 @@ Warnings take priority over a queued update.
 
 With a race length in laps saved in **Optional race setup**, the update also counts down at
 `10 to go`, `5 to go`, `4 to go`, `3 to go`, `2 to go` and `Final lap`, and **Short status**
-always names the laps left. The last lap gives a closing message instead, for example
+always names the laps left.
+
+**Start and finish report** in the same card is a separate switch, off by default, and
+needs that race length. It announces `Starting P5, 12 laps. Let's go!` once the position
+is known before the first lap ends, and replaces the update of the last lap with
 `Started P5, finished P3, best lap: 1:22.015.` The start position needs the relay to be
 listening before the first lap ends. A driver who is lapped and flagged before reaching
 the declared lap count gets no closing message.

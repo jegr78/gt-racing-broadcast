@@ -364,12 +364,12 @@ def t_lap_updates_default_off_and_reject_invalid_values():
     with tempfile.TemporaryDirectory() as d:
         store = radio.Store(d, True)
         store.update({'expected': 0, 'features': features(True, False)})
-        assert store.read()['announcements'] == {'lap_updates': False}
+        assert store.read()['announcements'] == {'lap_updates': False, 'race_reports': False}
         doc = json.loads(store.path.read_text(encoding='utf8'))
         del doc['announcements']
         store.path.write_text(json.dumps(doc), encoding='utf8')
-        assert store.read()['announcements'] == {'lap_updates': False}
-        for bad in ({'lap_updates': 'yes'}, {'other': True}):
+        assert store.read()['announcements'] == {'lap_updates': False, 'race_reports': False}
+        for bad in ({'lap_updates': 'yes'}, {'race_reports': 'yes'}, {'other': True}):
             try:
                 store.update({'expected': store.read()['revision'], 'announcements': bad})
             except radio.RadioError as exc:
