@@ -103,7 +103,7 @@ def t_smoke_http_requires_typed_confirmation_and_freezes_profile_before_job():
         profile_ops=ui_ops.PROFILE_OPS,active_profile=lambda:active['name'],jobs=Jobs())
     server,port=fixture._serve(ctx)
     try:
-        for typed in (None,True,'','CLEAR SCHEDULE other','CLEAR SCHEDULE demo\nextra',' '*513+'CLEAR SCHEDULE demo'):
+        for typed in (None,True,'','CLEAR SCHEDULE other','CLEAR SCHEDULE demo\nextra',' '*513+'CLEAR SCHEDULE demo','CLEAR SCHEDULE demo'+' '*(512-len('CLEAR SCHEDULE demo'))):
             status,raw=fixture._post_json(port,'/api/op/smoketest',{'profile':'demo','params':{'minutes':2},'confirmation':typed})
             result=json.loads(raw)
             assert status==400 and not result['ok'] and 'Type CLEAR SCHEDULE demo exactly' in result['error'],(status,result)

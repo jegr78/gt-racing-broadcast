@@ -1467,7 +1467,7 @@ def make_handler(ctx):
                     if not current:
                         return self._json({'ok':False,'error':'Select an active league profile first'},code=400)
                     typed = body.get('confirmation')
-                    if not isinstance(typed, str) or len(typed)>512 or not smoketest.phrase_ok(current, typed):
+                    if not isinstance(typed, str) or len(typed)>511 or not smoketest.phrase_ok(current, typed):
                         return self._json({'ok':False,'error':'Type CLEAR SCHEDULE '+current+' exactly to confirm'},code=400)
                     job_id, err = ctx['jobs'].start(name, argv, input_text=typed+'\n')
                 else:
