@@ -118,6 +118,13 @@ def t_running_apps_data_never_raises():
     assert d == {"obs": False, "discord": False}
 
 
+def t_radio_voice_actions_map_to_the_cli():
+    assert ui_ops.build_argv('radio-provision', None) == ['radio', 'provision']
+    assert ui_ops.build_argv('radio-provision', {'whisper': True}) == ['radio', 'provision', '--whisper']
+    assert ui_ops.build_argv('radio-provision', {'whisper': False}) == ['radio', 'provision']
+    assert ui_ops.build_argv('radio-smoke', None) == ['radio', 'smoke', '--allow-cloud']
+
+
 def t_ops_registry_shape():
     assert ui_ops.OPS["relay-start"] == ["relay", "start"]
     assert ui_ops.OPS["obs-refresh"] == ["obs", "refresh"]
