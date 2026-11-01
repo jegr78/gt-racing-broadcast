@@ -17,22 +17,20 @@ by either switch.
 
 | Output | AI Race Engineer | AI Coach |
 |---|---|---|
-| Text on a second device | **AI Race Engineer** section of the Console driver desk: presets, latest answer and its messages. The messages alone: **Radio messages** display | **AI Coach** section of the same desk: training controls, focus, review, debrief, private history and its messages. The messages alone: **Radio messages** display |
+| Text on a second device | **AI Race Engineer** section of the Console driver desk: presets and latest answer. All messages: **Radio messages** display | **AI Coach** section of the same desk: training controls, focus, review, debrief and private history. All messages: **Radio messages** display |
 | Audio | Native voice on the relay PC, when the shared **Voice** settings enable it | The same native voice and the same single playback slot |
 | Voice controls | **Voice** row above both sections (pause listening, reply mute, volume, input language), shown while either feature is on | The same row |
 | Control Center | **AI Race Engineer** card (switch and agent) | **AI Coach** card (switch and agent) and **AI Coach training** below the settings |
 | HUD in OBS | **Race engineer** slot, off until its **Visible** is switched on in the overlay builder | **Coach** slot, off until its **Visible** is switched on |
 
-Every message carries its source, so an engineer answer never appears in the
-AI Coach section and a coach review never appears in the AI Race Engineer
-section. A message labelled **Feature off** is the hint a switched-off feature
+Every message carries its source, shown on the **Radio messages** display. A message labelled **Feature off** is the hint a switched-off feature
 gives when someone asks it something by voice. It appears in the **Voice** row,
 because the switched-off feature's own section only says Off, and it stays there
 until the next message arrives; it never reaches the HUD. The relay serves the
 shared message lane and the native voice controls while either feature is on,
 and sends each view only the messages of the features that are switched on
 (plus those hints): with the AI Coach alone,
-the desk shows the coach messages and the **Voice** row, and no engineer
+the **Radio messages** display shows the coach messages, and no engineer
 messages; with the AI Race Engineer alone, no coach messages leave the relay.
 
 ## Radio messages display
