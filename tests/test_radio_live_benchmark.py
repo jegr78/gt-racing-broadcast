@@ -80,13 +80,15 @@ def t_measurement_attempts_and_budgets_reject_unbounded_input_before_provider_wo
     class Blocked:
         def explain(self,*args):raise AssertionError('Invalid measurement reached a provider')
     for attempts in (True,0,3):
-        try:bench.measure(Blocked(),None,'fixture',bench.sample(),attempts=attempts)
+        try:
+            bench.measure(Blocked(),None,'fixture',bench.sample(),attempts=attempts)
+            raise AssertionError('Unbounded attempt count accepted')
         except ValueError:pass
-        else:raise AssertionError('Unbounded attempt count accepted')
     for budget in (True,7,61,float('nan'),float('inf')):
-        try:bench.measure(Blocked(),None,'fixture',bench.sample(),ai_budget=budget)
+        try:
+            bench.measure(Blocked(),None,'fixture',bench.sample(),ai_budget=budget)
+            raise AssertionError('Unbounded measurement budget accepted')
         except ValueError:pass
-        else:raise AssertionError('Unbounded measurement budget accepted')
 
 
 def t_measurement_reports_completion_beyond_the_unchanged_live_budget():

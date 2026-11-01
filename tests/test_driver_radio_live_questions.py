@@ -283,9 +283,10 @@ def t_measurement_can_observe_slow_agent_completion_while_live_calls_keep_the_de
             except providers.ProviderError as exc:assert exc.code=='timed_out' and budgets[-1]==8
             else:raise AssertionError('Production LiveAI accepted a reply outside its existing budget')
         for value in (True,7,61,float('nan'),float('inf')):
-            try:live.LiveAI(machine,max_budget=value)
+            try:
+                live.LiveAI(machine,max_budget=value)
+                raise AssertionError('Unbounded measurement budget accepted')
             except ValueError:pass
-            else:raise AssertionError('Unbounded measurement budget accepted')
 
 
 def t_free_question_requires_live_data_even_with_an_agent_selected():
