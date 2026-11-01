@@ -58,6 +58,12 @@ def _provider_settings(value):
                 voice=value.get('voice', 'am_michael'))
 
 
+def _announcement_settings(value):
+    if not isinstance(value, dict) or set(value) - {'lap_updates'} or type(value.get('lap_updates', False)) is not bool:
+        raise ValueError('Invalid radio announcements')
+    return dict(lap_updates=value.get('lap_updates', False))
+
+
 def _feature_settings(value, current=None):
     """Both AI feature switches, each with its own optional agent. A partial update
     changes only the fields it names; anything unknown is invalid."""
@@ -98,7 +104,7 @@ def _valid(doc):
         return False
     return (isinstance(doc, dict)
             and {'version', 'revision', 'features', 'voice'} <= set(doc)
-            and not set(doc) - {'version', 'revision', 'features', 'voice', 'limits', 'providers', 'native'}
+            and not set(doc) - {'version', 'revision', 'features', 'voice', 'limits', 'providers', 'native', 'announcements'}
             and type(doc['version']) is int and doc['version'] == 2
             and type(doc['revision']) is int and doc['revision'] >= 0
             and features and _voice(doc['voice']))
@@ -122,7 +128,7 @@ class Store:
             return dict(version=2, revision=0, features=_feature_settings({}),
                         voice=dict(enabled=False, microphone=None, input_language='en'),
                         limits=driver_radio_assessment.settings(), providers=_provider_settings({}),
-                        native=driver_radio_voice_config.settings())
+                        native=driver_radio_voice_config.settings(), announcements=_announcement_settings({}))
         except OSError as exc:
             raise RadioError('settings_unavailable', 'Radio settings are unreadable; repair locally') from exc
         try:
@@ -132,13 +138,14 @@ class Store:
             doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
             doc['providers'] = _provider_settings(doc.get('providers', {}))
             doc['native'] = driver_radio_voice_config.settings(doc.get('native'))
+            doc['announcements'] = _announcement_settings(doc.get('announcements', {}))
             return doc
         except (ValueError, TypeError, RecursionError) as exc:
             raise RadioError('settings_unavailable', 'Radio settings are unreadable; repair locally') from exc
 
     def update(self, body):
         _require(self.available, 'source_unavailable', 'Radio requires a Solo POV telemetry profile')
-        _require(isinstance(body, dict) and not set(body) - {'expected', 'features', 'voice', 'limits', 'providers', 'native'},
+        _require(isinstance(body, dict) and not set(body) - {'expected', 'features', 'voice', 'limits', 'providers', 'native', 'announcements'},
                  'invalid_settings', 'Unsupported radio settings')
         try:
             with _LOCK, gt7_context._file_lock(str(self.path)):
@@ -153,6 +160,7 @@ class Store:
                     doc['limits'] = driver_radio_assessment.settings(doc.get('limits'))
                     doc['providers'] = _provider_settings(doc.get('providers', {}))
                     doc['native'] = driver_radio_voice_config.settings(doc.get('native'))
+                    doc['announcements'] = _announcement_settings(doc.get('announcements', {}))
                 except ValueError as exc:
                     raise RadioError('invalid_settings', 'Invalid radio features, limits or service selection') from exc
                 doc['revision'] += 1

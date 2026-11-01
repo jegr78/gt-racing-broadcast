@@ -10,6 +10,7 @@ DEFAULTS = dict(fuel_warning_laps=2.0, fuel_urgent_laps=1.0, consumption_laps=5,
                 baseline_laps=3, recent_laps=3, pace_min_s=.5, pace_fraction=.005,
                 noise_multiplier=3.0)
 MAX_ROWS = 512
+MIN_PACE_LAPS = 3
 
 
 def number(value, positive=False):
@@ -82,11 +83,15 @@ def _cohort(snapshot, service):
 
 def _pace(rows, limits):
     rows = [r for r in rows if number(r.get('time_s'), True) is not None]
+    # Early in a stint the windows share the laps there are, up to their limits.
     base_count, recent_count = limits['baseline_laps'], limits['recent_laps']
+    if len(rows) < base_count + recent_count:
+        recent_count = min(recent_count, max(1, len(rows)//2))
+        base_count = min(base_count, len(rows)-recent_count)
     result = dict(state='insufficient', last_s=rows[-1]['time_s'] if rows else None,
                   best_s=min((r['time_s'] for r in rows), default=None),
                   baseline_ids=[], recent_ids=[], delta_s=None, threshold_s=None)
-    if len(rows) < base_count + recent_count:
+    if len(rows) < MIN_PACE_LAPS:
         return result
     base = rows[-base_count-recent_count:-recent_count]
     recent = rows[-recent_count:]
@@ -98,9 +103,28 @@ def _pace(rows, limits):
     repeats = sum(r['time_s'] - baseline >= threshold for r in recent)
     state = ('slower' if delta >= threshold and repeats >= math.ceil(recent_count * 2/3)
              else 'faster' if delta <= -threshold else 'stable')
-    return dict(result, state=state, baseline_ids=[r['id'] for r in base],
+    return dict(result, state=state, repeated=repeats >= 2, baseline_ids=[r['id'] for r in base],
                 recent_ids=[r['id'] for r in recent], baseline_s=round(baseline, 3),
                 recent_s=round(latest, 3), delta_s=round(delta, 3), threshold_s=round(threshold, 3))
+
+
+def _latest_lap(snapshot):
+    """The newest confirmed timed lap of this session, comparable or not: a lap update
+    also reports the out lap, which never enters the pace comparison."""
+    for row in reversed((snapshot.get('laps') or [])[-MAX_ROWS:]):
+        if row.get('session_id') != snapshot.get('session_id'):
+            return None
+        if row.get('state') == 'confirmed' and number(row.get('time_s'), True) is not None:
+            return row
+    return None
+
+
+def _lap_text(row, usable):
+    minutes, seconds = divmod(row['time_s'], 60)
+    text = f"{int(minutes)}:{seconds:04.1f}."
+    if number(row.get('lap'), True) is not None:
+        text = f"Lap {row['lap']:g}, {text}"
+    return text+(f' Fuel for {usable:.1f} laps.' if usable is not None else '')
 
 
 def _finish(snapshot, setup, rows, consumption, usable):
@@ -190,7 +214,7 @@ def assess(snapshot, session=None, limits=None):
     compound = service.get('compound') or (snapshot.get('current') or {}).get('compound') or setup.get('starting_compound')
     tyres = dict(temperatures_c=temps, order=['front_left','front_right','rear_left','rear_right'],
                  compound=compound, age_laps=(snapshot.get('current') or {}).get('tyre_age_laps') if not service else None,
-                 wear=None, concern=pace['state']=='slower' and live)
+                 wear=None, concern=pace['state']=='slower' and pace['repeated'] and live)
     uncertainty = ['Tyre wear, traffic and weather causes are not measured.']
     if not (snapshot.get('current') or {}).get('context_confirmed'):
         uncertainty.append('Current strategy and tyre context may be incomplete.')
@@ -246,6 +270,8 @@ def assess(snapshot, session=None, limits=None):
                    else 'Comparable pace is stable.' if pace['state']=='stable'
                    else f"Comparable pace is {abs(pace['delta_s']):.1f} seconds {pace['state']}.")
     if tyres['concern']:status_pace += ' Tyres may contribute; consider tyres at the next stop. Causes remain uncertain.'
+    lap = _latest_lap(snapshot)
+    answers = dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_fuel+' '+status_pace)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
-                tyres=tyres, uncertainties=uncertainty, limits=limits,
-                answers=dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_fuel+' '+status_pace))
+                tyres=tyres, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
+                lap_text=_lap_text(lap, usable) if lap else None, answers=answers)

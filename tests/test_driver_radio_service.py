@@ -477,6 +477,54 @@ def t_held_text_appears_by_itself_after_the_bound():
         assert f.service.history(since=f.service.history()['revision'])['changed'] is False
 
 
+def t_one_slow_lap_reports_pace_but_sends_no_notice():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d,snapshot((90,90,92)));f.poll()
+        assert f.poll() and not [m for m in f.service.history()['messages'] if m['kind']=='pace']
+        assert '2.0 seconds slower' in f.request('status')['text']
+        f.at+=61;f.snap['laps'].append(dict(f.snap['laps'][-1],id='L4',lap=4));f.snap['current']['lap']=5
+        f.snap['revision']+=1;f.poll()
+        assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1,'a repeat is a trend'
+
+
+def _lap_rows(f):
+    return [m for m in f.service.history()['messages'] if m['kind']=='lap']
+
+
+def _complete_lap(f,n):
+    f.snap['laps'].append(dict(f.snap['laps'][-1],id='L'+str(n),lap=n,time_s=90))
+    f.snap['current']['lap']=n+1;f.snap['revision']+=1;f.poll()
+
+
+def t_lap_updates_follow_their_switch_and_each_lap_once():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();_complete_lap(f,7)
+        assert _lap_rows(f)==[],'off by default'
+        f.access.update({'expected':f.access.read()['revision'],'announcements':{'lap_updates':True}})
+        f.poll();f.snap['revision']+=1;f.poll()
+        assert _lap_rows(f)==[],'a lap completed before switching on is not news'
+        _complete_lap(f,8)
+        rows=_lap_rows(f)
+        assert len(rows)==1 and rows[0]['text'].startswith('Lap 8, 1:30.0.') and rows[0]['ai_state']=='not_requested',rows
+        f.snap['revision']+=1;f.poll()
+        assert len(_lap_rows(f))==1,'one message per lap'
+        _complete_lap(f,9)
+        assert len(_lap_rows(f))==2
+        f.access.update({'expected':f.access.read()['revision'],'announcements':{'lap_updates':False}})
+        f.poll();_complete_lap(f,10)
+        assert _lap_rows(f)==[],'saved settings start a new message context; no update follows'
+
+
+def t_lap_update_on_a_relay_start_mid_session_stays_quiet():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d)
+        f.access.update({'expected':f.access.read()['revision'],'announcements':{'lap_updates':True}})
+        f.poll()
+        assert _lap_rows(f)==[]
+        _complete_lap(f,7)
+        assert len(_lap_rows(f))==1
+
+
 def t_hud_text_follows_message_life():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);f.poll()

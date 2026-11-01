@@ -109,6 +109,20 @@ the human **Race Engineer** desk.
 
 ![Driver-only Console launcher](images/console-driver-radio-launcher.png)
 
+## Lap updates
+
+**Short status after every lap** in the **AI Race Engineer** card is off by default. With
+it on, each confirmed lap produces one short message, spoken and shown like any other, for
+example `Lap 12, 1:32.4. Fuel for 9.5 laps.` Fuel is left out until a range is measured.
+Warnings take priority over a queued update.
+
+## Pace comparison
+
+A pace trend is available after three comparable completed laps: two as the baseline and
+one as the current lap. The out lap and pit laps do not count. With more laps the windows
+grow to three laps each. A single slow lap shows in the status answer, but the automatic
+pace notice waits for a second slow lap, so one spin or traffic does not trigger it.
+
 ## Use the AI Race Engineer
 
 The four buttons request **Fuel status**, **Pace**, **Tyre temperatures** and

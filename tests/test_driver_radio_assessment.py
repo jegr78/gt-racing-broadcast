@@ -31,6 +31,16 @@ def review(snap, session=None, limits=None):
     return radio.assess(snap, session, limits)
 
 
+def t_lap_text_uses_the_newest_confirmed_lap():
+    snap=snapshot((90,92.46));data=review(snap)
+    assert data['latest_lap_id']=='L2' and data['lap_text'].startswith('Lap 2, 1:32.5. Fuel for ') and data['lap_text'].endswith(' laps.'),data['lap_text']
+    snap['laps'][-1]=dict(snap['laps'][-1],state='provisional')
+    assert review(snap)['latest_lap_id']=='L1'
+    snap['instruments']={}
+    assert review(snap)['lap_text']=='Lap 1, 1:30.0.'
+    assert review({})['lap_text'] is None
+
+
 def t_all_presets_have_evidence_and_no_provider_dependency():
     data=review(snapshot(), {'setup':{}, 'service':None})
     assert set(data['answers'])=={'fuel','pace','tyres','status'}
@@ -65,10 +75,14 @@ def t_pace_requires_repeated_comparable_evidence():
     assert review(snapshot((90,90,90,90,90,130)))['pace']['state']=='stable'
     assert review(snapshot((90,94,86,91,94,89)))['pace']['state']=='stable'
     assert review(snapshot((90,90,90,89,89,89)))['pace']['state']=='faster'
-    assert review(snapshot((90,90,91)))['pace']['state']=='insufficient'
-    assert review(snapshot((90,90,90,91,91)))['pace']['state']=='insufficient'
+    assert review(snapshot((90,91)))['pace']['state']=='insufficient'
+    early=review(snapshot((90,90,91)))
+    assert early['pace']['state']=='slower' and early['pace']['delta_s']==1,'three comparable laps are enough'
+    assert not early['pace']['repeated'] and not early['tyres']['concern'],'one slow lap is no tyre concern'
+    four=review(snapshot((90,90,91,91)))['pace']
+    assert four['baseline_ids']==['L1','L2'] and four['recent_ids']==['L3','L4'] and four['repeated']
     snap=snapshot();snap['laps'][2]['state']='unconfirmed'
-    assert review(snap)['pace']['state']=='insufficient'
+    assert 'L3' not in review(snap)['pace']['baseline_ids'],'an unconfirmed lap never counts'
     for field,value in (('session_id','other'),('car_id',2),('track_id','other'),('compound','RS'),
                         ('strategy',{'fuel_map':6}),('after_service',True)):
         snap=snapshot()
@@ -76,7 +90,7 @@ def t_pace_requires_repeated_comparable_evidence():
         snap['laps'][-3][field]=value
         assert review(snap)['pace']['state']=='insufficient', (field,review(snap)['pace'])
     snap=snapshot();snap['laps'][2]['analysis_role']='pit'
-    assert review(snap)['pace']['state']=='insufficient'
+    assert 'L3' not in review(snap)['pace']['baseline_ids'],'a pit lap never counts'
 
 
 def t_service_resets_evidence_without_inventing_tyres_or_wear():
