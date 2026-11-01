@@ -59,9 +59,10 @@ def _provider_settings(value):
 
 
 def _announcement_settings(value):
-    if not isinstance(value, dict) or set(value) - {'lap_updates'} or type(value.get('lap_updates', False)) is not bool:
+    if (not isinstance(value, dict) or set(value) - {'lap_updates', 'race_reports'}
+            or type(value.get('lap_updates', False)) is not bool or type(value.get('race_reports', False)) is not bool):
         raise ValueError('Invalid radio announcements')
-    return dict(lap_updates=value.get('lap_updates', False))
+    return dict(lap_updates=value.get('lap_updates', False), race_reports=value.get('race_reports', False))
 
 
 def _feature_settings(value, current=None):

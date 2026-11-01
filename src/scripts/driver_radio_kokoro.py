@@ -51,6 +51,7 @@ def _lap_time(match):
 def speakable(text):
     """Kokoro reads 5.7 as five seven, which sounds like a different value. Only the
     spoken text changes; the message keeps its digits."""
+    text=re.sub(r'\bP(\d+)\b',r'position \1',text)
     text=re.sub(r'\b(\d+):(\d{2})\.(\d+)\b',_lap_time,text)
     return re.sub(r'\b(\d+)\.(\d+)\b',lambda m:f"{m[1]} point {' '.join(m[2])}",text)
 
