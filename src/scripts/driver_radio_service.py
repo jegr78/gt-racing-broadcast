@@ -58,6 +58,8 @@ class Service:
         self._previous_fuel = None
         self._refuel_total = 0
         self._voice_enabled = False
+        self._lap_updates = False
+        self._lap_seen, self._lap_key = False, None
         self._speech_enabled = False
         self._audio_output = False
         self._pace_at = float('-inf')
@@ -100,6 +102,7 @@ class Service:
         self._epoch = uuid.uuid4().hex
         self._fuel_level, self._previous_fuel, self._refuel_total = 0, None, 0
         self._pace_key, self._pace_at = None, float('-inf')
+        self._lap_seen, self._lap_key = False, None
         self._live = False
 
     def _expire(self, now):
@@ -264,6 +267,7 @@ class Service:
                               for name in access.FEATURES}
             self._voice_enabled = config['voice']['enabled'] and enabled
             self._speech_enabled = config['providers']['speech'] is True
+            self._lap_updates = config['announcements']['lap_updates'] is True
             now = self.clock()
             self._expire(now)
             signature = (key, snapshot.get('revision'), snapshot.get('receipt', {}).get('state'),
@@ -311,11 +315,22 @@ class Service:
             self._publish('fuel', 'fuel', fuel['severity'], result, now)
             self._fuel_level = level
         pace_key = tuple(result['pace']['recent_ids'])
-        if result['pace']['state'] == 'slower' and pace_key != self._pace_key:
+        # One bad lap (a spin, traffic) is not a trend: the notice needs a repeat.
+        if result['pace']['state'] == 'slower' and result['pace'].get('repeated') and pace_key != self._pace_key:
             if now - self._pace_at >= PACE_COOLDOWN:
                 self._publish('pace', 'pace', 'normal', result, now)
                 self._pace_at = now
             self._pace_key = pace_key
+        # Only a lap completed while listening is news, not one found at start-up.
+        lap_id = result.get('latest_lap_id')
+        if lap_id != self._lap_key:
+            announce = self._lap_seen and self._lap_updates and lap_id is not None
+            self._lap_seen, self._lap_key = True, lap_id
+            if announce:
+                spoken = dict(result, answers=dict(result['answers'], lap=result['lap_text']))
+                message = self._publish('lap', 'lap', 'normal', spoken, now)
+                self._messages[message['id']]['ai_state'] = 'not_requested'
+        self._lap_seen = True  # An empty first read still means later laps are new.
 
     def _state(self):
         return copy.deepcopy(dict(version=1, revision=self._revision, epoch=self._epoch,

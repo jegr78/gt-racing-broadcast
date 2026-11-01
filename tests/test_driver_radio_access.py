@@ -360,6 +360,24 @@ def t_native_service_selection_rejects_paths_unknown_engines_and_unbounded_contr
         assert state['native']['stt']=='whisper' and state['revision']==1
 
 
+def t_lap_updates_default_off_and_reject_invalid_values():
+    with tempfile.TemporaryDirectory() as d:
+        store = radio.Store(d, True)
+        store.update({'expected': 0, 'features': features(True, False)})
+        assert store.read()['announcements'] == {'lap_updates': False}
+        doc = json.loads(store.path.read_text(encoding='utf8'))
+        del doc['announcements']
+        store.path.write_text(json.dumps(doc), encoding='utf8')
+        assert store.read()['announcements'] == {'lap_updates': False}
+        for bad in ({'lap_updates': 'yes'}, {'other': True}):
+            try:
+                store.update({'expected': store.read()['revision'], 'announcements': bad})
+            except radio.RadioError as exc:
+                assert exc.code == 'invalid_settings', exc.code
+            else:
+                raise AssertionError(bad)
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):
