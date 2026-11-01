@@ -6466,7 +6466,7 @@ def radio_provision_cmd(rest):
     import driver_radio_models
     parser = argparse.ArgumentParser(prog="racecast radio provision")
     parser.add_argument("--whisper", action="store_true", help="also download multilingual tiny weights; install whisper-cli separately")
-    parser.add_argument("--kokoro", action="store_true", help="install only the local Kokoro speech runtime (about 500 MB)")
+    parser.add_argument("--kokoro", action="store_true", help="install only the local Kokoro speech runtime (about 400 MB)")
     args = parser.parse_args(rest)
     try:
         if args.kokoro:
@@ -6474,8 +6474,8 @@ def radio_provision_cmd(rest):
             print(json.dumps(driver_radio_kokoro.provision(_runtime_base_dir())))
             return
         print(json.dumps(driver_radio_models.provision(_runtime_base_dir(), whisper=args.whisper)))
-    except (OSError, ValueError, subprocess.SubprocessError):
-        sys.exit("Native voice provisioning failed; verify network, disk space and the local model directory")
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        sys.exit(f"Native voice provisioning failed ({exc}); verify network, disk space and the local model directory")
 
 
 def radio_smoke_cmd(rest):

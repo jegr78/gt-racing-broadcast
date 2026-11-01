@@ -246,7 +246,7 @@ fails, the text appears without audio. Speech output is English.
 
 **Local Kokoro** is the default. It runs on the relay PC, needs no key and sends nothing to a service. The
 voices are Michael (default), Fenrir, Heart and George. Choose **Install Kokoro voices**
-(`racecast radio provision --kokoro`) once. It downloads about 500 MB: a private Python
+(`racecast radio provision --kokoro`) once. It downloads about 400 MB: a private Python
 runtime, hash-pinned packages and the model. **Test Kokoro** (`racecast radio smoke
 --kokoro`) measures the model load and the speed. Each synthesis uses about four CPU
 cores at below-normal priority; check OBS and your game under real load before relying
