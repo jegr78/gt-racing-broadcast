@@ -47,6 +47,7 @@ def t_pace_answer_gives_lap_times_as_minutes_seconds_millis():
     assert radio._lap_clock(59.9996)=='1:00.000.' and radio._lap_clock(58.1234)=='58.123 seconds.'
 
 
+<<<<<<< HEAD
 def t_position_is_in_the_status_and_the_lap_update_while_known():
     snap=snapshot((90,90,91));snap['instruments']['race_position']=3
     data=review(snap)
@@ -87,6 +88,11 @@ def t_laps_to_go_count_from_a_declared_race_length():
     done=review(snapshot((90,91,89)),{'setup':{'laps':3}})
     assert done['race_finished'] and done['finish_text']=='finished, best lap: 1:29.000.',done['finish_text']
     assert not review(snapshot((90,91)),{'setup':{'laps':3}})['race_finished']
+||||||| 9d58cd64
+=======
+def t_tyre_answer_skips_the_wear_note_telemetry_can_never_fill():
+    assert 'wear' not in review(snapshot())['answers']['tyres'].casefold()
+>>>>>>> origin/main
 
 
 def t_fastest_lap_is_named_only_when_a_comparable_lap_beats_the_earlier_ones():
