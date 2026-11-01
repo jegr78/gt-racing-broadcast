@@ -73,6 +73,83 @@ def t_classify_bad_tag_is_error():
     assert m.classify({"tag_name": "nightly", "assets": []}, "darwin", "v0.1.0")[0] == "error"
 
 
+def _versioned_release(tag, with_assets=True):
+    return {"tag_name": tag, "assets": [
+        {"name": name, "browser_download_url": "https://example.test/" + name}
+        for name in ("racecast-windows.zip", "racecast-macos.tar.gz", "racecast-linux.tar.gz")
+    ] if with_assets else []}
+
+
+def t_versioned_preview_does_not_offer_an_older_release():
+    for current in ("1.15.0-preview.main.8508c3e", "1.15.0-preview.pr1066.abcdef0",
+                    "1.15.0-preview.feature_branch.more.abcdef0123456789"):
+        for platform in ("win32", "darwin", "linux"):
+            for tag in ("v1.14.1", "v1.9.9", "v0.99.9"):
+                for assets in (True, False):
+                    got = m.classify(_versioned_release(tag, assets), platform, current, frozen=True)
+                    assert got == ("up-to-date", tag, None), (current, platform, assets, got)
+
+
+def t_versioned_preview_can_promote_to_matching_or_newer_release():
+    current = "1.15.0-preview.main.8508c3e"
+    for tag in ("v1.15.0", "v1.15.1", "v1.16.0", "v2.0.0"):
+        for platform in ("win32", "darwin", "linux"):
+            kind, offered, url = m.classify(_versioned_release(tag), platform, current, frozen=True)
+            assert kind == "update" and offered == tag and url.startswith("https://example.test/"), (kind, offered, url)
+            assert m.classify(_versioned_release(tag, False), platform, current, frozen=True) == ("building", tag, None)
+
+
+def t_incomparable_preview_versions_keep_the_latest_release_fallback():
+    for current in ("dev", "preview-main-8508c3e", "1.15.0-preview.main.",
+                    "1.15.0-preview..8508c3e", "1.15.0-preview.main.notasha", "1.15.0-preview.main.abc"):
+        got = m.classify(_versioned_release("v1.14.1"), "darwin", current, frozen=True)
+        assert got == ("update", "v1.14.1", "https://example.test/racecast-macos.tar.gz"), (current, got)
+
+
+def t_preview_cli_check_and_implicit_install_do_not_download_an_older_release():
+    import contextlib, io
+    from unittest.mock import patch
+    current = "1.15.0-preview.main.8508c3e"
+    for args in (["--check"], ["--yes"]):
+        out = io.StringIO()
+        with patch.object(m.sys, "frozen", True, create=True), \
+             patch.object(m.sys, "argv", ["update", "--current", current, *args]), \
+             patch.object(m, "fetch_latest", return_value=_versioned_release("v1.14.1")), \
+             patch.object(m, "_download_and_swap") as download, \
+             patch("builtins.input", side_effect=AssertionError("No downgrade prompt")), \
+             contextlib.redirect_stdout(out):
+            m.main()
+        assert "up to date" in out.getvalue() and "update available" not in out.getvalue(), out.getvalue()
+        download.assert_not_called()
+
+
+def t_preview_cli_offers_a_matching_final_release():
+    import contextlib, io
+    from unittest.mock import patch
+    out = io.StringIO()
+    current = "1.15.0-preview.main.8508c3e"
+    with patch.object(m.sys, "frozen", True, create=True), \
+         patch.object(m.sys, "argv", ["update", "--current", current, "--check"]), \
+         patch.object(m, "fetch_latest", return_value=_versioned_release("v1.15.0")), \
+         patch.object(m, "_download_and_swap") as download, contextlib.redirect_stdout(out):
+        m.main()
+    assert "update available: " + current + " -> v1.15.0" in out.getvalue(), out.getvalue()
+    download.assert_not_called()
+
+
+def t_explicit_tag_can_still_install_an_older_release_from_a_preview():
+    import contextlib, io
+    from unittest.mock import patch
+    with patch.object(m.sys, "frozen", True, create=True), \
+         patch.object(m.sys, "platform", "darwin"), \
+         patch.object(m.sys, "argv", ["update", "--current", "1.15.0-preview.main.8508c3e", "--tag", "v1.14.1", "--yes"]), \
+         patch.object(m, "fetch_release_by_tag", return_value=_versioned_release("v1.14.1")) as fetch, \
+         patch.object(m, "_download_and_swap") as download, contextlib.redirect_stdout(io.StringIO()):
+        m.main()
+    fetch.assert_called_once_with("v1.14.1")
+    download.assert_called_once_with("https://example.test/racecast-macos.tar.gz", "v1.14.1", None)
+
+
 def t_swap_plan_posix_inplace():
     assert m.swap_plan("darwin", "/app/racecast", "/tmp/new/racecast") == \
         [("replace", "/tmp/new/racecast", "/app/racecast"), ("chmod", "/app/racecast")]
