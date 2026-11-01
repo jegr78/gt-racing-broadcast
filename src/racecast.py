@@ -6463,7 +6463,7 @@ def _radio_tts_key():
 
 def radio_provision_cmd(rest):
     import argparse
-    import driver_radio_models
+    from driver_radio_models import provision as provision_voice_models
     parser = argparse.ArgumentParser(prog="racecast radio provision")
     parser.add_argument("--whisper", action="store_true", help="also download multilingual tiny weights; install whisper-cli separately")
     parser.add_argument("--kokoro", action="store_true", help="install only the local Kokoro speech runtime (about 400 MB)")
@@ -6473,7 +6473,7 @@ def radio_provision_cmd(rest):
             import driver_radio_kokoro
             print(json.dumps(driver_radio_kokoro.provision(_runtime_base_dir())))
             return
-        print(json.dumps(driver_radio_models.provision(_runtime_base_dir(), whisper=args.whisper)))
+        print(json.dumps(provision_voice_models(_runtime_base_dir(), whisper=args.whisper)))
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         sys.exit(f"Native voice provisioning failed ({exc}); verify network, disk space and the local model directory")
 
