@@ -195,8 +195,32 @@ def main():
                 page.reload()
                 page.wait_for_function("() => ovState.page === 'hud' && ovState.slots.length > 0")
                 page.evaluate('openBuilderModal()')
+                layout_read='**/api/overlay/layout?page=splitscreen'
+                reads=[]
+                def interrupt_once(route):
+                    assert route.request.method=='GET'
+                    reads.append(route.request.url)
+                    if len(reads)==1:route.abort('connectionreset')
+                    else:route.continue_()
+                page.route(layout_read,interrupt_once)
                 page.select_option('#ov-scene', 'splitscreen')
-                page.wait_for_function("() => ovState.page === 'splitscreen' && ovState.layout.slots['split-feed-a'].width === 1200")
+                page.wait_for_function("""() => !document.getElementById('overlay-err').hidden ||
+                    (ovState.page === 'splitscreen' && ovState.layout?.slots?.['split-feed-a']?.width === 1200)""")
+                restored=page.evaluate("""() => ({page:ovState.page,width:ovState.layout?.slots?.['split-feed-a']?.width,
+                    error:document.getElementById('overlay-err').hidden ? null : document.getElementById('overlay-err').textContent})""")
+                assert restored=={'page':'splitscreen','width':1200,'error':None},restored
+                assert len(reads)==2,reads
+                page.unroute(layout_read,interrupt_once)
+                failed=[]
+                def interrupt_always(route):failed.append(route.request.url);route.abort('connectionreset')
+                page.route(layout_read,interrupt_always)
+                page.evaluate('loadOverlay()')
+                assert page.locator('#overlay-err').is_visible()
+                assert page.locator('#overlay-err').text_content()=='Control Center not reachable.'
+                assert len(failed)==2 and page.evaluate("ovState.layout.slots['split-feed-a'].width")==1200,failed
+                page.unroute(layout_read,interrupt_always)
+                page.evaluate('loadOverlay()')
+                assert page.locator('#overlay-err').is_hidden()
                 profile.write_text('NAME=Demo Racing\nKIND=solo\nTEMPLATE=pov\n', encoding='utf-8')
                 changed = page.evaluate("() => { applyKindGating({ok:true,active:'demo',profiles:[{name:'demo',kind:'solo',template:'pov'}]}); return overlayPage; }")
                 assert changed == 'hud', 'Changing to Solo must leave unsupported Split editor'

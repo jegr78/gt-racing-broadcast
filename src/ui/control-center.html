@@ -3037,7 +3037,11 @@ async function loadOverlay(retry = 0) {
     slotsR = await (await fetch('/api/overlay/slots?page=' + requestedPage, {cache: 'no-store'})).json();
     layoutR = await (await fetch('/api/overlay/layout?page=' + requestedPage, {cache: 'no-store'})).json();
     fontsR = await (await fetch('/api/overlay/fonts', {cache: 'no-store'})).json();
-  } catch (e) { showProfileErr('overlay-err', 'Control Center not reachable.'); return; }
+  } catch (e) {
+    if (sequence !== ovLoadSequence || requestedPage !== overlayPage) return;
+    if (retry < 1) return loadOverlay(retry + 1);
+    showProfileErr('overlay-err', 'Control Center not reachable.'); return;
+  }
   if (sequence !== ovLoadSequence || requestedPage !== overlayPage) return;
   if (!slotsR.ok) { showProfileErr('overlay-err', slotsR.error || 'could not load slots'); return; }
   if (!layoutR.ok) { showProfileErr('overlay-err', layoutR.error || 'no active profile'); return; }

@@ -1736,6 +1736,45 @@ def _page_fn(page, name):
     return page[i:page.index("\n}\n", i) + 3]
 
 
+def t_builder_read_failure_has_one_bounded_retry():
+    out=_run_js(_page_fn(_cc_page(),'loadOverlay')+"""
+let ovLoadSequence=0,overlayPage='splitscreen',calls=0;
+const elements={};const $=id=>elements[id]||(elements[id]={hidden:true});
+const errors=[];function showProfileErr(id,text){errors.push([id,text]);$(id).hidden=false;}
+globalThis.fetch=async()=>{calls++;throw new Error('fixture interrupted read');};
+(async()=>{await loadOverlay();console.log(JSON.stringify({calls,errors,sequence:ovLoadSequence}));})();
+""",attempts=1)
+    if out is not None:
+        state=json.loads(out)
+        assert state=={'calls':2,'errors':[['overlay-err','Control Center not reachable.']],'sequence':2},state
+
+
+def t_obsolete_builder_read_failure_cannot_retry_or_show_an_error():
+    out=_run_js(_page_fn(_cc_page(),'loadOverlay')+"""
+let ovLoadSequence=0,overlayPage='splitscreen',calls=0,reject;
+const elements={};const $=id=>elements[id]||(elements[id]={hidden:true});
+const errors=[];function showProfileErr(id,text){errors.push([id,text]);$(id).hidden=false;}
+globalThis.fetch=()=>{calls++;return new Promise((resolve,fail)=>{reject=fail;});};
+(async()=>{const work=loadOverlay();overlayPage='hud';ovLoadSequence++;
+reject(new Error('obsolete interrupted read'));await work;
+console.log(JSON.stringify({calls,errors,page:overlayPage,sequence:ovLoadSequence}));})();
+""",attempts=1)
+    if out is not None:
+        assert json.loads(out)=={'calls':1,'errors':[],'page':'hud','sequence':2},out
+
+
+def t_builder_business_error_keeps_its_message_without_retry():
+    out=_run_js(_page_fn(_cc_page(),'loadOverlay')+"""
+let ovLoadSequence=0,overlayPage='splitscreen',calls=0;
+const elements={};const $=id=>elements[id]||(elements[id]={hidden:true});
+const errors=[];function showProfileErr(id,text){errors.push([id,text]);$(id).hidden=false;}
+globalThis.fetch=async()=>{calls++;return {json:async()=>({ok:false,error:'fixture slot data unavailable'})};};
+(async()=>{await loadOverlay();console.log(JSON.stringify({calls,errors,sequence:ovLoadSequence}));})();
+""",attempts=1)
+    if out is not None:
+        assert json.loads(out)=={'calls':3,'errors':[['overlay-err','fixture slot data unavailable']],'sequence':1},out
+
+
 def t_job_snapshot_tail_takes_ascii_digits_only():
     httpd, port = _serve(_ctx())
     try:
