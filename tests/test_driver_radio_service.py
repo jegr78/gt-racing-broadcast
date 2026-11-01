@@ -428,6 +428,55 @@ def t_engineer_off_refuses_presets_but_coach_runs():
                                        authorize=lambda:True,ready=lambda:True) is None, 'coach off publishes nothing'
 
 
+def _speech_on(f):
+    settings=f.access.read()
+    f.access.update({'expected':settings['revision'],'providers':{'speech':True}})
+    f.poll();f.service.set_audio_output(True)
+
+
+def _lane(f):
+    return [m['id'] for m in f.service.history()['messages']]
+
+
+def t_text_waits_for_the_audio_to_start():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);_speech_on(f)
+        first=f.request('pace');now=first['created_at']
+        assert _lane(f)==[] and f.service.hud_text('engineer',now) is None and f.service.text_held(first['id'])
+        ticket=f.service.take_playback()
+        assert ticket and _lane(f)==[],'taking the slot starts no audio yet'
+        assert f.service.attach(first['id'],first['epoch'],{'audio':b'wav','audio_state':'ready'})
+        assert _lane(f)==[],'synthesized audio has not started yet'
+        assert not f.service.playback_started('forged') and _lane(f)==[]
+        assert f.service.playback_started(ticket.id)
+        assert _lane(f)==[first['id']] and f.service.hud_text('engineer',now)==first['text']
+        assert not f.service.text_held(first['id'])
+        assert f.service.finish_playback(ticket.id) and _lane(f)==[first['id']]
+
+
+def t_text_shows_at_once_when_no_audio_can_follow():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);f.poll();f.service.set_audio_output(True)
+        first=f.request('pace');assert _lane(f)==[first['id']],'speech off holds nothing'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);_speech_on(f);f.service.set_audio_output(False)
+        first=f.request('pace');assert _lane(f)==[first['id']],'paused or muted output holds nothing'
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);_speech_on(f);first=f.request('pace')
+        assert f.service.attach(first['id'],first['epoch'],{'audio_state':'failed','audio_error':'speech_failed'})
+        assert _lane(f)==[first['id']],'a failed synthesis shows the text'
+
+
+def t_held_text_appears_by_itself_after_the_bound():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);_speech_on(f);first=f.request('pace')
+        before=f.service.history()
+        assert before['messages']==[] and f.service.history(since=before['revision'])['changed'] is True
+        f.at+=radio.AUDIO_HOLD_S
+        assert _lane(f)==[first['id']],'a stuck player must not hide the text'
+        assert f.service.history(since=f.service.history()['revision'])['changed'] is False
+
+
 def t_hud_text_follows_message_life():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);f.poll()
