@@ -113,6 +113,24 @@ def t_lap_evidence_preserves_preset_deduplication_and_requester_coalescing():
         assert all(changed['evidence'][k]==first['evidence'][k] for k in ('fuel','pace','tyres','uncertainties'))
 
 
+def t_non_live_lap_questions_publish_no_old_times_or_speech_work():
+    for unavailable in ('stale','replay','new_session'):
+        with tempfile.TemporaryDirectory() as d:
+            f=Fixture(d,snapshot((83.25,86.5)));state=f.poll()
+            f.service.question('fastest lap',state['binding'])
+            if unavailable=='stale':f.snap['receipt']={'state':'stale'}
+            elif unavailable=='replay':f.snap['replay']={'active':True}
+            else:f.snap['session_id']='new';f.snap['laps']=[]
+            f.snap['revision']+=1;state=f.poll()
+            for text in ('fastest lap','last lap'):
+                message=f.service.question(text,state['binding'])
+                assert 'unavailable' in message['text'].lower() and '1:23.250' not in message['text']
+                assert all(value is None for value in message['evidence']['laps'].values())
+                if unavailable!='new_session':
+                    assert message['state']=='text_only' and f.service.pending_count()==0
+                    assert f.service.enrichment_work('audio') is None
+
+
 def t_natural_questions_and_context_are_grounded_in_refreshed_facts():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);f.poll();state=f.service.refresh()
