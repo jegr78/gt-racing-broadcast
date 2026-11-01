@@ -1,7 +1,8 @@
 # Third-party licenses
 
-This page lists third-party components racecast ships or downloads. It is a factual
-inventory, not legal advice. Each component's own license text is authoritative.
+racecast itself is under the MIT License (`LICENSE`). This page lists third-party
+components racecast ships or downloads. It is a factual inventory, not legal advice. Each
+component's own license text is authoritative.
 
 ## Shipped with racecast
 

@@ -113,6 +113,7 @@ def main():
 
     # .env template (repo root, not src/) so producers can set their own RACECAST_SHEET_ID
     shutil.copy2(os.path.join(ROOT, ".env.example"), os.path.join(PKG, ".env.example"))
+    shutil.copy2(os.path.join(ROOT, "LICENSE"), os.path.join(PKG, "LICENSE"))
 
     # profiles/ lives at the repo root, not under src/. Ship both committed
     # leagues: `example`, the template `racecast profile new` copies from and
@@ -220,6 +221,7 @@ def main():
         "uplot vendored": os.path.isfile(os.path.join(PKG, "assets", "vendor", "uplot", "uPlot.iife.min.js")),
         "preview backdrop shipped": os.path.isfile(os.path.join(PKG, "assets", "preview-bg.jpg")),
         ".env.example shipped": os.path.isfile(os.path.join(PKG, ".env.example")),
+        "LICENSE shipped": os.path.isfile(os.path.join(PKG, "LICENSE")),
         "example profile shipped": os.path.isfile(
             os.path.join(PKG, "profiles", "example", "profile.env")),
         "demo profile shipped": os.path.isfile(
