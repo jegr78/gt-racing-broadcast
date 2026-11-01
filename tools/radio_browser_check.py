@@ -66,7 +66,8 @@ def check(browser,outdir,shots=None):
             assert f.f.service.attach(old['id'],old['epoch'],{'explanation':'Current range may vary.','ai_state':'ready'})
             f.f.service.question('What about pace?',binding)
             first.wait_for_timeout(1100)
-            assert 'Interpretation: Current range may vary.' in a.locator('#history').inner_text(),'history lost a completed interpretation'
+            lane=first.evaluate("fetch('/console/driver-radio/messages').then(r=>r.json())")
+            assert any(m.get('explanation')=='Current range may vary.' for m in lane['messages']),'the lane lost a completed interpretation'
             # An edited form keeps its original revision while another view saves.
             a.locator('#race-mode').select_option('laps');a.locator('#race-length').fill('20')
             b.locator('#race-mode').select_option('laps');b.locator('#race-length').fill('24')
@@ -102,7 +103,7 @@ def check(browser,outdir,shots=None):
             # Two labelled sections: engineer answers stay in the AI Race Engineer section.
             assert a.locator('#engineer-section h3').first.inner_text()=='AI Race Engineer'
             assert a.locator('#coach-section h3').first.inner_text()=='AI Coach'
-            assert a.locator('#engineer-section #history li').count()>0
+            assert a.locator('#history').count()==0 and a.locator('#coach-messages').count()==0,'the desk must not list messages'
             for width,view,wiki in ((1440,'desktop','console-driver-radio-desktop.png'),(1024,'tablet','console-driver-radio-tablet.png'),(390,'phone','console-driver-radio-phone.png')):
                 first.set_viewport_size({'width':width,'height':1000})
                 assert first.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),'driver desk overflows viewport'

@@ -102,6 +102,7 @@ def t_page_launcher_and_static_component_follow_the_feature_switches():
     with RadioFixture() as f:
         status,raw,headers=f.request('/console/driver-radio')
         assert status==200 and b'DriverRadio.mount' in raw and headers['Cache-Control']=='no-store'
+        assert b'href="/console/driver-radio/messages-view"' in raw
         assert 'HttpOnly' in headers['Set-Cookie'] and 'Path=/console' in headers['Set-Cookie']
         status,raw,_=f.request('/console/whoami');me=json.loads(raw)
         assert me['driver_radio'] is True and me['ai_engineer'] is True and me['ai_coach'] is True,me
@@ -438,16 +439,12 @@ def t_sections_split_messages_by_source():
     out=_run_component("""
      Object.assign(routes,%s);
      const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
-     const result={engineer:byId('history').textContent,coach:byId('coach-messages').textContent,latest:byId('latest').textContent,
-       hint:byId('voice-hint').textContent};
+     const result={latest:byId('latest').textContent,hint:byId('voice-hint').textContent,markup:written.join('')};
      view.destroy();console.log(JSON.stringify(result));
     """%_driver_routes(messages))
     if out is None:return
-    assert 'Fuel for 12 laps.' in out['engineer'] and 'Fuel for 12 laps.' not in out['coach'],out
-    assert 'Brake two metres later.' in out['coach'] and 'Brake two metres later.' not in out['engineer'],out
-    # Refusal hints belong to the shared Voice row, not to either feature's section.
-    for section in ('engineer','coach'):
-        assert 'Feature off' not in out[section] and 'Enable the' not in out[section],(section,out)
+    # The message list lives on the Radio messages display, not on the desk.
+    assert 'id="history"' not in out['markup'] and 'id="coach-messages"' not in out['markup'],'the desk grows with every message'
     assert out['latest']=='Fuel for 12 laps.',out
     assert out['hint']=='Feature off Enable the AI Race Engineer for this profile',out
 
@@ -476,13 +473,12 @@ def t_coach_only_view_keeps_the_voice_controls_and_coach_messages():
      Object.assign(routes,%s);
      const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
      const result={voice:byId('voice-section').hidden,pause:byId('pause').disabled,phase:byId('phase').textContent,
-       coach:byId('coach-messages').textContent,engineerOff:byId('engineer-off').hidden,content:byId('content').hidden};
+       engineerOff:byId('engineer-off').hidden,content:byId('content').hidden};
      view.destroy();console.log(JSON.stringify(result));
     """%_driver_routes(messages,engineer=False))
     if out is None:return
     assert out['content'] is False and out['engineerOff'] is False,out
     assert out['voice'] is False and out['pause'] is False and out['phase'].startswith('Native voice'),out
-    assert 'Brake two metres later.' in out['coach'],out
 
 
 def t_a_refusal_shows_in_the_voice_row_where_the_driver_looks():
@@ -494,13 +490,12 @@ def t_a_refusal_shows_in_the_voice_row_where_the_driver_looks():
      Object.assign(routes,%s);
      const view=window.DriverRadio.mount(new El('div'));await tick();await tick();
      const result={hint:byId('voice-hint').textContent,hidden:byId('voice-hint').hidden,voice:byId('voice-section').hidden,
-       coach:byId('coach-messages').textContent,engineerOff:byId('engineer-off').hidden};
+       engineerOff:byId('engineer-off').hidden};
      view.destroy();console.log(JSON.stringify(result));"""
     out=_run_component(probe%_driver_routes(messages,engineer=False))
     if out is None:return
     assert out['voice'] is False and out['hidden'] is False and out['engineerOff'] is False,out
     assert out['hint']=='Feature off Enable the AI Race Engineer for this profile',out
-    assert 'Enable the' not in out['coach'],out
     # A later message replaces the hint: it answers that one request, not every poll.
     later=messages+[dict(id=3,source='coach',kind='coach',state='done',text='Lift earlier into turn four.')]
     out=_run_component(probe%_driver_routes(later,engineer=False))
