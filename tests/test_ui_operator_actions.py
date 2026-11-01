@@ -155,6 +155,72 @@ def t_smoke_job_cannot_be_force_cancelled_before_its_existing_cli_cleanup():
     assert jobs.snapshot(job)['exit_code']==0
 
 
+def t_smoke_output_owner_survives_normal_and_ctrl_c_main_exit_until_cleanup():
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        for mode in ('normal','ctrl-c'):
+            marker=Path(directory)/(mode+'-cleanup');done=Path(directory)/(mode+'-done')
+            child=("import time;from pathlib import Path\ntry:\n print('started',flush=True);time.sleep(.3)\n"
+                   "finally:\n try:\n  print('cleanup',flush=True);Path("+repr(str(marker))+").write_text('cleaned')\n"
+                   " finally:Path("+repr(str(done))+").write_text('done')\n")
+            owner=("import sys,time;sys.path.insert(0,"+repr(str(ROOT/'src/ui'))+");import ui_jobs\n"
+                   "j=ui_jobs.JobManager(lambda args:[sys.executable,'-c',"+repr(child)+"])\n"
+                   "job,error=j.start('smoketest',[])\n"
+                   "deadline=time.monotonic()+5\nwhile not j.lines_since(job,0)[0] and time.monotonic()<deadline:time.sleep(.01)\n"
+                   "assert j.lines_since(job,0)[0]\ntry:\n"
+                   +(" raise KeyboardInterrupt\n" if mode=='ctrl-c' else " pass\n")+
+                   "except KeyboardInterrupt:pass\n")
+            result=subprocess.run([sys.executable,'-c',owner],capture_output=True,text=True,timeout=10)
+            deadline=time.monotonic()+5
+            while not done.exists() and time.monotonic()<deadline:time.sleep(.01)
+            assert result.returncode==0 and done.exists() and marker.exists(),(mode,result.returncode,result.stdout,result.stderr)
+
+
+def t_service_shutdown_refuses_smoke_then_closes_job_admission_atomically():
+    import io
+    import threading
+    import test_ui_server as fixture
+    finish=threading.Event();stopped=threading.Event();spawns=[]
+    class Process:
+        def __init__(self,argv):self.stdout=io.BytesIO(b'');spawns.append(argv)
+        def wait(self):assert finish.wait(5);return 0
+        def terminate(self):raise AssertionError('Shutdown must not terminate smoke')
+    jobs=ui_jobs.JobManager(list,spawn=Process)
+    job,error=jobs.start('smoketest',['--profile','demo','smoketest'])
+    ctx=fixture._ctx(jobs=jobs);server,port=fixture._serve(ctx);ctx['shutdown']=stopped.set
+    try:
+        for confirm in (False,True):
+            status,raw=fixture._post_json(port,'/api/quit',{'confirm':confirm});result=json.loads(raw)
+            assert status==409 and not result['ok'] and result['error']['code']=='smoke_running',(status,result)
+            assert not stopped.is_set() and jobs.snapshot(job)['exit_code'] is None
+        finish.set();deadline=time.monotonic()+5
+        while jobs.snapshot(job)['exit_code'] is None and time.monotonic()<deadline:time.sleep(.01)
+        status,raw=fixture._post_json(port,'/api/quit',{})
+        assert status==200 and json.loads(raw)['ok'] and stopped.wait(1)
+        other,reason=jobs.start('smoketest',['smoketest'])
+        assert other is None and 'stopping' in reason and len(spawns)==1,(other,reason,spawns)
+    finally:finish.set();server.shutdown();server.server_close()
+
+
+def t_shutdown_smoke_refusal_cannot_offer_the_ai_interrupt_override():
+    import test_ui_server as fixture
+    for file,function in [('control-center.html','blankAndQuit'),('telemetry-shell.js','workspaceQuit')]:
+        source=(ROOT/'src/ui'/file).read_text(encoding='utf-8')
+        code=fixture._page_fn(source,function)+"""
+let fetches=0,confirms=0,alerts=[];
+const reply=async()=>{fetches++;return {status:409,json:async()=>({ok:false,error:{code:'smoke_running',message:'Wait for smoke cleanup'}})}};
+const fetch=reply,workspaceFetch=reply;
+const confirmModal=async()=>{confirms++;return true;};
+const alertModal=async message=>alerts.push(message),workspaceStatus=message=>alerts.push(message);
+const document={body:{innerHTML:'unchanged',replaceChildren:()=>{throw new Error('UI must remain alive')}}};
+"""+"(async()=>{await "+function+"();console.log(JSON.stringify({fetches,confirms,alerts,body:document.body.innerHTML}));})();"
+        output=fixture._run_js(code,attempts=1)
+        if output is not None:
+            assert json.loads(output)=={'fetches':1,'confirms':int(function=='workspaceQuit'),
+                'alerts':['Wait for smoke cleanup'],'body':'unchanged'},output
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

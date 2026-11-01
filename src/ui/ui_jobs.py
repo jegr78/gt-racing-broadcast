@@ -41,6 +41,15 @@ class JobManager:
         self.logger = logger
         self.jobs = {}           # job_id -> Job, kept for the session; the op set is finite
         self.lock = threading.Lock()
+        self.stopping = False
+
+    def prepare_shutdown(self):
+        """Refuse shutdown during smoke cleanup and atomically close admission."""
+        with self.lock:
+            if any(job.op == "smoketest" and job.exit_code is None for job in self.jobs.values()):
+                return False
+            self.stopping = True
+            return True
 
     def _spawn(self, argv, input_text=None):
         if input_text is not None:
@@ -61,6 +70,8 @@ class JobManager:
         if input_text is not None and (op != 'smoketest' or not isinstance(input_text,str) or len(input_text)>512):
             raise ValueError('Only a finite typed smoke confirmation is accepted')
         with self.lock:
+            if self.stopping:
+                return None, "UI service is stopping"
             profile = op_args[1] if op_args[:1] == ["--profile"] else None
             for job in self.jobs.values():
                 if job.op == op and (job.profile == profile or op in MACHINE_OPS) and job.exit_code is None:  # exit_code writes are atomic
@@ -71,7 +82,7 @@ class JobManager:
             self.jobs[job.id] = job
         if self.logger:
             self.logger.info("[%s] action started, argv: %s", op, " ".join(argv))
-        reader = threading.Thread(target=self._reader, args=(job,), daemon=True)
+        reader = threading.Thread(target=self._reader, args=(job,), daemon=op != "smoketest")
         try:
             reader.start()
         except RuntimeError as exc:      # OS thread exhaustion; unblock the op

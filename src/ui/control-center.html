@@ -5633,7 +5633,7 @@ function quitStopToggle() {
 async function blankAndQuit() {
   try {
     let response=await fetch('/api/quit',{method:'POST'}),data=await response.json();
-    if(response.status===409){if(!await confirmModal(data.error.message,{title:'Active AI analysis',okLabel:'Interrupt analysis and stop'}))return;response=await fetch('/api/quit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});data=await response.json();}
+    if(response.status===409 && data.error?.code==='active_work'){if(!await confirmModal(data.error.message,{title:'Active AI analysis',okLabel:'Interrupt analysis and stop'}))return;response=await fetch('/api/quit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});data=await response.json();}
     if(!data.ok){await alertModal(data.error?.message||'Could not stop the UI service.');return;}
   } catch (_e) {return;}
   document.body.innerHTML =

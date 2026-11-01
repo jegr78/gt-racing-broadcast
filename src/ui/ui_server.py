@@ -1490,6 +1490,9 @@ def make_handler(ctx):
                     body = self._body_json()
                     if body is None or body.get("confirm") is not True:
                         return self._json({"ok": False, "error": {"code": "active_work", "message": message}}, code=409)
+                if not getattr(ctx.get('jobs'), 'prepare_shutdown', lambda:True)():
+                    return self._json({'ok':False,'error':{'code':'smoke_running',
+                        'message':'A smoke test is running. Wait for its event cleanup before stopping the UI service.'}},code=409)
                 self._json({"ok": True})
                 # shutdown() blocks until serve_forever() returns, so never call it
                 # from a request thread directly.

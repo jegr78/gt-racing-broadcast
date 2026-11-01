@@ -23,7 +23,11 @@ job. Only this operation accepts finite stdin, containing the operator's actual
 input. A temporary file passes it to the unchanged CLI confirmation; no automatic
 yes, force flag or confirmation bypass is supplied. The CLI retains its live-event
 checks. Force cancellation is unavailable for smoke because terminating its
-process would skip its existing event teardown.
+process would skip its existing event teardown. Stop UI refuses shutdown while
+smoke runs, even with an AI interruption acknowledgement. Admission closes under
+the job lock when shutdown is accepted, so a concurrent smoke request cannot
+slip past the check. Smoke owns a non-daemon output reader: natural main exit or
+Ctrl+C cannot close its output pipe before the child finishes its cleanup.
 
 The independent review found that the existing global CSRF guard accepted
 `Origin: null`. It now rejects explicit opaque, blank, malformed and non-HTTP

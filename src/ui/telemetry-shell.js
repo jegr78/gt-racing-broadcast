@@ -160,7 +160,7 @@ async function workspaceExport() {
 async function workspaceQuit() {
   if (!await confirmModal('Stop the shared UI service? Control Center and Telemetry will disconnect. The relay and broadcast keep running.',{title:'Stop UI service',okLabel:'Stop UI service'})) return;
   let response=await workspaceFetch('/api/quit',{method:'POST'}),data=await response.json();
-  if(response.status===409){if(!await confirmModal(data.error.message,{title:'Active AI analysis',okLabel:'Interrupt analysis and stop'}))return;response=await workspaceFetch('/api/quit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});data=await response.json();}
+  if(response.status===409 && data.error?.code==='active_work'){if(!await confirmModal(data.error.message,{title:'Active AI analysis',okLabel:'Interrupt analysis and stop'}))return;response=await workspaceFetch('/api/quit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});data=await response.json();}
   if(!data.ok){workspaceStatus(data.error?.message||'Could not stop the UI service.');return;}
   document.body.replaceChildren();const message=document.createElement('p');message.textContent='UI service stopped. You can close this tab.';document.body.append(message);
 }
