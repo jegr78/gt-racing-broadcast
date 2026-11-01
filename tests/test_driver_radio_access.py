@@ -33,7 +33,7 @@ def t_legacy_settings_migrate_to_both_features():
             doc = store.read()
             assert doc['version'] == 2 and doc['revision'] == 4, doc
             assert doc['features'] == features(enabled, enabled, 'a1'), doc['features']
-            assert doc['providers'] == {'speech': True}, doc['providers']
+            assert doc['providers'] == {'speech': True, 'engine': 'kokoro', 'voice': 'am_michael'}, doc['providers']
             assert 'enabled' not in doc and 'drivers' not in doc, sorted(doc)
             assert store.enabled('engineer') is enabled and store.enabled('coach') is enabled
             assert json.loads(store.path.read_text(encoding='utf8'))['version'] == 1, 'a read never writes'

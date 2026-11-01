@@ -240,10 +240,23 @@ routing. Deliberately capture the PC output if you want replies in the broadcast
 
 ## Speech and transcription services
 
-English speech uses Google Cloud Text-to-Speech **en-US-Studio-Q**. Configure the
-existing machine setting `RACECAST_GCLOUD_TTS_KEY` and explicitly select Google
-speech in the profile's radio setup. Credentials stay on the relay. Only answer
-text is sent for synthesis. There is no silent voice substitution.
+Check **Speak answers** in the **Voice** card and choose one **Speech engine**. There is
+no fallback between engines and no silent voice substitution: if the chosen engine
+fails, the text appears without audio. Speech output is English.
+
+**Local Kokoro** is the default. It runs on the relay PC, needs no key and sends nothing to a service. The
+voices are Michael (default), Fenrir, Heart and George. Choose **Install Kokoro voices**
+(`racecast radio provision --kokoro`) once. It downloads about 500 MB: a private Python
+runtime, hash-pinned packages and the model. **Test Kokoro** (`racecast radio smoke
+--kokoro`) measures the model load and the speed. Each synthesis uses about four CPU
+cores at below-normal priority; check OBS and your game under real load before relying
+on it during a broadcast. A long answer plays once it is complete. Intel macOS is not
+supported. The runtime contains GPL components (eSpeak NG, phonemizer), is downloaded
+separately and runs as its own process.
+
+**Google Studio-Q** must be selected deliberately. It uses Google Cloud Text-to-Speech **en-US-Studio-Q**. Configure the
+existing machine setting `RACECAST_GCLOUD_TTS_KEY`. Credentials stay on the relay. Only
+answer text is sent for synthesis.
 
 **Test Google speech** in the **Voice** card (`racecast radio smoke --allow-cloud`)
 makes two configured synthesis requests and measures cold, warm and cached latency

@@ -49,10 +49,13 @@ def _agent(value):
 
 
 def _provider_settings(value):
-    if (not isinstance(value, dict) or set(value) - {'speech'}
-            or type(value.get('speech', False)) is not bool):
+    if (not isinstance(value, dict) or set(value) - {'speech', 'engine', 'voice'}
+            or type(value.get('speech', False)) is not bool
+            or value.get('engine', 'kokoro') not in driver_radio_voice_config.SPEECH_ENGINES
+            or value.get('voice', 'am_michael') not in driver_radio_voice_config.SPEECH_VOICES):
         raise ValueError('Invalid radio service selection')
-    return dict(speech=value.get('speech', False))
+    return dict(speech=value.get('speech', False), engine=value.get('engine', 'kokoro'),
+                voice=value.get('voice', 'am_michael'))
 
 
 def _feature_settings(value, current=None):

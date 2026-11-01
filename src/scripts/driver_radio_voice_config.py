@@ -6,6 +6,8 @@ from pathlib import Path
 
 PHRASES={'hey_jeff':'hey jeff','hey_engineer':'hey engineer'}
 DEFAULTS=dict(wake='hey_jeff',stt='vosk',volume=.8,muted=False)
+SPEECH_ENGINES=('kokoro','google')
+SPEECH_VOICES=('am_michael','am_fenrir','af_heart','bm_george')
 
 
 def settings(value=None):

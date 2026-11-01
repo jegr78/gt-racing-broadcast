@@ -52,6 +52,8 @@ OPS = {
     "health-import": ["health", "import"],
     "gt7-data-update": ["gt7-data", "update"],
     "radio-provision": ["radio", "provision"],
+    "radio-kokoro-install": ["radio", "provision", "--kokoro"],
+    "radio-kokoro-smoke": ["radio", "smoke", "--kokoro"],
     "radio-smoke": ["radio", "smoke", "--allow-cloud"],   # the button click is the consent to the billed calls
     "telemetry-replay-start": ["telemetry", "replay", "start"],
     "telemetry-replay-stop": ["telemetry", "replay", "stop"],

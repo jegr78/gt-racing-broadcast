@@ -127,7 +127,7 @@ def t_numeric_explanations_cannot_relabel_other_measurements():
 def t_provider_work_is_text_first_and_late_results_cannot_attach():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d)
-        f.access.update({'expected':1,'providers':{'speech':True}});f.poll()
+        f.access.update({'expected':1,'providers':{'speech':True,'engine':'google'}});f.poll()
         message=f.request()
         assert message['text'] and message['audio_state']=='pending'
         entered,release=threading.Event(),threading.Event()
@@ -193,7 +193,7 @@ def t_explanation_uses_the_feature_agent():
 def t_stopped_enricher_cannot_publish_a_completed_attachment():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d)
-        f.access.update({'expected':1,'providers':{'speech':True}});f.poll();f.request()
+        f.access.update({'expected':1,'providers':{'speech':True,'engine':'google'}});f.poll();f.request()
         entered,release=threading.Event(),threading.Event()
         class Speech:
             def synthesize(self,*args):entered.set();assert release.wait(3);return wav()
@@ -331,7 +331,7 @@ def t_operator_cli_routes_smoke_and_does_not_call_cloud_without_flag():
 def t_fast_audio_chunks_do_not_multiply_full_snapshot_preparation():
     import copy
     with tempfile.TemporaryDirectory() as d:
-        f=Fixture(d);f.access.update({'expected':1,'providers':{'speech':True}});f.poll();f.request()
+        f=Fixture(d);f.access.update({'expected':1,'providers':{'speech':True,'engine':'google'}});f.poll();f.request()
         calls=[]
         def source():calls.append(1);return copy.deepcopy(f.snap)
         f.service.source=source
