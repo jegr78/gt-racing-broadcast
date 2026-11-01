@@ -3,6 +3,7 @@
 import base64
 import io
 import json
+import math
 import sys
 import tempfile
 import threading
@@ -53,6 +54,73 @@ def t_google_request_voice_headers_bounds_and_exact_cache():
     assert body['input']=={'text':'Fuel status is available.'}
     assert body['audioConfig']['audioEncoding']=='LINEAR16'
     assert args['allow_redirects'] is False and 0 < args['timeout'] <= 8
+
+
+def _speech_timeout_boundaries():
+    return ((math.nextafter(16.0,0.0),8),
+            (math.nextafter(16.0,0.0),.25),
+            (math.nextafter(2**20,0.0),.1),
+            (math.nextafter(2**20,0.0),.001),
+            (math.nextafter(16.0,0.0),30))
+
+
+def t_google_direct_timeouts_never_exceed_the_caller_budget():
+    from types import SimpleNamespace
+    raw=json.dumps({'audioContent':base64.b64encode(wav()).decode()}).encode()
+    for start,budget in _speech_timeout_boundaries():
+        requests=[];reads=[]
+        def request(*args,requests=requests,reads=reads,**kwargs):
+            requests.append(kwargs['timeout'])
+            response=Response(raw)
+            response.fp=SimpleNamespace(raw=SimpleNamespace(_sock=SimpleNamespace(settimeout=reads.append)))
+            return response
+        speech=providers.GoogleSpeech(key=lambda:'test-key',open_url=request,clock=lambda start=start:start)
+        assert speech.synthesize('Fuel status.',threading.Event(),budget)==wav()
+        assert len(requests)==1 and len(reads)>=2
+        assert all(0<timeout<=min(budget,8) for timeout in requests), (start,budget,requests)
+        assert all(0<timeout<=min(budget,8) for timeout in reads), (start,budget,reads)
+
+
+def t_google_worker_timeout_and_prompt_never_exceed_the_caller_budget():
+    raw=json.dumps({'audioContent':base64.b64encode(wav()).decode()}).encode()
+    for start,budget in _speech_timeout_boundaries():
+        calls=[]
+        def runner(invocation,prompt,stopped,timeout,*args,calls=calls,**kwargs):
+            calls.append((timeout,json.loads(prompt)['budget']))
+            return raw
+        speech=providers.GoogleSpeech(key=lambda:'test-key',runner=runner,clock=lambda start=start:start)
+        assert speech.synthesize('Fuel status.',threading.Event(),budget)==wav()
+        assert len(calls)==1
+        assert all(0<timeout<=min(budget,8) for timeout in calls[0]), (start,budget,calls)
+
+
+def t_google_deadline_shrinks_and_expired_intervals_do_no_work():
+    from types import SimpleNamespace
+    raw=json.dumps({'audioContent':base64.b64encode(wav()).decode()}).encode()
+    requests=[];reads=[]
+    def request(*args,**kwargs):
+        requests.append(kwargs['timeout'])
+        response=Response(raw)
+        response.fp=SimpleNamespace(raw=SimpleNamespace(_sock=SimpleNamespace(settimeout=reads.append)))
+        return response
+    steps=iter(range(7))
+    speech=providers.GoogleSpeech(key=lambda:'test-key',open_url=request,clock=lambda:next(steps))
+    assert speech.synthesize('Fuel status.',threading.Event(),8)==wav()
+    assert len(requests)==1 and 0<requests[0]<=5
+    assert len(reads)==2 and 0<reads[1]<reads[0]<=4
+    for start,budget,steps in ((16,0,[16,16]),(16,-1,[16,16]),
+                              (16,math.ulp(16)/4,[16,16]),
+                              (0,8,[0,8])):
+        calls=[]
+        def unexpected(*args,calls=calls,**kwargs):calls.append(1);raise AssertionError('Expired speech did provider work')
+        clock=iter(steps)
+        speech=providers.GoogleSpeech(key=lambda:'test-key',open_url=unexpected,clock=lambda clock=clock:next(clock))
+        rejected(lambda speech=speech,budget=budget:speech.synthesize('Fuel',threading.Event(),budget),'timed_out')
+        assert calls==[], (start,budget)
+    steps=iter([0,0,0,0,8]);requests.clear();reads.clear()
+    speech=providers.GoogleSpeech(key=lambda:'test-key',open_url=request,clock=lambda:next(steps))
+    rejected(lambda:speech.synthesize('Fuel',threading.Event(),8),'timed_out')
+    assert len(requests)==1 and reads==[]
 
 
 def t_google_failures_are_safe_and_never_substitute_a_voice():
