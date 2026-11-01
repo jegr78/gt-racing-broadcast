@@ -6615,9 +6615,9 @@ def update_check_data(fetch=None, current=None, platform=None, frozen=None):
     call; served on demand via /api/update (cached), never from the status poll.
     Never raises; {"ok": False} when offline / rate-limited / the tag is
     malformed. A non-frozen 'dev' checkout reports ok with no update; a frozen
-    binary with a non-semver version (a preview build, or a local 'dev' build) is
-    a real installable artifact, so, like the CLI, it gets the latest release
-    offered (the `frozen` flag is what tells the two apart; see #70). `fetch`/
+    versioned preview compares against its release number. Incomparable frozen
+    versions, such as legacy previews or a local 'dev' build, retain the CLI's
+    latest-release fallback (see #70). `fetch`/
     `current`/`platform`/`frozen` are test seams."""
     import update as upd
     frozen = IS_FROZEN if frozen is None else frozen

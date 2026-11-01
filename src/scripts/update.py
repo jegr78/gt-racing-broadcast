@@ -23,6 +23,17 @@ def parse_version(tag):
     return tuple(int(p) for p in parts)
 
 
+def _preview_version(current):
+    """Release number of a versioned Racecast preview, otherwise incomparable."""
+    if not isinstance(current, str):
+        return None
+    base, marker, identity = current.partition("-preview.")
+    ref, separator, commit = identity.rpartition(".")
+    if not marker or not separator or not ref or not _is_hex_sha(commit):
+        return None
+    return parse_version(base if base.startswith("v") else "v" + base)
+
+
 def asset_name(platform, machine=None):
     """The release asset for a sys.platform value, matching release.yml's matrix.
     Linux ships separate x86-64 and ARM64 archives, and `machine`, defaulting to
@@ -75,17 +86,21 @@ def classify(release, platform, current, frozen=False):
     ('up-to-date', tag, None)
     ('building',   tag, None)    newer release exists, platform asset not uploaded yet
     ('update',     tag, url)
-    An unparseable `current` such as 'dev' refuses in repo mode, but a frozen
-    binary built without --version gets the latest release offered instead: it is
-    incomparable, so it is never 'up-to-date'."""
+    Versioned frozen previews compare their release number; the matching final
+    release is newer than its preview. Other unparseable builds such as 'dev'
+    refuse in repo mode, but frozen builds keep the latest-release fallback."""
     cur = parse_version(current)
+    preview = False
+    if cur is None and frozen:
+        cur = _preview_version(current)
+        preview = cur is not None
     if cur is None and not frozen:
         return ("dev", None, None)
     tag = release.get("tag_name", "")
     new = parse_version(tag)
     if new is None:
         return ("error", f"unexpected tag on the latest release: {tag!r}", None)
-    if cur is not None and new <= cur:
+    if cur is not None and (new < cur or (new == cur and not preview)):
         return ("up-to-date", tag, None)
     url = _find_asset_url(release, platform)
     return ("update", tag, url) if url else ("building", tag, None)

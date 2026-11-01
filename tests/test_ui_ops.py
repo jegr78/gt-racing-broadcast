@@ -690,6 +690,19 @@ def t_update_check_frozen_preview_offers_latest():
     assert d["ok"] and d["update_available"] is True and d["latest"] == "v0.1.0"
 
 
+def t_versioned_preview_update_check_does_not_offer_a_downgrade():
+    current = "1.15.0-preview.main.8508c3e"
+    for platform in ("win32", "darwin", "linux"):
+        for with_asset in (True, False):
+            d = rc.update_check_data(fetch=lambda with_asset=with_asset: _release("v1.14.1", with_asset),
+                                     current=current, platform=platform, frozen=True)
+            assert d["ok"] and d["current"] == current and d["latest"] == "v1.14.1", d
+            assert d["update_available"] is False, d
+        d = rc.update_check_data(fetch=lambda: _release("v1.15.0"), current=current,
+                                 platform=platform, frozen=True)
+        assert d["ok"] and d["update_available"] is True, d
+
+
 def t_update_check_frozen_dev_offers_latest():
     # a locally built frozen binary (version 'dev', no --version stamp) likewise
     # jumps to the latest release rather than being told to run `git pull`

@@ -419,6 +419,38 @@ def t_update_route_wraps_provider():
         httpd.shutdown()
 
 
+def t_versioned_preview_update_response_hides_the_sidebar_offer():
+    source_dir = os.path.join(ROOT, 'src')
+    sys.path.insert(0, source_dir)
+    try:
+        import racecast
+    finally:
+        sys.path.remove(source_dir)
+    ctx = _ctx()
+    ctx['update_check'] = lambda force=False: racecast.update_check_data(
+        fetch=lambda: {'tag_name': 'v1.14.1', 'assets': []},
+        current='1.15.0-preview.main.8508c3e', platform='darwin', frozen=True)
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, '/api/update')
+        data = json.loads(body)
+        assert code == 200 and data['ok'] and data['latest'] == 'v1.14.1', (code, data)
+        assert data['update_available'] is False, data
+        script = _page_fn(_cc_page(), 'checkUpdate')
+        out = _run_js('const data=' + json.dumps(data) + ';\n' + """
+const elements={'ver-note': {textContent:'old offer',className:'avail'}, 'upd-banner': {hidden:false}};
+const $=id=>elements[id];
+global.fetch=async()=>({json:async()=>data});
+""" + script + "\ncheckUpdate(false).then(()=>console.log(JSON.stringify(elements)));\n")
+        if out is not None:
+            rendered = json.loads(out)
+            assert rendered['upd-banner']['hidden'] is True, rendered
+            assert rendered['ver-note']['className'] == 'ver-note', rendered
+            assert rendered['ver-note']['textContent'] == 'up to date · v1.14.1', rendered
+    finally:
+        httpd.shutdown(); httpd.server_close()
+
+
 def t_previews_route_wraps_provider():
     httpd, port = _serve(_ctx())
     try:
