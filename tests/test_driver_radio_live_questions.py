@@ -180,7 +180,7 @@ def t_invalid_agent_numbers_cannot_become_live_answer_or_speech():
         message=f.service.question(QUESTION,state['binding'])
         assert worker.step('ai') is True
         invalid=current(f,message)
-        assert invalid['ai_error']=='invalid_explanation' and '999' not in invalid['text']
+        assert invalid['ai_state']=='failed' and invalid.get('ai_error')=='invalid_explanation' and '999' not in invalid['text']
         assert worker.step('audio') and speech.calls[0][0]==invalid['text']
 
 
@@ -286,6 +286,57 @@ def t_measurement_can_observe_slow_agent_completion_while_live_calls_keep_the_de
             try:live.LiveAI(machine,max_budget=value)
             except ValueError:pass
             else:raise AssertionError('Unbounded measurement budget accepted')
+
+
+def t_free_question_requires_live_data_even_with_an_agent_selected():
+    for condition in ('stale','replay'):
+        with tempfile.TemporaryDirectory() as d:
+            f=Fixture(d);configured(f)
+            if condition=='stale':f.snap['receipt']={'state':'stale'}
+            else:f.snap['replay']={'active':True}
+            f.snap['revision']+=1;state=f.poll()
+            message=f.service.question(QUESTION,state['binding'])
+            assert message['state']=='text_only' and message['ai_state']=='not_requested' and 'answer_mode' not in message
+            assert f.service.enrichment_work('ai') is None and f.service.enrichment_work('audio') is None
+
+
+def t_ai_cancel_deadline_does_not_depend_on_a_history_reader_or_cancel_fallback_speech():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding'])
+        assert f.service.provider_current(message['id'],message['epoch'],kind='ai')
+        f.at+=8  # No refresh/history call has settled the cached message yet.
+        assert not f.service.provider_current(message['id'],message['epoch'],kind='ai')
+        assert f.service.provider_current(message['id'],message['epoch'],kind='audio')
+
+
+def t_settled_failure_cannot_be_replaced_by_an_early_but_obsolete_agent_reply():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding'])
+        assert f.service.attach(message['id'],message['epoch'],{'ai_state':'failed','ai_error':'rate_limited'})
+        before=current(f,message)
+        assert not f.service.attach(message['id'],message['epoch'],{'ai_state':'ready','explanation':'The measurements may help.'})
+        assert current(f,message)==before
+
+
+def t_answer_deadline_is_checked_again_after_refresh_before_mutating_text():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding'])
+        refresh=f.service.refresh
+        def crossed(*args,**kwargs):
+            result=refresh(*args,**kwargs);f.at+=8;return result
+        with patch.object(f.service,'refresh',side_effect=crossed):
+            assert not f.service.attach(message['id'],message['epoch'],{'ai_state':'ready','explanation':'The measurements may help.'})
+        assert current(f,message)['ai_error']=='timed_out'
+
+
+def t_invalid_direct_answer_attachment_leaves_pending_text_unchanged():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding']);before=current(f,message)
+        for fields in ({'ai_state':'ready'},{'ai_state':'ready','explanation':''},
+                       {'ai_state':'ready','explanation':'x'*590}):
+            assert not f.service.attach(message['id'],message['epoch'],fields)
+            assert current(f,message)==before
 
 
 if __name__=='__main__':
