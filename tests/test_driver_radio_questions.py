@@ -99,6 +99,20 @@ def t_optional_lap_interpretation_only_accepts_exact_lap_evidence():
             else:raise AssertionError('Ungrounded lap claim accepted')
 
 
+def t_lap_evidence_preserves_preset_deduplication_and_requester_coalescing():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d,snapshot((83.25,86.5)));state=f.poll()
+        first=f.service.request('status',state['binding'],requester='first',authorization=lambda:True)
+        second=f.service.request('status',state['binding'],requester='second',authorization=lambda:True)
+        assert second['id']==first['id'],'identical complete evidence must share a message'
+        assert set(f.service._messages[first['id']]['_requesters'])=={'first','second'}
+        f.snap['laps'][0]['lap']=None;f.snap['revision']+=1;f.poll()
+        changed=f.service.request('status',state['binding'],requester='first',authorization=lambda:True)
+        assert changed['id']!=first['id'],'changed lap evidence must not reuse an earlier message'
+        assert changed['evidence']['laps']['fastest_lap'] is None
+        assert all(changed['evidence'][k]==first['evidence'][k] for k in ('fuel','pace','tyres','uncertainties'))
+
+
 def t_natural_questions_and_context_are_grounded_in_refreshed_facts():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);f.poll();state=f.service.refresh()

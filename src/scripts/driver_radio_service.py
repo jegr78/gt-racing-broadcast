@@ -24,6 +24,12 @@ AUDIO_HOLD_S = 10.0
 HUD_GONE = ('superseded','cancelled','expired')
 
 
+def _evidence(result):
+    evidence={k:result[k] for k in ('fuel','pace','tyres','uncertainties')}
+    if 'laps' in result:evidence['laps']=result['laps']
+    return evidence
+
+
 @dataclass
 class Ticket:
     id: str
@@ -185,12 +191,10 @@ class Service:
         source = source or ('coach' if kind == 'coach' else 'engineer')
         message = dict(id=mid, version=1, epoch=self._epoch, binding=self._binding,
                        source=source, kind=kind, preset=preset, severity=severity, text=text,
-                       evidence={k:result[k] for k in ('fuel','pace','tyres','uncertainties')},
+                       evidence=_evidence(result),
                        created_at=self.wall(), expires_at=self.wall()+ttl, state='queued' if queued else 'text_only',
                        audio_state='pending', ai_state='pending', _deadline=now+ttl, _created=now,
                        _native=requester is None, _requesters={requester:authorization} if requester is not None else {})
-        if 'laps' in result:
-            message['evidence']['laps']=result['laps']
         self._messages[mid] = copy.deepcopy(message)
         if queued:self._queue.append(mid)
         self._queue.sort(key=lambda ident:self._messages[ident]['severity'] != 'urgent')
@@ -427,7 +431,7 @@ class Service:
             now = self.clock()
             duplicate = next((m for m in reversed(self._messages.values())
                               if m['kind']=='requested' and m['preset']==preset and m['epoch']==self._epoch
-                              and m['evidence']=={k:self._assessment[k] for k in ('fuel','pace','tyres','uncertainties')}
+                              and m['evidence']==_evidence(self._assessment)
                               and now-m['_created']<2
                               and m['state'] not in ('cancelled','expired','superseded')), None)
             if duplicate is not None:
