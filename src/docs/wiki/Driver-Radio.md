@@ -255,7 +255,7 @@ runtime, hash-pinned packages and the model. **Test Kokoro** (`racecast radio sm
 cores at below-normal priority; check OBS and your game under real load before relying
 on it during a broadcast. A long answer plays once it is complete. Intel macOS is not
 supported. The runtime contains GPL components (eSpeak NG, phonemizer), is downloaded
-separately and runs as its own process.
+separately and runs as its own process: see [Third-party licenses](Third-Party-Licenses).
 
 **Google Studio-Q** must be selected deliberately. It uses Google Cloud Text-to-Speech **en-US-Studio-Q**. Configure the
 existing machine setting `RACECAST_GCLOUD_TTS_KEY`. Credentials stay on the relay. Only

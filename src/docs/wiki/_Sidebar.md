@@ -39,3 +39,4 @@
 - [Static mode](Static-Mode)
 - [Build &amp; maintenance](Build-and-maintenance)
 - [Smoke test (after updates)](Smoke-Test)
+- [Third-party licenses](Third-Party-Licenses)
