@@ -1,0 +1,186 @@
+{
+  "backup create": {
+    "handler": "createBackup",
+    "surface": "ui/control-center.html"
+  },
+  "backup delete": {
+    "handler": "deleteBackup",
+    "surface": "ui/control-center.html"
+  },
+  "backup list": {
+    "handler": "loadBackups",
+    "surface": "ui/control-center.html"
+  },
+  "backup restore": {
+    "handler": "restoreBackup",
+    "surface": "ui/control-center.html"
+  },
+  "companion logs": {
+    "handler": "watchLog",
+    "surface": "ui/control-center.html"
+  },
+  "companion status": {
+    "handler": "refresh",
+    "surface": "ui/control-center.html"
+  },
+  "console token revoke": {
+    "handler": "revokeConsole",
+    "surface": "ui/control-center.html"
+  },
+  "device-scan": {
+    "handler": "saveDevices",
+    "surface": "ui/control-center.html"
+  },
+  "discord status": {
+    "handler": "refresh",
+    "surface": "ui/control-center.html"
+  },
+  "event status": {
+    "handler": "refresh",
+    "surface": "ui/control-center.html"
+  },
+  "fonts restore": {
+    "handler": "restoreBundledFonts",
+    "surface": "ui/control-center.html"
+  },
+  "funnel off": {
+    "handler": "consoleFunnel",
+    "surface": "ui/control-center.html"
+  },
+  "funnel on": {
+    "handler": "consoleFunnel",
+    "surface": "ui/control-center.html"
+  },
+  "gt7-data status": {
+    "handler": "loadGt7Data",
+    "surface": "ui/control-center.html"
+  },
+  "gt7-discover": {
+    "handler": "discoverPs",
+    "surface": "ui/control-center.html"
+  },
+  "help": {
+    "handler": "showView",
+    "surface": "ui/control-center.html"
+  },
+  "init": {
+    "handler": "fetchWizard",
+    "surface": "ui/control-center.html"
+  },
+  "links": {
+    "handler": "loadConsole",
+    "surface": "ui/control-center.html"
+  },
+  "obs collection": {
+    "handler": "fetchObsCollection",
+    "surface": "ui/control-center.html"
+  },
+  "obs logs": {
+    "handler": "watchLog",
+    "surface": "ui/control-center.html"
+  },
+  "obs stream-target": {
+    "handler": "renderProducerSchedule",
+    "surface": "ui/control-center.html"
+  },
+  "profile export": {
+    "handler": "exportProfile",
+    "surface": "ui/control-center.html"
+  },
+  "profile import": {
+    "handler": "importProfile",
+    "surface": "ui/control-center.html"
+  },
+  "profile list": {
+    "handler": "loadProfiles",
+    "surface": "ui/control-center.html"
+  },
+  "profile new": {
+    "handler": "newProfile",
+    "surface": "ui/control-center.html"
+  },
+  "profile show": {
+    "handler": "loadProfileEnv",
+    "surface": "ui/control-center.html"
+  },
+  "profile use": {
+    "handler": "useProfile",
+    "surface": "ui/control-center.html"
+  },
+  "relay logs": {
+    "handler": "watchLog",
+    "surface": "ui/control-center.html"
+  },
+  "relay run": {
+    "op": "relay-start",
+    "why": "Start plus the live Logs view provides the foreground relay workflow in the UI."
+  },
+  "relay status": {
+    "handler": "refresh",
+    "surface": "ui/control-center.html"
+  },
+  "report": {
+    "op": "report-generate",
+    "why": "The bare report command generates the latest report."
+  },
+  "report send": {
+    "handler": "reportSend",
+    "surface": "ui/control-center.html"
+  },
+  "sheet open": {
+    "handler": "openActiveSheet",
+    "surface": "ui/control-center.html"
+  },
+  "sheet url": {
+    "handler": "openActiveSheet",
+    "surface": "ui/control-center.html"
+  },
+  "status": {
+    "handler": "refresh",
+    "surface": "ui/control-center.html"
+  },
+  "streams logs": {
+    "handler": "watchLog",
+    "surface": "ui/control-center.html"
+  },
+  "streams status": {
+    "handler": "refresh",
+    "surface": "ui/control-center.html"
+  },
+  "tailscale logs": {
+    "handler": "watchLog",
+    "surface": "ui/control-center.html"
+  },
+  "tailscale status": {
+    "handler": "refresh",
+    "surface": "ui/control-center.html"
+  },
+  "telemetry analyze": {
+    "handler": "prepareNewRun",
+    "surface": "ui/ai-analysis.js"
+  },
+  "telemetry delete": {
+    "handler": "tmDelete",
+    "surface": "ui/telemetry-workspace.js"
+  },
+  "telemetry list": {
+    "handler": "tmLoad",
+    "surface": "ui/telemetry-workspace.js"
+  },
+  "telemetry replay status": {
+    "handler": "tmReplayPoll",
+    "surface": "ui/control-center.html"
+  },
+  "telemetry shifts": {
+    "handler": "tmShiftLoad",
+    "surface": "ui/telemetry-workspace.js"
+  },
+  "telemetry ui": {
+    "handler": "showView",
+    "surface": "ui/control-center.html"
+  },
+  "ui": {
+    "handler": "showView",
+    "surface": "ui/control-center.html"
+  }
+}

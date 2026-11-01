@@ -9435,6 +9435,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "init_step": init_step_action_data,
         "ops": ops_mod.OPS,
         "build_argv": ops_mod.build_argv,
+        "profile_ops": ops_mod.PROFILE_OPS,
+        "active_profile": _active_profile_name,
         "assets": assets_status_data,
         "producer_schedule": producer_schedule_data,
         "asset_files": assets_files_data,

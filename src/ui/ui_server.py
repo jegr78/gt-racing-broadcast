@@ -104,10 +104,15 @@ def request_csrf_ok(headers):
     host = _host_label(headers.get("Host"))
     if host and host not in LOOPBACK_HOSTS:
         return False
-    origin = headers.get("Origin") or headers.get("Referer")
-    if origin:
-        hostname = urlparse(origin).hostname
-        if hostname is not None and hostname not in LOOPBACK_HOSTS:
+    origin = headers.get("Origin")
+    if origin is None:
+        origin = headers.get("Referer")
+    if origin is not None:
+        try:
+            parsed = urlparse(origin)
+            if parsed.scheme not in {'http', 'https'} or parsed.hostname not in LOOPBACK_HOSTS:
+                return False
+        except ValueError:
             return False
     return True
 
@@ -1444,12 +1449,29 @@ def make_handler(ctx):
                                       code=400)
                 try:
                     argv = ctx["build_argv"](name, body.get("params"))
+                    current = None
+                    if name in ctx.get('profile_ops', ()):
+                        current = ctx.get('active_profile', lambda:None)()
+                        if not current:
+                            return self._json({'ok':False,'error':'Select an active league profile first'},code=400)
+                        if body.get('profile') != current:
+                            return self._json({'ok':False,'error':'Active league changed. Reload and try again'},code=409)
+                        argv = ['--profile', current] + argv
                     profile = self.analysis_profile or (ctx.get("telemetry_default_profile", lambda: None)() if name in ANALYSIS_OPS else None)
                     if profile:
                         argv = ["--profile", profile] + argv
                 except ValueError as exc:
                     return self._json({"ok": False, "error": str(exc)}, code=400)
-                job_id, err = ctx["jobs"].start(name, argv)
+                if name == 'smoketest':
+                    import smoketest
+                    if not current:
+                        return self._json({'ok':False,'error':'Select an active league profile first'},code=400)
+                    typed = body.get('confirmation')
+                    if not isinstance(typed, str) or len(typed)>511 or not smoketest.phrase_ok(current, typed):
+                        return self._json({'ok':False,'error':'Type CLEAR SCHEDULE '+current+' exactly to confirm'},code=400)
+                    job_id, err = ctx['jobs'].start(name, argv, input_text=typed+'\n')
+                else:
+                    job_id, err = ctx["jobs"].start(name, argv)
                 if err:
                     return self._json({"ok": False, "error": err, "job_id": job_id},
                                       code=409)
@@ -1468,6 +1490,9 @@ def make_handler(ctx):
                     body = self._body_json()
                     if body is None or body.get("confirm") is not True:
                         return self._json({"ok": False, "error": {"code": "active_work", "message": message}}, code=409)
+                if not getattr(ctx.get('jobs'), 'prepare_shutdown', lambda:True)():
+                    return self._json({'ok':False,'error':{'code':'smoke_running',
+                        'message':'A smoke test is running. Wait for its event cleanup before stopping the UI service.'}},code=409)
                 self._json({"ok": True})
                 # shutdown() blocks until serve_forever() returns, so never call it
                 # from a request thread directly.

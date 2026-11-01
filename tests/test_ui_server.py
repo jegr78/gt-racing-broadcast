@@ -1736,6 +1736,50 @@ def _page_fn(page, name):
     return page[i:page.index("\n}\n", i) + 3]
 
 
+def t_builder_read_failure_has_one_bounded_retry():
+    out=_run_js(_page_fn(_cc_page(),'loadOverlay')+"""
+let ovLoadSequence=0,overlayPage='splitscreen',calls=0;
+const elements={};const $=id=>elements[id]||(elements[id]={hidden:true});
+const errors=[];function showProfileErr(id,text){errors.push([id,text]);$(id).hidden=false;}
+globalThis.fetch=async()=>{calls++;throw new Error('fixture interrupted read');};
+(async()=>{await loadOverlay();console.log(JSON.stringify({calls,errors,sequence:ovLoadSequence}));})();
+""",attempts=1)
+    if out is not None:
+        state=json.loads(out)
+        assert state=={'calls':2,'errors':[['overlay-err','Control Center not reachable.']],'sequence':2},state
+
+
+def t_obsolete_builder_read_failure_cannot_retry_or_show_an_error():
+    out=_run_js(_page_fn(_cc_page(),'loadOverlay')+"""
+let ovLoadSequence=0,overlayPage='splitscreen',calls=0,reject;
+const elements={};const $=id=>elements[id]||(elements[id]={hidden:true});
+const errors=[];function showProfileErr(id,text){errors.push([id,text]);$(id).hidden=false;}
+globalThis.fetch=()=>{calls++;return calls===1 ? new Promise((resolve,fail)=>{reject=fail;}) : Promise.reject(new Error('unexpected retry'));};
+(async()=>{const results=[];
+for(const change of ['page','sequence']){
+ovLoadSequence=0;overlayPage='splitscreen';calls=0;errors.length=0;
+const work=loadOverlay();if(change==='page')overlayPage='hud';else ovLoadSequence++;
+reject(new Error('obsolete interrupted read'));await work;
+results.push({calls,errors:errors.slice(),page:overlayPage,sequence:ovLoadSequence});
+}console.log(JSON.stringify(results));})();
+""",attempts=1)
+    if out is not None:
+        assert json.loads(out)==[{'calls':1,'errors':[],'page':'hud','sequence':1},
+                                 {'calls':1,'errors':[],'page':'splitscreen','sequence':2}],out
+
+
+def t_builder_business_error_keeps_its_message_without_retry():
+    out=_run_js(_page_fn(_cc_page(),'loadOverlay')+"""
+let ovLoadSequence=0,overlayPage='splitscreen',calls=0;
+const elements={};const $=id=>elements[id]||(elements[id]={hidden:true});
+const errors=[];function showProfileErr(id,text){errors.push([id,text]);$(id).hidden=false;}
+globalThis.fetch=async()=>{calls++;return {json:async()=>({ok:false,error:'fixture slot data unavailable'})};};
+(async()=>{await loadOverlay();console.log(JSON.stringify({calls,errors,sequence:ovLoadSequence}));})();
+""",attempts=1)
+    if out is not None:
+        assert json.loads(out)=={'calls':3,'errors':[['overlay-err','fixture slot data unavailable']],'sequence':1},out
+
+
 def t_job_snapshot_tail_takes_ascii_digits_only():
     httpd, port = _serve(_ctx())
     try:
@@ -1995,6 +2039,12 @@ def t_csrf_cross_origin_blocked():
                                    "Referer": "http://evil.example.com/x"})
     assert not us.request_csrf_ok({"Host": "127.0.0.1:8089",
                                    "Origin": "https://youtube.com"})
+
+
+def t_csrf_opaque_or_malformed_origin_and_referer_are_blocked():
+    for key in ('Origin','Referer'):
+        for value in ('','ftp://localhost','null','file:///tmp/local.html','data:text/html,example','http://[invalid','localhost'):
+            assert not us.request_csrf_ok({'Host':'127.0.0.1:8089',key:value}),(key,value)
 
 
 def t_csrf_guard_blocks_foreign_host_on_real_server():
@@ -2881,7 +2931,7 @@ def t_shift_route_keeps_domain_errors_and_blocks_foreign_origins():
         try:
             _urlopen(request)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403 and json.loads(exc.read()) == {'ok': False, 'error': 'foreign context origin'}
+            assert exc.code == 403 and json.loads(exc.read()) == {'ok': False, 'error': 'cross-origin request blocked'}
         else:
             raise AssertionError('foreign shift reads must be refused')
         assert len(seen) == 1, 'blocked shift reads cannot reach recording analysis'
@@ -2930,7 +2980,7 @@ def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
         before = len(seen)
         for headers, error in (({'Origin': 'https://foreign.example'}, 'cross-origin request blocked'),
                                ({'Host': f'foreign.example:{port}'}, 'cross-origin request blocked'),
-                               ({'Origin': 'null'}, 'foreign context origin'),
+                               ({'Origin': 'null'}, 'cross-origin request blocked'),
                                ({'Origin': f'http://localhost:{port + 1}'}, 'foreign context origin')):
             request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/context',
                                              method='POST', data=b'{}', headers=headers)
