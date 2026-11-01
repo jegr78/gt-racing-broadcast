@@ -15,6 +15,18 @@ control and inspect it. External services and native capture remain initially of
 | No ambient upload or raw recording | local bounded PCM ring; cloud only after wake | selected utterance only | silence timeout, excessive audio, disabled cloud | IPC/payload inspection and scratch-directory checks |
 | Bounded status and recovery | supervisor state and authenticated controls | pause/resume, language, volume/mute | bad mutations, stale binding, closed supervisor | signed HTTP tests and bounded worker state |
 
+### Cleanup concurrency regression (#1057)
+
+| Requirement | Production path | Positive test | Failure test | Runtime evidence |
+| --- | --- | --- | --- | --- |
+| Process cleanup never owns the status/control lock | `Supervisor.step`, `_stop_capture`, `status`, `control` | Acquire the state lock without waiting while fake cleanup is blocked | Holding the state lock through cleanup fails immediately | Lock acquisition result plus cleanup entry/completion events |
+| Status, controls and consent changes complete before cleanup | Native controls and profile access update | Read status, apply pause and revoke consent before releasing cleanup | Assert cleanup has not already completed; surface worker exceptions | Real settings changes, worker join and lifecycle state |
+
+The cleanup regression checks ordering and lock ownership rather than requiring
+all readiness reads and profile writes to finish within 500 ms. Those filesystem
+operations are independent of process termination. Finite cleanup waits and
+thread joins still bound the fixture; they are not a response-time benchmark.
+
 ## Engine research and validation
 
 Vosk's Apache-2.0 C API and small English/German models support local streaming

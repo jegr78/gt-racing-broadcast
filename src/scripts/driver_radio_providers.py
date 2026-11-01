@@ -5,6 +5,7 @@ import collections
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -53,7 +54,9 @@ class GoogleSpeech:
         self._bytes=0
 
     def synthesize(self,text,stopped,budget):
-        deadline=self.clock()+min(BUDGET,budget)
+        # Round inward so subtraction cannot exceed the original budget when
+        # a coarse monotonic clock returns the same float several times.
+        deadline=math.nextafter(self.clock()+min(BUDGET,budget),-math.inf)
         with self._lock:
             if stopped.is_set():raise ProviderError('cancelled')
             if self.clock()>=deadline:raise ProviderError('timed_out')

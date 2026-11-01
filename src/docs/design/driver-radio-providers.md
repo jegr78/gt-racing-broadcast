@@ -13,6 +13,14 @@ it never delays deterministic text, relay HTTP, telemetry or broadcast workers.
 | Text-first and current attachments | independent enrichment workers, Service.attach | text visible while worker blocked | expiry/profile/session/context/access change during work | events and real shared message state |
 | No credential/recording disclosure | private environment and allowlisted facts | only selected current facts leave process | raw provider errors, private paths, unrelated history | outgoing request/package and public JSON inspection |
 
+### Speech deadline precision (#1061)
+
+| Requirement | Production path | Positive test | Failure test | Runtime evidence |
+| --- | --- | --- | --- | --- |
+| Never exceed the caller's speech budget or eight seconds | `GoogleSpeech.synthesize`, direct HTTP and owned worker | Fixed monotonic clocks at floating-point boundaries, full and fractional budgets | No tolerance above the budget in HTTP, socket or worker assertions | Captured request, socket and worker timeouts; fake audio only |
+| Preserve one shrinking deadline | Lock acquisition, worker preparation and streamed reads | Advancing clock reduces each remaining timeout | Expiry while waiting for the lock or reading rejects with `timed_out` | Deterministic clock steps and exact provider status |
+| Refuse work without a positive representable interval | Speech entry before cache or HTTP | Small representable budget still synthesizes | Zero, negative or already expired intervals perform no provider work | Fake HTTP and worker call counters |
+
 ## Defaults and consent
 
 Profile settings hold `providers` with `speech=false`, and each AI feature
@@ -41,6 +49,12 @@ Speech has an eight-second network budget, one worker, a two-MiB WAV bound and a
 never waits for AI. These are bounded engineering defaults; configured Studio-Q
 cold/warm latency is a separate explicit smoke check, not an ordinary CI call.
 No paid service call or live microphone capture is part of synthetic validation.
+
+Speech rounds its absolute monotonic deadline inward by one floating-point
+step. Even when clock reads repeat, subtraction cannot produce a timeout above
+the original caller budget. Lock waits, worker preparation and response reads
+consume that same deadline; a budget too small to represent expires before any
+provider work.
 
 The relay starts synthesis in an owned private process. This bounds DNS and
 socket stalls as well as response reads. Credentials travel through bounded
