@@ -6468,8 +6468,8 @@ def radio_provision_cmd(rest):
     args = parser.parse_args(rest)
     try:
         print(json.dumps(driver_radio_models.provision(_runtime_base_dir(), whisper=args.whisper)))
-    except (OSError, ValueError):
-        sys.exit("Native voice provisioning failed; verify network, disk space and the local model directory")
+    except (OSError, ValueError) as exc:
+        sys.exit(f"Native voice provisioning failed ({exc}); verify network, disk space and the local model directory")
 
 
 def radio_smoke_cmd(rest):

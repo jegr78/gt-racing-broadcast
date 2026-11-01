@@ -194,9 +194,10 @@ read text; it does not become a remote microphone or speaker.
 
 1. Install FFmpeg and FFplay on the relay PC. The existing tool setup normally
    provides FFmpeg; ensure FFplay is also available on the executable search path.
-2. Explicitly install the pinned local wake and transcription models:
-   `racecast radio provision`. Provisioning verifies checksums and the prepared
-   phrase fixtures. A relay start downloads nothing.
+2. Explicitly install the pinned local wake and transcription models: **Install
+   voice models** in the **Voice** card, or `racecast radio provision`. Provisioning
+   verifies checksums and the prepared phrase fixtures. A relay start downloads
+   nothing.
 3. In the **Voice** card of **Driver radio setup**, deliberately enable native voice for the profile.
    It uses the microphone selected in Control Center unless you enter a
    **Microphone override**. On Windows/macOS the override is the native device name; on Linux it
@@ -247,8 +248,9 @@ existing machine setting `RACECAST_GCLOUD_TTS_KEY` and explicitly select Google
 speech in the profile's radio setup. Credentials stay on the relay. Only answer
 text is sent for synthesis. There is no silent voice substitution.
 
-`racecast radio smoke --allow-cloud` makes two configured synthesis requests and
-measures cold, warm and cached latency without playing audio. It incurs normal
+**Test Google speech** in the **Voice** card (`racecast radio smoke --allow-cloud`)
+makes two configured synthesis requests and measures cold, warm and cached latency
+without playing audio. It incurs normal
 provider usage. Run it deliberately; ordinary tests never make paid calls.
 
 Transcription choices are independent:
@@ -257,7 +259,7 @@ Transcription choices are independent:
   can miss free questions, especially in noise. Repeat the wake and question, or
   use a preset if the transcript is wrong.
 - **Local whisper.cpp** uses its separately installed `whisper-cli`. Run
-  `racecast radio provision --whisper` to download pinned multilingual tiny
+  **Install with whisper.cpp weights** (`racecast radio provision --whisper`) to download pinned multilingual tiny
   weights. Optional machine settings `RACECAST_RADIO_WHISPER_EXE` and
   `RACECAST_RADIO_WHISPER_MODEL` select an installed executable/model. Synthetic
   English checks worked with tiny/base; the first German synthetic phrase was

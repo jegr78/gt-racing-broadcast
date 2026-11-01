@@ -35,6 +35,9 @@ no package manager); external runtime deps are `yt-dlp`, `streamlink`, `ffmpeg`,
   `http_util`, only stdlib-only helper modules from `src/scripts` that
   `tools/build-binary.py` bundles, e.g. `asset_metadata`, `placeholders`) and
   `src/scripts/update.py` (needs its own HTTPS-only redirect opener + test seam).
+- **Every operator CLI action is also runnable in the Control Center.** A new or
+  changed `racecast` verb gets its Control Center action in the same change
+  (`src/ui/ui_ops.py` plus a control in the matching view, or a dedicated `/api` route).
 - **Removing/renaming a CLI flag? Grep the whole repo: including `tools/` and
   `.github/`.** Those callers run only in the build/release pipeline, not in the
   test suite (a stale `--timer-url` in the binary smoke test broke every v1.0.0

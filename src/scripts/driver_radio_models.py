@@ -22,6 +22,10 @@ WHISPER=('https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bi
 LIBRARIES={'macos': ('https://files.pythonhosted.org/packages/44/19/5e8299237bc2005c3d155d3b48adba6fd6484465ad5c970302fc1d37947d/vosk-0.3.44-py3-none-macosx_10_6_universal2.whl', '029d0b3d6a5cff874c575b8a5814a4cccfb37608cff52e846c02a8c67a882801'), 'linux_arm64': ('https://files.pythonhosted.org/packages/a4/23/3130a69fa0bf4f5566a52e415c18cd854bf561547bb6505666a6eb1bb625/vosk-0.3.45-py3-none-manylinux2014_aarch64.whl', '54efb47dd890e544e9e20f0316413acec7f8680d04ec095c6140ab4e70262704'), 'linux_x64': ('https://files.pythonhosted.org/packages/fc/ca/83398cfcd557360a3d7b2d732aee1c5f6999f68618d1645f38d53e14c9ff/vosk-0.3.45-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl', '25e025093c4399d7278f543568ed8cc5460ac3a4bf48c23673ace1e25d26619f'), 'windows': ('https://files.pythonhosted.org/packages/c0/4c/deb0861f7da9696f8a255f1731bb73e9412cca29c4b3888a3fcb2a930a59/vosk-0.3.45-py3-none-win_amd64.whl', '6994ddc68556c7e5730c3b6f6bad13320e3519b13ce3ed2aa25a86724e7c10ac')}
 
 
+# The Vosk host serves ~190 KB/s, so a 45 MB model takes about four minutes.
+DOWNLOAD_DEADLINE_S=900
+
+
 def target(system=None,machine=None):
     system=system or platform.system();machine=(machine or platform.machine()).lower()
     if system=='Darwin' and machine in ('arm64','aarch64','x86_64','amd64'):return 'macos'
@@ -32,7 +36,7 @@ def target(system=None,machine=None):
 
 
 def download(url,checksum,maximum,open_url=http_util.open_url):
-    deadline=time.monotonic()+180
+    deadline=time.monotonic()+DOWNLOAD_DEADLINE_S
     raw=bytearray()
     with open_url(url,timeout=30) as response:
         while block:=response.read(min(1024*1024,maximum+1-len(raw))):
