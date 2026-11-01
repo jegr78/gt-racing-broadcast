@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Synthetic browser acceptance for shared driver radio views and producer setup."""
+import json
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -116,7 +118,15 @@ def check(browser,outdir,shots=None):
             for width,view in ((1024,'tablet'),(390,'phone'),(1440,'desktop')):
                 display.set_viewport_size({'width':width,'height':1000})
                 assert display.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),'messages display overflows viewport'
-                shot(display,'driver-radio-messages',view,'console-driver-radio-messages.png' if view=='desktop' else None)
+                shot(display,'driver-radio-messages',view)
+            # The wiki shows a current message above one past its validity.
+            now=time.time()
+            aged=[dict(id=n,source='engineer',kind='requested',severity='normal',state='spoken',text=text,created_at=now+age,expires_at=now+age+30)
+                  for n,text,age in ((1,'Fuel 83.3 litres, usable range 15.9 laps. Pace trend is not yet available.',-180),
+                                     (2,'Fuel 77.8 litres, usable range 14.8 laps. Pace trend is not yet available.',-5))]
+            display.route('**/console/driver-radio/messages',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps(dict(messages=aged))))
+            display.locator('#messages li.old').first.wait_for()
+            shot(display,'driver-radio-messages-aged',wiki='console-driver-radio-messages.png')
             display.close()
             f.f.request('fuel');f.enricher.step('audio')
             # A Director's Console landing; the Director Panel has no driver radio card.

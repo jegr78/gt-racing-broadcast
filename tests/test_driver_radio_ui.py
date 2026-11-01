@@ -610,6 +610,21 @@ def t_messages_view_lists_newest_first_with_its_source():
     assert out['status']=='',out
 
 
+def t_messages_view_dims_a_message_past_its_validity():
+    out=_run_messages_view("""
+     const now=Date.now()/1000,row=(id,fields)=>({id,source:'engineer',kind:'requested',severity:'urgent',state:'spoken',text:'T'+id,created_at:now-60,...fields});
+     routes[%r]=[200,{messages:[row(1,{expires_at:now-1}),row(2,{expires_at:now+30,state:'expired'}),row(3,{expires_at:now+30,state:'superseded'}),row(4,{expires_at:now+30})]}];
+     await view.poll();const first=byId('messages').children.map(r=>r.className);
+     routes[%r][1].messages[3].expires_at=now-1;
+     await view.poll();const later=byId('messages').children.map(r=>r.className);
+     view.stop();console.log(JSON.stringify({first,later}));
+    """%(_LANE,_LANE))
+    if out is None:return
+    assert 'old' not in out['first'][0] and 'urgent' in out['first'][0],out  # Newest first: message 4.
+    assert all('old' in name and 'urgent' not in name for name in out['first'][1:]),out
+    assert 'old' in out['later'][0],'a message that expires while shown dims without a new message'
+
+
 def t_messages_view_keeps_text_on_a_network_error_and_clears_it_when_refused():
     good=[dict(id=1,source='engineer',kind='requested',severity='routine',state='spoken',text='Fuel for 12 laps.',created_at=100)]
     out=_run_messages_view("""
