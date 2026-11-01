@@ -238,6 +238,19 @@ def t_smoke_reader_admission_failure_never_spawns_or_reports_a_running_child_fin
     assert jobs.prepare_shutdown() is True
 
 
+def t_failed_smoke_spawn_releases_its_admitted_output_owner():
+    import subprocess
+    code=("import sys;sys.path.insert(0,"+repr(str(ROOT/'src/ui'))+");import ui_jobs\n"
+          "def fail(argv,**kwargs):raise OSError('fixture launch failed')\n"
+          "jobs=ui_jobs.JobManager(list,spawn=fail)\n"
+          "try:jobs.start('smoketest',[],input_text='typed\\n')\n"
+          "except OSError:pass\nelse:raise AssertionError('Launch must fail')\n"
+          "assert jobs.jobs=={}\n")
+    try:result=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True,timeout=5)
+    except subprocess.TimeoutExpired as exc:raise AssertionError('Failed spawn stranded the admitted smoke output owner') from exc
+    assert result.returncode==0,(result.stdout,result.stderr)
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)
