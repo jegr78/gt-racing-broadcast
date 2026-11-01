@@ -140,6 +140,7 @@ def main():
                     print(json.dumps({'ok':True,'jobs':len(calls),'browserErrors':errors}))
                 finally:browser.close()
         finally:server.shutdown();server.server_close()
+    return 0
 
 
 if __name__=='__main__':raise SystemExit(main())
