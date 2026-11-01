@@ -1754,13 +1754,18 @@ def t_obsolete_builder_read_failure_cannot_retry_or_show_an_error():
 let ovLoadSequence=0,overlayPage='splitscreen',calls=0,reject;
 const elements={};const $=id=>elements[id]||(elements[id]={hidden:true});
 const errors=[];function showProfileErr(id,text){errors.push([id,text]);$(id).hidden=false;}
-globalThis.fetch=()=>{calls++;return new Promise((resolve,fail)=>{reject=fail;});};
-(async()=>{const work=loadOverlay();overlayPage='hud';ovLoadSequence++;
+globalThis.fetch=()=>{calls++;return calls===1 ? new Promise((resolve,fail)=>{reject=fail;}) : Promise.reject(new Error('unexpected retry'));};
+(async()=>{const results=[];
+for(const change of ['page','sequence']){
+ovLoadSequence=0;overlayPage='splitscreen';calls=0;errors.length=0;
+const work=loadOverlay();if(change==='page')overlayPage='hud';else ovLoadSequence++;
 reject(new Error('obsolete interrupted read'));await work;
-console.log(JSON.stringify({calls,errors,page:overlayPage,sequence:ovLoadSequence}));})();
+results.push({calls,errors:errors.slice(),page:overlayPage,sequence:ovLoadSequence});
+}console.log(JSON.stringify(results));})();
 """,attempts=1)
     if out is not None:
-        assert json.loads(out)=={'calls':1,'errors':[],'page':'hud','sequence':2},out
+        assert json.loads(out)==[{'calls':1,'errors':[],'page':'hud','sequence':1},
+                                 {'calls':1,'errors':[],'page':'splitscreen','sequence':2}],out
 
 
 def t_builder_business_error_keeps_its_message_without_retry():
