@@ -47,6 +47,10 @@ def t_pace_answer_gives_lap_times_as_minutes_seconds_millis():
     assert radio._lap_clock(59.9996)=='1:00.000.' and radio._lap_clock(58.1234)=='58.123 seconds.'
 
 
+def t_tyre_answer_skips_the_wear_note_telemetry_can_never_fill():
+    assert 'wear' not in review(snapshot())['answers']['tyres'].casefold()
+
+
 def t_fastest_lap_is_named_only_when_a_comparable_lap_beats_the_earlier_ones():
     fastest=review(snapshot((90,91,89)))
     assert 'Last lap was your fastest.' in fastest['answers']['status'] and ', your fastest lap.' in fastest['lap_text'],fastest['lap_text']

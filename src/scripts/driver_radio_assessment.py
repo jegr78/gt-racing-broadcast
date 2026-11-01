@@ -285,7 +285,7 @@ def assess(snapshot, session=None, limits=None):
                                  for label,value in zip(('front left','front right','rear left','rear right'),temps, strict=True))
     age = number(tyres['age_laps'])
     age_text = f' Confirmed tyre age {age:g} completed laps.' if age is not None and age >= 0 else ' Confirmed tyre age is unavailable.'
-    tyre_text = 'Tyre temperatures: '+temperature_text+'. Compound '+(compound or 'unknown')+'.'+age_text+' Wear is not measured.'
+    tyre_text = 'Tyre temperatures: '+temperature_text+'. Compound '+(compound or 'unknown')+'.'+age_text
     status_fuel = (f'Fuel {fuel:.1f} litres, usable range {usable:.1f} laps.' if fuel is not None and usable is not None
                    else f'Fuel {fuel:.1f} litres; range unavailable.' if fuel is not None else 'Live fuel is unavailable.')
     if fuel_result['state']=='provisional':status_fuel += ' Fuel estimate is provisional.'
