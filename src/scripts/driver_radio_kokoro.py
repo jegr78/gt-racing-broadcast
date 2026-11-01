@@ -10,6 +10,7 @@ import io
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tarfile
@@ -40,6 +41,18 @@ MODEL_FILES = {
     'voices-v1.0.bin':(_MODELS+'voices-v1.0.bin','bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d')}
 MANIFEST = 'kokoro-ready.json'
 MANIFEST_DOC = dict(version=1,python=RUNTIMES['windows'][0].split('/')[-2])
+
+
+def _lap_time(match):
+    minutes=int(match[1])
+    return f"{minutes} minute{'' if minutes==1 else 's'} {int(match[2])} point {' '.join(match[3])}"
+
+
+def speakable(text):
+    """Kokoro reads 5.7 as five seven, which sounds like a different value. Only the
+    spoken text changes; the message keeps its digits."""
+    text=re.sub(r'\b(\d+):(\d{2})\.(\d+)\b',_lap_time,text)
+    return re.sub(r'\b(\d+)\.(\d+)\b',lambda m:f"{m[1]} point {' '.join(m[2])}",text)
 
 
 def target(system=None,machine=None):
@@ -196,7 +209,7 @@ class KokoroSpeech:
             with self._state:
                 self._next+=1;request=self._next;self._reply=None
                 try:
-                    self._proc.stdin.write((json.dumps(dict(id=request,text=text,voice=voice))+'\n').encode())
+                    self._proc.stdin.write((json.dumps(dict(id=request,text=speakable(text),voice=voice))+'\n').encode())
                     self._proc.stdin.flush()
                 except (OSError,AttributeError,ValueError) as exc:raise ProviderError('speech_failed') from exc
             # A reply to an abandoned request carries an older id and never matches.
