@@ -144,19 +144,33 @@ def t_blocked_cleanup_does_not_block_status_controls_or_consent_updates():
     import threading
     with tempfile.TemporaryDirectory() as d:
         h=Harness(d);h.n.step();entered=threading.Event();release=threading.Event()
-        def slow_close():entered.set();assert release.wait(3)
+        closed=threading.Event();failures=[]
+        def slow_close():
+            entered.set()
+            try:assert release.wait(3), 'test did not release native cleanup'
+            finally:closed.set()
+        def step():
+            try:h.n.step()
+            except Exception as exc:failures.append(exc)
         h.workers[0].close=slow_close
         h.control(paused=True)
-        thread=threading.Thread(target=h.n.step);thread.start();assert entered.wait(1)
-        completed=threading.Event()
-        def control():
+        thread=threading.Thread(target=step);thread.start()
+        try:
+            assert entered.wait(1), 'native cleanup did not start'
+            # The cleanup owner cannot advance until release. Check the actual
+            # lock invariant before filesystem reads/writes on the caller thread.
+            assert h.n._lock.acquire(blocking=False), 'native process I/O owns the status/control lock'
+            h.n._lock.release()
             state=h.n.status()
-            h.n.control(dict(binding=state['binding'],expected=state['revision'],paused=True))
-            h.f.access.update({'expected':1,'features':features()})
-            completed.set()
-        request=threading.Thread(target=control);request.start()
-        try:assert completed.wait(.5), 'native process I/O blocked controls or profile consent'
-        finally:release.set();thread.join(3);request.join(3);h.n.close()
+            updated=h.n.control(dict(binding=state['binding'],expected=state['revision'],paused=True))
+            assert updated['paused'] and updated['revision']>state['revision']
+            consent=h.f.access.update({'expected':1,'features':features()})
+            assert not any(feature['enabled'] for feature in consent['features'].values())
+            assert not closed.is_set(), 'cleanup finished before the control and consent checks'
+        finally:
+            release.set();thread.join(3);h.n.close()
+        assert not thread.is_alive() and not failures, failures
+        assert closed.is_set()
 
 
 def t_consent_revoked_while_a_worker_stops_cannot_admit_its_replacement():
