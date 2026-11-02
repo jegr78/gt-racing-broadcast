@@ -13,7 +13,7 @@ def t_quick_questions_route_in_english_and_german():
     data=review(snapshot())
     for preset,texts in (
             ('position',("What's my position?",'Where am I?','Welche Position habe ich?','Wo liege ich?')),
-            ('to_go',('How many laps to go?','laps left','Wie viele Runden noch?','Runden übrig')),
+            ('to_go',('How many laps to go?','laps left','How many laps to the finish?','Wie viele Runden noch?','Runden übrig')),
             ('fuel_finish',('Do I have enough fuel?','Will I make it to the end?','Reicht der Sprit?','Sprit bis ins Ziel')),
             ('consumption',("What's my fuel per lap?",'consumption','Verbrauch','Sprit pro Runde')),
             ('tyre_age',('How old are my tyres?','tyre age','Wie alt sind die Reifen?','Reifenalter')),

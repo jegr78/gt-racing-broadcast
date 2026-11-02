@@ -24,6 +24,8 @@ def plan(text, previous=None):
     elif re.search(r'\b(?:stint|since (?:my |the )?(?:last )?stop|seit (?:dem |meinem )?(?:letzten )?stopp)\b',clean):preset='stint'
     elif re.search(r'\b(?:tyre age|tire age|how old (?:are )?(?:my |the )?(?:tyres|tires)|reifenalter'
                    r'|wie alt (?:sind )?(?:die |meine )?reifen)\b',clean):preset='tyre_age'
+    elif (re.search(r'\blaps? to (?:the )?(?:finish|end)\b',clean)
+          and not re.search(r'\b(?:fuel|sprit|benzin|tank)\b',clean)):preset='to_go'
     elif re.search(r'\b(?:fuel|range|reserve|finish|sprit|benzin|tank|treibstoff|reichweite)\b',clean):preset='fuel'
     elif re.search(r'\b(?:laps? (?:to go|left|remaining)|how many laps|runden (?:noch|übrig|verbleibend)|wie viele runden)\b',clean):preset='to_go'
     elif re.search(r'\b(?:tyres?|tires?|temperature|temperatures|reifen|reifentemperatur|reifentemperaturen)\b',clean):preset='tyres'
