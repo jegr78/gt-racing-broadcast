@@ -107,7 +107,10 @@ running relay.
   `Declared by radio voice` or `Declared by driver desk`. In turn the context fills the
   radio setup whenever the radio session starts. Each radio and coach message, with the
   driver's question, is kept in `<recording>.radio.jsonl` next to the capture; it is
-  deleted with the recording and exported as `radio.jsonl`.
+  deleted with the recording and exported as `radio.jsonl`. The event report lists
+  these messages in a **Driver radio** table, and an AI analysis package of the session
+  includes them, questions too; the package preview shows every message and states
+  that they are transmitted before you start.
 - **Stint service and comparison.** Enter the lap and optional recording time at which
   service occurred. Temperature resets, refuelling and standstill produce proposed times,
   never confirmed tyre compounds. A pit lap can contain both RM and RH. Each confirmed

@@ -1712,6 +1712,7 @@ def _report_telemetry(frm, to):
     if not _profile_has_telemetry():
         return None
     try:
+        import driver_radio_recording
         import gt7_recording
         import report_telemetry as rtel
         rows = _recordings_in_window(gt7_recording.list_recordings(_telemetry_rec_dir()),
@@ -1727,7 +1728,8 @@ def _report_telemetry(frm, to):
                 print(f"note: telemetry recording {r['name']} skipped "
                       f"({_telemetry_reason(exc, r['name'])}).")
                 continue
-            indexes.append(dict(_telemetry_with_shifts(_telemetry_with_context(idx, r["path"]), r['path']), partial=r["partial"]))
+            indexes.append(dict(_telemetry_with_shifts(_telemetry_with_context(idx, r["path"]), r['path']), partial=r["partial"],
+                                radio=driver_radio_recording.messages(driver_radio_recording.read_journal(r["path"]))))
         return rtel.telemetry_block(indexes, (frm, to))
     except Exception as exc:  # noqa: BLE001  telemetry must never fail the report
         print(f"note: telemetry section skipped ({_telemetry_reason(exc)}).")

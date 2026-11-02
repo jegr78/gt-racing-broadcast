@@ -160,7 +160,11 @@ def telemetry_block(indexes, window):
     to_ts), or None when there are none."""
     frm, to = window
     picked, partial, snapshots, definitions, references = [], False, {}, {}, {}
+    radio = []
     for idx in indexes:
+        # Driver-radio messages of the window (#1084), from the recordings' journals.
+        radio.extend(m for m in idx.get("radio") or []
+                     if isinstance(m.get("at"), (int, float)) and frm <= m["at"] <= to)
         found = False
         for lap in idx.get("laps") or []:
             ts = (idx.get("start_ts") or 0.0) + (lap.get("start_t_s") or 0.0)
@@ -186,7 +190,7 @@ def telemetry_block(indexes, window):
     return {"laps": rows, "laps_total": len(rows), "context_snapshots": snapshots, "track_definition_snapshots": definitions,
             "shift_reference_snapshots": references,
             "laps_counted": sum(1 for r in rows if r["counted"]),
-            "partial": partial, "groups": groups}
+            "partial": partial, "groups": groups, "radio": sorted(radio, key=lambda m: m["at"])}
 
 
 def summary_line(block, esc=None):

@@ -1041,5 +1041,18 @@ def t_report_counts_av_repairs_and_the_rendered_line_says_what_it_means():
     assert "re-synced" not in html3
 
 
+def t_driver_radio_section_lists_questions_and_messages():
+    radio = [{"at": 1100.0, "lap": 2, "kind": "question", "source": "engineer",
+              "question": "<b>How many laps?</b>", "text": "4 to go."},
+             {"at": 1150.0, "lap": None, "kind": "coach", "source": "coach", "question": None, "text": "Brake later."}]
+    html = rb.render_html(_solo_report(radio=radio))
+    assert "<h3>Driver radio</h3>" in html
+    for text in ("&lt;b&gt;How many laps?&lt;/b&gt;", "4 to go.", "AI Race Engineer", "AI Coach", "Brake later.",
+                 rb._fmt_clock(1100.0), "<th>Driver asked</th>"):
+        assert text in html, text
+    assert "<b>How many laps?</b>" not in html
+    assert "Driver radio" not in rb.render_html(_solo_report())
+
+
 if __name__ == "__main__":
     run()

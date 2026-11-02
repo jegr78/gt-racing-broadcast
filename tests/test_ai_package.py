@@ -245,6 +245,42 @@ def t_optional_shift_enrichment_only_reads_selected_usable_laps():
             expect(lambda session=session,lap=lap:a.build(origin,1,references=[(origin,session,lap)]),'invalid_selection')
 
 
+def t_the_driver_radio_journal_travels_with_the_package():
+    import driver_radio_recording as radio
+    with tempfile.TemporaryDirectory() as d:
+        s=source(Path(d)/'profile'/'telemetry-recordings')
+        assert 'radio' not in a.build(s,1) and 'driver-radio' not in a.preview(a.build(s,1),'codex')['transmission']
+        journal=radio.journal_path(s.path)
+        events=[dict(event='message',id='q1',at=10.0,kind='question',source='engineer',session=1,lap=2,
+                     question='How many laps to go?',text='Race length is not set.'),
+                dict(event='message',id='q2',at=11.0,kind='question',source='engineer',session=1,lap=2,
+                     question='Wie ist die Balance?',text='Copy, checking.'),
+                dict(event='answer',id='q2',at=14.0,kind='question',source='engineer',session=1,lap=2,
+                     question='Wie ist die Balance?',text='Rear is sliding on exit.'),
+                dict(event='message',id='c1',at=12.0,kind='coach',source='coach',session=1,lap=3,text='Brake earlier into T1.'),
+                dict(event='message',id='x',at=13.0,kind='lap',source='engineer',session=2,lap=1,text='Other session.')]
+        Path(journal).write_text(''.join(json.dumps(e)+'\n' for e in events),encoding='utf-8')
+        package=a.build(s,1)
+        assert package.get('radio',{}).get('messages')==[
+            dict(at=10.0,lap=2,kind='question',source='engineer',question='How many laps to go?',text='Race length is not set.'),
+            dict(at=11.0,lap=2,kind='question',source='engineer',question='Wie ist die Balance?',text='Rear is sliding on exit.'),
+            dict(at=12.0,lap=3,kind='coach',source='coach',question=None,text='Brake earlier into T1.')],package.get('radio')
+        manifest=a.preview(package,'codex')
+        assert manifest['transmission'].endswith("This includes 3 driver-radio messages with 2 of the driver's spoken questions."),manifest['transmission']
+        assert len(manifest['radio'])==3 and 'driver radio in detail.json' in a.prompt(package)
+        assert any('transcribed speech' in note for note in package['limitations'])
+        assert 'Rear is sliding' in a._json(package,readable=True).decode('utf-8')
+        # A line written before the journal knew its session: only a single-session recording claims it.
+        legacy=json.dumps(dict(event='message',id='old',at=9.0,kind='lap',source='engineer',lap=1,text='Legacy line.'))+'\n'
+        with open(journal,'a',encoding='utf-8') as handle:handle.write(legacy)
+        assert 'Legacy line.' in [m['text'] for m in a.build(s,1)['radio']['messages']]
+        two=source(Path(d)/'two'/'telemetry-recordings',[row(2,1,time=101),row(3,1,time=100),row(2,2,time=100)])
+        Path(radio.journal_path(two.path)).write_text(legacy,encoding='utf-8')
+        assert 'radio' not in a.build(two,1),'a multi-session recording must not guess the session of a legacy line'
+        german=a.build(s,1,language='de')
+        assert any('transkribierte Sprache' in note for note in german['limitations']),german['limitations']
+
+
 if __name__=='__main__':
     for n,f in sorted(globals().copy().items()):
         if n.startswith('t_'):f();print('PASS',n)

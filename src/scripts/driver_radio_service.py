@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_radio_questions as questions
+import driver_radio_recording as radio_recording
 import driver_radio_setup_voice as setup_voice
 from driver_radio_providers import ACK_TEXT, ANSWER_PREFIX, LIVE_ANSWER_MAX_CHARS, LIVE_ANSWER_MAX_S
 
@@ -84,6 +85,7 @@ class Service:
         self._conversation = collections.deque(maxlen=4)
         self._coach_cancel = threading.Event()
         self._voice_declared = None
+        self._recording_session = None  # the recording's session number, for the journal
 
     def start(self):
         with self._lock:
@@ -242,6 +244,7 @@ class Service:
             self.recording.journal(dict(event=event, id=message['id'], at=self.wall(), kind=message['kind'],
                                         preset=message['preset'], source=message['source'], severity=message['severity'],
                                         lap=(self._assessment or {}).get('completed_laps'),
+                                        session=self._recording_session,
                                         question=message.get('question'), text=message['text']))
         except (OSError, ValueError, TypeError):
             pass  # A full disk or a vanished capture leaves the journal incomplete.
@@ -305,6 +308,8 @@ class Service:
                 return self._state()
             snapshot = self.source() if enabled else {}
             self._read_at = now
+            if snapshot.get('session_id') is not None:
+                self._recording_session = int(radio_recording.session_key(snapshot))
             bound = assessment.binding(snapshot)
             declared = self.session.read(bound)
             key = (bound, config['revision'], declared['revision'], enabled)

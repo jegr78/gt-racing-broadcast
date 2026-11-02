@@ -462,5 +462,16 @@ def run():
     print("ALL PASS")
 
 
+def t_driver_radio_messages_of_the_window_join_the_block():
+    radio = [{"at": 1100.0, "lap": 2, "kind": "question", "source": "engineer", "question": "How many laps to go?",
+              "text": "4 to go."},
+             {"at": 1050.0, "lap": 1, "kind": "coach", "source": "coach", "question": None, "text": "Brake later."},
+             {"at": 5000.0, "lap": 9, "kind": "lap", "source": "engineer", "question": None, "text": "Outside."},
+             {"at": None, "text": "No time."}]
+    tel = rtel.telemetry_block([dict(session_index(), radio=radio)], WINDOW)
+    assert [m["text"] for m in tel["radio"]] == ["Brake later.", "4 to go."], tel["radio"]
+    assert block()["radio"] == []
+
+
 if __name__ == "__main__":
     run()

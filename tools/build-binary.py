@@ -132,7 +132,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "ai_jobs", "--hidden-import", "ai_control",
            "--hidden-import", "ai_reports",
            "--hidden-import", "gt7_channels", "--hidden-import", "gt7_channel_detail",
-           "--hidden-import", "report_telemetry",
+           "--hidden-import", "report_telemetry", "--hidden-import", "driver_radio_recording",
            "--add-data", f"{version_file}{sep}src"]
     cmd += _icon_arg()      # the racecast "rc" app icon (#58)
     if windowed:

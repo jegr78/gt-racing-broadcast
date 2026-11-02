@@ -67,6 +67,17 @@ The preview includes selected IDs, references, all included primary/reference
 context and notes, goals/questions, limitations, byte counts and an explicit
 subscription-cloud transmission statement. It never starts an agent.
 
+When the recording has a driver-radio journal (#1079), the package carries the
+selected session's radio messages under `radio.messages` in `detail.json`: time,
+completed lap, kind, source, the driver's transcribed question and the final text
+(a live answer replaces its acknowledgement), at most 200 messages. The maintainer
+decided that questions and answers are both transmitted (#1084). The manifest lists
+them under `radio` and the transmission statement names their count and the number
+of spoken questions; the Control Center preview shows each message before start.
+The prompt treats them like notes, as untrusted context, and a limitation says that
+questions are transcribed speech. Journal lines written before the session was
+recorded (#1079 shipped without it) count only for a single-session recording.
+
 Both providers allow 128 KiB of summary text and 8 MiB of detailed data.
 The lap limits are 40 for Codex and 30 for Claude, including references. All selected
 trace points retain their original values; no downsampling or rounding is used

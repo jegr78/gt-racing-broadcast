@@ -4,6 +4,7 @@ import math
 
 # Source identifiers remain unchanged in the inspectable provenance section.
 DE_LIMITATIONS = {
+    "Driver radio messages are what the live engineer said; questions are transcribed speech and may be misrecognised.": "Die Funkmeldungen geben wieder, was der Live-Engineer gesagt hat. Fragen sind transkribierte Sprache und können falsch erkannt sein.",
     "Interpretations are hypotheses; deterministic validation cannot establish narrative truth.": "Deutungen und mögliche Ursachen bleiben Hypothesen. Geprüft werden die zitierten Messwerte, nicht die fahrerische Erklärung.",
     "No direct tyre wear, setup, power or weather measurements; unknown channels cannot support diagnoses.": "Reifenverschleiß, Setup, Leistung und Wetter werden nicht direkt gemessen. Daraus lassen sich keine sicheren Diagnosen ableiten.",
     "Selection statistics may mix phases; use contextual comparison eligibility for coaching.": "Die Gesamtauswahl kann verschiedene Fahrphasen enthalten. Fahrhinweise benötigen einen passenden Vergleichskontext.",
