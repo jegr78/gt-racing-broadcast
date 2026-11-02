@@ -9,6 +9,54 @@ import driver_radio_access as access
 from test_driver_radio_assessment import snapshot,review,lap
 
 
+def t_quick_questions_route_in_english_and_german():
+    data=review(snapshot())
+    for preset,texts in (
+            ('position',("What's my position?",'Where am I?','Welche Position habe ich?','Wo liege ich?')),
+            ('to_go',('How many laps to go?','laps left','How many laps to the finish?','Wie viele Runden noch?','Runden übrig')),
+            ('fuel_finish',('Do I have enough fuel?','Will I make it to the end?','Reicht der Sprit?','Sprit bis ins Ziel')),
+            ('consumption',("What's my fuel per lap?",'consumption','Verbrauch','Sprit pro Runde')),
+            ('tyre_age',('How old are my tyres?','tyre age','Wie alt sind die Reifen?','Reifenalter')),
+            ('stint',('How long is my stint?','laps since my last stop','Wie lang ist mein Stint?','seit dem letzten Stopp'))):
+        for text in texts:
+            route,answer=q.answer(text,data)
+            assert route['preset']==preset and route['recognized'],(text,route)
+            assert answer==data['quick_answers'][preset],(text,answer)
+    assert q.answer('How many laps of fuel do I have?',data)[0]['preset']=='fuel'
+    assert q.answer('tyre temperatures',data)[0]['preset']=='tyres'
+
+
+def t_quick_answers_use_the_measured_facts():
+    snap=snapshot((90,90,90,91,91,91));snap['instruments']['race_position']=3
+    data=review(snap,{'setup':{'laps':10,'starting_compound':'RM'}})
+    quick=data['quick_answers']
+    assert quick['position']=='P3.',quick
+    assert quick['to_go']=='4 to go.',quick
+    # 15 litres at 3 per lap, 91 s laps: 5 laps, about 8 minutes, for 4 laps left.
+    assert quick['fuel_finish']=='Fuel for 5.0 laps, about 8 minutes, 4 to go, you are fine.',quick
+    assert quick['consumption']=='3.0 litres per lap.',quick
+    assert quick['tyre_age']=='Racing medium, 7 laps old.',quick
+    assert quick['stint']=='6 laps since the start.',quick
+    short=review(snap,{'setup':{'laps':20}})['quick_answers']['fuel_finish']
+    assert short=='Fuel for 5.0 laps, about 8 minutes, 14 to go, 9.0 laps short.',short
+
+
+def t_quick_answers_say_what_is_missing():
+    snap=snapshot(());snap['instruments'].pop('fuel_l')
+    quick=review(snap)['quick_answers']
+    assert quick['position']=='Position is not available.' and quick['to_go']=='Race length is not set.',quick
+    assert quick['fuel_finish']=='Fuel range is not measured yet.' and quick['consumption']=='Fuel per lap is not measured yet.',quick
+    done=review(snapshot((90,91,89)),{'setup':{'laps':3}})['quick_answers']['to_go']
+    assert done=='The race is complete.',done
+
+
+def t_tyre_age_and_stint_count_from_the_confirmed_stop():
+    stop={'lap_id':'L4','compound':'RH','confirmed_at':100}
+    quick=review(snapshot((90,)*6),{'setup':{},'service':stop})['quick_answers']
+    assert quick['tyre_age']=='Racing hard, 2 laps old.',quick
+    assert quick['stint']=='2 laps since your last stop.',quick
+
+
 def t_fastest_and_last_lap_questions_use_session_facts_across_a_tyre_stop():
     snap=snapshot((83.25,90,85.125,86.5))
     stop={'lap_id':'L2','compound':'RH','confirmed_at':100}

@@ -247,13 +247,28 @@ language. Closing a view does not change any of these native settings.
 Say the wake phrase for every new question. You can continue directly into the
 question, such as "Hey Jeff, will the fuel last at this pace?" A short context
 supports follow-ups such as "And if I stay out one more lap?" Each answer uses
-refreshed facts. Known fuel, pace, tyre and lap questions retain their fixed
-answers. Other questions can use the existing **Optional live AI** agent selected
-in the AI Race Engineer card. A successful answer is labelled "AI interpretation"
-and spoken through the configured speech engine. A missing agent, timeout, rate
-limit or invalid result leaves a fixed unavailable answer. Vehicle and
+refreshed facts. Known questions keep their fixed answers (see the table below). Other questions use
+the **Optional live AI** agent selected in the AI Race Engineer card: a short answer
+of one sentence and its values, spoken through the configured speech engine. A missing
+agent, a hung agent or an invalid result leaves a fixed unavailable answer. Vehicle and
 broadcast-control commands are refused. The initial
 version does not listen for spoken interruptions while it plays a reply.
+
+Frequent questions get fixed answers at once, without the live agent:
+
+| Question (examples) | Answer (example) |
+|---|---|
+| `What's my position?` / `Wo liege ich?` | `P3.` |
+| `How many laps to go?` / `Wie viele Runden noch?` | `4 to go.` (needs the race length) |
+| `Do I have enough fuel?` / `Reicht der Sprit?` | `Fuel for 5.0 laps, about 8 minutes, 4 to go, you are fine.` |
+| `What's my fuel per lap?` / `Verbrauch` | `3.0 litres per lap.` |
+| `How old are my tyres?` / `Wie alt sind die Reifen?` | `Racing medium, 7 laps old.` |
+| `How long is my stint?` / `seit dem letzten Stopp` | `2 laps since your last stop.` |
+| `What's my fastest lap?` / `schnellste Runde` | `Your fastest recorded lap is 1:23.250, lap 1.` |
+
+The fuel time comes from the median of the last three comparable laps. Tyre age and stint
+count from the confirmed tyre change; the stint also counts from a pit lap. Any other
+question goes to the live agent: `Copy, checking.` at once, the answer when it is ready.
 
 Wake-gated coaching vocabulary is deliberately narrow:
 
