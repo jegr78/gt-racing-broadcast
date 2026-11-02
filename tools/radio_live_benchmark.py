@@ -45,7 +45,7 @@ def measure(ai,speech,agent,message,attempts=2,clock=time.monotonic,ai_budget=pr
             result=ai.explain(agent,message,stopped,ai_budget)
             text=providers.ANSWER_PREFIX+providers.render_explanation(result,message)
             if len(text)>600:raise providers.ProviderError('invalid_explanation')
-            row.update(ai_state='ready',ai_s=round(clock()-started,4),within_live_ai_budget=clock()-started<=providers.BUDGET,
+            row.update(ai_state='ready',ai_s=round(clock()-started,4),within_live_ai_budget=clock()-started<=providers.LIVE_ANSWER_MAX_S,
                        speech_state='pending',answer=text)
             synthesis=clock();audio=speech.synthesize(text,stopped,providers.BUDGET)
             row.update(speech_state='ready',speech_s=round(clock()-synthesis,4),audio_seconds=providers.validate_wav(audio))
@@ -57,7 +57,7 @@ def measure(ai,speech,agent,message,attempts=2,clock=time.monotonic,ai_budget=pr
         row['time_to_audio_s']=round(clock()-started,4)
         rows.append(row)
     return dict(version=1,ok=all(r['speech_state']=='ready' for r in rows),facts_source='synthetic',
-        question=message['question'],ai_budget_s=ai_budget,live_ai_budget_s=providers.BUDGET,speech_budget_s=providers.BUDGET,
+        question=message['question'],ai_budget_s=ai_budget,live_ai_budget_s=providers.LIVE_ANSWER_MAX_S,speech_budget_s=providers.BUDGET,
         playback=False,attempts=rows)
 
 

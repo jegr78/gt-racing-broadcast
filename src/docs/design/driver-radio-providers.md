@@ -47,8 +47,9 @@ means a skipped explanation, never a delayed deterministic answer.
 
 Speech has an eight-second network budget, one worker, a two-MiB WAV bound and a
 25-second utterance limit. Identical utterances use a private in-memory LRU with
-16 entries and eight MiB total. AI has its own eight-second live deadline,
-64-KiB stream/result bounds and at most one attempt per 30 seconds. Urgent fuel
+16 entries and eight MiB total. An optional explanation has an eight-second deadline,
+64-KiB stream/result bounds and at most one attempt per 30 seconds. A driver's free
+question has a 60-second bound against a hung agent and is never throttled. Urgent fuel
 never waits for AI. These are bounded engineering defaults; configured Studio-Q
 cold/warm latency is a separate explicit smoke check, not an ordinary CI call.
 No paid service call or live microphone capture is part of synthetic validation.

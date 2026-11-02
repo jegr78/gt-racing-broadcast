@@ -2,7 +2,9 @@
 
 Preparation uses the existing feature agent, isolated LiveAI adapter, compact
 fact package, output validator, provider worker and acknowledged playback slot.
-It retains the current eight-second AI budget and existing attempt limit.
+A free question is acknowledged at once (`Copy, checking.`); its answer may take up to
+60 seconds, a bound that only stops a hung agent. The producer-PC measurement on
+2026-11-02 found 8.5-10.7 s per agent answer, above the former eight-second budget.
 Producer-PC latency is an acceptance measurement, not a prerequisite for preparing
 and synthetically verifying the implementation. No producer-PC result is claimed.
 
@@ -13,7 +15,7 @@ and synthetically verifying the implementation. No producer-PC result is claimed
 | Preserve grounded output | Existing explanation schema and fact validator | Exact supplied fact IDs, values and units rendered by the server | Invented numbers, facts, units, unconditional controls or unsupported provider output retain fallback | Actual LiveAI package/result validation |
 | Speak the answer once | Existing audio worker waits for the pending live answer | Validated answer becomes speech input and one native playback | Timeout, rate limit or provider failure yields the existing fixed fallback; no stale or duplicate speech | Controlled AI/audio barriers and fake native player |
 | Preserve independent text access | Existing history, conversation and HUD policies | Labelled AI interpretation is available as answer text | Muted/no-speech output cannot replay it later; AI prose never becomes deterministic HUD text | Existing message readers and playback lifecycle |
-| Bound the wait | Existing eight-second budget plus message expiry | Timely completion unblocks normal synthesis | A late result cannot overwrite a timed-out answer or audio already selected | Fake monotonic clocks and blocked provider fixtures |
+| Bound the wait | 60-second hang guard; validity counts from the answer's arrival | Timely completion unblocks normal synthesis | A late result cannot overwrite a timed-out answer or audio already selected | Fake monotonic clocks and blocked provider fixtures |
 | Prepare producer measurement | Maintainer benchmark reusing LiveAI and configured speech | Reports agent/probe/synthesis/total durations with source identity | Calls require explicit opt-in; ordinary checks use only fixtures | Offline check now; actual producer-PC run remains pending |
 
 The implementation remains a preparation until the producer-PC measurement and

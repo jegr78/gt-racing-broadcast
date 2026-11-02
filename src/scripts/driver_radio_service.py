@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_radio_questions as questions
-from driver_radio_providers import BUDGET as LIVE_AI_BUDGET, ANSWER_PREFIX
+from driver_radio_providers import ACK_TEXT, ANSWER_PREFIX, LIVE_ANSWER_MAX_S
 
 HISTORY_MAX = 32
 QUEUE_MAX = 4
@@ -119,6 +119,9 @@ class Service:
         self._live = False
 
     def _answer_text(self, message, text):
+        if message.get('answer_mode')=='live_ai':
+            # A late answer is valid from its arrival, not from the question.
+            message.update(_deadline=self.clock()+ROUTINE_TTL, expires_at=self.wall()+ROUTINE_TTL, _answered=self.clock())
         message['text'] = text
         for turn in self._conversation:
             if turn['id'] == message['id']:
@@ -385,10 +388,12 @@ class Service:
         """True while a message's text waits for its audio to start. The native
         supervisor reports whether it can play at all, so paused or muted output,
         speech switched off and a failed synthesis all show the text at once."""
+        if message.get('answer_mode')=='live_ai' and message['ai_state']=='pending':
+            return True  # The acknowledgement stands in until the answer exists.
         return (self._voice_enabled and self._speech_enabled and self._audio_output
                 and message['state'] in ('queued','playing') and not message.get('_audio_started')
                 and message['audio_state'] in ('pending','ready')
-                and self.clock()-message['_created'] < AUDIO_HOLD_S)
+                and self.clock()-message.get('_answered', message['_created']) < AUDIO_HOLD_S)
 
     def text_held(self, message_id):
         with self._lock:
@@ -481,17 +486,25 @@ class Service:
                 raise access.RadioError('invalid_body', 'Use a bounded telemetry question') from exc
             preset = route['preset']
             result['answers'][preset] = answer
+            live_answer = (not route['recognized'] and not route['rejected'] and self._live
+                           and bool(self.settings.read()['features']['engineer']['agent']))
+            if live_answer:
+                # The acknowledgement is spoken at once; the answer follows when it is ready.
+                ack = self._publish('ack', 'ack', 'normal', dict(result, answers=dict(result['answers'], ack=ACK_TEXT)), self.clock())
+                self._messages[ack['id']]['ai_state'] = 'not_requested'
             message = self._publish(preset, 'question', 'normal', result, self.clock())
             stored = self._messages[message['id']]
             stored['question'] = text.strip()
             stored['conversation'] = [{k:v for k,v in turn.items() if k!='id'} for turn in self._conversation]
             if route['rejected'] or not route['recognized']:
                 stored['ai_state'] = 'not_requested'
-            if (not route['recognized'] and not route['rejected'] and self._live
-                    and self.settings.read()['features']['engineer']['agent']):
-                stored.update(answer_mode='live_ai',ai_state='pending',
-                    _answer_deadline=min(stored['_deadline'],math.nextafter(stored['_created']+LIVE_AI_BUDGET,-math.inf)),
-                    _fallback_text=answer,text='Checking the current telemetry for that question.')
+            if live_answer:
+                now = self.clock()
+                answer_by = math.nextafter(stored['_created']+LIVE_ANSWER_MAX_S,-math.inf)
+                stored.update(answer_mode='live_ai',ai_state='pending',_answer_deadline=answer_by,
+                    _deadline=max(stored['_deadline'],answer_by+ROUTINE_TTL),
+                    expires_at=self.wall()+(answer_by-now)+ROUTINE_TTL,
+                    _asof_lap=result.get('completed_laps'),_fallback_text=answer,text=answer)
             if not self._live:
                 stored['state'] = 'text_only'
                 self._queue.remove(message['id'])
@@ -542,7 +555,7 @@ class Service:
             now = self.wall() if now is None else now
             if (newest is None or newest['epoch'] != self._epoch or newest['binding'] != self._binding
                     or newest['state'] in HUD_GONE or now >= newest['expires_at']
-                    or newest.get('answer_mode')=='live_ai'):
+                    or newest.get('answer_mode')=='live_ai' or newest['kind']=='ack'):
                 return None
             return newest['text']
 
@@ -607,7 +620,9 @@ class Service:
                     if (not isinstance(explanation,str) or not explanation.strip()
                             or len(ANSWER_PREFIX+explanation)>600
                             or self.clock()>=message['_answer_deadline']):return False
-                    answer_text = ANSWER_PREFIX+explanation
+                    asof,now_lap=message.get('_asof_lap'),(self._assessment or {}).get('completed_laps')
+                    stamp=f'As of lap {asof:g}. ' if asof and now_lap and now_lap!=asof else ''
+                    answer_text = stamp+ANSWER_PREFIX+explanation
                 elif 'explanation' in fields:return False
                 elif fields.get('ai_state') in ('failed','unconfigured','not_requested'):
                     answer_text = message['_fallback_text']

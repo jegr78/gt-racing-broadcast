@@ -40,7 +40,9 @@ class Speech:
 
 
 def current(f,message):
-    return next(m for m in f.service.history()['messages'] if m['id']==message['id'])
+    # A pending live answer is hidden from the history, behind its acknowledgement.
+    shown=next((m for m in f.service.history()['messages'] if m['id']==message['id']),None)
+    return shown or f.service._public(f.service._messages[message['id']])
 
 
 def t_unknown_question_uses_existing_agent_then_synthesizes_its_grounded_answer():
@@ -49,13 +51,17 @@ def t_unknown_question_uses_existing_agent_then_synthesizes_its_grounded_answer(
         worker=providers.Enricher(f.service,ai=ai,speech=speech,clock=lambda f=f:f.at)
         message=f.service.question(QUESTION,state['binding'])
         assert message.get('answer_mode')=='live_ai' and message['ai_state']=='pending',message
-        assert message['text']=='Checking the current telemetry for that question.'
+        shown=f.service.history()['messages']
+        assert [m['text'] for m in shown]==[providers.ACK_TEXT],'only the acknowledgement shows while the agent works'
+        assert f.service.hud_text('engineer') is None,'the acknowledgement never reaches the HUD'
+        assert worker.step('audio') is True and speech.calls[0][0]==providers.ACK_TEXT,'the acknowledgement is spoken at once'
+        speech.calls.clear()
         assert worker.step('audio') is False and speech.calls==[],'No fallback speech before the live answer'
         assert worker.step('ai') is True
         ready=current(f,message)
         assert ready['ai_state']=='ready' and ready['text'].startswith('AI interpretation. The measured reserve')
         assert 'Fuel range after reserve:' in ready['text'] and 'explanation' not in ready
-        assert ai.calls[0][0]=='fixture' and ai.calls[0][1]['question']==QUESTION and 0<ai.calls[0][2]<=8
+        assert ai.calls[0][0]=='fixture' and ai.calls[0][1]['question']==QUESTION and 8<ai.calls[0][2]<=providers.LIVE_ANSWER_MAX_S
         assert worker.step('audio') is True and speech.calls[0][0]==ready['text'] and 0<speech.calls[0][1]<=8
         assert f.service.hud_text('engineer') is None,'AI prose must not become deterministic HUD text'
         next_question=f.service.question('What does that imply?',state['binding'])
@@ -88,13 +94,46 @@ def t_live_answer_deadline_releases_fallback_and_rejects_a_late_completion():
         thread=threading.Thread(target=lambda worker=worker,outcomes=outcomes:outcomes.append(worker.step('ai')));thread.start()
         assert entered.wait(1)
         try:
-            f.at+=8;f.poll();expired=current(f,message)
+            f.at+=providers.LIVE_ANSWER_MAX_S;f.poll();expired=current(f,message)
             assert expired['ai_state']=='failed' and expired['ai_error']=='timed_out',expired
             assert expired['text'].startswith("I can't answer that yet.")
             assert worker.step('audio') is True and speech.calls[0][0]==expired['text']
         finally:release.set();thread.join(3)
         assert not thread.is_alive() and outcomes==[False]
         assert current(f,message)['text']==expired['text'] and len(speech.calls)==1
+
+
+def t_a_slow_answer_still_arrives_and_is_valid_from_its_arrival():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=configured(f)
+        message=f.service.question(QUESTION,state['binding'])
+        f.at+=25;f.poll()
+        assert current(f,message)['ai_state']=='pending' and message['id'] not in [m['id'] for m in f.service.history()['messages']]
+        assert f.service.attach(message['id'],message['epoch'],{'ai_state':'ready','explanation':'The measurements may help.'})
+        ready=current(f,message)
+        assert ready['ai_state']=='ready' and ready['text']=='AI interpretation. The measurements may help.',ready
+        assert ready['expires_at']-f.service.wall()>=29,'validity counts from the answer, not from the question'
+        assert f.service.remaining_for(message['id'],message['epoch'])>=29
+
+
+def t_a_late_answer_states_the_lap_its_facts_belong_to():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=configured(f)
+        message=f.service.question(QUESTION,state['binding'])
+        asked=f.service._messages[message['id']]['_asof_lap']
+        f.snap['laps'].append(dict(f.snap['laps'][-1],id='L7',lap=7));f.snap['current']['lap']=8
+        f.snap['revision']+=1;f.poll()
+        assert f.service.attach(message['id'],message['epoch'],{'ai_state':'ready','explanation':'The measurements may help.'})
+        assert current(f,message)['text']==f'As of lap {asked:g}. AI interpretation. The measurements may help.'
+
+
+def t_a_driver_question_is_not_throttled_by_the_explanation_rate_limit():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=configured(f);ai=AI()
+        worker=providers.Enricher(f.service,ai=ai,clock=lambda:f.at)
+        first=f.service.question(QUESTION,state['binding']);assert worker.step('ai') is True
+        second=f.service.question('What else stands out?',state['binding']);assert worker.step('ai') is True
+        assert current(f,first)['ai_state']=='ready' and current(f,second)['ai_state']=='ready'
 
 
 def t_failed_or_invalid_live_answers_preserve_fixed_fallback():
@@ -108,12 +147,8 @@ def t_failed_or_invalid_live_answers_preserve_fixed_fallback():
             assert worker.step('ai') is True
             result=current(f,message)
             assert result['ai_state']=='failed' and result['ai_error']==error and result['text'].startswith("I can't answer that yet."),result
-            assert worker.step('audio') is True and speech.calls[0][0]==result['text']
-    with tempfile.TemporaryDirectory() as d:
-        f=Fixture(d);state=configured(f);ai=AI();worker=providers.Enricher(f.service,ai=ai,clock=lambda f=f:f.at)
-        f.service.question(QUESTION,state['binding']);assert worker.step('ai')
-        second=f.service.question('What can you infer from this?',state['binding']);assert worker.step('ai')
-        assert len(ai.calls)==1 and current(f,second)['ai_error']=='rate_limited'
+            assert worker.step('audio') is True and worker.step('audio') is True
+            assert [c[0] for c in speech.calls]==[providers.ACK_TEXT,result['text']],speech.calls
 
 
 def t_non_live_or_revoked_work_cannot_publish_or_speak_an_agent_answer():
@@ -143,7 +178,8 @@ def t_text_only_live_answer_does_not_requeue_speech():
         worker=providers.Enricher(f.service,ai=ai,speech=speech,clock=lambda f=f:f.at)
         message=f.service.question(QUESTION,state['binding'])
         assert worker.step('audio') is True and speech.calls==[]
-        ticket=f.service.take_playback();assert ticket and f.service.finish_playback(ticket.id,'text_only')
+        for _ in range(2):  # The acknowledgement, then the question itself.
+            ticket=f.service.take_playback();assert ticket and f.service.finish_playback(ticket.id,'text_only')
         assert worker.step('ai') is True
         result=current(f,message)
         assert result['state']=='text_only' and result['text'].startswith('AI interpretation.')
@@ -157,15 +193,18 @@ def t_native_live_answer_is_spoken_once_and_capture_waits_for_it():
         worker=providers.Enricher(h.f.service,ai=ai,speech=speech,clock=lambda:h.f.at)
         try:
             h.n.step();h.workers[-1].events=[{'event':'question','text':QUESTION}]
-            h.n.step();assert h.workers[-1].closed and h.f.service.pending_count()==1
+            h.n.step();assert h.workers[-1].closed and h.f.service.pending_count()==2
             message=h.f.service.enrichment_work('ai');assert message['answer_mode']=='live_ai'
-            h.n.step();assert h.f.service._ticket and not h.players
             assert not h.f.service.attach(message['id'],message['epoch'],{'audio':wav(),'audio_state':'ready'})
+            # The acknowledgement plays at once, while the agent still works.
+            assert worker.step('audio') is True and speech.calls[0][0]==providers.ACK_TEXT
+            h.n.step();h.n.step();assert len(h.players)==1
+            h.players[0].done=True;h.n.step();h.n.step()
             assert worker.step('audio') is False and worker.step('ai') is True and worker.step('audio') is True
-            h.n.step();assert len(h.players)==1 and len(speech.calls)==1
-            assert current(h.f,message)['text']==speech.calls[0][0]
-            h.players[0].done=True;h.n.step();h.n.step();h.n.step()
-            assert len(h.players)==1 and current(h.f,message)['state']=='spoken'
+            h.n.step();h.n.step();assert len(h.players)==2 and len(speech.calls)==2
+            assert current(h.f,message)['text']==speech.calls[1][0]
+            h.players[1].done=True;h.n.step();h.n.step();h.n.step()
+            assert len(h.players)==2 and current(h.f,message)['state']=='spoken'
             assert worker.step('audio') is False and len(ai.calls)==1
         finally:h.n.close();worker.close()
 
@@ -181,7 +220,7 @@ def t_invalid_agent_numbers_cannot_become_live_answer_or_speech():
         assert worker.step('ai') is True
         invalid=current(f,message)
         assert invalid['ai_state']=='failed' and invalid.get('ai_error')=='invalid_explanation' and '999' not in invalid['text']
-        assert worker.step('audio') and speech.calls[0][0]==invalid['text']
+        assert worker.step('audio') and worker.step('audio') and speech.calls[-1][0]==invalid['text']
 
 
 def t_urgent_fuel_preempts_a_pending_live_answer_without_waiting_for_the_agent():
@@ -200,7 +239,8 @@ def t_urgent_fuel_preempts_a_pending_live_answer_without_waiting_for_the_agent()
             assert f.service.finish_playback(ticket.id)
             urgent=f.service.take_playback();assert urgent and urgent.message['severity']=='urgent'
         finally:release.set();thread.join(3)
-        assert outcomes==[False]
+        # The urgent call cut the acknowledgement; the answer itself still arrives and waits its turn.
+        assert outcomes==[True] and ticket.message['kind']=='ack'
 
 
 
@@ -243,8 +283,8 @@ def t_live_answer_deadline_rounds_inward_at_a_repeated_monotonic_tick():
         f=Fixture(d);f.at=8.002;state=configured(f)
         message=f.service.question(QUESTION,state['binding'])
         stored=f.service._messages[message['id']]
-        assert 0<stored['_answer_deadline']-stored['_created']<=8
-        f.at=8.002+8;f.poll()
+        assert 0<stored['_answer_deadline']-stored['_created']<=providers.LIVE_ANSWER_MAX_S
+        f.at=8.002+providers.LIVE_ANSWER_MAX_S;f.poll()
         assert current(f,message)['ai_error']=='timed_out'
 
 
@@ -305,7 +345,7 @@ def t_ai_cancel_deadline_does_not_depend_on_a_history_reader_or_cancel_fallback_
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding'])
         assert f.service.provider_current(message['id'],message['epoch'],kind='ai')
-        f.at+=8  # No refresh/history call has settled the cached message yet.
+        f.at+=providers.LIVE_ANSWER_MAX_S  # No refresh/history call has settled the cached message yet.
         assert not f.service.provider_current(message['id'],message['epoch'],kind='ai')
         assert f.service.provider_current(message['id'],message['epoch'],kind='audio')
 
@@ -325,7 +365,7 @@ def t_answer_deadline_is_checked_again_after_refresh_before_mutating_text():
         f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding'])
         refresh=f.service.refresh
         def crossed(*args,**kwargs):
-            result=refresh(*args,**kwargs);f.at+=8;return result
+            result=refresh(*args,**kwargs);f.at+=providers.LIVE_ANSWER_MAX_S;return result
         with patch.object(f.service,'refresh',side_effect=crossed):
             assert not f.service.attach(message['id'],message['epoch'],{'ai_state':'ready','explanation':'The measurements may help.'})
         assert current(f,message)['ai_error']=='timed_out'

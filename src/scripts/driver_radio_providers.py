@@ -25,6 +25,10 @@ CACHE_MAX = 8*1024*1024
 CACHE_ENTRIES = 16
 BUDGET = 8.0
 ANSWER_PREFIX = "AI interpretation. "
+# A live answer may take as long as an engineer checking the data. The bound only
+# stops a hung agent; the acknowledgement covers the wait.
+LIVE_ANSWER_MAX_S = 60.0
+ACK_TEXT = 'Copy, checking.'
 
 
 def validate_wav(audio):
@@ -249,9 +253,12 @@ def validate_explanation(result,facts):
         raise ProviderError('invalid_explanation')
     if not _conditional_recommendations(text):
         raise ProviderError('invalid_explanation')
-    for clause in re.split(r'[.!?;,]|\b(?:and|then|but|however)\b',text,flags=re.I):
-        uncertain=re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|consider|if|when)\b|not (?:measured|observed)',clause,re.I)
-        if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear|temperature)\b',clause,re.I) and not uncertain:
+    # A sentence is judged whole: in "traffic, weather and tyre wear are not measured"
+    # one "not measured" covers the list. Measured temperatures are facts, not causes.
+    for sentence in re.split(r'[.!?;]',text):
+        uncertain=re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|consider|if|when|suggests?)\b|not (?:measured|observed)|cannot be judged',sentence,re.I)
+        cause=re.sub(r'\btyre temperatures?\b|\btire temperatures?\b|\btemperatures?\b','',sentence,flags=re.I)
+        if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear)\b',cause,re.I) and not uncertain:
             raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear)\s+(?:caused|causes|is causing|are worn)|caused by (?:traffic|weather)',text,re.I):
         raise ProviderError('invalid_explanation')
@@ -352,10 +359,14 @@ class Enricher:
                         raise ProviderError('unconfigured')
                     if message['severity']=='urgent':
                         return self.service.attach(message['id'],message['epoch'],{state_key:'not_requested'})
-                    if self.clock()-self._ai_at<30:raise ProviderError('rate_limited')
-                    self._ai_at=self.clock()
+                    live_answer=message.get('answer_mode')=='live_ai'
+                    # The rate limit spaces optional explanations; a driver's question is never throttled.
+                    if not live_answer:
+                        if self.clock()-self._ai_at<30:raise ProviderError('rate_limited')
+                        self._ai_at=self.clock()
                     result=self.ai.explain(config['agent'],message,stopped,
-                        min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
+                        min(LIVE_ANSWER_MAX_S if live_answer else BUDGET,
+                            self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
                     explanation=render_explanation(result,message)
                     if message.get('answer_mode')=='live_ai' and len(ANSWER_PREFIX+explanation)>600:
                         raise ProviderError('invalid_explanation')

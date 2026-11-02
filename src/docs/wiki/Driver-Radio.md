@@ -325,10 +325,12 @@ Optional live AI uses the isolated agent chosen in the feature's own card. Its s
 contains the current allowed telemetry and short question context. Busy, missing,
 invalid or late AI leaves deterministic text intact. Numerical claims are checked
 against supplied facts; optional interpretations remain labelled separately.
-Free-question answers use that same validation, agent isolation and attempt limit.
-Their agent work retains the eight-second live deadline; synthesis begins after
-a validated answer or a fixed failure result. A late answer cannot replace an
-already settled request, and agent prose does not enter the deterministic HUD.
+Free-question answers use that same validation and agent isolation. A question the
+fixed answers do not cover is acknowledged at once with `Copy, checking.`; the answer
+follows when the agent has it, after up to 60 seconds, and is valid for 30 seconds from
+its arrival. If a lap ended meanwhile, it starts with `As of lap N.` A hung or failed
+agent gives the fixed reply instead. An urgent warning still comes first, and agent
+prose does not enter the deterministic HUD.
 
 ## When voice is unavailable
 
