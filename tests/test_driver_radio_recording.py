@@ -138,7 +138,7 @@ def t_spoken_setup_reaches_the_context_and_keeps_the_radio_epoch():
         r=Radio(d);state=r.poll();binding=state['binding']
         assert r.service.question('race 12 laps',binding)['text']=='Copy, 12 laps.'
         store=prepared(d)
-        assert store.read()['data']['sessions']['1']['settings']['laps']==12
+        assert store.read()['data']['sessions'].get('1',{}).get('settings',{}).get('laps')==12,store.read()['data']
         r.engineer_reads_context(store)
         after=r.poll()
         assert after['epoch']==state['epoch'] and after['assessment']['race_laps']==12
