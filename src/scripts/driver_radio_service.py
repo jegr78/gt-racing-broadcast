@@ -22,6 +22,9 @@ TEXT_STATES = ('queued','playing','text_only','spoken','failed')
 # With speech on, a message's text waits for its audio, at most this long: the 8 s
 # synthesis budget plus the start of playback. A failed or slow voice never hides text.
 AUDIO_HOLD_S = 10.0
+# GT7 reports the new race position about a second after the lap line, so a lap
+# message waits this long and then reads the position.
+LAP_POSITION_SETTLE_S = 2.0
 # A message leaves the HUD in these states even before it expires.
 HUD_GONE = ('superseded','cancelled','expired')
 
@@ -70,6 +73,7 @@ class Service:
         self._race_reports = False
         self._start_position = None
         self._start_reported = False
+        self._lap_due = None
         self._lap_seen, self._lap_key = False, None
         self._speech_enabled = False
         self._audio_output = False
@@ -116,6 +120,7 @@ class Service:
         self._lap_seen, self._lap_key = False, None
         self._start_position = None
         self._start_reported = False
+        self._lap_due = None
         self._live = False
 
     def _answer_text(self, message, text):
@@ -358,14 +363,18 @@ class Service:
         # Only a lap completed while listening is news, not one found at start-up.
         lap_id = result.get('latest_lap_id')
         if lap_id != self._lap_key:
-            completed = self._lap_seen and lap_id is not None
+            if self._lap_seen and lap_id is not None:
+                self._lap_due = (lap_id, now + LAP_POSITION_SETTLE_S)
             self._lap_seen, self._lap_key = True, lap_id
-            if completed and result.get('race_finished') and self._race_reports:
+        self._lap_seen = True  # An empty first read still means later laps are new.
+        due = self._lap_due
+        if due is not None and now >= due[1]:
+            self._lap_due = None
+            if due[0] == lap_id and result.get('race_finished') and self._race_reports:
                 text = result['finish_text']
                 self._publish_lap(f'Started {self._start_position}, {text}' if self._start_position else text[0].upper()+text[1:], result, now)
-            elif completed and self._lap_updates:
+            elif due[0] == lap_id and self._lap_updates:
                 self._publish_lap(result['lap_text'], result, now)
-        self._lap_seen = True  # An empty first read still means later laps are new.
 
     def _publish_lap(self, text, result, now):
         spoken = dict(result, answers=dict(result['answers'], lap=text))
