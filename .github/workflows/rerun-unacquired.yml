@@ -25,7 +25,10 @@ jobs:
         with:
           sparse-checkout: tools/rerun-unacquired.py
           sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Rerun the jobs that never got a runner
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/rerun-unacquired.py --repo "${{ github.repository }}" --run-id "${{ github.event.workflow_run.id }}"
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 tools/rerun-unacquired.py --repo "$REPO" --run-id "$RUN_ID"
