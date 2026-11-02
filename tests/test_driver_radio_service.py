@@ -481,7 +481,7 @@ def t_one_slow_lap_reports_pace_but_sends_no_notice():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d,snapshot((90,90,92)));f.poll()
         assert f.poll() and not [m for m in f.service.history()['messages'] if m['kind']=='pace']
-        assert '2.0 seconds slower' in f.request('status')['text']
+        assert '2.0 seconds slower' in f.request('pace')['text']
         f.at+=61;f.snap['laps'].append(dict(f.snap['laps'][-1],id='L4',lap=4));f.snap['current']['lap']=5
         f.snap['revision']+=1;f.poll()
         assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1,'a repeat is a trend'

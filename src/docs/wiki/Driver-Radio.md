@@ -114,6 +114,7 @@ it on, each confirmed lap produces one short message, spoken and shown like any 
 example `Lap 13, P3, last lap was a 1:32.415, your fastest lap, 4 to go, fuel for 9.5 laps.` The position, like the one in **Short
 status**, appears only while GT7 reports one. The update comes about two seconds after
 the line, because GT7 settles the new position only after it. Fuel is left out until a range is measured.
+**Short status** answers in the same format, with the laps left even between the marks.
 When a lap beats every earlier one of the session, the update and the **Short status**
 answer name it as your fastest lap. A tyre stop does not reset this. Out laps, pit laps
 and cut laps do not count.

@@ -178,23 +178,36 @@ def _finish_text(position, best_s):
     return text+(f', best lap: {_lap_clock(best_s)}' if best_s is not None else '.')
 
 
-def _lap_text(row, usable, fastest, position, to_go=None, total=None):
-    """One radio line after the line: the lap now running, then the one just done."""
+def _radio_call(row, usable, fastest, position, to_go=None, total=None, fuel=None, short=False, running=None):
+    """The one status line, for the lap update and the short status alike: the lap now
+    running, the position, the lap just done, laps left and fuel."""
     parts = []
-    done = number(row.get('lap'), True)
-    if done is not None and (total is None or done < total):
-        parts.append(f'Lap {done+1:g}')
+    done = number(row.get('lap'), True) if row else None
+    lap = done+1 if done is not None else number(running, True)
+    if lap is not None and (total is None or lap <= total):
+        parts.append(f'Lap {lap:g}')
     if position:
         parts.append(position)
-    parts.append(f"last lap was a {_clock(row['time_s'])}")
-    if fastest:
-        parts.append('your fastest lap')
+    if row:
+        parts.append(f"last lap was a {_clock(row['time_s'])}")
+        if fastest:
+            parts.append('your fastest lap')
     if to_go:
         parts.append(to_go)
     if usable is not None:
         parts.append(f'fuel for {usable:.1f} laps')
+    elif fuel is not None:
+        parts.append(f'fuel {fuel:.1f} litres')
+    if short:
+        parts.append('fuel is short of the finish')
+    if not parts:
+        return None
     text = ', '.join(parts)
     return text[0].upper()+text[1:]+'.'
+
+
+def _lap_text(row, usable, fastest, position, to_go=None, total=None):
+    return _radio_call(row, usable, fastest, position, to_go, total)
 
 
 def _finish(snapshot, setup, rows, consumption, usable):
@@ -330,13 +343,6 @@ def assess(snapshot, session=None, limits=None):
     age = number(tyres['age_laps'])
     age_text = f' Confirmed tyre age {age:g} completed laps.' if age is not None and age >= 0 else ' Confirmed tyre age is unavailable.'
     tyre_text = 'Tyre temperatures: '+temperature_text+'. Compound '+(compound or 'unknown')+'.'+age_text
-    status_fuel = (f'Fuel {fuel:.1f} litres, usable range {usable:.1f} laps.' if fuel is not None and usable is not None
-                   else f'Fuel {fuel:.1f} litres; range unavailable.' if fuel is not None else 'Live fuel is unavailable.')
-    if fuel_result['state']=='provisional':status_fuel += ' Fuel estimate is provisional.'
-    if finish['finish'] in ('short','estimated_short'):status_fuel += ' Range is short for the estimated finish.'
-    status_pace = ('Live pace is unavailable.' if not live else 'Pace trend is not yet available.' if pace['state']=='insufficient'
-                   else 'Comparable pace is stable.' if pace['state']=='stable'
-                   else f"Comparable pace is {abs(pace['delta_s']):.1f} seconds {pace['state']}.")
     lap = _latest_lap(snapshot)
     fastest = lap is not None and _is_fastest(lap, snapshot)
     position = _position(snapshot, live)
@@ -344,8 +350,9 @@ def assess(snapshot, session=None, limits=None):
     completed = number(lap.get('lap'), True) if lap else None
     race_laps = total is not None and completed is not None
     status_go = _to_go(total, completed) if race_laps and live else None
-    status_text = ((f'{position}. ' if position else '')+(f'{status_go[0].upper()+status_go[1:]}. ' if status_go else '')+status_fuel+' '+status_pace
-                   +(' Last lap was your fastest.' if fastest and live else ''))
+    status_text = (_radio_call(lap, usable, fastest, position, status_go, total, fuel,
+                               finish['finish'] in ('short', 'estimated_short'), (snapshot.get('current') or {}).get('lap'))
+                   if live else None) or 'Live telemetry is unavailable.'
     eligible = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
             if r.get('session_id') == snapshot.get('session_id') and _counts_for_fastest(r)]
     best=min(eligible,key=lambda r:r['time_s'],default=None)
