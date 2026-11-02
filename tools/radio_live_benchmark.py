@@ -34,7 +34,7 @@ def sample(question=QUESTION):
             uncertainties=['Traffic, weather and tyre wear are not measured.']))
 
 
-def measure(ai,speech,agent,message,attempts=2,clock=time.monotonic,ai_budget=providers.BUDGET):
+def measure(ai,speech,agent,message,attempts=2,clock=time.monotonic,ai_budget=providers.BUDGET,speech_budget=providers.BUDGET,inspect=None):
     if type(attempts) is not int or not 1<=attempts<=2:raise ValueError('Use one or two attempts')
     if type(ai_budget) not in (int,float) or not providers.BUDGET<=ai_budget<=60:raise ValueError('Use an eight to sixty second measurement budget')
     stopped=threading.Event();rows=[]
@@ -44,20 +44,23 @@ def measure(ai,speech,agent,message,attempts=2,clock=time.monotonic,ai_budget=pr
         try:
             result=ai.explain(agent,message,stopped,ai_budget)
             text=providers.ANSWER_PREFIX+providers.render_explanation(result,message)
-            if len(text)>600:raise providers.ProviderError('invalid_explanation')
+            if len(text)>providers.LIVE_ANSWER_MAX_CHARS:raise providers.ProviderError('invalid_explanation')
             row.update(ai_state='ready',ai_s=round(clock()-started,4),within_live_ai_budget=clock()-started<=providers.LIVE_ANSWER_MAX_S,
                        speech_state='pending',answer=text)
-            synthesis=clock();audio=speech.synthesize(text,stopped,providers.BUDGET)
+            synthesis=clock();audio=speech.synthesize(text,stopped,speech_budget)
             row.update(speech_state='ready',speech_s=round(clock()-synthesis,4),audio_seconds=providers.validate_wav(audio))
         except providers.ProviderError as exc:
             stage='speech' if row['ai_state']=='ready' else 'ai'
             row.update({stage+'_state':'failed',stage+'_error':exc.code,stage+'_s':round(clock()-(synthesis if stage=='speech' else started),4)})
+            if exc.code=='invalid_explanation' and inspect is not None:
+                rejected=inspect()
+                if rejected:row['rejected_answer']=rejected
             if exc.code=='cleanup_failed':
                 row['time_to_audio_s']=round(clock()-started,4);rows.append(row);break
         row['time_to_audio_s']=round(clock()-started,4)
         rows.append(row)
     return dict(version=1,ok=all(r['speech_state']=='ready' for r in rows),facts_source='synthetic',
-        question=message['question'],ai_budget_s=ai_budget,live_ai_budget_s=providers.LIVE_ANSWER_MAX_S,speech_budget_s=providers.BUDGET,
+        question=message['question'],ai_budget_s=ai_budget,live_ai_budget_s=providers.LIVE_ANSWER_MAX_S,speech_budget_s=speech_budget,
         playback=False,attempts=rows)
 
 
@@ -128,17 +131,36 @@ def main(argv=None):
             with args.env_file.open(encoding='utf8') as stream:raw=stream.read(131073)
         except (OSError,UnicodeError):return ''
         return parse_env_text(raw).get('RACECAST_GCLOUD_TTS_KEY','') if len(raw)<=131072 else ''
+    # A rejected answer is recorded with its size, so a validator failure needs no extra call.
+    last={};validate=providers.validate_explanation
+    def recording(result,facts,**options):
+        last.clear();last['result']=result;return validate(result,facts,**options)
+    providers.validate_explanation=recording
+    def inspect():
+        result=last.get('result')
+        if not isinstance(result,dict) or not isinstance(result.get('explanation'),str):return None
+        claims=result.get('claims') if isinstance(result.get('claims'),list) else []
+        rendered=sum(len(f"{providers.FACT_LABELS.get(c.get('fact'),'')}: {c.get('value')} {c.get('unit')}.")+1
+                     for c in claims if isinstance(c,dict))
+        return dict(explanation_chars=len(result['explanation']),claims=len(claims),
+                    rendered_chars=len(result['explanation'])+rendered,explanation=result['explanation'][:600])
+    speech_budget=providers.BUDGET
+    warmup_s=None
     if args.speech=='kokoro':
         from driver_radio_kokoro import KokoroSpeech
         engine=KokoroSpeech(args.machine_runtime)
         class Speech:
             def synthesize(self,text,stopped,budget):return engine.synthesize(text,stopped,budget,voice=args.voice)
-        speech=Speech()
+        speech=Speech();speech_budget=providers.LOCAL_SPEECH_BUDGET
+        # The relay keeps the model loaded; measure synthesis, not the cold start.
+        started=time.monotonic();engine.synthesize('Radio check.',threading.Event(),120,voice=args.voice)
+        warmup_s=round(time.monotonic()-started,3)
     else:
         engine=providers.GoogleSpeech(key=key);speech=engine
     try:
         report=measure(live.LiveAI(args.machine_runtime,process=process,max_budget=args.agent_budget),speech,args.agent,
-                       message,args.attempts,ai_budget=args.agent_budget)
+                       message,args.attempts,ai_budget=args.agent_budget,speech_budget=speech_budget,inspect=inspect)
+        report['speech_warmup_s']=warmup_s
         report.update(check=False,timing_origin='live_adapter_measurement',agent_id=args.agent,speech_engine=args.speech,
                       speech_voice=args.voice if args.speech=='kokoro' else providers.VOICE,
                       process_runs=timings,source=source_identity())

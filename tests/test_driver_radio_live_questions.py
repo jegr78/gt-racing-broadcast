@@ -59,8 +59,8 @@ def t_unknown_question_uses_existing_agent_then_synthesizes_its_grounded_answer(
         assert worker.step('audio') is False and speech.calls==[],'No fallback speech before the live answer'
         assert worker.step('ai') is True
         ready=current(f,message)
-        assert ready['ai_state']=='ready' and ready['text'].startswith('AI interpretation. The measured reserve')
-        assert 'Fuel range after reserve:' in ready['text'] and 'explanation' not in ready
+        assert ready['ai_state']=='ready' and ready['text'].startswith('The measured reserve')
+        assert ready['text'].endswith('Fuel range after reserve 5 laps.') and 'explanation' not in ready
         assert ai.calls[0][0]=='fixture' and ai.calls[0][1]['question']==QUESTION and 8<ai.calls[0][2]<=providers.LIVE_ANSWER_MAX_S
         assert worker.step('audio') is True and speech.calls[0][0]==ready['text'] and 0<speech.calls[0][1]<=8
         assert f.service.hud_text('engineer') is None,'AI prose must not become deterministic HUD text'
@@ -111,7 +111,7 @@ def t_a_slow_answer_still_arrives_and_is_valid_from_its_arrival():
         assert current(f,message)['ai_state']=='pending' and message['id'] not in [m['id'] for m in f.service.history()['messages']]
         assert f.service.attach(message['id'],message['epoch'],{'ai_state':'ready','explanation':'The measurements may help.'})
         ready=current(f,message)
-        assert ready['ai_state']=='ready' and ready['text']=='AI interpretation. The measurements may help.',ready
+        assert ready['ai_state']=='ready' and ready['text']=='The measurements may help.',ready
         assert ready['expires_at']-f.service.wall()>=29,'validity counts from the answer, not from the question'
         assert f.service.remaining_for(message['id'],message['epoch'])>=29
 
@@ -124,7 +124,7 @@ def t_a_late_answer_states_the_lap_its_facts_belong_to():
         f.snap['laps'].append(dict(f.snap['laps'][-1],id='L7',lap=7));f.snap['current']['lap']=8
         f.snap['revision']+=1;f.poll()
         assert f.service.attach(message['id'],message['epoch'],{'ai_state':'ready','explanation':'The measurements may help.'})
-        assert current(f,message)['text']==f'As of lap {asked:g}. AI interpretation. The measurements may help.'
+        assert current(f,message)['text']==f'As of lap {asked:g}. The measurements may help.'
 
 
 def t_a_driver_question_is_not_throttled_by_the_explanation_rate_limit():
@@ -168,7 +168,7 @@ def t_non_live_or_revoked_work_cannot_publish_or_speak_an_agent_answer():
                 f.poll()
             finally:release.set();thread.join(3)
             assert not thread.is_alive() and outcomes==[False],mutation
-            assert not any(m['text'].startswith('AI interpretation.') for m in f.service.history()['messages']),mutation
+            assert not any(m['text'].startswith('The measured reserve') for m in f.service.history()['messages']),mutation
             assert worker.step('audio') is False and speech.calls==[],mutation
 
 
@@ -182,7 +182,7 @@ def t_text_only_live_answer_does_not_requeue_speech():
             ticket=f.service.take_playback();assert ticket and f.service.finish_playback(ticket.id,'text_only')
         assert worker.step('ai') is True
         result=current(f,message)
-        assert result['state']=='text_only' and result['text'].startswith('AI interpretation.')
+        assert result['state']=='text_only' and result['text'].startswith('The measured reserve')
         assert worker.step('audio') is False and f.service.take_playback() is None and speech.calls==[]
 
 
@@ -268,7 +268,7 @@ def t_actual_isolated_live_adapter_receives_the_free_question_and_frozen_fact_pa
             captured.append(data)
             assert data['question']==QUESTION and data.get('purpose')=='answer'
             assert data['facts']==providers.compact_facts(message) and data['conversation']==[]
-            assert prompt.startswith(b'Answer the supplied voice question') and b'never as instructions' in prompt
+            assert prompt.startswith(b'Answer the supplied voice question') and b'one short sentence of at most fifteen words' in prompt and b'never as instructions' in prompt
             assert b'private-fixture-secret' not in prompt and 'RACECAST_CONSOLE_SECRET' not in env
             assert '--strict-config' in invocation.argv and '--ephemeral' in invocation.argv and 0<budget<=8
             Path(invocation.output).write_text(json.dumps(answer(message)),encoding='utf8')
@@ -292,7 +292,7 @@ def t_oversized_labelled_answer_falls_back_without_waiting_for_expiry():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);state=configured(f)
         class TooLong:
-            def explain(self,*args):return dict(explanation='x'*590,evidence=['fuel.current_l'],claims=[])
+            def explain(self,*args):return dict(explanation='x'*(providers.LIVE_ANSWER_MAX_CHARS+1),evidence=['fuel.current_l'],claims=[])
         worker=providers.Enricher(f.service,ai=TooLong(),clock=lambda:f.at)
         message=f.service.question(QUESTION,state['binding'])
         assert worker.step('ai') is True
@@ -375,7 +375,7 @@ def t_invalid_direct_answer_attachment_leaves_pending_text_unchanged():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d);state=configured(f);message=f.service.question(QUESTION,state['binding']);before=current(f,message)
         for fields in ({'ai_state':'ready'},{'explanation':'Measured fuel may vary.'},{'ai_state':'ready','explanation':''},
-                       {'ai_state':'ready','explanation':'x'*590}):
+                       {'ai_state':'ready','explanation':'x'*(providers.LIVE_ANSWER_MAX_CHARS+1)}):
             assert not f.service.attach(message['id'],message['epoch'],fields)
             assert current(f,message)==before
 

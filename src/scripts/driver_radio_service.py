@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_radio_questions as questions
-from driver_radio_providers import ACK_TEXT, ANSWER_PREFIX, LIVE_ANSWER_MAX_S
+from driver_radio_providers import ACK_TEXT, ANSWER_PREFIX, LIVE_ANSWER_MAX_CHARS, LIVE_ANSWER_MAX_S
 
 HISTORY_MAX = 32
 QUEUE_MAX = 4
@@ -618,7 +618,7 @@ class Service:
                 if fields.get('ai_state')=='ready':
                     explanation=fields.get('explanation')
                     if (not isinstance(explanation,str) or not explanation.strip()
-                            or len(ANSWER_PREFIX+explanation)>600
+                            or len(ANSWER_PREFIX+explanation)>LIVE_ANSWER_MAX_CHARS
                             or self.clock()>=message['_answer_deadline']):return False
                     asof,now_lap=message.get('_asof_lap'),(self._assessment or {}).get('completed_laps')
                     stamp=f'As of lap {asof:g}. ' if asof and now_lap and now_lap!=asof else ''

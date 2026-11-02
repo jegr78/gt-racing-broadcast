@@ -104,7 +104,7 @@ def t_measurement_reports_completion_beyond_the_unchanged_live_budget():
     assert report['ok'] and report['ai_budget_s']==30 and report['live_ai_budget_s']==bench.providers.LIVE_ANSWER_MAX_S and budgets==[30]
     row=report['attempts'][0]
     assert row['ai_s']==12 and row['speech_s']==1 and row['time_to_audio_s']==13
-    assert row['within_live_ai_budget'] is True and row['answer'].startswith('AI interpretation.')
+    assert row['within_live_ai_budget'] is True and row['answer']=='The measurements may help.'
 
 
 def t_cli_budget_errors_stop_before_an_offline_or_live_measurement():
