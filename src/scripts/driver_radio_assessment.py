@@ -122,10 +122,14 @@ def _latest_lap(snapshot):
     return None
 
 
-def _lap_clock(seconds):
+def _clock(seconds):
     """A lap time as drivers read it: 1:23.467, or 58.123 seconds under a minute."""
     minutes, rest = divmod(round(seconds, 3), 60)
-    return f"{int(minutes)}:{rest:06.3f}." if minutes else f"{rest:.3f} seconds."
+    return f"{int(minutes)}:{rest:06.3f}" if minutes else f"{rest:.3f} seconds"
+
+
+def _lap_clock(seconds):
+    return _clock(seconds)+'.'
 
 
 def _counts_for_fastest(row):
@@ -166,7 +170,7 @@ def _to_go(total, completed, milestones_only=False):
     left = int(total-completed)
     if left < 1 or (milestones_only and left not in TO_GO_MARKS):
         return None
-    return 'Final lap.' if left == 1 else f'{left} to go.'
+    return 'final lap' if left == 1 else f'{left} to go'
 
 
 def _finish_text(position, best_s):
@@ -174,17 +178,23 @@ def _finish_text(position, best_s):
     return text+(f', best lap: {_lap_clock(best_s)}' if best_s is not None else '.')
 
 
-def _lap_text(row, usable, fastest, position, to_go=None):
-    minutes, seconds = divmod(row['time_s'], 60)
-    text = f"{int(minutes)}:{seconds:04.1f}"
-    if number(row.get('lap'), True) is not None:
-        text = f"Lap {row['lap']:g}, {text}"
-    text += ', your fastest lap.' if fastest else '.'
+def _lap_text(row, usable, fastest, position, to_go=None, total=None):
+    """One radio line after the line: the lap now running, then the one just done."""
+    parts = []
+    done = number(row.get('lap'), True)
+    if done is not None and (total is None or done < total):
+        parts.append(f'Lap {done+1:g}')
     if position:
-        text += f' {position}.'
+        parts.append(position)
+    parts.append(f"last lap was a {_clock(row['time_s'])}")
+    if fastest:
+        parts.append('your fastest lap')
     if to_go:
-        text += f' {to_go}'
-    return text+(f' Fuel for {usable:.1f} laps.' if usable is not None else '')
+        parts.append(to_go)
+    if usable is not None:
+        parts.append(f'fuel for {usable:.1f} laps')
+    text = ', '.join(parts)
+    return text[0].upper()+text[1:]+'.'
 
 
 def _finish(snapshot, setup, rows, consumption, usable):
@@ -334,7 +344,7 @@ def assess(snapshot, session=None, limits=None):
     completed = number(lap.get('lap'), True) if lap else None
     race_laps = total is not None and completed is not None
     status_go = _to_go(total, completed) if race_laps and live else None
-    status_text = ((f'{position}. ' if position else '')+(f'{status_go} ' if status_go else '')+status_fuel+' '+status_pace
+    status_text = ((f'{position}. ' if position else '')+(f'{status_go[0].upper()+status_go[1:]}. ' if status_go else '')+status_fuel+' '+status_pace
                    +(' Last lap was your fastest.' if fastest and live else ''))
     eligible = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
             if r.get('session_id') == snapshot.get('session_id') and _counts_for_fastest(r)]
@@ -350,5 +360,5 @@ def assess(snapshot, session=None, limits=None):
                 tyres=tyres, laps=lap_facts, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
                 position=position, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
                 finish_text=_finish_text(position, best['time_s'] if best else None),
-                lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None) if lap else None,
+                lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None, total) if lap else None,
                 answers=answers,lap_answers=lap_answers)

@@ -31,13 +31,19 @@ def review(snap, session=None, limits=None):
     return radio.assess(snap, session, limits)
 
 
+def t_lap_text_reads_like_a_radio_call_with_full_milliseconds():
+    snap=snapshot((90,90,89.374));snap['instruments']['race_position']=1
+    text=review(snap,{'setup':{'laps':6}})['lap_text']
+    assert text=='Lap 4, P1, last lap was a 1:29.374, your fastest lap, 3 to go, fuel for 5.0 laps.',text
+
+
 def t_lap_text_uses_the_newest_confirmed_lap():
     snap=snapshot((90,92.46));data=review(snap)
-    assert data['latest_lap_id']=='L2' and data['lap_text'].startswith('Lap 2, 1:32.5. Fuel for ') and data['lap_text'].endswith(' laps.'),data['lap_text']
+    assert data['latest_lap_id']=='L2' and data['lap_text'].startswith('Lap 3, last lap was a 1:32.460, fuel for ') and data['lap_text'].endswith(' laps.'),data['lap_text']
     snap['laps'][-1]=dict(snap['laps'][-1],state='provisional')
     assert review(snap)['latest_lap_id']=='L1'
     snap['instruments']={}
-    assert review(snap)['lap_text']=='Lap 1, 1:30.0.'
+    assert review(snap)['lap_text']=='Lap 2, last lap was a 1:30.000.'
     assert review({})['lap_text'] is None
 
 
@@ -50,11 +56,11 @@ def t_pace_answer_gives_lap_times_as_minutes_seconds_millis():
 def t_position_is_in_the_status_and_the_lap_update_while_known():
     snap=snapshot((90,90,91));snap['instruments']['race_position']=3
     data=review(snap)
-    assert data['answers']['status'].startswith('P3. Fuel') and ' P3. Fuel for ' in data['lap_text'],data
+    assert data['answers']['status'].startswith('P3. Fuel') and data['lap_text'].startswith('Lap 4, P3, last lap was a 1:31.000, fuel for '),data
     for value in (-1,0,None):
         snap['instruments']['race_position']=value
         data=review(snap)
-        assert not data['answers']['status'].startswith('P') and ' P' not in data['lap_text'],value
+        assert not data['answers']['status'].startswith('P') and ', P' not in data['lap_text'],value
     snap['instruments']['race_position']=3;snap['receipt']={'state':'stale'}
     assert 'P3' not in review(snap)['answers']['status']
 
@@ -78,10 +84,10 @@ def t_laps_to_go_count_from_a_declared_race_length():
         return review(snapshot((90,)*done),{'setup':{'laps':total}})['lap_text']
     def status(done,total=12):
         return review(snapshot((90,)*done),{'setup':{'laps':total}})['answers']['status']
-    assert '10 to go.' in lap_text(2) and '5 to go.' in lap_text(7) and '2 to go.' in lap_text(10) and 'Final lap.' in lap_text(11)
+    assert ', 10 to go,' in lap_text(2) and ', 5 to go,' in lap_text(7) and ', 2 to go,' in lap_text(10) and ', final lap,' in lap_text(11)
     assert 'to go' not in lap_text(3) and 'to go' not in lap_text(1),'between the marks the lap update stays short'
     assert '9 to go.' in status(3) and 'Final lap.' in status(11),'the status always knows'
-    assert 'to go' not in lap_text(12) and 'Final' not in lap_text(12)
+    assert 'to go' not in lap_text(12) and 'final' not in lap_text(12) and not lap_text(12).startswith('Lap')
     undeclared=review(snapshot((90,)*3))
     assert 'to go' not in undeclared['lap_text'] and 'to go' not in undeclared['answers']['status']
     done=review(snapshot((90,91,89)),{'setup':{'laps':3}})
@@ -95,7 +101,7 @@ def t_tyre_answer_skips_the_wear_note_telemetry_can_never_fill():
 
 def t_fastest_lap_is_named_only_when_a_comparable_lap_beats_the_earlier_ones():
     fastest=review(snapshot((90,91,89)))
-    assert 'Last lap was your fastest.' in fastest['answers']['status'] and ', your fastest lap.' in fastest['lap_text'],fastest['lap_text']
+    assert 'Last lap was your fastest.' in fastest['answers']['status'] and ', your fastest lap' in fastest['lap_text'],fastest['lap_text']
     for times in ((90,),(90,91),(90,90),(89,90,91)):
         data=review(snapshot(times))
         assert 'fastest' not in data['answers']['status'] and 'fastest' not in data['lap_text'],times

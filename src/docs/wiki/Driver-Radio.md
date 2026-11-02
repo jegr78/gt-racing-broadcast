@@ -111,15 +111,16 @@ the human **Race Engineer** desk.
 
 **Short status after every lap** in the **AI Race Engineer** card is off by default. With
 it on, each confirmed lap produces one short message, spoken and shown like any other, for
-example `Lap 12, 1:32.4. P3. Fuel for 9.5 laps.` The position, like the one in **Short
-status**, appears only while GT7 reports one. Fuel is left out until a range is measured.
+example `Lap 13, P3, last lap was a 1:32.415, your fastest lap, 4 to go, fuel for 9.5 laps.` The position, like the one in **Short
+status**, appears only while GT7 reports one. The update comes about two seconds after
+the line, because GT7 settles the new position only after it. Fuel is left out until a range is measured.
 When a lap beats every earlier one of the session, the update and the **Short status**
 answer name it as your fastest lap. A tyre stop does not reset this. Out laps, pit laps
 and cut laps do not count.
 Warnings take priority over a queued update.
 
 With a race length in laps saved in **Optional race setup**, the update also counts down at
-`10 to go`, `5 to go`, `4 to go`, `3 to go`, `2 to go` and `Final lap`, and **Short status**
+`10 to go`, `5 to go`, `4 to go`, `3 to go`, `2 to go` and `final lap`, and **Short status**
 always names the laps left.
 
 **Start and finish report** in the same card is a separate switch, off by default, and
