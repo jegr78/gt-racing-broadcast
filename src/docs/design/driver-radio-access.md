@@ -98,7 +98,12 @@ ID. Only the latest confirmation is retained, with server timestamp and revision
 Replaying an old revision cannot confirm another service. Setup corrections retain
 the latest explicit service; starting compound never overwrites a service.
 
-A generation, session or shared context revision change clears setup and service,
+A context revision the radio wrote itself (`driver_radio_recording.Link.mask`, #1079)
+does not count as a change: the radio fills empty context fields and confirmed tyre
+changes into the recording context, and those writes must not reset its own session.
+A context prepared or edited in the Control Center fills the setup through
+`Session(prefill=...)` whenever the session resets. Any other
+generation, session or shared context revision change clears setup and service,
 advances the revision and requires renewed declarations. This conservative reset
 avoids carrying uncertain race/service assumptions across corrected evidence.
 No active session means setup writes return `session_unavailable`; access remains

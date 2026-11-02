@@ -309,6 +309,12 @@ minutes and the other way round. Without a running telemetry session Jeff answer
 the radio setup; vehicle and broadcast controls stay refused. The driver desk shows and
 edits the same values.
 
+The setup also reaches the telemetry recording: it fills the empty fields of the
+recording's context (see [Telemetry](Telemetry)), and a context prepared in the Control
+Center fills the radio setup when the radio session starts. Values entered in the Control
+Center win. Every radio message, with the driver's question, is kept in a journal next to
+the recording.
+
 Wake-gated coaching vocabulary is deliberately narrow:
 
 | Request | English | German |

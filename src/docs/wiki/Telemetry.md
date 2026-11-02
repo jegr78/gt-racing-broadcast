@@ -99,6 +99,15 @@ running relay.
   a template does not change existing recordings. Copying another session also requires
   fresh confirmation and does not carry over its stint boundaries. Missing values remain
   unknown. Templates and preparation belong to the profile.
+- **Driver radio in the context.** The driver radio's race setup (session type, race
+  length, fuel reserve, mandatory stops and compounds, starting compound) fills only
+  empty context fields of the running recording, or of the preparation when nothing
+  records; values entered here are never overwritten. A tyre change confirmed by voice or
+  on the driver desk adds a confirmed stint at the lap of the stop, labelled
+  `Declared by radio voice` or `Declared by driver desk`. In turn the context fills the
+  radio setup whenever the radio session starts. Each radio and coach message, with the
+  driver's question, is kept in `<recording>.radio.jsonl` next to the capture; it is
+  deleted with the recording and exported as `radio.jsonl`.
 - **Stint service and comparison.** Enter the lap and optional recording time at which
   service occurred. Temperature resets, refuelling and standstill produce proposed times,
   never confirmed tyre compounds. A pit lap can contain both RM and RH. Each confirmed

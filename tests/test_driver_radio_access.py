@@ -173,6 +173,9 @@ def t_radio_only_opt_in_collects_live_session_without_engineer_access():
         radio_access = radio.Store(d, True)
         telemetry = tm.TelemetryStore()
         store = fixture.m.engineer_live_for(engineer_access, telemetry, os.path.join(d, 'telemetry-recordings'), d, None)
+        # The radio reaches the recording context through this link; without a recorder, the prepared one.
+        assert isinstance(store.radio_link, fixture.m.driver_radio_recording.Link)
+        assert store.radio_link._store().path.endswith('telemetry-prepared.json')
         try:
             pkt = tm.parse_packet(_pkt(1, 30, 0))
             assert not store.put(pkt, 100)

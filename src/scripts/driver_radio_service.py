@@ -45,8 +45,9 @@ class Ticket:
 
 
 class Service:
-    def __init__(self, settings, session, source, clock=time.monotonic, wall=time.time):
+    def __init__(self, settings, session, source, clock=time.monotonic, wall=time.time, recording=None):
         self.settings, self.session, self.source = settings, session, source
+        self.recording = recording  # driver_radio_recording.Link, or None without telemetry recording
         self.clock, self.wall = clock, wall
         self._lock = threading.RLock()
         self._stop = threading.Event()
@@ -130,6 +131,7 @@ class Service:
             # A late answer is valid from its arrival, not from the question.
             message.update(_deadline=self.clock()+ROUTINE_TTL, expires_at=self.wall()+ROUTINE_TTL, _answered=self.clock())
         message['text'] = text
+        self._record(message, 'answer')
         for turn in self._conversation:
             if turn['id'] == message['id']:
                 turn['answer'] = text[:1200]
@@ -228,7 +230,21 @@ class Service:
             self._audio.pop(expired, None)
             if expired in self._queue:self._queue.remove(expired)
         self._revision += 1
+        if kind != 'question':
+            self._record(self._messages[mid])
         return self._public(message)
+
+    def _record(self, message, event='message'):
+        """One journal line in the running recording; the journal never blocks the radio."""
+        if self.recording is None:
+            return
+        try:
+            self.recording.journal(dict(event=event, id=message['id'], at=self.wall(), kind=message['kind'],
+                                        preset=message['preset'], source=message['source'], severity=message['severity'],
+                                        lap=(self._assessment or {}).get('completed_laps'),
+                                        question=message.get('question'), text=message['text']))
+        except (OSError, ValueError, TypeError):
+            pass  # A full disk or a vanished capture leaves the journal incomplete.
 
     def cancel_coach(self, blocking=True):
         # Signal the owner before waiting for a reader's grant callback.
@@ -528,13 +544,15 @@ class Service:
                 stored['state'] = 'text_only'
                 self._queue.remove(message['id'])
             self._conversation.append(dict(id=message['id'],question=text.strip(),preset=preset,answer=stored['text'][:1200]))
+            self._record(stored)
             return self._public(stored)
 
     def _declare(self, command, text):
         """A spoken race setup or tyre change, read back so a misrecognition is caught."""
         try:
+            snapshot = self.source() or {}
             if 'service' in command:
-                lap_id = ((self.source() or {}).get('current') or {}).get('id')
+                lap_id = (snapshot.get('current') or {}).get('id')
                 declared = self.session.declare(self._binding, compound=command['service'], lap_id=lap_id)
             else:
                 declared = self.session.declare(self._binding, command['setup'])
@@ -545,13 +563,23 @@ class Service:
         else:
             self._voice_declared = declared['revision']
             readback = command['readback']
+            self.declared(snapshot, command.get('setup'), command.get('service'), 'radio voice')
         self.refresh(force=True)
         result = copy.deepcopy(self._assessment or assessment.assess({}))
         result['answers']['setup'] = readback
         message = self._publish('setup', 'question', 'normal', result, self.clock(), queued=self._live)
         stored = self._messages[message['id']]
         stored.update(question=text.strip(), ai_state='not_requested')
+        self._record(stored)
         return self._public(stored)
+
+    def declared(self, snapshot, setup=None, compound=None, source='driver desk'):
+        """Fill the recording context from a radio declaration, never overwriting it."""
+        if self.recording is None:
+            return False
+        if compound is not None:
+            return self.recording.confirm_service(snapshot, compound, source)
+        return self.recording.apply_setup(snapshot, setup or {}, source)
 
     def refusal(self, feature, binding):
         """Internal native entry: a voice request for a switched-off feature gets the

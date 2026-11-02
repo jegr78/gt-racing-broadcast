@@ -28,7 +28,12 @@ _HELD = threading.local()
 _TOKEN = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
 COMPOUNDS = ('CH', 'CM', 'CS', 'SH', 'SM', 'SS', 'RH', 'RM', 'RS', 'IM', 'W', 'D', 'S')
 NUMBERS = {'laps', 'duration_min', 'pit_stops', 'tyre_x', 'fuel_x', 'refuel_lps',
-           'time_progression', 'starting_fuel_l'}
+           'time_progression', 'starting_fuel_l', 'fuel_reserve_l'}
+# The recording-owned driver-radio journal (driver_radio_recording.JOURNAL_SUFFIX).
+RADIO_JOURNAL_SUFFIX = '.radio.jsonl'
+SESSION_TYPES = {'practice', 'qualifying', 'race', 'unknown'}
+# Who declared a stint, when it was not entered in the Control Center (#1079).
+STINT_SOURCES = {'radio voice', 'driver desk'}
 BOOLEANS = {'bop', 'fixed_setup', 'starting_fuel_fixed'}
 TEXT = {'title', 'weather', 'time_of_day', 'pit_window', 'test_goal', 'conditions_note'}
 ROLES = {'regular', 'first', 'pit', 'warmup', 'unknown'}
@@ -87,7 +92,7 @@ def _bounded(v):
 
 def validate_settings(settings):
     settings = copy.deepcopy(_object(settings))
-    _keys(settings, NUMBERS | BOOLEANS | TEXT | {'start_type', 'pit_rule', 'required_tyres'})
+    _keys(settings, NUMBERS | BOOLEANS | TEXT | {'start_type', 'pit_rule', 'required_tyres', 'session_type'})
     for k, v in settings.items():
         if v is None:
             continue  # missing is never silently zero/false
@@ -101,6 +106,9 @@ def validate_settings(settings):
         elif k == 'required_tyres':
             if any(t not in COMPOUNDS for t in _list(v)):
                 raise ValueError('unsupported tyre compound')
+        elif k == 'session_type':
+            if v not in SESSION_TYPES:
+                raise ValueError('unsupported session type')
         elif v not in ({'rolling', 'standing', 'unknown'} if k == 'start_type'
                        else {'minimum', 'exact', 'maximum', 'unknown'}):
             raise ValueError('unsupported race rule')
@@ -199,7 +207,8 @@ def validate_data(data):
         for stint in stints:
             _object(stint)
             _keys(stint, {'id', 'start_lap', 'start_recording_s', 'compound', 'confirmed',
-                         'tyre_service', 'refuel', 'refuel_l', 'warmup_laps', 'strategy', 'strategy_changes', 'note'})
+                         'tyre_service', 'refuel', 'refuel_l', 'warmup_laps', 'strategy', 'strategy_changes', 'note',
+                         'source'})
             ident = _token(stint.get('id'))
             if ident in stint_ids:
                 raise ValueError('duplicate stint identifier')
@@ -209,6 +218,8 @@ def validate_data(data):
                 _number(stint['start_recording_s'], 'service time')
             if stint.get('compound') is not None and stint['compound'] not in COMPOUNDS:
                 raise ValueError('unsupported stint compound')
+            if stint.get('source') is not None and stint['source'] not in STINT_SOURCES:
+                raise ValueError('unsupported stint source')
             if stint.get('refuel_l') is not None:
                 _number(stint['refuel_l'], 'manual refuel amount')
             for k in ('confirmed', 'tyre_service', 'refuel'):
@@ -586,6 +597,10 @@ def delete_recording(path):
         history = context[:-5] + '-history'
         if os.path.isdir(history):
             shutil.rmtree(history)
+        try:
+            os.remove(stem + RADIO_JOURNAL_SUFFIX)
+        except FileNotFoundError:
+            pass  # A recording without radio has no journal.
     # With no capture remaining, queued writers fail identity validation before writing.
     if not any(os.path.exists(p) for p in (stem + '.gt7rec', stem + '.gt7rec.part')):
         try:
