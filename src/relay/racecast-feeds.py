@@ -181,6 +181,7 @@ import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
 import driver_radio_access
 import driver_radio_service
+import driver_radio_recording
 import driver_coach_service
 import driver_coach_history
 import driver_coach_controls
@@ -12037,12 +12038,19 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       requester=subject, authorization=still_authorized)}
                         else:
                             engine = getattr(telemetry_store, "engineer", None)
-                            snapshot = engine.snapshot(compact=True) if engine is not None else {}
+                            # A write needs the laps: a tyre change binds the lap of the stop.
+                            snapshot = engine.snapshot(compact=method != "POST") if engine is not None else {}
+                            link = getattr(engine, "radio_link", None)
+                            if link is not None:
+                                # The radio's own context writes keep the session it binds to.
+                                snapshot = link.mask(snapshot)
                             binding = ({k: snapshot[k] for k in ("generation", "session_id", "context_revision")}
                                        if snapshot.get("session_id") is not None else None)
                             if method == "POST":
                                 result = radio_session.update(binding, body, service=route == "service",
                                     lap_id=(snapshot.get("current") or {}).get("id"))
+                                radio_service.declared(snapshot, setup=body.get("setup"),
+                                                       compound=body.get("compound"), source="driver desk")
                                 radio_service.refresh(force=True)
                             else:
                                 result = radio_session.read(binding)
@@ -14362,6 +14370,7 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
         context_source=lambda: gt7_context.Store.prepared(rec_dir).read(),
     )
     store.api = race_engineer_api.Service(store)
+    store.radio_link = driver_radio_recording.Link(rec_dir, recording_path)
     telemetry.engineer = store
     telemetry.data_listeners.append(store.reload_data)
     return store
@@ -15092,10 +15101,14 @@ def main():
     )
     if telemetry_store is not None:
         telemetry_store.replay = telemetry_replay.Controller(telemetry_store, rec_dir)
+    radio_link = getattr(engineer_live, "radio_link", None)
+    def radio_snapshot():
+        snapshot = engineer_live.snapshot() if engineer_live is not None else {}
+        return radio_link.mask(snapshot) if radio_link is not None else snapshot
     radio_service = driver_radio_service.Service(
         driver_radio_access.Store(runtime, engineer_access.available),
-        driver_radio_access.Session(),
-        lambda: engineer_live.snapshot() if engineer_live is not None else {})
+        driver_radio_access.Session(prefill=(lambda: radio_link.prefill(radio_snapshot())) if radio_link else None),
+        radio_snapshot, recording=radio_link)
     coach_service = driver_coach_service.attach(radio_service, engineer_live)
     radio_enricher = driver_radio_providers.Enricher(
         radio_service, ai=driver_radio_ai.LiveAI(runtime_base, max_budget=driver_radio_providers.LIVE_ANSWER_MAX_S)

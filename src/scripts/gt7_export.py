@@ -7,6 +7,7 @@ import csv
 import json
 import math
 import os
+import shutil
 from contextlib import nullcontext
 
 import gt7_cars
@@ -177,6 +178,10 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
                                  num(larger['times_s'][i], 6), row.get('compound') or '',
                                  int(bool(row.get('context_confirmed'))), int(bool(row.get('comparison_eligible')))))
     gt7_context._atomic(os.path.join(os.path.realpath(out_dir), "context.json"), context_snapshot)
+    journal = gt7_context._stem(path) + gt7_context.RADIO_JOURNAL_SUFFIX
+    if os.path.isfile(journal):
+        # The driver-radio messages of this recording (#1079), copied as written.
+        shutil.copyfile(journal, os.path.join(os.path.realpath(out_dir), 'radio.jsonl'))
     if shift_analysis is not None:
         gt7_context._atomic(os.path.join(os.path.realpath(out_dir), 'shift-references.json'),
                             {'format': 'racecast-shift-reference-snapshot', 'version': 1,

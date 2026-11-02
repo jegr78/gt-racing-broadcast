@@ -2,10 +2,11 @@
 const tc = {open:false, target:null, doc:null, data:null, draft:{}, reply:null, session:'1',
   serial:0, dirty:false, pending:null, timer:null, generation:0, position:null, backups:new Map(), loading:false};
 const TC_FIELDS = [
- ['title','Race / test name','text'], ['laps','Race laps','integer'], ['duration_min','Race duration (min)','number'],
+ ['title','Race / test name','text'], ['session_type','Session type',[['','Unknown'],['practice','Practice'],['qualifying','Qualifying'],['race','Race']]],
+ ['laps','Race laps','integer'], ['duration_min','Race duration (min)','number'],
  ['start_type','Start',[['','Unknown'],['rolling','Rolling'],['standing','Standing']]],
  ['bop','BoP','boolean'], ['fixed_setup','Fixed setup','boolean'],
- ['starting_fuel_fixed','Fixed starting fuel','boolean'], ['starting_fuel_l','Starting fuel (L)','number'],
+ ['starting_fuel_fixed','Fixed starting fuel','boolean'], ['starting_fuel_l','Starting fuel (L)','number'], ['fuel_reserve_l','Fuel reserve (L)','number'],
  ['pit_stops','Required stops','integer'], ['pit_rule','Stop rule',[['','Unknown'],['minimum','At least'],['exact','Exactly'],['maximum','At most']]],
  ['required_tyres','Required tyres (codes, comma separated)','tyres'], ['pit_window','Pit window / extra rules','text'],
  ['tyre_x','Tyre wear multiplier','number'], ['fuel_x','Fuel use multiplier','number'],
@@ -180,7 +181,7 @@ function tcButton(parent,text,fn,cls='') {const b=tcEl('button',text,cls);b.type
 function tcStints() {
  const root=$('tc-stints');root.textContent='';const s=tcSession();
  s.stints.forEach((stint,i)=>{
-  const card=tcEl('section',null,'tcrow');const head=tcEl('div',null,'viewhead');head.append(tcEl('b','Stint '+(i+1)));
+  const card=tcEl('section',null,'tcrow');const head=tcEl('div',null,'viewhead');head.append(tcEl('b','Stint '+(i+1)));if(stint.source)head.append(tcEl('span','Declared by '+stint.source,'muted'));
   tcButton(head,'Remove',()=>{s.stints.splice(i,1);tcStints();tcChanged();});card.append(head);
   const grid=tcEl('div',null,'tcgrid');card.append(grid);const key='stint.'+stint.id+'.';
   tcField(grid,i?'Service occurs in lap':'Initial stint starts in lap',stint.start_lap,'required-integer',v=>stint.start_lap=v,key+'lap');

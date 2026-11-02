@@ -224,8 +224,9 @@ def merge_setup(setup, changes):
 class Session:
     """One bounded in-memory setup, invalidated by current evidence identity."""
 
-    def __init__(self):
+    def __init__(self, prefill=None):
         self._lock = threading.RLock()
+        self._prefill = prefill  # what the recording context already declares (#1079)
         self._binding = None
         self._revision = 0
         self._setup = {}
@@ -237,9 +238,15 @@ class Session:
                 if self._binding is not None:
                     self._revision += 1
                 self._binding = copy.deepcopy(binding)
-                self._setup, self._service = {}, None
+                self._setup, self._service = self._declared() if binding is not None else {}, None
             return copy.deepcopy(dict(version=1, binding=self._binding, revision=self._revision,
                                       setup=self._setup, service=self._service))
+
+    def _declared(self):
+        try:
+            return validate_setup(self._prefill() or {}) if callable(self._prefill) else {}
+        except (RadioError, OSError, ValueError, TypeError):
+            return {}  # An unreadable or invalid context leaves the setup undeclared.
 
     def declare(self, binding, changes=None, compound=None, lap_id=None):
         """A spoken setup change or tyre change for the current session, no revision check:
