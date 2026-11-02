@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_radio_questions as questions
+import driver_radio_setup_voice as setup_voice
 from driver_radio_providers import ACK_TEXT, ANSWER_PREFIX, LIVE_ANSWER_MAX_CHARS, LIVE_ANSWER_MAX_S
 
 HISTORY_MAX = 32
@@ -81,6 +82,7 @@ class Service:
         self._pace_key = None
         self._conversation = collections.deque(maxlen=4)
         self._coach_cancel = threading.Event()
+        self._voice_declared = None
 
     def start(self):
         with self._lock:
@@ -291,7 +293,12 @@ class Service:
             declared = self.session.read(bound)
             key = (bound, config['revision'], declared['revision'], enabled)
             if key != self._key:
-                self._invalidate()
+                # A desk correction starts a new radio epoch; the driver's own spoken
+                # setup keeps it, so its read-back and the race history stay.
+                spoken = (self._key is not None and declared['revision'] == self._voice_declared
+                          and (key[0], key[1], key[3]) == (self._key[0], self._key[1], self._key[3]))
+                if not spoken:
+                    self._invalidate()
                 self._key = copy.deepcopy(key)
             self._binding, self._enabled = bound, enabled
             self._features = {name: bool(enabled and config['features'][name]['enabled'] is True)
@@ -487,6 +494,9 @@ class Service:
                 raise access.RadioError('feature_disabled', access.DISABLED['engineer'])
             if binding != self._binding:
                 raise access.RadioError('conflict', 'Voice session changed; ask again')
+            command = setup_voice.plan(text)
+            if command is not None:
+                return self._declare(command, text)
             result = copy.deepcopy(self._assessment or assessment.assess({}))
             previous = self._conversation[-1]['preset'] if self._conversation else None
             try:
@@ -519,6 +529,29 @@ class Service:
                 self._queue.remove(message['id'])
             self._conversation.append(dict(id=message['id'],question=text.strip(),preset=preset,answer=stored['text'][:1200]))
             return self._public(stored)
+
+    def _declare(self, command, text):
+        """A spoken race setup or tyre change, read back so a misrecognition is caught."""
+        try:
+            if 'service' in command:
+                lap_id = ((self.source() or {}).get('current') or {}).get('id')
+                declared = self.session.declare(self._binding, compound=command['service'], lap_id=lap_id)
+            else:
+                declared = self.session.declare(self._binding, command['setup'])
+        except access.RadioError as exc:
+            if exc.code != 'session_unavailable':
+                raise
+            readback = 'No telemetry session yet. Say it again once you are on track.'
+        else:
+            self._voice_declared = declared['revision']
+            readback = command['readback']
+        self.refresh(force=True)
+        result = copy.deepcopy(self._assessment or assessment.assess({}))
+        result['answers']['setup'] = readback
+        message = self._publish('setup', 'question', 'normal', result, self.clock(), queued=self._live)
+        stored = self._messages[message['id']]
+        stored.update(question=text.strip(), ai_state='not_requested')
+        return self._public(stored)
 
     def refusal(self, feature, binding):
         """Internal native entry: a voice request for a switched-off feature gets the

@@ -187,19 +187,38 @@ class Store:
         return dict(version=2, enabled=True, revision=doc['revision'], feature=feature)
 
 
+SETUP_KEYS = {'laps', 'duration_min', 'starting_compound', 'fuel_reserve_l', 'session', 'mandatory_stops',
+              'mandatory_compounds'}
+
+
 def validate_setup(value):
-    _require(isinstance(value, dict) and not set(value) - {'laps', 'duration_min', 'starting_compound', 'fuel_reserve_l'})
-    for key, limit in (('laps', 100000), ('duration_min', 10080), ('fuel_reserve_l', 1000)):
+    _require(isinstance(value, dict) and not set(value) - SETUP_KEYS)
+    for key, limit in (('laps', 100000), ('duration_min', 10080), ('fuel_reserve_l', 1000), ('mandatory_stops', 20)):
         v = value.get(key)
         if v is not None:
             _require(type(v) in (int, float) and 0 <= v <= limit)
-            if key == 'laps':
-                _require(type(v) is int and v > 0)
+            if key in ('laps', 'mandatory_stops'):
+                _require(type(v) is int and (v > 0 or key == 'mandatory_stops'))
             if key == 'duration_min':
                 _require(v > 0)
     _require(value.get('laps') is None or value.get('duration_min') is None)
     _require(value.get('starting_compound') is None or value['starting_compound'] in gt7_context.COMPOUNDS)
+    _require(value.get('session') is None or value['session'] in driver_radio_assessment.SESSIONS)
+    required = value.get('mandatory_compounds')
+    _require(required is None or isinstance(required, list) and len(required) <= 8
+             and len(set(required)) == len(required) and all(c in gt7_context.COMPOUNDS for c in required))
     return copy.deepcopy(value)
+
+
+def merge_setup(setup, changes):
+    """One spoken declaration on top of the current setup; None clears a field."""
+    merged = dict(setup)
+    for key, value in changes.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    return validate_setup(merged)
 
 
 class Session:
@@ -222,6 +241,25 @@ class Session:
             return copy.deepcopy(dict(version=1, binding=self._binding, revision=self._revision,
                                       setup=self._setup, service=self._service))
 
+    def declare(self, binding, changes=None, compound=None, lap_id=None):
+        """A spoken setup change or tyre change for the current session, no revision check:
+        the voice command itself is the newest intent."""
+        with self._lock:
+            self.read(binding)
+            _require(binding is not None, 'session_unavailable', 'No active telemetry session')
+            if compound is not None:
+                self._confirm(compound, lap_id)
+            else:
+                self._setup = merge_setup(self._setup, changes)
+            self._revision += 1
+            return self.read(binding)
+
+    def _confirm(self, compound, lap_id):
+        _require(compound in gt7_context.COMPOUNDS)
+        fitted = list((self._service or {}).get('fitted', []))
+        self._service = dict(compound=compound, lap_id=lap_id, confirmed_at=time.time(),
+                             revision=self._revision + 1, fitted=(fitted+[compound])[-32:])
+
     def update(self, binding, body, service=False, lap_id=None):
         with self._lock:
             self.read(binding)
@@ -231,9 +269,7 @@ class Session:
             _require(type(body['expected']) is int and body['expected'] == self._revision
                      and body['binding'] == binding, 'conflict', 'Radio session or setup changed; reload')
             if service:
-                _require(body['compound'] in gt7_context.COMPOUNDS)
-                self._service = dict(compound=body['compound'], lap_id=lap_id,
-                                     confirmed_at=time.time(), revision=self._revision + 1)
+                self._confirm(body['compound'], lap_id)
             else:
                 self._setup = validate_setup(body['setup'])
             self._revision += 1

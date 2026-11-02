@@ -12,6 +12,8 @@ DEFAULTS = dict(fuel_warning_laps=2.0, fuel_urgent_laps=1.0, consumption_laps=5,
 MAX_ROWS = 512
 MIN_PACE_LAPS = 3
 TO_GO_MARKS = (10, 5, 4, 3, 2, 1)
+# GT7 telemetry does not say which session runs; the driver declares it.
+SESSIONS = ('practice', 'qualifying', 'race')
 
 
 def number(value, positive=False):
@@ -165,12 +167,16 @@ COMPOUND_NAMES = dict(CH='comfort hard', CM='comfort medium', CS='comfort soft',
                       W='wet', D='dirt', S='snow')
 
 
-def _quick_answers(snapshot, live, position, total, completed, usable, consumption, compound, tyre_age, eligible, service):
+def _quick_answers(snapshot, live, position, total, completed, usable, consumption, compound, tyre_age, eligible, service,
+                   kind=None):
     """Fixed answers for frequent driver questions: no agent, so they come at once."""
     def sentence(text):
         return text[0].upper()+text[1:]+'.'
-    answers = dict(position=f'{position}.' if position else 'Position is not available.')
-    if total is None:
+    answers = dict(position=f'{position}.' if position else 'Position is not used in practice.' if kind == 'practice'
+                   else 'Position is not available.')
+    if kind in ('practice', 'qualifying'):
+        answers['to_go'] = f'No race distance in {"practice" if kind == "practice" else "qualifying"}.'
+    elif total is None:
         answers['to_go'] = 'Race length is not set.'
     elif completed is not None and completed >= total:
         answers['to_go'] = 'The race is complete.'
@@ -228,7 +234,30 @@ def _finish_text(position, best_s):
     return text+(f', best lap: {_lap_clock(best_s)}' if best_s is not None else '.')
 
 
-def _radio_call(row, usable, fastest, position, to_go=None, total=None, fuel=None, short=False, running=None):
+def _mandatory(snapshot, setup, service):
+    """What the declared mandatory rules still require: each pit lane pass is one stop
+    (the box standstill or a refuel marks it), compounds count once declared as fitted."""
+    rows = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:] if r.get('session_id') == snapshot.get('session_id')]
+    current = snapshot.get('current') or {}
+    pits = {r.get('id') for r in rows if 'pit' in (r.get('lap_role'), r.get('analysis_role'))}
+    if 'pit' in (current.get('lap_role'), current.get('analysis_role')):
+        pits.add(current.get('id'))
+    required = setup.get('mandatory_stops')
+    left = max(0, required-len(pits)) if required is not None else None
+    fitted = {setup.get('starting_compound'), current.get('compound'),
+              *(service.get('fitted') or [service.get('compound')])}
+    missing = [c for c in setup.get('mandatory_compounds') or [] if c not in fitted]
+    parts = []
+    if left:
+        parts.append(f'{left} mandatory stop{"" if left == 1 else "s"} left')
+    if missing:
+        names = [COMPOUND_NAMES[c] for c in missing]
+        parts.append((names[0] if len(names) == 1 else ', '.join(names[:-1])+' and '+names[-1])+' still required')
+    return dict(stops_done=len(pits), stops_left=left, compounds_missing=missing, text=', '.join(parts) or None)
+
+
+def _radio_call(row, usable, fastest, position, to_go=None, total=None, fuel=None, short=False, running=None,
+                mandatory=None):
     """The one status line, for the lap update and the short status alike: the lap now
     running, the position, the lap just done, laps left and fuel."""
     parts = []
@@ -250,14 +279,16 @@ def _radio_call(row, usable, fastest, position, to_go=None, total=None, fuel=Non
         parts.append(f'fuel {fuel:.1f} litres')
     if short:
         parts.append('fuel is short of the finish')
+    if mandatory:
+        parts.append(mandatory)
     if not parts:
         return None
     text = ', '.join(parts)
     return text[0].upper()+text[1:]+'.'
 
 
-def _lap_text(row, usable, fastest, position, to_go=None, total=None):
-    return _radio_call(row, usable, fastest, position, to_go, total)
+def _lap_text(row, usable, fastest, position, to_go=None, total=None, mandatory=None):
+    return _radio_call(row, usable, fastest, position, to_go, total, mandatory=mandatory)
 
 
 def _finish(snapshot, setup, rows, consumption, usable):
@@ -307,6 +338,10 @@ def assess(snapshot, session=None, limits=None):
     if stale_declarations:
         session = {}
     setup, service = session.get('setup') or {}, session.get('service') or {}
+    kind = setup.get('session')
+    # Practice and qualifying have no race distance: no laps to go, no start or finish report.
+    raced = kind not in ('practice', 'qualifying')
+    race_setup = setup if raced else {k: v for k, v in setup.items() if k not in ('laps', 'duration_min')}
     live = (snapshot.get('receipt', {}).get('state') == 'live'
             and not snapshot.get('replay', {}).get('active') and snapshot.get('session_id') is not None)
     rows = _cohort(snapshot, service)
@@ -326,7 +361,7 @@ def assess(snapshot, session=None, limits=None):
     reserve = setup.get('fuel_reserve_l') or 0
     physical = number(fuel / consumption) if fuel is not None and consumption else None
     usable = number(max(0, fuel - reserve) / consumption) if fuel is not None and consumption else None
-    finish = _finish(snapshot, setup, rows, consumption, usable)
+    finish = _finish(snapshot, race_setup, rows, consumption, usable)
     severity = ('urgent' if usable is not None and usable <= limits['fuel_urgent_laps']
                 else 'warning' if usable is not None and usable <= limits['fuel_warning_laps'] else 'normal')
     if finish['finish'] == 'complete' or finish['finish'] == 'supported' and len(recent) >= 3:
@@ -395,13 +430,17 @@ def assess(snapshot, session=None, limits=None):
     tyre_text = 'Tyre temperatures: '+temperature_text+'. Compound '+(compound or 'unknown')+'.'+age_text
     lap = _latest_lap(snapshot)
     fastest = lap is not None and _is_fastest(lap, snapshot)
-    position = _position(snapshot, live)
-    total = number(setup.get('laps'), True)
+    # In qualifying GT7 reports the qualifying rank in the race position field.
+    position = _position(snapshot, live) if kind != 'practice' else None
+    total = number(race_setup.get('laps'), True)
+    mandatory = _mandatory(snapshot, setup, service) if raced else dict(stops_done=None, stops_left=None,
+                                                                         compounds_missing=[], text=None)
     completed = number(lap.get('lap'), True) if lap else None
     race_laps = total is not None and completed is not None
     status_go = _to_go(total, completed) if race_laps and live else None
     status_text = (_radio_call(lap, usable, fastest, position, status_go, total, fuel,
-                               finish['finish'] in ('short', 'estimated_short'), (snapshot.get('current') or {}).get('lap'))
+                               finish['finish'] in ('short', 'estimated_short'), (snapshot.get('current') or {}).get('lap'),
+                               mandatory['text'])
                    if live else None) or 'Live telemetry is unavailable.'
     eligible = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
             if r.get('session_id') == snapshot.get('session_id') and _counts_for_fastest(r)]
@@ -418,10 +457,11 @@ def assess(snapshot, session=None, limits=None):
     tyre_age = (completed-service_lap if service_lap is not None and completed is not None
                 else number(tyres['age_laps'], True) if not service else None)
     quick_answers = _quick_answers(snapshot, live, position, total, completed, usable, consumption,
-                                   compound, tyre_age, eligible if live else [], service)
+                                   compound, tyre_age, eligible if live else [], service, kind)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, laps=lap_facts, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
                 position=position, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
                 finish_text=_finish_text(position, best['time_s'] if best else None),
-                lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None, total) if lap else None,
+                lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None, total,
+                                   mandatory['text']) if lap else None, session=kind, mandatory=mandatory,
                 answers=answers,lap_answers=lap_answers,quick_answers=quick_answers)

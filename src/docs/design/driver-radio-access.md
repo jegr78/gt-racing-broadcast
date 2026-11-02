@@ -78,13 +78,20 @@ is an opaque bounded device identifier, never a command. Supported input languag
 are `en` and `de`; output is always English Studio-Q. Persistent voice enablement
 permits the future #976 native service to start with the relay. Listening pause is
 volatile worker state, distinct from disablement and remote Console login. No
-voice worker, capture, playback, arbitrary prompt or spoken write is added here.
+voice worker, capture, playback, arbitrary prompt or spoken write is added here
+(spoken setup commands came later with #1076, see below).
 
 Setup is volatile, relay-owned and shared by every signed-in user of the single
 Solo source. Every write carries `binding` containing generation, session_id and
 context_revision, plus `expected` setup revision. Setup fields are nullable
-`laps`, `duration_min`, `starting_compound`, `fuel_reserve_l`; one race length mode
-at a time. A setup write replaces the complete declaration. Missing fields stay
+`laps`, `duration_min`, `starting_compound`, `fuel_reserve_l`, `session`
+(`practice`/`qualifying`/`race`), `mandatory_stops` (0-20) and `mandatory_compounds`
+(up to eight distinct codes); one race length mode at a time. A desk setup write
+replaces the complete declaration. A spoken setup command (`driver_radio_setup_voice`)
+merges one field into it through `Session.declare` without a revision check, the spoken
+command being the newest intent, and keeps the radio epoch; a desk correction still
+starts a new one. Each confirmation appends its compound to a bounded `fitted` list,
+which the mandatory-compound check reads. Missing fields stay
 unknown. Inputs have finite bounds and cannot modify shared telemetry context.
 A service confirmation explicitly declares `compound` and binds the current lap
 ID. Only the latest confirmation is retained, with server timestamp and revision.
