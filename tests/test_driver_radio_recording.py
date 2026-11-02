@@ -188,7 +188,7 @@ def t_journal_lines_carry_the_recording_session():
         r=Radio(d);r.capture=os.path.join(d,'rec.gt7rec.part')
         r.snap['current']['recording_session']=2;r.snap['current']['session_id']='s'
         binding=r.poll()['binding'];r.service.request('fuel',binding)
-        assert recording.read_journal(r.capture)[-1]['session']==2
+        assert recording.read_journal(r.capture)[-1].get('session')==2,recording.read_journal(r.capture)[-1]
 
 
 if __name__=='__main__':
