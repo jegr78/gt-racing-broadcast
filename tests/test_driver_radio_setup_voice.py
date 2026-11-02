@@ -4,6 +4,7 @@ import sys,tempfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import driver_radio_access as access
+import gt7_context
 import driver_radio_setup_voice as voice
 from test_driver_radio_assessment import snapshot,review
 from test_driver_radio_native import Harness
@@ -28,7 +29,7 @@ def t_race_length_in_laps_or_minutes_clears_the_other_mode():
     assert voice.plan('race 30 minutes')==dict(setup=dict(duration_min=30,laps=None),readback='Copy, 30 minutes.')
     assert voice.plan('Rennen dreißig Minuten')['setup']['duration_min']==30
     assert voice.plan('race twenty five minutes')['setup']['duration_min']==25
-    assert voice.plan('Rennen fünfundzwanzig Runden')['setup']['laps']==25
+    assert voice.plan('Rennen fünfundzwanzig Runden')==dict(setup=dict(laps=25,duration_min=None),readback='Copy, 25 laps.')
     assert voice.plan('race 0 laps') is None and voice.plan('race many laps') is None
 
 
@@ -154,13 +155,21 @@ def t_open_mandatory_rules_are_named_in_the_status_and_lap_update():
 def t_native_voice_routes_a_setup_command_before_the_coaching_vocabulary():
     with tempfile.TemporaryDirectory() as d:
         h=Harness(d);h.n.step()
-        # "Training" alone would be the coach's clarification otherwise.
+        # "Training" alone is the coach's clarification otherwise: a coach that claims
+        # every text must never see a setup command.
+        claimed=[];h.n._coaching=lambda text,signature:claimed.append(text) or True
         h.workers[0].events=[{'event':'question','text':'Training'}]
         h.n.step()
+        assert claimed==[],claimed
         message=h.f.service.history()['messages'][-1]
         assert message['text']=='Copy, practice session.' and message['source']=='engineer',message
         assert h.f.session.read(message['binding'])['setup']=={'session':'practice'}
         h.n.close()
+
+
+def t_every_gt7_compound_code_has_a_spoken_name():
+    # The read-back and the mandatory-compound text name every code the setup accepts.
+    assert sorted(voice.COMPOUND_NAMES)==sorted(gt7_context.COMPOUNDS)
 
 
 def t_setup_validation_bounds_the_new_fields():
