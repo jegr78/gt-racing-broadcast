@@ -774,6 +774,14 @@ def _telemetry_html(tel):
              r["car"] or "—", r["track"]) for r in tel["laps"]]
     parts.append(_scroll(_table(["#", "Lap", "Time", "Status", "Reason", "Fuel (L)",
                                  "Top speed (km/h)", "Car", "Track"], rows)))
+    radio = tel.get("radio") or []
+    if radio:
+        parts.append("<h3>Driver radio</h3><p class='note'>What the AI Race Engineer and the AI Coach said "
+                     "on the radio, with the driver's spoken questions as transcribed.</p>")
+        parts.append(_scroll(_table(["Time", "After lap", "From", "Driver asked", "Radio"], [
+            (_fmt_clock(m["at"]), "—" if m.get("lap") is None else f"{m['lap']:g}",
+             "AI Coach" if m.get("source") == "coach" else "AI Race Engineer",
+             m.get("question") or "—", m["text"]) for m in radio])))
     references = tel.get('shift_reference_snapshots', {})
     if references:
         parts.append('<h3>Shift references</h3><p>Neutral RPM deviations; earlier shifts may be intentional. '

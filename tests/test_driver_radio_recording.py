@@ -165,6 +165,30 @@ def t_radio_messages_are_journalled_with_the_question():
         json.dumps(events)
 
 
+def t_messages_merge_a_late_answer_and_keep_one_session():
+    events=[dict(id='a',at=1.0,lap=2,kind='question',source='engineer',question='Balance?',text='Copy, checking.',session=1),
+            dict(id='a',at=5.0,text='Rear is sliding.',session=1),
+            dict(id='b',at=2.0,lap=3,kind='lap',source='engineer',text='Lap 4.',session=2),
+            dict(id='c',at=3.0,kind='coach',source='coach',text='Old line.'),
+            dict(id=None,text='broken'),dict(id='d',text=5)]
+    assert recording.messages(events)==[
+        dict(at=1.0,lap=2,kind='question',source='engineer',question='Balance?',text='Rear is sliding.'),
+        dict(at=2.0,lap=3,kind='lap',source='engineer',question=None,text='Lap 4.'),
+        dict(at=3.0,lap=None,kind='coach',source='coach',question=None,text='Old line.')]
+    assert [m['text'] for m in recording.messages(events,session=1)]==['Rear is sliding.']
+    assert [m['text'] for m in recording.messages(events,session=1,unknown_session=True)]==['Rear is sliding.','Old line.']
+    many=[dict(id=str(i),text='x') for i in range(recording.MAX_MESSAGES+5)]
+    assert len(recording.messages(many))==recording.MAX_MESSAGES
+
+
+def t_journal_lines_carry_the_recording_session():
+    with tempfile.TemporaryDirectory() as d:
+        r=Radio(d);r.capture=os.path.join(d,'rec.gt7rec.part')
+        r.snap['current']['recording_session']=2;r.snap['current']['session_id']='s'
+        binding=r.poll()['binding'];r.service.request('fuel',binding)
+        assert recording.read_journal(r.capture)[-1]['session']==2
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

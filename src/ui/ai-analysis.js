@@ -181,6 +181,7 @@ async function preview(){
  node('p',m.transmission,box);node('p','Provider: '+result.agent.provider+' · Model: '+result.requested_model+' · Report language: '+m.language+' · One invocation',box);
  const notes=disclosure(box,'Included context notes · '+m.notes.length);if(!m.notes.length)node('p','No included notes.',notes);
  m.notes.forEach(n=>node('p',typeof n==='string'?n:[n.scope==='recording'?'Recording':'Session '+n.session,n.lap!=null?'lap '+n.lap:'',n.text].filter(Boolean).join(' · '),notes));
+ const radio=m.radio||[];if(radio.length){const said=disclosure(box,'Included driver radio · '+radio.length+' messages');radio.forEach(r=>node('p',[r.lap!=null?'After lap '+r.lap:'',r.question?'Driver: '+r.question:'',(r.source==='coach'?'Coach: ':'Engineer: ')+r.text].filter(Boolean).join(' · '),said));}
  const contexts=disclosure(box,'Selected comparison context · '+(m.lap_contexts||[]).length+' laps');
  (m.lap_contexts||[]).forEach(c=>{const lap=disclosure(contexts,'Lap '+c.lap+' · '+c.compound+' · '+c.role+' · '+(c.confirmed?'confirmed':'unconfirmed'));node('p',c.rec+' · S'+c.session+' · '+c.car+' · '+c.layout,lap);
   const fields=Object.entries(c.settings||{});if(fields.length)node('p','Supplied conditions: '+fields.map(([k,v])=>k.replaceAll('_',' ')+' = '+String(v)).join(', '),lap);const objective=Object.entries(c.objective||{});if(objective.length)node('p','Supplied driving objective: '+objective.map(([k,v])=>k.replaceAll('_',' ')+' = '+String(v)).join(', '),lap);});

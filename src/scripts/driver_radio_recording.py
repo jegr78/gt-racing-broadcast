@@ -27,7 +27,7 @@ def journal_path(recording):
     return gt7_context._stem(recording) + JOURNAL_SUFFIX
 
 
-def _session_key(snapshot):
+def session_key(snapshot):
     """The recording session of the newest lap, as the context numbers it."""
     rows = [snapshot.get('current') or {}, *reversed((snapshot.get('laps') or [])[-512:])]
     for row in rows:
@@ -114,7 +114,7 @@ class Link:
             data = store.read()['data']
         except (OSError, ValueError, TypeError, gt7_context.gt7_recording.RecordingError):
             return {}
-        session = data.get('sessions', {}).get(_session_key(snapshot), {})
+        session = data.get('sessions', {}).get(session_key(snapshot), {})
         settings = session.get('settings', {})
         setup = {radio: settings[field] for radio, field in SETTINGS.items()
                  if settings.get(field) is not None and settings.get(field) != 'unknown'}
@@ -140,7 +140,7 @@ class Link:
             try:
                 doc = store.read()
                 data = copy.deepcopy(doc['data'])
-                session = data.setdefault('sessions', {}).setdefault(_session_key(snapshot), {})
+                session = data.setdefault('sessions', {}).setdefault(session_key(snapshot), {})
                 session.setdefault('settings', {})
                 session.setdefault('stints', [])
                 if not change(session):
@@ -216,6 +216,35 @@ class Link:
             with open(target, 'ab') as handle:
                 handle.write(line)
         return True
+
+
+MAX_MESSAGES = 200
+MAX_TEXT = 1200
+
+
+def messages(events, session=None, unknown_session=False):
+    """One entry per radio message in order, a live answer replacing its first text.
+
+    `session` keeps only that recording session; events written before the session was
+    journalled count only with `unknown_session` (a recording with a single session)."""
+    merged = {}
+    for event in events:
+        ident = event.get('id')
+        if not isinstance(ident, str) or not isinstance(event.get('text'), str):
+            continue
+        if session is not None and event.get('session') != session and not (
+                unknown_session and event.get('session') is None):
+            continue
+        if ident in merged:
+            merged[ident]['text'] = event['text'][:MAX_TEXT]
+            continue
+        question = event.get('question')
+        merged[ident] = dict(at=event.get('at') if isinstance(event.get('at'), (int, float)) else None,
+                             lap=event.get('lap') if type(event.get('lap')) in (int, float) else None,
+                             kind=str(event.get('kind') or ''), source=str(event.get('source') or ''),
+                             question=question[:400] if isinstance(question, str) and question else None,
+                             text=event['text'][:MAX_TEXT])
+    return list(merged.values())[-MAX_MESSAGES:]
 
 
 def read_journal(recording):

@@ -79,6 +79,14 @@ async def verify(page,fixture,port):
     await page.evaluate('() => workspaceAI()')
     await page.wait_for_function('() => tmState.lapB && tmState.lapB.recording_id')
     before=fixture.control().history()['runs'];assert not before
+    # A driver-radio journal (#1084): the preview must disclose every message before start.
+    import json
+    import driver_radio_recording
+    Path(driver_radio_recording.journal_path(fixture.source.path)).write_text(''.join(json.dumps(e)+'\n' for e in (
+        dict(event='message',id='q1',at=10.0,kind='question',source='engineer',session=1,lap=2,
+             question='How many laps to go?',text='4 to go.'),
+        dict(event='message',id='c1',at=12.0,kind='coach',source='coach',session=1,lap=3,text='Brake a little earlier into turn 1.'))),
+        encoding='utf-8')
     await page.locator('#ai-load-selection').click();await page.wait_for_selector('#ai-laps input')
     assert await page.locator('#ai-references input:checked').count()==0
     await page.locator('#ai-language').select_option('de')
@@ -88,7 +96,19 @@ async def verify(page,fixture,port):
         await page.wait_for_function('() => !document.getElementById("ai-start").disabled')
         return None
     await page.locator('#ai-model').fill('alternate');await preview()
+    summary=page.locator('summary',has_text='Included driver radio · 2 messages')
+    assert await summary.count()==1,await page.locator('#ai-preview').inner_text()
+    assert 'includes 2 driver-radio messages with 1 of the driver' in await page.locator('#ai-preview').inner_text()
+    await summary.click();radio=summary.locator('xpath=..')
+    assert 'Driver: How many laps to go? · Engineer: 4 to go.' in await radio.inner_text()
     if '--shots' in sys.argv:await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-preview.png'))
+    # A transcribed question is text, never markup.
+    with open(driver_radio_recording.journal_path(fixture.source.path),'a',encoding='utf-8') as journal:
+        journal.write(json.dumps(dict(event='message',id='q2',at=13.0,kind='question',source='engineer',session=1,lap=3,
+                                      question='<img src=x onerror=window.aiInjected=true>',text='Copy, checking.'))+'\n')
+    await preview();probe=page.locator('summary',has_text='Included driver radio · 3 messages')
+    await probe.click()
+    assert 'Driver: <img src=x' in await probe.locator('xpath=..').inner_text() and not await page.evaluate('() => window.aiInjected')
     await page.evaluate('() => RacecastAI.settings()')
     assert await page.locator('#ai-model').input_value()=='alternate'
     assert await page.locator('#ai-start').is_disabled()
