@@ -1,0 +1,31 @@
+name: Rerun unacquired jobs
+# GitHub cancels a job after about 15 minutes when no hosted runner takes it
+# ("The job was not acquired by Runner of type hosted even after multiple
+# attempts"; macOS arm64 under capacity constraints). Such a job ran no step and
+# says nothing about the code. tools/rerun-unacquired.py reruns the CI run only
+# when every failed job is of that kind, at most twice; a real failure stays red
+# (#1080). Runs from the default branch and never checks out PR code.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+  contents: read
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          sparse-checkout: tools/rerun-unacquired.py
+          sparse-checkout-cone-mode: false
+      - name: Rerun the jobs that never got a runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/rerun-unacquired.py --repo "${{ github.repository }}" --run-id "${{ github.event.workflow_run.id }}"
