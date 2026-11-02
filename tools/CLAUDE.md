@@ -29,7 +29,12 @@ per `platform.machine()` so a self-updating ARM64 binary never fetches the x86-6
 archive. release-please tags via GITHUB_TOKEN, which cannot
 trigger on-tag workflows, so `release-please.yml` dispatches `release.yml`
 explicitly. `ci.yml` runs the suite on all
-three OSes for every PR. Unsigned binaries: SmartScreen/Gatekeeper show a
+three OSes for every PR. Under macOS arm64 capacity constraints GitHub cancels a job
+after about 15 minutes with "The job was not acquired by Runner of type hosted even
+after multiple attempts" (no runner, no step); `rerun-unacquired.yml` then reruns the
+CI run through `tools/rerun-unacquired.py`, only when every failed job is of that kind
+and at most twice, so a real failure stays red (#1080). Raising `timeout-minutes`
+does not help: the test job has none and was cancelled all the same. Unsigned binaries: SmartScreen/Gatekeeper show a
 one-time "run anyway" warning.
 
 A separate **preview** channel (`.github/workflows/preview.yml`, helper
