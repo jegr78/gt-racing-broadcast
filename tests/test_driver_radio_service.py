@@ -481,7 +481,7 @@ def t_one_slow_lap_reports_pace_but_sends_no_notice():
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d,snapshot((90,90,92)));f.poll()
         assert f.poll() and not [m for m in f.service.history()['messages'] if m['kind']=='pace']
-        assert '2.0 seconds slower' in f.request('status')['text']
+        assert '2.0 seconds slower' in f.request('pace')['text']
         f.at+=61;f.snap['laps'].append(dict(f.snap['laps'][-1],id='L4',lap=4));f.snap['current']['lap']=5
         f.snap['revision']+=1;f.poll()
         assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1,'a repeat is a trend'
@@ -501,7 +501,18 @@ def _race(d,announcements=None):
 
 def _race_lap(f,n,seconds,position):
     f.snap['laps'].append(dict(lap_row(n,seconds)));f.snap['instruments']['race_position']=position
-    f.snap['current']['lap']=n+1;f.snap['revision']+=1;f.poll()
+    f.snap['current']['lap']=n+1;f.snap['revision']+=1;f.poll();_settle(f)
+
+
+def t_lap_update_names_the_position_after_the_line_not_at_it():
+    with tempfile.TemporaryDirectory() as d:
+        f=_race(d,{'lap_updates':True})
+        f.snap['laps'].append(dict(lap_row(1,90)));f.snap['instruments']['race_position']=4
+        f.snap['current']['lap']=2;f.snap['revision']+=1;f.poll()
+        assert _lap_rows(f)==[],'the update waits for GT7 to settle the position'
+        f.snap['instruments']['race_position']=3;_settle(f)
+        rows=_lap_rows(f)
+        assert len(rows)==1 and ', P3,' in rows[0]['text'] and 'P4' not in rows[0]['text'],rows
 
 
 def t_race_end_reports_start_finish_and_best_lap():
@@ -509,7 +520,7 @@ def t_race_end_reports_start_finish_and_best_lap():
         f=_race(d)
         _race_lap(f,1,90,4)
         assert _lap_rows(f)[0]['text']=="Starting P5, 2 laps. Let's go!",_lap_rows(f)
-        assert 'Final lap.' in _lap_rows(f)[-1]['text'],_lap_rows(f)
+        assert ', final lap' in _lap_rows(f)[-1]['text'],_lap_rows(f)
         _race_lap(f,2,89.5,3)
         assert _lap_rows(f)[-1]['text']=='Started P5, finished P3, best lap: 1:29.500.',_lap_rows(f)
         f.snap['revision']+=1;f.poll()
@@ -525,7 +536,7 @@ def t_race_reports_and_lap_updates_switch_separately():
         f=_race(d,{'lap_updates':True,'race_reports':False})
         _race_lap(f,1,90,4);_race_lap(f,2,89.5,3)
         texts=[m['text'] for m in _lap_rows(f)]
-        assert len(texts)==2 and all(t.startswith('Lap ') for t in texts),texts
+        assert len(texts)==2 and texts[0].startswith('Lap 2, ') and texts[1].startswith('P3, last lap was a 1:29.500'),texts
     with tempfile.TemporaryDirectory() as d:
         f=Fixture(d,snapshot(()))  # No declared race length: a practice session stays quiet.
         f.snap['instruments']['race_position']=5
@@ -551,9 +562,13 @@ def _lap_rows(f):
     return [m for m in f.service.history()['messages'] if m['kind']=='lap']
 
 
+def _settle(f):
+    f.at+=radio.LAP_POSITION_SETTLE_S;f.snap['revision']+=1;f.poll()
+
+
 def _complete_lap(f,n):
     f.snap['laps'].append(dict(f.snap['laps'][-1],id='L'+str(n),lap=n,time_s=90))
-    f.snap['current']['lap']=n+1;f.snap['revision']+=1;f.poll()
+    f.snap['current']['lap']=n+1;f.snap['revision']+=1;f.poll();_settle(f)
 
 
 def t_lap_updates_follow_their_switch_and_each_lap_once():
@@ -565,7 +580,7 @@ def t_lap_updates_follow_their_switch_and_each_lap_once():
         assert _lap_rows(f)==[],'a lap completed before switching on is not news'
         _complete_lap(f,8)
         rows=_lap_rows(f)
-        assert len(rows)==1 and rows[0]['text'].startswith('Lap 8, 1:30.0.') and rows[0]['ai_state']=='not_requested',rows
+        assert len(rows)==1 and rows[0]['text'].startswith('Lap 9, last lap was a 1:30.000') and rows[0]['ai_state']=='not_requested',rows
         f.snap['revision']+=1;f.poll()
         assert len(_lap_rows(f))==1,'one message per lap'
         _complete_lap(f,9)
