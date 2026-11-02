@@ -67,15 +67,20 @@ def main():
                     def view(name):
                         page.evaluate('(name)=>showView(name)',name)
                         page.locator(f'[data-view="{name}"]').wait_for(state='visible')
-                    def click_job(selector,expected,prompts=None):
+                    def click_job(selector,expected,prompts=None,with_replay_probe=False):
                         before=len(calls)
                         page.evaluate('(values)=>{promptAnswers=values;}',prompts or [])
-                        with page.expect_response(lambda response:'/api/op/' in response.url) as response:
+                        with page.expect_response(lambda response:'/api/op/' in response.url and not response.url.endswith('/telemetry-replay-status')) as response:
+                            if with_replay_probe:
+                                page.wait_for_function('!tmReplayBusy')
+                                page.evaluate('tmReplayPoll()')
+                                page.wait_for_function('!tmReplayBusy')
                             (page.locator(selector) if isinstance(selector,str) else selector).click()
                         result=response.value.json();assert result['ok'],result
                         page.wait_for_function("id=>jobId===id && !document.getElementById('jobchip').hidden && document.getElementById('jobchip').textContent==='done'",arg=result['job_id'])
-                        assert len(calls)==before+1,(selector,calls)
-                        assert calls[-1]==expected,(selector,calls[-1],expected)
+                        # Replay status polls are read-only background work, not operator submissions.
+                        submitted=[argv for argv in calls[before:] if argv!=['telemetry','replay','status']]
+                        assert submitted==[expected],(selector,submitted,expected)
                     view('tools')
                     page.evaluate('allowConfirm=false')
                     page.locator('#op-benchmark').click()
@@ -119,7 +124,7 @@ def main():
                     page.wait_for_function("() => activeProfile==='solo-pov'")
                     view('telemetry')
                     for verb in ('start','stop','status'):
-                        click_job('#op-record-'+verb,['--profile','solo-pov','telemetry','record',verb])
+                        click_job('#op-record-'+verb,['--profile','solo-pov','telemetry','record',verb],with_replay_probe=True)
                     if args.shots:
                         page.evaluate("useProfile('demo')")
                         page.wait_for_function("() => activeProfile==='demo'")
