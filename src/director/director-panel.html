@@ -3095,11 +3095,11 @@ function subRow(e){
   tr.innerHTML = `<td class="rn">${escapeHtml(e.target_stint||"?")}</td>
     <td>${qtag}<b>${escapeHtml(e.streamer_name||e.streamer_key||"?")}</b><br>
         <span class="hint" style="word-break:break-all">${prev} → <b>${escapeHtml(e.proposed_url||"")}</b></span></td>
-    <td class="act"><button class="clear prev">PREVIEW</button><button class="save app">APPROVE</button><button class="clear rej">REJECT</button></td>`;
+    <td class="act"><button class="clear prev">PREVIEW</button><button class="save approve">APPROVE</button><button class="clear rej">REJECT</button></td>`;
   tr.querySelector(".prev").addEventListener("click", ()=>{
     if (e.proposed_url) window.open(e.proposed_url, "_blank", "noopener");
   });
-  tr.querySelector(".app").addEventListener("click", ()=>subAct(e.id, "approve"));
+  tr.querySelector(".approve").addEventListener("click", ()=>subAct(e.id, "approve"));
   tr.querySelector(".rej").addEventListener("click", ()=>subAct(e.id, "reject"));
   return tr;
 }
