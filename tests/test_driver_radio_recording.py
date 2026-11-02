@@ -177,6 +177,8 @@ def t_messages_merge_a_late_answer_and_keep_one_session():
         dict(at=3.0,lap=None,kind='coach',source='coach',question=None,text='Old line.')]
     assert [m['text'] for m in recording.messages(events,session=1)]==['Rear is sliding.']
     assert [m['text'] for m in recording.messages(events,session=1,unknown_session=True)]==['Rear is sliding.','Old line.']
+    odd=recording.messages([dict(id='n',at=float('nan'),lap=float('inf'),text='Hand-edited.')])
+    assert odd[0]['at'] is None and odd[0]['lap'] is None,odd
     many=[dict(id=str(i),text='x') for i in range(recording.MAX_MESSAGES+5)]
     assert len(recording.messages(many))==recording.MAX_MESSAGES
 

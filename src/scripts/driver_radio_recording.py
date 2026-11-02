@@ -8,6 +8,7 @@ radio message is appended to a recording-owned journal next to the recording.
 """
 import copy
 import json
+import math
 import os
 import threading
 import time
@@ -222,6 +223,10 @@ MAX_MESSAGES = 200
 MAX_TEXT = 1200
 
 
+def _finite(value):
+    return value if type(value) in (int, float) and math.isfinite(value) else None
+
+
 def messages(events, session=None, unknown_session=False):
     """One entry per radio message in order, a live answer replacing its first text.
 
@@ -239,8 +244,7 @@ def messages(events, session=None, unknown_session=False):
             merged[ident]['text'] = event['text'][:MAX_TEXT]
             continue
         question = event.get('question')
-        merged[ident] = dict(at=event.get('at') if isinstance(event.get('at'), (int, float)) else None,
-                             lap=event.get('lap') if type(event.get('lap')) in (int, float) else None,
+        merged[ident] = dict(at=_finite(event.get('at')), lap=_finite(event.get('lap')),
                              kind=str(event.get('kind') or ''), source=str(event.get('source') or ''),
                              question=question[:400] if isinstance(question, str) and question else None,
                              text=event['text'][:MAX_TEXT])
