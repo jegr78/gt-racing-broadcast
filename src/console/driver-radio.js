@@ -16,7 +16,7 @@ function sourceOf(message){return message.source==='coach'||message.source==='en
 // A refusal is the hint that its feature is switched off, not advice: the switched-off
 // feature's own section only says Off, so the hint goes to the shared Voice row.
 function bySource(messages){const split={engineer:[],coach:[]};for(const message of messages||[])if(message.kind!=='refusal')split[sourceOf(message)].push(message);return split;}
-const KINDS={question:'Voice question',requested:'Requested answer',lap:'Lap update',refusal:'Feature off',coach:'Coach message'};
+const KINDS={question:'Voice question',requested:'Requested answer',lap:'Lap update',ack:'Acknowledgement',refusal:'Feature off',coach:'Coach message'};
 function agentChoices(select,agents,chosen){select.replaceChildren(new Option('Off',''));for(const row of agents||[])select.append(new Option(row.name,row.id));if(chosen&&!Array.from(select.options).some(o=>o.value===chosen))select.append(new Option('Unavailable configured agent',chosen));select.value=chosen||'';}
 class View {
  constructor(host,options={}){

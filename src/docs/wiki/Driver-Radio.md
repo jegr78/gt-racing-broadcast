@@ -247,7 +247,12 @@ language. Closing a view does not change any of these native settings.
 Say the wake phrase for every new question. You can continue directly into the
 question, such as "Hey Jeff, will the fuel last at this pace?" A short context
 supports follow-ups such as "And if I stay out one more lap?" Each answer uses
-refreshed facts. Vehicle and broadcast-control commands are refused. The initial
+refreshed facts. Known fuel, pace, tyre and lap questions retain their fixed
+answers. Other questions can use the existing **Optional live AI** agent selected
+in the AI Race Engineer card. A successful answer is labelled "AI interpretation"
+and spoken through the configured speech engine. A missing agent, timeout, rate
+limit or invalid result leaves a fixed unavailable answer. Vehicle and
+broadcast-control commands are refused. The initial
 version does not listen for spoken interruptions while it plays a reply.
 
 Wake-gated coaching vocabulary is deliberately narrow:
@@ -322,6 +327,12 @@ Optional live AI uses the isolated agent chosen in the feature's own card. Its s
 contains the current allowed telemetry and short question context. Busy, missing,
 invalid or late AI leaves deterministic text intact. Numerical claims are checked
 against supplied facts; optional interpretations remain labelled separately.
+Free-question answers use that same validation and agent isolation. A question the
+fixed answers do not cover is acknowledged at once with `Copy, checking.`; the answer
+follows when the agent has it, after up to 60 seconds, and is valid for 30 seconds from
+its arrival. If a lap ended meanwhile, it starts with `As of lap N.` A hung or failed
+agent gives the fixed reply instead. An urgent warning still comes first, and agent
+prose does not enter the deterministic HUD.
 
 ## When voice is unavailable
 

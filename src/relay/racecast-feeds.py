@@ -15098,7 +15098,8 @@ def main():
         lambda: engineer_live.snapshot() if engineer_live is not None else {})
     coach_service = driver_coach_service.attach(radio_service, engineer_live)
     radio_enricher = driver_radio_providers.Enricher(
-        radio_service, ai=driver_radio_ai.LiveAI(runtime_base) if telemetry_store is not None else None,
+        radio_service, ai=driver_radio_ai.LiveAI(runtime_base, max_budget=driver_radio_providers.LIVE_ANSWER_MAX_S)
+        if telemetry_store is not None else None,
         kokoro=driver_radio_kokoro.KokoroSpeech(runtime_base or os.path.dirname(os.path.abspath(runtime))))
     radio_native = driver_radio_native.Supervisor(
         radio_service, runtime_base or os.path.dirname(os.path.abspath(runtime)),

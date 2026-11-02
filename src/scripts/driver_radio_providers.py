@@ -24,6 +24,16 @@ AUDIO_MAX = 2*1024*1024
 CACHE_MAX = 8*1024*1024
 CACHE_ENTRIES = 16
 BUDGET = 8.0
+ANSWER_PREFIX = ""
+# A spoken live answer: a short sentence and its values, a few seconds of radio.
+LIVE_ANSWER_MAX_CHARS = 250
+# A live answer may take as long as an engineer checking the data. The bound only
+# stops a hung agent; the acknowledgement covers the wait.
+LIVE_ANSWER_MAX_S = 60.0
+# Local synthesis has no network round trip but scales with the text; a spoken live
+# answer of a few hundred characters takes several seconds on the producer PC.
+LOCAL_SPEECH_BUDGET = 20.0
+ACK_TEXT = 'Copy, checking.'
 
 
 def validate_wav(audio):
@@ -221,7 +231,7 @@ def _conditional_recommendations(text):
     return True
 
 
-def validate_explanation(result,facts):
+def validate_explanation(result,facts,compact=False):
     if not isinstance(result,dict) or set(result)!={'explanation','evidence','claims'}:
         raise ProviderError('invalid_explanation')
     text=result['explanation']
@@ -242,18 +252,23 @@ def validate_explanation(result,facts):
             raise ProviderError('invalid_explanation')
         label=FACT_LABELS.get(claim['fact'])
         if label is None:raise ProviderError('invalid_explanation')
-        rendered.append(f"{label}: {claim['value']:g} {claim['unit']}.")
+        rendered.append(f"{label.lower()} {claim['value']:g} {claim['unit']}" if compact else f"{label}: {claim['value']:g} {claim['unit']}.")
     if NUMBER_RE.search(text):raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:nan|infinite|infinity|percent|ideal|optimal)\b|%|\d\s*[+*/=]\s*\d',text,re.I):
         raise ProviderError('invalid_explanation')
     if not _conditional_recommendations(text):
         raise ProviderError('invalid_explanation')
-    for clause in re.split(r'[.!?;,]|\b(?:and|then|but|however)\b',text,flags=re.I):
-        uncertain=re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|consider|if|when)\b|not (?:measured|observed)',clause,re.I)
-        if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear|temperature)\b',clause,re.I) and not uncertain:
+    # A sentence is judged whole: in "traffic, weather and tyre wear are not measured"
+    # one "not measured" covers the list. Measured temperatures are facts, not causes.
+    for sentence in re.split(r'[.!?;]',text):
+        uncertain=re.search(r'\b(?:may|could|might|unknown|unavailable|uncertain|consider|if|when|suggests?)\b|not (?:measured|observed)|cannot be judged',sentence,re.I)
+        cause=re.sub(r'\btyre temperatures?\b|\btire temperatures?\b|\btemperatures?\b','',sentence,flags=re.I)
+        if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear)\b',cause,re.I) and not uncertain:
             raise ProviderError('invalid_explanation')
     if re.search(r'\b(?:traffic|weather|tyres?|tires?|wear)\s+(?:caused|causes|is causing|are worn)|caused by (?:traffic|weather)',text,re.I):
         raise ProviderError('invalid_explanation')
+    if compact and rendered:
+        rendered=[(', '.join(rendered)+'.')[0].upper()+(', '.join(rendered)+'.')[1:]]
     rendered_text=' '.join([text.strip(),*rendered])
     if len(rendered_text)>600:raise ProviderError('invalid_explanation')
     return rendered_text
@@ -262,7 +277,7 @@ def validate_explanation(result,facts):
 def render_explanation(result,message):
     facts=compact_facts(message)
     if message.get('kind')!='coach':
-        return validate_explanation(result,facts)
+        return validate_explanation(result,facts,compact=message.get('answer_mode')=='live_ai')
     if not isinstance(result,dict) or set(result)!={'explanation','evidence','claims','exercise'}:
         raise ProviderError('invalid_explanation')
     context=(message.get('evidence') or {}).get('coach_context') or {}
@@ -338,9 +353,10 @@ class Enricher:
                 if kind=='audio':
                     if not config['speech'] or not self.service.refresh()['voice_enabled']:
                         raise ProviderError('unconfigured')
-                    budget=min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind))
+                    local=config.get('engine')=='kokoro'
+                    budget=min(LOCAL_SPEECH_BUDGET if local else BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind))
                     # No fallback between engines: answer text never reaches a cloud unasked.
-                    if config.get('engine')=='kokoro':
+                    if local:
                         if self.kokoro is None:raise ProviderError('unconfigured')
                         audio=self.kokoro.synthesize(message['text'],stopped,budget,voice=config['voice'])
                     else:
@@ -351,11 +367,17 @@ class Enricher:
                         raise ProviderError('unconfigured')
                     if message['severity']=='urgent':
                         return self.service.attach(message['id'],message['epoch'],{state_key:'not_requested'})
-                    if self.clock()-self._ai_at<30:raise ProviderError('rate_limited')
-                    self._ai_at=self.clock()
+                    live_answer=message.get('answer_mode')=='live_ai'
+                    # The rate limit spaces optional explanations; a driver's question is never throttled.
+                    if not live_answer:
+                        if self.clock()-self._ai_at<30:raise ProviderError('rate_limited')
+                        self._ai_at=self.clock()
                     result=self.ai.explain(config['agent'],message,stopped,
-                        min(BUDGET,self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
+                        min(LIVE_ANSWER_MAX_S if live_answer else BUDGET,
+                            self.service.remaining_for(message['id'],message['epoch'],kind=kind)))
                     explanation=render_explanation(result,message)
+                    if message.get('answer_mode')=='live_ai' and len(ANSWER_PREFIX+explanation)>LIVE_ANSWER_MAX_CHARS:
+                        raise ProviderError('invalid_explanation')
                     fields={'explanation':explanation,state_key:'ready',error_key:None}
                 if stopped.is_set():return False
             except ProviderError as exc:

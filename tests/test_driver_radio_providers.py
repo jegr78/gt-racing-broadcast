@@ -36,6 +36,27 @@ def rejected(fn,code):
     else:raise AssertionError('Expected '+code)
 
 
+def t_live_answers_fold_their_values_into_one_short_clause():
+    facts=providers.compact_facts(dict(evidence=dict(fuel=dict(usable_laps=5,current_l=15),pace={},tyres={},laps={},uncertainties=[])))
+    result=dict(explanation='Fuel looks tight.',evidence=['fuel.usable_laps','fuel.current_l'],
+                claims=[dict(fact='fuel.usable_laps',value=5,unit='laps'),dict(fact='fuel.current_l',value=15,unit='litres')])
+    assert providers.validate_explanation(result,facts,compact=True)=='Fuel looks tight. Fuel range after reserve 5 laps, current fuel 15 litres.'
+    assert providers.validate_explanation(result,facts).endswith('Fuel range after reserve: 5 laps. Current fuel: 15 litres.')
+
+
+def t_validator_judges_whole_sentences_and_accepts_measured_temperatures():
+    facts=providers.compact_facts(dict(evidence=dict(fuel=dict(current_l=15),tyres=dict(temperatures_c=[80,81,82,83]),
+                                                    pace={},laps={},uncertainties=[])))
+    good=dict(evidence=['fuel.current_l'],claims=[],explanation=(
+        'Tyre temperatures are close together, with the rear right slightly warmest. Steady pace suggests stable running, '
+        'but traffic, weather and tyre wear are not measured, so grip cannot be judged.'))
+    assert providers.validate_explanation(good,facts).startswith('Tyre temperatures are close together')
+    for text in ('Traffic slowed the last lap.','The tyres are worn out.','Tyre wear caused the drop in pace.'):
+        try:providers.validate_explanation(dict(good,explanation=text),facts)
+        except providers.ProviderError as exc:assert exc.code=='invalid_explanation'
+        else:raise AssertionError(text)
+
+
 def t_google_request_voice_headers_bounds_and_exact_cache():
     calls=[]
     def request(url,**kwargs):
