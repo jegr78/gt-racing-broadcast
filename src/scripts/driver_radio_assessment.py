@@ -160,6 +160,56 @@ def _lap_answer(row, fastest, live):
     return text+(f', lap {lap:g}.' if lap is not None else '.')
 
 
+COMPOUND_NAMES = dict(CH='comfort hard', CM='comfort medium', CS='comfort soft', SH='sports hard', SM='sports medium',
+                      SS='sports soft', RH='racing hard', RM='racing medium', RS='racing soft', IM='intermediate',
+                      W='wet', D='dirt', S='snow')
+
+
+def _quick_answers(snapshot, live, position, total, completed, usable, consumption, compound, tyre_age, eligible, service):
+    """Fixed answers for frequent driver questions: no agent, so they come at once."""
+    def sentence(text):
+        return text[0].upper()+text[1:]+'.'
+    answers = dict(position=f'{position}.' if position else 'Position is not available.')
+    if total is None:
+        answers['to_go'] = 'Race length is not set.'
+    elif completed is not None and completed >= total:
+        answers['to_go'] = 'The race is complete.'
+    else:
+        answers['to_go'] = sentence(_to_go(total, completed or 0))
+    if usable is None:
+        answers['fuel_finish'] = 'Fuel range is not measured yet.'
+    else:
+        parts = [f'fuel for {usable:.1f} laps']
+        recent = [r['time_s'] for r in eligible[-3:]]
+        if recent:
+            minutes = usable*statistics.median(recent)/60
+            parts.append('under a minute' if minutes < 1 else f'about {round(minutes):d} minute{"" if round(minutes) == 1 else "s"}')
+        if total is not None and completed is not None and completed < total:
+            left = total-completed
+            parts.append(_to_go(total, completed))
+            parts.append('you are fine' if usable >= left else f'{left-usable:.1f} laps short')
+        answers['fuel_finish'] = sentence(', '.join(parts))
+    answers['consumption'] = (f'{consumption:.1f} litres per lap.' if live and consumption
+                              else 'Fuel per lap is not measured yet.')
+    name = COMPOUND_NAMES.get(compound)
+    if tyre_age is None:
+        answers['tyre_age'] = f'{sentence(name)[:-1]}, age not known.' if name else 'Tyre age is not known.'
+    else:
+        age = f'{tyre_age:g} lap{"" if tyre_age == 1 else "s"} old'
+        answers['tyre_age'] = sentence(f'{name}, {age}' if name else f'tyres are {age}')
+    rows = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:] if r.get('session_id') == snapshot.get('session_id')]
+    stops = [number(r.get('lap'), True) for r in rows if r.get('analysis_role') == 'pit' or r.get('id') == service.get('lap_id')]
+    stops = [lap for lap in stops if lap is not None]
+    if completed is None:
+        answers['stint'] = 'No lap completed yet.'
+    elif stops:
+        laps = completed-max(stops)
+        answers['stint'] = f'{laps:g} lap{"" if laps == 1 else "s"} since your last stop.'
+    else:
+        answers['stint'] = f'{completed:g} lap{"" if completed == 1 else "s"} since the start.'
+    return answers
+
+
 def _position(snapshot, live):
     value = number((snapshot.get('instruments') or {}).get('race_position'), True)
     return f'P{value:g}' if live and value is not None else None
@@ -363,9 +413,15 @@ def assess(snapshot, session=None, limits=None):
         lap_facts[label+'_lap']=number(row.get('lap'),True) if live and row else None
     answers = dict(fuel=fuel_text, pace=pace_text, tyres=tyre_text, status=status_text)
     lap_answers=dict(fastest_lap=_lap_answer(best,True,live),last_lap=_lap_answer(last,False,live))
+    service_lap = next((number(r.get('lap'), True) for r in (snapshot.get('laps') or [])[-MAX_ROWS:]
+                        if service and r.get('id') == service.get('lap_id')), None)
+    tyre_age = (completed-service_lap if service_lap is not None and completed is not None
+                else number(tyres['age_laps'], True) if not service else None)
+    quick_answers = _quick_answers(snapshot, live, position, total, completed, usable, consumption,
+                                   compound, tyre_age, eligible if live else [], service)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, laps=lap_facts, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
                 position=position, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
                 finish_text=_finish_text(position, best['time_s'] if best else None),
                 lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None, total) if lap else None,
-                answers=answers,lap_answers=lap_answers)
+                answers=answers,lap_answers=lap_answers,quick_answers=quick_answers)
