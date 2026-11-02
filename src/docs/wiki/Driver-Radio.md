@@ -131,6 +131,20 @@ is known before the first lap ends, and replaces the update of the last lap with
 listening before the first lap ends. A driver who is lapped and flagged before reaching
 the declared lap count gets no closing message.
 
+GT7 telemetry does not say which session runs, so the session type is declared in the setup:
+
+| Session | Laps to go and start/finish report | Position in the calls |
+|---|---|---|
+| Practice | off | left out |
+| Qualifying | off | the qualifying rank GT7 reports in this field |
+| Race, or not declared | on, as above | race position |
+
+With mandatory stops or compounds declared, the update and **Short status** end with what
+is still open, for example `1 mandatory stop left, racing hard still required.` Each pass
+through the pit lane counts as one stop: the relay sees it as the car standing in the box
+for two seconds or more, or as a refuel. A compound counts once it is the starting compound
+or a confirmed tyre change. There are no separate reminders.
+
 ## Pace comparison
 
 A pace trend is available after three comparable completed laps: two as the baseline and
@@ -147,7 +161,8 @@ the desk, the **Radio messages** display and the HUD. If no audio can follow (sp
 off, reply mute, paused listening, failed synthesis), the text appears at once; it
 never waits longer than 10 seconds. An AI explanation is added later. The desk
 adds bounded message history, measurement evidence, optional race length,
-starting compound and fuel reserve. Missing setup limits finish estimates and
+starting compound, fuel reserve, session type, mandatory stops and mandatory compounds.
+Missing setup limits finish estimates and
 strategy conclusions; it does not prevent measured status answers.
 
 Confirm a tyre change only after it has happened. An inferred stop does not
@@ -269,6 +284,30 @@ Frequent questions get fixed answers at once, without the live agent:
 The fuel time comes from the median of the last three comparable laps. Tyre age and stint
 count from the confirmed tyre change; the stint also counts from a pit lap. Any other
 question goes to the live agent: `Copy, checking.` at once, the answer when it is ready.
+
+The race setup can be set by voice too, so no mouse or keyboard is needed before a start.
+Jeff reads every setting back in English, so a misrecognition is caught and can be repeated:
+
+| Setting | English | German | Read-back |
+|---|---|---|---|
+| Session type | `practice session`, `qualifying`, `race` | `Training`, `Qualifying`, `Rennen` | `Copy, qualifying.` |
+| Race length in laps | `race 12 laps` | `Rennen 12 Runden` | `Copy, 12 laps.` |
+| Race length in time | `race 30 minutes` | `Rennen 30 Minuten` | `Copy, 30 minutes.` |
+| Starting compound | `starting on racing medium` | `Start auf Rennreifen mittel` | `Copy, starting on racing medium.` |
+| Fuel reserve | `reserve 2 litres` | `Reserve 2 Liter` | `Copy, reserve 2 litres.` |
+| Tyre change after a stop | `now on racing hard` | `jetzt auf Rennreifen hart` | `Copy, now on racing hard.` |
+| Mandatory stops | `two mandatory stops` | `zwei Pflichtstopps` | `Copy, 2 mandatory stops.` |
+| Mandatory compounds | `mandatory racing medium and racing hard` | `Pflicht Rennreifen mittel und Rennreifen hart` | `Copy, mandatory racing medium and racing hard.` |
+
+Numbers can be digits or words (`twelve`, `zwölf`, `fünfundzwanzig`). Compound names
+accept racing, sports and comfort in soft, medium and hard, plus intermediate and wet; in
+German `Rennen`/`Rennreifen`, `Sport`/`Sportreifen` and `Komfort`/`Komfortreifen` with
+`weich`, `mittel` or `hart`, plus `Intermediate` and `Regenreifen`. English names also work
+with German input. One command sets one value; a race length in laps replaces one in
+minutes and the other way round. Without a running telemetry session Jeff answers
+`No telemetry session yet. Say it again once you are on track.` These commands change only
+the radio setup; vehicle and broadcast controls stay refused. The driver desk shows and
+edits the same values.
 
 Wake-gated coaching vocabulary is deliberately narrow:
 

@@ -12,6 +12,7 @@ import driver_radio_access as access
 import driver_radio_assessment as assessment
 import driver_coach_controls as coaching
 import driver_radio_kokoro
+import driver_radio_setup_voice as setup_voice
 import driver_radio_voice_config as config
 from driver_radio_voice_process import Owned
 
@@ -251,7 +252,9 @@ class Supervisor:
                         if (self._closed or self._control_changed or self._paused
                                 or current['epoch']!=state['epoch']):return
                         try:
-                            if not self._coaching(event.get('text'),signature):
+                            # A setup command such as "Training" never reaches the coaching vocabulary.
+                            if (setup_voice.plan(event.get('text')) is not None
+                                    or not self._coaching(event.get('text'),signature)):
                                 self._question(event.get('text'))
                         except (access.RadioError, coaching.calibration.CoachError):self._set('error','question_rejected')
                         else:self._set('responding')
