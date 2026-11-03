@@ -85,7 +85,7 @@ def t_spoken_setup_is_read_back_and_keeps_the_radio_session():
                               ('qualifying','Copy, qualifying.'),('race','Copy, race.')):
             message=f.service.question(text,binding)
             assert message['text']==readback and message['preset']=='setup' and message['state']=='queued',message
-            assert message['ai_state']=='not_requested' and message['question']==text
+            assert message['ai_state']=='not_requested' and message['question']==voice.strip_wake(text)
         setup=f.session.read(binding)['setup']
         assert setup==dict(laps=12,starting_compound='RM',fuel_reserve_l=2.0,mandatory_stops=2,
                            mandatory_compounds=['RM','RH'],session='race'),setup
@@ -152,6 +152,16 @@ def t_open_mandatory_rules_are_named_in_the_status_and_lap_update():
     assert 'mandatory' not in review(snap,{'setup':dict(rules,session='practice')})['lap_text']
 
 
+def t_native_voice_hands_the_coach_the_text_without_the_wake_remnant():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step()
+        claimed=[];h.n._coaching=lambda text,signature:claimed.append(text) or True
+        h.workers[0].events=[{'event':'question','text':'hey sheriff start training'}]
+        h.n.step()
+        assert claimed==['start training'],claimed
+        h.n.close()
+
+
 def t_native_voice_routes_a_setup_command_before_the_coaching_vocabulary():
     with tempfile.TemporaryDirectory() as d:
         h=Harness(d);h.n.step()
@@ -180,6 +190,44 @@ def t_setup_validation_bounds_the_new_fields():
         except access.RadioError:continue
         raise AssertionError(bad)
     assert access.merge_setup({'laps':12,'session':'race'},{'duration_min':30,'laps':None})=={'duration_min':30,'session':'race'}
+
+
+def t_a_misheard_wake_phrase_is_dropped_before_routing():
+    # Transcripts from a live session: the wake phrase "hey jeff" stays in the text, misheard.
+    for text,clean in (('hey sheriff race','race'),('hey chair of race','race'),('hey hf pace','pace'),
+                       ('hate sheriff current session race','current session race'),
+                       ('hade have no mandatory pit stops','have no mandatory pit stops'),
+                       ('Hey Jeff, what is my position?','what is my position?'),('hey engineer tyres','tyres'),
+                       ('jeff how many laps to go','how many laps to go'),('race','race'),
+                       ('how many laps to go','how many laps to go'),('a quick question about fuel','a quick question about fuel')):
+        assert voice.strip_wake(text)==clean,(text,voice.strip_wake(text))
+
+
+def t_natural_setup_phrases_from_the_track():
+    for text,setup,readback in (
+            ('hey sheriff race',dict(session='race'),'Copy, race.'),
+            ('hey chair of race',dict(session='race'),'Copy, race.'),
+            ('hate sheriff current session race',dict(session='race'),'Copy, race.'),
+            ('hey hf current session is the race six laps',dict(session='race',laps=6,duration_min=None),'Copy, race, 6 laps.'),
+            ('this is qualifying',dict(session='qualifying'),'Copy, qualifying.'),
+            ('Die aktuelle Session ist das Rennen',dict(session='race'),'Copy, race.'),
+            ('hade have no mandatory pit stops',dict(mandatory_stops=0),'Copy, no mandatory stops.'),
+            ('we have two mandatory pit stops',dict(mandatory_stops=2),'Copy, 2 mandatory stops.'),
+            ('wir haben zwei Pflichtstopps',dict(mandatory_stops=2),'Copy, 2 mandatory stops.'),
+            ('the race is 20 minutes',dict(duration_min=20,laps=None),'Copy, 20 minutes.')):
+        result=voice.plan(text)
+        assert result==dict(setup=setup,readback=readback),(text,result)
+    # A question about the race is still a question.
+    for text in ('hey sheriff how many laps in the race','what is the race position','is this the race'):
+        assert voice.plan(text) is None,text
+
+
+def t_the_service_answers_the_question_without_the_wake_remnant():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);binding=f.poll()['binding']
+        message=f.service.question('hey sheriff position',binding)
+        assert message['preset']=='position' and message['question']=='position',message
+        assert f.service.question('hey chair of race',binding)['text']=='Copy, race.'
 
 
 if __name__=='__main__':
