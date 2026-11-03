@@ -31,7 +31,11 @@ def capture_args(platform,microphone):
 
 
 class Utterance:
-    def __init__(self):self.buffer=bytearray();self.active=False;self.quiet=0;self.after=0
+    def __init__(self,listen_s=None):
+        self.buffer=bytearray();self.active=False;self.quiet=0;self.after=0
+        # Armed (#1088): an interview answer needs no wake word, but must start within listen_s.
+        self.window=int(listen_s*32000) if listen_s else None;self.spoke=self.window is None
+        if self.window:self.active=True
     def feed(self,pcm,woke):
         if not isinstance(pcm,bytes) or len(pcm)%2 or len(pcm)>4096:raise ValueError('Invalid PCM chunk')
         self.buffer.extend(pcm)
@@ -43,6 +47,13 @@ class Utterance:
         samples=struct.unpack('<'+'h'*(len(pcm)//2),pcm)
         rms=math.sqrt(sum(v*v for v in samples)/max(1,len(samples)))
         self.quiet=self.quiet+len(pcm) if rms<200 else 0
+        if not self.spoke:
+            if rms<200:
+                del self.buffer[:-PRE_ROLL]
+                if self.after>=self.window:
+                    self.buffer.clear();self.active=False;return b''
+                return None
+            self.spoke=True;self.after=len(pcm)
         if len(self.buffer)>PCM_MAX:
             self.buffer.clear();self.active=False;return b''
         if self.after>=16000 and self.quiet>=25600:

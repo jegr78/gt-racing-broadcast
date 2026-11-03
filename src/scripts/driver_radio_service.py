@@ -85,6 +85,7 @@ class Service:
         self._conversation = collections.deque(maxlen=4)
         self._coach_cancel = threading.Event()
         self._voice_declared = None
+        self._interview = None  # the running session interview (#1088): step, repeated, readbacks
         self._recording_session = None  # the recording's session number, for the journal
 
     def start(self):
@@ -114,6 +115,7 @@ class Service:
         self._revision += 1
 
     def _invalidate(self):
+        self._interview = None
         self._cancel()
         self._messages.clear()
         self._conversation.clear()
@@ -518,6 +520,8 @@ class Service:
             if isinstance(text, str):
                 # What the radio acts on, shown and sent without a misheard wake phrase.
                 text = setup_voice.strip_wake(text.strip())
+            if setup_voice.interview_start(text):
+                return self._interview_begin(text)
             command = setup_voice.plan(text)
             if command is not None:
                 return self._declare(command, text)
@@ -557,6 +561,10 @@ class Service:
 
     def _declare(self, command, text):
         """A spoken race setup or tyre change, read back so a misrecognition is caught."""
+        return self._say(self._apply(command), text, 'setup')
+
+    def _apply(self, command):
+        """Declare one spoken setting; the read-back, or why it could not be set."""
         try:
             snapshot = self.source() or {}
             if 'service' in command:
@@ -573,13 +581,91 @@ class Service:
             readback = command['readback']
             self.declared(snapshot, command.get('setup'), command.get('service'), 'radio voice')
         self.refresh(force=True)
+        return readback
+
+    def _say(self, text, question, preset):
+        """One fixed radio line, spoken while live, answering `question` when given."""
         result = copy.deepcopy(self._assessment or assessment.assess({}))
-        result['answers']['setup'] = readback
-        message = self._publish('setup', 'question', 'normal', result, self.clock(), queued=self._live)
+        result['answers'][preset] = text
+        message = self._publish(preset, 'question', 'normal', result, self.clock(), queued=self._live)
         stored = self._messages[message['id']]
-        stored.update(question=text.strip(), ai_state='not_requested')
+        stored.update(question=question.strip() if isinstance(question, str) and question.strip() else None,
+                      ai_state='not_requested')
         self._record(stored)
         return self._public(stored)
+
+    # --- session interview (#1088) -------------------------------------------------------
+
+    def _interview_begin(self, text):
+        if self._binding is None:
+            return self._say('No telemetry session yet. Say it again once you are on track.', text, 'interview')
+        self._interview = dict(step=0, repeated=False, readbacks=[])
+        return self._interview_ask(text)
+
+    def _interview_ask(self, question=None, again=False):
+        step = setup_voice.INTERVIEW[self._interview['step']]
+        return self._say(('Say again. ' if again else '') + setup_voice.QUESTIONS[step], question, 'interview')
+
+    def _interview_end(self, prefix, question=None):
+        readbacks = self._interview['readbacks']
+        self._interview = None
+        summary = setup_voice.interview_summary(readbacks) if readbacks else 'Nothing set.'
+        return self._say((prefix + ' ' if prefix else '') + summary, question, 'interview')
+
+    def _interview_next(self, question=None):
+        self._interview.update(step=self._interview['step'] + 1, repeated=False)
+        if self._interview['step'] >= len(setup_voice.INTERVIEW):
+            return self._interview_end('', question)
+        return self._interview_ask(question)
+
+    def _interview_retry(self, reason, question=None):
+        if self._interview['repeated']:
+            return self._interview_end(reason + ' Interview ended.', question)
+        self._interview['repeated'] = True
+        return self._interview_ask(question, again=True)
+
+    def interview_waiting(self):
+        """Whether the next utterance answers an interview question, without a wake phrase."""
+        with self._lock:
+            return self._interview is not None and not self._closed
+
+    def _interview_guard(self, binding):
+        self.refresh(force=True)
+        if not self._voice_enabled or self._closed:
+            raise access.RadioError('feature_disabled', 'Native voice is not enabled')
+        if binding != self._binding:
+            self._interview = None
+            raise access.RadioError('conflict', 'Voice session changed; ask again')
+
+    def interview_answer(self, text, binding):
+        """Internal native entry: the driver's answer to the open interview question."""
+        with access._LOCK, self._lock:
+            self._interview_guard(binding)
+            if self._interview is None:
+                return None
+            text = setup_voice.strip_wake(text.strip()) if isinstance(text, str) else text
+            step = setup_voice.INTERVIEW[self._interview['step']]
+            kind, command = setup_voice.interview_reply(step, text)
+            if kind == 'stop':
+                return self._interview_end('Interview stopped.', text)
+            if kind == 'skip':
+                return self._interview_next(text)
+            if kind == 'unclear':
+                return self._interview_retry('No clear answer.', text)
+            readback = self._apply(command)
+            if not readback.startswith('Copy, '):
+                self._interview = None
+                return self._say(readback, text, 'interview')
+            self._interview['readbacks'].append(readback)
+            return self._interview_next(text)
+
+    def interview_timeout(self, binding):
+        """Internal native entry: no answer inside the window."""
+        with access._LOCK, self._lock:
+            self._interview_guard(binding)
+            if self._interview is None:
+                return None
+            return self._interview_retry('No answer.')
 
     def declared(self, snapshot, setup=None, compound=None, source='driver desk'):
         """Fill the recording context from a radio declaration, never overwriting it."""

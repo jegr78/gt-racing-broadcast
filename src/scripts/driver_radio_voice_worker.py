@@ -10,7 +10,9 @@ import driver_radio_recognition as recognition
 from driver_radio_voice_config import PHRASES
 
 
-FIELDS={'version','platform','microphone','language','wake','stt','paths','whisper_exe','whisper_model','google_key'}
+FIELDS={'version','platform','microphone','language','wake','stt','paths','whisper_exe','whisper_model','google_key','listen_s'}
+# An interview answer window (#1088): seconds without a wake word, or None for wake-gated capture.
+MAX_LISTEN_S=10
 
 
 def validate(body):
@@ -20,7 +22,9 @@ def validate(body):
             or not isinstance(body['paths'],dict) or set(body['paths'])!={'library','en','de'}
             or any(not isinstance(v,str) or not v or len(v)>4096 or any(ord(c)<32 for c in v) for v in body['paths'].values())
             or any(not isinstance(body[k],str) or len(body[k])>4096 or any(ord(c)<32 for c in body[k])
-                   for k in ('whisper_exe','whisper_model','google_key'))):
+                   for k in ('whisper_exe','whisper_model','google_key'))
+            or body['listen_s'] is not None and (type(body['listen_s']) not in (int,float)
+                                                 or not 1<=body['listen_s']<=MAX_LISTEN_S)):
         raise ValueError('invalid_request')
     recognition.capture_args(body['platform'],body['microphone'])
     return body
@@ -45,7 +49,7 @@ def run(body):
         # Inherit the supervisor's owned group/Job Object, never create an escape.
         proc=subprocess.Popen([exe,*recognition.capture_args(body['platform'],body['microphone'])],
                               stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
-        capture=recognition.Utterance();heartbeat=time.monotonic();emit('listening')
+        capture=recognition.Utterance(listen_s=body['listen_s']);heartbeat=time.monotonic();emit('listening')
         while pcm:=proc.stdout.read(2560):
             if time.monotonic()-heartbeat>=1:emit('heartbeat');heartbeat=time.monotonic()
             utterance=capture.feed(pcm,False if capture.active else wake.wake(pcm,phrase))

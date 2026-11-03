@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""The session interview (#1088): one wake phrase, then one question per setting."""
+import sys,tempfile
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
+import driver_radio_native as native
+import driver_radio_setup_voice as voice
+from test_driver_radio_assessment import snapshot
+from test_driver_radio_native import Harness
+from test_driver_radio_service import Fixture
+
+
+def t_the_interview_starts_in_english_and_german():
+    for text in ('Hey Jeff, ask me for the session info','ask me about the session setup','session interview',
+                 'Hey Jeff, frag mich nach den Session Infos','frag mich nach der Session','hey sheriff ask me for the session info'):
+        assert voice.interview_start(text),text
+    for text in ('what is the session','race','ask me later','session',None,'x'*401):
+        assert not voice.interview_start(text),text
+
+
+def t_each_answer_uses_the_setup_vocabulary_without_its_keyword():
+    for step,text,setup in (
+            ('session','race',dict(session='race')),('session','Training',dict(session='practice')),
+            ('length','12 laps',dict(laps=12,duration_min=None)),('length','dreißig Minuten',dict(duration_min=30,laps=None)),
+            ('starting_compound','racing medium',dict(starting_compound='RM')),
+            ('starting_compound','Rennreifen weich',dict(starting_compound='RS')),
+            ('mandatory_stops','two',dict(mandatory_stops=2)),('mandatory_stops','keine',dict(mandatory_stops=0)),
+            ('mandatory_stops','one mandatory stop',dict(mandatory_stops=1)),
+            ('mandatory_compounds','racing medium and racing hard',dict(mandatory_compounds=['RM','RH'])),
+            ('mandatory_compounds','none',dict(mandatory_compounds=[])),
+            ('fuel_reserve','2 litres',dict(fuel_reserve_l=2.0)),('fuel_reserve','1,5',dict(fuel_reserve_l=1.5)),
+            ('fuel_reserve','keine',dict(fuel_reserve_l=0.0))):
+        kind,result=voice.interview_reply(step,text)
+        assert kind=='set' and result['setup']==setup,(step,text,kind,result)
+    for text,kind in (('skip','skip'),('weiter','skip'),('stop','stop'),('abbrechen','stop'),('banana','unclear'),('','unclear')):
+        assert voice.interview_reply('session',text)[0]==kind,text
+    assert voice.interview_reply('length','twelve')==('unclear',None)
+    assert voice.interview_reply('session','12 laps')==('unclear',None)
+
+
+def t_the_summary_reads_back_every_answer():
+    assert voice.interview_summary(['Copy, race.','Copy, 12 laps.','Copy, reserve 2 litres.'])=='Copy, race, 12 laps, reserve 2 litres.'
+
+
+def ask(f,binding,answer):
+    return f.service.interview_answer(answer,binding)['text']
+
+
+def t_a_full_interview_sets_every_answer_and_reads_them_back():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);state=f.poll();binding=state['binding']
+        first=f.service.question('Hey Jeff, ask me for the session info',binding)
+        assert first['text']=='Which session is it?' and first['preset']=='interview' and f.service.interview_waiting()
+        assert ask(f,binding,'race')=='How long is the race, laps or minutes?'
+        assert ask(f,binding,'12 laps')=='Which tyres do you start on?'
+        assert ask(f,binding,'skip')=='How many mandatory stops?'
+        assert ask(f,binding,'banana')=='Say again. How many mandatory stops?'
+        assert ask(f,binding,'one')=='Which compounds are mandatory?'
+        assert ask(f,binding,'racing hard')=='What fuel reserve?'
+        assert ask(f,binding,'2 litres')=='Copy, race, 12 laps, 1 mandatory stop, mandatory racing hard, reserve 2 litres.'
+        assert not f.service.interview_waiting()
+        assert f.session.read(binding)['setup']==dict(session='race',laps=12,mandatory_stops=1,
+                                                       mandatory_compounds=['RH'],fuel_reserve_l=2.0)
+        assert f.poll()['epoch']==state['epoch'],'interview answers keep the radio session'
+        # After the interview, an answer is a normal question again.
+        assert f.service.interview_answer('race',binding) is None
+
+
+def t_silence_repeats_the_question_once_then_ends():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);binding=f.poll()['binding']
+        f.service.question('session interview',binding)
+        assert f.service.interview_timeout(binding)['text']=='Say again. Which session is it?'
+        assert f.service.interview_timeout(binding)['text']=='No answer. Interview ended. Nothing set.'
+        assert not f.service.interview_waiting()
+        f.service.question('session interview',binding)
+        assert ask(f,binding,'qualifying')=='How long is the race, laps or minutes?'
+        assert ask(f,binding,'stop')=='Interview stopped. Copy, qualifying.'
+        assert not f.service.interview_waiting()
+
+
+def t_the_interview_needs_a_session_and_ends_with_it():
+    with tempfile.TemporaryDirectory() as d:
+        snap=snapshot();snap['session_id']=None
+        f=Fixture(d,snap);binding=f.poll()['binding']
+        assert f.service.question('session interview',binding)['text']=='No telemetry session yet. Say it again once you are on track.'
+        assert not f.service.interview_waiting()
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);binding=f.poll()['binding']
+        f.service.question('session interview',binding)
+        f.snap['context_revision']+=1;f.poll()
+        assert not f.service.interview_waiting(),'a new radio epoch drops the open interview'
+
+
+def speak_latest(h):
+    """Play the newest queued radio line to its end, as the relay would."""
+    message=h.f.service.history()['messages'][-1]
+    h.f.service.attach(message['id'],message['epoch'],{'audio':b'wav','audio_state':'ready'})
+    for _ in range(3):h.n.step()
+    h.players[-1].done=True;h.n.step();h.f.at+=1
+    for _ in range(3):h.n.step()
+
+
+def t_native_voice_listens_five_seconds_without_wake_for_an_answer():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step()
+        assert h.args[-1]['listen_s'] is None,'wake-gated outside the interview'
+        h.workers[0].events=[{'event':'question','text':'Hey Jeff, ask me for the session info'}]
+        h.n.step()
+        assert h.f.service.interview_waiting()
+        workers=len(h.workers)
+        speak_latest(h)
+        config=[c for c in h.args if isinstance(c,dict)][-1]
+        assert len(h.workers)==workers+1 and config['listen_s']==native.INTERVIEW_LISTEN_S==5,(len(h.workers),config)
+        claimed=[];h.n._coaching=lambda text,signature:claimed.append(text) or True
+        h.workers[-1].events=[{'event':'question','text':'race'}]
+        h.n.step()
+        assert claimed==[] and h.f.service.history()['messages'][-1]['text']=='How long is the race, laps or minutes?'
+        speak_latest(h)
+        h.workers[-1].events=[{'event':'error','code':'utterance_timeout'}]
+        h.n.step()
+        assert h.f.service.history()['messages'][-1]['text']=='Say again. How long is the race, laps or minutes?'
+        assert h.n._retry_at<=h.f.at,'silence after a question needs no error back-off'
+        h.n.close()
+
+
+def t_the_worker_accepts_only_a_bounded_answer_window():
+    import driver_radio_voice_worker as worker
+    body=dict(version=1,platform='linux',microphone='source.id',language='en',wake='hey_jeff',stt='vosk',
+              paths={'library':'lib','en':'en','de':'de'},whisper_exe='',whisper_model='',google_key='',listen_s=None)
+    assert worker.validate(dict(body))['listen_s'] is None
+    assert worker.validate(dict(body,listen_s=5))['listen_s']==5
+    for bad in (0,11,'5',True,float('nan')):
+        try:worker.validate(dict(body,listen_s=bad))
+        except ValueError:continue
+        raise AssertionError(bad)
+    missing=dict(body);missing.pop('listen_s')
+    try:worker.validate(missing)
+    except ValueError:pass
+    else:raise AssertionError('listen_s is required')
+
+
+if __name__=='__main__':
+    for name,fn in sorted(list(globals().items())):
+        if name.startswith('t_') and callable(fn):fn();print('PASS',name)
