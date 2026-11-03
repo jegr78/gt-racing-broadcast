@@ -299,6 +299,8 @@ Jeff reads every setting back in English, so a misrecognition is caught and can 
 | Mandatory stops | `two mandatory stops` | `zwei Pflichtstopps` | `Copy, 2 mandatory stops.` |
 | Mandatory compounds | `mandatory racing medium and racing hard` | `Pflicht Rennreifen mittel und Rennreifen hart` | `Copy, mandatory racing medium and racing hard.` |
 
+Natural forms work too: `current session is the race`, `this is qualifying`, `die aktuelle Session ist das Rennen`, `current session is the race, six laps` (session and length at once), `the race is 20 minutes`, `we have no mandatory pit stops`, `wir haben zwei Pflichtstopps`. The transcription often repeats a misheard wake phrase (`hey sheriff race`, `hey chair of race`, `hade have no mandatory pit stops`); a leading `hey`-like word with up to two following words that start no command or question is dropped before any question or command is routed, and **You asked** shows the text the radio acted on.
+
 Numbers can be digits or words (`twelve`, `zwölf`, `fünfundzwanzig`). Compound names
 accept racing, sports and comfort in soft, medium and hard, plus intermediate and wet; in
 German `Rennen`/`Rennreifen`, `Sport`/`Sportreifen` and `Komfort`/`Komfortreifen` with

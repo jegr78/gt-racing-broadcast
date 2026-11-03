@@ -515,6 +515,9 @@ class Service:
                 raise access.RadioError('feature_disabled', access.DISABLED['engineer'])
             if binding != self._binding:
                 raise access.RadioError('conflict', 'Voice session changed; ask again')
+            if isinstance(text, str):
+                # What the radio acts on, shown and sent without a misheard wake phrase.
+                text = setup_voice.strip_wake(text.strip())
             command = setup_voice.plan(text)
             if command is not None:
                 return self._declare(command, text)

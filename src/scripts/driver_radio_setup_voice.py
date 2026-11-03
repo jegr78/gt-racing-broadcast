@@ -5,6 +5,10 @@ from driver_radio_assessment import COMPOUND_NAMES
 
 MAX_MANDATORY_STOPS = 20
 SESSION_READBACK = dict(practice='practice session', qualifying='qualifying', race='race')
+SESSIONS_SPOKEN = {'practice': 'practice', 'practice session': 'practice', 'training': 'practice',
+                   'trainingssession': 'practice', 'freies training': 'practice', 'qualifying': 'qualifying',
+                   'qualifying session': 'qualifying', 'qualifikation': 'qualifying', 'quali': 'qualifying',
+                   'race': 'race', 'race session': 'race', 'rennen': 'race'}
 
 _FAMILIES = {'racing': 'R', 'rennen': 'R', 'rennreifen': 'R', 'renn': 'R',
              'sports': 'S', 'sport': 'S', 'sportreifen': 'S',
@@ -23,10 +27,44 @@ _TENS = dict(twenty=20, thirty=30, forty=40, fifty=50, sixty=60, seventy=70, eig
 _ZERO = {'zero', 'no', 'null', 'keine', 'kein'}
 
 
+# The free transcription repeats the wake phrase and often mishears it ("hey sheriff",
+# "hey chair of", "hate sheriff", "hey hf", "hade"). A leading "hey"-like word, or the
+# name alone, plus at most two words that start no command or question are dropped.
+_WAKE = {'hey', 'hay', 'hei', 'hej', 'hi', 'he', 'hate', 'hade', 'heyjeff', 'eh'}
+_NAMES = {'jeff', 'geoff', 'chef', 'jeffrey', 'engineer'}
+_VOCABULARY = set('''race rennen practice training trainingssession freies qualifying qualifikation quali current
+    aktuelle session this it its we were wir are have haben there es is ist the die das der starting start starten
+    reserve fuel sprit benzin tank now jetzt mandatory pflicht no keine kein what whats how where which when do does
+    can will give tell wie wo was welche welcher welches wann reicht gibt position platzierung lap laps last best
+    fastest runde runden pace tempo tyre tyres tire tires reifen status summary overview stint consumption verbrauch
+    temperature temperatures and und one more extra noch box pit mute stop'''.split())
+
+
+def _word(token):
+    return token.casefold().strip(',.!?;:')
+
+
+def strip_wake(text):
+    """The utterance without a leading, possibly misheard wake phrase."""
+    tokens = text.split()
+    if not tokens:
+        return text
+    first = _word(tokens[0])
+    if first in _NAMES:
+        rest = tokens[1:]
+    elif first in _WAKE:
+        rest = tokens[1:]
+        for _ in range(2):
+            if rest and _word(rest[0]) not in _VOCABULARY and not _word(rest[0]).isdigit():
+                rest = rest[1:]
+    else:
+        return text
+    return ' '.join(rest) if rest else text
+
+
 def _clean(text):
-    clean = re.sub(r'(\d),(\d)', r'\1.\2', text).casefold().translate(str.maketrans({'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss', '-': ' ', ',': ' '}))
+    clean = re.sub(r'(\d),(\d)', r'\1.\2', strip_wake(text)).casefold().translate(str.maketrans({'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss', '-': ' ', ',': ' '}))
     clean = ' '.join(clean.split())
-    clean = re.sub(r'^(?:hey jeff|hey engineer)\s*', '', clean)
     return re.sub(r'[.!?]+$', '', clean).strip()
 
 
@@ -109,13 +147,32 @@ def plan(text):
     if not isinstance(text, str) or not text.strip() or len(text) > 400 or any(ord(c) < 32 for c in text):
         return None
     clean = _clean(text)
-    session = {'practice': 'practice', 'practice session': 'practice', 'training': 'practice',
-               'trainingssession': 'practice', 'freies training': 'practice',
-               'qualifying': 'qualifying', 'qualifying session': 'qualifying', 'qualifikation': 'qualifying',
-               'quali': 'qualifying', 'race': 'race', 'race session': 'race', 'rennen': 'race'}.get(clean)
+    # "We have no mandatory pit stops", "wir haben zwei Pflichtstopps".
+    clean = re.sub(r'^(?:we |wir )?(?:have |haben |there are |there is |es gibt )(?=.*(?:mandatory|pflicht))', '', clean)
+    # "Current session is the race", "this is qualifying", "die aktuelle Session ist das Rennen".
+    declared = re.fullmatch(r'(?:(?:the |die |das )?(?:current |aktuelle )?session (?:is |ist )?|this is |it is |its |'
+                            r'we are in |were in |das ist |wir sind im |wir sind in der )'
+                            r'(?:a |an |the |ein |eine |das |der |die )?(.+)', clean)
+    if declared:
+        words = declared[1].split()
+        named = 2 if ' '.join(words[:2]) in SESSIONS_SPOKEN else 1 if words[0] in SESSIONS_SPOKEN else 0
+        if not named:
+            return None
+        session = SESSIONS_SPOKEN[' '.join(words[:named])]
+        rest = ' '.join(words[named:])
+        if not rest:
+            return dict(setup=dict(session=session), readback=f'Copy, {SESSION_READBACK[session]}.')
+        # "... is the race, six laps": the session and its length in one breath.
+        length = plan('race ' + rest) if session == 'race' else None
+        if not length or set(length.get('setup', {})) != {'laps', 'duration_min'}:
+            return None
+        return dict(setup=dict(session=session, **length['setup']),
+                    readback=f'Copy, {SESSION_READBACK[session]}, {length["readback"][len("Copy, "):]}')
+    session = SESSIONS_SPOKEN.get(clean)
     if session:
         return dict(setup=dict(session=session), readback=f'Copy, {SESSION_READBACK[session]}.')
-    match = re.fullmatch(r'(?:race|rennen)\s+(.+?)\s+(laps?|runden?|minutes?|minuten?|mins?)', clean)
+    match = re.fullmatch(r'(?:the |das )?(?:race|rennen)\s+(?:is\s+|ist\s+|geht ueber\s+)?(.+?)\s+'
+                         r'(laps?|runden?|minutes?|minuten?|mins?)', clean)
     if match:
         value = _integer(match[1])
         if value is None or not 0 < value <= (100000 if match[2][0] in 'lr' else 10080):
