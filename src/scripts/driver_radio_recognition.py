@@ -53,7 +53,7 @@ class Utterance:
                 if self.after>=self.window:
                     self.buffer.clear();self.active=False;return b''
                 return None
-            self.spoke=True;self.after=len(pcm)
+            self.spoke=True
         if len(self.buffer)>PCM_MAX:
             self.buffer.clear();self.active=False;return b''
         if self.after>=16000 and self.quiet>=25600:
