@@ -252,10 +252,12 @@ class Supervisor:
                         if (self._closed or self._control_changed or self._paused
                                 or current['epoch']!=state['epoch']):return
                         try:
+                            text=event.get('text')
+                            if isinstance(text,str):text=setup_voice.strip_wake(text.strip())
                             # A setup command such as "Training" never reaches the coaching vocabulary.
-                            if (setup_voice.plan(event.get('text')) is not None
-                                    or not self._coaching(event.get('text'),signature)):
-                                self._question(event.get('text'))
+                            if (setup_voice.plan(text) is not None
+                                    or not self._coaching(text,signature)):
+                                self._question(text)
                         except (access.RadioError, coaching.calibration.CoachError):self._set('error','question_rejected')
                         else:self._set('responding')
                         return
