@@ -24,6 +24,8 @@ TEXT_STATES = ('queued','playing','text_only','spoken','failed')
 # With speech on, a message's text waits for its audio, at most this long: the 8 s
 # synthesis budget plus the start of playback. A failed or slow voice never hides text.
 AUDIO_HOLD_S = 10.0
+# Wake-free answer windows per interview: every question asked at most twice (#1088).
+INTERVIEW_MAX_WINDOWS = 12
 # GT7 reports the new race position about a second after the lap line, so a lap
 # message waits this long and then reads the position.
 LAP_POSITION_SETTLE_S = 2.0
@@ -599,11 +601,12 @@ class Service:
     def _interview_begin(self, text):
         if self._binding is None:
             return self._say('No telemetry session yet. Say it again once you are on track.', text, 'interview')
-        self._interview = dict(step=0, repeated=False, readbacks=[])
+        self._interview = dict(step=0, repeated=False, readbacks=[], asked=0)
         return self._interview_ask(text)
 
     def _interview_ask(self, question=None, again=False):
         step = setup_voice.INTERVIEW[self._interview['step']]
+        self._interview['asked'] += 1
         return self._say(('Say again. ' if again else '') + setup_voice.QUESTIONS[step], question, 'interview')
 
     def _interview_end(self, prefix, question=None):
@@ -627,11 +630,24 @@ class Service:
     def interview_waiting(self):
         """Whether the next utterance answers an interview question, without a wake phrase."""
         with self._lock:
-            return self._interview is not None and not self._closed
+            return (self._interview is not None and not self._closed
+                    and self._interview['asked'] <= INTERVIEW_MAX_WINDOWS)
+
+    def interview_cancel(self, reason):
+        """Internal native entry: a wake-free window failed in another way than silence.
+        The interview ends at once, so a failing capture never re-opens the microphone."""
+        with access._LOCK, self._lock:
+            if self._interview is None:
+                return None
+            if self._closed:
+                self._interview = None
+                return None
+            return self._interview_end(reason + ' Interview ended.')
 
     def _interview_guard(self, binding):
         self.refresh(force=True)
-        if not self._voice_enabled or self._closed:
+        if not self._voice_enabled or self._closed or not self._features['engineer']:
+            self._interview = None
             raise access.RadioError('feature_disabled', 'Native voice is not enabled')
         if binding != self._binding:
             self._interview = None
@@ -651,7 +667,8 @@ class Service:
             if kind == 'skip':
                 return self._interview_next(text)
             if kind == 'unclear':
-                return self._interview_retry('No clear answer.', text)
+                # Wake-free speech that answers nothing is not kept (a bystander, the engine).
+                return self._interview_retry('No clear answer.')
             readback = self._apply(command)
             if not readback.startswith('Copy, '):
                 self._interview = None
@@ -865,6 +882,7 @@ class Service:
     def close(self):
         with self._lock:
             self._closed = True
+            self._interview = None
             self._cancel()
             self._stop.set()
         if self._thread is not None and self._thread is not threading.current_thread():

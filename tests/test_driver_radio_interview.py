@@ -124,6 +124,54 @@ def t_native_voice_listens_five_seconds_without_wake_for_an_answer():
         h.n.close()
 
 
+def t_a_failing_window_ends_the_interview_instead_of_reopening_the_microphone():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step()
+        h.workers[0].events=[{'event':'question','text':'session interview'}]
+        h.n.step();speak_latest(h)
+        assert [c for c in h.args if isinstance(c,dict)][-1]['listen_s']==5
+        h.workers[-1].events=[{'event':'error','code':'transcription_uncertain'}]
+        h.n.step()
+        assert not h.f.service.interview_waiting()
+        assert h.f.service.history()['messages'][-1]['text']=='Voice unavailable. Interview ended. Nothing set.'
+        h.n.close()
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step()
+        h.workers[0].events=[{'event':'question','text':'session interview'}]
+        h.n.step();speak_latest(h)
+        h.f.at+=60;h.n.step()  # The armed worker stops reporting.
+        assert not h.f.service.interview_waiting()
+        h.n.close()
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step()
+        h.control(muted=True);h.n.step()
+        h.workers[-1].events=[{'event':'question','text':'session interview'}]
+        for _ in range(4):h.n.step()
+        h.f.at+=1;h.n.step()
+        assert not h.f.service.interview_waiting(),'muted replies never open a wake-free window'
+        assert all(c['listen_s'] is None for c in h.args if isinstance(c,dict))
+        h.n.close()
+
+
+def t_wake_free_text_is_kept_only_when_it_answers():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);binding=f.poll()['binding']
+        f.service.question('session interview',binding)
+        assert f.service.interview_answer('someone else talking',binding)['question'] is None
+        assert f.service.interview_answer('race',binding)['question']=='race'
+
+
+def t_the_wake_free_windows_are_capped():
+    with tempfile.TemporaryDirectory() as d:
+        f=Fixture(d);binding=f.poll()['binding']
+        f.service.question('session interview',binding)
+        f.service._interview['asked']=13
+        assert not f.service.interview_waiting()
+        f.service._interview['asked']=1
+        f.service.close()
+        assert not f.service.interview_waiting() and f.service._interview is None
+
+
 def t_the_worker_accepts_only_a_bounded_answer_window():
     import driver_radio_voice_worker as worker
     body=dict(version=1,platform='linux',microphone='source.id',language='en',wake='hey_jeff',stt='vosk',
@@ -136,7 +184,7 @@ def t_the_worker_accepts_only_a_bounded_answer_window():
         raise AssertionError(bad)
     missing=dict(body);missing.pop('listen_s')
     try:worker.validate(missing)
-    except ValueError:pass
+    except ValueError:pass  # an old body without the field fails closed
     else:raise AssertionError('listen_s is required')
 
 
