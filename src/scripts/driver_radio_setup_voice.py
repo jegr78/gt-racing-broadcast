@@ -37,7 +37,8 @@ _VOCABULARY = set('''race rennen practice training trainingssession freies quali
     reserve fuel sprit benzin tank now jetzt mandatory pflicht no keine kein what whats how where which when do does
     can will give tell wie wo was welche welcher welches wann reicht gibt position platzierung lap laps last best
     fastest runde runden pace tempo tyre tyres tire tires reifen status summary overview stint consumption verbrauch
-    temperature temperatures and und one more extra noch box pit mute stop'''.split())
+    temperature temperatures and und one more extra noch box pit mute stop ask frag fragen please bitte interview
+    starte'''.split())
 
 
 def _word(token):
@@ -209,3 +210,62 @@ def plan(text):
         if codes:
             return dict(setup=dict(mandatory_compounds=codes), readback=f'Copy, mandatory {_names(codes)}.')
     return None
+
+
+# --- Session interview (#1088): one wake phrase, then one question per setting ------------
+
+INTERVIEW = ('session', 'length', 'starting_compound', 'mandatory_stops', 'mandatory_compounds', 'fuel_reserve')
+QUESTIONS = dict(session='Which session is it?', length='How long is the race, laps or minutes?',
+                 starting_compound='Which tyres do you start on?', mandatory_stops='How many mandatory stops?',
+                 mandatory_compounds='Which compounds are mandatory?', fuel_reserve='What fuel reserve?')
+_NONE = ('none', 'no', 'zero', 'nothing', 'keine', 'kein', 'keiner', 'null', 'nichts')
+
+
+def interview_start(text):
+    """Whether the driver asks to be interviewed for the session setup."""
+    if not isinstance(text, str) or len(text) > 400:
+        return False
+    return bool(re.fullmatch(
+        r'(?:please )?(?:(?:ask|interview) me (?:for|about|on) (?:the )?(?:session|race) (?:info|infos|information|details|setup)'
+        r'|(?:start )?(?:the )?session (?:interview|setup|questions)'
+        r'|frag mich (?:nach|zu) (?:den |der )?session ?(?:infos?|informationen|daten)?'
+        r'|session (?:infos?|daten) abfragen|starte (?:das )?session interview)', _clean(text)))
+
+
+def interview_reply(step, text):
+    """('skip'|'stop'|'unclear', None) or ('set', plan) for one interview answer."""
+    if not isinstance(text, str) or not text.strip() or len(text) > 400 or any(ord(c) < 32 for c in text):
+        return 'unclear', None
+    clean = _clean(text)
+    if clean in ('skip', 'next', 'pass', 'skip it', 'weiter', 'ueberspringen', 'naechste', 'naechste frage'):
+        return 'skip', None
+    if clean in ('stop', 'cancel', 'end', 'abort', 'that is all', 'thats all', 'abbrechen', 'stopp', 'ende', 'fertig'):
+        return 'stop', None
+    none = clean in _NONE
+    if step == 'session':
+        result = plan(clean)
+        result = result if result and set(result.get('setup', {})) == {'session'} else None
+    elif step == 'length':
+        result = plan('race ' + clean)
+    elif step == 'starting_compound':
+        code = compound(clean)
+        result = dict(setup=dict(starting_compound=code), readback=f'Copy, starting on {COMPOUND_NAMES[code]}.') if code else None
+    elif step == 'mandatory_stops':
+        result = plan('no mandatory stops' if none else clean if 'mandatory' in clean or 'pflicht' in clean
+                      else clean + ' mandatory stops')
+    elif step == 'mandatory_compounds':
+        result = plan('mandatory none' if none else clean if re.match(r'(?:mandatory|pflicht) ', clean) else 'mandatory ' + clean)
+    elif step == 'fuel_reserve':
+        amount = '0' if none else clean
+        result = plan('reserve ' + amount if re.search(r'(?:litres?|liters?|liter|l)$', amount) else 'reserve ' + amount + ' litres')
+    else:
+        result = None
+    if result is None or 'setup' not in result:
+        return 'unclear', None
+    return 'set', result
+
+
+def interview_summary(readbacks):
+    """One read-back for every answered setting: 'Copy, race, 12 laps, reserve 2 litres.'"""
+    parts = [r[len('Copy, '):].rstrip('.') for r in readbacks if r.startswith('Copy, ')]
+    return 'Copy, ' + ', '.join(parts) + '.' if parts else 'Copy, nothing set.'

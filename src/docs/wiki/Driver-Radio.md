@@ -319,6 +319,8 @@ Center fills the radio setup when the radio session starts. Values entered in th
 Center win. Every radio message, with the driver's question, is kept in a journal next to
 the recording.
 
+Instead of one command per value, say `Hey Jeff, ask me for the session info` (German: `Hey Jeff, frag mich nach den Session Infos`). Jeff then asks one question at a time: session type, race length, starting compound, mandatory stops, mandatory compounds and fuel reserve. After each question has finished playing, the radio listens **5 seconds** for the answer without a wake phrase. Answer with the value only: `race`, `12 laps` or `30 minutes`, `racing medium`, `two` or `none`, `racing medium and racing hard` or `none`, `2 litres`. Say `skip` (`weiter`) to move on or `stop` (`abbrechen`) to end. Without an answer, or with an unclear one, Jeff asks once more (`Say again. ...`) and then ends the interview. At the end he reads everything back in one line, for example `Copy, race, 12 laps, starting on racing medium, 1 mandatory stop, mandatory racing hard, reserve 2 litres.` The answers take the same path as single commands, including the recording context.
+
 Wake-gated coaching vocabulary is deliberately narrow:
 
 | Request | English | German |

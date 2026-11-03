@@ -30,6 +30,27 @@ def t_continuous_wake_and_question_uses_bounded_memory_and_no_ambient_transcript
     assert len(state.buffer)<=r.PCM_MAX
 
 
+def t_an_armed_capture_listens_without_wake_and_gives_up_without_speech():
+    speech=struct.pack('<h',1000)*1280;silence=b'\0'*2560
+    # Interview answers (#1088): no wake word, but speech has to start inside the window.
+    state=r.Utterance(listen_s=5)
+    result=None
+    for _ in range(int(5*32000/2560)+2):
+        result=state.feed(silence,False)
+        if result is not None:break
+    assert result==b'',result
+    state=r.Utterance(listen_s=5)
+    for _ in range(10):assert state.feed(silence,False) is None
+    for _ in range(8):assert state.feed(speech,False) is None
+    for _ in range(12):
+        result=state.feed(silence,False)
+        if result is not None:break
+    assert result and speech in result
+    # Silence before the answer never ends the capture early.
+    state=r.Utterance(listen_s=5)
+    assert all(state.feed(silence,False) is None for _ in range(30))
+
+
 def t_cloud_transcriber_only_receives_the_bounded_utterance_and_selected_language():
     calls=[]
     class Reply:

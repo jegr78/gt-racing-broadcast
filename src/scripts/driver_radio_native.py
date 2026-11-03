@@ -16,6 +16,9 @@ import driver_radio_setup_voice as setup_voice
 import driver_radio_voice_config as config
 from driver_radio_voice_process import Owned
 
+# The answer window after an interview question (#1088), decided by the maintainer.
+INTERVIEW_LISTEN_S=5
+
 
 class Supervisor:
     def __init__(self,service,machine,microphone=lambda:'',worker=None,player=None,
@@ -28,7 +31,7 @@ class Supervisor:
         self._work_lock=threading.RLock()
         self._worker_proc=None;self._player_proc=None;self._ticket=None;self._signature=None
         self._binding=None;self._revision=0;self._paused=False;self._closed=False
-        self._phase='disabled';self._error=None;self._retry_at=0;self._heartbeat=0;self._settle=0
+        self._phase='disabled';self._error=None;self._retry_at=0;self._heartbeat=0;self._settle=0;self._armed=False
         self._volume=.8;self._muted=False;self._language='en';self._wake='hey_jeff';self._enabled=False
         self._control_changed=False
 
@@ -164,6 +167,10 @@ class Supervisor:
                                    ready=lambda:True, completed_at=self.service.wall(), latest=True)
         return True
 
+    def _cancel_interview(self, reason):
+        try:self.service.interview_cancel(reason)
+        except (access.RadioError, OSError, ValueError, TypeError):pass  # Ending is best effort; capture is already stopped.
+
     def _question(self, text):
         try:
             self.service.question(text, self._binding)
@@ -250,12 +257,18 @@ class Supervisor:
                         self._stop_capture()
                         current=self.service.refresh(force=True)
                         if (self._closed or self._control_changed or self._paused
-                                or current['epoch']!=state['epoch']):return
+                                or current['epoch']!=state['epoch']):
+                            if self._armed:self._cancel_interview('Listening paused.')
+                            return
                         try:
                             text=event.get('text')
                             if isinstance(text,str):text=setup_voice.strip_wake(text.strip())
+                            if self._armed and self.service.interview_waiting():
+                                # An interview answer never reaches coaching or the question router.
+                                try:self.service.interview_answer(text,self._binding)
+                                except access.RadioError:self._cancel_interview('Radio unavailable.');raise
                             # A setup command such as "Training" never reaches the coaching vocabulary.
-                            if (setup_voice.plan(text) is not None
+                            elif (setup_voice.plan(text) is not None or setup_voice.interview_start(text)
                                     or not self._coaching(text,signature)):
                                 self._question(text)
                         except (access.RadioError, coaching.calibration.CoachError):self._set('error','question_rejected')
@@ -265,6 +278,13 @@ class Supervisor:
                         self._heartbeat=self.clock()
                         if event['event']!='heartbeat':self._set(event['event'])
                     elif event.get('event')=='error':
+                        if self._armed and event.get('code')=='utterance_timeout' and self.service.interview_waiting():
+                            # Silence after an interview question: repeat it once, then end.
+                            self._stop_capture()
+                            try:self.service.interview_timeout(self._binding)
+                            except access.RadioError:self._cancel_interview('Radio unavailable.');self._set('error','question_rejected')
+                            return
+                        if self._armed:self._cancel_interview('Voice unavailable.')
                         self._stop_capture();self._retry_at=self.clock()+5
                         self._set('error',event.get('code') if event.get('code') in (
                             'microphone_unavailable','model_unavailable','transcription_failed','transcription_uncertain',
@@ -272,6 +292,7 @@ class Supervisor:
                 budget=8 if self._phase=='transcribing' else 20
                 if self._worker_proc.poll() is not None or self.clock()-self._heartbeat>budget:
                     code='transcription_timed_out' if self._phase=='transcribing' else 'worker_failed'
+                    if self._armed:self._cancel_interview('Voice unavailable.')
                     self._stop_capture();self._retry_at=self.clock()+5;self._set('error',code)
                 return
             if self.clock()<max(self._retry_at,self._settle):return
@@ -286,7 +307,13 @@ class Supervisor:
                       stt=native['stt'],paths=config.paths(self.machine),
                       whisper_exe=os.environ.get('RACECAST_RADIO_WHISPER_EXE') or shutil.which('whisper-cli') or '',
                       whisper_model=os.environ.get('RACECAST_RADIO_WHISPER_MODEL') or str(self.machine/'radio-voice'/'ggml-tiny.bin'),
-                      google_key=os.environ.get('RACECAST_GCLOUD_STT_KEY','') if native['stt']=='google' else '')
+                      google_key=os.environ.get('RACECAST_GCLOUD_STT_KEY','') if native['stt']=='google' else '',
+                      listen_s=None)
+            if self.service.interview_waiting():
+                # The question is the signal that the microphone opens; muted replies give none.
+                if self._muted:self._cancel_interview('Replies muted.');return
+                body['listen_s']=INTERVIEW_LISTEN_S
+            self._armed=body['listen_s'] is not None
             try:self._worker_proc=self.worker_factory(body)
             except (OSError,ValueError):
                 self._retry_at=self.clock()+5;self._set('error','worker_failed');return
