@@ -139,6 +139,8 @@ GT7 telemetry does not say which session runs, so the session type is declared i
 | Qualifying | off | the qualifying rank GT7 reports in this field |
 | Race, or not declared | on, as above | race position |
 
+Asked directly (`What's my position?`), Jeff names the position in every session.
+
 With mandatory stops or compounds declared, the update and **Short status** end with what
 is still open, for example `1 mandatory stop left, racing hard still required.` Each pass
 through the pit lane counts as one stop: the relay sees it as the car standing in the box

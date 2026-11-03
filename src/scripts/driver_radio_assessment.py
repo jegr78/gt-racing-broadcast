@@ -172,8 +172,7 @@ def _quick_answers(snapshot, live, position, total, completed, usable, consumpti
     """Fixed answers for frequent driver questions: no agent, so they come at once."""
     def sentence(text):
         return text[0].upper()+text[1:]+'.'
-    answers = dict(position=f'{position}.' if position else 'Position is not used in practice.' if kind == 'practice'
-                   else 'Position is not available.')
+    answers = dict(position=f'{position}.' if position else 'Position is not available.')
     if kind in ('practice', 'qualifying'):
         answers['to_go'] = f'No race distance in {"practice" if kind == "practice" else "qualifying"}.'
     elif total is None:
@@ -431,7 +430,9 @@ def assess(snapshot, session=None, limits=None):
     lap = _latest_lap(snapshot)
     fastest = lap is not None and _is_fastest(lap, snapshot)
     # In qualifying GT7 reports the qualifying rank in the race position field.
-    position = _position(snapshot, live) if kind != 'practice' else None
+    # Practice calls leave the position out; asked directly, it is named in every session.
+    asked_position = _position(snapshot, live)
+    position = asked_position if kind != 'practice' else None
     total = number(race_setup.get('laps'), True)
     mandatory = _mandatory(snapshot, setup, service) if raced else dict(stops_done=None, stops_left=None,
                                                                          compounds_missing=[], text=None)
@@ -456,7 +457,7 @@ def assess(snapshot, session=None, limits=None):
                         if service and r.get('id') == service.get('lap_id')), None)
     tyre_age = (completed-service_lap if service_lap is not None and completed is not None
                 else number(tyres['age_laps'], True) if not service else None)
-    quick_answers = _quick_answers(snapshot, live, position, total, completed, usable, consumption,
+    quick_answers = _quick_answers(snapshot, live, asked_position, total, completed, usable, consumption,
                                    compound, tyre_age, eligible if live else [], service, kind)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, laps=lap_facts, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,

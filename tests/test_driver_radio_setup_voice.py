@@ -126,7 +126,8 @@ def t_practice_and_qualifying_drop_the_race_distance():
     assert practice['answers']['status']==practice['lap_text']=='Lap 4, last lap was a 1:31.000, fuel for 5.0 laps.',practice['lap_text']
     assert practice['race_laps'] is None and practice['position'] is None
     assert practice['quick_answers']['to_go']=='No race distance in practice.'
-    assert practice['quick_answers']['position']=='Position is not used in practice.'
+    # Asked directly, the position is named in every session; only the calls leave it out.
+    assert practice['quick_answers']['position']=='P3.',practice['quick_answers']['position']
     qualifying=review(snap,{'setup':{'laps':4,'session':'qualifying'}})
     assert qualifying['lap_text']=='Lap 4, P3, last lap was a 1:31.000, fuel for 5.0 laps.',qualifying['lap_text']
     assert qualifying['race_laps'] is None and qualifying['quick_answers']['to_go']=='No race distance in qualifying.'
