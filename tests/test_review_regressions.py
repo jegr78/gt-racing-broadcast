@@ -81,7 +81,7 @@ def t_cross_origin_controls_are_rejected_before_any_dispatch():
         cookie = f'{gate.m.console_auth.COOKIE_NAME}={gate._tok("bob")}'
         try:
             for method in ('GET', 'POST'):
-                for path in ('/next', '/console/next', '/mode/race', '/console/obs/audio',
+                for path in ('/', '/status', '/next', '/console/next', '/mode/race', '/console/obs/audio',
                              '/feed/A/deactivate', '/timer/start', '/telemetry/record/start',
                              '/console/buttons/api/location/1/0/0/press'):
                     for foreign in ({'Sec-Fetch-Site': 'cross-site'},
@@ -109,9 +109,10 @@ def t_cross_origin_controls_are_rejected_before_any_dispatch():
             assert len(calls) == 6
             # Same-origin metadata alone is insufficient after DNS rebinding.
             for host in ('attacker.example:8088', 'producer.tail123.ts.net.attacker.example:8088'):
-                code, _ = gate._get(server.server_port, '/next', headers={
-                    'Host': host, 'Origin': 'http://' + host, 'Sec-Fetch-Site': 'same-origin'})
-                assert code == 403, (host, code)
+                for path in ('/', '/status', '/next'):
+                    code, _ = gate._get(server.server_port, path, headers={
+                        'Host': host, 'Origin': 'http://' + host, 'Sec-Fetch-Site': 'same-origin'})
+                    assert code == 403, (host, path, code)
             assert len(calls) == 6
             # Funnel preserves the public Host and reports its HTTPS scheme.
             code, _ = gate._get(server.server_port, '/console/next', gate._tok('bob'), headers={
