@@ -8623,6 +8623,7 @@ class Feed:
             if new_idx == self.idx:
                 return False
             self.idx = new_idx
+            self._set_phase("connecting")  # The old stream cannot prove the new source ready.
         self._clear_drop_health()         # director repositioned -> alarm acknowledged, new source not yet served
         self.dead_serves = 0              # new source -> fresh dead-serve count
         self.quality_tier = "full"        # #493: a new source starts fresh at full quality
@@ -11164,19 +11165,11 @@ class Relay:
             return {**self.status(), "changed": False, "feed": self.live_feed(),
                     "continuation": True, "obs_cut": False}
 
-        # Past the last stint: idle over-press (unchanged behavior).
+        # Past the last stint there is no incoming stream to take. Keep the
+        # current pull and display, even when NEXT is pressed again.
         if nxt >= len(rows):
-            new_live = self.live_after_next()
-            target = "A" if new_live == "B" else "B"
-            result = self.advance(target, +2)
-            cut = self.feeds[new_live].phase == "serving"
-            if cut:
-                self._reflect(new_live, True, **tx)
-            self.on_air_row = self.feeds[new_live].idx
-            # `result` (from advance()) already carries status() plus "changed"/"feed";
-            # spread it first and place continuation/obs_cut last, matching the
-            # spread-first/explicit-last ordering of the other two branches above.
-            return {**result, "continuation": False, "obs_cut": cut}
+            return {**self.status(), "changed": False, "feed": self.live_feed(),
+                    "continuation": False, "obs_cut": False}
 
         # Real handover to the pre-warmed off-air feed, walking SLOTS (not +2) so a
         # freed feed skips a continuation run instead of duplicating the on-air pull.
@@ -11184,10 +11177,15 @@ class Relay:
         freed = "A" if new_live == "B" else "B"
         # Reconcile the incoming feed's preload against fresh slots (a Sheet edit may
         # have moved the boundary): it must sit on the next slot after the current row.
-        self.feeds[new_live].set_index(next_slot_first_row(slots, cur))
-        cut = self.feeds[new_live].phase == "serving"
-        if cut:
-            self._reflect(new_live, True, **tx)       # only flip onto a feed that is actually live
+        incoming = self.feeds[new_live]
+        repositioned = incoming.set_index(next_slot_first_row(slots, cur))
+        # Re-indexing kills the old pull before its worker changes phase. A
+        # stale 'serving' phase must not authorize a cut to that replacement.
+        cut = not repositioned and not incoming.paused and incoming.phase == "serving"
+        if not cut:
+            return {**self.status(), "changed": False, "feed": self.live_feed(),
+                    "continuation": False, "obs_cut": False}
+        self._reflect(new_live, True, **tx)
         # #489/#505: on a real handover cut, stop the outgoing pull so only ONE feed
         # ever pulls googlevideo between handovers (the durable single-puller fix). Gated
         # on cut (never stop a feed we did not cut away from -> never blacks the program)
@@ -11691,7 +11689,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
-                 event_documents_source=None):
+                 event_documents_source=None, browser_hosts=()):
+    # No DNS lookup in a request: only configured names and literal IP addresses
+    # may be browser origins. Otherwise DNS rebinding could make a foreign Host
+    # look same-origin to the origin comparison below.
+    browser_names = {"localhost", socket.gethostname().lower().rstrip(".")}
+    browser_names.update(name.lower().rstrip(".") for name in browser_hosts if name)
+    browser_names.update(name.split(".", 1)[0] for name in tuple(browser_names))
     radio_access = (driver_radio_access.Store(engineer_access.root, engineer_access.available)
                     if engineer_access is not None else None)
     def radio_page_access():
@@ -13026,7 +13030,53 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             director/producer and stripped for every other role. The plain tailnet
             /status is unaffected."""
             return redact_console_status(self._status_payload(), roles)
+        def _browser_request_allowed(self, method):
+            """Check browser provenance before Console routing or any side effect.
+
+            Native Companion/CLI requests have no browser headers. Only exact
+            landing pages and OAuth's nonce-checked entry/callback permit foreign
+            navigation; no API or proxied Companion path inherits that exception.
+            """
+            p = tuple(x for x in urlparse(self.path).path.split("/") if x)
+            if method == "GET":
+                if p[:1] == ("console",):
+                    if p[1:] in _CONSOLE_PAGE_GETS or p[1:] in (("login",), ("oauth", "callback")):
+                        return True
+                elif p in _CONSOLE_PAGE_GETS or p in (("hud",), ("hud", "preview"),
+                                                     ("splitscreen",), ("splitscreen", "hud"), ("intermission",)):
+                    return True
+            if not intermission_live.allow_control_origin(self.headers):
+                return False
+            if not any(self.headers.get(key) for key in
+                       ("Origin", "Referer", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest")):
+                return True  # Headerless native clients retain trusted-network access.
+            try:
+                host = urlparse("http://" + self.headers.get("Host", ""))
+                name = (host.hostname or "").lower().rstrip(".")
+                if not name or host.username is not None or host.password is not None or host.path or host.query or host.fragment:
+                    return False
+                if name in browser_names:
+                    return True
+                ipaddress.ip_address(name)
+                return True  # Literal addresses cannot be redirected by DNS rebinding.
+            except ValueError:
+                return False
+
+        def _refuse_browser_request(self):
+            p = tuple(x for x in urlparse(self.path).path.split("/") if x)
+            if p[:1] == ("console",):
+                p = p[1:]
+            if p[:1] == ("driver-radio",):
+                return self._radio_error("foreign_origin", "Radio access requires the current server origin", 403)
+            return self._send({"ok": False, "error": "Cross-origin relay request refused."}, 403)
+
         def do_GET(self):
+            # These loopback-only endpoints already enforce stricter provenance
+            # checks and expose provider-specific error/protocol envelopes.
+            if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
+                return self._audience_admin(provider=urlparse(self.path).path.rsplit("/", 1)[1])
+            if not self._browser_request_allowed("GET"):
+                return self._refuse_browser_request()
             if urlparse(self.path).path == '/driver-radio/admin/coach':
                 return self._coach('GET', admin=True)
             if urlparse(self.path).path in ("/driver-radio-ui.js", "/console/driver-radio-ui.js"):
@@ -13034,8 +13084,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._send_file(os.path.join(radio_page_dir, "driver-radio.js"), "application/javascript; charset=utf-8")
             if urlparse(self.path).path in ("/driver-radio/admin", "/driver-radio/admin/native"):
                 return self._radio("native" if self.path.split('?')[0].endswith('/native') else "admin", "GET", admin=True)
-            if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
-                return self._audience_admin(provider=urlparse(self.path).path.rsplit("/", 1)[1])
             p = [x for x in urlparse(self.path).path.split("/") if x]
             try:
                 if p and p[0] == "console":
@@ -13748,6 +13796,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.rfile.read(length)
 
         def do_POST(self):
+            if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
+                return self._audience_admin(mutation=True, provider=urlparse(self.path).path.rsplit("/", 1)[1])
+            if not self._browser_request_allowed("POST"):
+                self._body_consumed = False
+                self.close_connection = True
+                self.connection.settimeout(.2)
+                try:
+                    self._drain_body()
+                except OSError:
+                    pass  # A foreign client need not finish its refused body.
+                return self._refuse_browser_request()
             if urlparse(self.path).path == '/driver-radio/admin/coach':
                 self._body_consumed = False
                 try:return self._coach('POST', admin=True)
@@ -13758,8 +13817,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._radio("native" if self.path.split('?')[0].endswith('/native') else "admin", "POST", admin=True)
                 finally:
                     self._drain_body()
-            if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
-                return self._audience_admin(mutation=True, provider=urlparse(self.path).path.rsplit("/", 1)[1])
             p = [x for x in urlparse(self.path).path.split("/") if x]
             self._body_consumed = False
             try:
@@ -14404,11 +14461,7 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0
                 data, addr = sock.recvfrom(4096)
             except socket.timeout:
                 continue
-            if dest is None:                 # discovery: latch the responder
-                dest = addr[0]
-                store.set_source(dest)
-                tlog.info("GT7 console discovered at %s", dest)
-            elif addr[0] != dest:
+            if dest is not None and addr[0] != dest:
                 continue                      # ignore packets from any other host once the
                                              # console is latched/pinned, a rogue LAN host can
                                              # forge valid telemetry (the key is fixed+public)
@@ -14420,6 +14473,12 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0
             store.record(now_wall, kind, plain)
             try:
                 packet = gt7_telemetry.parse_packet(plain)
+                # An arbitrary UDP datagram must not pin discovery and redirect
+                # all future heartbeats away from the actual console.
+                if dest is None:
+                    dest = addr[0]
+                    store.set_source(dest)
+                    tlog.info("GT7 console discovered at %s", dest)
                 if getattr(store, "replay", None) is not None:
                     store.replay.udp_update(packet, now_wall)
                 else:
@@ -15181,6 +15240,7 @@ def main():
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,
         radio_native=radio_native,
+        browser_hosts=(tailscale.detect_magicdns_name(),),
     )
     bind_addrs = resolve_bind_addresses(
         args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
