@@ -2623,7 +2623,11 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
             # Stop waiting once the relay answers OR its process is gone: a relay
             # that exits at startup never binds, so the full window is wasted.
             if _relay_http_ok():
-                up.append(True)
+                # HTTP alone can be an unrelated listener. Never return a PID
+                # which already exited, including a failed frozen bootloader.
+                sv._reap_zombie(pid)
+                if sv.pid_alive(pid):
+                    up.append(True)
                 return True
             sv._reap_zombie(pid)   # POSIX: an unreaped dead child still "exists"
             return not sv.pid_alive(pid)
@@ -2633,6 +2637,18 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
         if up:
             return pid
         reason = relay_boot_failure_line(_relay_boot_log_since(offset))
+        # A slow startup may still be fetching Sheet tabs. Reap this owned
+        # attempt before another start overwrites its PID or binds its ports.
+        # Keep the PID file if cleanup fails so stop/status can still find it.
+        if not sv.stop_pid(pid, timeout=3):
+            print(f"  ERROR: relay startup PID {pid} could not be stopped. "
+                  "No retry was started; run 'racecast relay stop' before retrying.")
+            return None
+        if sv.read_pid(_relay_pid_path()) == pid:
+            try:
+                os.remove(_relay_pid_path())
+            except FileNotFoundError:
+                pass  # Another completed stop already removed this attempt.
         if reason and not re.search(r"\bport\b", reason, re.IGNORECASE):
             break   # a config/tool error: a respawn would fail the same way
         if attempt < attempts:

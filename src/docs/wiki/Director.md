@@ -326,7 +326,10 @@ graphics have no shortcut, and in solo the tenth macro (`CAPTURE`) has none.
   tears the feed's pull and means a brief interruption if that feed is on
   air.
 - `NEXT` locks for 3 seconds after a press, so a double-tap cannot advance
-  two stints.
+  two stints. If the incoming feed is stopped or still starting, the relay keeps
+  the current feed and stint on air. Arm the incoming feed, wait until it is ready,
+  then press `NEXT` again. Pressing it after the last stint also keeps the current
+  stream. Consecutive stints sharing one stream still advance the label without a cut.
 
 > **Two things are called "stint".** `FEEDS → STINT…` (FEEDS bus) re-targets
 > the actual feeds to a stint number: it interrupts running pulls and is for

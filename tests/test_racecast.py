@@ -2522,7 +2522,8 @@ def _relay_spawn_stubs(http_ok_seq):
     saves = [
         ("pt", "pids_on_port", lambda port: []),                 # port free -> plain start
         ("sv", "read_pid", lambda path: None),
-        ("sv", "pid_alive", lambda pid: False),
+        ("sv", "pid_alive", bool),
+        ("sv", "stop_pid", lambda *args, **kwargs: True),
         ("sv", "start_detached", lambda *a, **k: (
             calls.__setitem__("spawn", calls["spawn"] + 1), 4242)[1]),
         (None, "_relay_http_ok", lambda: next(seq)),

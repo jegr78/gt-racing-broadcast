@@ -49,7 +49,7 @@ class _Crew:
 
 
 def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None,
-           graphics_take="off", flag_graphic_store=None, solo=False):
+           graphics_take="off", flag_graphic_store=None, solo=False, browser_hosts=()):
     rows = [("https://youtu.be/a", "Alice", "1", 2)]           # alice -> commentator
     src = _FakeSource(_URLS8, rows)
     relay = m.Relay(src, [53001, 53002], LOGDIR, sheet_id=sheet_id)
@@ -70,6 +70,7 @@ def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None,
         health_monitor_page_path=os.path.join(SRC, "console", "health-monitor.html"),
         uplot_dir=os.path.join(SRC, "assets", "vendor", "uplot"),
         companion_url=companion_url,
+        browser_hosts=browser_hosts,
         logo_path=logo_path,
         graphics_dir=graphics_dir,
         graphics_take=graphics_take,

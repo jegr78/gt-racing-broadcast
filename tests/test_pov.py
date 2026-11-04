@@ -248,9 +248,11 @@ def t_next_new_live_is_the_non_advanced_feed():
     r = _relay(["s1", "s2", "s3", "s4"])
     assert (r.A.idx, r.B.idx) == (0, 1)
     assert r.live_after_next() == "B"          # B (stint2) is pre-warmed -> next live
+    r.B.phase = "serving"
     r.next_auto()
     assert (r.A.idx, r.B.idx) == (2, 1)        # A advanced to stint3; B now live
     assert r.live_feed() == "B"
+    r.A.phase = "serving"                    # the freed feed finished pre-warming
     r.next_auto()
     assert (r.A.idx, r.B.idx) == (2, 3)        # B advanced to stint4; A now live
     assert r.live_feed() == "A"
@@ -262,6 +264,7 @@ def t_cold_start_one_link_then_add_second():
     assert r.B.current_channel() == (None, 1)  # B idles (black) on the empty slot 2
     r.source.add("s2")                         # link entered mid-event
     assert r.live_after_next() == "B"
+    r.B.phase = "serving"                     # new link has finished pre-warming
     r.next_auto()
     assert r.live_feed() == "B" and r.B.current_channel() == ("s2", 1)
 
@@ -274,10 +277,10 @@ def t_next_reflects_only_when_incoming_serving():
     out = r.next_auto()
     assert out["obs_cut"] is False
     assert calls == []                          # no visibility/audio flip onto a non-serving feed
-    r.feeds["A"].phase = "serving"              # next incoming feed is live
+    r.feeds["B"].phase = "serving"              # retry the same incoming feed
     out2 = r.next_auto()
     assert out2["obs_cut"] is True
-    assert calls == [("A", True)]
+    assert calls == [("B", True)]
 
 
 def t_next_auto_passes_the_transition_to_the_cut():
@@ -476,6 +479,7 @@ def t_relay_live_schedule_row_tracks_on_air_feed():
             ("s3", "Ann", "Stint 3", 3), ("s4", "Ben", "Stint 4", 4)]
     r = m.Relay(_StubSource(["s1", "s2", "s3", "s4"], rows), (53001, 53002), LOGDIR)
     r._reflect = lambda live, cut: None
+    r.B.phase = "serving"                    # incoming stream is pre-warmed
     assert r.live_feed() == "A"                        # A on stint 1
     assert r.live_schedule_row() == {"streamer": "JeGr", "stint": "Stint 1"}
     r.next_auto()                                      # B (stint 2) now on air
@@ -485,6 +489,7 @@ def t_relay_live_schedule_row_tracks_on_air_feed():
 
 def t_on_air_row_tracks_feed_in_normal_operation():
     r = _relay(["s1", "s2", "s3", "s4"])
+    r.B.phase = "serving"
     assert r.on_air_row_idx() == 0                       # stint 1
     assert r.live_row_map() == {0: "A", 1: "B"}          # on-air A row0, off-air B row1
     r.next_auto()                                        # B (stint 2) on air
@@ -527,6 +532,7 @@ def t_back_to_back_no_dup_pull_no_cut():
     assert r.live_schedule_row() == {"streamer": "B", "stint": "Stint 3"}
 
     # Next -> stint 4 (real handover): cut to A(uD)
+    r.A.phase = "serving"                    # the next distinct stream is ready
     out3 = r.next_auto()
     assert out3["continuation"] is False and out3["obs_cut"] is True
     assert r.on_air_row_idx() == 3 and r.live_feed() == "A"
@@ -651,6 +657,7 @@ def t_next_auto_real_handover_stop_freed_never_armed_is_noop():
 def t_status_live_stint_reports_display_row_on_continuation():
     # Normal (all-distinct) schedule: /status live.stint == the physical pull index.
     r = _relay(["s1", "s2", "s3", "s4"])
+    r.B.phase = "serving"
     assert r.status()["live"]["stint"] == r.on_air_row_idx() + 1 == 1
     r.next_auto()                                       # stint 2, real handover
     assert r.status()["live"]["stint"] == r.on_air_row_idx() + 1 == 2
@@ -771,6 +778,7 @@ def t_next_past_end_is_idle_no_cut():
 
 def t_splitscreen_state_maps_live_feed_to_current():
     r = _relay(["s1", "s2", "s3", "s4"])
+    r.B.phase = "serving"
     assert r.splitscreen_state() == {"current": "A", "next_active": True, "mode": "race"}
     r.next_auto()                                  # B becomes the on-air feed
     assert r.splitscreen_state()["current"] == "B"

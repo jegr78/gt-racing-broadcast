@@ -62,6 +62,14 @@ All tokens are signed with one **per-league secret**, `CONSOLE_SECRET`, auto-gen
 the active profile's `profile.env` on first relay start and carried by
 `racecast profile export`/import. (See [Configuration](Configuration).)
 
+The relay checks browser origins before dispatching API requests, including the
+legacy GET controls and the Companion proxy. Foreign browser requests are refused
+even when a Console cookie is present. Browser API access uses a literal IP address,
+`localhost`, the machine hostname, or its Tailscale name discovered at relay startup.
+The Console landing pages and Discord login remain reachable through external links.
+Native Companion and CLI requests without browser provenance headers retain their
+existing trusted-network access. This check supplements the role and token checks.
+
 ## The `/console` launcher: role-adaptive
 
 `/console` renders only what the signed-in person's roles permit:
