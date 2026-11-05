@@ -364,6 +364,16 @@ def quality_step_down_due(tier, pinned, dead_serves, source_state,
 
 RESOLVE_RETRY = 15  # seconds between yt-dlp resolve attempts while a stint isn't live
 COOKIE_MAX_AGE_H = 12   # keep in sync with preflight.py cookies_status(max_age_hours)
+# Automatic cookie refresh (#1092): with RACECAST_COOKIES_BROWSER set, a jar a feed
+# uses is re-exported from that browser once its export is this old, so the 12 h
+# warning never comes up while the browser stays logged in.
+COOKIE_REFRESH_AGE_H = 1.0
+COOKIE_REFRESH_CHECK_S = 600     # how often the refresher looks
+COOKIE_REFRESH_RETRY_S = 3600    # after a failed export, wait this long per platform
+# yt-dlp --cookies-from-browser names. The value reaches yt-dlp's argv, so only a
+# bare name is accepted: no profile path, keyring or container suffix.
+COOKIE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "opera",
+                   "safari", "vivaldi", "whale")
 RETRY_SLEEP = 10    # seconds after a stream ends / manifest expires before re-resolving
 FEED_FAST_EXIT_S = 3.0  # a serve proc dying faster than this (non-zero) = a bind/launch failure, not a stint
 DEAD_SERVE_BACKOFF_CAP = 300   # s; max delay between re-attempts of a fast-dying ("was live, now dead") serve
@@ -9420,15 +9430,11 @@ class Relay:
         source, the only feeds that read yt-cookies.txt (#1091). Both modes count, so a
         mode switch never meets stale cookies unannounced. Best-effort: an unreadable
         source counts as needing nothing rather than raising into /status."""
-        urls = []
-        for src in (self.race_source, self.qual_source, self.pov_source):
-            if src is None:
-                continue
-            try:
-                urls.extend(src.get())
-            except Exception:                           # noqa: BLE001  best-effort
-                continue
-        return youtube_cookies_needed(urls)
+        return youtube_cookies_needed(feed_source_urls(self))
+
+    def cookie_feed_urls(self):
+        """Every configured feed source, see feed_source_urls."""
+        return feed_source_urls(self)
 
     def active_items(self):
         """Feed provider: the active schedule's URL list (mode-aware)."""
@@ -14526,6 +14532,94 @@ def youtube_cookies_needed(urls):
     return False
 
 
+def feed_source_urls(relay):
+    """Every configured feed source of *relay* (race schedule, qualifying row, POV),
+    in both modes. Best-effort: a missing or unreadable source contributes nothing."""
+    urls = []
+    for name in ("race_source", "qual_source", "pov_source"):
+        src = getattr(relay, name, None)
+        if src is None:
+            continue
+        try:
+            urls.extend(src.get())
+        except Exception:                               # noqa: BLE001  best-effort
+            continue
+    return urls
+
+
+def twitch_cookies_needed(urls):
+    """True when any feed source in *urls* is a Twitch stream (#1092)."""
+    for url in urls or ():
+        if isinstance(url, str) and url.strip() and feed_platform(url.strip()) == "twitch":
+            return True
+    return False
+
+
+def cookie_refresh_browser(environ):
+    """The browser named by RACECAST_COOKIES_BROWSER (machine .env), or None: unset,
+    or not a bare name from COOKIE_BROWSERS (#1092)."""
+    value = (environ.get("RACECAST_COOKIES_BROWSER") or "").strip().lower()
+    return value if value in COOKIE_BROWSERS else None
+
+
+def cookie_refresh_due(age_h, needed, refresh_age_h=COOKIE_REFRESH_AGE_H):
+    """Re-export a jar only when a feed needs it and its export is old or unknown."""
+    return bool(needed) and (age_h is None or age_h >= refresh_age_h)
+
+
+class CookieRefresher:
+    """Keeps the cookie jars the feeds use fresh from a logged-in browser (#1092).
+
+    Only jars that already exist are refreshed: a relay started without
+    yt-cookies.txt runs its feeds cookie-less, and twitch-cookies.txt exists only
+    when the producer opted into Twitch cookies. A jar is re-exported when a
+    configured feed needs its platform and its export is COOKIE_REFRESH_AGE_H old.
+    A failed export keeps the previous jar (export_cookies' contract) and waits
+    COOKIE_REFRESH_RETRY_S before that platform is tried again, so a logged-out
+    browser costs one warning an hour, and the stale warning reports it at 12 h.
+    *export* and *clock* are test seams."""
+
+    def __init__(self, relay, browser, cookie_dir, export=None, clock=time.time):
+        self.relay = relay
+        self.browser = browser
+        self.cookie_dir = cookie_dir
+        self.export = export or export_cookies
+        self.clock = clock
+        self._retry_at = {}
+
+    def _jars(self):
+        urls = self.relay.cookie_feed_urls()
+        yield "youtube", self.relay.cookies, youtube_cookies_needed(urls)
+        yield "twitch", cookies_for("twitch", self.cookie_dir), twitch_cookies_needed(urls)
+
+    def tick(self):
+        now = self.clock()
+        try:
+            jars = list(self._jars())
+        except Exception as exc:                        # noqa: BLE001  never kill the thread
+            LOG.warning("cookie refresh: cannot read the feed sources: %s", exc)
+            return
+        for platform, path, needed in jars:
+            if not path or not os.path.isfile(path):
+                continue
+            if now < self._retry_at.get(platform, 0):
+                continue
+            if not cookie_refresh_due(cookie_jar.export_age_h(path, now=now), needed):
+                continue
+            try:
+                ok = self.export(self.browser, path, platform)
+            except Exception as exc:                    # noqa: BLE001  never kill the thread
+                LOG.warning("cookie refresh (%s) failed: %s", platform, exc)
+                ok = False
+            if not ok:
+                self._retry_at[platform] = now + COOKIE_REFRESH_RETRY_S
+
+    def run(self):
+        while True:
+            self.tick()
+            time.sleep(COOKIE_REFRESH_CHECK_S)
+
+
 def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H, needed=True):
     """Cookie staleness for /status, computed on demand. During a 24 h event the
     cookies age while the relay runs, so this must be live, not a startup snapshot.
@@ -14555,7 +14649,7 @@ def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H, needed=True):
             "needed": needed}
 
 
-def _cookie_hint(stderr_text, browser):
+def _cookie_hint(stderr_text, browser, platform="youtube"):
     """failure_hint() from the sibling get-cookies.py, one source of truth
     for the actionable export-failure hints (locked DB, no profile, DPAPI)."""
     import importlib.util
@@ -14564,15 +14658,20 @@ def _cookie_hint(stderr_text, browser):
         "get_cookies", os.path.join(here, "get-cookies.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.failure_hint(stderr_text, browser)
+    return mod.failure_hint(stderr_text, browser, platform)
 
 
-def export_cookies(browser, out):
-    """Export YouTube cookies from a logged-in browser to a Netscape yt-cookies.txt
+# The page yt-dlp opens while exporting; keep in sync with get-cookies.py cookie_target.
+COOKIE_EXPORT_URLS = {"youtube": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+                      "twitch": "https://www.twitch.tv"}
+
+
+def export_cookies(browser, out, platform="youtube"):
+    """Export *platform*'s cookies from a logged-in browser to the Netscape jar *out*
     using yt-dlp. Best-effort: returns True on success. yt-dlp writes the whole
-    browser profile into a private directory; only the youtube.com cookies reach
+    browser profile into a private directory; only the platform's own cookies reach
     *out* (#616), and a failed filter leaves the previous jar unchanged."""
-    url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+    url = COOKIE_EXPORT_URLS[platform]
     try:
         with cookie_jar.private_export_path(out, warn=LOG.warning) as raw:
             try:
@@ -14590,9 +14689,9 @@ def export_cookies(browser, out):
                 for line in [l for l in err.splitlines() if l.strip()][-1:]:
                     LOG.warning("%s", line)   # the real yt-dlp reason, not a guess
                 LOG.warning("Cookie export from '%s': FAILED. %s", browser,
-                            _cookie_hint(err, browser))
+                            _cookie_hint(err, browser, platform))
                 return False
-            dropped = cookie_jar.filter_jar(raw, "youtube", dest=out)
+            dropped = cookie_jar.filter_jar(raw, platform, dest=out)
     except OSError as exc:
         LOG.warning("Cookie export from '%s': FAILED. Cannot prepare it next to %s: %s",
                     browser, out, exc)
@@ -14601,11 +14700,12 @@ def export_cookies(browser, out):
         LOG.warning("Cookie export from '%s': FAILED. Could not write the filtered "
                     "cookies to %s; the previous jar is unchanged.", browser, out)
         return False
-    try: os.chmod(out, 0o600)   # live YouTube session, owner-only
+    try: os.chmod(out, 0o600)   # live session, owner-only
     except OSError: pass        # best-effort hardening; never block the export
     cookie_jar.record_export(out)
-    LOG.info("Cookie export from '%s': OK -> %s (kept only youtube.com cookies, dropped %d "
-             "other lines)", browser, out, dropped)
+    LOG.info("Cookie export from '%s': OK -> %s (kept only %s cookies, dropped %d "
+             "other lines)", browser, out,
+             ", ".join(cookie_jar.PLATFORM_COOKIE_DOMAINS[platform]), dropped)
     return True
 
 def main():
@@ -15079,6 +15179,17 @@ def main():
         if _ch["stale"]:
             LOG.warning("yt-cookies.txt is %.0f h old. Cookies rotate; "
                         "run 'racecast cookies firefox' before the event.", _ch['age_h'])
+    _refresh_browser = cookie_refresh_browser(os.environ)
+    if _refresh_browser:
+        threading.Thread(target=CookieRefresher(
+            relay, _refresh_browser,
+            os.path.dirname(cookies) if cookies else runtime).run,
+            name="cookie-refresh", daemon=True).start()
+        LOG.info("cookie auto-refresh from '%s': jars a feed uses are re-exported "
+                 "once they are %.0f h old", _refresh_browser, COOKIE_REFRESH_AGE_H)
+    elif (os.environ.get("RACECAST_COOKIES_BROWSER") or "").strip():
+        LOG.warning("RACECAST_COOKIES_BROWSER=%r is not one of %s: no cookie auto-refresh",
+                    os.environ["RACECAST_COOKIES_BROWSER"], ", ".join(COOKIE_BROWSERS))
     relay.health_store = _health_store_obj
     relay.timer_store = timer_store
     relay.start()
