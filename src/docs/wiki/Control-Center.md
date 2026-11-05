@@ -202,7 +202,7 @@ Machine-wide (not league) configuration:
   Control Center port, the Windows Companion path). Secret values are **masked**: click
   the eye to reveal one. Comments in the file are preserved. Changes apply the next time
   you (re)start the affected service.
-- **YouTube cookies**: freshness status, re-exported with **Refresh** (pick the browser).
+- **YouTube cookies**: freshness status, re-exported with **Refresh** (pick the browser). Shows **NOT NEEDED** instead of a warning when no feed uses YouTube (a solo profile, or a running relay whose Schedule, Qualifying and POV hold no YouTube source).
 - **Devices**: **Reload** lists the video and audio devices OBS sees; pick the **capture
   card** (what a [local capture stint](Relay-Mode#local-capture-stint) puts on air) and the
   **commentary mic**, then **Save** (writes `RACECAST_CAPTURE`, `RACECAST_MIC` and

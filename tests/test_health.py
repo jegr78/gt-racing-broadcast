@@ -23,13 +23,13 @@ os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 
 def t_cookie_health_no_path():
-    assert m.cookie_health(None) == {"present": False, "age_h": None, "stale": False}, \
+    assert m.cookie_health(None) == {"present": False, "age_h": None, "stale": False, "needed": True}, \
         "running cookie-less (public streams) is legitimate: never stale"
 
 
 def t_cookie_health_missing_file():
     h = m.cookie_health(os.path.join(HERE, "no-such-cookies.txt"))
-    assert h == {"present": False, "age_h": None, "stale": False}
+    assert h == {"present": False, "age_h": None, "stale": False, "needed": True}
 
 
 def t_cookie_health_fresh_and_stale():
@@ -39,7 +39,7 @@ def t_cookie_health_fresh_and_stale():
             fh.write("# Netscape HTTP Cookie File\n")
         cookie_jar.record_export(path, now=1000.0)
         fresh = m.cookie_health(path, now=1000.0 + 3600)
-        assert fresh == {"present": True, "age_h": 1.0, "stale": False}, fresh
+        assert fresh == {"present": True, "age_h": 1.0, "stale": False, "needed": True}, fresh
         stale = m.cookie_health(path, now=1000.0 + 14 * 3600)
         assert stale["present"] is True and stale["stale"] is True
         assert round(stale["age_h"]) == 14
@@ -66,7 +66,7 @@ def t_an_unstamped_jar_reports_an_unknown_age_rather_than_a_fresh_one():
         path = os.path.join(td, "cookies.txt")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("# Netscape HTTP Cookie File\n")
-        assert m.cookie_health(path) == {"present": True, "age_h": None, "stale": False}
+        assert m.cookie_health(path) == {"present": True, "age_h": None, "stale": False, "needed": True}
 
 
 def t_cookie_max_age_matches_preflight():
@@ -408,7 +408,7 @@ def t_status_cookies_health_no_cookies():
     with tempfile.TemporaryDirectory() as td:
         r = _mk_relay(td, ["https://youtu.be/a"])
         st = r.status()
-        assert st["cookies_health"] == {"present": False, "age_h": None, "stale": False}
+        assert st["cookies_health"] == {"present": False, "age_h": None, "stale": False, "needed": True}
 
 
 def t_status_cookies_health_stale_file():
@@ -421,6 +421,65 @@ def t_status_cookies_health_stale_file():
         st = r.status()
         assert st["cookies_health"]["present"] is True
         assert st["cookies_health"]["stale"] is True
+
+
+def _old_jar(td, hours=14):
+    path = os.path.join(td, "cookies.txt")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("x\n")
+    cookie_jar.record_export(path, now=time.time() - hours * 3600)
+    return path
+
+
+def t_old_cookies_are_not_stale_when_no_feed_needs_them():
+    # #1091: the age only matters when a YouTube feed resolves through yt-dlp.
+    with tempfile.TemporaryDirectory() as td:
+        path = _old_jar(td)
+        h = m.cookie_health(path, needed=False)
+        assert h["present"] is True and round(h["age_h"]) == 14, h
+        assert h["stale"] is False and h["needed"] is False, h
+        assert m.cookie_health(path, needed=True)["stale"] is True
+
+
+def t_youtube_cookies_needed_only_for_youtube_feed_sources():
+    need = m.youtube_cookies_needed
+    assert need([]) is False
+    assert need(["", "  ", "local:"]) is False, "blank planned stints and the capture card"
+    assert need(["https://www.twitch.tv/somebody"]) is False
+    assert need(["https://www.twitch.tv/a", "https://youtu.be/x"]) is True
+    assert need(["https://www.youtube.com/@channel/live"]) is True
+    assert need(["UCabcdefghijklmnopqrstuv"]) is True, "a bare channel id is YouTube"
+    assert need([None, "local:"]) is False
+
+
+def t_relay_cookies_needed_reads_schedule_qualifying_and_pov():
+    import types
+    def src(items):
+        return types.SimpleNamespace(get=lambda: list(items))
+    rel = types.SimpleNamespace(race_source=src(["https://www.twitch.tv/a"]),
+                                qual_source=None, pov_source=None)
+    assert m.Relay.cookies_needed(rel) is False
+    rel.qual_source = src(["https://youtu.be/q"])
+    assert m.Relay.cookies_needed(rel) is True
+    solo = types.SimpleNamespace(race_source=None, qual_source=None,
+                                 pov_source=src(["https://youtu.be/pov"]))
+    assert m.Relay.cookies_needed(solo) is True, "a YouTube POV needs them in solo too"
+    solo.pov_source = src([""])
+    assert m.Relay.cookies_needed(solo) is False
+
+    def boom():
+        raise RuntimeError("sheet gone")
+    broken = types.SimpleNamespace(race_source=types.SimpleNamespace(get=boom),
+                                   qual_source=None, pov_source=None)
+    assert m.Relay.cookies_needed(broken) is False
+
+
+def t_status_cookie_banner_stays_quiet_without_a_youtube_feed():
+    with tempfile.TemporaryDirectory() as td:
+        r = _mk_relay(td, ["https://www.twitch.tv/a", "local:"], cookies=_old_jar(td))
+        ch = r.status()["cookies_health"]
+        assert ch["needed"] is False and ch["stale"] is False, ch
+        assert r._health_facts(time.time())["cookies_stale"] is False
 
 
 def t_status_pov_stopped_when_paused_with_age():
@@ -440,7 +499,7 @@ def t_cookie_health_vanished_file_treated_as_absent():
         with open(gone, "w", encoding="utf-8") as fh:
             fh.write("x\n")
         os.remove(gone)
-        assert m.cookie_health(gone) == {"present": False, "age_h": None, "stale": False}
+        assert m.cookie_health(gone) == {"present": False, "age_h": None, "stale": False, "needed": True}
 
 
 # Live OBS-reachability probe behind /status's obs.reachable.

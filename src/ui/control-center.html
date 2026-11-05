@@ -1109,10 +1109,13 @@ function updateHome(s) {
   setShareLink('h-relay-open', 'h-relay-copy', panelShare,
                panelShare ? panelOpenUrl(s.relay.port, s.tailscale_ip) : '');
   // Cookies readiness tile: a short label only; the detail lives on Assets.
+  // INFO = no feed needs YouTube cookies right now (#1091): neutral, not a warning.
   if (s.cookies) setTile('cookies',
-      s.cookies.level === 'PASS' ? 'ok' : (s.cookies.level === 'FAIL' ? 'bad' : 'warn'),
+      s.cookies.level === 'PASS' ? 'ok' : (s.cookies.level === 'FAIL' ? 'bad'
+        : (s.cookies.level === 'INFO' ? '' : 'warn')),
       s.cookies.level === 'PASS' ? 'fresh'
-        : (s.cookies.level === 'FAIL' ? 'expired' : 'missing / stale'));
+        : (s.cookies.level === 'FAIL' ? 'expired'
+          : (s.cookies.level === 'INFO' ? 'not needed' : 'missing / stale')));
   // Live relay stats only make sense while the control server answers.
   if (!(relayUp && s.relay.http_ok)) {
     liveTimer = null;
@@ -1476,7 +1479,8 @@ async function refresh() {
            s.streams.length ? s.streams.filter(f => f.alive).length + '/' +
                               s.streams.length + ' feeds up' : 'no feeds started');
   if (s.cookies) setLevelBadge('cookies', s.cookies.level,
-      s.cookies.level === 'PASS' ? 'FRESH' : s.cookies.level, s.cookies.detail);
+      s.cookies.level === 'PASS' ? 'FRESH'
+        : (s.cookies.level === 'INFO' ? 'NOT NEEDED' : s.cookies.level), s.cookies.detail);
   updateHome(s);
   updateAppStatus(s);
   // Live relay stats are a separate localhost round-trip, so fetch them only while

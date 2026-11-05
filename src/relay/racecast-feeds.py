@@ -9415,6 +9415,21 @@ class Relay:
         qualifying mode (and a qual source exists), else the race schedule."""
         return self.qual_source if (self.mode == "qualifying" and self.qual_source) else self.race_source
 
+    def cookies_needed(self):
+        """True when the race schedule, the qualifying row or the POV names a YouTube
+        source, the only feeds that read yt-cookies.txt (#1091). Both modes count, so a
+        mode switch never meets stale cookies unannounced. Best-effort: an unreadable
+        source counts as needing nothing rather than raising into /status."""
+        urls = []
+        for src in (self.race_source, self.qual_source, self.pov_source):
+            if src is None:
+                continue
+            try:
+                urls.extend(src.get())
+            except Exception:                           # noqa: BLE001  best-effort
+                continue
+        return youtube_cookies_needed(urls)
+
     def active_items(self):
         """Feed provider: the active schedule's URL list (mode-aware)."""
         return self.active_source().get()
@@ -9499,7 +9514,7 @@ class Relay:
             except Exception:                            # noqa: BLE001  best-effort
                 tpush = None
         return {"feeds_down": feeds_down, "feeds_connecting_long": connecting_long,
-                "cookies_stale": cookie_health(self.cookies, now=now)["stale"],
+                "cookies_stale": cookie_health(self.cookies, now=now, needed=self.cookies_needed())["stale"],
                 "obs_reachable": self.obs_reachable, "tailscale_present": ts_present,
                 "stream_active": st.get("stream_active"),
                 "stream_expected": bool(self.stream_expected),
@@ -9611,7 +9626,7 @@ class Relay:
             a_state, a_down, a_stint = feed_fields(self.feeds["A"])
             b_state, b_down, b_stint = feed_fields(self.feeds["B"])
             live = self.live_feed()
-        ch = cookie_health(self.cookies, now=now)
+        ch = cookie_health(self.cookies, now=now, needed=self.cookies_needed())
         tmode, tpush = None, None
         ts = getattr(self, "timer_store", None)
         if ts is not None:
@@ -10629,7 +10644,7 @@ class Relay:
             return self._solo_status(now)
         sched = self.source.get()
         out = {"schedule_len": len(sched), "cookies": bool(self.cookies),
-               "cookies_health": cookie_health(self.cookies, now=now),
+               "cookies_health": cookie_health(self.cookies, now=now, needed=self.cookies_needed()),
                "mode": self.mode, "auto_cover_active": bool(self._cover_auto_owned),
                # #614: the trailing join mark a consumer rejoins at. `racecast obs
                # benchmark` derives its prefetch wait from it, so it must read the value
@@ -10701,7 +10716,7 @@ class Relay:
         out = {"mode": "solo", "solo": True, "feeds": {},
                "template": solo_template(os.environ),
                "cookies": bool(self.cookies),
-               "cookies_health": cookie_health(self.cookies, now=now)}
+               "cookies_health": cookie_health(self.cookies, now=now, needed=self.cookies_needed())}
         if self.pov:
             raw = (self.pov_source.get()[:1] or [None])[0] if self.pov_source else None
             out["pov"] = {"port": self.pov.port, "url": raw,
@@ -14501,9 +14516,23 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0
             stop_evt.wait(1.0)
 
 
-def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H):
+def youtube_cookies_needed(urls):
+    """True when any feed source in *urls* resolves through yt-dlp on YouTube, the only
+    path that reads yt-cookies.txt (#1091). Blank planned stints, `local:` and Twitch
+    sources never need it; a bare channel id is YouTube (feed_platform's default)."""
+    for url in urls or ():
+        if isinstance(url, str) and url.strip() and feed_platform(url.strip()) == "youtube":
+            return True
+    return False
+
+
+def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H, needed=True):
     """Cookie staleness for /status, computed on demand. During a 24 h event the
     cookies age while the relay runs, so this must be live, not a startup snapshot.
+
+    *needed* (#1091): whether a configured feed resolves on YouTube at all. Old
+    cookies nobody uses are never stale, so a solo or Twitch/local-only broadcast
+    raises no banner; the age is still reported.
 
     The age is the EXPORT age (cookie_jar's stamp), not the jar's mtime: yt-dlp
     rewrites the jar on every resolve, so mid-event its mtime is always minutes old
@@ -14512,16 +14541,18 @@ def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H):
     Running cookie-less (path None / file gone) is a legitimate configuration
     (public streams): present=False, stale=False. The panel raises its cookie
     banner only on stale=True."""
+    needed = bool(needed)
     try:
         present = bool(path) and os.path.isfile(path)
     except OSError:
         present = False
     if not present:
-        return {"present": False, "age_h": None, "stale": False}
+        return {"present": False, "age_h": None, "stale": False, "needed": needed}
     age_h = cookie_jar.export_age_h(path, now=now)
     if age_h is None:
-        return {"present": True, "age_h": None, "stale": False}
-    return {"present": True, "age_h": age_h, "stale": age_h > max_age_hours}
+        return {"present": True, "age_h": None, "stale": False, "needed": needed}
+    return {"present": True, "age_h": age_h, "stale": needed and age_h > max_age_hours,
+            "needed": needed}
 
 
 def _cookie_hint(stderr_text, browser):
@@ -14866,11 +14897,6 @@ def main():
     if cookies:
         try: os.chmod(cookies, 0o600)   # contains a live YouTube session, owner-only
         except OSError: pass            # best-effort hardening; never block startup
-    if cookies:
-        _ch = cookie_health(cookies)
-        if _ch["stale"]:
-            LOG.warning("yt-cookies.txt is %.0f h old. Cookies rotate; "
-                        "run 'racecast cookies firefox' before the event.", _ch['age_h'])
 
     # Locate the director panel (shipped in the package root, one level up from relay/)
     panel_path = None
@@ -15047,6 +15073,12 @@ def main():
                   league_name=args.league_name,
                   producer_name=os.environ.get("RACECAST_PRODUCER_NAME", ""),
                   solo=args.solo)
+    if cookies:
+        # After the Relay exists: only a YouTube feed source makes old cookies matter (#1091).
+        _ch = cookie_health(cookies, needed=relay.cookies_needed())
+        if _ch["stale"]:
+            LOG.warning("yt-cookies.txt is %.0f h old. Cookies rotate; "
+                        "run 'racecast cookies firefox' before the event.", _ch['age_h'])
     relay.health_store = _health_store_obj
     relay.timer_store = timer_store
     relay.start()

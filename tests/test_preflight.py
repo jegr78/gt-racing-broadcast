@@ -266,6 +266,42 @@ def t_cookies_fresh_without_login_warns():
         assert r.level == "WARN" and "no logged-in" in r.detail, r
 
 
+def t_old_or_missing_cookies_are_info_when_no_feed_needs_them():
+    # #1091: a solo broadcast or a Twitch/local-only event never touches the jar.
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "cookies.txt")
+        with open(p, "w") as fh:
+            fh.write("host\tTRUE\t/\tTRUE\t0\tSAPISID\tval")
+        m.cookie_jar.record_export(p, now=time.time() - 20 * 3600)
+        r = m.cookies_status(p, needed=False)
+        assert r.level == "INFO" and "not needed" in r.detail and "20 h" in r.detail, r
+        assert m.cookies_status(p, needed=None).level == "WARN"
+        assert m.cookies_status(p, needed=True).level == "WARN"
+        gone = m.cookies_status(os.path.join(d, "nope.txt"), needed=False)
+        assert gone.level == "INFO" and "not needed" in gone.detail, gone
+
+
+def t_a_fresh_jar_still_passes_when_not_needed():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "cookies.txt")
+        with open(p, "w") as fh:
+            fh.write("host\tTRUE\t/\tTRUE\t0\tSAPISID\tval")
+        m.cookie_jar.record_export(p)
+        assert m.cookies_status(p, needed=False).level == "PASS"
+
+
+def t_cookies_needed_prefers_the_running_relay_then_the_profile_kind():
+    need = m.cookies_needed
+    yes = {"cookies_health": {"needed": True}}
+    no = {"cookies_health": {"needed": False}}
+    assert need("solo", yes) is True, "a solo relay with a YouTube POV needs them"
+    assert need("endurance", no) is False
+    assert need("solo", None) is False
+    assert need("endurance", None) is None, "unknown until the relay knows the schedule"
+    assert need("", {"cookies_health": {}}) is None, "an older relay without the field"
+    assert need(None, "not a dict") is None
+
+
 def t_main_returns_int():
     rc = m.main([])
     assert rc in (0, 1)
