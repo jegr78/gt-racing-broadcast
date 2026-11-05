@@ -5574,7 +5574,7 @@ def _event_sections(ev, pf):
     except Exception as exc:
         services.append(ev.Result(ev.WARN, "Companion", f"check failed: {exc}"))
     # Assets: a broken probe must never traceback the report.
-    assets = [pf.cookies_status(_cookies_path())]
+    assets = [_cookies_result(pf)]
     try:
         g_dir, m_dir, missing_g, missing_m = _asset_state(ev)
         assets += [ev.classify_assets("Graphics", missing_g, ev.local_count(g_dir),
@@ -5671,7 +5671,7 @@ def _event_gate_results(ev, pf):
     _event_sections so the gate and the readiness report agree."""
     results = [ev.classify_env(os.environ.get("RACECAST_SHEET_ID"),
                                os.environ.get("RACECAST_SHEET_PUSH_URL")),
-               pf.cookies_status(_cookies_path())]
+               _cookies_result(pf)]
     try:
         g_dir, m_dir, missing_g, missing_m = _asset_state(ev)
         results += [ev.classify_assets("Graphics", missing_g, ev.local_count(g_dir),
@@ -6995,16 +6995,33 @@ def resources_data():
             "disk_level": resources.disk_level(snap["disk_free"])}
 
 
-def cookies_status_data(status=None):
-    """Local cookie-jar freshness (no network, safe for the 3 s poll;
-    never raises, a broken probe must not 500 the status poll)."""
+def _cookies_needed():
+    """Does a feed need the YouTube cookies (#1091)? The running relay's verdict when
+    one runs (loopback only), else the profile kind; None = unknown. Never raises."""
+    try:
+        pf = _event_modules()[1]
+        alive = sv.pid_alive(sv.read_pid(_relay_pid_path()))
+        status = pf.relay_status(f"http://127.0.0.1:{RELAY_PORT}/status") if alive else None
+        return pf.cookies_needed(os.environ.get("RACECAST_KIND"), status)
+    except Exception:                           # noqa: BLE001  unknown keeps today's warning
+        return None
+
+
+def _cookies_result(pf, path=None, needed=None):
+    """preflight.cookies_status for the shared jar, judged by whether a feed needs it."""
+    return pf.cookies_status(path or _cookies_path(), needed=(needed or _cookies_needed)())
+
+
+def cookies_status_data(status=None, path=None, needed=None):
+    """Local cookie-jar freshness (loopback only, safe for the 3 s poll;
+    never raises, a broken probe must not 500 the status poll).
+    *needed*: optional zero-arg override of _cookies_needed (tests)."""
     try:
         if status is None:
             pf = _event_modules()[1]
-            path = _cookies_path()
 
             def status():
-                return pf.cookies_status(path)
+                return _cookies_result(pf, path, needed)
         res = status()
         return {"level": res.level, "detail": res.detail}
     except Exception as exc:

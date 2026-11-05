@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdlib checks for the Control Center's structured status providers in racecast.py.
 Run: python3 tests/test_ui_ops.py"""
-import os, sys
+import os, sys, time
 from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -292,6 +292,19 @@ def t_cookies_status_data_shape():
         level, detail = "PASS", "fresh (1 h old)"
     d = rc.cookies_status_data(status=R)
     assert d == {"level": "PASS", "detail": "fresh (1 h old)"}
+
+
+def t_cookies_status_data_reports_old_cookies_as_info_when_not_needed(tmp):
+    # #1091: the Control Center tile follows the running relay's verdict.
+    p = os.path.join(tmp, "yt-cookies.txt")
+    with open(p, "w") as fh:
+        fh.write("host\tTRUE\t/\tTRUE\t0\tSAPISID\tval")
+    pf = rc._event_modules()[1]
+    pf.cookie_jar.record_export(p, now=time.time() - 20 * 3600)
+    d = rc.cookies_status_data(path=p, needed=lambda: False)
+    assert d["level"] == "INFO" and "not needed" in d["detail"], d
+    d = rc.cookies_status_data(path=p, needed=lambda: None)
+    assert d["level"] == "WARN", d
 
 
 def t_cookies_status_data_never_raises():

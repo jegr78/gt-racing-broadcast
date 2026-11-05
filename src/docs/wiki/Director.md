@@ -301,7 +301,7 @@ while the condition holds and disappear on their own when it is resolved:
 | **RELAY UNREACHABLE** (red) | the panel cannot reach the producer's relay: buttons in FEEDS/TIMER will not work | tell the producer (`racecast status` on their side names the problem) |
 | **SHEET SYNC FAILED** (red) | the sheet webhook's Apps Script is outdated, or a HUD field / team write did not reach the sheet (that value falls back to the sheet after 60 s). A Schedule, Qualifying or POV save never raises it: such a save is held in the relay instead (see [Schedule section](#director-panel-schedule-section)). The relay checks the webhook every 30 s and clears the banner as soon as it answers again. | re-try the HUD change once the banner is gone; if it stays, tell the producer (the relay log names each failed `sheet push` and logs `sheet sync recovered` when it clears) |
 | **TIMER SHEET SYNC FAILED** (red) | the race timer's state is not reaching the sheet, a producer handover would not pick up the correct remaining time | tell the producer; details in [Race Timer](Race-Timer) |
-| **COOKIES N H OLD** (amber) | the producer's YouTube cookies are stale, the **next handover may fail** | tell the producer: `racecast cookies firefox` on the producer machine |
+| **COOKIES N H OLD** (amber) | the producer's YouTube cookies are stale while a Schedule, Qualifying or POV source is on YouTube, so the **next handover may fail** (no banner when no feed uses YouTube) | tell the producer: `racecast cookies firefox` on the producer machine |
 
 One-off action failures (a button press that didn't take) show as short
 toasts in the top-right corner and are also logged in the log box below the

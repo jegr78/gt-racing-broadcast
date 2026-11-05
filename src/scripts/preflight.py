@@ -338,8 +338,56 @@ def resolve_cookies_path(preflight_file, runtime_dir=None, cookies_opt=None):
     return os.path.abspath(candidates[0])
 
 
-def cookies_status(path, max_age_hours=12, now=None):
+def cookies_needed(kind=None, relay_status=None):
+    """Whether a feed needs the YouTube cookies (#1091): True/False, or None when
+    that is unknown. The running relay knows its schedule and POV, so its /status
+    `cookies_health.needed` wins; without it a solo profile needs none (a YouTube
+    POV loaded later still raises the relay's own banner); otherwise unknown."""
+    if isinstance(relay_status, dict):
+        health = relay_status.get("cookies_health")
+        if isinstance(health, dict) and isinstance(health.get("needed"), bool):
+            return health["needed"]
+    if (kind or "").strip().lower() == "solo":
+        return False
+    return None
+
+
+RELAY_STATUS_URL = "http://127.0.0.1:8088/status"
+
+
+def relay_status(url=RELAY_STATUS_URL, timeout=2):
+    """The local relay's /status dict, or None when no relay answers. Best-effort."""
+    try:
+        data = http_util.get_json(url, timeout=timeout)
+    except Exception:                           # noqa: BLE001  no relay is the normal case
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _cookies_not_needed(path, age_h):
+    """INFO for a jar no feed reads (#1091): its state, without asking for a refresh."""
+    if not os.path.isfile(path):
+        state = "no yt-cookies.txt"
+    elif age_h is None:
+        state = "yt-cookies.txt present"
+    else:
+        state = f"yt-cookies.txt is {age_h:.0f} h old"
+    return Result(INFO, "yt-cookies.txt",
+                  f"{state}; not needed: no YouTube feed in the schedule or POV")
+
+
+def cookies_status(path, max_age_hours=12, now=None, needed=None):
+    """Readiness of the YouTube cookie jar. *needed* False (no YouTube feed, see
+    cookies_needed) turns every finding into INFO; True/None judge it as before."""
     now = time.time() if now is None else now
+    result = _judge_cookies(path, max_age_hours, now)
+    if needed is False and result.level != PASS:
+        age_h = cookie_jar.export_age_h(path, now=now) if os.path.isfile(path) else None
+        return _cookies_not_needed(path, age_h)
+    return result
+
+
+def _judge_cookies(path, max_age_hours, now):
     if not os.path.isfile(path):
         return Result(WARN, "yt-cookies.txt",
                       f"not found at {path}. Run `racecast cookies firefox` before the event")
@@ -743,7 +791,9 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
                          if reachable
                          else Result(INFO, f"port {port}",
                                      f"{svc} not reachable yet; it is launched at event start"))
-    cookies = [cookies_status(resolve_cookies_path(preflight_file, runtime_dir, cookies_opt))]
+    cookies = [cookies_status(resolve_cookies_path(preflight_file, runtime_dir, cookies_opt),
+                              needed=cookies_needed(os.environ.get("RACECAST_KIND"),
+                                                    relay_status()))]
     sheet_id = os.environ.get("RACECAST_SHEET_ID")
     if sheet_id:
         outcome, payload = fetch_sheet_csv(sheet_id)
