@@ -136,6 +136,13 @@ RACECAST_PROFILE=
   (`racecast ui`); set only when another app already occupies the default `8089`.
 - **`RACECAST_PROFILE`** *(optional)*, the default active league when neither `--profile`
   nor the `runtime/active-profile` pointer applies. Leave unset if you keep one profile.
+- **`RACECAST_COOKIES_BROWSER`** *(optional, default off)*: the browser the relay
+  re-exports the cookie jars from while it runs, e.g. `firefox`. While a Schedule,
+  Qualifying or POV source is on YouTube, `yt-cookies.txt` is refreshed once its export
+  is an hour old; `twitch-cookies.txt` likewise for Twitch sources, if that jar exists.
+  The 12 h "cookies stale" warning then stays away during a long event. Stay logged in
+  to YouTube/Twitch in that browser; a failed export keeps the old jar, logs a warning
+  and is retried an hour later.
 - **`RACECAST_AUTO_FAILOVER`** *(optional, default off)*: when set to `1`, the relay
   automatically switches OBS to the **Intermission** scene if the **on-air** feed stays
   down past the red grace window, so viewers see a clean holding card instead of a frozen
