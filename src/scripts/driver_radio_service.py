@@ -676,6 +676,26 @@ class Service:
             self._interview['readbacks'].append(readback)
             return self._interview_next(text)
 
+    def interview_unclear(self, binding):
+        """Internal native entry: an answer the recogniser was unsure of (#1101) counts as
+        an unclear answer. Like any wake-free speech that answers nothing, it is not kept."""
+        with access._LOCK, self._lock:
+            self._interview_guard(binding)
+            if self._interview is None:
+                return None
+            return self._interview_retry('No clear answer.')
+
+    def not_understood(self, heard, binding):
+        """Internal native entry: a wake-gated request the recogniser was unsure of (#1101).
+        The driver hears "Say again." and the message shows what was heard."""
+        with access._LOCK, self._lock:
+            self.refresh(force=True)
+            if not self._voice_enabled or self._closed:
+                raise access.RadioError('feature_disabled', 'Native voice is not enabled')
+            if binding != self._binding:
+                raise access.RadioError('conflict', 'Voice session changed; ask again')
+            return self._say('Say again.', heard or '(nothing clear)', 'unclear')
+
     def interview_timeout(self, binding):
         """Internal native entry: no answer inside the window."""
         with access._LOCK, self._lock:

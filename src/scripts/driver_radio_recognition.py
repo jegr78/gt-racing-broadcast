@@ -69,9 +69,16 @@ def wav_bytes(pcm):
     return out.getvalue()
 
 
+class Uncertain(ValueError):
+    """transcription_uncertain, with the words the recogniser heard and its confidence."""
+    def __init__(self,heard='',confidence=0.0):
+        super().__init__('transcription_uncertain');self.heard,self.confidence=heard,confidence
+
+
 class Vosk:
-    def __init__(self,library,model,phrase=None):
-        self.model=None;self.rec=None;self._dll=None
+    def __init__(self,library,model,phrase=None,words=None):
+        """*phrase* makes a wake spotter; *words* limits transcription to that vocabulary."""
+        self.model=None;self.rec=None;self._dll=None;self.confidence=0.0
         if os.name=='nt':self._dll=os.add_dll_directory(str(Path(library).parent.resolve()))
         self.lib=ctypes.CDLL(str(library))
         for name,args,result in (
@@ -92,7 +99,12 @@ class Vosk:
         self.model=self.lib.vosk_model_new(str(model).encode())
         try:
             if not self.model:raise ValueError('model_unavailable')
-            if phrase is None:self.rec=self.lib.vosk_recognizer_new(self.model,16000)
+            if words is not None:
+                # A word the model lacks would make Vosk reject the whole grammar.
+                known=[w for w in words if self.lib.vosk_model_find_word(self.model,w.encode())>=0]
+                if not known:raise ValueError('model_unavailable')
+                self.rec=self.lib.vosk_recognizer_new_grm(self.model,16000,json.dumps([*known,'[unk]']).encode())
+            elif phrase is None:self.rec=self.lib.vosk_recognizer_new(self.model,16000)
             else:
                 if phrase not in PHRASES.values() or any(self.lib.vosk_model_find_word(self.model,w.encode())<0 for w in phrase.split()):
                     raise ValueError('model_unavailable')
@@ -115,10 +127,12 @@ class Vosk:
             if self.lib.vosk_recognizer_accept_waveform(self.rec,chunk,len(chunk)):
                 parts.append(json.loads(self.lib.vosk_recognizer_result(self.rec)))
         parts.append(json.loads(self.lib.vosk_recognizer_final_result(self.rec)))
-        words=[word for part in parts for word in part.get('result',[])]
-        if not words or sum(w.get('conf',0) for w in words)/len(words)<.65:
-            raise ValueError('transcription_uncertain')
-        return clean_text(' '.join(part.get('text','') for part in parts))
+        # A grammar recogniser marks out-of-vocabulary speech as [unk].
+        words=[word for part in parts for word in part.get('result',[]) if word.get('word')!='[unk]']
+        heard=' '.join(str(w.get('word','')) for w in words)[:400]
+        self.confidence=sum(w.get('conf',0) for w in words)/len(words) if words else 0.0
+        if not words or self.confidence<.65:raise Uncertain(heard,self.confidence)
+        return clean_text(heard)
 
     def close(self):
         if self.rec:self.lib.vosk_recognizer_free(self.rec);self.rec=None

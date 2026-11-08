@@ -1,6 +1,7 @@
 """Relay-owned native voice lifecycle. Closing browser clients has no effect."""
 import copy
 import json
+import logging
 import os
 import shutil
 import sys
@@ -15,6 +16,8 @@ import driver_radio_kokoro
 import driver_radio_setup_voice as setup_voice
 import driver_radio_voice_config as config
 from driver_radio_voice_process import Owned
+
+LOG=logging.getLogger('racecast.relay.radio')
 
 # The answer window after an interview question (#1088), decided by the maintainer;
 # 8 s since #1095, when it began to open at the question's end.
@@ -199,7 +202,12 @@ class Supervisor:
                     whisper_exe=os.environ.get('RACECAST_RADIO_WHISPER_EXE') or shutil.which('whisper-cli') or '',
                     whisper_model=os.environ.get('RACECAST_RADIO_WHISPER_MODEL') or str(self.machine/'radio-voice'/'ggml-tiny.bin'),
                     google_key=os.environ.get('RACECAST_GCLOUD_STT_KEY','') if native['stt']=='google' else '',
-                    listen_s=listen_s,hold=hold)
+                    listen_s=listen_s,hold=hold,grammar=self._grammar(listen_s,native))
+
+    @staticmethod
+    def _grammar(listen_s,native):
+        """An answer window transcribes against the interview vocabulary (#1101)."""
+        return list(setup_voice.interview_words()) if listen_s and native['stt']=='vosk' else None
 
     def _prearm(self,voice,native,signature):
         """Start the answer capture with an interview question, held (#1095): the worker
@@ -220,6 +228,20 @@ class Supervisor:
             if event.get('event') in ('heartbeat','listening'):self._heartbeat=self.clock()
             else:self._stop_capture();return
         if self._worker_proc.poll() is not None or self.clock()-self._heartbeat>20:self._stop_capture()
+
+    def _unclear(self,event):
+        """An uncertain transcription asks the driver again instead of failing (#1101).
+        True when handled."""
+        heard=event.get('heard') if isinstance(event.get('heard'),str) else ''
+        self._stop_capture()
+        try:
+            if self._armed and self.service.interview_waiting():self.service.interview_unclear(self._binding)
+            elif not self._armed:self.service.not_understood(heard.strip()[:400],self._binding)
+            else:return False
+        except access.RadioError:
+            if self._armed:self._cancel_interview('Radio unavailable.')
+            self._set('error','question_rejected');return True
+        self._set('responding');return True
 
     def step(self):
         # Only the owner loop touches process references. HTTP controls use the
@@ -304,6 +326,8 @@ class Supervisor:
             if self._worker_proc is not None:
                 for event in self._worker_proc.read():
                     if event.get('event')=='question':
+                        LOG.info('radio voice heard %r (confidence %s, %s)',event.get('text'),event.get('confidence'),
+                                 'interview answer' if self._armed else 'wake request')
                         self._stop_capture()
                         current=self.service.refresh(force=True)
                         if (self._closed or self._control_changed or self._paused
@@ -328,6 +352,10 @@ class Supervisor:
                         self._heartbeat=self.clock()
                         if event['event']!='heartbeat':self._set(event['event'])
                     elif event.get('event')=='error':
+                        if event.get('code')=='transcription_uncertain':
+                            LOG.info('radio voice unsure, heard %r (confidence %s, %s)',event.get('heard'),
+                                     event.get('confidence'),'interview answer' if self._armed else 'wake request')
+                            if self._unclear(event):return
                         if self._armed and event.get('code')=='utterance_timeout' and self.service.interview_waiting():
                             # Silence after an interview question: repeat it once, then end.
                             self._stop_capture()
@@ -355,7 +383,7 @@ class Supervisor:
             if self.service.interview_waiting():
                 # The question is the signal that the microphone opens; muted replies give none.
                 if self._muted:self._cancel_interview('Replies muted.');return
-                body['listen_s']=INTERVIEW_LISTEN_S
+                body['listen_s']=INTERVIEW_LISTEN_S;body['grammar']=self._grammar(INTERVIEW_LISTEN_S,native)
             self._armed=body['listen_s'] is not None
             try:self._worker_proc=self.worker_factory(body)
             except (OSError,ValueError):

@@ -319,7 +319,7 @@ Center fills the radio setup when the radio session starts. Values entered in th
 Center win. Every radio message, with the driver's question, is kept in a journal next to
 the recording.
 
-Instead of one command per value, say `Hey Jeff, ask me for the session info` (German: `Hey Jeff, frag mich nach den Session Infos`). Jeff then asks one question at a time: session type, race length, starting compound, mandatory stops, mandatory compounds and fuel reserve. The microphone opens the moment each question has finished playing (the radio prepares it while the question plays) and listens **8 seconds** for the answer without a wake phrase, so answer right away. Answer with the value only: `race`, `12 laps` or `30 minutes`, `racing medium`, `two` or `none`, `racing medium and racing hard` or `none`, `2 litres`. Say `skip` (`weiter`) to move on or `stop` (`abbrechen`) to end. Without an answer, or with an unclear one, Jeff asks once more (`Say again. ...`) and then ends the interview. At the end he reads everything back in one line, for example `Copy, race, 12 laps, starting on racing medium, 1 mandatory stop, mandatory racing hard, reserve 2 litres.` The answers take the same path as single commands, including the recording context.
+Instead of one command per value, say `Hey Jeff, ask me for the session info` (German: `Hey Jeff, frag mich nach den Session Infos`). The radio also accepts the common mishearings of that request, such as `asked me about the session`. Jeff then asks one question at a time: session type, race length, starting compound, mandatory stops, mandatory compounds and fuel reserve. The microphone opens the moment each question has finished playing (the radio prepares it while the question plays) and listens **8 seconds** for the answer without a wake phrase, so answer right away. Answer with the value only: `race`, `12 laps` or `30 minutes`, `racing medium`, `two` or `none`, `racing medium and racing hard` or `none`, `2 litres`. Say `skip` (`weiter`) to move on or `stop` (`abbrechen`) to end. While it listens for an answer, the recognition only knows the interview vocabulary, so short answers like `two` or `race` are not misheard as other words. Without an answer, with an unclear one or with one the recognition is unsure of, Jeff asks once more (`Say again. ...`) and then ends the interview. At the end he reads everything back in one line, for example `Copy, race, 12 laps, starting on racing medium, 1 mandatory stop, mandatory racing hard, reserve 2 litres.` The answers take the same path as single commands, including the recording context.
 
 Wake-gated coaching vocabulary is deliberately narrow:
 
@@ -407,6 +407,13 @@ responding and error conditions. Missing models, device permissions, unplugged
 microphones, failed providers or playback do not remove preset text. The service
 retries device/worker failures with bounded backoff. Failed cleanup retains the
 old playback slot until termination succeeds, preventing a second output owner.
+
+When the local recognition is unsure of a wake request, Jeff answers `Say again.` and
+the message shows what was heard as `You asked: ...`. To see what the radio recognised,
+including interview answers, read the relay log (`racecast relay logs`): every
+transcription is one line, for example
+`radio voice heard 'race' (confidence 1.0, interview answer)` or
+`radio voice unsure, heard 'two' (confidence 0.55, wake request)`.
 
 Shared microphone access with OBS/Discord and real acoustic wake accuracy depend
 on the OS, device and environment. Verify them on the producer PC. Synthetic CI

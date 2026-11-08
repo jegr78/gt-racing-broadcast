@@ -83,6 +83,59 @@ def t_whisper_adapter_sends_wav_via_stdin_without_recording_a_file():
     assert len(seen)==1
 
 
+
+class FakeVoskLib:
+    """The libvosk calls Vosk makes, with one scripted final result."""
+    def __init__(self,result,known=('race','two')):
+        self.result,self.known,self.grammar=result,known,None
+        for name in ('vosk_set_log_level','vosk_model_free','vosk_recognizer_set_words','vosk_recognizer_free',
+                     'vosk_recognizer_partial_result','vosk_recognizer_result'):
+            setattr(self,name,self._fn(lambda *a:None))
+        self.vosk_model_new=self._fn(lambda path:1)
+        self.vosk_model_find_word=self._fn(lambda model,word:0 if word.decode() in self.known else -1)
+        self.vosk_recognizer_new=self._fn(lambda model,rate:2)
+        self.vosk_recognizer_new_grm=self._fn(lambda model,rate,grammar:setattr(self,'grammar',json.loads(grammar)) or 3)
+        self.vosk_recognizer_accept_waveform=self._fn(lambda rec,pcm,n:0)
+        self.vosk_recognizer_final_result=self._fn(lambda rec:json.dumps(self.result).encode())
+    @staticmethod
+    def _fn(body):
+        def fn(*args):return body(*args)
+        return fn
+
+
+def vosk(tmp,result,words=None):
+    from unittest.mock import patch
+    lib=FakeVoskLib(result)
+    with patch.object(r.ctypes,'CDLL',lambda path:lib):
+        return lib,r.Vosk(str(Path(tmp)/'libvosk'),'model',words=words)
+
+
+def t_an_answer_grammar_keeps_only_words_the_model_knows():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        lib,engine=vosk(d,{},words=['race','two','fünfundzwanzig'])
+        assert lib.grammar==['race','two','[unk]'],lib.grammar
+        engine.close()
+        lib,engine=vosk(d,{})
+        assert lib.grammar is None,'without words the free transcription runs'
+
+
+def t_transcription_drops_unknown_words_and_reports_what_it_heard():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        _,engine=vosk(d,{'text':'[unk] race','result':[{'word':'[unk]','conf':.2},{'word':'race','conf':.9}]},words=['race'])
+        try:text=engine.transcribe(b'\0'*3200)
+        except r.Uncertain as exc:raise AssertionError(f'[unk] must not count as heard speech: {exc.heard!r}') from None
+        assert text=='race' and engine.confidence==.9,(text,engine.confidence)
+        for result,heard in (({'text':'two','result':[{'word':'two','conf':.55}]},'two'),
+                             ({'text':'[unk]','result':[{'word':'[unk]','conf':1}]},'')):
+            _,engine=vosk(d,result,words=['two'])
+            try:engine.transcribe(b'\0'*3200)
+            except r.Uncertain as exc:
+                assert str(exc)=='transcription_uncertain' and exc.heard==heard,(exc,exc.heard)
+            else:raise AssertionError(result)
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

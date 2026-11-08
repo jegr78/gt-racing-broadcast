@@ -11,7 +11,8 @@ import driver_radio_recognition as recognition
 from driver_radio_voice_config import PHRASES
 
 
-FIELDS={'version','platform','microphone','language','wake','stt','paths','whisper_exe','whisper_model','google_key','listen_s','hold'}
+FIELDS={'version','platform','microphone','language','wake','stt','paths','whisper_exe','whisper_model','google_key','listen_s','hold',
+        'grammar'}
 # An interview answer window (#1088): seconds without a wake word, or None for wake-gated capture.
 MAX_LISTEN_S=10
 
@@ -27,7 +28,12 @@ def validate(body):
             or body['listen_s'] is not None and (type(body['listen_s']) not in (int,float)
                                                  or not 1<=body['listen_s']<=MAX_LISTEN_S)
             # A held capture (#1095) starts with the question and is only an answer window.
-            or type(body['hold']) is not bool or body['hold'] and body['listen_s'] is None):
+            or type(body['hold']) is not bool or body['hold'] and body['listen_s'] is None
+            # An answer window may limit Vosk to the answer vocabulary (#1101).
+            or body['grammar'] is not None and (body['listen_s'] is None or not isinstance(body['grammar'],list)
+                                                or not 0<len(body['grammar'])<=1000
+                                                or any(not isinstance(w,str) or not 0<len(w)<=40 or not w.isalpha()
+                                                       or w!=w.lower() for w in body['grammar']))):
         raise ValueError('invalid_request')
     recognition.capture_args(body['platform'],body['microphone'])
     return body
@@ -51,7 +57,7 @@ def run(body):
         paths=body['paths'];phrase=PHRASES[body['wake']]
         wake=recognition.Vosk(paths['library'],paths['en'],phrase=phrase)
         if body['stt']=='vosk':
-            transcriber=recognition.Vosk(paths['library'],paths[body['language']])
+            transcriber=recognition.Vosk(paths['library'],paths[body['language']],words=body['grammar'])
         if body['stt']=='whisper' and (not body['whisper_exe'] or not body['whisper_model']):
             raise ValueError('transcription_unconfigured')
         if body['stt']=='google' and not body['google_key']:raise ValueError('transcription_unconfigured')
@@ -74,10 +80,11 @@ def run(body):
             if utterance is None:continue
             if not utterance:raise ValueError('utterance_timeout')
             emit('transcribing')
-            if body['stt']=='vosk':text=transcriber.transcribe(utterance)
+            confidence=None
+            if body['stt']=='vosk':text=transcriber.transcribe(utterance);confidence=transcriber.confidence
             elif body['stt']=='whisper':text=recognition.whisper_transcribe(utterance,body['language'],body['whisper_exe'],body['whisper_model'])
             else:text=recognition.google_transcribe(utterance,body['language'],body['google_key'])
-            emit('question',text=text);return
+            emit('question',text=text,confidence=confidence);return
         raise ValueError('microphone_unavailable')
     finally:
         if proc is not None:
@@ -97,11 +104,13 @@ def main():
         if len(raw)>16384:raise ValueError('invalid_request')
         run(json.loads(raw))
     except Exception as exc:
-        code=str(exc) if type(exc) is ValueError else 'transcription_failed'
+        code=str(exc) if type(exc) in (ValueError,recognition.Uncertain) else 'transcription_failed'
         if code not in ('microphone_unavailable','model_unavailable','transcription_failed','transcription_uncertain',
                         'transcription_unconfigured','utterance_timeout','invalid_request'):
             code='native_unavailable'
-        emit('error',code=code)
+        if isinstance(exc,recognition.Uncertain):
+            emit('error',code=code,heard=exc.heard,confidence=round(exc.confidence,2))
+        else:emit('error',code=code)
     return 0
 
 
