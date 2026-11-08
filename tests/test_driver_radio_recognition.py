@@ -124,7 +124,9 @@ def t_transcription_drops_unknown_words_and_reports_what_it_heard():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         _,engine=vosk(d,{'text':'[unk] race','result':[{'word':'[unk]','conf':.2},{'word':'race','conf':.9}]},words=['race'])
-        assert engine.transcribe(b'\0'*3200)=='race' and engine.confidence==.9
+        try:text=engine.transcribe(b'\0'*3200)
+        except r.Uncertain as exc:raise AssertionError(f'[unk] must not count as heard speech: {exc.heard!r}') from None
+        assert text=='race' and engine.confidence==.9,(text,engine.confidence)
         for result,heard in (({'text':'two','result':[{'word':'two','conf':.55}]},'two'),
                              ({'text':'[unk]','result':[{'word':'[unk]','conf':1}]},'')):
             _,engine=vosk(d,result,words=['two'])

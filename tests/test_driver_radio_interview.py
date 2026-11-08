@@ -208,8 +208,9 @@ def t_an_uncertain_wake_request_shows_what_was_heard():
             h=Harness(d);h.n.step()
             h.workers[0].events=[{'event':'error','code':'transcription_uncertain','heard':'hf asked me','confidence':.41}]
             h.n.step()
-            message=h.f.service.history()['messages'][-1]
-            assert message['text']=='Say again.' and message['question']=='hf asked me',message
+            messages=h.f.service.history()['messages']
+            assert messages,'an unsure request gets an answer, not silence'
+            assert messages[-1]['text']=='Say again.' and messages[-1]['question']=='hf asked me',messages[-1]
             assert h.n.status()['error'] is None and h.n._retry_at<=h.f.at,'not a voice failure'
             h.n.close()
     finally:native.LOG.removeHandler(handler)
@@ -224,7 +225,7 @@ def t_the_answer_window_transcribes_with_the_interview_grammar():
         h.workers[0].events=[{'event':'question','text':'session interview'}]
         h.n.step();speak_latest(h)
         answer=[c for c in h.args[first_line_args:] if isinstance(c,dict)][-1]
-        assert answer['listen_s']==native.INTERVIEW_LISTEN_S and answer['grammar']==list(voice.interview_words())
+        assert answer['listen_s']==native.INTERVIEW_LISTEN_S and answer['grammar']==list(voice.interview_words()),            'the answer window must transcribe against the interview vocabulary'
         h.n.close()
 
 
