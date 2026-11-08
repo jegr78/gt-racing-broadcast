@@ -219,17 +219,44 @@ QUESTIONS = dict(session='Which session is it?', length='How long is the race, l
                  starting_compound='Which tyres do you start on?', mandatory_stops='How many mandatory stops?',
                  mandatory_compounds='Which compounds are mandatory?', fuel_reserve='What fuel reserve?')
 _NONE = ('none', 'no', 'zero', 'nothing', 'keine', 'kein', 'keiner', 'null', 'nichts')
+_SKIP = ('skip', 'next', 'pass', 'skip it', 'weiter', 'ueberspringen', 'naechste', 'naechste frage')
+_STOP = ('stop', 'cancel', 'end', 'abort', 'that is all', 'thats all', 'abbrechen', 'stopp', 'ende', 'fertig')
+# Words an answer may use besides the tables above: declarations ("it is the race"),
+# units, connectors and decimals.
+_ANSWER_WORDS = '''it is its this the a an current session we are were in das ist die der ein eine aktuelle wir sind im
+    lap laps runde runden minute minutes mins minuten litre litres liter liters reserve fuel mandatory pit stop stops
+    pflicht pflichtstopp pflichtstopps and und plus point komma hundred hundert tyre tyres tire tires reifen frage'''
 
 
 def interview_start(text):
-    """Whether the driver asks to be interviewed for the session setup."""
+    """Whether the driver asks to be interviewed for the session setup. Tolerates the
+    free transcription's slips: wake residue, "asked", a misheard "info"."""
     if not isinstance(text, str) or len(text) > 400:
         return False
-    return bool(re.fullmatch(
-        r'(?:please )?(?:(?:ask|interview) me (?:for|about|on) (?:the )?(?:session|race) (?:info|infos|information|details|setup)'
-        r'|(?:start )?(?:the )?session (?:interview|setup|questions)'
-        r'|frag mich (?:nach|zu) (?:den |der )?session ?(?:infos?|informationen|daten)?'
-        r'|session (?:infos?|daten) abfragen|starte (?:das )?session interview)', _clean(text)))
+    clean = _clean(text)
+    return bool(re.fullmatch(r'(?:start )?(?:the )?session (?:interview|setup|questions)'
+                             r'|session (?:infos?|daten) abfragen|starte (?:das )?session interview', clean)
+                or re.search(r'(?:^|\b(?:ask|asks|asked|asking|interview|interviewing) )me (?:for|about|on|with) '
+                             r'(?:the )?(?:session|race)\b', clean)
+                or re.search(r'\bfrag\w* mich (?:nach|zu|ueber) (?:den |der |die )?session\b', clean))
+
+
+def _model_spellings(word):
+    """A cleaned word as the Vosk models may spell it: with and without umlauts."""
+    umlaut = word.replace('ae', 'ä').replace('oe', 'ö').replace('ue', 'ü')
+    return {word, umlaut, umlaut.replace('ss', 'ß'), word.replace('ss', 'ß')}
+
+
+def interview_words():
+    """Every single word an interview answer can use, for a grammar-limited recogniser."""
+    words = set(_ANSWER_WORDS.split())
+    for table in (SESSIONS_SPOKEN, _FAMILIES, _GRADES, _SINGLE, _UNITS, _TENS, _ZERO, _NONE, _SKIP, _STOP):
+        for entry in table:
+            words.update(entry.split())
+    # German tens are spoken as one word: fuenfundzwanzig.
+    words.update(unit + 'und' + ten for unit in 'ein zwei drei vier fuenf sechs sieben acht neun'.split()
+                 for ten in 'zwanzig dreissig vierzig fuenfzig sechzig siebzig achtzig neunzig'.split())
+    return tuple(sorted(w for word in words for w in _model_spellings(word) if w.isalpha()))
 
 
 def interview_reply(step, text):
@@ -237,9 +264,9 @@ def interview_reply(step, text):
     if not isinstance(text, str) or not text.strip() or len(text) > 400 or any(ord(c) < 32 for c in text):
         return 'unclear', None
     clean = _clean(text)
-    if clean in ('skip', 'next', 'pass', 'skip it', 'weiter', 'ueberspringen', 'naechste', 'naechste frage'):
+    if clean in _SKIP:
         return 'skip', None
-    if clean in ('stop', 'cancel', 'end', 'abort', 'that is all', 'thats all', 'abbrechen', 'stopp', 'ende', 'fertig'):
+    if clean in _STOP:
         return 'stop', None
     none = clean in _NONE
     if step == 'session':

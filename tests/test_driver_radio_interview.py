@@ -18,6 +18,29 @@ def t_the_interview_starts_in_english_and_german():
         assert not voice.interview_start(text),text
 
 
+def t_the_interview_starts_from_a_misheard_request():
+    # #1101: live transcriptions of "Hey Jeff, ask me for the session info".
+    for text in ('hf asked me about the session info','me about the session and full',
+                 'hey jeff asked me for the session in fall','asking me about the session','interview me on the session'):
+        assert voice.interview_start(text),text
+    for text in ('tell me about the session','what session is it','how long is the session','ask me later'):
+        assert not voice.interview_start(text),text
+
+
+def t_the_answer_grammar_covers_every_interview_answer():
+    words=set(voice.interview_words())
+    norm=lambda w:w.translate(str.maketrans({'ä':'ae','ö':'oe','ü':'ue','ß':'ss'}))
+    known={norm(w) for w in words}
+    for text in ('race','training','qualifying','it is the race','twelve laps','dreißig minuten','racing medium',
+                 'rennreifen weich','two','keine','one mandatory stop','racing medium and racing hard','none',
+                 'five litres','one point five','fünfundzwanzig runden','skip','weiter','stop','abbrechen',
+                 'überspringen','intermediate','full wet','zero','nächste frage'):
+        missing=[w for w in voice._clean(text).split() if w not in known]
+        assert not missing,(text,missing)
+    assert {'fünf','dreißig','zwölf'}<=words,'German model words carry their umlauts'
+    assert all(w==w.lower() and ' ' not in w and w.isalpha() for w in words),'single lower-case words only'
+
+
 def t_each_answer_uses_the_setup_vocabulary_without_its_keyword():
     for step,text,setup in (
             ('session','race',dict(session='race')),('session','Training',dict(session='practice')),
@@ -131,7 +154,7 @@ def t_a_failing_window_ends_the_interview_instead_of_reopening_the_microphone():
         h.workers[0].events=[{'event':'question','text':'session interview'}]
         h.n.step();speak_latest(h)
         assert [c for c in h.args if isinstance(c,dict)][-1]['listen_s']==native.INTERVIEW_LISTEN_S
-        h.workers[-1].events=[{'event':'error','code':'transcription_uncertain'}]
+        h.workers[-1].events=[{'event':'error','code':'microphone_unavailable'}]
         h.n.step()
         assert not h.f.service.interview_waiting()
         assert h.f.service.history()['messages'][-1]['text']=='Voice unavailable. Interview ended. Nothing set.'
@@ -151,6 +174,57 @@ def t_a_failing_window_ends_the_interview_instead_of_reopening_the_microphone():
         h.f.at+=1;h.n.step()
         assert not h.f.service.interview_waiting(),'muted replies never open a wake-free window'
         assert all(c['listen_s'] is None for c in h.args if isinstance(c,dict))
+        h.n.close()
+
+
+def t_an_uncertain_answer_is_asked_again_not_a_voice_failure():
+    # #1101: a short answer below the confidence floor is an unclear answer.
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step()
+        h.workers[0].events=[{'event':'question','text':'session interview'}]
+        h.n.step();speak_latest(h)
+        h.workers[-1].events=[{'event':'error','code':'transcription_uncertain'}]
+        h.n.step()
+        assert h.f.service.interview_waiting(),'one unclear answer keeps the interview'
+        assert h.f.service.history()['messages'][-1]['text']=='Say again. Which session is it?'
+        assert h.n._retry_at<=h.f.at,'an unclear answer needs no error back-off'
+        speak_latest(h)
+        h.workers[-1].events=[{'event':'error','code':'transcription_uncertain'}]
+        h.n.step()
+        assert not h.f.service.interview_waiting()
+        assert h.f.service.history()['messages'][-1]['text']=='No clear answer. Interview ended. Nothing set.'
+        h.n.close()
+
+
+def t_an_uncertain_wake_request_shows_what_was_heard():
+    # #1101: the driver sees the transcription instead of silence or an error.
+    import logging
+    seen=[]
+    class Grab(logging.Handler):
+        def emit(self,record):seen.append(record.getMessage())
+    handler=Grab();native.LOG.addHandler(handler);native.LOG.setLevel(logging.INFO)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            h=Harness(d);h.n.step()
+            h.workers[0].events=[{'event':'error','code':'transcription_uncertain','heard':'hf asked me','confidence':.41}]
+            h.n.step()
+            message=h.f.service.history()['messages'][-1]
+            assert message['text']=='Say again.' and message['question']=='hf asked me',message
+            assert h.n.status()['error'] is None and h.n._retry_at<=h.f.at,'not a voice failure'
+            h.n.close()
+    finally:native.LOG.removeHandler(handler)
+    assert any("'hf asked me'" in line and '0.41' in line and 'wake request' in line for line in seen),seen
+
+
+def t_the_answer_window_transcribes_with_the_interview_grammar():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step()
+        assert h.args[-1]['grammar'] is None,'wake-gated questions keep the free transcription'
+        first_line_args=len(h.args)
+        h.workers[0].events=[{'event':'question','text':'session interview'}]
+        h.n.step();speak_latest(h)
+        answer=[c for c in h.args[first_line_args:] if isinstance(c,dict)][-1]
+        assert answer['listen_s']==native.INTERVIEW_LISTEN_S and answer['grammar']==list(voice.interview_words())
         h.n.close()
 
 
@@ -242,7 +316,7 @@ def t_the_worker_accepts_only_a_bounded_answer_window():
     import driver_radio_voice_worker as worker
     body=dict(version=1,platform='linux',microphone='source.id',language='en',wake='hey_jeff',stt='vosk',
               paths={'library':'lib','en':'en','de':'de'},whisper_exe='',whisper_model='',google_key='',listen_s=None,
-              hold=False)
+              hold=False,grammar=None)
     assert worker.validate(dict(body))['listen_s'] is None
     assert worker.validate(dict(body,listen_s=5))['listen_s']==5
     assert worker.validate(dict(body,listen_s=8,hold=True))['hold'] is True
@@ -250,6 +324,11 @@ def t_the_worker_accepts_only_a_bounded_answer_window():
         try:worker.validate(dict(body,**bad))
         except ValueError:continue
         raise AssertionError(bad)  # a held capture is only an armed answer window
+    assert worker.validate(dict(body,listen_s=8,grammar=['race','zwei']))['grammar']==['race','zwei']
+    for bad in (['race'],[],['Race'],['two words'],['x'*41],['race']*1001,'race',[1]):
+        try:worker.validate(dict(body,listen_s=8 if bad!=['race'] else None,grammar=bad))
+        except ValueError:continue
+        raise AssertionError(bad)  # a grammar is a bounded word list, only for an answer window
     for bad in (0,11,'5',True,float('nan')):
         try:worker.validate(dict(body,listen_s=bad))
         except ValueError:continue
