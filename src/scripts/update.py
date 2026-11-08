@@ -4,7 +4,7 @@ Checks /releases/latest, compares semver tags, downloads the platform archive an
 swaps the running binary. Windows needs the rename trick, since a running exe can
 be renamed but not overwritten. Frozen-only: a repo checkout updates with
 `git pull`. Design: docs/superpowers/specs/2026-06-05-self-update-design.md."""
-import argparse, hashlib, json, os, platform as _platform, secrets, shutil, sys, tarfile, tempfile, time
+import argparse, hashlib, http.client, json, os, platform as _platform, secrets, shutil, sys, tarfile, tempfile, time
 import urllib.error, urllib.parse, urllib.request, zipfile
 
 # Renamed from gt-endurance-racing-broadcast; GitHub redirects the old slug (web,
@@ -228,13 +228,17 @@ def fetch_latest(opener=None):
     return _get_json(API_LATEST, opener)
 
 
+class _InsecureRedirect(urllib.error.URLError):
+    """A redirect off HTTPS was refused; final, never retried (#1098)."""
+
+
 class _HttpsOnlyRedirect(urllib.request.HTTPRedirectHandler):
     """Refuse any redirect that downgrades off HTTPS during an update download.
     Neither a MITM nor a future API host that 302s to http:// may strip TLS while
     the binary is being fetched."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urllib.parse.urlsplit(newurl).scheme != "https":
-            raise urllib.error.URLError("update: refusing non-HTTPS redirect")
+            raise _InsecureRedirect("update: refusing non-HTTPS redirect")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -274,11 +278,20 @@ DOWNLOAD_ATTEMPTS = 3
 DOWNLOAD_RETRY_S = 3
 
 
+# What a download can raise: socket/HTTP-status errors are OSError, a connection
+# cut off mid-body is http.client.IncompleteRead (an HTTPException).
+DOWNLOAD_ERRORS = (OSError, http.client.HTTPException)
+
+
 def _transient(exc):
-    """A server-side 5xx or a connection-level failure, worth another attempt."""
+    """A server-side 5xx or a connection-level failure, worth another attempt. A
+    refused HTTPS downgrade and a 4xx are final."""
+    if isinstance(exc, _InsecureRedirect):
+        return False
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code >= 500
-    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError))
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError,
+                            http.client.HTTPException))
 
 
 def download(url, dst, opener=None, sleep=time.sleep):
@@ -300,7 +313,7 @@ def download(url, dst, opener=None, sleep=time.sleep):
                 if close:
                     close()
             return
-        except OSError as exc:
+        except DOWNLOAD_ERRORS as exc:
             if attempt == DOWNLOAD_ATTEMPTS or not _transient(exc):
                 raise
             print(f"update: download failed ({_download_error(exc)}), "
@@ -313,7 +326,7 @@ def _download_error(exc):
     if isinstance(exc, urllib.error.HTTPError):
         return f"HTTP {exc.code}"
     reason = getattr(exc, "reason", None)
-    return str(reason if reason is not None else exc)
+    return str(reason if reason is not None else exc) or type(exc).__name__
 
 
 def extract_binary(archive, dest_dir):
@@ -458,9 +471,11 @@ def _download_and_swap(url, tag, digest=None):
         print("Downloading:", url)
         try:
             download(url, archive)
-        except OSError as exc:
+        except DOWNLOAD_ERRORS as exc:
+            # "Retry" only for a server/connection hiccup, not for a local write error.
+            hint = "; retry in a moment" if _transient(exc) else ""
             sys.exit(f"update: download failed ({_download_error(exc)}). The binary is "
-                     "unchanged; retry in a moment.")
+                     f"unchanged{hint}.")
         if digest:
             actual = archive_sha256(archive)
             if actual != digest:

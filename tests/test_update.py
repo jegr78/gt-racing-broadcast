@@ -475,6 +475,42 @@ def t_download_gives_up_after_its_bounded_attempts():
     assert len(calls) == m.DOWNLOAD_ATTEMPTS == 3, calls
 
 
+def t_a_refused_https_downgrade_is_never_retried():
+    import tempfile, os as _os
+    opener, calls = _flaky_opener([m._InsecureRedirect("update: refusing non-HTTPS redirect")] * 3)
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            m.download("https://example.com/a.zip", _os.path.join(td, "a.zip"),
+                       opener=opener, sleep=lambda s: None)
+        except OSError as exc:
+            assert "non-HTTPS" in str(exc), exc
+        else:
+            raise AssertionError("a refused downgrade must fail")
+    assert len(calls) == 1, f"a refused downgrade was retried: {calls}"
+
+
+def t_a_download_cut_off_midway_is_retried():
+    import http.client, io, tempfile, os as _os
+    calls = []
+
+    class Cut(io.BytesIO):
+        def read(self, *a):
+            raise http.client.IncompleteRead(b"par", 10)
+
+    def opener(req, timeout):
+        calls.append(1)
+        return Cut() if len(calls) == 1 else io.BytesIO(b"archive-bytes")
+    with tempfile.TemporaryDirectory() as td:
+        dst = _os.path.join(td, "a.zip")
+        try:
+            m.download("https://example.com/a.zip", dst, opener=opener, sleep=lambda s: None)
+        except http.client.HTTPException as exc:
+            raise AssertionError(f"a cut-off download was not retried: {exc!r}") from exc
+        with open(dst, "rb") as fh:
+            assert fh.read() == b"archive-bytes", "the retry must rewrite the partial file"
+    assert len(calls) == 2, calls
+
+
 def t_a_failed_download_ends_with_a_message_not_a_traceback():
     # #1098: the 504 escaped _download_and_swap as an unhandled exception.
     import contextlib, io, tempfile
@@ -504,6 +540,19 @@ def t_a_failed_download_ends_with_a_message_not_a_traceback():
             assert "timed out" in str(exc.code) and "unchanged" in str(exc.code), exc.code
         else:
             raise AssertionError("a connection error must stop the update")
+    import http.client
+    with tempfile.TemporaryDirectory() as td, \
+         patch.object(m, "staging_dir", lambda parent, prefix: tempfile.mkdtemp(dir=td)), \
+         patch.object(m, "download", side_effect=http.client.IncompleteRead(b"x", 9)), \
+         contextlib.redirect_stdout(io.StringIO()):
+        try:
+            m._download_and_swap("https://example.com/a.zip", "preview-main")
+        except SystemExit as exc:
+            assert "unchanged" in str(exc.code), exc.code
+        except http.client.HTTPException as exc:
+            raise AssertionError(f"a cut-off download escaped: {exc!r}") from exc
+        else:
+            raise AssertionError("a cut-off download must stop the update")
 
 
 # Extraction hardening: symlink members and decompression caps. (#99)
