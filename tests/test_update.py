@@ -527,8 +527,18 @@ def t_a_failed_download_ends_with_a_message_not_a_traceback():
             raise AssertionError(f"the download error escaped: {exc!r}") from exc
         else:
             raise AssertionError("a failed download must stop the update")
-        assert "504" in text and "unchanged" in text, text
+        assert "504" in text and "unchanged" in text and "retry" in text, text
         assert not perform.called, "nothing may be swapped"
+    with tempfile.TemporaryDirectory() as td, \
+         patch.object(m, "staging_dir", lambda parent, prefix: tempfile.mkdtemp(dir=td)), \
+         patch.object(m, "download", side_effect=OSError(28, "No space left on device")), \
+         contextlib.redirect_stdout(io.StringIO()):
+        try:
+            m._download_and_swap("https://example.com/a.zip", "preview-main")
+        except SystemExit as exc:
+            text = str(exc.code)
+        assert "No space left" in text and "retry" not in text, \
+            f"a local write error is no reason to retry: {text}"
     import urllib.error
     with tempfile.TemporaryDirectory() as td, \
          patch.object(m, "staging_dir", lambda parent, prefix: tempfile.mkdtemp(dir=td)), \
