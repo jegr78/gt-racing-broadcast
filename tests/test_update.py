@@ -413,6 +413,158 @@ def t_download_rejects_non_https():
     assert raised
 
 
+def _http_error(code):
+    import urllib.error
+    return urllib.error.HTTPError("https://example.com/a.zip", code, f"HTTP {code}", {}, None)
+
+
+def _flaky_opener(failures):
+    """An opener that raises each of *failures* in turn, then serves the archive."""
+    import io
+    calls = []
+
+    def opener(req, timeout):
+        calls.append(req.full_url)
+        if len(calls) <= len(failures):
+            raise failures[len(calls) - 1]
+        return io.BytesIO(b"archive-bytes")
+    return opener, calls
+
+
+def t_download_retries_a_transient_server_error():
+    # #1098: GitHub's release CDN answered 504 twice in a row; a retry rides it out.
+    import tempfile, os as _os
+    opener, calls = _flaky_opener([_http_error(504), _http_error(502)])
+    slept = []
+    with tempfile.TemporaryDirectory() as td:
+        dst = _os.path.join(td, "a.zip")
+        try:
+            m.download("https://example.com/a.zip", dst, opener=opener, sleep=slept.append)
+        except OSError as exc:
+            raise AssertionError(f"a transient 5xx was not retried: {exc}") from exc
+        with open(dst, "rb") as fh:
+            assert fh.read() == b"archive-bytes"
+    assert len(calls) == 3 and len(slept) == 2 and all(s > 0 for s in slept), (calls, slept)
+
+
+def t_download_does_not_retry_a_client_error():
+    import tempfile, os as _os
+    opener, calls = _flaky_opener([_http_error(404)])
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            m.download("https://example.com/a.zip", _os.path.join(td, "a.zip"),
+                       opener=opener, sleep=lambda s: None)
+        except Exception as exc:  # noqa: BLE001  the type is asserted below
+            assert getattr(exc, "code", None) == 404, exc
+        else:
+            raise AssertionError("a 404 must not be retried into a success")
+    assert len(calls) == 1, calls
+
+
+def t_download_gives_up_after_its_bounded_attempts():
+    import tempfile, os as _os
+    opener, calls = _flaky_opener([_http_error(504)] * 10)
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            m.download("https://example.com/a.zip", _os.path.join(td, "a.zip"),
+                       opener=opener, sleep=lambda s: None)
+        except Exception as exc:  # noqa: BLE001  the type is asserted below
+            assert getattr(exc, "code", None) == 504, exc
+        else:
+            raise AssertionError("an endless 504 must fail")
+    assert len(calls) == m.DOWNLOAD_ATTEMPTS == 3, calls
+
+
+def t_a_refused_https_downgrade_is_never_retried():
+    import tempfile, os as _os
+    opener, calls = _flaky_opener([m._InsecureRedirect("update: refusing non-HTTPS redirect")] * 3)
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            m.download("https://example.com/a.zip", _os.path.join(td, "a.zip"),
+                       opener=opener, sleep=lambda s: None)
+        except OSError as exc:
+            assert "non-HTTPS" in str(exc), exc
+        else:
+            raise AssertionError("a refused downgrade must fail")
+    assert len(calls) == 1, f"a refused downgrade was retried: {calls}"
+
+
+def t_a_download_cut_off_midway_is_retried():
+    import http.client, io, tempfile, os as _os
+    calls = []
+
+    class Cut(io.BytesIO):
+        def read(self, *a):
+            raise http.client.IncompleteRead(b"par", 10)
+
+    def opener(req, timeout):
+        calls.append(1)
+        return Cut() if len(calls) == 1 else io.BytesIO(b"archive-bytes")
+    with tempfile.TemporaryDirectory() as td:
+        dst = _os.path.join(td, "a.zip")
+        try:
+            m.download("https://example.com/a.zip", dst, opener=opener, sleep=lambda s: None)
+        except http.client.HTTPException as exc:
+            raise AssertionError(f"a cut-off download was not retried: {exc!r}") from exc
+        with open(dst, "rb") as fh:
+            assert fh.read() == b"archive-bytes", "the retry must rewrite the partial file"
+    assert len(calls) == 2, calls
+
+
+def t_a_failed_download_ends_with_a_message_not_a_traceback():
+    # #1098: the 504 escaped _download_and_swap as an unhandled exception.
+    import contextlib, io, tempfile
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as td, \
+         patch.object(m, "staging_dir", lambda parent, prefix: tempfile.mkdtemp(dir=td)), \
+         patch.object(m, "download", side_effect=_http_error(504)), \
+         patch.object(m, "perform") as perform, contextlib.redirect_stdout(io.StringIO()):
+        try:
+            m._download_and_swap("https://example.com/a.zip", "preview-main")
+        except SystemExit as exc:
+            text = str(exc.code)
+        except OSError as exc:
+            raise AssertionError(f"the download error escaped: {exc!r}") from exc
+        else:
+            raise AssertionError("a failed download must stop the update")
+        assert "504" in text and "unchanged" in text and "retry" in text, text
+        assert not perform.called, "nothing may be swapped"
+    with tempfile.TemporaryDirectory() as td, \
+         patch.object(m, "staging_dir", lambda parent, prefix: tempfile.mkdtemp(dir=td)), \
+         patch.object(m, "download", side_effect=OSError(28, "No space left on device")), \
+         contextlib.redirect_stdout(io.StringIO()):
+        try:
+            m._download_and_swap("https://example.com/a.zip", "preview-main")
+        except SystemExit as exc:
+            text = str(exc.code)
+        assert "No space left" in text and "retry" not in text, \
+            f"a local write error is no reason to retry: {text}"
+    import urllib.error
+    with tempfile.TemporaryDirectory() as td, \
+         patch.object(m, "staging_dir", lambda parent, prefix: tempfile.mkdtemp(dir=td)), \
+         patch.object(m, "download", side_effect=urllib.error.URLError("timed out")), \
+         contextlib.redirect_stdout(io.StringIO()):
+        try:
+            m._download_and_swap("https://example.com/a.zip", "preview-main")
+        except SystemExit as exc:
+            assert "timed out" in str(exc.code) and "unchanged" in str(exc.code), exc.code
+        else:
+            raise AssertionError("a connection error must stop the update")
+    import http.client
+    with tempfile.TemporaryDirectory() as td, \
+         patch.object(m, "staging_dir", lambda parent, prefix: tempfile.mkdtemp(dir=td)), \
+         patch.object(m, "download", side_effect=http.client.IncompleteRead(b"x", 9)), \
+         contextlib.redirect_stdout(io.StringIO()):
+        try:
+            m._download_and_swap("https://example.com/a.zip", "preview-main")
+        except SystemExit as exc:
+            assert "unchanged" in str(exc.code), exc.code
+        except http.client.HTTPException as exc:
+            raise AssertionError(f"a cut-off download escaped: {exc!r}") from exc
+        else:
+            raise AssertionError("a cut-off download must stop the update")
+
+
 # Extraction hardening: symlink members and decompression caps. (#99)
 def _raises_value_error(fn):
     try:
