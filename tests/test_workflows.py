@@ -81,6 +81,21 @@ def _unquoted_scalars():
                 yield os.path.basename(path), i, m.group(2), value
 
 
+def t_workflow_downloads_retry_transient_server_errors():
+    # #1097: one GitHub 504 on the pinned gitleaks download failed a required check.
+    # The checksum still guards the artifact, so a bounded retry is safe.
+    found = 0
+    for name in sorted(os.listdir(WF_DIR)):
+        if not name.endswith((".yml", ".yaml")):
+            continue
+        with open(os.path.join(WF_DIR, name), encoding="utf-8") as fh:
+            for line in fh:
+                if re.search(r"(^|[\s;|&(])curl\s", line):
+                    found += 1
+                    assert "--retry" in line and "--retry-all-errors" in line, (name, line.strip())
+    assert found, "no curl download found: update this guard"
+
+
 def t_plain_scalars_have_no_bare_colon():
     offenders = [f"{base}:{ln} {key}: {val}"
                  for base, ln, key, val in _unquoted_scalars()
