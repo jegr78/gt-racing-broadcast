@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 import logsetup
@@ -10,7 +11,7 @@ import driver_radio_recognition as recognition
 from driver_radio_voice_config import PHRASES
 
 
-FIELDS={'version','platform','microphone','language','wake','stt','paths','whisper_exe','whisper_model','google_key','listen_s'}
+FIELDS={'version','platform','microphone','language','wake','stt','paths','whisper_exe','whisper_model','google_key','listen_s','hold'}
 # An interview answer window (#1088): seconds without a wake word, or None for wake-gated capture.
 MAX_LISTEN_S=10
 
@@ -24,10 +25,20 @@ def validate(body):
             or any(not isinstance(body[k],str) or len(body[k])>4096 or any(ord(c)<32 for c in body[k])
                    for k in ('whisper_exe','whisper_model','google_key'))
             or body['listen_s'] is not None and (type(body['listen_s']) not in (int,float)
-                                                 or not 1<=body['listen_s']<=MAX_LISTEN_S)):
+                                                 or not 1<=body['listen_s']<=MAX_LISTEN_S)
+            # A held capture (#1095) starts with the question and is only an answer window.
+            or type(body['hold']) is not bool or body['hold'] and body['listen_s'] is None):
         raise ValueError('invalid_request')
     recognition.capture_args(body['platform'],body['microphone'])
     return body
+
+
+def wait_for_release(stream,released):
+    """Set *released* when the supervisor writes the release line (#1095). EOF or any
+    other line leaves the capture held until the supervisor stops it."""
+    try:line=stream.readline(16)
+    except (OSError,ValueError):return
+    if line.strip()==b'go':released.set()
 
 
 def emit(event,**fields):
@@ -49,9 +60,16 @@ def run(body):
         # Inherit the supervisor's owned group/Job Object, never create an escape.
         proc=subprocess.Popen([exe,*recognition.capture_args(body['platform'],body['microphone'])],
                               stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+        released=threading.Event()
+        if body['hold']:
+            # Models and microphone are ready while the question still plays; its audio is
+            # dropped until the supervisor releases the window at the question's end.
+            threading.Thread(target=wait_for_release,args=(sys.stdin.buffer,released),daemon=True).start()
+        else:released.set()
         capture=recognition.Utterance(listen_s=body['listen_s']);heartbeat=time.monotonic();emit('listening')
         while pcm:=proc.stdout.read(2560):
             if time.monotonic()-heartbeat>=1:emit('heartbeat');heartbeat=time.monotonic()
+            if not released.is_set():continue
             utterance=capture.feed(pcm,False if capture.active else wake.wake(pcm,phrase))
             if utterance is None:continue
             if not utterance:raise ValueError('utterance_timeout')

@@ -10,8 +10,9 @@ from driver_radio_process import ProviderError
 
 
 class Owned:
-    def __init__(self,argv,payload,env,events=False):
-        self.proc=None;self.tree=None;self.closed=False
+    def __init__(self,argv,payload,env,events=False,hold=False):
+        """*hold* keeps stdin open after *payload* so release() can send one line later."""
+        self.proc=None;self.tree=None;self.closed=False;self._writer=None
         self.failed=threading.Event();self.events=queue.Queue(maxsize=8)
         self.threads=[]
         try:
@@ -22,9 +23,12 @@ class Owned:
             self.tree.attach(self.proc)
             def write():
                 try:
-                    with self.proc.stdin as out:out.write(payload)
+                    if hold:self.proc.stdin.write(payload);self.proc.stdin.flush()
+                    else:
+                        with self.proc.stdin as out:out.write(payload)
                 except OSError:self.failed.set()
             thread=threading.Thread(target=write,daemon=True);self.threads.append(thread);thread.start()
+            self._writer=thread
             if events:
                 def read():
                     try:
@@ -44,6 +48,12 @@ class Owned:
             try:result.append(self.events.get_nowait())
             except queue.Empty:break
         return result
+
+    def release(self):
+        """Open a held capture's answer window (#1095): one line, then stdin closes."""
+        if self._writer is not None:self._writer.join(1)
+        try:self.proc.stdin.write(b'go\n');self.proc.stdin.close()
+        except (OSError,ValueError):self.failed.set()
 
     def poll(self):
         return 1 if self.failed.is_set() else self.proc.poll()

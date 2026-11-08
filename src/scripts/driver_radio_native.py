@@ -16,8 +16,13 @@ import driver_radio_setup_voice as setup_voice
 import driver_radio_voice_config as config
 from driver_radio_voice_process import Owned
 
-# The answer window after an interview question (#1088), decided by the maintainer.
-INTERVIEW_LISTEN_S=5
+# The answer window after an interview question (#1088), decided by the maintainer;
+# 8 s since #1095, when it began to open at the question's end.
+INTERVIEW_LISTEN_S=8
+# The capture worker needs ~3 s to load its models (measured on Windows, #1095), so it
+# starts with the question, held, and opens this long after the question ends: the
+# speaker tail of the engineer's voice must not count as an answer.
+INTERVIEW_RELEASE_GUARD_S=.3
 
 
 class Supervisor:
@@ -34,11 +39,13 @@ class Supervisor:
         self._phase='disabled';self._error=None;self._retry_at=0;self._heartbeat=0;self._settle=0;self._armed=False
         self._volume=.8;self._muted=False;self._language='en';self._wake='hey_jeff';self._enabled=False
         self._control_changed=False
+        self._held=False;self._release_at=None
 
     def _worker(self,body):
         executable=([sys.executable,'_radio-voice-worker'] if getattr(sys,'frozen',False) else
                     [sys.executable,str(Path(__file__).with_name('driver_radio_voice_worker.py'))])
-        return Owned(executable,json.dumps(body).encode()+b'\n',config.execution_env(),events=True)
+        return Owned(executable,json.dumps(body).encode()+b'\n',config.execution_env(),events=True,
+                     hold=body.get('hold') is True)
 
     def _player(self,audio,volume):
         exe=shutil.which('ffplay')
@@ -78,6 +85,7 @@ class Supervisor:
         return self.status()
 
     def _stop_capture(self):
+        self._held=False;self._release_at=None
         if self._worker_proc is not None:
             self._worker_proc.close();self._worker_proc=None
 
@@ -90,6 +98,7 @@ class Supervisor:
         if self._ticket is not None:
             self.service.finish_playback(self._ticket.id,outcome);self._ticket=None
             self._settle=self.clock()+.3
+            if self._held:self._release_at=self.clock()+INTERVIEW_RELEASE_GUARD_S
 
     def _radio_read(self, read):
         ticket = self._ticket
@@ -180,6 +189,38 @@ class Supervisor:
                 raise
             self.service.refusal('engineer', self._binding)
 
+    def _capture_body(self,voice,native,listen_s,hold=False):
+        """The worker request, or None without a microphone."""
+        mic=voice['microphone'] or self.microphone()
+        if not mic:return None
+        with self._lock:language,wake=self._language,self._wake
+        return dict(version=1,platform=sys.platform,microphone=mic,language=language,wake=wake,
+                    stt=native['stt'],paths=config.paths(self.machine),
+                    whisper_exe=os.environ.get('RACECAST_RADIO_WHISPER_EXE') or shutil.which('whisper-cli') or '',
+                    whisper_model=os.environ.get('RACECAST_RADIO_WHISPER_MODEL') or str(self.machine/'radio-voice'/'ggml-tiny.bin'),
+                    google_key=os.environ.get('RACECAST_GCLOUD_STT_KEY','') if native['stt']=='google' else '',
+                    listen_s=listen_s,hold=hold)
+
+    def _prearm(self,voice,native,signature):
+        """Start the answer capture with an interview question, held (#1095): the worker
+        loads its models while the question plays instead of after it. Best effort: any
+        miss leaves the usual start after the question."""
+        if self._worker_proc is not None or self._muted or not self.service.interview_waiting():return
+        if not self.ready() or not self._current(signature,output=True):return
+        body=self._capture_body(voice,native,INTERVIEW_LISTEN_S,hold=True)
+        if body is None:return
+        try:self._worker_proc=self.worker_factory(body)
+        except (OSError,ValueError):return
+        self._held=True;self._release_at=None;self._armed=True;self._heartbeat=self.clock()
+
+    def _drain_held(self):
+        """Keep a held capture alive during playback; a failing one is dropped quietly."""
+        if self._worker_proc is None or not self._held:return
+        for event in self._worker_proc.read():
+            if event.get('event') in ('heartbeat','listening'):self._heartbeat=self.clock()
+            else:self._stop_capture();return
+        if self._worker_proc.poll() is not None or self.clock()-self._heartbeat>20:self._stop_capture()
+
     def step(self):
         # Only the owner loop touches process references. HTTP controls use the
         # separate state lock and remain available during spawn/termination.
@@ -210,6 +251,7 @@ class Supervisor:
                 self._stop_capture();self._stop_output('text_only')
                 self._set('disabled' if not enabled else 'paused');return
             if self._ticket is not None:
+                self._drain_held()
                 # Force freshness and cancellation checks before every player poll.
                 audio=self._radio_read(lambda:self.service.audio_for(self._ticket.id))
                 if self._ticket.cancelled.is_set() or self._muted:
@@ -227,6 +269,7 @@ class Supervisor:
                         self.service.playback_started(self._ticket.id)
                     except (OSError,ValueError):
                         self._stop_output('failed');self._set('error','playback_unavailable')
+                    else:self._prearm(voice,native,signature)
                     if not self._current(signature,output=True):self._stop_output('text_only')
                     return
                 state=self._radio_read(lambda:self.service.ticket_audio_state(self._ticket.id))
@@ -249,8 +292,15 @@ class Supervisor:
                                 self._player_proc=self.player_factory(audio,self._volume)
                                 self.service.playback_started(self._ticket.id)
                             except (OSError,ValueError):self._stop_output('failed');self._set('error','playback_unavailable')
+                            else:self._prearm(voice,native,signature)
                             if not self._current(signature,output=True):self._stop_output('text_only')
                     return
+            if self._worker_proc is not None and self._held:
+                if self._release_at is None or self.clock()<self._release_at:
+                    self._drain_held();return
+                # The question has ended: the answer window opens now, no startup gap.
+                self._worker_proc.release();self._held=False;self._release_at=None
+                self._heartbeat=self.clock();self._set('listening');return
             if self._worker_proc is not None:
                 for event in self._worker_proc.read():
                     if event.get('event')=='question':
@@ -297,18 +347,11 @@ class Supervisor:
                 return
             if self.clock()<max(self._retry_at,self._settle):return
             if not self.ready():self._set('error','models_unavailable');return
-            mic=voice['microphone'] or self.microphone()
-            if not mic:self._set('error','microphone_unavailable');return
+            body=self._capture_body(voice,native,None)
+            if body is None:self._set('error','microphone_unavailable');return
             if not self._current(signature):return
             with self._lock:
                 if self._closed or self._control_changed or self._paused:return
-                language,wake=self._language,self._wake
-            body=dict(version=1,platform=sys.platform,microphone=mic,language=language,wake=wake,
-                      stt=native['stt'],paths=config.paths(self.machine),
-                      whisper_exe=os.environ.get('RACECAST_RADIO_WHISPER_EXE') or shutil.which('whisper-cli') or '',
-                      whisper_model=os.environ.get('RACECAST_RADIO_WHISPER_MODEL') or str(self.machine/'radio-voice'/'ggml-tiny.bin'),
-                      google_key=os.environ.get('RACECAST_GCLOUD_STT_KEY','') if native['stt']=='google' else '',
-                      listen_s=None)
             if self.service.interview_waiting():
                 # The question is the signal that the microphone opens; muted replies give none.
                 if self._muted:self._cancel_interview('Replies muted.');return

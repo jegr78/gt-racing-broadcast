@@ -9,9 +9,10 @@ from test_driver_radio_service import Fixture,features
 
 
 class Worker:
-    def __init__(self):self.events=[];self.closed=False;self.dead=False
+    def __init__(self):self.events=[];self.closed=False;self.dead=False;self.released=False
     def poll(self):return 1 if self.dead else None
     def read(self):events=self.events;self.events=[];return events
+    def release(self):self.released=True
     def close(self):self.closed=True
 
 
