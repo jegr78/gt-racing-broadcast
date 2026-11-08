@@ -4,7 +4,7 @@ Checks /releases/latest, compares semver tags, downloads the platform archive an
 swaps the running binary. Windows needs the rename trick, since a running exe can
 be renamed but not overwritten. Frozen-only: a repo checkout updates with
 `git pull`. Design: docs/superpowers/specs/2026-06-05-self-update-design.md."""
-import argparse, hashlib, json, os, platform as _platform, secrets, shutil, sys, tarfile, tempfile
+import argparse, hashlib, json, os, platform as _platform, secrets, shutil, sys, tarfile, tempfile, time
 import urllib.error, urllib.parse, urllib.request, zipfile
 
 # Renamed from gt-endurance-racing-broadcast; GitHub redirects the old slug (web,
@@ -268,20 +268,52 @@ def expected_digest(release, platform):
     return None
 
 
-def download(url, dst, opener=None):
-    """Fetch `url` to file path `dst`: HTTPS only, cert-verified, no downgrade."""
+# GitHub's release CDN answers a short-lived 5xx now and then (#1098: two 504s in a
+# row). A few spaced attempts ride that out; a 4xx is final at once.
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_RETRY_S = 3
+
+
+def _transient(exc):
+    """A server-side 5xx or a connection-level failure, worth another attempt."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError))
+
+
+def download(url, dst, opener=None, sleep=time.sleep):
+    """Fetch `url` to file path `dst`: HTTPS only, cert-verified, no downgrade.
+    Transient failures are retried DOWNLOAD_ATTEMPTS times in all; each attempt
+    rewrites `dst` from the start. The last error propagates."""
     if urllib.parse.urlsplit(url).scheme != "https":
         raise ValueError(f"update: refusing non-HTTPS download URL: {url!r}")
-    req = urllib.request.Request(url, headers={"User-Agent": "racecast-update"})
     opener = _SECURE_OPENER.open if opener is None else opener
-    resp = opener(req, timeout=120)
-    try:
-        with open(dst, "wb") as fh:
-            shutil.copyfileobj(resp, fh)
-    finally:
-        close = getattr(resp, "close", None)
-        if close:
-            close()
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        req = urllib.request.Request(url, headers={"User-Agent": "racecast-update"})
+        try:
+            resp = opener(req, timeout=120)
+            try:
+                with open(dst, "wb") as fh:
+                    shutil.copyfileobj(resp, fh)
+            finally:
+                close = getattr(resp, "close", None)
+                if close:
+                    close()
+            return
+        except OSError as exc:
+            if attempt == DOWNLOAD_ATTEMPTS or not _transient(exc):
+                raise
+            print(f"update: download failed ({_download_error(exc)}), "
+                  f"retrying in {DOWNLOAD_RETRY_S * attempt} s")
+            sleep(DOWNLOAD_RETRY_S * attempt)
+
+
+def _download_error(exc):
+    """A one-line reason for a failed download, for the operator."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code}"
+    reason = getattr(exc, "reason", None)
+    return str(reason if reason is not None else exc)
 
 
 def extract_binary(archive, dest_dir):
@@ -424,7 +456,11 @@ def _download_and_swap(url, tag, digest=None):
     try:
         archive = os.path.join(td, asset_name(sys.platform))
         print("Downloading:", url)
-        download(url, archive)
+        try:
+            download(url, archive)
+        except OSError as exc:
+            sys.exit(f"update: download failed ({_download_error(exc)}). The binary is "
+                     "unchanged; retry in a moment.")
         if digest:
             actual = archive_sha256(archive)
             if actual != digest:
