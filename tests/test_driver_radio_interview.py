@@ -101,7 +101,7 @@ def speak_latest(h):
     for _ in range(3):h.n.step()
 
 
-def t_native_voice_listens_five_seconds_without_wake_for_an_answer():
+def t_native_voice_listens_without_wake_for_an_answer():
     with tempfile.TemporaryDirectory() as d:
         h=Harness(d);h.n.step()
         assert h.args[-1]['listen_s'] is None,'wake-gated outside the interview'
@@ -111,7 +111,8 @@ def t_native_voice_listens_five_seconds_without_wake_for_an_answer():
         workers=len(h.workers)
         speak_latest(h)
         config=[c for c in h.args if isinstance(c,dict)][-1]
-        assert len(h.workers)==workers+1 and config['listen_s']==native.INTERVIEW_LISTEN_S==5,(len(h.workers),config)
+        assert len(h.workers)==workers+1 and config['listen_s']==native.INTERVIEW_LISTEN_S==8,(len(h.workers),config)
+        assert config['hold'] is True and h.workers[-1].released
         claimed=[];h.n._coaching=lambda text,signature:claimed.append(text) or True
         h.workers[-1].events=[{'event':'question','text':'race'}]
         h.n.step()
@@ -129,7 +130,7 @@ def t_a_failing_window_ends_the_interview_instead_of_reopening_the_microphone():
         h=Harness(d);h.n.step()
         h.workers[0].events=[{'event':'question','text':'session interview'}]
         h.n.step();speak_latest(h)
-        assert [c for c in h.args if isinstance(c,dict)][-1]['listen_s']==5
+        assert [c for c in h.args if isinstance(c,dict)][-1]['listen_s']==native.INTERVIEW_LISTEN_S
         h.workers[-1].events=[{'event':'error','code':'transcription_uncertain'}]
         h.n.step()
         assert not h.f.service.interview_waiting()
@@ -151,6 +152,71 @@ def t_a_failing_window_ends_the_interview_instead_of_reopening_the_microphone():
         assert not h.f.service.interview_waiting(),'muted replies never open a wake-free window'
         assert all(c['listen_s'] is None for c in h.args if isinstance(c,dict))
         h.n.close()
+
+
+def first_line(h):
+    """Ask for the interview and start speaking its first question (player running)."""
+    h.n.step()
+    h.workers[0].events=[{'event':'question','text':'Hey Jeff, ask me for the session info'}]
+    h.n.step()
+    message=h.f.service.history()['messages'][-1]
+    h.f.service.attach(message['id'],message['epoch'],{'audio':b'wav','audio_state':'ready'})
+    h.n.step()
+    assert len(h.players)==1 and not h.players[-1].done
+
+
+def t_the_answer_window_opens_when_the_question_ends_not_seconds_later():
+    # #1095: the worker needs ~3 s to load its models; spawned after the question it
+    # missed an answer given right away. It now starts with the question, held.
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);first_line(h)
+        held=h.workers[-1];config=[c for c in h.args if isinstance(c,dict)][-1]
+        assert config['hold'] is True and config['listen_s']==native.INTERVIEW_LISTEN_S
+        assert not held.released,'the engineer is still speaking: nothing may count as an answer'
+        for _ in range(12):  # A long question: heartbeats keep coming and are drained.
+            held.events=[{'event':'heartbeat'}];h.f.at+=1;h.n.step()
+            assert not held.closed and held.events==[],'the held worker must survive the playback'
+        workers=len(h.workers)
+        h.players[-1].done=True;h.n.step()
+        assert not held.released,'a short guard lets the speaker tail fade first'
+        h.f.at+=native.INTERVIEW_RELEASE_GUARD_S;h.n.step()
+        assert held.released and len(h.workers)==workers,'no second worker, no startup gap'
+        assert h.n.status()['phase']=='listening'
+        held.events=[{'event':'question','text':'race'}];h.n.step()
+        assert h.f.service.history()['messages'][-1]['text']=='How long is the race, laps or minutes?'
+        h.n.close()
+
+
+def t_a_held_worker_that_fails_during_the_question_falls_back_to_a_fresh_one():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);first_line(h)
+        held=h.workers[-1];held.events=[{'event':'error','code':'microphone_unavailable'}]
+        h.n.step()
+        assert held.closed and h.f.service.interview_waiting(),'the interview survives a lost pre-start'
+        workers=len(h.workers)
+        h.players[-1].done=True;h.n.step();h.f.at+=1;h.n.step()
+        assert len(h.workers)==workers+1 and h.args[-1]['listen_s']==native.INTERVIEW_LISTEN_S
+        assert h.args[-1]['hold'] is False,'spawned after the question: listening at once'
+        h.n.close()
+
+
+def t_only_interview_questions_start_capture_during_playback():
+    with tempfile.TemporaryDirectory() as d:
+        h=Harness(d);h.n.step();h.workers[0].events=[{'event':'question','text':'Fuel status?'}]
+        h.n.step();message=h.f.service.history()['messages'][-1]
+        h.f.service.attach(message['id'],message['epoch'],{'audio':b'wav','audio_state':'ready'})
+        h.n.step();assert len(h.players)==1 and len(h.workers)==1 and h.workers[0].closed
+        assert all(c['hold'] is False for c in h.args if isinstance(c,dict))
+        h.n.close()
+
+
+def t_the_worker_waits_for_the_release_line():
+    import io,threading
+    import driver_radio_voice_worker as worker
+    for data,released in ((b'go\n',True),(b'',False),(b'later\n',False)):
+        event=threading.Event()
+        worker.wait_for_release(io.BytesIO(data),event)
+        assert event.is_set() is released,data
 
 
 def t_wake_free_text_is_kept_only_when_it_answers():
@@ -175,9 +241,15 @@ def t_the_wake_free_windows_are_capped():
 def t_the_worker_accepts_only_a_bounded_answer_window():
     import driver_radio_voice_worker as worker
     body=dict(version=1,platform='linux',microphone='source.id',language='en',wake='hey_jeff',stt='vosk',
-              paths={'library':'lib','en':'en','de':'de'},whisper_exe='',whisper_model='',google_key='',listen_s=None)
+              paths={'library':'lib','en':'en','de':'de'},whisper_exe='',whisper_model='',google_key='',listen_s=None,
+              hold=False)
     assert worker.validate(dict(body))['listen_s'] is None
     assert worker.validate(dict(body,listen_s=5))['listen_s']==5
+    assert worker.validate(dict(body,listen_s=8,hold=True))['hold'] is True
+    for bad in (dict(hold=True),dict(listen_s=5,hold=1),dict(listen_s=5,hold=None)):
+        try:worker.validate(dict(body,**bad))
+        except ValueError:continue
+        raise AssertionError(bad)  # a held capture is only an armed answer window
     for bad in (0,11,'5',True,float('nan')):
         try:worker.validate(dict(body,listen_s=bad))
         except ValueError:continue
