@@ -120,6 +120,14 @@ answer name it as your fastest lap. A tyre stop does not reset this. Out laps, p
 and cut laps do not count.
 Warnings take priority over a queued update.
 
+The same switch also calls position changes within a lap, for example `Gained 2 positions,
+now P4.` or `Lost 1 position, now P7.` The count runs from the last position Jeff named,
+in a lap update, the start report or an earlier position call, or else from the first
+position seen after the radio started listening. A change is called once it
+has held for three seconds, so a swap undone at once stays quiet, and at most every
+15 seconds, so a long fight ends in one call with the net result. Only races get position
+calls: in qualifying the rank moves with the other drivers' times, not with overtakes.
+
 With a race length in laps saved in **Optional race setup**, the update also counts down at
 `10 to go`, `5 to go`, `4 to go`, `3 to go`, `2 to go` and `final lap`, and **Short status**
 always names the laps left.

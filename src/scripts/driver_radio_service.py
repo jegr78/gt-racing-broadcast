@@ -29,6 +29,10 @@ INTERVIEW_MAX_WINDOWS = 12
 # GT7 reports the new race position about a second after the lap line, so a lap
 # message waits this long and then reads the position.
 LAP_POSITION_SETTLE_S = 2.0
+# A position change within a lap is called once it holds this long, and at most once
+# per cooldown after the previous position or lap call.
+POSITION_SETTLE_S = 3.0
+POSITION_COOLDOWN = 15.0
 # A message leaves the HUD in these states even before it expires.
 HUD_GONE = ('superseded','cancelled','expired')
 
@@ -80,6 +84,7 @@ class Service:
         self._start_reported = False
         self._lap_due = None
         self._lap_seen, self._lap_key = False, None
+        self._rank_said, self._rank_seen, self._rank_at = None, None, float('-inf')
         self._speech_enabled = False
         self._audio_output = False
         self._pace_at = float('-inf')
@@ -130,6 +135,7 @@ class Service:
         self._start_position = None
         self._start_reported = False
         self._lap_due = None
+        self._rank_said, self._rank_seen, self._rank_at = None, None, float('-inf')
         self._live = False
 
     def _answer_text(self, message, text):
@@ -407,10 +413,35 @@ class Service:
                 self._publish_lap(f'Started {self._start_position}, {text}' if self._start_position else text[0].upper()+text[1:], result, now)
             elif due[0] == lap_id and self._lap_updates:
                 self._publish_lap(result['lap_text'], result, now)
+        self._position_change(result, now)
 
-    def _publish_lap(self, text, result, now):
-        spoken = dict(result, answers=dict(result['answers'], lap=text))
-        message = self._publish('lap', 'lap', 'normal', spoken, now)
+    def _position_change(self, result, now):
+        """Names a settled position change within a lap, counted from the last called position."""
+        rank = result.get('rank')
+        if self._rank_said is None or rank is None:
+            self._rank_said = self._rank_said or rank
+            self._rank_seen = None
+            return
+        # In qualifying the rank moves with other drivers' times, not with overtakes.
+        if (rank == self._rank_said or self._lap_due is not None or result.get('race_finished')
+                or result.get('session') == 'qualifying'):
+            self._rank_seen = None
+            return
+        if self._rank_seen is None or self._rank_seen[0] != rank:
+            self._rank_seen = (rank, now)
+        if not self._lap_updates or now-self._rank_seen[1] < POSITION_SETTLE_S or now-self._rank_at < POSITION_COOLDOWN:
+            return
+        change = self._rank_said-rank
+        count = abs(change)
+        self._publish_lap(f"{'Gained' if change > 0 else 'Lost'} {count} position{'' if count == 1 else 's'}, now P{rank}.",
+                          result, now, 'position_change')
+
+    def _publish_lap(self, text, result, now, preset='lap'):
+        # A position call has its own preset, so it never supersedes a queued lap update
+        # or the answer to a driver's position question.
+        spoken = dict(result, answers={**result['answers'], preset: text})
+        self._rank_said, self._rank_seen, self._rank_at = result.get('rank') or self._rank_said, None, now
+        message = self._publish(preset, 'lap', 'normal', spoken, now)
         self._messages[message['id']]['ai_state'] = 'not_requested'
 
     def _state(self):
