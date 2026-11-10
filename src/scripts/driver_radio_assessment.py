@@ -461,7 +461,7 @@ def assess(snapshot, session=None, limits=None):
                                    compound, tyre_age, eligible if live else [], service, kind)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, laps=lap_facts, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
-                position=position, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
+                position=position, rank=int(position[1:]) if position else None, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
                 finish_text=_finish_text(position, best['time_s'] if best else None),
                 lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None, total,
                                    mandatory['text']) if lap else None, session=kind, mandatory=mandatory,

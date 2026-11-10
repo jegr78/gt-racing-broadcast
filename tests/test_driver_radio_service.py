@@ -487,14 +487,15 @@ def t_one_slow_lap_reports_pace_but_sends_no_notice():
         assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1,'a repeat is a trend'
 
 
-def _race(d,announcements=None):
+def _race(d,announcements=None,laps=2,session=None):
     f=Fixture(d,snapshot(()))
     f.snap['instruments']['race_position']=5
     f.access.update({'expected':f.access.read()['revision'],'announcements':announcements or {'lap_updates':True,'race_reports':True}})
     f.poll()
     binding=f.service.refresh()['binding']
     declared=f.session.read(binding)
-    f.session.update(binding,dict(binding=binding,expected=declared['revision'],setup={'laps':2}))
+    setup={'laps':laps,'session':session} if session else {'laps':laps}
+    f.session.update(binding,dict(binding=binding,expected=declared['revision'],setup=setup))
     f.snap['revision']+=1;f.poll()
     return f
 
@@ -556,6 +557,59 @@ def t_race_end_without_a_known_start_leaves_it_out():
         f.session.update(binding,dict(binding=binding,expected=declared['revision'],setup={'laps':7}))
         f.snap['revision']+=1;f.poll();_race_lap(f,7,88,6)
         assert _lap_rows(f)[-1]['text']=='Finished P6, best lap: 1:28.000.',_lap_rows(f)
+
+
+def _run_to(f,position,seconds):
+    f.snap['instruments']['race_position']=position;f.snap['revision']+=1;f.poll()
+    f.at+=seconds;f.snap['revision']+=1;f.poll()
+
+
+def t_position_change_within_a_lap_names_the_count_and_the_position():
+    with tempfile.TemporaryDirectory() as d:
+        f=_race(d,{'lap_updates':True},laps=10)
+        _race_lap(f,1,90,4)
+        f.at+=radio.POSITION_COOLDOWN
+        _run_to(f,2,radio.POSITION_SETTLE_S)
+        assert _lap_rows(f)[-1]['text']=='Gained 2 positions, now P2.',_lap_rows(f)
+        assert _lap_rows(f)[0]['state']=='queued','a position call never supersedes the lap update'
+        f.at+=radio.POSITION_COOLDOWN
+        _run_to(f,3,radio.POSITION_SETTLE_S)
+        assert _lap_rows(f)[-1]['text']=='Lost 1 position, now P3.',_lap_rows(f)
+        assert len(_lap_rows(f))==3,'one lap update and two position calls'
+
+
+def t_position_call_waits_for_a_settled_change():
+    with tempfile.TemporaryDirectory() as d:
+        f=_race(d,{'lap_updates':True},laps=10)
+        _race_lap(f,1,90,4);f.at+=radio.POSITION_COOLDOWN
+        _run_to(f,3,radio.POSITION_SETTLE_S-.5);_run_to(f,4,radio.POSITION_SETTLE_S)
+        assert len(_lap_rows(f))==1,'a swap that is undone at once is not news'
+        _run_to(f,6,radio.POSITION_SETTLE_S-.5)
+        assert len(_lap_rows(f))==1,'the call waits until the position holds'
+        f.at+=.5;f.snap['revision']+=1;f.poll()
+        assert _lap_rows(f)[-1]['text']=='Lost 2 positions, now P6.',_lap_rows(f)
+
+
+def t_position_calls_keep_a_gap_and_count_from_the_last_call():
+    with tempfile.TemporaryDirectory() as d:
+        f=_race(d,{'lap_updates':True},laps=10)
+        _race_lap(f,1,90,4)
+        _run_to(f,3,radio.POSITION_SETTLE_S)
+        assert len(_lap_rows(f))==1,'no call right after the lap update'
+        _run_to(f,2,radio.POSITION_SETTLE_S)
+        f.at+=radio.POSITION_COOLDOWN;f.snap['revision']+=1;f.poll()
+        assert _lap_rows(f)[-1]['text']=='Gained 2 positions, now P2.',_lap_rows(f)
+
+
+def t_position_calls_follow_the_lap_update_switch_and_the_session():
+    for announcements,session in (({'race_reports':True},None),({'lap_updates':True},'practice'),
+                                  ({'lap_updates':True},'qualifying')):
+        with tempfile.TemporaryDirectory() as d:
+            f=_race(d,announcements,laps=10,session=session)
+            _race_lap(f,1,90,4);f.at+=radio.POSITION_COOLDOWN
+            before=len(_lap_rows(f))
+            _run_to(f,2,radio.POSITION_SETTLE_S)
+            assert len(_lap_rows(f))==before,(announcements,session,_lap_rows(f))
 
 
 def _lap_rows(f):
