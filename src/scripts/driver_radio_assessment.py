@@ -215,9 +215,14 @@ def _quick_answers(snapshot, live, position, total, completed, usable, consumpti
     return answers
 
 
-def _position(snapshot, live):
+def _rank(snapshot, live):
     value = number((snapshot.get('instruments') or {}).get('race_position'), True)
-    return f'P{value:g}' if live and value is not None else None
+    return int(value) if live and value is not None and value == int(value) else None
+
+
+def _position(snapshot, live):
+    rank = _rank(snapshot, live)
+    return f'P{rank}' if rank is not None else None
 
 
 def _to_go(total, completed, milestones_only=False):
@@ -461,7 +466,7 @@ def assess(snapshot, session=None, limits=None):
                                    compound, tyre_age, eligible if live else [], service, kind)
     return dict(version=1, binding=binding(snapshot), live=live, fuel=fuel_result, pace=pace,
                 tyres=tyres, laps=lap_facts, uncertainties=uncertainty, limits=limits, latest_lap_id=lap['id'] if lap else None,
-                position=position, rank=int(position[1:]) if position else None, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
+                position=position, rank=_rank(snapshot, live) if position else None, race_laps=total, race_finished=race_laps and completed >= total, completed_laps=completed,
                 finish_text=_finish_text(position, best['time_s'] if best else None),
                 lap_text=_lap_text(lap, usable, fastest, position, _to_go(total, completed, True) if race_laps else None, total,
                                    mandatory['text']) if lap else None, session=kind, mandatory=mandatory,

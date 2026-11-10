@@ -572,9 +572,13 @@ def t_position_change_within_a_lap_names_the_count_and_the_position():
         _run_to(f,2,radio.POSITION_SETTLE_S)
         assert _lap_rows(f)[-1]['text']=='Gained 2 positions, now P2.',_lap_rows(f)
         assert _lap_rows(f)[0]['state']=='queued','a position call never supersedes the lap update'
+        asked=f.service.question("What's my position?",assessment.binding(f.snap))
+        assert asked['preset']=='position',asked
         f.at+=radio.POSITION_COOLDOWN
         _run_to(f,3,radio.POSITION_SETTLE_S)
         assert _lap_rows(f)[-1]['text']=='Lost 1 position, now P3.',_lap_rows(f)
+        answer=next(m for m in f.service.history()['messages'] if m['id']==asked['id'])
+        assert answer['state']=='queued','a position call never supersedes the driver\'s question'
         assert len(_lap_rows(f))==3,'one lap update and two position calls'
 
 

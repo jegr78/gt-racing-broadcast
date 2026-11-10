@@ -434,10 +434,11 @@ class Service:
         change = self._rank_said-rank
         count = abs(change)
         self._publish_lap(f"{'Gained' if change > 0 else 'Lost'} {count} position{'' if count == 1 else 's'}, now P{rank}.",
-                          result, now, 'position')
+                          result, now, 'position_change')
 
     def _publish_lap(self, text, result, now, preset='lap'):
-        # A position call has its own preset, so it never supersedes a queued lap update.
+        # A position call has its own preset, so it never supersedes a queued lap update
+        # or the answer to a driver's position question.
         spoken = dict(result, answers={**result['answers'], preset: text})
         self._rank_said, self._rank_seen, self._rank_at = result.get('rank') or self._rank_said, None, now
         message = self._publish(preset, 'lap', 'normal', spoken, now)
