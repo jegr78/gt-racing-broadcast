@@ -1585,9 +1585,9 @@ def t_a_clock_probe_on_a_busy_card_reports_the_card():
     assert found == m.CLOCK_MIC_FAILED, found
     calls = []
     for answer in (m.CLOCK_CARD_BUSY, "monotonic"):
-        assert m.capture_clock("win32", ["-i", "busy-then-free"],
-                               probe=lambda a, answer=answer: calls.append(a) or answer) == answer, (
-            f"capture_clock must hand back {answer!r}")
+        got = m.capture_clock("win32", ["-i", "busy-then-free"],
+                              probe=lambda a, answer=answer: calls.append(a) or answer)
+        assert got == answer, f"capture_clock must hand back {answer!r}"
     assert len(calls) == 2, "a busy card is probed again, never cached"
 
 
