@@ -249,6 +249,9 @@ def t_control_center_relay_row_shows_the_block():
     row = html[html.index("setBadge('relay', relayUp"):]
     row = row[:row.index(";")]
     assert "keepAwakeText(s.relay.keep_awake)" in row, "the relay row names the idle-sleep block"
+    home = html[html.index("setBadgeEl('h-relay', 'hd-relay'"):]
+    home = home[:home.index(";")]
+    assert "keepAwakeText(s.relay.keep_awake)" in home, "the Home relay row names the idle-sleep block too"
     fn = html[html.index("function keepAwakeText(k)"):]
     fn = fn[:fn.index("\n}")]
     assert "idle sleep NOT blocked" in fn and "k.note" in fn, fn

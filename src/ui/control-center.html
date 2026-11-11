@@ -1093,7 +1093,7 @@ function updateHome(s) {
   setBadgeEl('h-obs', 'hd-obs', !!ar.obs, 'RUNNING', 'not running',
              ar.obs ? 'process running' : 'launched by Start');
   setBadgeEl('h-relay', 'hd-relay', relayUp, 'RUNNING', 'stopped',
-             relayUp ? (s.relay.http_ok ? 'control OK on port ' + s.relay.port
+             relayUp ? (s.relay.http_ok ? 'control OK on port ' + s.relay.port + keepAwakeText(s.relay.keep_awake)
                                         : 'port ' + s.relay.port + ' not responding')
                      : 'racecast service');
   setBadgeEl('h-companion', 'hd-companion', compUp, 'RUNNING', 'stopped',
