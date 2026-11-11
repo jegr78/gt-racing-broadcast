@@ -270,8 +270,17 @@ def corner_metrics(lap, definition):
                     'exit_m': end, 'time_s': None if None in times else times[1]-times[0],
                     'entry_speed_kmh': speeds[0], 'anchor_speed_kmh': speeds[1], 'exit_speed_kmh': speeds[2],
                     'min_speed_kmh': min((p['speed_kmh'] for p in part), default=None),
-                    'max_brake_pct': max((p['brake'] for p in part), default=None)})
+                    'max_brake_pct': max((p['brake'] for p in part), default=None),
+                    **_corner_events(lap, start, end)})
     return out
+
+
+def _corner_events(lap, start, end):
+    """The lap's lock-ups and wheelspin that start inside one corner."""
+    events = [e for e in lap.get('wheel_events', [])
+              if e.get('distance_m') is not None and start <= e['distance_m'] <= end]
+    return {'lockups': sum(e['kind'] == 'lockup' for e in events),
+            'wheelspins': sum(e['kind'] == 'wheelspin' for e in events), 'wheel_events': events}
 
 
 def geometry_lap(laps, layout, tracks):

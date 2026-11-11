@@ -35,6 +35,21 @@ def t_decoding_keeps_geometry_gearbox_units_and_constant_zero_distinct():
     assert normal['alert_max_rpm']['label'] != 'Rev limit'
 
 
+def t_slip_ratio_is_a_derived_channel_per_wheel():
+    plain = bytearray(fixture._pkt(2, 30, 0))
+    struct.pack_into('<4f', plain, 0xA4, 30/.36, -30/.36, 15/.36, 45/.36)
+    rows = c.decode(plain, ['slip_fl', 'slip_fr', 'slip_rl', 'slip_rr'])
+    assert [round(rows[k]['value'], 3) for k in ('slip_fl', 'slip_fr', 'slip_rl', 'slip_rr')] == [1.0, 1.0, .5, 1.5], rows
+    assert all(rows[k]['state'] == 'value' for k in rows)
+    slow = c.decode(bytearray(fixture._pkt(2, 5, 0)), ['slip_fl'])['slip_fl']
+    assert slow['value'] is None and slow['state'] == 'unset', f'slip is undefined at low speed: {slow}'
+    short = c.decode(bytes(plain[:0xA0]), ['slip_fl'])['slip_fl']
+    assert short['state'] == 'missing', short
+    desc = {d['key']: d for d in c.descriptors(False)}['slip_rl']
+    assert desc['provenance'] == 'derived' and desc['type'] == 'continuous' and desc['unit'] == '1', desc
+    json.dumps(rows, allow_nan=False)
+
+
 def t_missing_nonfinite_and_unset_are_not_silently_zero():
     plain = bytearray(fixture._pkt(2, 30, 0))
     plain[0x90] = 0xF3

@@ -204,11 +204,11 @@ def parse_packet(plain):
         gear_ratios=tuple(_opt_float(plain, OFF_GEAR_RATIOS + 4 * i) for i in range(8))
         if len(plain) >= OFF_GEAR_RATIOS + 32 else None,
         packet_id=_opt_int(plain, OFF_PACKET_ID),
-        **_wheels(plain),
+        **wheel_fields(plain),
     )
 
 
-def _wheels(plain):
+def wheel_fields(plain):
     """Wheel rotation, tyre radius and the slip ratio per wheel; slip is None below
     SLIP_MIN_SPEED_MPS or when a value is not finite."""
     if len(plain) < OFF_TYRE_RADIUS + 16:

@@ -8,6 +8,8 @@ and units remain diagnostics. No external code/data is required at runtime.
 import math
 import struct
 
+import gt7_telemetry
+
 SCHEMA_VERSION = 1
 SOURCE = 'PDTools SimulatorPacket.cs ffe0bb26377ac9ff62f40951c1c0b16c5d9a380f'
 _CHANNELS = []
@@ -95,15 +97,30 @@ for off, fmt, label in [(0, 'I', 'Packet magic'), (0x40, 'I', 'Packet IV'),
                         *[(off, 'f', 'Unknown extended component') for off in range(0x140, 0x158, 4)]]:
     _field('raw_'+f'0x{off:03x}', label, off, fmt, 'native', diagnostic=True,
            uncertainty='Raw representation only; interpretation/unit is not validated')
+# Slip ratio per wheel: |rotation| x radius / car speed, undefined below the minimum speed.
+for i, corner in enumerate(('fl', 'fr', 'rl', 'rr')):
+    _CHANNELS.append(dict(key='slip_'+corner, label='Slip ratio '+corner.upper(), offset=f'0x{0xA4+4*i:03x}',
+                          encoding='f', unit='1', type='continuous', provenance='derived', source=SOURCE,
+                          diagnostic=False, uncertainty='', off=None, factor=1, shift=0, mask=None,
+                          sentinel=None, subtract=0, wheel=i))
 for bit in (3, 12, 13, 14, 15):
     _field('raw_flag_'+str(bit), 'Unverified simulator flag '+str(bit), 0x8E, 'H',
            shift=bit, mask=1, diagnostic=True, uncertainty='Flag meaning is unverified')
 _BY_KEY = {d['key']: d for d in _CHANNELS}
 
 
+def _slip(plain, wheel):
+    if len(plain) < gt7_telemetry.OFF_TYRE_RADIUS + 16:
+        return {'value': None, 'state': 'missing', 'raw': None}
+    slip = gt7_telemetry.wheel_fields(bytes(plain))['slip']
+    if slip is None:
+        return {'value': None, 'state': 'unset', 'raw': None}
+    return {'value': slip[wheel], 'state': 'value', 'raw': None}
+
+
 def descriptors(diagnostic=None):
     """Public descriptors are copies; no internal decoder configuration leaks or mutates."""
-    hidden = {'off', 'factor', 'shift', 'mask', 'subtract'}
+    hidden = {'off', 'factor', 'shift', 'mask', 'subtract', 'wheel'}
     return [{k: v for k, v in d.items() if k not in hidden} for d in _CHANNELS
             if diagnostic is None or d['diagnostic'] == diagnostic]
 
@@ -116,6 +133,9 @@ def decode(plain, keys=None):
     out = {}
     for key in keys:
         d = _BY_KEY[key]
+        if 'wheel' in d:
+            out[key] = _slip(plain, d['wheel'])
+            continue
         off, size = d['off'], struct.calcsize('<'+d['encoding'])
         if len(plain) < off + size:
             out[key] = {'value': None, 'state': 'missing', 'raw': None}

@@ -197,6 +197,19 @@ def t_analysis_joins_definition_snapshots_without_mutating_raw_indexes():
         assert empty['laps'][0]['larger_sectors'], 'clearing optional selection metadata must preserve analysis'
 
 
+def t_corner_metrics_count_the_wheel_events_inside_each_corner():
+    projected = td.project_definition(definition(), fixture.FakeTracks())
+    corner = projected['corners'][0]
+    inside = {'kind': 'lockup', 'wheel': 'FR', 'start_s': 0.6, 'distance_m': corner['apex_m'], 'duration_s': 0.3, 'extreme': 0.4}
+    outside = dict(inside, kind='wheelspin', wheel='RL', distance_m=corner['exit_m'] + 50)
+    row = dict(lap(2, (4, 4, 4, 4)), wheel_events=[inside, outside])
+    metrics = td.corner_metrics(row, projected)[0]
+    assert (metrics['lockups'], metrics['wheelspins']) == (1, 0), metrics
+    assert metrics['wheel_events'] == [inside], metrics['wheel_events']
+    bare = td.corner_metrics(lap(2, (4, 4, 4, 4)), projected)[0]
+    assert (bare['lockups'], bare['wheel_events']) == (0, []), 'an older index without events reads as none'
+
+
 def t_verified_game_divisions_are_preferred_without_overriding_a_session_choice():
     with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as bundle:
         store = td.Store(root, bundle)
