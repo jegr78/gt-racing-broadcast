@@ -972,6 +972,18 @@ def t_the_report_counts_the_relays_mic_remutes():
     assert quiet["mic_remutes"] == 0 and "commentary mic" not in rb.render_html(quiet)
 
 
+def t_the_report_names_local_stints_without_the_mixed_mic():
+    # #1124: the OBS mic carried the voice ~3 s early; the producer learns it afterwards.
+    samples = [_sample(0.0, live_stint=1), _sample(30.0, live_stint=1)]
+    events = [{"ts": 5.0, "type": "mic_fallback", "metadata": {"input": "Commentary Mic Device"}}]
+    rep = rb.build_report(samples, events, {1: "Alice"}, "E", (0.0, 30.0), now=100.0)
+    assert rep["mic_fallbacks"] == 1 and rep["mic_remutes"] == 0, rep
+    html = rb.render_html(rep)
+    assert "without the commentary mic in its feed 1 time(s)" in html, html
+    quiet = rb.build_report(samples, [], {1: "Alice"}, "E", (0.0, 30.0), now=100.0)
+    assert "without the commentary mic" not in rb.render_html(quiet)
+
+
 def t_a_repair_between_two_parts_is_still_part_of_the_event():
     # One series across every window, not a sum per window. Per window, each part's
     # first sample is its own baseline, so a rise in the off-air gap between two parts
