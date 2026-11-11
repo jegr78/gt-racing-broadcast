@@ -467,11 +467,30 @@ def t_telemetry_loop_counts_lost_and_undecryptable_packets():
         m.socket.socket, m.gt7_telemetry.parse_packet = real, parse
     stats = store.packet_stats()
     assert (stats["received"], stats["lost"], stats["decrypt_failed"], stats["parse_failed"]) == (3, 2, 1, 1), stats
-    srv, get = _serve(store)
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    srv, get = _serve(store, relay=_StatusRelay())
     try:
         assert json.loads(get("/telemetry/data")[2])["packets"]["lost"] == 2
+        assert json.loads(get("/status")[2])["telemetry"]["packets"]["decrypt_failed"] == 1, \
+            "the relay status carries the packet counters"
     finally:
         srv.shutdown()
+
+
+def t_relay_main_wires_the_packet_counters_everywhere():
+    import inspect
+    src = inspect.getsource(m.main)
+    for needle in ("packets=gt7_packet_stats.PacketStats()",
+                   "recorder.packet_stats = telemetry_store.packet_stats",
+                   "relay.telemetry_store = telemetry_store"):
+        assert needle in src, f"main() must wire {needle}"
+    assert src.index("telemetry_store = gt7_telemetry.TelemetryStore(") < src.index("relay.telemetry_store = telemetry_store"), \
+        "the health check gets the store after it exists"
+    assert "race_engineer_api.Service(store, packets=telemetry.packet_stats)" in inspect.getsource(m.engineer_live_for), \
+        "the Engineer snapshot carries the live counters"
 
 
 def t_relay_starts_telemetry_side_effects_only_after_the_control_port_bind():
