@@ -153,7 +153,22 @@ shared notes and limitations update without resetting that selection.
 ## Connection, history and access
 
 Pause, menu, loading, preparation delay, stale telemetry and browser disconnection
-have distinct labels. Five seconds without packets dims retained values. A browser
+have distinct labels. Five seconds without packets dims retained values.
+
+GT7 numbers its packets and sends about 60 per second, so the relay counts the ones that
+never arrive. The connection line shows `packets lost: x % (10 s)`, the share of packets
+missing over the last ten seconds. When that share stays at 5 % or more for 20 seconds while
+packets still arrive, the status reads **Lossy network** instead of **Telemetry live**, and
+the Health Monitor shows a yellow `GT7 telemetry losing ... of its packets` line. Both point
+at the console's Wi-Fi or LAN, not at racecast. The warning never pages Discord. No packets at
+all stays **Telemetry stale**. `/telemetry/data` and the relay `/status` carry the counters
+(received, lost, out of order or repeated, undecryptable, unparseable). A new GT7 stream (the
+packet number jumps back, jumps ahead by more than ten seconds of packets, or packets return
+after five seconds of silence) starts a new count. Recordings keep the counters, and the lap
+index notes `N packets lost` on every lap that missed packets, so a gap in a trace can be told
+apart from a driving gap. Such a lap still counts.
+
+A browser
 connection interruption keeps selection and zoom while it retries. A relay restart, and a
 replay starting or ending, starts a new generation and clears the live selection and zoom.
 The notice names which of them happened. A selected shared reference stays selected. Explicitly

@@ -14480,7 +14480,7 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
         recording_source=recording_path,
         context_source=lambda: gt7_context.Store.prepared(rec_dir).read(),
     )
-    store.api = race_engineer_api.Service(store)
+    store.api = race_engineer_api.Service(store, packets=telemetry.packet_stats)
     store.radio_link = driver_radio_recording.Link(rec_dir, recording_path)
     telemetry.engineer = store
     telemetry.data_listeners.append(store.reload_data)
