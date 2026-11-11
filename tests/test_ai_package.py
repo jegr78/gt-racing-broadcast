@@ -103,7 +103,8 @@ def t_lockups_and_wheelspin_are_measured_facts_with_their_definition():
         s = source(Path(d)/'telemetry-recordings', [dict(row(2), wheel_events=[event], lockups=1, wheelspins=0), row(3)])
         package = a.build(s, 1)
         lap2 = [lap for lap in package['laps'] if lap['lap'] == 2][0]
-        assert lap2['metrics']['wheel_events'] == [event] and lap2['metrics']['lockups'] == 1, lap2['metrics']
+        assert lap2['metrics'].get('wheel_events') == [event] and lap2['metrics'].get('lockups') == 1, \
+            f"lock-ups are measured lap facts: {lap2['metrics']}"
         assert any('Lock-up: a braked wheel' in note for note in package['limitations']), package['limitations']
         german = a.build(s, 1, language='de')
         assert any('Blockieren' in note for note in german['limitations']), german['limitations']

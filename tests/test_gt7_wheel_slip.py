@@ -49,15 +49,17 @@ def run(detector, packets, t0=0.0, dt=1 / 60):
 
 def t_a_braked_wheel_below_the_floor_is_a_lockup():
     locked = (30 / R, 30 / R * 0.2, 30 / R, 30 / R)      # FR turns at 20 % of the car speed
+    locking = (30 / R, 30 / R * 0.5, 30 / R, 30 / R)
     d = tm.SlipEvents()
-    packets = ([wheel_packet(30)] * 10 + [wheel_packet(30, rot=locked, brake=200)] * 30
+    packets = ([wheel_packet(30)] * 10 + [wheel_packet(30, rot=locking, brake=200)] * 10
+               + [wheel_packet(30, rot=locked, brake=200)] * 10 + [wheel_packet(30, rot=locking, brake=200)] * 10
                + [wheel_packet(30)] * 10)
     events = run(d, packets)
     assert len(events) == 1, events
     e = events[0]
     assert (e["kind"], e["wheel"]) == ("lockup", "FR"), e
     assert abs(e["start_s"] - 10 / 60) < 1e-6 and abs(e["duration_s"] - 30 / 60) < 1e-6, e
-    assert round(e["extreme"], 3) == 0.2, e
+    assert round(e["extreme"], 3) == 0.2, f"the extreme is the lowest ratio of the event: {e}"
 
 
 def t_a_driven_wheel_above_the_ceiling_under_throttle_is_wheelspin():

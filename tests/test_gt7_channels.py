@@ -39,8 +39,8 @@ def t_slip_ratio_is_a_derived_channel_per_wheel():
     plain = bytearray(fixture._pkt(2, 30, 0))
     struct.pack_into('<4f', plain, 0xA4, 30/.36, -30/.36, 15/.36, 45/.36)
     rows = c.decode(plain, ['slip_fl', 'slip_fr', 'slip_rl', 'slip_rr'])
+    assert all(rows[k]['state'] == 'value' for k in rows), f'every wheel has a slip value at speed: {rows}'
     assert [round(rows[k]['value'], 3) for k in ('slip_fl', 'slip_fr', 'slip_rl', 'slip_rr')] == [1.0, 1.0, .5, 1.5], rows
-    assert all(rows[k]['state'] == 'value' for k in rows)
     slow = c.decode(bytearray(fixture._pkt(2, 5, 0)), ['slip_fl'])['slip_fl']
     assert slow['value'] is None and slow['state'] == 'unset', f'slip is undefined at low speed: {slow}'
     short = c.decode(bytes(plain[:0xA0]), ['slip_fl'])['slip_fl']
