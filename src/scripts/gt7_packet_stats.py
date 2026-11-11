@@ -81,7 +81,8 @@ class PacketStats:
             self._lossy_since = None
 
     def on_packet(self, pid, now):
-        if (not self.stream or self._last_at is None or now - self._last_at >= STREAM_IDLE_S
+        if not self.stream or self._last_at is not None and (
+                now - self._last_at >= STREAM_IDLE_S
                 or pid < self._last_id - REORDER_WINDOW or pid - self._last_id - 1 > MAX_GAP):
             self._new_stream()
         bucket = self._bucket(now)
@@ -101,7 +102,8 @@ class PacketStats:
             bucket[2] -= 1
         else:
             self.counts["reordered"] += 1
-        self._missing = {m for m in self._missing if m >= self._last_id - REORDER_WINDOW}
+        if self._missing:
+            self._missing = {m for m in self._missing if m >= self._last_id - REORDER_WINDOW}
         self._last_at = now
         self._judge(now)
 

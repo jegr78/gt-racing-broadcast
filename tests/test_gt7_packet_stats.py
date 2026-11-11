@@ -79,6 +79,14 @@ def t_decode_failures_are_counted_separately():
     assert (snap["decrypt_failed"], snap["parse_failed"], snap["lost"]) == (2, 1, 0), snap
 
 
+def t_a_failure_before_the_first_packet_stays_in_its_stream():
+    s = ps.PacketStats()
+    s.on_decrypt_failure(100.0)
+    t = feed(s, [1, 2, 3], 100.1)
+    snap = s.snapshot(t)
+    assert (snap["stream"], snap["decrypt_failed"], snap["received"]) == (1, 1, 3), snap
+
+
 def t_the_rate_covers_only_the_last_ten_seconds():
     s = ps.PacketStats()
     ids = [i for i in range(1, 601) if i % 10]          # 10 % lost
