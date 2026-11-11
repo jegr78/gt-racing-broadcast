@@ -1070,6 +1070,12 @@ function setBadgeEl(badgeId, detailId, on, onText, offText, detail) {
   if (detailId) $(detailId).textContent = detail || '';
 }
 
+// The detail of a running relay, shared by the Home and Services rows.
+function relayDetail(r) {
+  return r.http_ok ? 'control OK on port ' + r.port + keepAwakeText(r.keep_awake)
+                   : 'port ' + r.port + ' not responding';
+}
+
 // The relay's idle-sleep block (#1105); empty for a relay that does not report it.
 function keepAwakeText(k) {
   if (!k) return '';
@@ -1093,9 +1099,7 @@ function updateHome(s) {
   setBadgeEl('h-obs', 'hd-obs', !!ar.obs, 'RUNNING', 'not running',
              ar.obs ? 'process running' : 'launched by Start');
   setBadgeEl('h-relay', 'hd-relay', relayUp, 'RUNNING', 'stopped',
-             relayUp ? (s.relay.http_ok ? 'control OK on port ' + s.relay.port + keepAwakeText(s.relay.keep_awake)
-                                        : 'port ' + s.relay.port + ' not responding')
-                     : 'racecast service');
+             relayUp ? relayDetail(s.relay) : 'racecast service');
   setBadgeEl('h-companion', 'hd-companion', compUp, 'RUNNING', 'stopped',
              s.companion.url || s.companion.why || '');
   setBadgeEl('h-streams', 'hd-streams', strAlive > 0, 'RUNNING', 'stopped',
@@ -1467,8 +1471,7 @@ async function refresh() {
   $('ver').textContent = s.version;
   const relayUp = s.relay.alive;
   setBadge('relay', relayUp, 'RUNNING', 'stopped',
-    relayUp ? (s.relay.http_ok ? 'control OK on port ' + s.relay.port + keepAwakeText(s.relay.keep_awake)
-                               : 'port ' + s.relay.port + ' not responding') : '');
+    relayUp ? relayDetail(s.relay) : '');
   const panelUp = relayUp && s.relay.http_ok;
   // The sidebar quick-link and the Relay-page Open are the producer's own links, so
   // prefer the Tailscale host and the producer shares the directors' endpoint.

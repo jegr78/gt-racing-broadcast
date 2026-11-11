@@ -126,7 +126,7 @@ While the relay runs it keeps the producer PC from going to sleep when idle, als
 OBS starts streaming and in a solo session that only records telemetry. Display sleep and
 closing the lid still work. On Windows and macOS a sleep you choose yourself works too; on
 Linux the block also holds back a suspend you start (`systemctl suspend -i` overrides it,
-or stop the relay first). The Control Center's Relay row
+or stop the relay first). The Relay rows on the Control Center's Home and Services views
 and `racecast relay status` say whether the block is held. Windows uses
 `SetThreadExecutionState`, macOS `caffeinate`, Linux `systemd-inhibit`; without
 `systemd-inhibit` the relay logs one line and runs on. `RACECAST_KEEP_AWAKE=0` in `.env`
