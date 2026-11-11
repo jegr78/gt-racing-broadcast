@@ -1,8 +1,10 @@
 """Keep the producer PC from idle sleep while the relay runs (#1105).
 
-Stdlib only: the standalone relay imports it. Only idle sleep is blocked; display
-sleep, a closed lid and a sleep the operator chooses stay untouched. Every block
-ends with the relay process, so a crash or kill leaves none behind.
+Stdlib only: the standalone relay imports it. Display sleep and a closed lid stay
+untouched. On Windows and macOS only idle sleep is blocked; on Linux the logind
+block also holds back a suspend the operator requests (`systemctl suspend -i`
+overrides it). Every block ends with the relay process, so a crash or kill leaves
+none behind.
 """
 import logging
 import shutil
@@ -13,6 +15,7 @@ import threading
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 _FALSEY = {"0", "false", "no", "off"}
+STARTUP_CHECK_S = 0.3
 
 
 def enabled(environ):
@@ -121,10 +124,12 @@ class KeepAwake:
                                 stderr=subprocess.PIPE, text=True, errors="replace")
         self._held = True
         self.note = ""
-        self.log.info("keep-awake: idle sleep blocked (%s)", self.method)
         self._watch = threading.Thread(target=self._watch_helper, args=(self._proc,),
                                        name="keep-awake", daemon=True)
         self._watch.start()
+        self._watch.join(STARTUP_CHECK_S)   # a helper that fails at once logs only its failure
+        if self._watch.is_alive():
+            self.log.info("keep-awake: idle sleep blocked (%s)", self.method)
 
     def _watch_helper(self, proc):
         try:
@@ -135,11 +140,6 @@ class KeepAwake:
             return
         lines = [x.strip() for x in (err or "").splitlines() if x.strip()]
         self._fail(lines[-1] if lines else f"{self.method} exited ({proc.poll()})")
-
-    def wait_watch(self, timeout):
-        """Test seam: wait until the helper watcher has finished."""
-        if self._watch is not None:
-            self._watch.join(timeout)
 
     def status(self):
         held = self._held

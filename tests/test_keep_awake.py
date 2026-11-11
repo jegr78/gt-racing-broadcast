@@ -152,12 +152,12 @@ def t_helper_that_exits_early_is_one_warning_and_not_held():
     holder = ka.KeepAwake(1, platform="linux", which=which_from(PATHS),
                           popen=lambda argv, **kw: proc, environ={}, log=log)
     holder.start()
-    holder.wait_watch(5)
     st = holder.status()
     assert st["held"] is False and st["method"] == "systemd-inhibit", st
     assert "Access denied" in st["note"], st
-    warnings = [r for r in records if r.levelno >= logging.WARNING]
-    assert len(warnings) == 1 and "Access denied" in warnings[0].getMessage(), warnings
+    assert len(records) == 1 and records[0].levelno == logging.WARNING, \
+        f"a helper that fails at once logs only its failure: {records}"
+    assert "Access denied" in records[0].getMessage(), records
 
 
 def t_popen_failure_is_one_warning_and_not_held():

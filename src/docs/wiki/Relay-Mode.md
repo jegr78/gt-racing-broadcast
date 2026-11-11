@@ -123,8 +123,10 @@ see [Director](Director) and the security note below.
 (Developers running from the repo: python3 src/racecast.py works the same everywhere.)
 
 While the relay runs it keeps the producer PC from going to sleep when idle, also before
-OBS starts streaming and in a solo session that only records telemetry. Display sleep,
-closing the lid and a sleep you choose yourself still work. The Control Center's Relay row
+OBS starts streaming and in a solo session that only records telemetry. Display sleep and
+closing the lid still work. On Windows and macOS a sleep you choose yourself works too; on
+Linux the block also holds back a suspend you start (`systemctl suspend -i` overrides it,
+or stop the relay first). The Control Center's Relay row
 and `racecast relay status` say whether the block is held. Windows uses
 `SetThreadExecutionState`, macOS `caffeinate`, Linux `systemd-inhibit`; without
 `systemd-inhibit` the relay logs one line and runs on. `RACECAST_KEEP_AWAKE=0` in `.env`
