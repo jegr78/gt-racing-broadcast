@@ -249,7 +249,7 @@ def _mandatory(snapshot, setup, service):
     rows = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:] if r.get('session_id') == snapshot.get('session_id')]
     current = snapshot.get('current') or {}
     pits = {r.get('id') for r in rows if 'pit' in (r.get('lap_role'), r.get('analysis_role')) and not r.get('non_race')}
-    if 'pit' in (current.get('lap_role'), current.get('analysis_role')):
+    if 'pit' in (current.get('lap_role'), current.get('analysis_role')) and not current.get('non_race'):
         pits.add(current.get('id'))
     required = setup.get('mandatory_stops')
     left = max(0, required-len(pits)) if required is not None else None
@@ -339,7 +339,7 @@ def _finish(snapshot, setup, rows, consumption, usable):
     return result
 
 
-def _race_laps(snapshot, skip):
+def _counted_in_race_laps(snapshot, skip):
     """The snapshot counted in race laps: a declared non-race opening lap becomes lap 0
     and is marked non_race, every later lap of the session moves down by one."""
     if not skip:
@@ -367,7 +367,7 @@ def assess(snapshot, session=None, limits=None):
     # Practice and qualifying have no race distance: no laps to go, no start or finish report.
     raced = kind not in ('practice', 'qualifying')
     race_setup = setup if raced else {k: v for k, v in setup.items() if k not in ('laps', 'duration_min')}
-    snapshot = _race_laps(snapshot, 1 if raced and setup.get('opening_lap') else 0)
+    snapshot = _counted_in_race_laps(snapshot, 1 if raced and setup.get('opening_lap') else 0)
     live = (snapshot.get('receipt', {}).get('state') == 'live'
             and not snapshot.get('replay', {}).get('active') and snapshot.get('session_id') is not None)
     rows = _cohort(snapshot, service)

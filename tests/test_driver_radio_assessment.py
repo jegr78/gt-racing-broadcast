@@ -140,6 +140,9 @@ def t_a_follow_up_lobby_counts_from_the_lap_after_the_box():
     snap=snapshot((140,95,90));snap['laps'][0]['analysis_role']='pit'
     stops=review(snap,{'setup':{'laps':6,'opening_lap':'to_box','mandatory_stops':1}})['mandatory']
     assert stops['stops_done']==0 and stops['stops_left']==1,'the box wait before the GO is no mandatory stop'
+    snap=snapshot(());snap['current']['lap_role']='pit'
+    stops=review(snap,{'setup':{'laps':6,'opening_lap':'to_box','mandatory_stops':1}})['mandatory']
+    assert stops['stops_done']==0,'driving into the box on lap 1 is no mandatory stop either'
 
 
 def t_a_timed_race_clock_starts_after_the_formation_lap():

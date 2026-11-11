@@ -146,17 +146,21 @@ def _names(codes):
     return names[0] if len(names) == 1 else ', '.join(names[:-1])+' and '+names[-1]
 
 
+def _opening_plan(kind):
+    """The setup change for lap 1; None declares it a race lap again."""
+    readback = OPENING_READBACK[kind] if kind else 'lap 1 is a race lap'
+    return dict(setup=dict(opening_lap=kind), readback=f'Copy, {readback}.')
+
+
 def _opening_lap(clean):
     """'formation lap', 'wir haben eine Einführungsrunde', 'box start', 'no formation lap'."""
     if re.fullmatch(r'(?:no|keine|kein) (?:formation lap|formationsrunde|einfuehrungsrunde|box start|boxenstart)'
                     r'|normal(?:er)? start', clean):
-        return dict(setup=dict(opening_lap=None), readback='Copy, lap 1 is a race lap.')
+        return _opening_plan(None)
     match = re.fullmatch(r'(?:(?:we |wir )?(?:have |haben |start with |starten mit )|with |mit )?'
                          r'(?:a |an |the |eine |einer |der |die )?(.+)', clean)
     kind = _OPENING.get(match[1]) if match else None
-    if kind is None:
-        return None
-    return dict(setup=dict(opening_lap=kind), readback=f'Copy, {OPENING_READBACK[kind]}.')
+    return _opening_plan(kind) if kind else None
 
 
 def plan(text):
@@ -309,10 +313,7 @@ def interview_reply(step, text):
         result = plan('mandatory none' if none else clean if re.match(r'(?:mandatory|pflicht) ', clean) else 'mandatory ' + clean)
     elif step == 'opening_lap':
         kind = _OPENING_SHORT.get(clean)
-        result = (dict(setup=dict(opening_lap=None), readback='Copy, lap 1 is a race lap.') if none
-                  else dict(setup=dict(opening_lap=kind), readback=f'Copy, {OPENING_READBACK[kind]}.') if kind
-                  else _opening_lap(clean))
-        result = result if result and set(result.get('setup', {})) == {'opening_lap'} else None
+        result = _opening_plan(None) if none else _opening_plan(kind) if kind else _opening_lap(clean)
     elif step == 'fuel_reserve':
         amount = '0' if none else clean
         result = plan('reserve ' + amount if re.search(r'(?:litres?|liters?|liter|l)$', amount) else 'reserve ' + amount + ' litres')
