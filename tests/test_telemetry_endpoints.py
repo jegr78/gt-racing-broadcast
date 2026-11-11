@@ -415,6 +415,85 @@ def t_telemetry_loop_records_a_packet_the_parser_rejects():
     assert waits == [], f"a rejected packet must not pause the loop for a second: {waits}"
 
 
+def _with_packet_id(cipher, pid):
+    """The encrypted fixture packet with another packet id: Salsa20 is an XOR stream."""
+    old = m.gt7_crypto.decrypt_packet(cipher)[0x70:0x74]
+    new = pid.to_bytes(4, "little", signed=True)
+    out = bytearray(cipher)
+    for i in range(4):
+        out[0x70 + i] ^= old[i] ^ new[i]
+    return bytes(out)
+
+
+def t_telemetry_loop_counts_lost_and_undecryptable_packets():
+    import json
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import EXT_TCS_HEX
+    ps_ip = "100.64.0.7"
+    stop = _t.Event()
+    clock = [100.0]
+    base = bytes.fromhex(EXT_TCS_HEX)
+    packets = [_with_packet_id(base, 10), _with_packet_id(base, 11), b"\x00" * len(base),
+               _with_packet_id(base, 14), _with_packet_id(base, 15)]
+    assert m.gt7_crypto.decrypt_packet(packets[3])[0x70:0x74] == (14).to_bytes(4, "little")
+
+    class FakeSock:
+        def __init__(self, *a, **kw): pass
+        def setsockopt(self, *a): pass
+        def bind(self, addr): pass
+        def settimeout(self, s): pass
+        def close(self): pass
+        def sendto(self, data, addr): pass
+        def recvfrom(self, n):
+            if packets:
+                clock[0] += 1 / 60
+                return packets.pop(0), (ps_ip, 33740)
+            stop.set()
+            raise _socket.timeout()
+
+    store = m.gt7_telemetry.TelemetryStore(None, clock=lambda: clock[0], packets=m.gt7_packet_stats.PacketStats())
+    real, parse = m.socket.socket, m.gt7_telemetry.parse_packet
+    m.socket.socket = FakeSock
+
+    def flaky(plain):
+        if m.gt7_packet_stats.packet_id(plain) == 15:
+            raise ValueError("unparseable")
+        return parse(plain)
+    m.gt7_telemetry.parse_packet = flaky
+    try:
+        m._telemetry_loop(store, ps_ip, stop, clock=lambda: clock[0])
+    finally:
+        m.socket.socket, m.gt7_telemetry.parse_packet = real, parse
+    stats = store.packet_stats()
+    assert (stats["received"], stats["lost"], stats["decrypt_failed"], stats["parse_failed"]) == (3, 2, 1, 1), stats
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    srv, get = _serve(store, relay=_StatusRelay())
+    try:
+        assert json.loads(get("/telemetry/data")[2])["packets"]["lost"] == 2
+        status = json.loads(get("/status")[2])["telemetry"]
+        assert (status.get("packets") or {}).get("decrypt_failed") == 1, \
+            f"the relay status carries the packet counters: {status}"
+    finally:
+        srv.shutdown()
+
+
+def t_relay_main_wires_the_packet_counters_everywhere():
+    import inspect
+    src = inspect.getsource(m.main)
+    for needle in ("packets=gt7_packet_stats.PacketStats()",
+                   "recorder.packet_stats = telemetry_store.packet_stats",
+                   "relay.telemetry_store = telemetry_store"):
+        assert needle in src, f"main() must wire {needle}"
+    assert src.index("telemetry_store = gt7_telemetry.TelemetryStore(") < src.index("relay.telemetry_store = telemetry_store"), \
+        "the health check gets the store after it exists"
+    assert "race_engineer_api.Service(store, packets=telemetry.packet_stats)" in inspect.getsource(m.engineer_live_for), \
+        "the Engineer snapshot carries the live counters"
+
+
 def t_relay_starts_telemetry_side_effects_only_after_the_control_port_bind():
     import inspect
     src = inspect.getsource(m.main)

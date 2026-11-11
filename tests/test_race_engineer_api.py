@@ -52,6 +52,19 @@ def t_thin_snapshot_history_revision_and_private_projection():
             finally: service.close()
 
 
+def t_the_snapshot_carries_the_packet_counters_when_the_relay_has_them():
+    counters = {"received": 600, "lost": 30, "loss_rate_10s": 0.0476, "lossy": False}
+    with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars()) as store:
+        service = api.Service(store, packets=lambda: dict(counters))
+        try:
+            assert service.snapshot().get('packets') == counters, 'the live snapshot carries the counters'
+        finally: service.close()
+        bare = api.Service(store)
+        try:
+            assert 'packets' not in bare.snapshot(), 'a replayed recording has no live network'
+        finally: bare.close()
+
+
 def t_session_car_and_measured_position_survive_the_public_projection():
     import gt7_telemetry
     from test_gt7_laps import _pkt

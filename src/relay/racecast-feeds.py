@@ -166,6 +166,7 @@ import cookie_jar  # the shared "jar holds a YouTube login" rule, same as prefli
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
+import gt7_packet_stats
 from contextlib import nullcontext
 import telemetry_replay
 import intermission_live
@@ -1310,6 +1311,9 @@ def aggregate_health(facts):
            streamed before but is not streaming now, a live broadcast dropped
            off air). The stream_expected latch means starting the relay pre-show,
            before OBS ever goes live, never alarms.
+    telemetry_lossy (optional loss rate 0..1 while gt7_packet_stats calls the GT7 network
+        lossy, else None: a quiet, display-only yellow excluded from the notify level).
+
     yellow = OBS WebSocket unreachable · cookies stale · Tailscale down · a feed
              stuck connecting · stream_reconnecting · funnel_down ·
              sheet_push_failing · an auto-rebuild stood down · a consumer backlog. A red result still lists
@@ -1348,6 +1352,9 @@ def aggregate_health(facts):
             yellow.append(f"Feed {name} stuck connecting")
     for name in facts.get("feeds_jittery") or []:
         yellow.append(f"Feed {name} inbound stall. A gap exceeded the fan-out reserve (stutter risk)")
+    if facts.get("telemetry_lossy") is not None:
+        yellow.append(f"GT7 telemetry losing {facts['telemetry_lossy'] * 100:.0f} % of its packets: "
+                      f"check the console's network")
     for name, fps in (facts.get("rebuilds_stood_down") or {}).items():
         renders = f" (producer host renders {fps:.0f} fps)" if fps is not None else ""
         yellow.append(f"Feed {name} rebuild ineffective: {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
@@ -9538,7 +9545,17 @@ class Relay:
                 "feeds_backlogged": dict(self._backlogged_feeds),
                 "feeds_av_disturbed": self._av_health_fact(),
                 "mic_problem": (mic_health_problem(self.mic_device)
-                                if self._schedule_has_local() else None)}
+                                if self._schedule_has_local() else None),
+                "telemetry_lossy": self._telemetry_lossy_fact()}
+
+    def _telemetry_lossy_fact(self):
+        """The GT7 loss rate while the packet counters call the network lossy, else None."""
+        store = getattr(self, "telemetry_store", None)
+        try:
+            stats = store.packet_stats() if store is not None else None
+        except Exception:  # noqa: BLE001  health sampling is best-effort
+            return None
+        return stats.get("loss_rate_10s") if isinstance(stats, dict) and stats.get("lossy") else None
 
     def _note_obs_splice(self, feed):
         """Record that the relay just spliced this feed into OBS by rebuilding the input.
@@ -9613,7 +9630,8 @@ class Relay:
         notify_level = aggregate_health({**facts, "feeds_jittery": [],
                                          "feeds_backlogged": {},
                                          "feeds_av_disturbed": {},
-                                         "mic_problem": None})["level"]
+                                         "mic_problem": None,
+                                         "telemetry_lossy": None})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -13053,6 +13071,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         base["telemetry"]["record"] = telemetry_store.recorder.status()
                     if telemetry_store.has_tracks():
                         base["telemetry"]["track"] = telemetry_store.track()
+                    packets = telemetry_store.packet_stats()
+                    if packets is not None:
+                        base["telemetry"]["packets"] = packets
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
@@ -14459,7 +14480,7 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
         recording_source=recording_path,
         context_source=lambda: gt7_context.Store.prepared(rec_dir).read(),
     )
-    store.api = race_engineer_api.Service(store)
+    store.api = race_engineer_api.Service(store, packets=telemetry.packet_stats)
     store.radio_link = driver_radio_recording.Link(rec_dir, recording_path)
     telemetry.engineer = store
     telemetry.data_listeners.append(store.reload_data)
@@ -14500,12 +14521,21 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0
                                              # forge valid telemetry (the key is fixed+public)
             kind, plain = gt7_crypto.decrypt_typed(data)
             if plain is None:
+                store.count_packet("decrypt", now=clock())
                 continue
             heartbeat.on_packet(kind, clock())
             now_wall = time.time()
             store.record(now_wall, kind, plain)
             try:
                 packet = gt7_telemetry.parse_packet(plain)
+            except Exception as e:  # noqa: BLE001  a bad packet must not pause the loop, it is recorded already
+                store.count_packet("parse", now=clock())
+                if not packet_failed:
+                    tlog.error("telemetry packet rejected (logged once): %s", e)
+                packet_failed = True
+                continue
+            store.count_packet("ok", packet.packet_id, clock())
+            try:
                 # An arbitrary UDP datagram must not pin discovery and redirect
                 # all future heartbeats away from the actual console.
                 if dest is None:
@@ -15271,7 +15301,9 @@ def main():
             view_path=os.path.join(runtime, "telemetry-view.json"),   # show/hide survives restarts
             cars=gt7_cars.CarDB(gt7_data.cars_dir(runtime_base, gt7_bundled)),
             tracks=gt7_tracks.TrackDB.load(runtime_base, gt7_bundled),
-            recorder=recorder)
+            recorder=recorder, packets=gt7_packet_stats.PacketStats())
+        recorder.packet_stats = telemetry_store.packet_stats
+        relay.telemetry_store = telemetry_store   # the health check reads its packet counters
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because

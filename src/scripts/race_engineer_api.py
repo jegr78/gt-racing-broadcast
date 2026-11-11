@@ -177,8 +177,9 @@ def selector(value):
 
 
 class Service:
-    def __init__(self, live):
+    def __init__(self, live, packets=None):
         self.live = live
+        self._packets = packets  # the relay's live GT7 packet counters, None for a replayed recording
         self._lock = threading.Lock()
         self._queue = queue.Queue(maxsize=16)
         self._cache = collections.OrderedDict()
@@ -194,6 +195,9 @@ class Service:
         result = self.live.snapshot(compact=True)
         if result.get("current"):
             result["current"] = public_lap(result["current"], False)
+        packets = self._packets() if self._packets else None
+        if packets is not None:
+            result["packets"] = packets
         return result
 
     def history(self, since):

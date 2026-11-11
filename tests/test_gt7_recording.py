@@ -100,6 +100,45 @@ def t_drop_count_is_persisted():
         assert r.dropped == 3, r.dropped
 
 
+def t_packet_counters_are_stored_in_meta_records():
+    stats = {"stream": 1, "received": 0, "lost": 0, "reordered": 0, "decrypt_failed": 0, "parse_failed": 0}
+    with tempfile.TemporaryDirectory() as d:
+        w = rec.RecordingWriter(d, "Demo", "dev", flush_s=0.05, packet_stats=lambda: dict(stats))
+        w.put(1.0, "A", _plain())
+        time.sleep(0.2)
+        stats.update(received=120, lost=4, decrypt_failed=1)
+        w.put(2.0, "A", _plain())
+        w.close()
+        r = rec.Recording(w.path)
+        assert [p[0] for p in r.packets()] == [1.0, 2.0], "meta records are no packets"
+        assert r.packet_stats == stats, r.packet_stats
+        assert r.dropped == 0
+
+
+def t_a_writer_without_packet_counters_keeps_the_old_meta():
+    with tempfile.TemporaryDirectory() as d:
+        w = rec.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w.put(1.0, "A", _plain())
+        w.dropped = 2
+        w.close()
+        r = rec.Recording(w.path)
+        list(r.packets())
+        assert r.packet_stats is None and r.dropped == 2
+
+
+def t_record_control_hands_the_packet_counters_to_its_writer():
+    with tempfile.TemporaryDirectory() as d:
+        control = rec.RecordControl(os.path.join(d, "rec"), os.path.join(d, "state.json"), True)
+        control.packet_stats = lambda: {"stream": 1, "received": 1, "lost": 7, "reordered": 0,
+                                        "decrypt_failed": 0, "parse_failed": 0}
+        control.put(1.0, "A", _plain())
+        control.close()
+        files = [f for f in os.listdir(os.path.join(d, "rec")) if f.endswith(rec.SUFFIX)]
+        r = rec.Recording(os.path.join(d, "rec", files[0]))
+        list(r.packets())
+        assert r.packet_stats["lost"] == 7, r.packet_stats
+
+
 def t_put_never_blocks_when_full():
     import queue as _queue
     with tempfile.TemporaryDirectory() as d:
