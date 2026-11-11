@@ -1560,7 +1560,7 @@ def t_the_failed_capture_input_is_read_from_ffmpeg():
     # #1124: the live log of a busy card, then a mic that cannot open, per platform.
     assert m.failed_capture_input(CARD_BUSY_LOG, "win32", "Mikrofon (K66)") == "card"
     assert m.failed_capture_input("Error opening input file audio=Mikrofon (K66).\n",
-                                  "win32", "Mikrofon (K66)") == "mic"
+                                  "win32", "Mikrofon (K66)") == "mic", "the mic's own open error"
     assert m.failed_capture_input("Error opening input file alsa_input.usb-mic.\n",
                                   "linux", "alsa_input.usb-mic") == "mic"
     assert m.failed_capture_input("Error opening input file /dev/video2.\n",
@@ -1586,7 +1586,8 @@ def t_a_clock_probe_on_a_busy_card_reports_the_card():
     calls = []
     for answer in (m.CLOCK_CARD_BUSY, "monotonic"):
         assert m.capture_clock("win32", ["-i", "busy-then-free"],
-                               probe=lambda a, answer=answer: calls.append(a) or answer) == answer
+                               probe=lambda a, answer=answer: calls.append(a) or answer) == answer, (
+            f"capture_clock must hand back {answer!r}")
     assert len(calls) == 2, "a busy card is probed again, never cached"
 
 
@@ -1620,7 +1621,8 @@ def t_setup_reports_whether_the_mic_is_mixed():
 def t_only_a_failed_mic_drops_the_mic_for_the_stint():
     import logging, types
     feed = types.SimpleNamespace(mic_failed=False, log=logging.getLogger("t"))
-    assert m.Feed._note_local_failure(feed, CARD_BUSY_LOG, "win32", "Mikrofon (K66)") == m.LOCAL_DEVICE_BUSY
+    assert m.Feed._note_local_failure(feed, CARD_BUSY_LOG, "win32", "Mikrofon (K66)") == m.LOCAL_DEVICE_BUSY, (
+        "a busy card is reported as a busy card")
     assert feed.mic_failed is False, "a busy card keeps the mic for the next attempt"
     err = m.Feed._note_local_failure(feed, "Error opening input file audio=Mikrofon (K66).\n",
                                      "win32", "Mikrofon (K66)")
