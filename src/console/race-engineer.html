@@ -153,7 +153,7 @@ function instruments(snap){const v=snap.instruments||{};$('race-position').textC
 }
 function age(){if(state.stopped||!state.snapshot)return;const r=state.snapshot.receipt||{},since=(performance.now()-state.received)/1000,packetAge=r.packet_age_s==null?null:r.packet_age_s+since;
  const disconnected=!state.connected||since>=5,stale=packetAge!=null&&packetAge>=5;
- const packets=state.snapshot.packets,lossy=!!packets?.lossy&&!disconnected&&!stale;
+ const packets=state.snapshot.packets,lossy=!!packets?.lossy;
  const label=state.problem||(disconnected?'Browser disconnected':stale?'Telemetry stale':lossy?'Lossy network':({live:'Telemetry live',paused:'Game paused',menu:'Game menu',loading:'Game loading',waiting:'Waiting for telemetry',preparing:'Preparing telemetry',delayed:'Analysis delayed',stale:'Telemetry stale'}[r.state]||'Telemetry unavailable'));
  $('status').textContent=state.snapshot.replay?.active&&!state.problem&&!disconnected?`Replay · ${state.snapshot.replay.label} · ${state.snapshot.replay.speed}×`+(r.state==='live'?'':` · ${label}`):label;$('protected').classList.toggle('dim',disconnected||stale||r.state==='paused'||r.state==='menu'||r.state==='delayed');
  const at=r.packet_received_at==null?null:new Date(r.packet_received_at*1000),replay=state.snapshot.replay?.active;

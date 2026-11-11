@@ -57,7 +57,7 @@ def t_the_snapshot_carries_the_packet_counters_when_the_relay_has_them():
     with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars()) as store:
         service = api.Service(store, packets=lambda: dict(counters))
         try:
-            assert service.snapshot()['packets'] == counters
+            assert service.snapshot().get('packets') == counters, 'the live snapshot carries the counters'
         finally: service.close()
         bare = api.Service(store)
         try:

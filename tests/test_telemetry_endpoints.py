@@ -474,8 +474,9 @@ def t_telemetry_loop_counts_lost_and_undecryptable_packets():
     srv, get = _serve(store, relay=_StatusRelay())
     try:
         assert json.loads(get("/telemetry/data")[2])["packets"]["lost"] == 2
-        assert json.loads(get("/status")[2])["telemetry"]["packets"]["decrypt_failed"] == 1, \
-            "the relay status carries the packet counters"
+        status = json.loads(get("/status")[2])["telemetry"]
+        assert (status.get("packets") or {}).get("decrypt_failed") == 1, \
+            f"the relay status carries the packet counters: {status}"
     finally:
         srv.shutdown()
 

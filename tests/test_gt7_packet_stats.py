@@ -63,7 +63,7 @@ def t_an_id_reset_starts_a_new_stream_instead_of_a_huge_gap():
 def t_a_long_silence_starts_a_new_stream():
     s = ps.PacketStats()
     t = feed(s, [1, 2, 3])
-    t = feed(s, [9000, 9001], t + ps.STREAM_IDLE_S + 1)
+    t = feed(s, [10, 11], t + ps.STREAM_IDLE_S + 1)
     snap = s.snapshot(t)
     assert snap["stream"] == 2 and snap["lost"] == 0, \
         f"a console that stopped sending is no lossy network: {snap}"
