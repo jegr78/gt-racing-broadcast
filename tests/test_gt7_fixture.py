@@ -128,7 +128,7 @@ def _parse(h):
 
 def t_real_packets_carry_their_sequence_number():
     assert _parse(PKT_THROTTLE_HEX).packet_id == 1473162, "the 'A' packet id at 0x70"
-    assert _parse(EXT_TCS_HEX).packet_id == 3547654, "the '~' packet id at 0x70"
+    assert _parse_ext(EXT_TCS_HEX).packet_id == 3547654, "the '~' packet id at 0x70"
 
 
 def t_real_full_throttle_no_lap_yet():
