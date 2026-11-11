@@ -487,7 +487,7 @@ def t_one_slow_lap_reports_pace_but_sends_no_notice():
         assert len([m for m in f.service.history()['messages'] if m['kind']=='pace'])==1,'a repeat is a trend'
 
 
-def _race(d,announcements=None,laps=2,session=None):
+def _race(d,announcements=None,laps=2,session=None,opening_lap=None):
     f=Fixture(d,snapshot(()))
     f.snap['instruments']['race_position']=5
     f.access.update({'expected':f.access.read()['revision'],'announcements':announcements or {'lap_updates':True,'race_reports':True}})
@@ -495,6 +495,8 @@ def _race(d,announcements=None,laps=2,session=None):
     binding=f.service.refresh()['binding']
     declared=f.session.read(binding)
     setup={'laps':laps,'session':session} if session else {'laps':laps}
+    if opening_lap:
+        setup['opening_lap']=opening_lap
     f.session.update(binding,dict(binding=binding,expected=declared['revision'],setup=setup))
     f.snap['revision']+=1;f.poll()
     return f
@@ -526,6 +528,19 @@ def t_race_end_reports_start_finish_and_best_lap():
         assert _lap_rows(f)[-1]['text']=='Started P5, finished P3, best lap: 1:29.500.',_lap_rows(f)
         f.snap['revision']+=1;f.poll()
         assert len(_lap_rows(f))==3,'one start and one closing message'
+
+
+def t_a_formation_lap_moves_the_final_lap_and_the_flag_by_one():
+    with tempfile.TemporaryDirectory() as d:
+        f=_race(d,opening_lap='formation')
+        _race_lap(f,1,150,5)
+        texts=[m['text'] for m in _lap_rows(f)]
+        assert texts[0]=="Starting P5, 2 laps. Let's go!",texts
+        assert not texts[-1].startswith('Lap') and 'final lap' not in texts[-1],'the formation lap update names no lap'
+        _race_lap(f,2,90,4)
+        assert ', final lap' in _lap_rows(f)[-1]['text'] and _lap_rows(f)[-1]['text'].startswith('Lap 2,'),_lap_rows(f)
+        _race_lap(f,3,89.5,3)
+        assert _lap_rows(f)[-1]['text']=='Started P5, finished P3, best lap: 1:29.500.',_lap_rows(f)
 
 
 def t_race_reports_and_lap_updates_switch_separately():
