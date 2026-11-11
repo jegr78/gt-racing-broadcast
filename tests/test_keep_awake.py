@@ -246,9 +246,13 @@ def t_console_status_keeps_only_the_held_flag_for_crew_roles():
 def t_control_center_relay_row_shows_the_block():
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
         html = fh.read()
-    row = html[html.index("setBadge('relay', relayUp"):]
-    row = row[:row.index(";")]
-    assert "keepAwakeText(s.relay.keep_awake)" in row, "the relay row names the idle-sleep block"
+    detail = html[html.index("function relayDetail(r)"):]
+    detail = detail[:detail.index("\n}")]
+    assert "keepAwakeText(r.keep_awake)" in detail, "the relay detail names the idle-sleep block"
+    for start, view in (("setBadge('relay', relayUp", "Services"), ("setBadgeEl('h-relay', 'hd-relay'", "Home")):
+        row = html[html.index(start):]
+        row = row[:row.index(";")]
+        assert "relayDetail(s.relay)" in row, f"the {view} relay row uses the shared relay detail"
     fn = html[html.index("function keepAwakeText(k)"):]
     fn = fn[:fn.index("\n}")]
     assert "idle sleep NOT blocked" in fn and "k.note" in fn, fn
