@@ -34,7 +34,8 @@ def t_the_answer_grammar_covers_every_interview_answer():
     for text in ('race','training','qualifying','it is the race','twelve laps','dreißig minuten','racing medium',
                  'rennreifen weich','two','keine','one mandatory stop','racing medium and racing hard','none',
                  'five litres','one point five','fünfundzwanzig runden','skip','weiter','stop','abbrechen',
-                 'überspringen','intermediate','full wet','zero','nächste frage'):
+                 'überspringen','intermediate','full wet','zero','nächste frage','formation lap','formation','box',
+                 'box start','einführungsrunde','formationsrunde','boxenstart','folgelobby','follow-up lobby'):
         missing=[w for w in voice._clean(text).split() if w not in known]
         assert not missing,(text,missing)
     assert {'fünf','dreißig','zwölf'}<=words,'German model words carry their umlauts'
@@ -52,7 +53,11 @@ def t_each_answer_uses_the_setup_vocabulary_without_its_keyword():
             ('mandatory_compounds','racing medium and racing hard',dict(mandatory_compounds=['RM','RH'])),
             ('mandatory_compounds','none',dict(mandatory_compounds=[])),
             ('fuel_reserve','2 litres',dict(fuel_reserve_l=2.0)),('fuel_reserve','1,5',dict(fuel_reserve_l=1.5)),
-            ('fuel_reserve','keine',dict(fuel_reserve_l=0.0))):
+            ('fuel_reserve','keine',dict(fuel_reserve_l=0.0)),
+            ('opening_lap','formation lap',dict(opening_lap='formation')),('opening_lap','formation',dict(opening_lap='formation')),
+            ('opening_lap','Einführungsrunde',dict(opening_lap='formation')),('opening_lap','box',dict(opening_lap='to_box')),
+            ('opening_lap','box start',dict(opening_lap='to_box')),('opening_lap','Folgelobby',dict(opening_lap='to_box')),
+            ('opening_lap','none',dict(opening_lap=None)),('opening_lap','keine',dict(opening_lap=None))):
         kind,result=voice.interview_reply(step,text)
         assert kind=='set' and result['setup']==setup,(step,text,kind,result)
     for text,kind in (('skip','skip'),('weiter','skip'),('stop','stop'),('abbrechen','stop'),('banana','unclear'),('','unclear')):
@@ -75,14 +80,16 @@ def t_a_full_interview_sets_every_answer_and_reads_them_back():
         first=f.service.question('Hey Jeff, ask me for the session info',binding)
         assert first['text']=='Which session is it?' and first['preset']=='interview' and f.service.interview_waiting()
         assert ask(f,binding,'race')=='How long is the race, laps or minutes?'
-        assert ask(f,binding,'12 laps')=='Which tyres do you start on?'
+        assert ask(f,binding,'12 laps')=='Is lap 1 a formation lap or a lap to the box?'
+        assert ask(f,binding,'formation lap')=='Which tyres do you start on?'
         assert ask(f,binding,'skip')=='How many mandatory stops?'
         assert ask(f,binding,'banana')=='Say again. How many mandatory stops?'
         assert ask(f,binding,'one')=='Which compounds are mandatory?'
         assert ask(f,binding,'racing hard')=='What fuel reserve?'
-        assert ask(f,binding,'2 litres')=='Copy, race, 12 laps, 1 mandatory stop, mandatory racing hard, reserve 2 litres.'
+        assert ask(f,binding,'2 litres')==('Copy, race, 12 laps, formation lap first, 1 mandatory stop, '
+                                           'mandatory racing hard, reserve 2 litres.')
         assert not f.service.interview_waiting()
-        assert f.session.read(binding)['setup']==dict(session='race',laps=12,mandatory_stops=1,
+        assert f.session.read(binding)['setup']==dict(session='race',laps=12,opening_lap='formation',mandatory_stops=1,
                                                        mandatory_compounds=['RH'],fuel_reserve_l=2.0)
         assert f.poll()['epoch']==state['epoch'],'interview answers keep the radio session'
         # After the interview, an answer is a normal question again.

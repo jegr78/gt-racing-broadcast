@@ -25,6 +25,11 @@ _UNITS.update(ein=1, eine=1, einen=1, a=1, an=1, zwo=2)
 _TENS = dict(twenty=20, thirty=30, forty=40, fifty=50, sixty=60, seventy=70, eighty=80, ninety=90,
              zwanzig=20, dreissig=30, vierzig=40, fuenfzig=50, sechzig=60, siebzig=70, achtzig=80, neunzig=90)
 _ZERO = {'zero', 'no', 'null', 'keine', 'kein'}
+OPENING_READBACK = dict(formation='formation lap first', to_box='first lap to the box')
+_OPENING = {'formation lap': 'formation', 'formationsrunde': 'formation', 'einfuehrungsrunde': 'formation',
+            'box start': 'to_box', 'boxenstart': 'to_box', 'follow up lobby': 'to_box', 'folgelobby': 'to_box',
+            'first lap to the box': 'to_box'}
+_OPENING_SHORT = {'formation': 'formation', 'box': 'to_box'}  # interview answers only
 
 
 # The free transcription repeats the wake phrase and often mishears it ("hey sheriff",
@@ -38,7 +43,8 @@ _VOCABULARY = set('''race rennen practice training trainingssession freies quali
     can will give tell wie wo was welche welcher welches wann reicht gibt position platzierung lap laps last best
     fastest runde runden pace tempo tyre tyres tire tires reifen status summary overview stint consumption verbrauch
     temperature temperatures and und one more extra noch box pit mute stop ask frag fragen please bitte interview
-    starte'''.split())
+    starte formation formationsrunde einfuehrungsrunde einführungsrunde boxenstart folgelobby follow first normal
+    normaler with mit'''.split())
 
 
 def _word(token):
@@ -140,6 +146,23 @@ def _names(codes):
     return names[0] if len(names) == 1 else ', '.join(names[:-1])+' and '+names[-1]
 
 
+def _opening_plan(kind):
+    """The setup change for lap 1; None declares it a race lap again."""
+    readback = OPENING_READBACK[kind] if kind else 'lap 1 is a race lap'
+    return dict(setup=dict(opening_lap=kind), readback=f'Copy, {readback}.')
+
+
+def _opening_lap(clean):
+    """'formation lap', 'wir haben eine Einführungsrunde', 'box start', 'no formation lap'."""
+    if re.fullmatch(r'(?:no|keine|kein) (?:formation lap|formationsrunde|einfuehrungsrunde|box start|boxenstart)'
+                    r'|normal(?:er)? start', clean):
+        return _opening_plan(None)
+    match = re.fullmatch(r'(?:(?:we |wir )?(?:have |haben |start with |starten mit )|with |mit )?'
+                         r'(?:a |an |the |eine |einer |der |die )?(.+)', clean)
+    kind = _OPENING.get(match[1]) if match else None
+    return _opening_plan(kind) if kind else None
+
+
 def plan(text):
     """The setting one spoken command changes, or None when it is no setup command.
 
@@ -148,6 +171,9 @@ def plan(text):
     if not isinstance(text, str) or not text.strip() or len(text) > 400 or any(ord(c) < 32 for c in text):
         return None
     clean = _clean(text)
+    opening = _opening_lap(clean)
+    if opening is not None:
+        return opening
     # "We have no mandatory pit stops", "wir haben zwei Pflichtstopps".
     clean = re.sub(r'^(?:we |wir )?(?:have |haben |there are |there is |es gibt )(?=.*(?:mandatory|pflicht))', '', clean)
     # "Current session is the race", "this is qualifying", "die aktuelle Session ist das Rennen".
@@ -214,8 +240,10 @@ def plan(text):
 
 # --- Session interview (#1088): one wake phrase, then one question per setting ------------
 
-INTERVIEW = ('session', 'length', 'starting_compound', 'mandatory_stops', 'mandatory_compounds', 'fuel_reserve')
+INTERVIEW = ('session', 'length', 'opening_lap', 'starting_compound', 'mandatory_stops', 'mandatory_compounds',
+             'fuel_reserve')
 QUESTIONS = dict(session='Which session is it?', length='How long is the race, laps or minutes?',
+                 opening_lap='Is lap 1 a formation lap or a lap to the box?',
                  starting_compound='Which tyres do you start on?', mandatory_stops='How many mandatory stops?',
                  mandatory_compounds='Which compounds are mandatory?', fuel_reserve='What fuel reserve?')
 _NONE = ('none', 'no', 'zero', 'nothing', 'keine', 'kein', 'keiner', 'null', 'nichts')
@@ -250,7 +278,8 @@ def _model_spellings(word):
 def interview_words():
     """Every single word an interview answer can use, for a grammar-limited recogniser."""
     words = set(_ANSWER_WORDS.split())
-    for table in (SESSIONS_SPOKEN, _FAMILIES, _GRADES, _SINGLE, _UNITS, _TENS, _ZERO, _NONE, _SKIP, _STOP):
+    for table in (SESSIONS_SPOKEN, _FAMILIES, _GRADES, _SINGLE, _UNITS, _TENS, _ZERO, _NONE, _SKIP, _STOP,
+                  _OPENING, _OPENING_SHORT):
         for entry in table:
             words.update(entry.split())
     # German tens are spoken as one word: fuenfundzwanzig.
@@ -282,6 +311,9 @@ def interview_reply(step, text):
                       else clean + ' mandatory stops')
     elif step == 'mandatory_compounds':
         result = plan('mandatory none' if none else clean if re.match(r'(?:mandatory|pflicht) ', clean) else 'mandatory ' + clean)
+    elif step == 'opening_lap':
+        kind = _OPENING_SHORT.get(clean)
+        result = _opening_plan(None) if none else _opening_plan(kind) if kind else _opening_lap(clean)
     elif step == 'fuel_reserve':
         amount = '0' if none else clean
         result = plan('reserve ' + amount if re.search(r'(?:litres?|liters?|liter|l)$', amount) else 'reserve ' + amount + ' litres')

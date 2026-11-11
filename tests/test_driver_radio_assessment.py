@@ -105,6 +105,68 @@ def t_laps_to_go_count_from_a_declared_race_length():
     assert not review(snapshot((90,91)),{'setup':{'laps':3}})['race_finished']
 
 
+def t_a_formation_lap_is_not_a_race_lap():
+    # A 12-lap race with a formation lap: GT7 counts 13 laps, its lap 2 is race lap 1.
+    setup={'setup':{'laps':12,'opening_lap':'formation'}}
+    def data(done):
+        return review(snapshot((150,)+(90,)*(done-1)),setup)
+    formation=review(snapshot(()),setup)
+    assert not formation['answers']['status'].startswith('Lap'),'the non-race lap names no lap number'
+    first=data(1)
+    assert first['completed_laps']==0 and not first['lap_text'].startswith('Lap'),first['lap_text']
+    assert first['answers']['status'].startswith('Lap 1,'),'race lap 1 runs after the formation lap'
+    assert first['quick_answers']['stint']=='No race lap completed yet.',first['quick_answers']['stint']
+    assert data(2)['lap_text'].startswith('Lap 2,'),data(2)['lap_text']
+    assert ', 12 to go' in first['answers']['status'],first['answers']['status']
+    assert data(11)['lap_text'].startswith('Lap 11,') and ', 2 to go,' in data(11)['lap_text'],data(11)['lap_text']
+    final=data(12)
+    assert ', final lap,' in final['lap_text'] and not final['race_finished'],final['lap_text']
+    assert data(13)['race_finished'],'the flag falls after 12 race laps, GT7 lap 13'
+    assert data(12)['quick_answers']['to_go']=='Final lap.',data(12)['quick_answers']['to_go']
+    plain=review(snapshot((150,)+(90,)*11),{'setup':{'laps':12}})
+    assert plain['race_finished'],'without the setting every GT7 lap stays a race lap'
+
+
+def t_a_follow_up_lobby_counts_from_the_lap_after_the_box():
+    # Stint lobby: lap 1 runs to the box, lap 2 is the first race lap of a 6-lap stint.
+    setup={'setup':{'laps':6,'opening_lap':'to_box'}}
+    def data(done):
+        snap=snapshot((140,)+(90,)*(done-1));snap['laps'][0]['analysis_role']='pit'
+        return review(snap,setup)
+    assert not data(1)['lap_text'].startswith('Lap') and ', 6 to go' in data(1)['answers']['status']
+    assert data(3)['quick_answers']['stint']=='2 laps since the start.',data(3)['quick_answers']['stint']
+    assert ', final lap,' in data(6)['lap_text'] and not data(6)['race_finished'],data(6)['lap_text']
+    assert data(7)['race_finished']
+    snap=snapshot((140,95,90));snap['laps'][0]['analysis_role']='pit'
+    stops=review(snap,{'setup':{'laps':6,'opening_lap':'to_box','mandatory_stops':1}})['mandatory']
+    assert stops['stops_done']==0 and stops['stops_left']==1,'the box wait before the GO is no mandatory stop'
+    snap=snapshot(());snap['current']['lap_role']='pit'
+    stops=review(snap,{'setup':{'laps':6,'opening_lap':'to_box','mandatory_stops':1}})['mandatory']
+    assert stops['stops_done']==0,'driving into the box on lap 1 is no mandatory stop either'
+
+
+def t_a_timed_race_clock_starts_after_the_formation_lap():
+    snap=snapshot((150,90,90,90,90,90,90))
+    result=review(snap,{'setup':{'duration_min':10,'opening_lap':'formation'}})['fuel']
+    assert result['remaining_race_laps']==round(15/90+1,3),'the formation lap time is not race time'
+
+
+def t_the_non_race_lap_is_neither_fastest_nor_pace_evidence():
+    setup={'setup':{'laps':12,'opening_lap':'formation'}}
+    snap=snapshot((80,90,91,89))
+    assert 'your fastest lap' in review(snap,setup)['lap_text'],'the formation lap sets no fastest lap'
+    assert 'fastest' not in review(snap,{'setup':{'laps':12}})['lap_text']
+    fuel=review(snapshot((80,90,91)),setup)['fuel']
+    assert fuel['sample_ids']==['L2','L3'],f"the formation lap is no pace or consumption evidence: {fuel['sample_ids']}"
+    assert review(snapshot((80,90,90,90,91,91,91)),setup)['laps']['fastest_lap']==1,'race lap 1 is GT7 lap 2'
+
+
+def t_practice_and_qualifying_ignore_the_opening_lap():
+    for kind in ('practice','qualifying'):
+        data=review(snapshot((80,90,89)),{'setup':{'session':kind,'opening_lap':'formation'}})
+        assert data['lap_text'].startswith('Lap 4,'),(kind,data['lap_text'])
+
+
 def t_tyre_answer_skips_the_wear_note_telemetry_can_never_fill():
     assert 'wear' not in review(snapshot())['answers']['tyres'].casefold()
 

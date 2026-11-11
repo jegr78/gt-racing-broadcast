@@ -188,7 +188,7 @@ class Store:
 
 
 SETUP_KEYS = {'laps', 'duration_min', 'starting_compound', 'fuel_reserve_l', 'session', 'mandatory_stops',
-              'mandatory_compounds'}
+              'mandatory_compounds', 'opening_lap'}
 
 
 def validate_setup(value):
@@ -204,6 +204,7 @@ def validate_setup(value):
     _require(value.get('laps') is None or value.get('duration_min') is None)
     _require(value.get('starting_compound') is None or value['starting_compound'] in gt7_context.COMPOUNDS)
     _require(value.get('session') is None or value['session'] in driver_radio_assessment.SESSIONS)
+    _require(value.get('opening_lap') is None or value['opening_lap'] in driver_radio_assessment.OPENING_LAPS)
     required = value.get('mandatory_compounds')
     _require(required is None or isinstance(required, list) and len(required) <= 8
              and len(set(required)) == len(required) and all(c in gt7_context.COMPOUNDS for c in required))

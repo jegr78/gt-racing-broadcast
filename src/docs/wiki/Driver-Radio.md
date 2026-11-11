@@ -132,6 +132,24 @@ With a race length in laps saved in **Optional race setup**, the update also cou
 `10 to go`, `5 to go`, `4 to go`, `3 to go`, `2 to go` and `final lap`, and **Short status**
 always names the laps left.
 
+GT7 counts every lap of a session, including laps that are not race laps. **Lap 1** in
+the race setup says which kind the first lap is:
+
+- **Race lap** (the default): every GT7 lap is a race lap.
+- **Formation lap**: a manual formation lap before the start. GT7 calls it lap 1, so the
+  first race lap is GT7 lap 2.
+- **Lap to the box (follow-up lobby)**: in an endurance event each stint runs in its own
+  lobby. The race starts normally, every driver comes into the box at the end of lap 1 and
+  waits for the GO from the team mate, so GT7 lap 2 is the first race lap again.
+
+Declare the race length in race laps, not GT7 laps. Example: a 12-lap race with a
+formation lap is declared as `12 laps` and **Lap 1: Formation lap**. The start report says
+`12 laps`. The update after the formation lap names no lap number. Every later update
+counts race laps, so the one after GT7 lap 12 says `Lap 12, ..., final lap`, and the finish
+report replaces the update after GT7 lap 13, at the real flag. **Short status** and the
+laps-to-go answer count race laps too. The non-race lap never sets the fastest lap, never
+enters the pace comparison and is no pit stop for the mandatory stops.
+
 **Start and finish report** in the same card is a separate switch, off by default, and
 needs that race length. It announces `Starting P5, 12 laps. Let's go!` once the position
 is known before the first lap ends, and replaces the update of the last lap with
@@ -303,6 +321,9 @@ Jeff reads every setting back in English, so a misrecognition is caught and can 
 | Session type | `practice session`, `qualifying`, `race` | `Training`, `Qualifying`, `Rennen` | `Copy, qualifying.` |
 | Race length in laps | `race 12 laps` | `Rennen 12 Runden` | `Copy, 12 laps.` |
 | Race length in time | `race 30 minutes` | `Rennen 30 Minuten` | `Copy, 30 minutes.` |
+| Lap 1 is a formation lap | `formation lap`, `we have a formation lap` | `Einführungsrunde`, `mit Formationsrunde` | `Copy, formation lap first.` |
+| Lap 1 runs to the box | `box start`, `follow-up lobby` | `Boxenstart`, `Folgelobby` | `Copy, first lap to the box.` |
+| Lap 1 is a race lap | `no formation lap`, `normal start` | `keine Einführungsrunde` | `Copy, lap 1 is a race lap.` |
 | Starting compound | `starting on racing medium` | `Start auf Rennreifen mittel` | `Copy, starting on racing medium.` |
 | Fuel reserve | `reserve 2 litres` | `Reserve 2 Liter` | `Copy, reserve 2 litres.` |
 | Tyre change after a stop | `now on racing hard` | `jetzt auf Rennreifen hart` | `Copy, now on racing hard.` |
@@ -327,7 +348,7 @@ Center fills the radio setup when the radio session starts. Values entered in th
 Center win. Every radio message, with the driver's question, is kept in a journal next to
 the recording.
 
-Instead of one command per value, say `Hey Jeff, ask me for the session info` (German: `Hey Jeff, frag mich nach den Session Infos`). The radio also accepts the common mishearings of that request, such as `asked me about the session`. Jeff then asks one question at a time: session type, race length, starting compound, mandatory stops, mandatory compounds and fuel reserve. The microphone opens the moment each question has finished playing (the radio prepares it while the question plays) and listens **8 seconds** for the answer without a wake phrase, so answer right away. Answer with the value only: `race`, `12 laps` or `30 minutes`, `racing medium`, `two` or `none`, `racing medium and racing hard` or `none`, `2 litres`. Say `skip` (`weiter`) to move on or `stop` (`abbrechen`) to end. While it listens for an answer, the recognition only knows the interview vocabulary, so short answers like `two` or `race` are not misheard as other words. Without an answer, with an unclear one or with one the recognition is unsure of, Jeff asks once more (`Say again. ...`) and then ends the interview. At the end he reads everything back in one line, for example `Copy, race, 12 laps, starting on racing medium, 1 mandatory stop, mandatory racing hard, reserve 2 litres.` The answers take the same path as single commands, including the recording context.
+Instead of one command per value, say `Hey Jeff, ask me for the session info` (German: `Hey Jeff, frag mich nach den Session Infos`). The radio also accepts the common mishearings of that request, such as `asked me about the session`. Jeff then asks one question at a time: session type, race length, lap 1 (`Is lap 1 a formation lap or a lap to the box?`), starting compound, mandatory stops, mandatory compounds and fuel reserve. The microphone opens the moment each question has finished playing (the radio prepares it while the question plays) and listens **8 seconds** for the answer without a wake phrase, so answer right away. Answer with the value only: `race`, `12 laps` or `30 minutes`, `formation`, `box` or `none`, `racing medium`, `two` or `none`, `racing medium and racing hard` or `none`, `2 litres`. Say `skip` (`weiter`) to move on or `stop` (`abbrechen`) to end. While it listens for an answer, the recognition only knows the interview vocabulary, so short answers like `two` or `race` are not misheard as other words. Without an answer, with an unclear one or with one the recognition is unsure of, Jeff asks once more (`Say again. ...`) and then ends the interview. At the end he reads everything back in one line, for example `Copy, race, 12 laps, formation lap first, starting on racing medium, 1 mandatory stop, mandatory racing hard, reserve 2 litres.` The answers take the same path as single commands, including the recording context.
 
 Wake-gated coaching vocabulary is deliberately narrow:
 

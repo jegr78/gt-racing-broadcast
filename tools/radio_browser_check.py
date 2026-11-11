@@ -54,6 +54,9 @@ def check(browser,outdir,shots=None):
             assert a.locator('#race-length').input_value()=='38','save acknowledgement discarded newer edits'
             a.locator('#setup-form button').click();first.wait_for_timeout(1100)
             assert f.f.session.read(f.f.service.refresh()['binding'])['setup']['laps']==38
+            a.locator('#opening-lap').select_option('formation');a.locator('#setup-form button').click();first.wait_for_timeout(1100)
+            assert f.f.session.read(f.f.service.refresh()['binding'])['setup'].get('opening_lap')=='formation','the desk saves lap 1 as a formation lap'
+            assert b.locator('#opening-lap').input_value()=='formation','a second view shows the saved opening lap'
             a.locator('#race-length').fill('39')
             first.route('**/driver-radio/snapshot',lambda route:route.fulfill(status=503,content_type='application/json',body='{"error":{"message":"Synthetic temporary outage"}}'))
             first.wait_for_timeout(1200)

@@ -28,8 +28,10 @@ previously selected for tutorial videos. Browser output goes to the PC audio
 route. The driver can deliberately capture that route in a Solo POV broadcast;
 the feature does not automatically change OBS sources or PlayStation audio.
 
-Optional race setup contains race length in laps or time, starting compound and
-desired fuel reserve. A driver can confirm a tyre change. Missing setup never
+Optional race setup contains race length in laps or time, starting compound,
+desired fuel reserve and whether GT7 lap 1 is a race lap. A formation lap, or the
+start lap to the box in a follow-up endurance lobby, is declared there, never
+inferred from telemetry; the radio then counts race laps only. A driver can confirm a tyre change. Missing setup never
 blocks measured status answers, but limits strategic conclusions. A confirmed
 change creates a new tyre stint; inferred service alone cannot confirm it.
 

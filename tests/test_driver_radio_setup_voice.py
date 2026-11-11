@@ -193,6 +193,30 @@ def t_setup_validation_bounds_the_new_fields():
     assert access.merge_setup({'laps':12,'session':'race'},{'duration_min':30,'laps':None})=={'duration_min':30,'session':'race'}
 
 
+def t_the_opening_lap_is_declared_in_english_and_german():
+    formation=dict(setup=dict(opening_lap='formation'),readback='Copy, formation lap first.')
+    box=dict(setup=dict(opening_lap='to_box'),readback='Copy, first lap to the box.')
+    normal=dict(setup=dict(opening_lap=None),readback='Copy, lap 1 is a race lap.')
+    for text,result in (('formation lap',formation),('Hey Jeff, we have a formation lap',formation),
+                        ('with formation lap',formation),('Einführungsrunde',formation),
+                        ('wir haben eine Einführungsrunde',formation),('mit Formationsrunde',formation),
+                        ('box start',box),('follow-up lobby',box),('first lap to the box',box),
+                        ('Boxenstart',box),('Folgelobby',box),
+                        ('no formation lap',normal),('keine Einführungsrunde',normal),('normal start',normal)):
+        assert voice.plan(text)==result,(text,voice.plan(text))
+    assert voice.plan('hey sheriff formation lap')==formation,'the wake remnant is dropped before a formation lap'
+    assert access.merge_setup({'laps':12,'opening_lap':'formation'},{'opening_lap':None})=={'laps':12}
+
+
+def t_setup_validation_accepts_only_known_opening_laps():
+    for good in ('formation','to_box'):
+        assert access.validate_setup({'opening_lap':good})=={'opening_lap':good}
+    for bad in ('rolling',1,True,''):
+        try:access.validate_setup({'opening_lap':bad})
+        except access.RadioError:continue
+        raise AssertionError(bad)
+
+
 def t_a_misheard_wake_phrase_is_dropped_before_routing():
     # Transcripts from a live session: the wake phrase "hey jeff" stays in the text, misheard.
     for text,clean in (('hey sheriff race','race'),('hey chair of race','race'),('hey hf pace','pace'),
