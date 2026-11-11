@@ -69,8 +69,8 @@ class KeepAwake:
 
     def start(self):
         if not enabled(self.environ):
-            self.note = "off (RACECAST_KEEP_AWAKE=0)"
-            self.log.info("keep-awake: %s", self.note)
+            self.note = "RACECAST_KEEP_AWAKE=0"
+            self.log.info("keep-awake: off (%s)", self.note)
             return
         try:
             if self.platform == "win32":

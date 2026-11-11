@@ -192,7 +192,7 @@ def t_switch_off_starts_nothing():
                           environ={"RACECAST_KEEP_AWAKE": "0"}, log=log)
     holder.start()
     st = holder.status()
-    assert st == {"held": False, "method": None, "note": "off (RACECAST_KEEP_AWAKE=0)"}, st
+    assert st == {"held": False, "method": None, "note": "RACECAST_KEEP_AWAKE=0"}, st
 
 
 def _load_relay():
