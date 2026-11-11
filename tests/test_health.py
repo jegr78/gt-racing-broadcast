@@ -1288,6 +1288,30 @@ def t_jitter_yellow_does_not_page_but_real_yellow_does():
 
 
 
+def t_a_lossy_telemetry_network_is_a_quiet_yellow():
+    import types
+    h = m.aggregate_health({"telemetry_lossy": 0.083})
+    assert h["level"] == "yellow" and any("GT7 telemetry losing 8 % of its packets" in r for r in h["reasons"]), h
+    assert m.aggregate_health({"telemetry_lossy": None})["level"] == "green"
+    with tempfile.TemporaryDirectory() as td:
+        r = _mk_relay(td, ["https://www.twitch.tv/a"])
+        assert r._health_facts(time.time())["telemetry_lossy"] is None, "no telemetry, no fact"
+        stats = {"lossy": False, "loss_rate_10s": 0.2}
+        r.telemetry_store = types.SimpleNamespace(packet_stats=lambda: stats)
+        assert r._health_facts(time.time())["telemetry_lossy"] is None, "a short burst is not yet lossy"
+        stats["lossy"] = True
+        assert r._health_facts(time.time())["telemetry_lossy"] == 0.2
+        r.telemetry_store = types.SimpleNamespace(packet_stats=lambda: None)
+        assert r._health_facts(time.time())["telemetry_lossy"] is None
+        r.telemetry_store = types.SimpleNamespace(packet_stats=lambda: {"lossy": True, "loss_rate_10s": 0.2})
+        now = time.time()
+        h = r._refresh_health(now)
+        assert any("GT7 telemetry" in reason for reason in h["reasons"]), h
+        quiet = {"feeds_jittery": [], "feeds_backlogged": {}, "feeds_av_disturbed": {}, "mic_problem": None}
+        without = m.aggregate_health({**r._health_facts(now), **quiet, "telemetry_lossy": None})["level"]
+        assert h["notify_level"] == without, "a lossy telemetry network never pages Discord on its own"
+
+
 def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
     # Named after the measurement, not a guessed cause, and the line carries the
     # operator's next step: the RESET that drops the backlog, with its cost. Not

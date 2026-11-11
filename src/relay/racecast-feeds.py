@@ -1311,6 +1311,9 @@ def aggregate_health(facts):
            streamed before but is not streaming now, a live broadcast dropped
            off air). The stream_expected latch means starting the relay pre-show,
            before OBS ever goes live, never alarms.
+    telemetry_lossy (optional loss rate 0..1 while gt7_packet_stats calls the GT7 network
+        lossy, else None: a quiet, display-only yellow excluded from the notify level).
+
     yellow = OBS WebSocket unreachable · cookies stale · Tailscale down · a feed
              stuck connecting · stream_reconnecting · funnel_down ·
              sheet_push_failing · an auto-rebuild stood down · a consumer backlog. A red result still lists
@@ -1349,6 +1352,9 @@ def aggregate_health(facts):
             yellow.append(f"Feed {name} stuck connecting")
     for name in facts.get("feeds_jittery") or []:
         yellow.append(f"Feed {name} inbound stall. A gap exceeded the fan-out reserve (stutter risk)")
+    if facts.get("telemetry_lossy") is not None:
+        yellow.append(f"GT7 telemetry losing {facts['telemetry_lossy'] * 100:.0f} % of its packets: "
+                      f"check the console's network")
     for name, fps in (facts.get("rebuilds_stood_down") or {}).items():
         renders = f" (producer host renders {fps:.0f} fps)" if fps is not None else ""
         yellow.append(f"Feed {name} rebuild ineffective: {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
@@ -9539,7 +9545,17 @@ class Relay:
                 "feeds_backlogged": dict(self._backlogged_feeds),
                 "feeds_av_disturbed": self._av_health_fact(),
                 "mic_problem": (mic_health_problem(self.mic_device)
-                                if self._schedule_has_local() else None)}
+                                if self._schedule_has_local() else None),
+                "telemetry_lossy": self._telemetry_lossy_fact()}
+
+    def _telemetry_lossy_fact(self):
+        """The GT7 loss rate while the packet counters call the network lossy, else None."""
+        store = getattr(self, "telemetry_store", None)
+        try:
+            stats = store.packet_stats() if store is not None else None
+        except Exception:  # noqa: BLE001  health sampling is best-effort
+            return None
+        return stats.get("loss_rate_10s") if isinstance(stats, dict) and stats.get("lossy") else None
 
     def _note_obs_splice(self, feed):
         """Record that the relay just spliced this feed into OBS by rebuilding the input.
@@ -9614,7 +9630,8 @@ class Relay:
         notify_level = aggregate_health({**facts, "feeds_jittery": [],
                                          "feeds_backlogged": {},
                                          "feeds_av_disturbed": {},
-                                         "mic_problem": None})["level"]
+                                         "mic_problem": None,
+                                         "telemetry_lossy": None})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -15286,6 +15303,7 @@ def main():
             tracks=gt7_tracks.TrackDB.load(runtime_base, gt7_bundled),
             recorder=recorder, packets=gt7_packet_stats.PacketStats())
         recorder.packet_stats = telemetry_store.packet_stats
+        relay.telemetry_store = telemetry_store   # the health check reads its packet counters
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
