@@ -487,6 +487,16 @@ def t_the_index_reports_lockups_and_wheelspin_per_lap():
         assert _lap(idx, 2)["wheel_events"] == [] and _lap(idx, 4)["lockups"] == 0
 
 
+def t_a_lap_stores_a_bounded_event_list_with_exact_counts():
+    events = [dict(kind="wheelspin", wheel="RL", start_s=i * .2, duration_s=.1, extreme=1.5)
+              for i in range(gl.MAX_WHEEL_EVENTS + 30)]
+    trace = [{"d": float(d), "t": d / 100} for d in range(0, 1000, 5)]
+    placed = gl._placed(events, trace)
+    assert len(placed["events"]) == gl.MAX_WHEEL_EVENTS, len(placed["events"])
+    assert placed["wheelspins"] == gl.MAX_WHEEL_EVENTS + 30 and placed["lockups"] == 0, \
+        "the counts cover every event, the stored list is bounded"
+
+
 def t_a_resumed_index_keeps_an_open_wheel_event():
     with tempfile.TemporaryDirectory() as d:
         def slips(lap, k):

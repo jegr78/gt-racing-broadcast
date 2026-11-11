@@ -22,6 +22,7 @@ SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
 INDEX_VERSION = 13
+MAX_WHEEL_EVENTS = 100        # stored per lap; the lock-up and wheelspin counts cover all
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -473,14 +474,16 @@ def _relative(events, start):
 
 
 def _placed(events, trace):
-    """Each slip event at the trace distance its lap time first reaches."""
+    """Each slip event at the trace distance its lap time first reaches, the first
+    MAX_WHEEL_EVENTS of them, plus exact counts of all."""
     out = []
-    for e in events:
+    for e in events[:MAX_WHEEL_EVENTS]:
         station = next((p for p in trace if p["t"] >= e["start_s"]), trace[-1] if trace else None)
         out.append({"kind": e["kind"], "wheel": e["wheel"], "start_s": e["start_s"],
                     "distance_m": station["d"] if station else None,
                     "duration_s": e["duration_s"], "extreme": e["extreme"]})
-    return out
+    return {"events": out, "lockups": sum(e["kind"] == "lockup" for e in events),
+            "wheelspins": sum(e["kind"] == "wheelspin" for e in events)}
 
 
 def _coverage_problem(samples, track_db, track_id, length):
@@ -558,12 +561,11 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
     if problem:
         row.update(status="not counted", reason=problem)
     lost = lap.get("packets_lost", 0)
-    events = _placed(lap.get("wheel_events", []), trace)
+    slips = _placed(lap.get("wheel_events", []), trace)
     flags = ([problem] if problem else []) + ([f"{lost} packet{'' if lost == 1 else 's'} lost"] if lost else [])
     row.update(capture_complete=capture_complete, trace_complete=complete_trace,
-               time_valid=time_valid, packets_lost=lost, wheel_events=events,
-               lockups=sum(e["kind"] == "lockup" for e in events),
-               wheelspins=sum(e["kind"] == "wheelspin" for e in events),
+               time_valid=time_valid, packets_lost=lost, wheel_events=slips["events"],
+               lockups=slips["lockups"], wheelspins=slips["wheelspins"],
                data_quality=lap["data_quality"], reasons=list(dict.fromkeys(lap["reasons"] + flags)),
                pace_eligible=eligible,
                is_reference=eligible and lap["status"] == "reference", after_service=after_service,
