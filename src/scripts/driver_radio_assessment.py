@@ -206,11 +206,12 @@ def _quick_answers(snapshot, live, position, total, completed, usable, consumpti
         age = f'{tyre_age:g} lap{"" if tyre_age == 1 else "s"} old'
         answers['tyre_age'] = sentence(f'{name}, {age}' if name else f'tyres are {age}')
     rows = [r for r in (snapshot.get('laps') or [])[-MAX_ROWS:] if r.get('session_id') == snapshot.get('session_id')]
-    stops = [number(r.get('lap'), True) for r in rows
-             if not r.get('non_race') and (r.get('analysis_role') == 'pit' or r.get('id') == service.get('lap_id'))]
+    stops = [number(r.get('lap'), True) for r in rows if r.get('analysis_role') == 'pit' or r.get('id') == service.get('lap_id')]
     stops = [lap for lap in stops if lap is not None]
-    if not completed:
+    if completed is None:
         answers['stint'] = 'No lap completed yet.'
+    elif not completed:
+        answers['stint'] = 'No race lap completed yet.'
     elif stops:
         laps = completed-max(stops)
         answers['stint'] = f'{laps:g} lap{"" if laps == 1 else "s"} since your last stop.'
@@ -271,8 +272,6 @@ def _radio_call(row, usable, fastest, position, to_go=None, total=None, fuel=Non
     parts = []
     done = number(row.get('lap'), True) if row else None
     lap = done+1 if done is not None else number(running, True)
-    if row and row.get('non_race'):
-        lap = None
     if lap is not None and (total is None or lap <= total):
         parts.append(f'Lap {lap:g}')
     if position:

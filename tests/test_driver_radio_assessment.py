@@ -114,6 +114,8 @@ def t_a_formation_lap_is_not_a_race_lap():
     assert not formation['answers']['status'].startswith('Lap'),'the non-race lap names no lap number'
     first=data(1)
     assert first['completed_laps']==0 and not first['lap_text'].startswith('Lap'),first['lap_text']
+    assert first['answers']['status'].startswith('Lap 1,'),'race lap 1 runs after the formation lap'
+    assert first['quick_answers']['stint']=='No race lap completed yet.',first['quick_answers']['stint']
     assert data(2)['lap_text'].startswith('Lap 2,'),data(2)['lap_text']
     assert ', 12 to go' in first['answers']['status'],first['answers']['status']
     assert data(11)['lap_text'].startswith('Lap 11,') and ', 2 to go,' in data(11)['lap_text'],data(11)['lap_text']
@@ -151,8 +153,8 @@ def t_the_non_race_lap_is_neither_fastest_nor_pace_evidence():
     snap=snapshot((80,90,91,89))
     assert 'your fastest lap' in review(snap,setup)['lap_text'],'the formation lap sets no fastest lap'
     assert 'fastest' not in review(snap,{'setup':{'laps':12}})['lap_text']
-    paced=review(snapshot((80,90,90,90,91,91,91)),setup)['pace']
-    assert 'L1' not in paced['baseline_ids']+paced['recent_ids'],paced
+    fuel=review(snapshot((80,90,91)),setup)['fuel']
+    assert fuel['sample_ids']==['L2','L3'],f"the formation lap is no pace or consumption evidence: {fuel['sample_ids']}"
     assert review(snapshot((80,90,90,90,91,91,91)),setup)['laps']['fastest_lap']==1,'race lap 1 is GT7 lap 2'
 
 
