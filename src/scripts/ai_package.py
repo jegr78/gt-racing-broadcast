@@ -36,6 +36,9 @@ METRICS = (
     "top_speed_kmh",
     "tyre_avg_c",
     "length_m",
+    "lockups",
+    "wheelspins",
+    "wheel_events",
 )
 CONTEXT_KEYS = (
     "compound",
@@ -724,6 +727,8 @@ def build(
         limitations.append("Technically unusable selected laps were excluded.")
     if source.index.get("dropped"):
         limitations.append("Recorder reported dropped packets.")
+    if any("wheel_events" in r for r in eligible):
+        limitations.append(ai_report_text.SLIP_DEFINITION)
     for r in eligible:
         if not r.get("track_id"):
             limitations.append(

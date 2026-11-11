@@ -97,6 +97,21 @@ def t_live_incomplete_profile_and_stale_guards():
         expect(lambda:a.build(changed,1),'stale_source')
 
 
+def t_lockups_and_wheelspin_are_measured_facts_with_their_definition():
+    with tempfile.TemporaryDirectory() as d:
+        event = dict(kind='lockup', wheel='FR', start_s=12.0, distance_m=420.0, duration_s=0.3, extreme=0.41)
+        s = source(Path(d)/'telemetry-recordings', [dict(row(2), wheel_events=[event], lockups=1, wheelspins=0), row(3)])
+        package = a.build(s, 1)
+        lap2 = [lap for lap in package['laps'] if lap['lap'] == 2][0]
+        assert lap2['metrics'].get('wheel_events') == [event] and lap2['metrics'].get('lockups') == 1, \
+            f"lock-ups are measured lap facts: {lap2['metrics']}"
+        assert any('Lock-up: a braked wheel' in note for note in package['limitations']), package['limitations']
+        german = a.build(s, 1, language='de')
+        assert any('Blockieren' in note for note in german['limitations']), german['limitations']
+        legacy = a.build(source(Path(d)/'legacy'/'telemetry-recordings', [row(2), row(3)]), 1)
+        assert not any('Lock-up' in note for note in legacy['limitations']), 'an index without events claims no definition'
+
+
 def t_quality_and_compatible_references():
     with tempfile.TemporaryDirectory() as d:
         root=Path(d)/'telemetry-recordings';s=source(root)

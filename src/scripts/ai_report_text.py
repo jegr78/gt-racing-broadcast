@@ -2,8 +2,23 @@
 
 import math
 
+import gt7_telemetry as _gt7
+
+_LIMITS = dict(floor=f"{_gt7.LOCKUP_FLOOR:g}", ceiling=f"{_gt7.WHEELSPIN_CEILING:g}",
+               duration=f"{_gt7.SLIP_EVENT_MIN_S:g}", speed=f"{_gt7.SLIP_MIN_SPEED_MPS * 3.6:g}")
+SLIP_DEFINITION = (
+    "Lock-up: a braked wheel whose slip ratio (wheel speed over car speed) stays below {floor} for at "
+    "least {duration} s; wheelspin: a wheel under throttle above {ceiling} for as long. Slip is not "
+    "measured below {speed} km/h. The limits come from one car's recordings.").format(**_LIMITS)
+_SLIP_DEFINITION_DE = (
+    "Blockieren: ein gebremstes Rad, dessen Schlupfverhältnis (Radgeschwindigkeit zu Fahrzeuggeschwindigkeit) "
+    "mindestens {duration} s unter {floor} bleibt. Durchdrehen: ein Rad unter Gas, das ebenso lange über "
+    "{ceiling} liegt. Unter {speed} km/h wird kein Schlupf gemessen. Die Grenzen stammen aus Aufzeichnungen "
+    "eines Fahrzeugs.").format(**_LIMITS)
+
 # Source identifiers remain unchanged in the inspectable provenance section.
 DE_LIMITATIONS = {
+    SLIP_DEFINITION: _SLIP_DEFINITION_DE,
     "Driver radio messages are what the live engineer said; questions are transcribed speech and may be misrecognised.": "Die Funkmeldungen geben wieder, was der Live-Engineer gesagt hat. Fragen sind transkribierte Sprache und können falsch erkannt sein.",
     "Interpretations are hypotheses; deterministic validation cannot establish narrative truth.": "Deutungen und mögliche Ursachen bleiben Hypothesen. Geprüft werden die zitierten Messwerte, nicht die fahrerische Erklärung.",
     "No direct tyre wear, setup, power or weather measurements; unknown channels cannot support diagnoses.": "Reifenverschleiß, Setup, Leistung und Wetter werden nicht direkt gemessen. Daraus lassen sich keine sicheren Diagnosen ableiten.",

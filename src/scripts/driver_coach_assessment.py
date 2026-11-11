@@ -171,6 +171,16 @@ def _corners(definition):
     return sorted(out, key=lambda r: r['entry_m'])
 
 
+def _wheel_events(lap, corners):
+    """The lap's measured lock-ups and wheelspin, each with the corner it starts in."""
+    out = []
+    for event in lap.get('wheel_events') or []:
+        d = event.get('distance_m')
+        inside = next((c['id'] for c in corners if finite(d) and c['entry_m'] <= d <= c['exit_m']), None)
+        out.append(dict(event, section_id=inside))
+    return out
+
+
 def _metrics(trace, corner):
     start, end = corner['entry_m'], corner['exit_m']
     trace = _window(trace, start, end)
@@ -268,7 +278,7 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
     unknown = ['Traffic is not observed.', 'Weather is not measured.', 'Tyre wear is not measured.',
                'Setup and aid behavior are not inferred.']
     result = dict(status='unsuitable', lap_id=lap.get('id') if isinstance(lap, dict) else None,
-                  reference_id=None, findings=[], section_checks=[], unknown=unknown,
+                  reference_id=None, findings=[], section_checks=[], unknown=unknown, wheel_events=[],
                   summary='This lap is unsuitable for a new technique score. Keep the current exercise.')
     if not _eligible(lap):
         return result
@@ -296,6 +306,7 @@ def assess(lap, reference=None, definition=None, personal_laps=()):
                         and lap.get('definition_fingerprint') == definition['fingerprint']
                         and reference is not None and reference.get('definition_fingerprint') == definition['fingerprint'])
     corners = _corners(definition) if valid_definition else []
+    result['wheel_events'] = _wheel_events(lap, corners)
     if not corners:
         unknown.append('Comparable corner definition is unavailable.')
     if isinstance(definition, dict) and isinstance(definition.get('corners'), list) and len(definition['corners']) > CORNERS_MAX:

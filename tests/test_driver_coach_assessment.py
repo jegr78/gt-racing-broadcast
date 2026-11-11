@@ -54,6 +54,16 @@ def t_observed_channels_produce_grounded_experiments_with_exact_evidence():
     assert 'trace' not in result and 'recording_path' not in result
 
 
+def t_lockups_and_wheelspin_reach_the_coach_as_measured_facts():
+    own=lap()
+    own['wheel_events']=[dict(kind='lockup',wheel='FR',start_s=2.4,distance_m=120.0,duration_s=0.3,extreme=0.41),
+                         dict(kind='wheelspin',wheel='RL',start_s=6.0,distance_m=330.0,duration_s=0.5,extreme=1.6)]
+    result=assess(own)
+    assert result['wheel_events']==[dict(own['wheel_events'][0],section_id='turn-a'),
+                                    dict(own['wheel_events'][1],section_id=None)],result['wheel_events']
+    assert assess()['wheel_events']==[],'a lap without events reports none'
+
+
 def t_missing_channels_do_not_turn_into_observed_steering_or_braking():
     own=lap()
     for point in own['trace']:

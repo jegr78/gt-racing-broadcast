@@ -35,6 +35,21 @@ def t_decoding_keeps_geometry_gearbox_units_and_constant_zero_distinct():
     assert normal['alert_max_rpm']['label'] != 'Rev limit'
 
 
+def t_slip_ratio_is_a_derived_channel_per_wheel():
+    plain = bytearray(fixture._pkt(2, 30, 0))
+    struct.pack_into('<4f', plain, 0xA4, 30/.36, -30/.36, 15/.36, 45/.36)
+    rows = c.decode(plain, ['slip_fl', 'slip_fr', 'slip_rl', 'slip_rr'])
+    assert all(rows[k]['state'] == 'value' for k in rows), f'every wheel has a slip value at speed: {rows}'
+    assert [round(rows[k]['value'], 3) for k in ('slip_fl', 'slip_fr', 'slip_rl', 'slip_rr')] == [1.0, 1.0, .5, 1.5], rows
+    slow = c.decode(bytearray(fixture._pkt(2, 5, 0)), ['slip_fl'])['slip_fl']
+    assert slow['value'] is None and slow['state'] == 'unset', f'slip is undefined at low speed: {slow}'
+    short = c.decode(bytes(plain[:0xA0]), ['slip_fl'])['slip_fl']
+    assert short['state'] == 'missing', short
+    desc = {d['key']: d for d in c.descriptors(False)}['slip_rl']
+    assert desc['provenance'] == 'derived' and desc['type'] == 'continuous' and desc['unit'] == '1', desc
+    json.dumps(rows, allow_nan=False)
+
+
 def t_missing_nonfinite_and_unset_are_not_silently_zero():
     plain = bytearray(fixture._pkt(2, 30, 0))
     plain[0x90] = 0xF3
@@ -76,6 +91,19 @@ def t_raw_time_window_preserves_single_packet_cut_and_uses_sparse_capture_offset
                 pass  # a refused detail request is the expected domain failure
             else:
                 raise AssertionError('invalid channel/window request must fail with a domain error')
+
+
+def t_the_workspace_detail_charts_the_slip_ratio_of_a_lap():
+    def slips(lap, k):
+        return ((1.0, 1.0, 1.4, 1.0), 0) if lap == 3 and 100 <= k < 140 else None
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td, slip=slips)
+        idx = fixture._index(path)
+        lap = fixture._lap(idx, 3)
+        result = detail.window(path, idx, lap, ['slip_rl', 'slip_fl'], 'distance', 0, 500, fixture.FakeTracks())
+        values = [row['slip_rl'] for row in result['rows'] if row['slip_rl'] is not None]
+        assert values and max(values) > 1.3 and min(values) < 1.01, values[:5]
+        assert {d['key'] for d in result['channels']} == {'slip_rl', 'slip_fl'}
 
 
 def t_distance_windows_use_common_geometry_and_refuse_unbounded_allocations():

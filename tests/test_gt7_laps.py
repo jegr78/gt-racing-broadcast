@@ -53,10 +53,13 @@ class FakeCars:
                 "group": "N"}
 
 
-def _pkt(lap, speed, angle, last_ms=-1, pid=0):
+def _pkt(lap, speed, angle, last_ms=-1, pid=0, slip=(1.0, 1.0, 1.0, 1.0), brake=0):
     b = bytearray(0x158)
     struct.pack_into("<I", b, 0, 0x47375330)
     struct.pack_into("<i", b, tm.OFF_PACKET_ID, pid)
+    struct.pack_into("<4f", b, tm.OFF_WHEEL_RPS, *(speed * s / 0.36 for s in slip))
+    struct.pack_into("<4f", b, tm.OFF_TYRE_RADIUS, *(0.36,) * 4)
+    b[tm.OFF_BRAKE] = brake
     struct.pack_into("<3f", b, tm.OFF_POS, R * math.cos(angle), 0.0, R * math.sin(angle))
     struct.pack_into("<f", b, tm.OFF_SPEED, speed)
     struct.pack_into("<f", b, tm.OFF_FUEL_LEVEL, 50.0)
@@ -76,11 +79,12 @@ def _pkt(lap, speed, angle, last_ms=-1, pid=0):
 
 
 def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_000_000.0,
-                           n=400, ns=None, lost=()):
+                           n=400, ns=None, lost=(), slip=None):
     """One lap per entry of lap_secs around the circle, `n` packets each (or ns[i] for
     lap i); lap 1 is the engine's partial first lap. From the 6th packet of a lap GT7's
     last_ms reports the previous timed lap; 10 packets of one more lap close the last one.
-    Packets are numbered from 1; the numbers in `lost` never reach the recording."""
+    Packets are numbered from 1; the numbers in `lost` never reach the recording.
+    `slip(lap, k)` returns (per-wheel slip, brake byte) for packet k of a lap, or None."""
     w = gt7_recording.RecordingWriter(rec_dir, "Solo", "dev", flush_s=0.05, queue_max=0)
     t, last_ms, pid = t0, -1, 0
     for li, secs in enumerate(list(lap_secs) + [lap_secs[-1]]):
@@ -90,8 +94,10 @@ def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_
             if li >= 2 and k == 5:
                 last_ms = round(lap_secs[li - 1] * 1000)
             pid += 1
+            extra = slip(li + 1, k) if slip else None
             if pid not in lost:
-                w.put(t, "~", _pkt(li + 1, speed, 2 * math.pi * k / n, last_ms, pid))
+                w.put(t, "~", _pkt(li + 1, speed, 2 * math.pi * k / n, last_ms, pid,
+                                   *(extra or ())))
             t += dt
     w.close()
     return w.path
@@ -460,6 +466,57 @@ def t_the_index_flags_laps_that_lost_packets():
         assert (_lap(idx, 3)["status"], _lap(idx, 3)["pace_eligible"]) == \
             (_lap(clean, 3)["status"], _lap(clean, 3)["pace_eligible"]), "a lost packet flags the lap, it does not reject it"
         assert "packets lost" not in " ".join(_lap(idx, 2)["reasons"])
+
+
+def _slips(lap, k):
+    # Lap 3: the front right locks for 40 packets from packet 100 under the brake.
+    if lap == 3 and 100 <= k < 140:
+        return (1.0, 0.2, 1.0, 1.0), 200
+    return None
+
+
+def t_the_index_reports_lockups_and_wheelspin_per_lap():
+    with tempfile.TemporaryDirectory() as d:
+        idx = _index(write_circle_recording(d, slip=_slips))
+        lap3 = _lap(idx, 3)
+        assert [(e["kind"], e["wheel"]) for e in lap3["wheel_events"]] == [("lockup", "FR")], lap3["wheel_events"]
+        e = lap3["wheel_events"][0]
+        assert abs(e["duration_s"] - 40 * 16 / 400) < 1e-3, e
+        assert abs(e["distance_m"] - 250.0) <= 10.0, f"packet 100 of 400 is a quarter into a 1000 m lap: {e}"
+        assert (lap3["lockups"], lap3["wheelspins"]) == (1, 0), lap3
+        assert _lap(idx, 2)["wheel_events"] == [] and _lap(idx, 4)["lockups"] == 0
+
+
+def t_a_lap_stores_a_bounded_event_list_with_exact_counts():
+    events = [dict(kind="wheelspin", wheel="RL", start_s=i * .2, duration_s=.1, extreme=1.5)
+              for i in range(gl.MAX_WHEEL_EVENTS + 30)]
+    trace = [{"d": float(d), "t": d / 100} for d in range(0, 1000, 5)]
+    placed = gl._placed(events, trace)
+    assert len(placed["events"]) == gl.MAX_WHEEL_EVENTS, len(placed["events"])
+    assert placed["wheelspins"] == gl.MAX_WHEEL_EVENTS + 30 and placed["lockups"] == 0, \
+        "the counts cover every event, the stored list is bounded"
+
+
+def t_a_resumed_index_keeps_an_open_wheel_event():
+    with tempfile.TemporaryDirectory() as d:
+        def slips(lap, k):
+            if lap == 4 and 2 <= k < 300:
+                return (1.0, 1.0, 1.6, 1.0), 0
+            return None
+        src = write_circle_recording(os.path.join(d, "src"), lap_secs=(20.0, 20.0, 16.0, 20.0, 18.0), slip=slips)
+        size = os.path.getsize(src)
+        cold = _without_stamp(_index(src))
+        part_dir = os.path.join(d, "live")
+        os.makedirs(part_dir)
+        part = os.path.join(part_dir, os.path.basename(src) + gt7_recording.PART)
+        for cut in (0.62, 0.7):
+            _grow(src, part, int(size * cut) + 7)
+            _index(part)
+        _grow(src, part, size)
+        assert _without_stamp(_index(part)) == dict(cold, name=os.path.basename(part)), \
+            "a resume point inside a wheel event keeps it open"
+        assert [(e["kind"], e["wheel"]) for e in _lap(cold, 4)["wheel_events"]] == [("wheelspin", "RL")], \
+            _lap(cold, 4)["wheel_events"]
 
 
 def t_a_resumed_index_counts_lost_packets_like_a_cold_build():

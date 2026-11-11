@@ -276,6 +276,42 @@ per session: `GT7 track: no match for a <length> m lap`.
 > `racecast telemetry index` builds the missing lap caches ahead of time.
 
 
+### Wheelspin and lock-ups
+
+GT7 reports each wheel's rotation (rad/s) and tyre radius (m). The slip ratio of a wheel
+is its rotation times its radius divided by the car's speed: 1.0 rolls freely, below 1.0
+the wheel turns slower than the car (braking, locking), above 1.0 faster (wheelspin).
+The **Slip ratio FL/FR/RL/RR** channels chart it in the channel detail next to the other
+traces. The lap index records two measurement events, not driving advice:
+
+- **Lock-up:** a wheel with the brake pressed whose slip ratio stays below **0.70** for at
+  least **0.1 s**.
+- **Wheelspin:** a wheel with the throttle pressed whose slip ratio stays above **1.25**
+  for at least **0.1 s**.
+
+Below **15 m/s (54 km/h)** the slip ratio is undefined and no event is counted. Each lap
+lists its events with wheel, start distance, duration and the most extreme ratio, and the
+corner metrics of a track definition count the events that start inside each corner. The
+AI Coach and the AI analysis package carry them as measured facts, with the definition in
+the package's limitations.
+
+Where the limits come from. Three recordings of one car (Nissan GT-R GT500 '99) on one
+track, about 136,000 packets each, measured:
+
+| Condition | Slip ratio measured |
+|---|---|
+| Free rolling, straight, no pedal | 0.998 to 1.002 (front wheels; the radius reads 0.3606 m) |
+| Hard braking, front wheels, corners included | down to 0.79 |
+| Full throttle, driven wheels, two recordings | up to 1.20 |
+| Coasting below 15 m/s | no samples |
+
+The free-rolling spread is the measurement resolution, not a lock-up boundary: normal
+assisted braking already takes the front wheels to 0.79. The limits therefore sit outside
+the envelope of normal driving, so two of the three recordings contain no event at all.
+The third shows rear wheelspin up to a ratio of 1.73 for up to 1.9 s. The 0.1 s minimum
+keeps a single corrupt packet from becoming an event. No recording with a real lock-up
+exists yet, and other cars may need other limits: recalibrate when one does.
+
 ### Optional AI telemetry analysis
 
 ![Telemetry workspace: optional AI settings](images/cc-ai-settings.png)
