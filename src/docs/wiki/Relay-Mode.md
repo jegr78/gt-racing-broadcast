@@ -122,6 +122,16 @@ directors, bind the control server to the producer's **Tailscale IP** (not `0.0.
 see [Director](Director) and the security note below.
 (Developers running from the repo: python3 src/racecast.py works the same everywhere.)
 
+While the relay runs it keeps the producer PC from going to sleep when idle, also before
+OBS starts streaming and in a solo session that only records telemetry. Display sleep and
+closing the lid still work. On Windows and macOS a sleep you choose yourself works too; on
+Linux the block also holds back a suspend you start (`systemctl suspend -i` overrides it,
+or stop the relay first). The Control Center's Relay row
+and `racecast relay status` say whether the block is held. Windows uses
+`SetThreadExecutionState`, macOS `caffeinate`, Linux `systemd-inhibit`; without
+`systemd-inhibit` the relay logs one line and runs on. `RACECAST_KEEP_AWAKE=0` in `.env`
+switches it off after a relay restart.
+
 **Taking over mid-event (multi-part broadcasts):** start the relay at the stint
 that is on air right now,
 

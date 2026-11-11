@@ -2492,22 +2492,48 @@ def _event_title_sanitizer():
     return _EVENT_TITLE_SANITIZER
 
 
-def relay_status_data(read_pid=None, alive=None, http_ok=None):
+def relay_status_data(read_pid=None, alive=None, probe=None):
     """Structured relay state: one source for `racecast status` (text) and the
-    Control Center's /api/status (JSON). Injection points are for tests."""
+    Control Center's /api/status (JSON). `probe` returns the relay's /status dict or
+    None. Injection points are for tests."""
     read_pid = read_pid or sv.read_pid
     alive = alive or sv.pid_alive
-    http_ok = http_ok or _relay_http_ok
+    probe = probe or _relay_status_probe
     pid = read_pid(_relay_pid_path())
     is_alive = alive(pid)
+    status = probe() if is_alive else None
+    awake = status.get("keep_awake") if isinstance(status, dict) else None
     return {"pid": pid, "alive": is_alive, "port": RELAY_PORT,
-            "http_ok": http_ok() if is_alive else False}
+            "http_ok": status is not None,
+            "keep_awake": awake if isinstance(awake, dict) else None}
+
+
+def _relay_status_probe():
+    """The relay's /status as a dict, {} for a non-dict answer, None when it does not answer."""
+    try:
+        status = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/status")
+    except Exception:
+        return None
+    return status if isinstance(status, dict) else {}
+
+
+def keep_awake_text(awake):
+    """One phrase for the relay's idle-sleep block, "" when the relay did not report it."""
+    if not isinstance(awake, dict):
+        return ""
+    if awake.get("held"):
+        return "idle sleep blocked"
+    note = awake.get("note") or ""
+    return "idle sleep NOT blocked" + (f" ({note})" if note else "")
 
 
 def _relay_extra_text(data, tailscale_ip):
     """The CLI's extra column for a live relay, from relay_status_data()."""
     parts = [f"control http://127.0.0.1:{data['port']}/status OK" if data["http_ok"]
              else f"(port {data['port']} not responding)"]
+    awake = keep_awake_text(data.get("keep_awake"))
+    if awake:
+        parts.append(awake)
     if tailscale_ip:
         parts.append(f"tablet/panel http://{tailscale_ip}:{data['port']}/panel")
     return "  ".join(parts)

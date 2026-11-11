@@ -24,19 +24,45 @@ def t_shift_reference_job_only_accepts_a_bounded_car_id():
 
 
 def t_relay_status_data_running():
+    awake = {"held": True, "method": "caffeinate", "note": ""}
     d = rc.relay_status_data(read_pid=lambda p: 4242,
                               alive=lambda pid: True,
-                              http_ok=lambda: True)
-    assert d == {"pid": 4242, "alive": True, "port": 8088, "http_ok": True}
+                              probe=lambda: {"keep_awake": awake})
+    assert d == {"pid": 4242, "alive": True, "port": 8088, "http_ok": True,
+                 "keep_awake": awake}
+
+
+def t_relay_status_data_older_relay_has_no_keep_awake():
+    d = rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
+                              probe=lambda: {})
+    assert d["http_ok"] is True and d["keep_awake"] is None, d
+
+
+def t_relay_status_data_unanswered_probe_is_not_ok():
+    d = rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
+                              probe=lambda: None)
+    assert d["http_ok"] is False and d["keep_awake"] is None, d
 
 
 def t_relay_status_data_stopped_skips_http_probe():
     probed = []
     d = rc.relay_status_data(read_pid=lambda p: None,
                               alive=lambda pid: False,
-                              http_ok=lambda: probed.append(1) or True)
-    assert d == {"pid": None, "alive": False, "port": 8088, "http_ok": False}
+                              probe=lambda: probed.append(1) or {})
+    assert d == {"pid": None, "alive": False, "port": 8088, "http_ok": False,
+                 "keep_awake": None}
     assert probed == []   # never probe HTTP for a dead relay
+
+
+def t_relay_extra_text_names_the_idle_sleep_block():
+    held = {"pid": 1, "alive": True, "port": 8088, "http_ok": True,
+            "keep_awake": {"held": True, "method": "caffeinate", "note": ""}}
+    assert "idle sleep blocked" in rc._relay_extra_text(held, None)
+    lost = dict(held, keep_awake={"held": False, "method": "systemd-inhibit",
+                                  "note": "systemd-inhibit not found"})
+    text = rc._relay_extra_text(lost, None)
+    assert "idle sleep NOT blocked (systemd-inhibit not found)" in text, text
+    assert rc.keep_awake_text(None) == ""
 
 
 def t_relay_extra_text_ok_with_tailscale():
