@@ -93,6 +93,19 @@ def t_raw_time_window_preserves_single_packet_cut_and_uses_sparse_capture_offset
                 raise AssertionError('invalid channel/window request must fail with a domain error')
 
 
+def t_the_workspace_detail_charts_the_slip_ratio_of_a_lap():
+    def slips(lap, k):
+        return ((1.0, 1.0, 1.4, 1.0), 0) if lap == 3 and 100 <= k < 140 else None
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td, slip=slips)
+        idx = fixture._index(path)
+        lap = fixture._lap(idx, 3)
+        result = detail.window(path, idx, lap, ['slip_rl', 'slip_fl'], 'distance', 0, 500, fixture.FakeTracks())
+        values = [row['slip_rl'] for row in result['rows'] if row['slip_rl'] is not None]
+        assert values and max(values) > 1.3 and min(values) < 1.01, values[:5]
+        assert {d['key'] for d in result['channels']} == {'slip_rl', 'slip_fl'}
+
+
 def t_distance_windows_use_common_geometry_and_refuse_unbounded_allocations():
     with tempfile.TemporaryDirectory() as td:
         path = fixture.write_circle_recording(td)

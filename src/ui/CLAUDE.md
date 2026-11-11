@@ -64,6 +64,7 @@ Loaded when working under `src/ui/`.
   recording seek offsets to the original file and complete recording header, and separates capture
   completeness, trace coverage, roles, pace eligibility and historical reference status.
   Version 12 adds `packets_lost` per lap, counted from gaps in the recorded GT7 packet ids.
+  Version 13 adds `wheel_events`, `lockups` and `wheelspins` per lap (wiki Telemetry).
   Known-layout completeness is checked against original driven coverage and the
   first projected station before trace normalization. Incomplete captures cannot
   become pace or historical references; usable laps determine historical improvements.
