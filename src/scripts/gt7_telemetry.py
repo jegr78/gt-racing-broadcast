@@ -29,6 +29,14 @@ OFF_RPM = 0x3C          # engine rpm (float)
 OFF_CLUTCH_ENGAGEMENT = 0xF8  # clutch engagement 0..1 (float)
 OFF_GEAR_RATIOS = 0x104       # forward gear ratios 1..8 (float x8, 0 = no gear)
 OFF_PACKET_ID = 0x70          # packet sequence number (int32), +1 per packet
+OFF_WHEEL_RPS = 0xA4          # wheel angular velocity FL, FR, RL, RR (float x4, rad/s)
+OFF_TYRE_RADIUS = 0xB4        # tyre radius FL, FR, RL, RR (float x4, m)
+WHEELS = ("FL", "FR", "RL", "RR")
+# Slip limits sit outside the slip measured in normal driving; derivation: wiki Telemetry.
+SLIP_MIN_SPEED_MPS = 15.0
+LOCKUP_FLOOR = 0.70
+WHEELSPIN_CEILING = 1.25
+SLIP_EVENT_MIN_S = 0.1
 OFF_GEAR = 0x90         # low nibble = current gear (uint8)
 OFF_SPEED = 0x4C        # metres/second (float)
 OFF_FUEL_LEVEL = 0x44   # litres in tank (float)
@@ -136,8 +144,8 @@ GT7Packet = namedtuple("GT7Packet", [
     "car_id",
     "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
     "gear", "rpm", "pos_x", "pos_y", "pos_z", "race_position", "car_count",
-    "clutch_engagement", "gear_ratios", "packet_id",
-], defaults=(None,) * 17)   # None when the packet is too short to carry the field
+    "clutch_engagement", "gear_ratios", "packet_id", "wheel_rps", "tyre_radius", "slip",
+], defaults=(None,) * 20)   # None when the packet is too short to carry the field
 
 
 def _opt_float(plain, off):
@@ -196,7 +204,78 @@ def parse_packet(plain):
         gear_ratios=tuple(_opt_float(plain, OFF_GEAR_RATIOS + 4 * i) for i in range(8))
         if len(plain) >= OFF_GEAR_RATIOS + 32 else None,
         packet_id=_opt_int(plain, OFF_PACKET_ID),
+        **_wheels(plain),
     )
+
+
+def _wheels(plain):
+    """Wheel rotation, tyre radius and the slip ratio per wheel; slip is None below
+    SLIP_MIN_SPEED_MPS or when a value is not finite."""
+    if len(plain) < OFF_TYRE_RADIUS + 16:
+        return {}
+    rps = struct.unpack_from("<4f", plain, OFF_WHEEL_RPS)
+    radius = struct.unpack_from("<4f", plain, OFF_TYRE_RADIUS)
+    speed = struct.unpack_from("<f", plain, OFF_SPEED)[0]
+    slip = None
+    if math.isfinite(speed) and speed >= SLIP_MIN_SPEED_MPS:
+        slip = tuple(abs(w) * r / speed for w, r in zip(rps, radius, strict=True))
+        if not all(math.isfinite(s) for s in slip):
+            slip = None
+    return {"wheel_rps": rps, "tyre_radius": radius, "slip": slip}
+
+
+class SlipEvents:
+    """Lock-ups (a braked wheel below LOCKUP_FLOOR) and wheelspin (a wheel under throttle
+    above WHEELSPIN_CEILING) that last at least SLIP_EVENT_MIN_S. Feed packets in order;
+    close() ends open events and returns every finished one since the last close()."""
+
+    def __init__(self):
+        self._open = {}
+        self._done = []
+
+    def update(self, pkt, t):
+        slip = pkt.slip if pkt.on_track and not pkt.paused else None
+        for i, wheel in enumerate(WHEELS):
+            kind = None
+            if slip is not None:
+                if pkt.brake > 0 and slip[i] < LOCKUP_FLOOR:
+                    kind = "lockup"
+                elif pkt.throttle > 0 and slip[i] > WHEELSPIN_CEILING:
+                    kind = "wheelspin"
+            event = self._open.get(wheel)
+            if event is not None and event["kind"] != kind:
+                self._finish(wheel, t)
+                event = None
+            if kind is None:
+                continue
+            if event is None:
+                self._open[wheel] = {"kind": kind, "wheel": wheel, "start_s": t, "extreme": slip[i]}
+            else:
+                pick = min if kind == "lockup" else max
+                event["extreme"] = pick(event["extreme"], slip[i])
+
+    def _finish(self, wheel, t):
+        event = self._open.pop(wheel)
+        event["duration_s"] = t - event["start_s"]
+        if event["duration_s"] >= SLIP_EVENT_MIN_S - 1e-9:
+            self._done.append(event)
+
+    def close(self, t):
+        for wheel in list(self._open):
+            self._finish(wheel, t)
+        done, self._done = sorted(self._done, key=lambda e: e["start_s"]), []
+        return done
+
+    def finished(self):
+        """The events finished since the last close(), without ending the open ones."""
+        return sorted(self._done, key=lambda e: e["start_s"])
+
+    def state(self):
+        return {"open": {w: dict(e) for w, e in self._open.items()}, "done": [dict(e) for e in self._done]}
+
+    def restore(self, state):
+        self._open = {w: dict(e) for w, e in state["open"].items()}
+        self._done = [dict(e) for e in state["done"]]
 
 
 # ---- heartbeat policy: which byte to send, and when (#711) ----
