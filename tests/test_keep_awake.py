@@ -224,12 +224,13 @@ def t_relay_status_reports_the_block_in_race_and_solo():
             return held
 
     race = rf.Relay(_StubSource(), (53001, 53002), logdir)
-    assert race.status()["keep_awake"] == {"held": False, "method": None, "note": "not started"}
+    assert race.status().get("keep_awake") == {"held": False, "method": None,
+                                               "note": "not started"}, "race before start"
     race.keep_awake = Fake()
-    assert race.status()["keep_awake"] == held
+    assert race.status().get("keep_awake") == held, "race status reports the block"
     solo = rf.Relay(None, [], logdir, solo=True)
     solo.keep_awake = Fake()
-    assert solo.status()["keep_awake"] == held
+    assert solo.status().get("keep_awake") == held, "solo status reports the block"
 
 
 def t_console_status_keeps_only_the_held_flag_for_crew_roles():
