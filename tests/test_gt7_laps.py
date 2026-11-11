@@ -53,9 +53,10 @@ class FakeCars:
                 "group": "N"}
 
 
-def _pkt(lap, speed, angle, last_ms=-1):
+def _pkt(lap, speed, angle, last_ms=-1, pid=0):
     b = bytearray(0x158)
     struct.pack_into("<I", b, 0, 0x47375330)
+    struct.pack_into("<i", b, tm.OFF_PACKET_ID, pid)
     struct.pack_into("<3f", b, tm.OFF_POS, R * math.cos(angle), 0.0, R * math.sin(angle))
     struct.pack_into("<f", b, tm.OFF_SPEED, speed)
     struct.pack_into("<f", b, tm.OFF_FUEL_LEVEL, 50.0)
@@ -75,19 +76,22 @@ def _pkt(lap, speed, angle, last_ms=-1):
 
 
 def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_000_000.0,
-                           n=400, ns=None):
+                           n=400, ns=None, lost=()):
     """One lap per entry of lap_secs around the circle, `n` packets each (or ns[i] for
     lap i); lap 1 is the engine's partial first lap. From the 6th packet of a lap GT7's
-    last_ms reports the previous timed lap; 10 packets of one more lap close the last one."""
+    last_ms reports the previous timed lap; 10 packets of one more lap close the last one.
+    Packets are numbered from 1; the numbers in `lost` never reach the recording."""
     w = gt7_recording.RecordingWriter(rec_dir, "Solo", "dev", flush_s=0.05, queue_max=0)
-    t, last_ms = t0, -1
+    t, last_ms, pid = t0, -1, 0
     for li, secs in enumerate(list(lap_secs) + [lap_secs[-1]]):
         n = ns[li] if ns and li < len(ns) else n
         dt, speed = secs / n, 1000.0 / secs
         for k in range(n if li < len(lap_secs) else 10):
             if li >= 2 and k == 5:
                 last_ms = round(lap_secs[li - 1] * 1000)
-            w.put(t, "~", _pkt(li + 1, speed, 2 * math.pi * k / n, last_ms))
+            pid += 1
+            if pid not in lost:
+                w.put(t, "~", _pkt(li + 1, speed, 2 * math.pi * k / n, last_ms, pid))
             t += dt
     w.close()
     return w.path
@@ -246,10 +250,10 @@ def t_old_normalized_coverage_cache_is_rebuilt():
 
 def t_joined_lap_is_not_a_reference_and_the_next_complete_lap_can_be_one():
     real_packet = globals()['_pkt']
-    def joined_packet(lap, speed, angle, last_ms=-1):
+    def joined_packet(lap, speed, angle, last_ms=-1, pid=0):
         if lap == 2:
             speed, angle = speed * .7, .3 * 2 * math.pi + angle * .7
-        return real_packet(lap, speed, angle, last_ms)
+        return real_packet(lap, speed, angle, last_ms, pid)
     globals()['_pkt'] = joined_packet
     try:
         with tempfile.TemporaryDirectory() as directory:
@@ -266,8 +270,8 @@ def t_joined_lap_is_not_a_reference_and_the_next_complete_lap_can_be_one():
 
 def t_possible_tyre_service_is_an_unconfirmed_timestamped_proposal():
     real = globals()['_pkt']
-    def tyres(lap, speed, angle, last_ms=-1):
-        b = bytearray(real(lap, speed, angle, last_ms))
+    def tyres(lap, speed, angle, last_ms=-1, pid=0):
+        b = bytearray(real(lap, speed, angle, last_ms, pid))
         if lap == 2 and angle >= math.pi:
             for off in (tm.OFF_TYRE_FL, tm.OFF_TYRE_FR, tm.OFF_TYRE_RL, tm.OFF_TYRE_RR):
                 struct.pack_into('<f', b, off, 60.0)
@@ -443,6 +447,38 @@ def t_a_growing_recording_replays_only_its_tail():
             f"the replay must start at the cached resume point, not at 0: {starts}"
         assert warm == dict(cold, name=os.path.basename(part)), \
             "a resumed index must equal a cold build of the whole file"
+
+
+def t_the_index_flags_laps_that_lost_packets():
+    # Lap 3 holds packets 801..1200; five of them never arrive.
+    with tempfile.TemporaryDirectory() as d:
+        idx = _index(write_circle_recording(d, lost=set(range(900, 905))))
+        assert [_lap(idx, n)["packets_lost"] for n in (1, 2, 3, 4)] == [0, 0, 5, 0], \
+            [(lap["lap"], lap["packets_lost"]) for lap in idx["laps"]]
+        assert "5 packets lost" in _lap(idx, 3)["reasons"], _lap(idx, 3)["reasons"]
+        clean = _index(write_circle_recording(os.path.join(d, "clean")))
+        assert (_lap(idx, 3)["status"], _lap(idx, 3)["pace_eligible"]) == \
+            (_lap(clean, 3)["status"], _lap(clean, 3)["pace_eligible"]), "a lost packet flags the lap, it does not reject it"
+        assert "packets lost" not in " ".join(_lap(idx, 2)["reasons"])
+
+
+def t_a_resumed_index_counts_lost_packets_like_a_cold_build():
+    with tempfile.TemporaryDirectory() as d:
+        src = write_circle_recording(os.path.join(d, "src"), lap_secs=(20.0, 20.0, 16.0, 20.0, 18.0),
+                                     lost=set(range(1150, 1160)) | {1500})
+        size = os.path.getsize(src)
+        cold = _without_stamp(_index(src))
+        part_dir = os.path.join(d, "live")
+        os.makedirs(part_dir)
+        part = os.path.join(part_dir, os.path.basename(src) + gt7_recording.PART)
+        for cut in (0.45, 0.62):
+            _grow(src, part, int(size * cut) + 7)
+            _index(part)
+        _grow(src, part, size)
+        warm = _without_stamp(_index(part))
+        assert warm == dict(cold, name=os.path.basename(part)), "a resume point keeps the last packet id"
+        assert [lap["packets_lost"] for lap in cold["laps"]] == [0, 0, 10, 1, 0], \
+            [(lap["lap"], lap["packets_lost"]) for lap in cold["laps"]]
 
 
 def _cold_copy(part, d, version):

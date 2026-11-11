@@ -15285,6 +15285,7 @@ def main():
             cars=gt7_cars.CarDB(gt7_data.cars_dir(runtime_base, gt7_bundled)),
             tracks=gt7_tracks.TrackDB.load(runtime_base, gt7_bundled),
             recorder=recorder, packets=gt7_packet_stats.PacketStats())
+        recorder.packet_stats = telemetry_store.packet_stats
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because

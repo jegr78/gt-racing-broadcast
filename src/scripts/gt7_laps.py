@@ -12,6 +12,7 @@ import os
 import tempfile
 
 import gt7_data
+import gt7_packet_stats
 import gt7_recording
 import gt7_telemetry
 import gt7_tracks
@@ -20,7 +21,7 @@ STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 11
+INDEX_VERSION = 12
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -346,6 +347,7 @@ class _Replay:
         self.first = self.last = None
         self.raw_seek = []
         self.start, self.dropped, self.point = None, 0, None
+        self.last_pid, self.lap_lost = None, 0    # packet ids missing from the open lap
         if point is not None:
             self.eng.restore(point["eng"])
             self.times.restore(point["times"])
@@ -358,6 +360,7 @@ class _Replay:
             self.first, self.last = point["first"], point["last"]
             self.raw_seek = [tuple(p) for p in point.get("raw_seek", [])]
             self.start, self.dropped = point["offset"], point["dropped"]
+            self.last_pid, self.lap_lost = point["last_pid"], point["lap_lost"]
             self.point = {k: v for k, v in point.items()
                           if k not in ("raw_laps", "started", "check")}
         self.reused = len(self.laps)
@@ -369,6 +372,7 @@ class _Replay:
             relative = wall_ts - (self.first if self.first is not None else wall_ts)
             if math.isfinite(relative) and (not self.raw_seek or relative >= self.raw_seek[-1][0] + 2):
                 self.raw_seek.append((relative, rec.record_start))
+            self._count_lost(gt7_packet_stats.packet_id(plain))
             self._feed(wall_ts, gt7_telemetry.parse_packet(plain))
             if len(self.laps) > marked and self.times.settled():
                 marked = len(self.laps)
@@ -377,8 +381,18 @@ class _Replay:
                     "times": self.times.resume_state(), "cur": list(self.cur),
                     "tail": self.tail, "tyre": list(self.tyre), "cur_events": list(self.cur_events),
                     "first": self.first, "raw_seek": list(self.raw_seek),
-                    "last": self.last, "dropped": rec.dropped}
+                    "last": self.last, "dropped": rec.dropped,
+                    "last_pid": self.last_pid, "lap_lost": self.lap_lost}
         self.dropped = rec.dropped
+
+    def _count_lost(self, pid):
+        """Gaps in the packet ids belong to the lap they fall into; a new stream starts over."""
+        if pid is None:
+            return
+        last = self.last_pid
+        self.lap_lost += gt7_packet_stats.gap(last, pid)
+        if last is None or pid > last or pid < last - gt7_packet_stats.REORDER_WINDOW:
+            self.last_pid = pid
 
     def _feed(self, wall_ts, pkt):
         self.first = wall_ts if self.first is None else self.first
@@ -390,6 +404,7 @@ class _Replay:
         for lap in self.laps[closed:]:
             lap['service_events'] = list(self.cur_events)
             self.cur_events = []
+            lap['packets_lost'], self.lap_lost = self.lap_lost, 0
             times.lap_closed(lap, wall_ts)
             samples = self.cur if self.tail is None else self.cur + [self.tail]
             if lap["status"] in COUNTED:
@@ -520,9 +535,11 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
     eligible = lap["status"] in COUNTED and complete_trace and time_valid
     if problem:
         row.update(status="not counted", reason=problem)
+    lost = lap.get("packets_lost", 0)
+    flags = ([problem] if problem else []) + ([f"{lost} packet{'' if lost == 1 else 's'} lost"] if lost else [])
     row.update(capture_complete=capture_complete, trace_complete=complete_trace,
-               time_valid=time_valid,
-               data_quality=lap["data_quality"], reasons=list(dict.fromkeys(lap["reasons"] + ([problem] if problem else []))),
+               time_valid=time_valid, packets_lost=lost,
+               data_quality=lap["data_quality"], reasons=list(dict.fromkeys(lap["reasons"] + flags)),
                pace_eligible=eligible,
                is_reference=eligible and lap["status"] == "reference", after_service=after_service,
                lap_role=("pit" if lap["pit"] else "partial" if not capture_complete
@@ -557,6 +574,7 @@ def _build(path, track_db, cars, key, old=None):
     unfinished = replay.eng.open_lap_record()
     if unfinished is not None:
         unfinished['service_events'] = list(replay.cur_events)
+        unfinished['packets_lost'] = replay.lap_lost
     open_lap = None
     if unfinished is not None and (replay.cur or replay.tail):
         samples = replay.cur if replay.tail is None else replay.cur + [replay.tail]

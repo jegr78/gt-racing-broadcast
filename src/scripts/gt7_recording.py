@@ -3,7 +3,8 @@
 
 Stdlib only and no relay imports, so the CLI reads recordings without a relay.
 File: one JSON header line, then records of float64 wall ts, uint8 kind, uint16
-length and the payload. Kind 0x00 is a meta record carrying {"dropped": n}.
+length and the payload. Kind 0x00 is a meta record carrying {"dropped": n} and, from a
+relay that counts them, the GT7 packet counters of the current stream as "packets".
 """
 import datetime
 from functools import lru_cache
@@ -23,6 +24,7 @@ import gt7_telemetry
 LOG = logging.getLogger("racecast.relay.telemetry")
 
 FORMAT = "racecast-gt7rec"
+PACKET_META_KEYS = ("stream", "received", "lost", "reordered", "decrypt_failed", "parse_failed")
 VERSION = 1
 SUFFIX = ".gt7rec"
 PART = ".part"
@@ -135,11 +137,13 @@ class RecordingWriter:
     """Writes packets to `<rec_dir>/<start>.gt7rec.part` from its own thread and
     renames the file on close. put() never blocks: a full queue drops the packet.
     `on_open(path, rec_dir, recording_id)` runs once on its own thread after the
-    header is on disk; its failure is logged and never stops recording."""
+    header is on disk; its failure is logged and never stops recording. `packet_stats()`
+    returns the relay's packet counters for the meta records, or None."""
 
     def __init__(self, rec_dir, profile, relay_version, queue_max=QUEUE_MAX,
-                 flush_s=FLUSH_S, on_open=None):
+                 flush_s=FLUSH_S, on_open=None, packet_stats=None):
         self._dir = rec_dir
+        self._packet_stats = packet_stats
         self._on_open = on_open
         self._profile = profile
         self._relay_version = relay_version
@@ -231,9 +235,20 @@ class RecordingWriter:
         LOG.warning("could not finalise telemetry recording %s: %s; the next relay "
                     "start finishes it", os.path.basename(self.path) + PART, err.strerror)
 
+    def _meta(self):
+        """The meta record's payload: the queue drops plus the packet counters, if any."""
+        meta = {"dropped": self.dropped}
+        try:
+            stats = self._packet_stats() if self._packet_stats else None
+        except Exception:  # noqa: BLE001  counters are optional, recording goes on
+            stats = None
+        if isinstance(stats, dict):
+            meta["packets"] = {k: stats[k] for k in PACKET_META_KEYS if k in stats}
+        return meta
+
     def _run(self):
         fh = None
-        written_drops = 0
+        written_meta = {"dropped": 0}
         last_flush = time.monotonic()
         try:
             while True:
@@ -252,10 +267,10 @@ class RecordingWriter:
                     self._write(fh, _encode(wall_ts, ord(kind), plain))
                 now = time.monotonic()
                 if fh is not None and (done or now - last_flush >= self._flush_s):
-                    if self.dropped != written_drops:
-                        written_drops = self.dropped
-                        meta = json.dumps({"dropped": written_drops}).encode("utf-8")
-                        self._write(fh, _encode(time.time(), _META, meta))
+                    meta = self._meta()
+                    if meta != written_meta:
+                        written_meta = meta
+                        self._write(fh, _encode(time.time(), _META, json.dumps(meta).encode("utf-8")))
                     fh.flush()
                     last_flush = now
                 if done:
@@ -279,6 +294,7 @@ class Recording:
     def __init__(self, path):
         self.path = path
         self.dropped = 0
+        self.packet_stats = None   # the newest packet counters a meta record carried
         try:
             with open(path, "rb") as fh:
                 line = fh.readline()
@@ -319,9 +335,12 @@ class Recording:
                 self.pos += _REC.size + n
                 if kind == _META:
                     try:
-                        self.dropped = int(json.loads(payload.decode("utf-8"))["dropped"])
-                    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-                        pass  # a damaged meta record only loses the drop count
+                        meta = json.loads(payload.decode("utf-8"))
+                        self.dropped = int(meta["dropped"])
+                        if isinstance(meta.get("packets"), dict):
+                            self.packet_stats = meta["packets"]
+                    except (ValueError, KeyError, TypeError, AttributeError, UnicodeDecodeError):
+                        pass  # a damaged meta record only loses its counts
                     continue
                 if n < _MIN_PAYLOAD:
                     continue
@@ -588,8 +607,10 @@ class RecordControl:
         self._error = None
         self._state_error = None
         self._closed = False
+        self.packet_stats = None   # callable: the relay's packet counters, for the meta records
         self._factory = writer_factory or (
-            lambda: RecordingWriter(rec_dir, profile, relay_version, on_open=on_open))
+            lambda: RecordingWriter(rec_dir, profile, relay_version, on_open=on_open,
+                                    packet_stats=lambda: self.packet_stats() if self.packet_stats else None))
 
     def _load(self, default):
         try:
