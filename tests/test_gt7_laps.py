@@ -465,7 +465,7 @@ def t_the_index_flags_laps_that_lost_packets():
 def t_a_resumed_index_counts_lost_packets_like_a_cold_build():
     with tempfile.TemporaryDirectory() as d:
         src = write_circle_recording(os.path.join(d, "src"), lap_secs=(20.0, 20.0, 16.0, 20.0, 18.0),
-                                     lost=set(range(1150, 1160)) | {1500})
+                                     lost=set(range(1150, 1160)) | {1202, 1203, 1500})
         size = os.path.getsize(src)
         cold = _without_stamp(_index(src))
         part_dir = os.path.join(d, "live")
@@ -477,7 +477,7 @@ def t_a_resumed_index_counts_lost_packets_like_a_cold_build():
         _grow(src, part, size)
         warm = _without_stamp(_index(part))
         assert warm == dict(cold, name=os.path.basename(part)), "a resume point keeps the last packet id"
-        assert [lap["packets_lost"] for lap in cold["laps"]] == [0, 0, 10, 1, 0], \
+        assert [lap["packets_lost"] for lap in cold["laps"]] == [0, 0, 10, 3, 0], \
             [(lap["lap"], lap["packets_lost"]) for lap in cold["laps"]]
 
 
