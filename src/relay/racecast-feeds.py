@@ -178,6 +178,7 @@ from dataclasses import asdict
 from audience_connections import StorageError
 import overlay_build
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
+import keep_awake
 import race_engineer_access
 import driver_radio_access
 import driver_radio_service
@@ -7030,6 +7031,9 @@ def redact_console_status(full, roles):
         if isinstance(telem, dict) and "record" in telem:
             # recording detail (file name, byte and drop counters): director/producer only.
             out["telemetry"] = {k: v for k, v in telem.items() if k != "record"}
+        awake = full.get("keep_awake")
+        if isinstance(awake, dict):                   # the note can carry a helper's stderr
+            out["keep_awake"] = {"held": awake.get("held")}
     return out
 
 
@@ -9258,6 +9262,7 @@ class Relay:
         # ON-AIR marker). Equals the on-air feed's pull index in normal operation;
         # diverges one row ahead only during a same-URL back-to-back continuation.
         self.solo = solo
+        self.keep_awake = None   # keep_awake.KeepAwake once the relay owns the control port
         self.manual_feed_arm = manual_feed_arm_enabled(os.environ)
         if solo:
             # Solo: no Schedule/Qualifying and no A/B ping-pong feeds. POV (below)
@@ -10714,7 +10719,13 @@ class Relay:
         if av:
             out["av"] = av
         out["rebuild_guard"] = self.rebuild_guard_status()
+        out["keep_awake"] = self.keep_awake_status()
         return out
+
+    def keep_awake_status(self):
+        if self.keep_awake is None:
+            return {"held": False, "method": None, "note": "not started"}
+        return self.keep_awake.status()
 
     def _solo_status(self, now):
         """Status payload for solo mode: no A/B schedule/feeds. POV + OBS + health +
@@ -10740,6 +10751,7 @@ class Relay:
         self._refresh_health(now)
         out["health"] = {"level": self.health_level, "reasons": self.health_reasons,
                          "since_s": round(now - self.health_since, 1)}
+        out["keep_awake"] = self.keep_awake_status()
         return out
 
     def live_feed(self):
@@ -15406,6 +15418,8 @@ def main():
                  f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
                  f"to see what holds the port.")
 
+    relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
+    relay.keep_awake.start()
     radio_service.start()
     if coach_service is not None:coach_service.start()
     radio_enricher.start()
@@ -15454,6 +15468,7 @@ def main():
             youtube_service.close()
         if twitch_service is not None:
             twitch_service.close()
+        relay.keep_awake.stop()
         stop_evt.set(); relay.shutdown(); os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)

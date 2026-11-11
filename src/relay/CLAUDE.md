@@ -98,6 +98,8 @@ explicit value (`127.0.0.1` for local-only, or `0.0.0.0`) to override. The endpo
 have no auth and `/status` reveals stream URLs, so the tailnet is the trust boundary,
 keep it to invited members. Bind logic is pure + unit-tested: `tests/test_bind.py`.
 
+**Keep awake (#1105).** Once the relay owns the control port it holds an idle-sleep block for its own lifetime (`src/scripts/keep_awake.py`, stdlib only): Windows sets `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` on a dedicated thread (the flag belongs to that thread and dies with the process), macOS runs `caffeinate -i -w <relay pid>`, Linux `systemd-inhibit --what=idle:sleep --mode=block` around `tail --pid=<relay pid>`. Both helpers end with the relay pid, so a crash or `taskkill /F` leaves no block. A missing or failing helper logs one WARNING and the relay runs on. `/status` `keep_awake` = `{held, method, note}` (crew console roles see only `held`); `RACECAST_KEEP_AWAKE=0` (machine `.env`) turns it off. Tests: `tests/test_keep_awake.py`.
+
 **Logging.** The relay and each static-stream feed write timestamped, leveled lines
 (`YYYY-MM-DD HH:MM:SS LEVEL …`) to per-service log files under `runtime/<profile>/logs/`
 via `src/scripts/logsetup.py` (`TimedRotatingFileHandler`, daily midnight rotation,
