@@ -166,6 +166,7 @@ import cookie_jar  # the shared "jar holds a YouTube login" rule, same as prefli
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
+import gt7_packet_stats
 from contextlib import nullcontext
 import telemetry_replay
 import intermission_live
@@ -13053,6 +13054,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         base["telemetry"]["record"] = telemetry_store.recorder.status()
                     if telemetry_store.has_tracks():
                         base["telemetry"]["track"] = telemetry_store.track()
+                    packets = telemetry_store.packet_stats()
+                    if packets is not None:
+                        base["telemetry"]["packets"] = packets
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
@@ -14500,12 +14504,21 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0
                                              # forge valid telemetry (the key is fixed+public)
             kind, plain = gt7_crypto.decrypt_typed(data)
             if plain is None:
+                store.count_packet("decrypt", now=clock())
                 continue
             heartbeat.on_packet(kind, clock())
             now_wall = time.time()
             store.record(now_wall, kind, plain)
             try:
                 packet = gt7_telemetry.parse_packet(plain)
+            except Exception as e:  # noqa: BLE001  a bad packet must not pause the loop, it is recorded already
+                store.count_packet("parse", now=clock())
+                if not packet_failed:
+                    tlog.error("telemetry packet rejected (logged once): %s", e)
+                packet_failed = True
+                continue
+            store.count_packet("ok", packet.packet_id, clock())
+            try:
                 # An arbitrary UDP datagram must not pin discovery and redirect
                 # all future heartbeats away from the actual console.
                 if dest is None:
@@ -15271,7 +15284,7 @@ def main():
             view_path=os.path.join(runtime, "telemetry-view.json"),   # show/hide survives restarts
             cars=gt7_cars.CarDB(gt7_data.cars_dir(runtime_base, gt7_bundled)),
             tracks=gt7_tracks.TrackDB.load(runtime_base, gt7_bundled),
-            recorder=recorder)
+            recorder=recorder, packets=gt7_packet_stats.PacketStats())
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because

@@ -13,6 +13,7 @@ import math
 import os
 import struct
 import threading
+import time
 from collections import deque, namedtuple
 
 # The relay's telemetry logger: one line per finished lap says whether it became
@@ -27,6 +28,7 @@ OFF_POS = 0x04          # car position x/y/z, metres (float x3)
 OFF_RPM = 0x3C          # engine rpm (float)
 OFF_CLUTCH_ENGAGEMENT = 0xF8  # clutch engagement 0..1 (float)
 OFF_GEAR_RATIOS = 0x104       # forward gear ratios 1..8 (float x8, 0 = no gear)
+OFF_PACKET_ID = 0x70          # packet sequence number (int32), +1 per packet
 OFF_GEAR = 0x90         # low nibble = current gear (uint8)
 OFF_SPEED = 0x4C        # metres/second (float)
 OFF_FUEL_LEVEL = 0x44   # litres in tank (float)
@@ -134,8 +136,8 @@ GT7Packet = namedtuple("GT7Packet", [
     "car_id",
     "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
     "gear", "rpm", "pos_x", "pos_y", "pos_z", "race_position", "car_count",
-    "clutch_engagement", "gear_ratios",
-], defaults=(None,) * 16)   # None when the packet is too short to carry the field
+    "clutch_engagement", "gear_ratios", "packet_id",
+], defaults=(None,) * 17)   # None when the packet is too short to carry the field
 
 
 def _opt_float(plain, off):
@@ -193,6 +195,7 @@ def parse_packet(plain):
         clutch_engagement=_opt_float(plain, OFF_CLUTCH_ENGAGEMENT),
         gear_ratios=tuple(_opt_float(plain, OFF_GEAR_RATIOS + 4 * i) for i in range(8))
         if len(plain) >= OFF_GEAR_RATIOS + 32 else None,
+        packet_id=_opt_int(plain, OFF_PACKET_ID),
     )
 
 
@@ -854,8 +857,12 @@ class TelemetryStore:
     """
 
     def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False,
-                 view_path=None, cars=None, recorder=None, tracks=None, engineer=None):
+                 view_path=None, cars=None, recorder=None, tracks=None, engineer=None,
+                 clock=time.monotonic, packets=None):
         self._eng = TelemetryEngine()
+        self._clock = clock
+        self._packets = packets        # gt7_packet_stats.PacketStats for live UDP, or None
+        self._packets_lock = threading.Lock()
         self._eng.track_db = tracks    # gt7_tracks.TrackDB (or None: no track recognition)
         self._cars = cars              # gt7_cars.CarDB (or None: no car names)
         self._view_path = view_path
@@ -921,6 +928,27 @@ class TelemetryStore:
         except Exception as e:  # noqa: BLE001  recording must never stop the telemetry loop
             LOG.warning("telemetry recording failed: %s", e)
 
+    def count_packet(self, outcome, pid=None, now=None):
+        """Count one received datagram: 'ok' with its packet id, 'decrypt' or 'parse'."""
+        if self._packets is None:
+            return
+        now = self._clock() if now is None else now
+        with self._packets_lock:
+            if outcome == "ok" and pid is not None:
+                self._packets.on_packet(pid, now)
+            elif outcome == "decrypt":
+                self._packets.on_decrypt_failure(now)
+            elif outcome == "parse":
+                self._packets.on_parse_failure(now)
+
+    def packet_stats(self, now=None):
+        """Loss and decode counters of the current GT7 stream, None without counters."""
+        if self._packets is None:
+            return None
+        now = self._clock() if now is None else now
+        with self._packets_lock:
+            return self._packets.snapshot(now)
+
     def set_source(self, ip):
         """Record the console IP the listener latched (surfaced on /telemetry/data
         so `racecast gt7-discover` can read it without a second 33740 bind)."""
@@ -944,6 +972,7 @@ class TelemetryStore:
         out["visible"] = self.visible()
         out["car"] = self._lookup_car(snap["car_id"])
         out["track"] = self.track()
+        out["packets"] = self.packet_stats()
         return out
 
     def _lookup_car(self, car_id):
