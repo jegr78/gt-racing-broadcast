@@ -1550,6 +1550,85 @@ def t_setup_never_mixes_on_unaligned_clocks():
     assert "clock" in note and "Mikrofon (K66)" in note
 
 
+CARD_BUSY_LOG = ("[in#0 @ 000002a8c08e0240] Could not run graph (sometimes caused by a device "
+                 "already in use by other application)\n"
+                 "Error opening input file video=Elgato HD60 X:audio=Elgato HD60 X (Elgato HD60 X).\n"
+                 "Error opening input files: I/O error\n")
+
+
+def t_the_failed_capture_input_is_read_from_ffmpeg():
+    # #1124: the live log of a busy card, then a mic that cannot open, per platform.
+    assert m.failed_capture_input(CARD_BUSY_LOG, "win32", "Mikrofon (K66)") == "card"
+    assert m.failed_capture_input("Error opening input file audio=Mikrofon (K66).\n",
+                                  "win32", "Mikrofon (K66)") == "mic", "the mic's own open error"
+    assert m.failed_capture_input("Error opening input file alsa_input.usb-mic.\n",
+                                  "linux", "alsa_input.usb-mic") == "mic"
+    assert m.failed_capture_input("Error opening input file /dev/video2.\n",
+                                  "linux", "alsa_input.usb-mic") == "card"
+    assert m.failed_capture_input("Error opening input file :Studio Mic.\n",
+                                  "darwin", "Studio Mic") == "mic"
+    assert m.failed_capture_input("frame=  100 fps= 60\n", "win32", "Mikrofon (K66)") is None
+    assert m.failed_capture_input(CARD_BUSY_LOG, "win32", "") == "card"
+
+
+def t_a_clock_probe_on_a_busy_card_reports_the_card():
+    # #1124: the probe that hit a busy card read as "clocks differ" and dropped the mic.
+    class Done:
+        stdout, stderr = b"", CARD_BUSY_LOG.encode()
+    args = m.local_capture_input_args("win32", HD60X_OBS_ID, mic="Mikrofon (K66)", origin=0)
+    found = m.probe_capture_clock(args, runner=lambda *a, **k: Done(), platform="win32",
+                                  mic="Mikrofon (K66)")
+    assert found == m.CLOCK_CARD_BUSY, found
+    Done.stderr = b"Error opening input file audio=Mikrofon (K66).\n"
+    found = m.probe_capture_clock(args, runner=lambda *a, **k: Done(), platform="win32",
+                                  mic="Mikrofon (K66)")
+    assert found == m.CLOCK_MIC_FAILED, found
+    calls = []
+    for answer in (m.CLOCK_CARD_BUSY, "monotonic"):
+        got = m.capture_clock("win32", ["-i", "busy-then-free"],
+                              probe=lambda a, answer=answer: calls.append(a) or answer)
+        assert got == answer, f"capture_clock must hand back {answer!r}"
+    assert len(calls) == 2, "a busy card is probed again, never cached"
+
+
+def t_a_busy_card_never_builds_a_stint_without_the_mic():
+    state = {}
+    cmd, err, note = m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game,
+                                           mic_scan=lambda p, mic: True, state=state,
+                                           clock_detect=lambda p, a: m.CLOCK_CARD_BUSY)
+    assert cmd is None and err == m.LOCAL_DEVICE_BUSY, (cmd, err, note)
+    cmd, err, note = m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game,
+                                           mic_scan=lambda p, mic: True, state=state,
+                                           clock_detect=lambda p, a: m.CLOCK_MIC_FAILED)
+    assert err is None and "audio=Mikrofon (K66)" not in cmd and state["mic"] == "", state
+    assert "Mikrofon (K66)" in note and "could not be opened" in note, note
+
+
+def t_setup_reports_whether_the_mic_is_mixed():
+    state = {}
+    m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game, state=state,
+                          mic_scan=lambda p, mic: True, clock=lambda: 1.0,
+                          clock_detect=lambda p, a: "monotonic")
+    assert state == {"mic": "Mikrofon (K66)", "expected": True}, state
+    m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game, state=state,
+                          mic_scan=lambda p, mic: True, clock_detect=lambda p, a: None)
+    assert state == {"mic": "", "expected": True}, state
+    m.local_capture_setup({"RACECAST_CAPTURE": HD60X_OBS_ID}, "win32", "x264",
+                          audio_scan=_game, state=state)
+    assert state == {"mic": "", "expected": False}, "no mic configured: nothing is missing"
+
+
+def t_only_a_failed_mic_drops_the_mic_for_the_stint():
+    import logging, types
+    feed = types.SimpleNamespace(mic_failed=False, log=logging.getLogger("t"))
+    assert m.Feed._note_local_failure(feed, CARD_BUSY_LOG, "win32", "Mikrofon (K66)") == m.LOCAL_DEVICE_BUSY, (
+        "a busy card is reported as a busy card")
+    assert feed.mic_failed is False, "a busy card keeps the mic for the next attempt"
+    err = m.Feed._note_local_failure(feed, "Error opening input file audio=Mikrofon (K66).\n",
+                                     "win32", "Mikrofon (K66)")
+    assert feed.mic_failed is True and "Mikrofon (K66)" in err, err
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

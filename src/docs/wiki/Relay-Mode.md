@@ -384,9 +384,11 @@ local feed's audio: voice, game sound and picture travel one path and stay in sy
 The inputs must share one clock for that. Before the first local stint of a relay run the
 relay opens card and mic for about a second and checks which clock their timestamps are
 on (on Windows the system clock since boot; Linux and PulseAudio stamp wall-clock time).
-If they do not share one, the stint runs **without** the mic and says so, rather than
+If they do not share one, the stint runs without the mixed mic and says so, rather than
 with a misaligned voice. That first start takes about 3 seconds longer; the result is kept
-for the run.
+for the run. A card that is busy during this check (OBS or the Elgato utility holds it)
+is a busy card, not a clock problem: that start fails and the relay tries again with the
+mic.
 
 - The mic is audible exactly when the local feed is audible: on air in `Stint`, and in
   `Splitscreen` while the local stint is the audible side. Nothing switches it
@@ -401,9 +403,15 @@ for the run.
   `racecast device-scan --mic` writes; on Linux `RACECAST_MIC`, the PulseAudio source.
 - On Linux the card's picture and its game sound are separate inputs too; the shared
   clock keeps those aligned as well.
-- A missing mic never costs the picture: if the device is not found, or a start with it
-  fails, the stint runs without the mic and says so in `feed_A.log`/`feed_B.log` and on
-  the Director Panel's feed line.
+- A missing mic never costs the picture: if the device is not found, it cannot be opened,
+  or its clock differs from the card's, the stint runs without the mixed mic and says so
+  in `feed_A.log`/`feed_B.log` and on the Director Panel's feed line. A start that fails
+  on the card keeps the mic for the next attempt.
+- **A local stint never goes out without commentary.** While it runs without the mixed
+  mic, the relay opens the OBS input `Commentary Mic Device` for it instead (the voice is
+  then about 3 seconds ahead of the picture), and Health turns yellow with a Discord
+  alert naming the feed and the reason. Once a start mixes the mic again, the OBS input
+  is muted again.
 
 **Without a mic for the capture** (an endurance profile with no mic configured) the
 microphone is **not** part of the capture. It is the OBS input

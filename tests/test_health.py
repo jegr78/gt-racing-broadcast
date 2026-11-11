@@ -1546,6 +1546,60 @@ def t_mixes_mic_needs_windows_a_card_and_a_mic_name():
 
 
 
+def _local_feed(mic_mixed, note=None, phase="serving"):
+    import types
+    return types.SimpleNamespace(current_channel=lambda: ("local:", 1), mic_mixed=mic_mixed,
+                                 mic_note=note, phase=phase)
+
+
+def t_a_local_stint_without_the_mixed_mic_gets_the_obs_mic():
+    # #1124: the stint must never go out silent. The OBS input carries the voice instead.
+    import types
+    saved = m._OBS_WS_MODULE
+    try:
+        m._OBS_WS_MODULE = m._obs_ws or saved
+        mic = m._OBS_WS_MODULE.COMMENTARY_MIC_INPUT
+        remote = types.SimpleNamespace(current_channel=lambda: ("https://www.twitch.tv/x", 2))
+        stub = types.SimpleNamespace(feeds={"A": _local_feed(False), "B": remote},
+                                     manages_mic=lambda: True, mixes_mic=lambda: True)
+        audio, extra = m.Relay.obs_audio_plan(stub)
+        assert mic in audio["A"] and mic not in audio["B"] and mic in extra, (audio, extra)
+        stub.feeds["A"] = _local_feed(True)
+        audio, extra = m.Relay.obs_audio_plan(stub)
+        assert all(mic not in ins for ins in audio.values()), "a mixed mic keeps the OBS copy muted"
+    finally:
+        m._OBS_WS_MODULE = saved
+
+
+def t_the_obs_probe_opens_the_obs_mic_for_an_unmixed_stint_on_air():
+    obs = _MicObs([True, False, False])
+    stub, events = _mic_stub(obs)
+    stub.live_feed = lambda: "A"
+    stub.feeds = {"A": _local_feed(False, "mic could not be opened")}
+    lines = _remute(stub, 100.0)
+    assert obs.sets == [("Commentary Mic Device", False)], obs.sets
+    assert events == ["mic_fallback"], events
+    assert len(lines) == 1 and lines[0][0] == logging.WARNING and "Feed A" in lines[0][1], lines
+    assert _remute(stub, 105.0) == [] and len(obs.sets) == 1, "an open OBS mic stays as it is"
+    stub.feeds = {"A": _local_feed(True)}
+    _remute(stub, 110.0)
+    assert obs.sets[-1] == ("Commentary Mic Device", True), "back to the mixed mic: muted again"
+    assert events == ["mic_fallback"], "closing the relay's own fallback is no doubled voice"
+
+
+def t_a_local_stint_without_the_mixed_mic_pages_discord():
+    import types
+    feeds = {"A": _local_feed(False, "commentary mic 'K66' not found"),
+             "B": _local_feed(True), "POV": _local_feed(False, phase="idle")}
+    fact = m.mic_fallback_fact(feeds)
+    assert fact == {"A": "commentary mic 'K66' not found"}, fact
+    h = m.aggregate_health({"mic_fallback": fact})
+    assert h["level"] == "yellow", h
+    reason = h["reasons"][0]
+    assert "Feed A" in reason and "OBS mic" in reason and "3 s" in reason and "K66" in reason, reason
+    assert m.mic_fallback_fact({"A": types.SimpleNamespace(current_channel=lambda: ("x", 1))}) == {}
+
+
 def t_health_reads_each_feeds_own_reserve():
     # #673: a local stint runs with a 0.5 s reserve; the backlog/jitter signals must
     # judge it against that, not the relay-wide 3 s.

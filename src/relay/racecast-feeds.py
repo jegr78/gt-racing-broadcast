@@ -1378,6 +1378,9 @@ def aggregate_health(facts):
     # the producer's commentary. Quiet, like the jitter yellow: never pages Discord.
     if facts.get("mic_problem"):
         yellow.append(facts["mic_problem"])
+    for name, why in (facts.get("mic_fallback") or {}).items():
+        yellow.append(f"Feed {name}: commentary mic not in the local feed ({why}). The OBS mic "
+                      f"carries the voice, about 3 s ahead of the picture")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -4807,28 +4810,51 @@ def pick_capture_clock(starts, mono, wall, tol=LOCAL_CLOCK_TOLERANCE_S):
     return None
 
 
-def probe_capture_clock(input_args):
+# What a clock probe returns besides a clock when an input could not open (#1124).
+CLOCK_CARD_BUSY = "card_busy"
+CLOCK_MIC_FAILED = "mic_failed"
+_OPEN_ERROR_RE = re.compile(r"Error opening input file (.+?)\.?\s*$", re.MULTILINE)
+
+
+def failed_capture_input(text, platform, mic):
+    """'mic', 'card' or None: which capture input ffmpeg could not open, from its log
+    `text`. The mic is named the way local_capture_inputs passes it. Pure."""
+    mic = (mic or "").strip()
+    spec = (("audio=" + mic) if platform.startswith("win") else
+            (":" + mic) if platform == "darwin" else mic)
+    failed = [s.strip() for s in _OPEN_ERROR_RE.findall(text or "")]
+    if mic and spec in failed:
+        return "mic"
+    return "card" if failed or "Error opening input" in (text or "") else None
+
+
+def probe_capture_clock(input_args, runner=subprocess.run, platform=None, mic=""):
     """Open the capture inputs for a moment and return the clock their timestamps are
-    on (pick_capture_clock), or None. Best-effort."""
+    on (pick_capture_clock), CLOCK_CARD_BUSY or CLOCK_MIC_FAILED when an input could not
+    open, or None. Best-effort."""
     cmd = (["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "info"] + list(input_args)
            + ["-t", "1", "-f", "null", "-"])
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=30, env=external_tool_env(),
-                           **_no_window_kwargs())
+        r = runner(cmd, capture_output=True, timeout=30, env=external_tool_env(),
+                **_no_window_kwargs())
     except Exception:                         # noqa: BLE001  best-effort probe
         return None
     text = (r.stdout + r.stderr).decode("utf-8", "replace")
+    failed = failed_capture_input(text, platform or sys.platform, mic)
+    if failed:
+        return CLOCK_MIC_FAILED if failed == "mic" else CLOCK_CARD_BUSY
     return pick_capture_clock(parse_input_starts(text), time.monotonic(), time.time())
 
 
-def capture_clock(platform, input_args, probe=None):
+def capture_clock(platform, input_args, probe=None, mic=""):
     """The capture clock for these inputs, probed once per relay run. Only a found
     clock is cached: a probe that failed (card busy) is retried next time."""
     key = (platform, tuple(a for a in input_args if not a.startswith("-0.")))
     if key not in _CAPTURE_CLOCKS:
-        found = (probe or probe_capture_clock)(input_args)
-        if found is None:
-            return None
+        found = (probe(input_args) if probe else
+                 probe_capture_clock(input_args, platform=platform, mic=mic))
+        if found not in ("monotonic", "wall"):
+            return found
         _CAPTURE_CLOCKS[key] = found
     return _CAPTURE_CLOCKS[key]
 
@@ -4869,19 +4895,38 @@ def mixed_mic_needs_remute(manages, mixes, muted):
     return bool(manages and mixes and muted is False)
 
 
+def _unmixed_local(feed):
+    """True when `feed` serves a local stint without the mixed commentary mic (#1124)."""
+    try:
+        local = is_local_source(feed.current_channel()[0])
+    except Exception:                                    # noqa: BLE001  best-effort
+        return False
+    return local and getattr(feed, "mic_mixed", None) is False
+
+
+def mic_fallback_fact(feeds):
+    """{feed name: why} for every serving local stint without the mixed mic (#1124):
+    the OBS mic carries its commentary instead, a notifiable health yellow. Pure."""
+    return {name: getattr(feed, "mic_note", None) or "commentary mic not mixed"
+            for name, feed in (feeds or {}).items()
+            if _unmixed_local(feed) and getattr(feed, "phase", None) == "serving"}
+
+
 def _join_notes(a, b):
     return f"{a}; {b}" if a else b
 
 
 def local_capture_setup(environ, platform, encoder, audio_scan=None, mic_scan=None,
-                        clock=None, with_mic=True, clock_detect=None, wall=None):
+                        clock=None, with_mic=True, clock_detect=None, wall=None, state=None):
     """(argv, None, note) for the configured capture device, or (None, reason, None)
-    when it cannot be built. `note` is a non-fatal warning (no game audio found, mic
-    missing). The device comes from the machine .env, never from the sheet. The mic
-    is mixed in when mixes_mic_env() holds, the device is present and `with_mic`; a
-    mic problem never costs the picture. The origin comes from the clock the capture
-    inputs actually stamp (capture_clock; `clock`/`wall` read the monotonic and wall
-    clocks, test seams), taken per call, so every spawn gets a fresh one."""
+    when it cannot be built; a card the clock probe could not open is LOCAL_DEVICE_BUSY.
+    `note` is a non-fatal warning (no game audio found, mic missing). The device comes
+    from the machine .env, never from the sheet. The mic is mixed in when
+    mixes_mic_env() holds, the device is present and `with_mic`; a mic problem never
+    costs the picture. The origin comes from the clock the capture inputs actually
+    stamp (capture_clock; `clock`/`wall` read the monotonic and wall clocks, test
+    seams), taken per call, so every spawn gets a fresh one. A `state` dict receives
+    `expected` (this machine mixes the mic) and `mic` (the mixed mic, "" for none)."""
     video = (environ.get("RACECAST_CAPTURE") or "").strip()
     audio = (environ.get("RACECAST_CAPTURE_AUDIO") or "").strip()
     if not video:
@@ -4895,7 +4940,10 @@ def local_capture_setup(environ, platform, encoder, audio_scan=None, mic_scan=No
         audio, note = (audio_scan or scan_capture_audio)(platform, video)
         audio = audio or ""
     mic = ""
-    if mixes_mic_env(environ, platform, solo=False):
+    expected = mixes_mic_env(environ, platform, solo=False)
+    if state is not None:
+        state.update(expected=expected, mic="")
+    if expected:
         name = mic_device_for(environ, platform)
         if not with_mic:
             note = _join_notes(note, f"local capture: running without the commentary mic "
@@ -4906,13 +4954,23 @@ def local_capture_setup(environ, platform, encoder, audio_scan=None, mic_scan=No
                                      "`racecast device-scan --mic`)")
         else:
             probe_args = local_capture_input_args(platform, video, audio, mic=name, origin=0)
-            found = (clock_detect or capture_clock)(platform, probe_args)
-            if found is None:
+            found = (clock_detect(platform, probe_args) if clock_detect
+                     else capture_clock(platform, probe_args, mic=name))
+            if found == CLOCK_CARD_BUSY:
+                # The serve would fail on the card too; a free card a moment later must
+                # never run without the mic, so this attempt ends here.
+                return None, LOCAL_DEVICE_BUSY, note
+            if found == CLOCK_MIC_FAILED:
+                note = _join_notes(note, f"local capture: commentary mic '{name}' could not "
+                                         "be opened; the stint runs without it")
+            elif found is None:
                 note = _join_notes(note, f"local capture: commentary mic '{name}' not mixed: "
                                          "the capture inputs do not share a clock here, so "
                                          "voice and picture could not be aligned")
             else:
                 mic = name
+    if state is not None:
+        state["mic"] = mic
     origin = None
     if mic:
         origin = (wall or time.time)() if found == "wall" else (clock or time.monotonic)()
@@ -8550,6 +8608,12 @@ class Feed:
         # operator advance, and in set_index()/reload(). NOT reset in
         # _clear_drop_health() (that runs every serve-start, which would zero it).
         self.dead_serves = 0
+        # #1124: a local stint's commentary mic. mic_mixed is None for a remote stint,
+        # True/False whether the serve mixes it; mic_failed drops it for this stint.
+        self.mic_mixed = None
+        self.mic_note = None
+        self.mic_failed = False
+        self._local_lines = collections.deque(maxlen=40)
         self.quality_tier = "full"        # #493: full|robust|emergency (POV: pinned robust)
         self.quality_pinned = False       # True = operator pinned; suppresses auto-step-down
         self.on_step_down = None          # relay-set callback(feed, stint, from_tier, to_tier)
@@ -8647,6 +8711,7 @@ class Feed:
             self._set_phase("connecting")  # The old stream cannot prove the new source ready.
         self._clear_drop_health()         # director repositioned -> alarm acknowledged, new source not yet served
         self.dead_serves = 0              # new source -> fresh dead-serve count
+        self.mic_failed = False
         self.quality_tier = "full"        # #493: a new source starts fresh at full quality
         self.quality_pinned = False
         self.advance.set(); self._kill_proc()
@@ -8656,6 +8721,7 @@ class Feed:
         """Reconnect to the (possibly changed) channel at the CURRENT index."""
         self._clear_drop_health()         # director intervened -> alarm acknowledged, reconnecting source
         self.dead_serves = 0              # operator reload -> fresh dead-serve count
+        self.mic_failed = False
         self.advance.set(); self._kill_proc()
         return True
 
@@ -8882,7 +8948,7 @@ class Feed:
             target=logsetup.pump_subprocess,
             args=(stderr_text, self.log, tool),
             kwargs={"on_line": (self._observe_streamlink_line
-                                if tool == "streamlink" else None)},
+                                if tool == "streamlink" else self._local_lines.append)},
             daemon=True).start()
         self._set_phase("serving")
         self._clear_drop_health()
@@ -8945,16 +9011,37 @@ class Feed:
             self.log.info("stint %d (%s) -> %s", i + 1, plat, url)
 
             local_cmd = None
+            self.mic_mixed = self.mic_note = None
             self._tune_for_content(plat == "local")      # #673
             if plat == "local":
                 if self.ring is None:
                     local_err = LOCAL_NEEDS_FANOUT
                 else:
-                    # #670: after a fast failure with the mic, try once without it,
-                    # so a broken mic can never cost the picture.
+                    # #670/#1124: only a mic that failed to open drops it, so a broken
+                    # mic never costs the picture and a busy card never costs the mic.
+                    mic_state = {}
                     local_cmd, local_err, local_note = local_capture_setup(
                         os.environ, sys.platform, local_encoder(),
-                        with_mic=self.dead_serves % 2 == 0)
+                        with_mic=not self.mic_failed, state=mic_state)
+                    self._local_lines.clear()
+                    self.mic_mixed = (bool(mic_state.get("mic"))
+                                      if mic_state.get("expected") and local_cmd else None)
+                    self.mic_note = local_note if self.mic_mixed is False else None
+                if local_err == LOCAL_DEVICE_BUSY:
+                    # The clock probe found the card busy: a fast failed serve, retried.
+                    self.log.error("local capture: %s", LOCAL_DEVICE_BUSY)
+                    self.last_error = LOCAL_DEVICE_BUSY
+                    self.dead_serves += 1
+                    if should_idle_dead_serves(self.dead_serves):
+                        self._set_phase("idle")
+                        self.last_error = ("stint source unavailable: paused after "
+                                           f"{self.dead_serves} attempts; /next or /reload to "
+                                           f"retry ({LOCAL_DEVICE_BUSY})")
+                        while not self.stop and not self.advance.is_set():
+                            self.advance.wait(1.0)
+                        continue
+                    time.sleep(dead_serve_backoff(self.dead_serves))
+                    continue
                 if local_err:
                     # A configuration problem, not a flaky source: idle with the reason
                     # until the operator reloads/moves the feed, like dead-serve idle.
@@ -9079,9 +9166,10 @@ class Feed:
             if err and local_cmd:
                 # The relay ffmpeg must own the card; a second opener (OBS, the Elgato
                 # utility, another feed) makes it exit at once. Say so, never go quiet.
-                err = LOCAL_DEVICE_BUSY
+                err = self._note_local_failure("\n".join(self._local_lines), sys.platform,
+                                               mic_device_for(os.environ, sys.platform))
                 self.log.error("local capture: ffmpeg exited after %.1f s (rc=%s). %s",
-                               serve_elapsed, serve_rc, LOCAL_DEVICE_BUSY)
+                               serve_elapsed, serve_rc, err)
             if err:
                 self.last_error = err
             if serve_elapsed < HEALTH_SERVED_OK_S:
@@ -9110,6 +9198,15 @@ class Feed:
                 time.sleep(dead_serve_backoff(self.dead_serves))
                 continue
             time.sleep(RETRY_SLEEP)                 # served_ok serve that simply ended normally
+
+    def _note_local_failure(self, text, platform, mic):
+        """The error for a local serve that exited at once (#1124). A mic ffmpeg could
+        not open is dropped for the rest of this stint; a busy card keeps it."""
+        if mic and failed_capture_input(text, platform, mic) == "mic":
+            self.mic_failed = True
+            return (f"local capture: commentary mic '{mic}' could not be opened; "
+                    "the next attempt runs without it")
+        return LOCAL_DEVICE_BUSY
 
     def shutdown(self):
         self.stop = True; self._kill_proc()
@@ -9309,6 +9406,8 @@ class Relay:
         self.mic_device = None            # #668: last commentary-mic device check
         self._mic_check_ts = None
         self._mic_remute_failing = False  # #721: a refused remute is warned once
+        self._mic_fallback_failing = False  # #1124: a refused fallback open is warned once
+        self._mic_fallback_open = False     # #1124: the OBS mic is open as the fallback
         self._obs_last_bytes = None       # for stream_kbps derivation
         self._obs_last_bytes_ts = None
         self.conn_state = {"funnel_ok": None, "tailscale_up": None,
@@ -9546,6 +9645,7 @@ class Relay:
                 "feeds_av_disturbed": self._av_health_fact(),
                 "mic_problem": (mic_health_problem(self.mic_device)
                                 if self._schedule_has_local() else None),
+                "mic_fallback": mic_fallback_fact(getattr(self, "feeds", {})),
                 "telemetry_lossy": self._telemetry_lossy_fact()}
 
     def _telemetry_lossy_fact(self):
@@ -10962,15 +11062,26 @@ class Relay:
             muted, _note = self._obs.get_input_mute(mic)
         except Exception:                                # noqa: BLE001  best-effort
             return
+        live = getattr(self, "live_feed", lambda: None)()
+        feed = (getattr(self, "feeds", None) or {}).get(live)
+        if feed is not None and _unmixed_local(feed):
+            Relay._open_fallback_mic(self, now, mic, live, muted)
+            return
         if not mixed_mic_needs_remute(manages, mixes, muted):
             if muted:
                 self._mic_remute_failing = False
+                self._mic_fallback_open = False
             return
         try:
             ok, note = self._obs.set_input_mute(mic, True)
         except Exception as exc:                         # noqa: BLE001  best-effort
             ok, note = False, str(exc) or exc.__class__.__name__
-        if ok:
+        if ok and getattr(self, "_mic_fallback_open", False):
+            # #1124: the relay opened it as the fallback; the mic is mixed again.
+            self._mic_fallback_open = False
+            self._mic_remute_failing = False
+            LOG.info("OBS: muted %s again: the local feed mixes the commentary mic", mic)
+        elif ok:
             self._mic_remute_failing = False
             LOG.warning("OBS: %s was live while the commentary mic is mixed into the local "
                         "feed (voice doubled on air); muted it", mic)
@@ -10982,6 +11093,29 @@ class Relay:
             LOG.warning("OBS: %s is live while the commentary mic is mixed into the local "
                         "feed (voice doubled on air), and muting it failed: %s", mic, note)
 
+    def _open_fallback_mic(self, now, mic, live, muted):
+        """#1124: the on-air local stint runs without the mixed mic, so the OBS mic input
+        carries the commentary. A refused open is retried every probe but warned once;
+        never raises."""
+        if muted is not True:
+            self._mic_fallback_failing = False
+            return
+        try:
+            ok, note = self._obs.set_input_mute(mic, False)
+        except Exception as exc:                         # noqa: BLE001  best-effort
+            ok, note = False, str(exc) or exc.__class__.__name__
+        failing = getattr(self, "_mic_fallback_failing", False)
+        self._mic_fallback_failing = not ok
+        if ok:
+            self._mic_fallback_open = True
+            LOG.warning("OBS: opened %s: Feed %s runs its local stint without the mixed "
+                        "commentary mic", mic, live)
+            self._record_event(now, "mic_fallback",
+                               f"{mic} opened: Feed {live} has no mixed mic", {"input": mic})
+        elif not failing:
+            LOG.warning("OBS: Feed %s runs without the mixed commentary mic and opening %s "
+                        "failed: %s", live, mic, note)
+
     def obs_audio_plan(self):
         """(audio, extra_mute) for the OBS intent planners (#593): which feed carries
         the local capture right now, and whether this machine manages the commentary
@@ -10991,9 +11125,10 @@ class Relay:
         mic = _OBS_WS_MODULE.COMMENTARY_MIC_INPUT if self.manages_mic() else None
         if mic and self.mixes_mic():
             # #670: the voice is inside the local feed; the OBS input would double it,
-            # ~3 s early, so it only ever gets muted.
-            audio, _ = _OBS_WS_MODULE.feed_audio_plan(set(), mic=None)
-            return audio, [mic]
+            # ~3 s early, so it stays muted. #1124: a local stint that runs without the
+            # mixed mic gets the OBS input instead of going out silent.
+            unmixed = {f for f, feed in self.feeds.items() if _unmixed_local(feed)}
+            return _OBS_WS_MODULE.feed_audio_plan(unmixed, mic=mic)
         try:
             local = {f for f, feed in self.feeds.items()
                      if is_local_source(feed.current_channel()[0])}
