@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.16.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.15.0...v1.16.0) (2026-11-12)
+
+
+### Features
+
+* **relay:** keep the producer PC from idle sleep while the relay runs ([#1117](https://github.com/jegr78/gt-racing-broadcast/issues/1117)) ([8dab9b9](https://github.com/jegr78/gt-racing-broadcast/commit/8dab9b9c9ed2260b8b2dafdbb860a9ffe90462cd))
+* **telemetry:** measure wheelspin and lock-ups from wheel rotation and tyre radius ([#1121](https://github.com/jegr78/gt-racing-broadcast/issues/1121)) ([11640d0](https://github.com/jegr78/gt-racing-broadcast/commit/11640d09b6753eb6b55f0aefe0353e317042f469))
+* **telemetry:** report GT7 packet loss and decode failures ([#1120](https://github.com/jegr78/gt-racing-broadcast/issues/1120)) ([a9d6d6d](https://github.com/jegr78/gt-racing-broadcast/commit/a9d6d6d464f01c0cdfa0e71c4c9f534dc400a0f5))
+
+
+### Bug Fixes
+
+* **radio:** count race laps after a formation lap or a lap to the box ([#1119](https://github.com/jegr78/gt-racing-broadcast/issues/1119)) ([5e52234](https://github.com/jegr78/gt-racing-broadcast/commit/5e52234c32c3077384df7d36529014afa385cabe))
+* **relay:** never air a local stint without the commentary mic ([#1125](https://github.com/jegr78/gt-racing-broadcast/issues/1125)) ([55755ef](https://github.com/jegr78/gt-racing-broadcast/commit/55755ef3681715417a10938fad2e87b2f42b67a0))
+* **ui:** show the relay's idle-sleep block on the Home view too ([#1122](https://github.com/jegr78/gt-racing-broadcast/issues/1122)) ([291578b](https://github.com/jegr78/gt-racing-broadcast/commit/291578b8805f73afc43898dbf0f36e031bb72c69))
+
 ## [1.15.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.14.1...v1.15.0) (2026-11-10)
 
 
