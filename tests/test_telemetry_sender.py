@@ -275,7 +275,8 @@ def t_names_the_relay_refuses_are_refused_at_start():
         old = sys.stderr
         sys.stderr = err
         try:
-            snd.main(["--url", "u", "--key", "k", "--name", bad])
+            snd.main(["--url", "http://127.0.0.1:9/ingest", "--key", "k", "--name", bad,
+                      "--listen", "0", "--bind", "127.0.0.1", "--duration", "0"])
         except SystemExit as exc:
             assert exc.code == 2, bad
         else:
