@@ -238,6 +238,7 @@ def t_incompatible_pinned_reference_is_kept_not_rejected():
     src = _func_src(h.replace("\nasync function selection(", "\nfunction selection("), "selection")
     out = _run_js(_HARNESS + _func_src(h, "comparable") + "\n" + """
 const notices = []; const say = t => notices.push(t); const recognising = () => false; const render = () => {};
+const referenceOutline = async () => null;
 const clearPlots = () => {};
 const B = {...live(5), id: 'L5'}, A = lap(3, 90);
 let request = async (route, q) => route === '/race-engineer/compare'
