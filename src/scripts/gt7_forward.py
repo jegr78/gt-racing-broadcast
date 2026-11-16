@@ -14,7 +14,6 @@ import collections
 import re
 import socket
 import struct
-import sys
 
 import gt7_crypto
 
@@ -82,10 +81,6 @@ class Forwarder:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._sock.setblocking(False)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            if sys.platform == "win32":
-                # Otherwise Windows reports an ICMP port unreachable of one target as an
-                # error on a later send, possibly to another target.
-                self._sock.ioctl(socket.SIO_UDP_CONNRESET, False)
         self._sent = [0] * len(self.targets)
         self._failed = [0] * len(self.targets)
         self._down = [False] * len(self.targets)
@@ -109,7 +104,9 @@ class Forwarder:
             try:
                 self._sock.sendto(payload, self._addrs[i])
             except ConnectionResetError:
-                continue  # an ICMP of an earlier send, not this target's error
+                # Windows reports an ICMP port unreachable of an earlier send here, maybe
+                # on another target's send; that one packet is lost, no target is blamed.
+                continue
             except Exception as exc:  # noqa: BLE001  forwarding must never stop the telemetry loop
                 self._failed[i] += 1
                 if not self._down[i]:
