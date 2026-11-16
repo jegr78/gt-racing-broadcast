@@ -95,6 +95,31 @@ def t_decrypt_typed_tries_the_length_matched_type_first():
     assert calls == [4, 0x158], calls        # one magic check, then the full packet
 
 
+def _plain(n=0x158):
+    body = bytearray(n)
+    struct.pack_into("<I", body, 0, gt7.MAGIC)
+    struct.pack_into("<i", body, 0x70, 4242)
+    return bytes(body)
+
+
+def t_encrypt_round_trips_each_type_like_the_console():
+    plain = _plain()
+    for kind in ("A", "B", "~"):
+        packet = gt7.encrypt(plain, kind, iv=0x12345678)
+        assert len(packet) == gt7.PACKET_LEN[kind], (kind, len(packet))
+        assert struct.unpack_from("<I", packet, 0x40)[0] == 0x12345678, "the IV travels in clear at 0x40"
+        got_kind, got = gt7.decrypt_typed(packet)
+        assert got_kind == kind, (kind, got_kind)
+        assert got[:0x40] == plain[:0x40] and got[0x44:] == plain[0x44:len(got)], \
+            f"{kind}: everything but the IV slot must survive"
+    head = gt7.decrypt_head(gt7.encrypt(plain, "B", iv=9))
+    assert head == ("B", plain[:0x40] + head[1][0x40:0x44] + plain[0x44:0x80]), head[0]
+    assert gt7.decrypt_head(b"\0" * 296) == (None, None)
+    padded = gt7.decrypt_typed(gt7.encrypt(_plain(0x128), "~", iv=7))[1]
+    assert len(padded) == gt7.PACKET_LEN["~"] and padded[0x128:] == bytes(0x158 - 0x128), \
+        "a shorter recording pads the extended fields with zeros"
+
+
 def t_decrypt_typed_rejects_garbage():
     assert gt7.decrypt_typed(bytes(0x158)) == (None, None)
     assert gt7.decrypt_typed(b"short") == (None, None)
