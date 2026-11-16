@@ -461,9 +461,9 @@ def _implicit_path_text_calls(source):
 def t_maintainer_text_files_have_explicit_encoding():
     # Windows defaults to cp1252 unless UTF-8 mode is enabled. These files are
     # UTF-8 regardless of the host locale, so reads AND writes must opt in.
-    from pathlib import Path
+    import pathlib
     offenders = []
-    for path in sorted((Path(ROOT) / "tools").rglob("*.py")):
+    for path in sorted((pathlib.Path(ROOT) / "tools").rglob("*.py")):
         for line in _implicit_path_text_calls(path.read_text(encoding="utf-8")):
             offenders.append(f"{path.relative_to(ROOT)}:{line}")
     assert not offenders, "implicit text file encoding: " + ", ".join(offenders)
