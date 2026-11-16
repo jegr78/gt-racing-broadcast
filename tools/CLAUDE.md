@@ -187,11 +187,13 @@ python3 tools/gt7-probe-load.py --url https://<host>/console/probe/ingest --key 
 ```
 
 The simulated PS5 answers heartbeats like the console (format per receiver, sends
-from its own port, stops ten seconds after the last heartbeat). The sender and the
+from its own port, stops 16 seconds after the last heartbeat and takes a new format
+only after such a lapse). The sender and the
 simulated PS5 cannot share a host on the default ports: both need UDP 33740 or
 33739; use `--bind`, `--port`, `--reply-port` and the sender's hidden
 `--receive-port`/`--console-port` for a loopback run. The load tool posts through the
-sender's own upload code; `--status` adds the relay's counts to its JSON report.
+sender's own upload code; `--status` adds the relay's counts to its JSON report and
+`--reset` clears the probe's counters first.
 
 ## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
 Two maintainer gates for a pass that is supposed to touch comments and prose only.

@@ -2,7 +2,7 @@
 """A simulated PlayStation for the driver telemetry probe (#1110).
 
 Maintainer tool. It answers GT7 heartbeats like the console and replays a racecast
-`.gt7rec` recording to every device that heartbeated within the last ten seconds,
+`.gt7rec` recording to every device that heartbeated within the last 16 seconds,
 encrypted again in the format that device asked for (A, B or ~). Like the real
 console it sends from a port of its own, not from 33739. The probe's sender and
 the relay's own listener can then be tested without a console.
@@ -22,7 +22,7 @@ import gt7_crypto
 import gt7_recording
 import logsetup
 
-ALIVE_S = 10.0          # a receiver without a heartbeat for this long gets nothing
+ALIVE_S = 16.0          # a receiver without a heartbeat for this long gets nothing
 KINDS = {b"A": "A", b"B": "B", b"~": "~"}
 
 
@@ -42,21 +42,27 @@ class Console:
         kind = KINDS.get(bytes(data[:1]))
         if kind is None:
             return False
+        now = self.clock()
         with self._lock:
             known = self.receivers.get(addr[0])
-            # The console keeps a running stream in its format, like GT7 does.
-            self.receivers[addr[0]] = ((known[0] if known else kind), self.clock())
+            # A running stream keeps its format, like GT7; after a lapse the new one counts.
+            running = known is not None and now - known[1] <= ALIVE_S
+            self.receivers[addr[0]] = ((known[0] if running else kind), now)
         return True
 
     def emit(self, plain):
         now = self.clock()
         with self._lock:
-            targets = [(host, kind) for host, (kind, seen) in self.receivers.items()
-                       if now - seen <= ALIVE_S]
+            for host in [h for h, (_k, seen) in self.receivers.items() if now - seen > ALIVE_S]:
+                del self.receivers[host]
+            targets = list(self.receivers.items())
         iv = int.from_bytes(plain[0x70:0x74], "little")
-        for host, kind in targets:
-            self.send(gt7_crypto.encrypt(plain, kind, iv=iv), (host, self.reply_port))
-            self.sent += 1
+        for host, (kind, _seen) in targets:
+            try:
+                self.send(gt7_crypto.encrypt(plain, kind, iv=iv), (host, self.reply_port))
+                self.sent += 1
+            except OSError:
+                pass  # a receiver that went away (Windows reports its ICMP here)
 
     def run(self, stop, speed=1.0, loop=False, sleep=time.sleep):
         while not stop.is_set():
@@ -117,7 +123,7 @@ def main(argv=None):
     try:
         console.run(stop, speed=args.speed, loop=args.loop)
     except KeyboardInterrupt:
-        pass
+        pass  # Ctrl+C ends the replay; the summary below still prints
     stop.set()
     print(f"sent {console.sent} packets", flush=True)
 

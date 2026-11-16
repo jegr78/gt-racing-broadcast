@@ -85,6 +85,8 @@ def summary(results, seconds):
     def pct(p):
         return lat[min(len(lat) - 1, int(p * len(lat)))] * 1000 if lat else float("nan")
     return {"senders": len(results), "seconds": round(seconds, 1), "packets_sent": sent,
+            "generated_hz_per_sender": round(sent / seconds / len(results), 1)
+            if seconds and results else None,
             "posts": posted, "post_failed": failed, "dropped": dropped,
             "posts_per_s": round(posted / seconds, 1) if seconds else None,
             "latency_ms": {"p50": round(pct(0.5), 1), "p95": round(pct(0.95), 1),
@@ -101,7 +103,13 @@ def main(argv=None):
     ap.add_argument("--duration", type=float, default=60.0, help="seconds per sender")
     ap.add_argument("--recording", help=".gt7rec whose packets the senders replay")
     ap.add_argument("--status", help="tailnet /telemetry/probe URL to compare relay counts")
+    ap.add_argument("--reset", action="store_true",
+                    help="clear the probe's counters first (needs --status)")
     args = ap.parse_args(argv)
+    if args.reset:
+        if not args.status:
+            ap.error("--reset needs --status")
+        http_util.post_json(args.status.rstrip("/") + "/reset", {}, timeout=10)
     mod = _sender_module()
     packets = plains(args.recording)
     stop = threading.Event()

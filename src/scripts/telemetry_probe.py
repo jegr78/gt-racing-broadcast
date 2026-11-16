@@ -27,6 +27,7 @@ RATE_HZ = 20              # how often a sender posts; the reply tells the sender
 SAMPLE_EVERY = 6          # decrypt every 6th packet whole: 10 Hz samples at 60 Hz
 SENDER_STAT_KEYS = ("received", "forwarded", "posted", "dropped", "post_failed",
                     "interruptions", "heartbeats")
+COUNTERS = ("received", "lost", "reordered", "decrypt_failed", "parse_failed")
 _NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")
 
 
@@ -73,6 +74,8 @@ def _sample(kind, pid, plain, wall):
 class _Sender:
     def __init__(self, samples):
         self.stats = gt7_packet_stats.PacketStats()
+        self.banked = dict.fromkeys(COUNTERS, 0)   # streams that ended: an upload stall,
+        self.stream_seen = 0                        # a sender restart or a replay loop
         self.samples = collections.deque(maxlen=samples)
         self.kinds = collections.Counter()
         self.batches = self.bytes = 0
@@ -125,6 +128,7 @@ class Probe:
                     sender.stats.on_decrypt_failure(now)
                     continue
                 sender.stats.on_packet(pid, now)
+                self._bank(sender)
                 sender.kinds[kind] += 1
                 accepted += 1
                 if pid % SAMPLE_EVERY == 0 or not sender.samples:
@@ -134,6 +138,14 @@ class Probe:
                     except (struct.error, ValueError, IndexError, TypeError):
                         sender.stats.on_parse_failure(now)
         return {"ok": True, "rate_hz": self.rate_hz, "accepted": accepted}
+
+    @staticmethod
+    def _bank(sender):
+        if sender.stats.stream != sender.stream_seen:
+            if sender.stream_seen and sender.stats.previous:
+                for k in COUNTERS:
+                    sender.banked[k] += sender.stats.previous.get(k, 0)
+            sender.stream_seen = sender.stats.stream
 
     def reset(self):
         with self._lock:
@@ -146,13 +158,14 @@ class Probe:
             for name, s in self._senders.items():
                 span = (s.last_at - s.first_at) if s.first_at is not None else 0.0
                 stats = s.stats.snapshot(now)
+                packets = {k: s.banked[k] + stats[k] for k in COUNTERS}
                 senders[name] = {
-                    "packets": {k: stats[k] for k in ("received", "lost", "reordered",
-                                                      "decrypt_failed", "parse_failed")},
+                    "packets": packets,
+                    "current_stream": {k: stats[k] for k in COUNTERS},
                     "loss_rate_10s": stats["loss_rate_10s"], "stream": stats["stream"],
                     "batches": s.batches, "bytes": s.bytes, "kinds": dict(s.kinds),
                     "seconds": round(span, 3), "idle_s": round(now - s.last_at, 3),
-                    "packets_per_s": round(stats["received"] / span, 2) if span > 0 else None,
+                    "packets_per_s": round(packets["received"] / span, 2) if span > 0 else None,
                     "max_batch_gap_s": round(s.max_gap, 3),
                     "sender_stats": dict(s.sender_stats), "samples": list(s.samples)}
         return {"rate_hz": self.rate_hz, "senders": senders}

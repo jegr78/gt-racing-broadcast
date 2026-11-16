@@ -61,6 +61,21 @@ def t_ingest_counts_loss_decode_failures_and_keeps_samples():
     assert abs(snap["max_batch_gap_s"] - 0.05) < 1e-9, snap["max_batch_gap_s"]
 
 
+def t_totals_survive_an_upload_stall_and_a_replay_loop():
+    probe, clock = _probe()
+    probe.ingest("one", tp.encode_batch([_wire(101), _wire(102), _wire(104)]), None)
+    clock.t += 6.0                       # an upload stall longer than a stream's idle limit
+    probe.ingest("one", tp.encode_batch([_wire(110), _wire(111)]), None)
+    clock.t += 1.0                       # a looping replay: the packet ids jump far back
+    probe.ingest("one", tp.encode_batch([_wire(1), _wire(3)]), None)
+    snap = probe.snapshot()["senders"]["one"]
+    assert snap["stream"] == 3, snap["stream"]
+    assert snap["packets"]["received"] == 7 and snap["packets"]["lost"] == 2, \
+        f"totals must cover every stream: {snap['packets']}"
+    assert snap["current_stream"]["received"] == 2 and snap["current_stream"]["lost"] == 1, snap
+    assert snap["packets_per_s"] == 1.0, f"the rate uses the totals: {snap['packets_per_s']}"
+
+
 def t_sample_ring_is_bounded_and_senders_are_capped():
     probe, _clock = _probe(samples=3, max_senders=2)
     probe.ingest("one", tp.encode_batch([_wire(i) for i in range(1, 31)]), None)

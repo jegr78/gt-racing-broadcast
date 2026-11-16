@@ -20,6 +20,7 @@ Standard library only, Python 3.8 or newer.
 import argparse
 import collections
 import json
+import re
 import socket
 import struct
 import sys
@@ -38,10 +39,14 @@ HEARTBEAT_EVERY_S = 10.0
 CONSOLE_PORT = 33739
 RECEIVE_PORT = 33740
 MIN_PACKET = 0x94         # shorter datagrams are not GT7 telemetry
+MAX_PACKET = 512          # the relay refuses longer ones; GT7 sends at most 344 bytes
+REFUSED_WAIT_S = 60.0     # a refused link or key is retried once a minute
+RELATCH_S = 30.0          # a discovered console silent this long is searched again
 QUIET_S = 2.0             # no packet for this long is an interruption
 DISCOVERY_HINT_S = 15.0
 STATUS_EVERY_S = 10.0
 USER_AGENT = "racecast-sender/" + VERSION
+NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # the relay accepts these names only
 
 
 def encode_batch(packets):
@@ -66,18 +71,32 @@ class Uploader:
         self._say = say
         self._clock = clock
         self._lock = threading.Lock()
-        self._queue = collections.deque()
-        self.stats = dict.fromkeys(("posted", "dropped", "post_failed"), 0)
+        self._queue = collections.deque()        # (sequence, packet)
+        self._seq = 0
+        self._inflight = None                    # last sequence of the post under way
+        self._evicted_inflight = 0
+        self.stats = dict.fromkeys(("posted", "dropped", "post_failed", "rejected"), 0)
         self.extra_stats = lambda: {}
         self._failing_since = None
+        self._failures = 0                       # consecutive, for the backoff
         self.latencies = collections.deque(maxlen=2000)
 
     def put(self, packet):
         with self._lock:
             if len(self._queue) >= BACKLOG:
+                seq, _packet = self._queue.popleft()
+                if self._inflight is not None and seq <= self._inflight:
+                    self._evicted_inflight += 1  # still delivered, unless that post fails
+                else:
+                    self.stats["dropped"] += 1
+            self._seq += 1
+            self._queue.append((self._seq, packet))
+
+    def _remove_through(self, last):
+        """Drop the queued packets up to sequence `last`, whatever put() evicted since."""
+        with self._lock:
+            while self._queue and self._queue[0][0] <= last:
                 self._queue.popleft()
-                self.stats["dropped"] += 1
-            self._queue.append(packet)
 
     def pending(self):
         with self._lock:
@@ -87,10 +106,14 @@ class Uploader:
         """Post up to MAX_BATCH queued packets; returns the seconds until the next try."""
         with self._lock:
             batch = [self._queue[i] for i in range(min(MAX_BATCH, len(self._queue)))]
+            if batch:
+                self._inflight, self._evicted_inflight = batch[-1][0], 0
         if not batch:
             return 1.0 / self.rate_hz
+        last = batch[-1][0]
         stats = dict(self.stats, **self.extra_stats())
-        req = urllib.request.Request(self.url, data=encode_batch(batch), method="POST", headers={
+        req = urllib.request.Request(self.url, data=encode_batch([p for _s, p in batch]),
+                                     method="POST", headers={
             "Content-Type": "application/octet-stream", "User-Agent": USER_AGENT,
             "X-Probe-Key": self.key, "X-Sender-Stats": json.dumps(stats)})
         started = self._clock()
@@ -98,14 +121,22 @@ class Uploader:
             with self._open(req, timeout=5) as resp:
                 reply = json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as exc:
-            return self._failed(f"the relay answered {exc.code}", fatal=exc.code in (401, 403, 404))
+            if exc.code == 400:              # this batch can never be accepted: drop it
+                self._settle(delivered=True)     # counted as rejected below, not as dropped
+                self._remove_through(last)
+                self.stats["rejected"] += len(batch)
+                return self._failed("the relay refused a batch (400)", wait=1.0 / self.rate_hz)
+            if exc.code in (401, 403, 404, 429):
+                return self._failed(f"the relay answered {exc.code}. Check the link and the key",
+                                    wait=REFUSED_WAIT_S, repeat=True)
+            return self._failed(f"the relay answered {exc.code}")
         except (OSError, ValueError) as exc:
             return self._failed(f"cannot reach the relay ({exc})")
         self.latencies.append(self._clock() - started)
+        self._settle(delivered=True)
+        self._remove_through(last)
+        self._failures = 0
         with self._lock:
-            for _ in batch:
-                if self._queue:
-                    self._queue.popleft()
             self.stats["posted"] += 1
         if self._failing_since is not None:
             self._say("upload works again after %.0f s" % (self._clock() - self._failing_since))
@@ -115,13 +146,20 @@ class Uploader:
             self.rate_hz = float(rate)
         return 1.0 / self.rate_hz
 
-    def _failed(self, why, fatal=False):
+    def _settle(self, delivered):
+        with self._lock:
+            if not delivered:
+                self.stats["dropped"] += self._evicted_inflight
+            self._inflight, self._evicted_inflight = None, 0
+
+    def _failed(self, why, wait=None, repeat=False):
+        self._settle(delivered=False)
         self.stats["post_failed"] += 1
-        if self._failing_since is None:
-            self._failing_since = self._clock()
-            self._say("upload interrupted: " + why + (
-                ". Check the link and the key" if fatal else ". Retrying"))
-        return min(5.0, 0.5 * 2 ** min(self.stats["post_failed"], 4))
+        self._failures += 1
+        if self._failing_since is None or repeat:
+            self._failing_since = self._failing_since or self._clock()
+            self._say("upload interrupted: " + why + ("" if repeat else ". Retrying"))
+        return wait if wait is not None else min(5.0, 0.5 * 2 ** min(self._failures, 4))
 
     def run(self, stop):
         while not stop.is_set():
@@ -136,6 +174,7 @@ class Sender:
                  clock=time.monotonic):
         self.up = uploader
         self.console = console
+        self._pinned = console is not None        # --console: never searched again
         self.listen = listen
         self.forward = forward
         self.console_port = console_port
@@ -148,7 +187,8 @@ class Sender:
         self.sock.bind((bind, port))
         self.sock.settimeout(0.5)
         self.fwd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if forward else None
-        self.stats = dict.fromkeys(("received", "forwarded", "interruptions", "heartbeats"), 0)
+        self.stats = dict.fromkeys(("received", "forwarded", "interruptions", "heartbeats",
+                                    "oversized"), 0)
         uploader.extra_stats = lambda: dict(self.stats)
         self._last_rx = None
         self._quiet = False
@@ -166,7 +206,17 @@ class Sender:
             data, addr = self.sock.recvfrom(4096)
         except socket.timeout:
             return False
+        except ConnectionResetError:
+            return False  # Windows reports an ICMP port unreachable of a heartbeat here
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 10040:   # a datagram over 4096 bytes
+                self.stats["oversized"] += 1
+                return False
+            raise
         if len(data) < MIN_PACKET:
+            return False
+        if len(data) > MAX_PACKET:
+            self.stats["oversized"] += 1
             return False
         if self.listen is None:
             if self.console is None:
@@ -188,6 +238,15 @@ class Sender:
             except OSError:
                 pass  # the local app is not listening; the relay still gets everything
         return True
+
+    def check_relatch(self):
+        """Search the console again when a discovered one stays silent (new IP)."""
+        if (self.listen is None and not self._pinned and self.console is not None
+                and self._last_rx is not None and self.clock() - self._last_rx >= RELATCH_S):
+            self.say(f"no packets from {self.console} for {RELATCH_S:.0f} s: searching again")
+            self.console = None
+            self._last_rx = None
+            self._quiet = False
 
     def check_quiet(self):
         if self._last_rx is not None and not self._quiet and self.clock() - self._last_rx >= QUIET_S:
@@ -214,6 +273,7 @@ class Sender:
                          "inbound UDP %d in the firewall" % self.sock.getsockname()[1])
             self.receive_once()
             self.check_quiet()
+            self.check_relatch()
             if now >= next_status:
                 rate = (self.stats["received"] - rx_mark[1]) / (now - rx_mark[0])
                 self.say("received %.1f/s, posted %d, dropped %d, upload failures %d" % (
@@ -241,7 +301,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Send GT7 telemetry to a racecast relay.")
     parser.add_argument("--url", required=True, help="ingest URL from the invite or probe link")
     parser.add_argument("--key", required=True, help="key from the invite or probe link")
-    parser.add_argument("--name", required=True, help="your name or car, up to 32 letters")
+    parser.add_argument("--name", required=True,
+                        help="your name or car: up to 32 ASCII letters, digits, spaces, _ . -")
     parser.add_argument("--console", help="PlayStation IP when discovery does not find it")
     parser.add_argument("--forward", type=_hostport, metavar="HOST:PORT",
                         help="also pass every packet to this local app (SimHub)")
@@ -254,6 +315,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.listen is not None and args.forward is not None:
         parser.error("--listen and --forward do not combine: the other app already receives")
+    if not NAME.match(args.name):
+        parser.error("--name takes up to 32 ASCII letters, digits, spaces, _ . -")
     up = Uploader(args.url, args.key, args.name)
     try:
         sender = Sender(up, console=args.console, listen=args.listen, forward=args.forward,
@@ -265,17 +328,21 @@ def main(argv=None):
              "the port: use --listen with its forwarding, or run the sender on another device")
         return 2
     stop = threading.Event()
-    threading.Thread(target=up.run, args=(stop,), daemon=True).start()
+    poster = threading.Thread(target=up.run, args=(stop,), daemon=True)
+    poster.start()
     _say("sending as %r to %s%s" % (args.name, args.url,
                                      " (listening, no heartbeat)" if args.listen is not None else ""))
     try:
         sender.run(stop, duration=args.duration)
     except KeyboardInterrupt:
         stop.set()
-    for _ in range(BACKLOG // MAX_BATCH + 1):          # flush what is still queued
-        if not up.pending() or up.stats["post_failed"] and up._failing_since is not None:
-            break
-        up.post_once()
+    try:
+        poster.join(10)                                 # never post one batch twice
+        deadline = time.monotonic() + 10
+        while up.pending() and up._failing_since is None and time.monotonic() < deadline:
+            up.post_once()                              # flush what is still queued
+    except KeyboardInterrupt:
+        pass  # a second Ctrl+C skips the flush
     _say("stopped: received %d, posted %d batches, dropped %d" % (
         sender.stats["received"], up.stats["posted"], up.stats["dropped"]))
     return 0
