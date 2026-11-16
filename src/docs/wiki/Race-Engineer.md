@@ -114,7 +114,9 @@ B minus A. The current lap is provisional; future curve sections and incomplete
 While the lap grows, comparison retains the latest completed observed prefix and
 refreshes it in the background. Its displayed distance identifies that prefix.
 The map uses the complete selected reference lap as its outline, or the latest
-confirmed session lap when no reference is available. Its outline and full-distance
+confirmed session lap when no reference is available. Before any lap of the session
+completes, the downloaded racing line of the event's picked layout draws the outline
+(see [Telemetry](Telemetry)). Its outline and full-distance
 chart range stay stable while the live trace grows, including during preparation.
 The displayed best uses retained eligible summaries. The theoretical best composes the
 best **larger sectors** over the same retained pool, not an unlimited full-session
