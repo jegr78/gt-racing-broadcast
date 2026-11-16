@@ -46,6 +46,7 @@ QUIET_S = 2.0             # no packet for this long is an interruption
 DISCOVERY_HINT_S = 15.0
 STATUS_EVERY_S = 10.0
 USER_AGENT = "racecast-sender/" + VERSION
+ROUTE_PROBE = "192.0.2.1"   # TEST-NET-1: picks the default-route interface, never contacted
 NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # the relay accepts these names only
 
 
@@ -53,6 +54,23 @@ def encode_batch(packets):
     """The relay's batch format, version 1: MAGIC, then per packet a big-endian uint16
     length and the packet bytes as received."""
     return MAGIC + b"".join(struct.pack(">H", len(p)) + p for p in packets)
+
+
+def default_bind(console=None, listen=None):
+    """The local address to receive on: loopback in listen mode (the other app forwards
+    on this device), else the interface that reaches the console, or the default-route
+    interface while the console is unknown. None when no interface can be found. Never
+    all interfaces: the sender has no business on a VPN or a second network."""
+    if listen is not None:
+        return "127.0.0.1"
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect((console or ROUTE_PROBE, CONSOLE_PORT))   # UDP connect sends nothing
+        return probe.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        probe.close()
 
 
 def _say(line):
@@ -169,7 +187,7 @@ class Uploader:
 class Sender:
     """Receives the console's packets and hands them to the uploader."""
 
-    def __init__(self, uploader, console=None, listen=None, forward=None, bind="0.0.0.0",
+    def __init__(self, uploader, console=None, listen=None, forward=None, bind=None,
                  console_port=CONSOLE_PORT, receive_port=RECEIVE_PORT, say=_say,
                  clock=time.monotonic):
         self.up = uploader
@@ -184,6 +202,9 @@ class Sender:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if listen is None:
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        bind = bind or default_bind(console, listen)
+        if not bind:
+            raise OSError("no network interface found: pass --bind <this device's LAN address>")
         self.sock.bind((bind, port))
         self.sock.settimeout(0.5)
         self.fwd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if forward else None
@@ -308,7 +329,8 @@ def main(argv=None):
                         help="also pass every packet to this local app (SimHub)")
     parser.add_argument("--listen", type=int, metavar="PORT",
                         help="no heartbeat: read packets another app forwards to PORT")
-    parser.add_argument("--bind", default="0.0.0.0", help="local address to receive on")
+    parser.add_argument("--bind", help="local address to receive on (default: the interface "
+                                       "that reaches the console; 127.0.0.1 with --listen)")
     parser.add_argument("--receive-port", type=int, default=RECEIVE_PORT, help=argparse.SUPPRESS)
     parser.add_argument("--console-port", type=int, default=CONSOLE_PORT, help=argparse.SUPPRESS)
     parser.add_argument("--duration", type=float, help="stop after this many seconds")
