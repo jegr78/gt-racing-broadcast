@@ -208,6 +208,7 @@
   .hint{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5}
   #feedHealth{min-height:0}
   #feedHealth .warnline{color:#ffd361}
+  #trackNote{color:#ffd361}
   #feedHealth .downline{color:#ff8080;font-weight:600}
 
   /* Setup dropdowns (sheet-backed) */
@@ -953,6 +954,16 @@
         </details>
       </div>
       <div class="area" data-area="setup">
+        <section class="bus" id="trackSec"><div class="cap">Track layout</div>
+          <div class="body">
+            <div class="setrow"><div class="fld" style="flex:1 1 260px">
+              <label for="trackPick">GT7 layout of the event</label>
+              <select id="trackPick"><option value="">None: recognise after the first lap</option></select>
+            </div></div>
+            <div class="hint" id="trackNote" hidden></div>
+            <div class="hint">Names the track, draws the map and shows corner names from the first metre. Recognition checks the pick after the first complete lap.</div>
+          </div>
+        </section>
         <details class="bus chat" id="gfxBrowseBox" open>
           <summary>Graphics library<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
           <div class="body">
@@ -2205,6 +2216,43 @@ function renderTeleRec(rec, down){
   cost.hidden = !cost.textContent;
 }
 
+/* The event's GT7 track layout (#1129) */
+let trackLayoutsLoaded = false;
+function trackLabel(t){
+  return [t.track, t.layout].filter(Boolean).join(" ") + (t.reverse ? " (reverse)" : "");
+}
+async function loadTrackLayouts(){
+  try{
+    const d = await (await fetch("/event/track", {cache:"no-store"})).json();
+    if (d.error || !Array.isArray(d.layouts)) return;
+    const sel = $("#trackPick");
+    for (const t of d.layouts) sel.appendChild(new Option(trackLabel(t) + (t.line ? "" : " · no line"), t.id));
+    trackLayoutsLoaded = true;
+    renderTrackPick(d);
+  }catch(e){ /* relay unreachable: the next poll retries */ }
+}
+function renderTrackPick(tp){
+  if (!tp) return;
+  if (!trackLayoutsLoaded){ loadTrackLayouts(); return; }
+  const sel = $("#trackPick");
+  if (document.activeElement !== sel) sel.value = tp.pick ? tp.pick.id : "";
+  const notes = [];
+  if (tp.pick && tp.pick.warning) notes.push(tp.pick.warning);
+  if (tp.mismatch && tp.recognised) notes.push("The first complete lap matches " + trackLabel(tp.recognised) + ", not the picked layout.");
+  $("#trackNote").textContent = notes.join(" ");
+  $("#trackNote").hidden = !notes.length;
+}
+$("#trackPick").addEventListener("change", async (e)=>{
+  try{
+    const r = await fetch("/event/track", {method:"POST", cache:"no-store",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({id: e.target.value || null})});
+    const d = await r.json();
+    if (d.error){ log("Track layout: " + d.error, "err"); toast("Track layout: " + d.error); return; }
+    log("Track layout → " + (d.pick ? trackLabel(d.pick) : "none"));
+    renderTrackPick(d);
+  }catch(err){ log("Track layout failed (relay reachable?): " + err, "err"); toast("Track layout failed: relay unreachable"); }
+});
+
 async function relayPoll(){
   try{
     const r = await fetch("/status", {cache:"no-store"});
@@ -2213,6 +2261,7 @@ async function relayPoll(){
     const solo = d.solo === true;         // feed-less solo relay (#302)
     applySolo(solo, d.template);
     renderEventTitle(d.event_title);          // header subtitle + tab title (#207)
+    renderTrackPick(d.track_pick);
     // On-air feed = the lower stint index (mirrors the relay's live_feed()).
     pvMarkOnAir(!solo && d.feeds && d.feeds.A
       ? (d.feeds.A.index <= d.feeds.B.index ? "A" : "B") : null);

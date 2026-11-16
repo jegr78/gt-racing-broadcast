@@ -404,6 +404,20 @@ def classify_env(sheet_id, push_url):
     return Result(PASS, ".env", "RACECAST_SHEET_ID and RACECAST_SHEET_PUSH_URL set")
 
 
+def classify_track_pick(pick):
+    """The event's picked GT7 layout (#1129): optional (INFO), WARN without a
+    downloaded line."""
+    name = "GT7 track layout"
+    if pick is None:
+        return Result(INFO, name, "none picked: the track is recognised after the first "
+                      "complete lap (`racecast event track`)")
+    label = " ".join(x for x in (pick.get("track"), pick.get("layout")) if x)
+    label += " (reverse)" if pick.get("reverse") else ""
+    if pick.get("warning"):
+        return Result(WARN, name, pick["warning"])
+    return Result(PASS, name, label)
+
+
 def gate_blockers(results):
     """The FAIL-level Results among `racecast event start`'s *static*
     preconditions, the ones bringing services up cannot fix: SHEET_ID, graphics,

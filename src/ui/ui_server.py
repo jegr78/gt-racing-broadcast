@@ -598,6 +598,13 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"relay stats failed: {exc}"},
                                       code=500)
+            if path == "/api/event-track":
+                try:
+                    return self._json(ctx["event_track_read"]())
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"track layout read failed: {exc}"},
+                                      code=500)
             if path == "/api/event-title":
                 try:
                     return self._json(ctx["event_title_read"]())
@@ -1056,6 +1063,18 @@ def make_handler(ctx):
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not save PS IP: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/event-track":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error},
+                                      code=400)
+                try:
+                    result = ctx["event_track_write"](body.get("id"))
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not set the track layout: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/event-title":

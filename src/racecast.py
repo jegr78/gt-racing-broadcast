@@ -12,6 +12,7 @@
   racecast event start --stint N             # takeover: stint N is on air now, so the relay starts there
   racecast event start --qualifying          # bring up in qualifying mode (Feed A serves the Qualifying tab)
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
+  racecast event track [ID|--clear|--list]  # the event's GT7 track layout: map and corner names from the first metre
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
@@ -1043,7 +1044,7 @@ EXTRA_VERBS = {
 # Internal verbs: routed but never advertised (frozen feed children use run-feed).
 HIDDEN_VERBS = {"streams": ("run-feed",)}
 ONESHOTS = ("preflight", "speedtest", "cookies", "graphics", "media", "brands", "setup", "install-tools", "install-apps", "obs-browser", "update")
-EVENT_VERBS = ("status", "start", "stop", "takeover")
+EVENT_VERBS = ("status", "start", "stop", "takeover", "track")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
@@ -5611,6 +5612,10 @@ def _event_sections(ev, pf):
         assets.append(ev.Result(ev.WARN, "Graphics/Media", f"check failed: {exc}"))
     config = [ev.classify_env(os.environ.get("RACECAST_SHEET_ID"),
                               os.environ.get("RACECAST_SHEET_PUSH_URL"))]
+    try:
+        config.append(ev.classify_track_pick(event_track_read_data()["pick"]))
+    except Exception as exc:  # noqa: BLE001  a broken probe must never traceback the report
+        config.append(ev.Result(ev.WARN, "GT7 track layout", f"check failed: {exc}"))
     return [("Apps", apps), ("Services", services), ("Assets", assets),
             ("Config", config), ("Go-live reminders", [ev.GO_LIVE_REMINDER])]
 
@@ -5619,6 +5624,126 @@ def event_status(rest):
     ev, pf = _event_modules()
     color = pf.enable_color("--no-color" in rest)
     raise SystemExit(pf.report(_event_sections(ev, pf), color))
+
+
+def _event_track_path():
+    """The active profile's picked GT7 layout file (#1129), read by the relay at start."""
+    import gt7_track_pick
+    return gt7_track_pick.path_in(_runtime_dir())
+
+
+def _event_track_db():
+    import gt7_tracks
+    return gt7_tracks.TrackDB.load(_runtime_base_dir(), resource_path("assets/gt7"))
+
+
+def event_track_read_data(alive=None, fetch=None, path=None, tracks=None):
+    """The event's GT7 layout (#1129) with the layout list. Relay up -> its live pick
+    plus what recognition named; relay down -> the persisted pick. Never raises."""
+    import gt7_track_pick
+    alive = alive or _relay_is_alive
+    is_alive = bool(alive())
+    if is_alive:
+        fetch = fetch or _relay_fetch_json
+        try:
+            st = fetch(f"http://127.0.0.1:{RELAY_PORT}/event/track")
+            if isinstance(st, dict) and "pick" in st:
+                return {"ok": True, "source": "relay", "relay_alive": True,
+                        "pick": st.get("pick"), "recognised": st.get("recognised"),
+                        "mismatch": bool(st.get("mismatch")),
+                        "layouts": st.get("layouts") or []}
+        except Exception:  # noqa: BLE001  an older or busy relay: read the file instead
+            pass
+    try:
+        tracks = tracks if tracks is not None else _event_track_db()
+        pick = gt7_track_pick.describe(tracks, gt7_track_pick.read_id(path or _event_track_path()))
+        return {"ok": True, "source": "file", "relay_alive": is_alive, "pick": pick,
+                "recognised": None, "mismatch": False,
+                "layouts": gt7_track_pick.layouts(tracks)}
+    except Exception as exc:  # noqa: BLE001  surface as a clean error
+        return {"ok": False, "error": f"could not read the track layouts: {exc}"}
+
+
+def event_track_write_data(value, alive=None, post=None, path=None, tracks=None):
+    """Pick the event's GT7 layout by id, or clear it with ""/None. Relay up -> POST
+    /event/track (live telemetry and the open recording follow at once); relay down ->
+    the file the next relay start reads. Returns {"ok", "pick", "applied"} or
+    {"ok": False, "error"}; never raises."""
+    import gt7_track_pick
+    official_id = (value or "").strip() if isinstance(value, str) else None
+    if value is not None and not isinstance(value, str):
+        return {"ok": False, "error": "the layout must be a layout id"}
+    official_id = official_id or None
+    try:
+        tracks = tracks if tracks is not None else _event_track_db()
+        if official_id is not None and gt7_track_pick.describe(tracks, official_id) is None:
+            return {"ok": False, "error": f"unknown track layout {official_id!r}: "
+                                          "see `racecast event track --list`"}
+        alive = alive or _relay_is_alive
+        if alive():
+            post = post or _relay_post_json
+            try:
+                res = post(f"http://127.0.0.1:{RELAY_PORT}/event/track", {"id": official_id})
+            except Exception as exc:  # noqa: BLE001  surface as a clean error to the UI
+                return {"ok": False, "error": f"relay rejected the layout: {exc}"}
+            if not isinstance(res, dict) or res.get("error"):
+                return {"ok": False, "error": f"relay rejected the layout: "
+                                              f"{(res or {}).get('error', res)}"}
+            return {"ok": True, "pick": res.get("pick"), "applied": "relay"}
+        gt7_track_pick.write_id(path or _event_track_path(), official_id)
+        return {"ok": True, "pick": gt7_track_pick.describe(tracks, official_id),
+                "applied": "file"}
+    except OSError as exc:
+        return {"ok": False, "error": f"could not save the layout: {exc}"}
+    except Exception as exc:  # noqa: BLE001  surface as a clean error
+        return {"ok": False, "error": f"could not set the layout: {exc}"}
+
+
+def _track_pick_line(pick):
+    import gt7_track_pick
+    if pick is None:
+        return "GT7 track layout: none picked (the track is recognised after the first complete lap)"
+    return (f"GT7 track layout: {gt7_track_pick.label(pick)} [{pick['id']}]"
+            + (f"\nwarning: {pick['warning']}" if pick.get("warning") else ""))
+
+
+def event_track_cmd(rest):
+    """racecast event track [ID | --clear | --list]: show, pick or clear the event's
+    GT7 layout (#1129)."""
+    import argparse
+    import gt7_track_pick
+    parser = argparse.ArgumentParser(
+        prog="racecast event track",
+        description="Show, pick or clear the GT7 track layout of the event.")
+    parser.add_argument("layout", nargs="?", help="layout id from --list")
+    parser.add_argument("--clear", action="store_true", help="remove the pick")
+    parser.add_argument("--list", action="store_true", help="list every GT7 layout")
+    args = parser.parse_args(rest)
+    if args.list:
+        d = event_track_read_data()
+        if not d["ok"]:
+            sys.exit(d["error"])
+        for row in d["layouts"]:
+            print(f"{row['id']}  {gt7_track_pick.label(row)}"
+                  + ("" if row["line"] else "  (no downloaded line)"))
+        return
+    if args.clear or args.layout:
+        if args.clear and args.layout:
+            sys.exit("racecast event track: give a layout id or --clear, not both")
+        d = event_track_write_data(None if args.clear else args.layout)
+        if not d["ok"]:
+            sys.exit(d["error"])
+        print(_track_pick_line(d["pick"]))
+        if d["applied"] == "file":
+            print("The relay is not running: the next relay start uses this layout.")
+        return
+    d = event_track_read_data()
+    if not d["ok"]:
+        sys.exit(d["error"])
+    print(_track_pick_line(d["pick"]))
+    if d.get("mismatch") and d.get("recognised"):
+        print(f"warning: the lap matches {gt7_track_pick.label(d['recognised'])}, "
+              "not the picked layout")
 
 
 def takeover_plan(status, stint_override=None, qualifying_flag=False):
@@ -6569,6 +6694,7 @@ DISPATCH = {
     ("streams", "logs"): streams_logs, ("streams", "run-feed"): streams_run_feed,
     ("event", "status"): event_status, ("event", "start"): event_start,
     ("event", "stop"): event_stop, ("event", "takeover"): event_takeover,
+    ("event", "track"): event_track_cmd,
     ("tailscale", "up"): tailscale_up_cmd, ("tailscale", "down"): tailscale_down_cmd,
     ("tailscale", "status"): tailscale_status_cmd,
     ("obs", "refresh"): obs_refresh_cmd, ("obs", "collection"): obs_collection_cmd,
@@ -9482,6 +9608,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "relay_live": relay_live_data,
         "event_title_read": event_title_read_data,
         "event_title_write": event_title_write_data,
+        "event_track_read": event_track_read_data,
+        "event_track_write": event_track_write_data,
         "tailscale_peers": _tailscale_peers,
         "obs_collection": obs_collection_data,
         "obs_stream_target": obs_stream_target_data,

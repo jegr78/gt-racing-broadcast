@@ -127,6 +127,7 @@
   .rcmsg { font-size: 12px; min-height: 14px; }
   .rcmsg.ok { color: #2bd66a; }
   .rcmsg.err { color: #ff6b6b; }
+  .rcmsg.warn { color: #ffd361; }
   .notesbtn { font: inherit; cursor: pointer; background: transparent;
     border: 1px solid currentColor; border-radius: 6px; padding: 2px 8px; color: inherit; }
   .notesmodal { max-width: 560px; width: 90vw; border: none; border-radius: 10px;
@@ -221,6 +222,15 @@
     <div class="card" id="flagCard" data-tab="act" style="margin-top:12px;" hidden>
       <h2>Flag graphic</h2>
       <div id="flagList" class="flaglist"></div>
+    </div>
+    <div class="card" id="trackCard" data-tab="act" style="margin-top:12px;" hidden>
+      <h2>Track layout</h2>
+      <div class="rcsend">
+        <select id="trackPick" aria-label="GT7 layout of the event">
+          <option value="">None: recognise after the first lap</option>
+        </select>
+        <div id="trackNote" class="rcmsg warn" role="status"></div>
+      </div>
     </div>
     <div class="card desk-only" style="margin-top:12px;"><h2>Race timer</h2><div id="timer"><div class="t">—</div></div></div>
     <div class="card" data-tab="chat" style="margin-top:12px;">
@@ -323,7 +333,49 @@ function renderSchedule(d) {
   });
   $('schedEmpty').textContent = rows.length ? '' : 'No stints scheduled yet.';
   rebuildTargets(rows.map(s => s.streamer));      // keep the note composer in sync
+  renderTrackPick(d.track_pick);
 }
+
+// The event's GT7 track layout (#1129): Race Control and the director can change it.
+let trackLayoutsLoaded = false;
+function trackLabel(t) {
+  return [t.track, t.layout].filter(Boolean).join(' ') + (t.reverse ? ' (reverse)' : '');
+}
+async function loadTrackLayouts() {
+  try {
+    const d = await j('/race-control/track');
+    const sel = $('trackPick');
+    (d.layouts || []).forEach(t => sel.appendChild(new Option(trackLabel(t) + (t.line ? '' : ' · no line'), t.id)));
+    trackLayoutsLoaded = true;
+    renderTrackPick(d);
+  } catch (e) { /* the next poll retries */ }
+}
+function renderTrackPick(tp) {
+  const card = $('trackCard');
+  card.hidden = !tp;
+  if (!tp) return;
+  if (!trackLayoutsLoaded) { loadTrackLayouts(); return; }
+  const sel = $('trackPick');
+  if (document.activeElement !== sel) sel.value = tp.pick ? tp.pick.id : '';
+  const notes = [];
+  if (tp.pick && tp.pick.warning) notes.push(tp.pick.warning);
+  if (tp.mismatch && tp.recognised) notes.push('The first complete lap matches ' + trackLabel(tp.recognised) + ', not the picked layout.');
+  $('trackNote').className = 'rcmsg warn';
+  $('trackNote').textContent = notes.join(' ');
+}
+$('trackPick').addEventListener('change', async (e) => {
+  const note = $('trackNote');
+  try {
+    const r = await fetch('/race-control/track', {method: 'POST', cache: 'no-store',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: e.target.value || null})});
+    const d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || r.status);
+    renderTrackPick(d);
+  } catch (err) {
+    note.className = 'rcmsg err';
+    note.textContent = 'Could not change the layout: ' + (err.message || err);
+  }
+});
 async function pollSchedule() {
   try { renderSchedule(await j('/race-control/data')); }
   catch (e) { /* transient */ }
