@@ -46,7 +46,7 @@ def t_store_persists_validates_and_clears():
 def t_layout_without_line_warns_and_unknown_id_is_no_pick():
     info = tp.describe(_Tracks(), "bbb001")
     assert info["line"] is False
-    assert info["warning"].startswith("Ring Full (reverse): no downloaded racing line"), info
+    assert info["warning"].startswith("Ring Full (reverse) has no downloaded racing line."), info
     assert "gt7-data update" in info["warning"], info["warning"]
     with tempfile.TemporaryDirectory() as d:
         path = tp.path_in(d)

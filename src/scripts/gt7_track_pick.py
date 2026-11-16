@@ -13,9 +13,9 @@ import threading
 import atomic_replace
 
 FILENAME = "event-track.json"
-NO_LINE = ("no downloaded racing line: no map and no recognition cross-check until "
-           "a recording teaches the line (Set track). Line data arrives with "
-           "`racecast gt7-data update`; a few layouts have none upstream")
+NO_LINE = ("has no downloaded racing line. Without it there is no map and no "
+           "recognition cross-check until a recording teaches the line with Set track. "
+           "`racecast gt7-data update` downloads the lines; a few layouts have none upstream.")
 
 
 def path_in(runtime_dir):
@@ -66,7 +66,7 @@ def describe(tracks, official_id):
     line = bool(tracks.has_downloaded_line(official_id))
     return {"id": info["id"], "track": info["track"], "layout": info["layout"],
             "reverse": bool(info["reverse"]), "line": line,
-            "warning": None if line else f"{label(info)}: {NO_LINE}"}
+            "warning": None if line else f"{label(info)} {NO_LINE}"}
 
 
 def label(info):

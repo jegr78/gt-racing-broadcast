@@ -1258,6 +1258,7 @@ $('evt-title-input').addEventListener('keydown', async (e) => {
 $('evt-title-input').addEventListener('blur', () => { if (evtEditing) stopEditEventTitle(); });
 
 // The event's GT7 track layout (Home; #1129)
+let evtTrackLoaded = false;
 function trackLabel(t) {
   return [t.track, t.layout].filter(Boolean).join(' ') + (t.reverse ? ' (reverse)' : '');
 }
@@ -1279,7 +1280,7 @@ async function fetchEventTrack() {
   let d;
   try { d = await (await fetch('/api/event-track', {cache: 'no-store'})).json(); }
   catch (e) { return; }                    // server gone, keep last state
-  if (d && d.ok) { $('evt-track-err').hidden = true; renderEventTrack(d); }
+  if (d && d.ok) { evtTrackLoaded = true; $('evt-track-err').hidden = true; renderEventTrack(d); }
   else if (d) { $('evt-track-err').textContent = d.error || 'could not read the track layouts'; $('evt-track-err').hidden = false; }
 }
 $('evt-track').addEventListener('change', async (e) => {
@@ -1544,6 +1545,8 @@ async function refresh() {
   // Home is open and the relay control server is answering.
   if (currentView === 'home' && relayUp && s.relay.http_ok) fetchRelayLive();
   if (currentView === 'home') fetchEventTitle();
+  // The layout list is a local file read while the relay is down: load it once then.
+  if (currentView === 'home' && (relayUp || !evtTrackLoaded)) fetchEventTrack();
   if (currentView === 'profile') fetchAssetFiles();
 }
 

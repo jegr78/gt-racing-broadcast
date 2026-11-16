@@ -209,6 +209,8 @@
   #feedHealth{min-height:0}
   #feedHealth .warnline{color:#ffd361}
   #trackNote{color:#ffd361}
+  #trackSec .fld{min-width:0}
+  #trackPick{width:100%;min-width:0}
   #feedHealth .downline{color:#ff8080;font-weight:600}
 
   /* Setup dropdowns (sheet-backed) */
@@ -2218,9 +2220,6 @@ function renderTeleRec(rec, down){
 
 /* The event's GT7 track layout (#1129) */
 let trackLayoutsLoaded = false;
-function trackLabel(t){
-  return [t.track, t.layout].filter(Boolean).join(" ") + (t.reverse ? " (reverse)" : "");
-}
 async function loadTrackLayouts(){
   try{
     const d = await (await fetch("/event/track", {cache:"no-store"})).json();
