@@ -291,6 +291,14 @@ is remembered across a relay restart. The producer can also preset it with
 [Sheet-Webhook](Sheet-Webhook)). Leave it blank and the header keeps its static
 text.
 
+### Track layout
+
+The **Setup** area has a **Track layout** card with the event's GT7 layout. The telemetry
+uses it to name the track and draw the map from the first metre. When the first complete
+lap matches another layout, the card says which one and the health pill turns yellow;
+pick the right layout here. The producer usually sets it before the event (see
+[Telemetry](Telemetry)).
+
 ### Warning banners
 
 Ongoing problems show as banners directly under the header, they appear
