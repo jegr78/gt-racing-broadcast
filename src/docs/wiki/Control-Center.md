@@ -210,7 +210,9 @@ Machine-wide (not league) configuration:
   card** (what a [local capture stint](Relay-Mode#local-capture-stint) puts on air) and the
   **commentary mic**, then **Save** (writes `RACECAST_CAPTURE`, `RACECAST_MIC` and
   `RACECAST_MIC_NAME`). A solo profile adds the webcam; a solo commentary profile also
-  the tyres/fuel capture, a solo POV profile the GT7 PlayStation IP.
+  the tyres/fuel capture, a solo POV profile the GT7 PlayStation IP and the apps the
+  relay forwards GT7 packets to (**Forward GT7 to**, see
+  [Telemetry](Telemetry#other-telemetry-apps-next-to-the-relay)).
 - **GT7 data** shows when the car and track data were last checked and how many cars and
   layouts it knows. **Update now** fetches the latest copy in the background (the row says
   "updating…" until it ends, a failed file opens a message); a running relay uses it

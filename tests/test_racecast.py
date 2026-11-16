@@ -6708,6 +6708,33 @@ def t_ps_ip_write_validates_and_upserts(tmp_path=None):
         os.remove(path)
 
 
+def t_env_edit_reaches_services_the_control_center_starts_later():
+    env = {"RACECAST_GT7_FORWARD": "10.0.0.5:1", "RACECAST_OLD": "x", "RACECAST_REAL": "shell"}
+    before = {"RACECAST_GT7_FORWARD": "10.0.0.5:1", "RACECAST_OLD": "x", "RACECAST_REAL": "file"}
+    after = {"RACECAST_GT7_FORWARD": "", "RACECAST_NEW": "1", "RACECAST_REAL": "file2"}
+    m._sync_environ_with_env_file(before, after, environ=env)
+    assert env == {"RACECAST_GT7_FORWARD": "", "RACECAST_NEW": "1", "RACECAST_REAL": "shell"}, \
+        f"file values follow the edit, a removed key goes, a real environment value wins: {env}"
+
+
+def t_gt7_forward_write_validates_normalises_and_clears():
+    fd, path = tempfile.mkstemp(suffix=".env"); os.close(fd)
+    try:
+        bad = m.gt7_forward_write_data("host-without-port", path=path)
+        assert bad["ok"] is False and "HOST:PORT" in bad["error"], bad
+        good = m.gt7_forward_write_data(" 127.0.0.1:20777/raw , 10.0.0.5:33740/A ", path=path)
+        assert good["ok"] is True and good["value"] == "127.0.0.1:20777,10.0.0.5:33740/A", good
+        with open(path, encoding="utf-8") as f:
+            assert "RACECAST_GT7_FORWARD=127.0.0.1:20777,10.0.0.5:33740/A" in f.read()
+        cleared = m.gt7_forward_write_data("", path=path)
+        assert cleared["ok"] is True and cleared["value"] == "", cleared
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        assert "10.0.0.5" not in text, f"an empty text clears the targets: {text!r}"
+    finally:
+        os.remove(path)
+
+
 def t_gt7_discover_cmd_single_save(capsys=None):
     # One console found + --save -> writes RACECAST_GT7_PS_IP via ps_ip_write_data
     # (both resolve_console and ps_ip_write_data are mocked, so no real .env is touched).

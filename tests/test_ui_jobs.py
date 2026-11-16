@@ -170,6 +170,15 @@ def t_no_logger_is_silent():
     assert lines == ["line1", "line2"]
 
 
+def t_a_callable_env_is_built_again_for_every_job():
+    calls = []
+    jm = ui_jobs.JobManager(lambda a: ["ignored"], env=lambda: calls.append(1) or {"K": str(len(calls))})
+    assert jm._child_env() == {"K": "1"} and jm._child_env() == {"K": "2"}, \
+        "a later settings edit must reach the next job"
+    assert ui_jobs.JobManager(lambda a: ["x"], env={"K": "v"})._child_env() == {"K": "v"}
+    assert ui_jobs.JobManager(lambda a: ["x"])._child_env() is None
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

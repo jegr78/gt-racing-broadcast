@@ -659,6 +659,13 @@
               <button id="ps-save" onclick="savePsIp()">Save</button></div>
             <select id="ps-list" style="width:100%;margin-top:6px" aria-label="Found consoles" hidden></select>
             <p class="envhint" id="ps-hint">Set the console IP by hand, or click Discover (GT7 must be in an active session).</p>
+            <div class="row" style="margin-top:12px"><span class="name">Forward GT7 to</span>
+              <input id="gt7-fwd" type="text" style="flex:1" placeholder="e.g. 127.0.0.1:20777, 192.168.1.20:33740/A"
+                     aria-label="GT7 forward targets">
+              <button id="gt7-fwd-save" onclick="saveGt7Forward()">Save</button></div>
+            <p class="envhint" id="gt7-fwd-hint">The relay passes every GT7 packet on to these apps (SimHub,
+              GT Race Engineer): HOST:PORT as received, HOST:PORT/A re-encrypted as format A for apps that
+              read only A. Point the app at that port and turn its own heartbeat off where it offers one.</p>
           </div>
         </section>
         <div class="enverr" id="env-err" hidden></div>
@@ -2386,6 +2393,7 @@ function settingsRow(key, value) { return envEditorRow(key, value); }
 function addSettingsRow() { addEnvEditorRow('envrows'); }
 function collectSettings() { return collectEnvEditor('envrows'); }
 
+const GT7_FORWARD_ENV = 'RACECAST_GT7_FORWARD';
 async function loadSettings(force) {
   if (force && !(await confirmModal('Reload from disk and discard any unsaved edits?'))) return;
   $('env-err').hidden = true;
@@ -2400,6 +2408,10 @@ async function loadSettings(force) {
   const c = $('envrows');
   c.textContent = '';
   d.entries.forEach(e => c.appendChild(settingsRow(e.key, e.value)));
+  const fwd = d.entries.find(e => e.key === GT7_FORWARD_ENV);
+  const field = $('gt7-fwd');
+  if (field.value === (field.dataset.saved || '')) field.value = fwd ? fwd.value : '';  // keeps unsaved input
+  field.dataset.saved = fwd ? fwd.value : '';
 }
 
 // Devices (General Settings): webcam + capture-card + mic pickers (#720: capture + mic
@@ -2519,6 +2531,22 @@ async function savePsIp(){
       ? 'Saved RACECAST_GT7_PS_IP — restart the relay to apply.'
       : ('Could not save: ' + (d.error || 'unknown error'));
     if(d.ok && typeof loadSettings === 'function'){ loadSettings(); }  // refresh the .env editor (no force = no discard-edits confirm)
+  }catch(e){ hint.textContent = 'Save failed: ' + e; }
+}
+
+async function saveGt7Forward(){
+  const hint = $('gt7-fwd-hint');
+  try{
+    const r = await fetch('/api/gt7-forward', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({targets: $('gt7-fwd').value})});
+    const d = await r.json();
+    if(d.ok){
+      $('gt7-fwd').value = d.value;
+      $('gt7-fwd').dataset.saved = d.value;
+      hint.textContent = d.value ? 'Saved RACECAST_GT7_FORWARD, restart the relay to apply.'
+                                 : 'Forwarding off, restart the relay to apply.';
+      loadSettings();
+    } else { hint.textContent = 'Could not save: ' + (d.error || 'unknown error'); }
   }catch(e){ hint.textContent = 'Save failed: ' + e; }
 }
 

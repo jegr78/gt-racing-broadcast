@@ -368,6 +368,96 @@ def t_telemetry_loop_feeds_the_recorder(replay=False):
         assert store._eng._last is None, "Live UDP reached display consumers during replay"
 
 
+def t_telemetry_loop_forwards_console_packets_only():
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import EXT_TCS_HEX
+    ps_ip = "100.64.0.7"
+    stop = _t.Event()
+    packet = bytes.fromhex(EXT_TCS_HEX)
+    inbox = [(packet, ("100.64.0.99", 1)), (b"\0" * 344, (ps_ip, 1)), (packet, (ps_ip, 1))]
+    forwarded = []
+
+    class FakeSock:
+        def __init__(self, *a, **kw): pass
+        def setsockopt(self, *a): pass
+        def bind(self, addr): pass
+        def settimeout(self, s): pass
+        def close(self): pass
+        def sendto(self, data, addr): pass
+        def recvfrom(self, n):
+            if inbox:
+                return inbox.pop(0)
+            stop.set()
+            raise _socket.timeout()
+
+    class Forward:
+        def __bool__(self):
+            return True
+
+        def send(self, data, kind, plain):
+            forwarded.append((data, kind, len(plain)))
+
+    store = m.gt7_telemetry.TelemetryStore(None)
+    real = m.socket.socket
+    m.socket.socket = FakeSock
+    try:
+        m._telemetry_loop(store, ps_ip, stop, forward=Forward())
+    finally:
+        m.socket.socket = real
+    assert forwarded == [(packet, "~", 0x158)], \
+        f"only decryptable packets from the console are forwarded, unchanged: {len(forwarded)}"
+
+
+def t_telemetry_loop_forwards_nothing_before_discovery_latches():
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import EXT_TCS_HEX
+    stop = _t.Event()
+    packet = bytes.fromhex(EXT_TCS_HEX)
+    inbox = [(packet, ("100.64.0.7", 1)), (packet, ("100.64.0.7", 1))]
+    forwarded = []
+
+    class FakeSock:
+        def __init__(self, *a, **kw): pass
+        def setsockopt(self, *a): pass
+        def bind(self, addr): pass
+        def settimeout(self, s): pass
+        def close(self): pass
+        def sendto(self, data, addr): pass
+        def recvfrom(self, n):
+            if inbox:
+                return inbox.pop(0)
+            stop.set()
+            raise _socket.timeout()
+
+    class Forward:
+        def __bool__(self):
+            return True
+
+        def send(self, data, kind, plain):
+            forwarded.append(data)
+
+    store = m.gt7_telemetry.TelemetryStore(None)
+    real = m.socket.socket
+    m.socket.socket = FakeSock
+    try:
+        m._telemetry_loop(store, None, stop, forward=Forward())
+    finally:
+        m.socket.socket = real
+    assert len(forwarded) == 1, f"the packet that latches the console is not forwarded yet: {len(forwarded)}"
+
+
+def t_forward_targets_stay_with_director_and_producer():
+    full = {"feeds": {}, "telemetry": {"visible": True, "packets": {"received": 1},
+                                       "forward": [{"target": "10.0.0.5:5000", "format": "raw",
+                                                    "sent": 3, "failed": 0}]}}
+    crew = m.redact_console_status(full, ["commentator"])
+    assert "forward" not in crew["telemetry"] and crew["telemetry"]["packets"], crew["telemetry"]
+    director = m.redact_console_status(full, ["director"])
+    assert director["telemetry"]["forward"][0]["sent"] == 3, director["telemetry"]
+
+
 def t_telemetry_loop_records_udp_during_replay():
     t_telemetry_loop_feeds_the_recorder(replay=True)
 
