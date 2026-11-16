@@ -173,6 +173,26 @@ For inspecting the real desk or capturing development screenshots, use the
 printed URL with Playwright at 1440, 1024 and 390 px. The reproducible committed
 wiki images continue to use synthetic data; see the wiki-screenshots skill.
 
+## Driver telemetry probe (#1110)
+
+Stage 1 of the driver dashboard probe measures what senders deliver. Start the relay
+with `RACECAST_TELEMETRY_PROBE=1` (machine `.env`); `GET /telemetry/probe` on the
+tailnet shows the key and, per sender, packets, loss, kinds, batch gaps and samples.
+
+```bash
+python3 src/relay/racecast-sender.py --url https://<host>/console/probe/ingest --key KEY --name "Mac"
+python3 tools/gt7-sim-ps5.py REC.gt7rec --loop      # a simulated PS5 on UDP 33739, replays a recording
+python3 tools/gt7-probe-load.py --url https://<host>/console/probe/ingest --key KEY \
+    --senders 15 --duration 120 --status http://<tailnet-ip>:8088/telemetry/probe
+```
+
+The simulated PS5 answers heartbeats like the console (format per receiver, sends
+from its own port, stops ten seconds after the last heartbeat). The sender and the
+simulated PS5 cannot share a host on the default ports: both need UDP 33740 or
+33739; use `--bind`, `--port`, `--reply-port` and the sender's hidden
+`--receive-port`/`--console-port` for a loopback run. The load tool posts through the
+sender's own upload code; `--status` adds the relay's counts to its JSON report.
+
 ## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
 Two maintainer gates for a pass that is supposed to touch comments and prose only.
 Both compare the working tree against a base ref and are read-only.
