@@ -168,6 +168,13 @@
             <button id="evt-title-edit"
                     title="Set the event title shown on the HUD, Cockpit and Discord">Edit</button></div>
           <div class="enverr" id="evt-title-err" hidden></div>
+          <div class="row"><span class="name">Track layout</span>
+            <select id="evt-track" class="grow" aria-label="GT7 track layout of the event"
+                    title="The GT7 layout of this event: the telemetry names the track, draws the map and shows corner names from the first metre. Recognition still checks it after the first complete lap">
+              <option value="">none: recognise after the first lap</option>
+            </select></div>
+          <div class="note-warn" id="evt-track-note" hidden></div>
+          <div class="enverr" id="evt-track-err" hidden></div>
         </section>
         <section>
           <div class="row"><span class="name">Tailscale</span>
@@ -1007,6 +1014,7 @@ function showView(name) {
   if (name === 'home') loadTakeoverPeers();
   if (name === 'home') fetchProducerSchedule();
   if (name === 'home') fetchEventTitle();
+  if (name === 'home') fetchEventTrack();
 }
 
 let _reportPath = null;
@@ -1248,6 +1256,47 @@ $('evt-title-input').addEventListener('keydown', async (e) => {
   else if (e.key === 'Escape') { stopEditEventTitle(); }
 });
 $('evt-title-input').addEventListener('blur', () => { if (evtEditing) stopEditEventTitle(); });
+
+// The event's GT7 track layout (Home; #1129)
+let evtTrackLoaded = false;
+function trackLabel(t) {
+  return [t.track, t.layout].filter(Boolean).join(' ') + (t.reverse ? ' (reverse)' : '');
+}
+function renderEventTrack(d) {
+  const sel = $('evt-track');
+  if (d.layouts && d.layouts.length && sel.options.length <= 1) {
+    for (const t of d.layouts)
+      sel.appendChild(new Option(trackLabel(t) + (t.line ? '' : ' · no line'), t.id));
+  }
+  if (document.activeElement !== sel) sel.value = d.pick ? d.pick.id : '';
+  const notes = [];
+  if (d.pick && d.pick.warning) notes.push(d.pick.warning);
+  if (d.mismatch && d.recognised)
+    notes.push('The first complete lap matches ' + trackLabel(d.recognised) + ', not the picked layout.');
+  $('evt-track-note').textContent = notes.join(' ');
+  $('evt-track-note').hidden = !notes.length;
+}
+async function fetchEventTrack() {
+  let d;
+  const url = '/api/event-track' + (evtTrackLoaded ? '' : '?layouts=1');
+  try { d = await (await fetch(url, {cache: 'no-store'})).json(); }
+  catch (e) { return; }                    // server gone, keep last state
+  if (d && d.ok) { evtTrackLoaded = true; $('evt-track-err').hidden = true; renderEventTrack(d); }
+  else if (d) { $('evt-track-err').textContent = d.error || 'could not read the track layouts'; $('evt-track-err').hidden = false; }
+}
+$('evt-track').addEventListener('change', async (e) => {
+  let d;
+  try {
+    d = await (await fetch('/api/event-track', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: e.target.value || null})})).json();
+  } catch (err) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  if (!d.ok) {
+    $('evt-track-err').textContent = d.error || 'could not set the track layout';
+    $('evt-track-err').hidden = false;
+  }
+  fetchEventTrack();
+});
 
 function renderTimer() {
   if (!liveTimer) return;
@@ -1497,6 +1546,8 @@ async function refresh() {
   // Home is open and the relay control server is answering.
   if (currentView === 'home' && relayUp && s.relay.http_ok) fetchRelayLive();
   if (currentView === 'home') fetchEventTitle();
+  // The layout list is a local file read while the relay is down: load it once then.
+  if (currentView === 'home' && ((relayUp && s.relay.http_ok) || !evtTrackLoaded)) fetchEventTrack();
   if (currentView === 'profile') fetchAssetFiles();
 }
 

@@ -104,7 +104,7 @@ def min_capability(segments, method="GET"):
         # These carry per-stint stream URLs, so a commentator must not read them
         # over the Funnel. The panel is the sole consumer.
         return Requirement(DIRECTOR, False)
-    if p == ["event", "title"]:
+    if p in (["event", "title"], ["event", "track"]):
         return Requirement(DIRECTOR, False)
     if p == ["submissions"] or (len(p) == 2 and p[0] == "submissions"):
         return Requirement(DIRECTOR, False)
@@ -121,7 +121,7 @@ def min_capability(segments, method="GET"):
             method == "POST" and p in (["driver-radio", "setup"], ["driver-radio", "service"], ["driver-radio", "request"], ["driver-radio", "native"], ["driver-radio", "coach"])):
         return Requirement(DRIVER_RADIO, False)
 
-    if method == "GET" and (p == ["race-engineer"] or len(p) == 2 and p[0] == "race-engineer" and p[1] in ("access", "snapshot", "history", "lap", "reference", "compare", "trace")):
+    if method == "GET" and (p == ["race-engineer"] or len(p) == 2 and p[0] == "race-engineer" and p[1] in ("access", "snapshot", "history", "lap", "reference", "compare", "trace", "outline")):
         return Requirement(RACE_ENGINEER,False)
     # The one shared write on the Engineer desk: the reference pin.
     if method == "POST" and p == ["race-engineer", "pin"]:
@@ -131,7 +131,7 @@ def min_capability(segments, method="GET"):
     # quick-note send plus presets (#244, #376). The desk reuses the ANY cockpit
     # monitors below; only these are race_control-gated.
     if p == ["race-control"] or (len(p) == 2 and p[0] == "race-control"
-                                 and p[1] in ("data", "cues", "presets")):
+                                 and p[1] in ("data", "cues", "presets", "track")):
         return Requirement(RACE_CONTROL, False)
 
     # Health monitor: the page and its combined data endpoint. It carries no stream

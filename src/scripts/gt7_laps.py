@@ -15,6 +15,7 @@ import gt7_data
 import gt7_packet_stats
 import gt7_recording
 import gt7_telemetry
+import gt7_track_pick
 import gt7_tracks
 
 STEP_M = 5.0
@@ -582,7 +583,8 @@ def _build(path, track_db, cars, key, old=None):
     replay = _Replay(old["resume"] if old is not None else None)
     replay.run(rec)
     laps = replay.laps
-    by_session = gt7_recording.session_tracks(laps, track_db, key)
+    by_session = gt7_recording.session_tracks(laps, track_db, key,
+                                              pick=gt7_track_pick.recording_pick(path))
     out = old["laps"][:replay.reused] if old is not None else []
     for lap in out:
         found = by_session.get(lap["session"])

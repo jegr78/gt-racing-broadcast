@@ -607,6 +607,23 @@ def _synthetic_relay_args():
             "--gt7-bind", "127.0.0.1", "--gt7-port", "0", "--gt7-ps-ip", "127.0.0.1"]
 
 
+def _check_track_pick(base):
+    """The event's layout reaches the live telemetry before any packet (#1129)."""
+    status, doc = E._get_json(base + "/event/track?layouts=1")
+    assert status == 200 and doc["layouts"], (status, doc)
+    layout = next(row for row in doc["layouts"] if row["line"]) if any(
+        row["line"] for row in doc["layouts"]) else doc["layouts"][0]
+    status, body, _h = E.http_request(base + "/event/track", method="POST",
+                                      headers={"Content-Type": "application/json"},
+                                      data=json.dumps({"id": layout["id"]}).encode())
+    assert status == 200, (status, body)
+    status, st = E._get_json(base + "/status")
+    track = st["telemetry"].get("track") or {}
+    assert track.get("id") == layout["id"] and track.get("picked"), track
+    assert st["track_pick"]["pick"]["id"] == layout["id"], st["track_pick"]
+    print("  [PASS] relay names the picked track layout before the first packet")
+
+
 def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, timeout):
     """Real solo relay, synthetic capture, signed Engineer and advancing consumers."""
     from pathlib import Path
@@ -633,6 +650,7 @@ def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, ti
     procs.append(proc)
     base = f"http://127.0.0.1:{port}"
     _wait_ready(base + "/status", timeout, proc, log)
+    _check_track_pick(base)
     recording = next(directory.glob("*.gt7rec"))
     from urllib.parse import urlencode
     start = base + "/telemetry/replay/start?" + urlencode({"name":recording.name,"speed":2})
@@ -661,8 +679,13 @@ def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, ti
     coaching=e2e_coach.check(base,runtime.name,token,timeout)
     assert coaching['status']=='pass' and coaching['scored_laps']==0
     print(f"  [PASS] source/frozen private coach controls, replay exclusion and journal debrief ({coaching['elapsed_s']:.3f}s)")
+    status, st = E._get_json(base + "/status")
+    assert status == 200 and not (st["telemetry"].get("track") or {}).get("picked"), \
+        f"a replay must run without the event's layout: {st['telemetry'].get('track')}"
     status, stopped = E._get_json(base + "/telemetry/replay/stop")
     assert status == 200 and not stopped["active"]
+    status, st = E._get_json(base + "/status")
+    assert (st["telemetry"].get("track") or {}).get("picked"), "the live telemetry must get the pick back"
     assert len(list(directory.glob("*.gt7rec"))) == 1 and not list(directory.glob("*.part"))
     print("  [PASS] relay telemetry replay advances all consumers and stops without recording")
 

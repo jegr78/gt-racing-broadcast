@@ -1264,6 +1264,104 @@ def t_engine_sets_track_after_a_matching_lap_and_resets_on_session_change():
     assert eng.track is None
 
 
+_PICK = {"id": "2066d9", "track": "N\u00fcrburgring", "layout": "Grand Prix", "reverse": False}
+
+
+def t_engine_pick_names_the_track_before_any_lap():
+    eng = tm.TelemetryEngine()
+    eng.track_db = _FakeTracks(None)
+    eng.set_track_pick(_PICK)
+    assert eng.track == dict(_PICK, picked=True), eng.track
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    assert eng.track == dict(_PICK, picked=True), "the pick must name the track from the first packet"
+    eng.update(tm.parse_packet(_packet(lap=0)), 0.1)            # session change
+    assert eng.track == dict(_PICK, picked=True), "a session change must keep the pick"
+    eng.set_track_pick(None)
+    assert eng.track is None and eng.track_check is None, "clearing the pick restores recognition"
+
+
+def t_engine_pick_keeps_recognition_as_cross_check():
+    other = {"id": "aaaaaa", "track": "Spa", "layout": "Full", "reverse": False, "score_m": 3.0}
+    eng = tm.TelemetryEngine()
+    eng.track_db = _FakeTracks(other)
+    eng.set_track_pick(_PICK)
+    with _LapLog() as cap:
+        eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+        t = _drive_xy(eng, 0.1, 2, 10.0)
+        eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == dict(_PICK, picked=True), "recognition must not replace the pick"
+    assert eng.track_check == other, eng.track_check
+    assert eng.track_mismatch() is True
+    assert any("does not match the picked layout" in s for s in cap.lines), cap.lines
+    n = len(eng.track_db.calls)
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)
+    assert len(eng.track_db.calls) == n, "the cross-check runs once per session"
+    eng.update(tm.parse_packet(_packet(lap=0)), t + 0.1)
+    assert eng.track_check is None and eng.track_mismatch() is False, "a new session checks again"
+
+
+def t_engine_pick_confirmed_or_close_alternative_is_no_mismatch():
+    for found in ({"id": "2066d9", "track": "N", "layout": "GP", "reverse": False, "score_m": 2.0},
+                  {"id": "bbbbbb", "track": "N", "layout": "GP chicane", "reverse": False,
+                   "score_m": 2.0, "alternatives": ["2066d9"]}):
+        eng = tm.TelemetryEngine()
+        eng.track_db = _FakeTracks(found)
+        eng.set_track_pick(_PICK)
+        eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+        t = _drive_xy(eng, 0.1, 2, 10.0)
+        eng.update(tm.parse_packet(_packet(lap=3)), t)
+        assert eng.track_check == found
+        assert eng.track_mismatch() is False, f"{found['id']} must not count as a mismatch"
+
+
+def t_engine_pick_without_a_match_is_no_mismatch():
+    eng = tm.TelemetryEngine()
+    eng.track_db = _FakeTracks(None)
+    eng.set_track_pick(_PICK)
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track_check is None and eng.track_mismatch() is False
+    assert eng.track == dict(_PICK, picked=True)
+
+
+def t_store_keeps_the_pick_through_reset_and_reload():
+    st = tm.TelemetryStore()
+    st.set_track_pick(_PICK)
+    assert st.track() == dict(_PICK, picked=True)
+    st.reset_analysis({})
+    assert st.track() == dict(_PICK, picked=True), "reset_analysis dropped the pick"
+    st.reload_data(object(), _FakeTracks(None))
+    assert st.track() == dict(_PICK, picked=True), "a GT7 data reload dropped the pick"
+    status = st.track_status()
+    assert status == {"track": dict(_PICK, picked=True), "recognised": None,
+                      "mismatch": False}, status
+    st.reset_analysis({"active": True})
+    assert st.track() is None, "a replayed recording must not show the event's pick"
+    other = dict(_PICK, id="aaaaaa")
+    st.set_track_pick(other)
+    assert st.track() is None, "a pick changed during a replay waits for the replay to end"
+    st.reset_analysis({"active": False})
+    assert st.track() == dict(other, picked=True), "the live analysis must get the pick back"
+
+
+def t_engine_keeps_what_recognition_named_when_the_pick_changes():
+    found = {"id": "2066d9", "track": "N", "layout": "GP", "reverse": False, "score_m": 2.0}
+    eng = tm.TelemetryEngine()
+    eng.track_db = _FakeTracks(found)
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == found
+    other = dict(_PICK, id="bbbbbb")
+    eng.set_track_pick(other)
+    assert eng.track_check == found and eng.track_mismatch() is True, \
+        "a pick made after recognition must be checked against it at once"
+    eng.set_track_pick(None)
+    assert eng.track == found, "clearing the pick must keep the recognised track and its map"
+
+
 def t_engine_logs_an_unmatched_lap_once_per_session():
     # A layout without a downloaded or learned line (e.g. Autopolis Short Course,
     # whose upstream capture was dropped) never matches. Say so once per session,

@@ -485,8 +485,32 @@ class TelemetryEngine:
         self.session = 1
         self.on_lap = None            # callable(dict) per closed lap; the recording exporter sets it
         self.track_db = None    # gt7_tracks.TrackDB, or None (no track recognition)
-        self.track = None       # recognised layout, or {"candidates": [...]}
+        self.track = None       # picked or recognised layout, or {"candidates": [...]}
+        self.track_pick = None  # the producer's layout for the event, or None
+        self.track_check = None  # with a pick: what recognition named this session
         self._track_miss_logged = False   # the "no match" line is logged once per session
+
+    def set_track_pick(self, info):
+        """Name the track from the first packet as `info` ({id, track, layout, reverse});
+        None returns to recognition. Recognition still runs as a cross-check, and what it
+        already named this session is kept."""
+        if self.track_pick is None:
+            recognised = self.track if self.track and "id" in self.track else None
+        else:
+            recognised = self.track_check
+        self.track_pick = None if info is None else {
+            k: info[k] for k in ("id", "track", "layout", "reverse")}
+        self.track_check = recognised
+        self.track = self._picked_track() or (dict(recognised) if recognised else None)
+
+    def _picked_track(self):
+        return None if self.track_pick is None else dict(self.track_pick, picked=True)
+
+    def track_mismatch(self):
+        """True when recognition named another layout and the pick is not a close one."""
+        pick, found = self.track_pick, self.track_check
+        return bool(pick and found and found["id"] != pick["id"]
+                    and pick["id"] not in found.get("alternatives", ()))
 
     def _session_boundary(self, pkt):
         """How a new session starts, or None. GT7 sends no session-change event, so it
@@ -531,7 +555,8 @@ class TelemetryEngine:
         self._delta_hist.clear()
         self._lap_num = pkt.lap
         self._acc = _LapAccumulator(now, started_at_boundary=at_line)
-        self.track = None
+        self.track = self._picked_track()
+        self.track_check = None
         self._track_miss_logged = False
 
     def update(self, pkt, now):
@@ -661,7 +686,13 @@ class TelemetryEngine:
             LOG.warning("GT7 lap consumer failed: %s", e)
 
     def _detect_track(self, acc):
-        if self.track_db is None or (self.track is not None and "id" in self.track):
+        if self.track_db is None:
+            return
+        if self.track_pick is not None:
+            if self.track_check is None:
+                self._check_pick(acc)
+            return
+        if self.track is not None and "id" in self.track:
             return
         if len(acc.points) < MIN_TRACK_POINTS:        # a partial or stationary lap names nothing
             return
@@ -681,6 +712,23 @@ class TelemetryEngine:
             self.track = found
         except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
             LOG.warning("GT7 track recognition failed: %s", e)
+
+    def _check_pick(self, acc):
+        if len(acc.points) < MIN_TRACK_POINTS:
+            return
+        try:
+            found = self.track_db.match(acc.points, acc.distance)
+        except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
+            LOG.warning("GT7 track recognition failed: %s", e)
+            return
+        if not isinstance(found, dict) or "id" not in found:
+            return
+        self.track_check = found
+        if self.track_mismatch():
+            self._log.warning("GT7 track: the lap matches %s %s%s, which does not match the "
+                              "picked layout %s %s", found.get("track"), found.get("layout"),
+                              " (reverse)" if found.get("reverse") else "",
+                              self.track_pick["track"], self.track_pick["layout"])
 
     def _finalise_lap(self, line_packet=None, closed_at=None):
         acc = self._acc
@@ -939,6 +987,8 @@ class TelemetryStore:
                  view_path=None, cars=None, recorder=None, tracks=None, engineer=None,
                  clock=time.monotonic, packets=None):
         self._eng = TelemetryEngine()
+        self._track_pick = None        # the event's picked layout, kept across analysis resets
+        self._replaying = False
         self._clock = clock
         self._packets = packets        # gt7_packet_stats.PacketStats for live UDP, or None
         self._packets_lock = threading.Lock()
@@ -975,6 +1025,8 @@ class TelemetryStore:
             tracks = self._eng.track_db
             self._eng = TelemetryEngine()
             self._eng.track_db = tracks
+            self._replaying = bool((metadata or {}).get("active"))
+            self._eng.set_track_pick(None if self._replaying else self._track_pick)
             self._dirty_ref = None
             self._remove_file()
         if self.engineer is not None:
@@ -1069,6 +1121,24 @@ class TelemetryStore:
     def track(self):
         with self._lock:
             return dict(self._eng.track) if self._eng.track else None
+
+    def set_track_pick(self, info):
+        """The producer's layout for the event (see TelemetryEngine.set_track_pick); a
+        replayed recording runs without it until the replay ends."""
+        with self._lock:
+            self._track_pick = info
+            if not self._replaying:
+                self._eng.set_track_pick(info)
+        if self.engineer is not None and hasattr(self.engineer, "set_track_pick"):
+            self.engineer.set_track_pick(info)
+
+    def track_status(self):
+        """The current track, what recognition named with a pick, and whether they differ."""
+        with self._lock:
+            eng = self._eng
+            return {"track": dict(eng.track) if eng.track else None,
+                    "recognised": dict(eng.track_check) if eng.track_check else None,
+                    "mismatch": eng.track_mismatch()}
 
     def reload_data(self, cars, tracks):
         """Swap in refreshed car and track data (after a GT7 data update)."""

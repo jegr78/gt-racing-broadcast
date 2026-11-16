@@ -422,4 +422,57 @@ async def main():
     return None
 
 
-if __name__=='__main__':asyncio.run(main())
+async def picked_layout_outline():
+    """The picked layout's downloaded line draws the map before lap 1 completes (#1129)."""
+    import math
+    from playwright.async_api import async_playwright
+    import race_engineer_live as live
+    import race_engineer_api as api
+    import gt7_recording, gt7_telemetry
+    from test_race_engineer_live import FakeTracks, FakeCars
+    radius = 1000.0 / (2 * math.pi)
+
+    class LineTracks(FakeTracks):
+        def reference_trace(self, oid):
+            return [{'d': 5.0 * i, 'x': radius * math.cos(i * math.pi / 100), 'z': radius * math.sin(i * math.pi / 100)}
+                    for i in range(201)]
+    with tempfile.TemporaryDirectory(prefix='racecast-desk-outline-') as root:
+        fixture = Fixture(root)
+        fixture.access().update(enabled=True, expected=0)
+        server = fixture.console(with_live=True)
+        previous = fixture.live
+        fixture.live = live.Store(lambda: fixture.access().read()['enabled'], tracks=LineTracks(known=False), cars=FakeCars(),
+                                  runtime_base=str(fixture.root), queue_max=4096, clock=lambda: fixture.live_clock)
+        fixture.live.api = api.Service(fixture.live)
+        fixture.telemetry.engineer = fixture.live
+        previous.close()
+        try:
+            fixture.live.set_track_pick({'id': 'ring01', 'track': 'Test Ring', 'layout': 'Full', 'reverse': False})
+            fixture.live.refresh_enabled()
+            for wall, _kind, raw in list(gt7_recording.Recording(fixture.live_path).packets())[:150]:
+                fixture.live.put(gt7_telemetry.parse_packet(raw), wall)
+            assert fixture.live.flush(10)
+            assert not fixture.live.snapshot()['laps'], 'the check needs a first lap still in progress'
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                page = await browser.new_page(viewport={'width': 1440, 'height': 1050})
+                errors = []
+                page.on('pageerror', lambda e: errors.append(str(e)))
+                token = gate.m.console_auth.mint_token(gate.SECRET, 'engineer')
+                await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
+                await page.wait_for_function('() => document.querySelector("#map path[data-outline=complete]")', timeout=10000)
+                assert not errors, errors
+                await browser.close()
+        finally:
+            server.shutdown(); server.server_close(); fixture.live.close()
+    print('PASS Engineer desk draws the picked layout before the first lap completes')
+    return None
+
+
+async def run():
+    await main()
+    await picked_layout_outline()
+    return None
+
+
+if __name__=='__main__':asyncio.run(run())

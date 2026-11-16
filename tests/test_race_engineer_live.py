@@ -265,6 +265,43 @@ def t_gt7_data_reload_reaches_the_running_analysis():
         assert store.snapshot()['track_recognition'] is False, 'no track data reported as recognisable'
 
 
+def t_track_pick_names_the_open_lap_and_yields_to_a_clear_recognition():
+    pick = {"id": "ring02", "track": "Other Ring", "layout": "Full", "reverse": False}
+    for tracks, closed_ids in ((FakeTracks(known=False), {'ring02'}), (FakeTracks(), {'ring01'})):
+        with tempfile.TemporaryDirectory() as d:
+            path = write_circle_recording(d)
+            packets = list(gr.Recording(path).packets())
+            with live.Store(lambda: True, tracks=tracks, cars=FakeCars(), queue_max=4096) as store:
+                store.set_track_pick(pick)
+                deadline = time.monotonic() + 5
+                while store._pick is None and time.monotonic() < deadline:
+                    time.sleep(.05)
+                wall, _kind, plain = packets[0]
+                store.put(tm.parse_packet(plain), wall)
+                assert store.flush(10)
+                current = store.snapshot()['current']
+                assert current is not None and current['track_id'] == 'ring02', \
+                    f"the first lap must carry the picked layout: {current and current.get('track_id')}"
+                for wall, _kind, plain in packets[1:]:
+                    store.put(tm.parse_packet(plain), wall)
+                assert store.flush(10)
+                closed = {r['track_id'] for r in store.snapshot()['laps'] if r['state'] == 'confirmed'}
+                assert closed == closed_ids, f"closed laps: {closed}, expected {closed_ids}"
+
+def t_track_pick_rests_while_a_recording_is_replayed():
+    pick = {"id": "ring02", "track": "Other Ring", "layout": "Full", "reverse": False}
+    with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars()) as store:
+        store.set_track_pick(pick)
+        deadline = time.monotonic() + 5
+        while store._pick is None and time.monotonic() < deadline:
+            time.sleep(.05)
+        assert store._replay.eng.track_pick["id"] == "ring02"
+        store.reset(dict(active=True, label="old", speed=1.0, live_gap=False))
+        assert store._replay.eng.track_pick is None, "a replay must not show the event's layout"
+        store.reset(dict(active=False, label="", speed=1.0, live_gap=True))
+        assert store._replay.eng.track_pick["id"] == "ring02", "live analysis must get the pick back"
+
+
 def t_bounds_eviction_concurrent_readers_and_async_recovery():
     with tempfile.TemporaryDirectory() as d:
         path = write_circle_recording(d, lap_secs=tuple(20.0 - i * .1 for i in range(12)), n=100)

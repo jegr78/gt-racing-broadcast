@@ -39,6 +39,10 @@
     "handler": "refresh",
     "surface": "ui/control-center.html"
   },
+  "event track": {
+    "handler": "fetchEventTrack",
+    "surface": "ui/control-center.html"
+  },
   "fonts restore": {
     "handler": "restoreBundledFonts",
     "surface": "ui/control-center.html"

@@ -198,6 +198,7 @@ import gt7_context     # prepared session notes attached to each new recording
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
 import gt7_tracks      # GT7 track recognition from lap positions (#787)
+import gt7_track_pick  # the event's picked GT7 layout (#1129)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -1313,6 +1314,9 @@ def aggregate_health(facts):
            before OBS ever goes live, never alarms.
     telemetry_lossy (optional loss rate 0..1 while gt7_packet_stats calls the GT7 network
         lossy, else None: a quiet, display-only yellow excluded from the notify level).
+    track_mismatch (optional text while track recognition contradicts the event's
+        picked GT7 layout, else None: a quiet, display-only yellow excluded from the
+        notify level, #1129).
 
     yellow = OBS WebSocket unreachable · cookies stale · Tailscale down · a feed
              stuck connecting · stream_reconnecting · funnel_down ·
@@ -1352,6 +1356,8 @@ def aggregate_health(facts):
             yellow.append(f"Feed {name} stuck connecting")
     for name in facts.get("feeds_jittery") or []:
         yellow.append(f"Feed {name} inbound stall. A gap exceeded the fan-out reserve (stutter risk)")
+    if facts.get("track_mismatch"):
+        yellow.append(facts["track_mismatch"])
     if facts.get("telemetry_lossy") is not None:
         yellow.append(f"GT7 telemetry losing {facts['telemetry_lossy'] * 100:.0f} % of its packets: "
                       f"check the console's network")
@@ -9646,7 +9652,16 @@ class Relay:
                 "mic_problem": (mic_health_problem(self.mic_device)
                                 if self._schedule_has_local() else None),
                 "mic_fallback": mic_fallback_fact(getattr(self, "feeds", {})),
-                "telemetry_lossy": self._telemetry_lossy_fact()}
+                "telemetry_lossy": self._telemetry_lossy_fact(),
+                "track_mismatch": self._track_mismatch_fact()}
+
+    def _track_mismatch_fact(self):
+        """The mismatch line while recognition contradicts the picked layout, else None."""
+        pick = getattr(self, "track_pick", None)
+        try:
+            return pick.mismatch_text() if pick is not None else None
+        except Exception:  # noqa: BLE001  health sampling is best-effort
+            return None
 
     def _telemetry_lossy_fact(self):
         """The GT7 loss rate while the packet counters call the network lossy, else None."""
@@ -9731,7 +9746,8 @@ class Relay:
                                          "feeds_backlogged": {},
                                          "feeds_av_disturbed": {},
                                          "mic_problem": None,
-                                         "telemetry_lossy": None})["level"]
+                                         "telemetry_lossy": None,
+                                         "track_mismatch": None})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -11875,7 +11891,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
-                 event_documents_source=None, browser_hosts=()):
+                 event_documents_source=None, browser_hosts=(), track_pick=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -13013,7 +13029,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "schedule": race_control_schedule(rows, live, live_idx),
                         "event_title": event_store.get() if event_store else "",
                         "mode": relay.mode,
+                        "track_pick": track_pick.status() if track_pick else None,
                         "on_air": live_schedule_row(rows, live_idx)})
+                # The event's GT7 layout (#1129): read with the layout list, or change it.
+                if sub == ["race-control", "track"] and method == "GET":
+                    return self._track_pick_get()
+                if sub == ["race-control", "track"] and method == "POST":
+                    return ["race-control", "track"]
                 # RC -> commentator quick-note presets (#376), admin-managed.
                 if sub == ["race-control", "presets"] and method == "GET":
                     return self._send({"presets": hud_source.rc_note_presets()
@@ -13181,6 +13203,25 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 frm = 0
             return "\n".join(relay.health_store.export_lines(frm))
 
+        def _track_pick_get(self):
+            if track_pick is None:
+                return self._send({"error": "track layout pick unavailable"}, 404)
+            layouts = parse_qs(urlparse(self.path).query).get("layouts") == ["1"]
+            return self._send(track_pick.status(with_layouts=layouts))
+
+        def _track_pick_post(self, body):
+            if track_pick is None:
+                return self._send({"error": "track layout pick unavailable"}, 404)
+            official_id = body.get("id")
+            if official_id is not None and not isinstance(official_id, str):
+                return self._send({"error": "id must be a layout id or null"}, 400)
+            try:
+                return self._send(dict(track_pick.set(official_id), ok=True))
+            except ValueError as exc:
+                return self._send({"error": str(exc)}, 400)
+            except OSError as exc:
+                return self._send({"error": f"could not save the layout: {exc.strerror}"}, 500)
+
         def _status_payload(self):
             """The full /status JSON (feeds, pov, league, health) + timer +
             event_title. Served verbatim on the tailnet; redacted for /console
@@ -13209,6 +13250,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     packets = telemetry_store.packet_stats()
                     if packets is not None:
                         base["telemetry"]["packets"] = packets
+            if track_pick is not None:
+                base["track_pick"] = track_pick.status()
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
@@ -13862,6 +13905,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                          "commentator": bool(c), "race_control": bool(rc),
                          "discord": x or "", "race_engineer": bool(re)}
                         for (n, d, pr, c, rc, x, re) in (CrewSource._member(row) for row in rows)]})
+                if p == ["event", "track"]:
+                    return self._track_pick_get()
                 if p == ["event-notes", "data"]:
                     # Notes and public document links in the shared crew dialog.
                     # Read-only; one shared list for all roles. Mirrored
@@ -14221,6 +14266,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         self._notify_approval(entry)
                         return self._send({"ok": True, "id": entry["id"], **res})
                     return self._send({"error": "unknown", "path": self.path}, 404)
+                if p in (["event", "track"], ["race-control", "track"]):
+                    return self._track_pick_post(body)
                 if p == ["event", "title"]:
                     # Director live-edit of the free-text event title (#207). Tailnet
                     # trust boundary like the rest of the panel; persisted to
@@ -15416,6 +15463,15 @@ def main():
     # a solo POV broadcast (endurance, solo COMMENTARY, or explicitly disabled), so
     # make_handler's /telemetry/* (Task 8) 404s cleanly and the HUD block self-hides.
     telemetry_store = rec_dir = runtime_base = gt7_bundled = None
+    _recorder_open = []   # hooks for each new recording, filled once the pick exists
+
+    def _on_recording_open(path, rec_dir_, recording_id):
+        for hook in _recorder_open:
+            try:
+                hook(path, rec_dir_, recording_id)
+            except Exception as exc:  # noqa: BLE001  a hook must never stop the recording
+                LOG.warning("telemetry recording start hook failed: %s", exc)
+        return gt7_context.attach_prepared(path, rec_dir_, recording_id)
     if telemetry_active(args.solo, os.environ):
         _tunits = os.environ.get("RACECAST_TELEMETRY_UNITS", "metric")
         _tthr = (float(os.environ.get("RACECAST_TELEMETRY_TYRE_COLD", 70)),
@@ -15429,7 +15485,7 @@ def main():
             gt7_recording.record_default(os.environ),
             profile=os.environ.get("RACECAST_PROFILE_NAME", ""),
             relay_version=VERSION_LABEL,
-            on_open=gt7_context.attach_prepared)
+            on_open=_on_recording_open)
         telemetry_store = gt7_telemetry.TelemetryStore(
             os.path.join(runtime, "telemetry.json"), units=_tunits, thresholds=_tthr,
             reset=True,          # fresh reference each relay start (spec §D), no stale cross-track lap
@@ -15439,6 +15495,31 @@ def main():
             recorder=recorder, packets=gt7_packet_stats.PacketStats())
         recorder.packet_stats = telemetry_store.packet_stats
         relay.telemetry_store = telemetry_store   # the health check reads its packet counters
+
+    # The event's GT7 layout (#1129): an event setting for every profile kind.
+    _pick_tracks = (telemetry_store._eng.track_db if telemetry_store is not None
+                    else gt7_tracks.TrackDB.load(
+                        gt7_runtime_base(args.runtime_base, runtime, bool(args.runtime_dir)),
+                        os.path.join(assets_dir, "gt7")))
+
+    def _open_recording_path():
+        rec = telemetry_store.recorder if telemetry_store is not None else None
+        name = rec.status().get("file") if rec is not None else None
+        return os.path.join(rec_dir, name) if name else None
+
+    track_pick = gt7_track_pick.Controller(
+        gt7_track_pick.Store(gt7_track_pick.path_in(runtime), _pick_tracks),
+        telemetry_store, recording=_open_recording_path, log=LOG)
+    relay.track_pick = track_pick
+    if telemetry_store is not None:
+        telemetry_store.data_listeners.append(
+            lambda _cars, tracks: setattr(track_pick.store, "tracks", tracks))
+        _recorder_open.append(lambda path, _dir, _rid: track_pick.assign(path))
+    _pick = track_pick.store.current()
+    if _pick is not None:
+        LOG.info("GT7 track layout picked for this event: %s", gt7_track_pick.label(_pick))
+        if _pick["warning"]:
+            LOG.warning("GT7 track layout %s", _pick["warning"])
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
@@ -15482,6 +15563,7 @@ def main():
     )
     if telemetry_store is not None:
         telemetry_store.replay = telemetry_replay.Controller(telemetry_store, rec_dir)
+    track_pick.apply()      # after the Engineer analysis is attached, so it gets the pick too
     radio_link = getattr(engineer_live, "radio_link", None)
     def radio_snapshot():
         snapshot = engineer_live.snapshot() if engineer_live is not None else {}
@@ -15558,6 +15640,7 @@ def main():
         channel_csv_url=channel_csv_url,
         push_url=push_url,
         telemetry_store=telemetry_store,
+        track_pick=track_pick,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

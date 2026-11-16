@@ -65,6 +65,28 @@ def t_the_snapshot_carries_the_packet_counters_when_the_relay_has_them():
         finally: bare.close()
 
 
+def t_outline_serves_the_downloaded_line_of_a_layout():
+    class LineTracks(FakeTracks):
+        def reference_trace(self, oid):
+            return [{"d": 0.0, "x": 1.0, "z": 2.0}, {"d": 5.0, "x": 3.0, "z": 4.0}] if oid == "ring01" else None
+    with live.Store(lambda: True, tracks=LineTracks(), cars=FakeCars()) as store:
+        service = api.Service(store)
+        try:
+            got = service.request("outline", {"track": ["ring01"]}, None)
+            assert got["state"] == "ready" and len(got["trace"]) == 2 and got["track_id"] == "ring01", got
+            none = service.request("outline", {"track": ["ring02"]}, None)
+            assert none["state"] == "unavailable" and none["trace"] == [], none
+            for bad in ({"track": ["../x"]}, {}, {"track": ["ring01"], "id": ["x"]}):
+                try:
+                    service.request("outline", bad, None)
+                except api.AccessError as exc:
+                    assert exc.code == "invalid_query", exc.code
+                else:
+                    raise AssertionError(f"{bad} must be refused")
+        finally:
+            service.close()
+
+
 def t_session_car_and_measured_position_survive_the_public_projection():
     import gt7_telemetry
     from test_gt7_laps import _pkt

@@ -11,7 +11,7 @@ import threading
 import gt7_comparison
 from race_engineer_access import AccessError
 
-ROUTES = frozenset(("snapshot", "history", "lap", "reference", "compare", "trace"))
+ROUTES = frozenset(("snapshot", "history", "lap", "reference", "compare", "trace", "outline"))
 FIELDS = frozenset((
     "id",
     "session_id",
@@ -380,6 +380,7 @@ class Service:
             "reference": {"id"},
             "compare": {"a", "b"},
             "trace": {"since"},
+            "outline": {"track"},
         }[route]
         query = {k: v for k, v in query.items() if k != "t"}
         if set(query) - allowed or any(len(v) != 1 or not v[0] for v in query.values()):
@@ -400,6 +401,13 @@ class Service:
             return self.history(int(since) if since is not None else None)
         if set(query) != allowed:
             raise AccessError("invalid_query", "Required identity is missing")
+        if route == "outline":
+            track = query["track"][0]
+            if not re.fullmatch(r"[0-9a-z]{1,32}", track):
+                raise AccessError("invalid_query", "Invalid track layout")
+            trace = self.live.reference_outline(track)
+            return dict(version=1, generation=self.live.generation, track_id=track,
+                        state="ready" if trace else "unavailable", trace=trace or [])
         if route == "lap":
             return self.lap(query["id"][0], reference)
         if route == "reference":

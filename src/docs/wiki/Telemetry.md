@@ -252,6 +252,20 @@ The illustration uses authored synthetic reference values; no external curve is 
 ![Data management: choose a reference layout before recording](images/telemetry-reference-data-management.png)
 
 ![Track definition prepared before the first recording](images/telemetry-reference-track-editor.png)
+- **Track layout of the event.** Pick the GT7 layout before the event: on the Control
+  Center Home (**Track layout**), with `racecast event track ID` (`--list` shows the ids,
+  `--clear` removes the pick), in the Director Panel's **Setup** area or on the Race
+  Control desk. Every profile kind has it. The live telemetry then names the track from
+  the first packet, so the Engineer desk draws the map and the corner names before the
+  first lap completes, and layouts that differ by one chicane are not mixed up. The
+  recording the relay writes keeps the picked layout, so it needs no Set track
+  afterwards; only a session whose laps clearly match another layout keeps that layout.
+  A replayed recording runs without the pick. Recognition still runs as a cross-check: when the first complete lap of a
+  GT7 session matches another layout, the Director Panel's health shows a yellow line, the
+  desks name the layout the lap matched, and the director or Race Control can change the
+  layout. Picking a layout without a downloaded racing line warns: that event has no map
+  and no cross-check until a recording teaches the line. The pick stays until it is
+  changed or cleared. Without a pick everything works as before.
 - **Set track.** When racecast does not recognise the layout of a GT7 session, or two
   layouts fit, pick it from the list. The row acts on the session of the analysed lap B
   and names it ("Session 5"), because one recording often holds several tracks; it is

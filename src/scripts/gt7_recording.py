@@ -120,6 +120,7 @@ def _free_path(rec_dir, stem):
         path = os.path.join(rec_dir, name)
         stem_path = path[:-len(SUFFIX)]
         if not any(os.path.exists(p) for p in (path, path + PART, stem_path + ".context.json",
+                                               stem_path + ".track.json",
                                                stem_path + ".context.json.lock",
                                                stem_path + ".context-history")):
             return path
@@ -559,12 +560,15 @@ def session_key(key, session):
     return f"{key}#{session}"
 
 
-def session_tracks(laps, tracks, key=None):
+def session_tracks(laps, tracks, key=None, pick=None):
     """The track of each GT7 session: the session's learned assignment, else the
-    recording's, else the longest lap that matches."""
+    recording's, else the longest lap that matches. The event's picked layout id `pick`
+    names a session unless its longest matching lap names another layout and the pick
+    is not one of the close alternatives."""
     if tracks is None:
         return {}
     whole = tracks.assignment(key) if key else None
+    picked = tracks.name(pick) if pick else None
     out = {}
     for session in sorted({lap["session"] for lap in laps}):
         assigned = (tracks.assignment(session_key(key, session)) if key else None) or whole
@@ -572,15 +576,18 @@ def session_tracks(laps, tracks, key=None):
         if info:
             out[session] = brief_track(info)
             continue
-        found = None
+        found, matched = None, None
         ranked = sorted((lap for lap in laps if lap["session"] == session and lap["points"]),
                         key=lambda lap: lap["distance_m"], reverse=True)
         for lap in ranked:
             m = tracks.match(lap["points"], lap["distance_m"])
             if m and "id" in m:
-                found = brief_track(m)
+                found, matched = brief_track(m), m
                 break
             found = found or m
+        if picked and (matched is None or matched["id"] == picked["id"]
+                       or picked["id"] in matched.get("alternatives", ())):
+            found = brief_track(picked)
         out[session] = found
     return out
 

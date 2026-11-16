@@ -228,6 +228,9 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                                          "source": "default", "relay_alive": False},
             "event_title_write": lambda value: {"ok": True, "title": value or "",
                                                 "applied": "file"},
+            "event_track_read": lambda layouts=True: {"ok": True, "pick": None, "layouts": [],
+                                         "source": "file", "relay_alive": False},
+            "event_track_write": lambda value: {"ok": True, "pick": None, "applied": "file"},
             "crew_read": lambda: {"ok": True, "entries": [
                 {"name": "Dana", "director": True, "producer": False}]},
             "crew_write": lambda row, name, director, producer, commentator=None, race_control=None, discord=None: {
@@ -2129,6 +2132,30 @@ def t_event_title_post_validation_error_is_400():
     try:
         code, body = _post_json(port, "/api/event-title", {"title": "x"})
         assert code == 400 and "relay rejected" in json.loads(body)["error"]
+    finally:
+        httpd.shutdown()
+
+
+def t_event_track_routes_read_and_forward_the_id():
+    seen = []
+    ctx = _ctx()
+    asked = []
+    ctx["event_track_read"] = lambda layouts=True: asked.append(layouts) or {
+        "ok": True, "pick": {"id": "aaa001"}, "layouts": []}
+    ctx["event_track_write"] = lambda value: seen.append(value) or (
+        {"ok": True, "pick": {"id": value}, "applied": "relay"} if value
+        else {"ok": False, "error": "unknown track layout"})
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/event-track")
+        assert code == 200 and json.loads(body)["pick"]["id"] == "aaa001", body
+        _get(port, "/api/event-track?layouts=1")
+        assert asked == [False, True], f"the layout list must be asked for explicitly: {asked}"
+        code, body = _post_json(port, "/api/event-track", {"id": "aaa001"})
+        assert code == 200 and json.loads(body)["pick"]["id"] == "aaa001", body
+        code, body = _post_json(port, "/api/event-track", {"id": ""})
+        assert code == 400 and "unknown track layout" in json.loads(body)["error"], body
+        assert seen == ["aaa001", ""], seen
     finally:
         httpd.shutdown()
 

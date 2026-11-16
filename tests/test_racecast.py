@@ -1358,8 +1358,12 @@ def t_telemetry_delete_removes_the_lap_index():
         m.telemetry_laps_data(rec=_stem(path))
         cache = os.path.join(rec_dir, _stem(path) + ".laps.json")
         assert os.path.exists(cache) and path in m._TELEMETRY_MEMO
+        sidecar = os.path.join(rec_dir, _stem(path) + ".track.json")
+        with open(sidecar, "w", encoding="utf-8") as fh:
+            fh.write('{"id": "ring01"}')
         m.telemetry_delete_cmd([_stem(path)])
         assert not os.path.exists(cache) and not os.path.exists(path)
+        assert not os.path.exists(sidecar), "the recording's picked-layout file must go with it"
         assert path not in m._TELEMETRY_MEMO
 
 
@@ -5183,6 +5187,69 @@ def t_path_loaded_module_imports_are_frozen():
                 missing.add(mod)
     assert not missing, ("peer modules imported by path-loaded src/ui modules but "
                          f"not --hidden-import in tools/build-binary.py: {sorted(missing)}")
+
+
+# The event's GT7 layout pick (#1129).
+
+class _PickTracks:
+    CAT = {"aaa001": {"id": "aaa001", "track": "Oval", "layout": "Full", "reverse": False}}
+
+    def name(self, oid):
+        return dict(self.CAT[oid]) if oid in self.CAT else None
+
+    def has_downloaded_line(self, oid):
+        return False
+
+    def layouts(self):
+        return [dict(v) for v in self.CAT.values()]
+
+
+def t_event_track_write_and_read_without_relay():
+    with tempfile.TemporaryDirectory() as dd:
+        p = os.path.join(dd, "event-track.json")
+        d = m.event_track_write_data("aaa001", alive=lambda: False, path=p, tracks=_PickTracks())
+        assert d["ok"] and d["applied"] == "file" and d["pick"]["id"] == "aaa001", d
+        assert "no downloaded racing line" in d["pick"]["warning"], d
+        r = m.event_track_read_data(alive=lambda: False, path=p, tracks=_PickTracks())
+        assert r["source"] == "file" and r["pick"]["id"] == "aaa001", r
+        assert [x["id"] for x in r["layouts"]] == ["aaa001"], r
+        bad = m.event_track_write_data("zzz999", alive=lambda: False, path=p, tracks=_PickTracks())
+        assert not bad["ok"] and "unknown track layout" in bad["error"], bad
+        assert m.event_track_write_data("", alive=lambda: False, path=p,
+                                        tracks=_PickTracks())["pick"] is None
+        assert not os.path.exists(p), "clearing must remove the pick file"
+
+
+def t_event_track_goes_through_a_running_relay():
+    sent = {}
+
+    def post(url, payload):
+        sent.update(url=url, payload=payload)
+        return {"ok": True, "pick": {"id": payload["id"]}}
+    d = m.event_track_write_data("aaa001", alive=lambda: True, post=post, tracks=_PickTracks(),
+                                 foreign=lambda: "")
+    assert d == {"ok": True, "pick": {"id": "aaa001"}, "applied": "relay"}, d
+    assert sent["url"].endswith("/event/track") and sent["payload"] == {"id": "aaa001"}, sent
+    r = m.event_track_read_data(alive=lambda: True, foreign=lambda: "", fetch=lambda u: {
+        "pick": {"id": "aaa001"}, "recognised": {"id": "b"}, "mismatch": True, "layouts": []})
+    assert r["source"] == "relay" and r["mismatch"] is True and r["recognised"] == {"id": "b"}, r
+    refused = m.event_track_write_data("aaa001", alive=lambda: True, foreign=lambda: "",
+                                       post=lambda u, b: {"error": "nope"}, tracks=_PickTracks())
+    assert not refused["ok"] and "nope" in refused["error"], refused
+
+
+
+def t_event_track_never_changes_a_relay_of_another_profile():
+    def post(url, payload):
+        raise AssertionError("a relay of another profile must not get this profile's layout")
+    with tempfile.TemporaryDirectory() as dd:
+        p = os.path.join(dd, "event-track.json")
+        d = m.event_track_write_data("aaa001", alive=lambda: True, foreign=lambda: "other",
+                                     post=post, path=p, tracks=_PickTracks())
+        assert d["ok"] and d["applied"] == "file", d
+        r = m.event_track_read_data(alive=lambda: True, foreign=lambda: "other", path=p,
+                                    fetch=post, tracks=_PickTracks(), layouts=False)
+        assert r["source"] == "file" and r["pick"]["id"] == "aaa001" and r["layouts"] == [], r
 
 
 # Event-title providers for the Control Center Home. (#207)

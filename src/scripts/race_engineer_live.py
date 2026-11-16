@@ -13,6 +13,7 @@ import uuid
 
 import gt7_context
 import gt7_track_definitions
+import gt7_track_pick
 import gt7_laps
 import gt7_recording
 import gt7_shifts
@@ -301,6 +302,7 @@ def _bounded_recording(
     """Streaming local replay with finite retention, including explicitly requested laps."""
     replay = gt7_laps._Replay()
     replay.eng.track_db = tracks
+    pick = gt7_track_pick.recording_pick(path)
     context = gt7_context.Store.for_recording(path).read()
     summaries, details = collections.OrderedDict(), collections.OrderedDict()
     previous = collections.OrderedDict()
@@ -327,7 +329,9 @@ def _bounded_recording(
                 p for p in replay.times._waiting if p[0] is not raw
             ]
             samples, tyres = replay.lap_samples.pop(0), replay.lap_tyres.pop(0)
-            found = gt7_recording.session_tracks([raw], tracks).get(raw["session"])
+            found = gt7_recording.session_tracks([raw], tracks, pick=pick).get(
+                raw["session"]
+            )
             row = gt7_laps._indexed_lap(
                 source,
                 raw,
@@ -497,6 +501,7 @@ class Store:
         self._enabled_source, self._clock = enabled, clock
         self._tracks, self._cars = tracks, cars
         self._pending_data = None
+        self._pick, self._picks = None, queue.SimpleQueue()
         self._runtime_base, self._bundled = runtime_base, bundled
         self._definitions = (
             _SteadyDefinitions(gt7_track_definitions.Store(
@@ -573,7 +578,12 @@ class Store:
     def _new_replay(self):
         replay = gt7_laps._Replay()
         replay.eng.track_db = self._tracks
+        replay.eng.set_track_pick(self._live_pick())
         return replay
+
+    def _live_pick(self):
+        """The event's pick, except while a recording is replayed."""
+        return None if self._source_replay["active"] else self._pick
 
     def _empty(self):
         return {
@@ -659,11 +669,33 @@ class Store:
         """Called from the GT7 data watcher; the worker swaps the tables between packets."""
         self._pending_data = (cars, tracks)
 
+    def reference_outline(self, track_id):
+        """The downloaded racing line of a layout as [{d, x, z}], or None. It draws the
+        map before a lap of that layout has completed."""
+        tracks = self._tracks
+        try:
+            return tracks.reference_trace(track_id) if tracks is not None else None
+        except (AttributeError, ValueError):
+            return None
+
+    def set_track_pick(self, info):
+        """The event's picked layout, or None; the worker applies it between packets."""
+        self._picks.put(info)
+
     def _apply_data(self):
         pending, self._pending_data = self._pending_data, None
         if pending is not None:
             self._cars, self._tracks = pending
             self._replay.eng.track_db = self._tracks
+        changed = False
+        while True:
+            try:
+                self._pick = self._picks.get_nowait()
+            except queue.Empty:
+                break
+            changed = True
+        if changed:
+            self._replay.eng.set_track_pick(self._live_pick())
 
     def reset(self, metadata, timeout=5):
         """Bound admission and acknowledgement; expired commands cannot publish later."""
@@ -788,7 +820,10 @@ class Store:
             replay.times._waiting = [
                 p for p in replay.times._waiting if p[0] is not lap
             ]
-            found = gt7_recording.session_tracks([lap], self._tracks).get(
+            found = gt7_recording.session_tracks(
+                [lap], self._tracks,
+                pick=self._live_pick()["id"] if self._live_pick() else None,
+            ).get(
                 lap["session"]
             )
             row = gt7_laps._indexed_lap(

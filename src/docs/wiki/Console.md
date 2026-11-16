@@ -67,7 +67,9 @@ desk is safe over the public Funnel.
 ![Race Control desk: program preview, redacted streamer/stint schedule with an on-air marker, race timer and crew chat](images/console-race-control.png)
 
 The schedule marks the stint on air with **ON AIR** and the stint already loaded on the
-other feed with **NEXT**, each with its feed letter.
+other feed with **NEXT**, each with its feed letter. The **Track layout** card shows the
+event's GT7 layout and lets Race Control change it, for example when the card reports that
+the first complete lap matched another layout (see [Telemetry](Telemetry)).
 
 ### On a phone
 
@@ -78,7 +80,7 @@ the top while you scroll. A tab bar at the bottom shows one part of the page at 
 | Page | Tabs |
 |---|---|
 | Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (stint plan, stream-link submission) |
-| Race Control | **Act** (note to commentator, flag graphic), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
+| Race Control | **Act** (note to commentator, flag graphic, track layout), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
 
 The page remembers the last tab. On a wider screen both pages keep their multi-column
 layout.
