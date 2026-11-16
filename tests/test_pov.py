@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the POV additions. Run: python3 tests/test_pov.py"""
-import importlib.util, json, os, tempfile, time
+import contextlib, importlib.util, json, os, tempfile, time
 import threading, urllib.request, urllib.error
 
 # Manual-arm is ON by default (#492). These tests exercise the legacy auto-pull
@@ -3188,6 +3188,17 @@ def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
         == [("mute", "Feed A"), ("mute", MIC)]
 
 
+@contextlib.contextmanager
+def _pinned_tailscale():
+    """Pin the one health fact the relay reads from the machine, so two calls agree."""
+    orig = m.detect_tailscale_ip
+    m.detect_tailscale_ip = lambda: "100.64.0.9"
+    try:
+        yield
+    finally:
+        m.detect_tailscale_ip = orig
+
+
 class _BacklogSrv:
     """FeedFanoutServer stand-in for #583: a fixed interval floor and live backlog."""
     def __init__(self, floor, live=None):
@@ -3415,20 +3426,21 @@ def t_av_disturbance_reaches_health_but_never_the_discord_notify_level():
     # Same contract as the #535 inbound stall and the #583 backlog: a display-only
     # yellow. An @here for something OBS already repaired would train the crew to
     # ignore the pings that matter.
-    import av_sync as _av
-    r = _make_min_relay()
-    r.obs_reachable = True
-    ev = _av.parse_obs_log_line("22:52:21.790: Source Feed A audio is lagging "
-                                "(over by 5415.66 ms) at max audio buffering. "
-                                "Restarting source audio.")
-    _av.record(r._av, ev, now=time.monotonic(), serving_age_s=None)   # no restart to explain it
-    facts = r._health_facts(2000.0)
-    assert facts["feeds_av_disturbed"] == {"A": 5415.66}
-    h = r._refresh_health(2000.0)
-    assert any("audio timing broke by 5416 ms" in x for x in h["reasons"]), h["reasons"]
-    assert h["level"] == "yellow"
-    assert h["notify_level"] == m.aggregate_health({**facts,
-                                                    "feeds_av_disturbed": {}})["level"]
+    with _pinned_tailscale():
+        import av_sync as _av
+        r = _make_min_relay()
+        r.obs_reachable = True
+        ev = _av.parse_obs_log_line("22:52:21.790: Source Feed A audio is lagging "
+                                    "(over by 5415.66 ms) at max audio buffering. "
+                                    "Restarting source audio.")
+        _av.record(r._av, ev, now=time.monotonic(), serving_age_s=None)   # no restart to explain it
+        facts = r._health_facts(2000.0)
+        assert facts["feeds_av_disturbed"] == {"A": 5415.66}
+        h = r._refresh_health(2000.0)
+        assert any("audio timing broke by 5416 ms" in x for x in h["reasons"]), h["reasons"]
+        assert h["level"] == "yellow"
+        assert h["notify_level"] == m.aggregate_health({**facts,
+                                                        "feeds_av_disturbed": {}})["level"]
 
 
 def t_av_status_block_is_absent_until_a_disturbance_happens():
@@ -3468,18 +3480,19 @@ def t_backlog_on_a_local_stint_names_the_reset():
 
 def t_backlog_yellow_shows_but_never_pages():
     # Uncalibrated until stage 4 of #581: display-only, like the #535 inbound stall.
-    r = _backlog_relay(11.6)
-    r.obs_reachable = True
-    r._sample_consumer_backlogs()
-    h = r._refresh_health(2000.0)
-    assert ("Feed A output 12 s behind live. OBS reads slower than real time; RESET A → "
-            "LIVE drops it with a short black dropout") in h["reasons"]
-    facts = r._health_facts(2000.0)
-    assert facts["feeds_backlogged"] == {"A": 11.6}
-    assert h["notify_level"] == m.aggregate_health({**facts, "feeds_backlogged": {}})["level"], \
-        "the notify level is computed as if the backlog were absent"
-    r._backlogged_feeds = {}
-    assert r._refresh_health(2001.0)["notify_level"] == h["notify_level"]
+    with _pinned_tailscale():
+        r = _backlog_relay(11.6)
+        r.obs_reachable = True
+        r._sample_consumer_backlogs()
+        h = r._refresh_health(2000.0)
+        assert ("Feed A output 12 s behind live. OBS reads slower than real time; RESET A → "
+                "LIVE drops it with a short black dropout") in h["reasons"]
+        facts = r._health_facts(2000.0)
+        assert facts["feeds_backlogged"] == {"A": 11.6}
+        assert h["notify_level"] == m.aggregate_health({**facts, "feeds_backlogged": {}})["level"], \
+            "the notify level is computed as if the backlog were absent"
+        r._backlogged_feeds = {}
+        assert r._refresh_health(2001.0)["notify_level"] == h["notify_level"]
 
 
 def t_backlog_in_status_and_health_snapshot():
