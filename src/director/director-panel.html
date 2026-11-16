@@ -2219,16 +2219,19 @@ function renderTeleRec(rec, down){
 }
 
 /* The event's GT7 track layout (#1129) */
-let trackLayoutsLoaded = false;
+let trackLayoutsLoaded = false, trackLayoutsLoading = false;
 async function loadTrackLayouts(){
+  if (trackLayoutsLoading) return;
+  trackLayoutsLoading = true;
   try{
-    const d = await (await fetch("/event/track", {cache:"no-store"})).json();
+    const d = await (await fetch("/event/track?layouts=1", {cache:"no-store"})).json();
     if (d.error || !Array.isArray(d.layouts)) return;
     const sel = $("#trackPick");
     for (const t of d.layouts) sel.appendChild(new Option(trackLabel(t) + (t.line ? "" : " · no line"), t.id));
     trackLayoutsLoaded = true;
     renderTrackPick(d);
   }catch(e){ /* relay unreachable: the next poll retries */ }
+  finally{ trackLayoutsLoading = false; }
 }
 function renderTrackPick(tp){
   if (!tp) return;

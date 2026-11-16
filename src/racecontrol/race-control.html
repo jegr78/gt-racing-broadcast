@@ -337,18 +337,21 @@ function renderSchedule(d) {
 }
 
 // The event's GT7 track layout (#1129): Race Control and the director can change it.
-let trackLayoutsLoaded = false;
+let trackLayoutsLoaded = false, trackLayoutsLoading = false;
 function trackLabel(t) {
   return [t.track, t.layout].filter(Boolean).join(' ') + (t.reverse ? ' (reverse)' : '');
 }
 async function loadTrackLayouts() {
+  if (trackLayoutsLoading) return;
+  trackLayoutsLoading = true;
   try {
-    const d = await j('/race-control/track');
+    const d = await j('/race-control/track?layouts=1');
     const sel = $('trackPick');
     (d.layouts || []).forEach(t => sel.appendChild(new Option(trackLabel(t) + (t.line ? '' : ' · no line'), t.id)));
     trackLayoutsLoaded = true;
     renderTrackPick(d);
   } catch (e) { /* the next poll retries */ }
+  finally { trackLayoutsLoading = false; }
 }
 function renderTrackPick(tp) {
   const card = $('trackCard');

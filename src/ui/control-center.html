@@ -1268,7 +1268,7 @@ function renderEventTrack(d) {
     for (const t of d.layouts)
       sel.appendChild(new Option(trackLabel(t) + (t.line ? '' : ' · no line'), t.id));
   }
-  sel.value = d.pick ? d.pick.id : '';
+  if (document.activeElement !== sel) sel.value = d.pick ? d.pick.id : '';
   const notes = [];
   if (d.pick && d.pick.warning) notes.push(d.pick.warning);
   if (d.mismatch && d.recognised)
@@ -1278,7 +1278,8 @@ function renderEventTrack(d) {
 }
 async function fetchEventTrack() {
   let d;
-  try { d = await (await fetch('/api/event-track', {cache: 'no-store'})).json(); }
+  const url = '/api/event-track' + (evtTrackLoaded ? '' : '?layouts=1');
+  try { d = await (await fetch(url, {cache: 'no-store'})).json(); }
   catch (e) { return; }                    // server gone, keep last state
   if (d && d.ok) { evtTrackLoaded = true; $('evt-track-err').hidden = true; renderEventTrack(d); }
   else if (d) { $('evt-track-err').textContent = d.error || 'could not read the track layouts'; $('evt-track-err').hidden = false; }
@@ -1546,7 +1547,7 @@ async function refresh() {
   if (currentView === 'home' && relayUp && s.relay.http_ok) fetchRelayLive();
   if (currentView === 'home') fetchEventTitle();
   // The layout list is a local file read while the relay is down: load it once then.
-  if (currentView === 'home' && (relayUp || !evtTrackLoaded)) fetchEventTrack();
+  if (currentView === 'home' && ((relayUp && s.relay.http_ok) || !evtTrackLoaded)) fetchEventTrack();
   if (currentView === 'profile') fetchAssetFiles();
 }
 

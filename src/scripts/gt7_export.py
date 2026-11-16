@@ -15,6 +15,7 @@ import gt7_channels
 import gt7_context
 import gt7_recording as gr
 import gt7_telemetry
+import gt7_track_pick
 
 LEGACY_SAMPLE_COLUMNS = (
     "t_s", "session", "lap", "lap_t_s", "lap_dist_m", "on_track", "paused", "speed_kmh",
@@ -84,7 +85,8 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
     eng.on_lap = laps.append
     times = gr.LapTimeMatcher()
     _h, all_laps, _d = gr.replay_laps(path) if tracks is not None else (None, [], 0)
-    by_session = gr.session_tracks(all_laps, tracks, key)
+    by_session = gr.session_tracks(all_laps, tracks, key,
+                                   pick=gt7_track_pick.recording_pick(path))
     os.makedirs(out_dir, exist_ok=True)
     delimiter = ";" if excel else ","
     encoding = "utf-8-sig" if excel else "utf-8"

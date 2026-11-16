@@ -1358,8 +1358,12 @@ def t_telemetry_delete_removes_the_lap_index():
         m.telemetry_laps_data(rec=_stem(path))
         cache = os.path.join(rec_dir, _stem(path) + ".laps.json")
         assert os.path.exists(cache) and path in m._TELEMETRY_MEMO
+        sidecar = os.path.join(rec_dir, _stem(path) + ".track.json")
+        with open(sidecar, "w", encoding="utf-8") as fh:
+            fh.write('{"id": "ring01"}')
         m.telemetry_delete_cmd([_stem(path)])
         assert not os.path.exists(cache) and not os.path.exists(path)
+        assert not os.path.exists(sidecar), "the recording's picked-layout file must go with it"
         assert path not in m._TELEMETRY_MEMO
 
 
@@ -5222,15 +5226,30 @@ def t_event_track_goes_through_a_running_relay():
     def post(url, payload):
         sent.update(url=url, payload=payload)
         return {"ok": True, "pick": {"id": payload["id"]}}
-    d = m.event_track_write_data("aaa001", alive=lambda: True, post=post, tracks=_PickTracks())
+    d = m.event_track_write_data("aaa001", alive=lambda: True, post=post, tracks=_PickTracks(),
+                                 foreign=lambda: "")
     assert d == {"ok": True, "pick": {"id": "aaa001"}, "applied": "relay"}, d
     assert sent["url"].endswith("/event/track") and sent["payload"] == {"id": "aaa001"}, sent
-    r = m.event_track_read_data(alive=lambda: True, fetch=lambda u: {
+    r = m.event_track_read_data(alive=lambda: True, foreign=lambda: "", fetch=lambda u: {
         "pick": {"id": "aaa001"}, "recognised": {"id": "b"}, "mismatch": True, "layouts": []})
     assert r["source"] == "relay" and r["mismatch"] is True and r["recognised"] == {"id": "b"}, r
-    refused = m.event_track_write_data("aaa001", alive=lambda: True,
+    refused = m.event_track_write_data("aaa001", alive=lambda: True, foreign=lambda: "",
                                        post=lambda u, b: {"error": "nope"}, tracks=_PickTracks())
     assert not refused["ok"] and "nope" in refused["error"], refused
+
+
+
+def t_event_track_never_changes_a_relay_of_another_profile():
+    def post(url, payload):
+        raise AssertionError("a relay of another profile must not get this profile's layout")
+    with tempfile.TemporaryDirectory() as dd:
+        p = os.path.join(dd, "event-track.json")
+        d = m.event_track_write_data("aaa001", alive=lambda: True, foreign=lambda: "other",
+                                     post=post, path=p, tracks=_PickTracks())
+        assert d["ok"] and d["applied"] == "file", d
+        r = m.event_track_read_data(alive=lambda: True, foreign=lambda: "other", path=p,
+                                    fetch=post, tracks=_PickTracks(), layouts=False)
+        assert r["source"] == "file" and r["pick"]["id"] == "aaa001" and r["layouts"] == [], r
 
 
 # Event-title providers for the Control Center Home. (#207)

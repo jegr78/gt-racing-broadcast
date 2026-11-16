@@ -258,8 +258,9 @@ The illustration uses authored synthetic reference values; no external curve is 
   Control desk. Every profile kind has it. The live telemetry then names the track from
   the first packet, so the Engineer desk draws the map and the corner names before the
   first lap completes, and layouts that differ by one chicane are not mixed up. The
-  recording the relay writes is assigned to the picked layout, so it needs no Set track
-  afterwards. Recognition still runs as a cross-check: when the first complete lap of a
+  recording the relay writes keeps the picked layout, so it needs no Set track
+  afterwards; only a session whose laps clearly match another layout keeps that layout.
+  A replayed recording runs without the pick. Recognition still runs as a cross-check: when the first complete lap of a
   GT7 session matches another layout, the Director Panel's health shows a yellow line, the
   desks name the layout the lap matched, and the director or Race Control can change the
   layout. Picking a layout without a downloaded racing line warns: that event has no map

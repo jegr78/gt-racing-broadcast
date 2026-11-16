@@ -268,25 +268,6 @@ def t_project_runs_along_the_line_and_reverses():
         assert db.project([(0, 0)], "nope") is None and db.line_length("nope") is None
 
 
-def t_assign_sets_and_clears_a_recording_assignment_without_a_line():
-    with tempfile.TemporaryDirectory() as d:
-        db = _db(d, [_row("aaa001", "Oval", OVAL)])
-        db.assign("p/20261116-1000", "bbb001")          # Ring has no line at all
-        assert db.assignment("p/20261116-1000") == "bbb001"
-        again = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "signatures.json"),
-                           os.path.join(d, "learned-tracks.json"))
-        assert again.assignment("p/20261116-1000") == "bbb001", "the assignment must survive a reload"
-        assert again.recognisable() and "bbb001" not in again._rows, "assign must not learn a line"
-        db.assign("p/20261116-1000", None)
-        assert db.assignment("p/20261116-1000") is None
-        try:
-            db.assign("p/x", "nope00")
-        except ValueError as exc:
-            assert "unknown" in str(exc), exc
-        else:
-            raise AssertionError("an unknown layout must not be assigned")
-
-
 def t_learn_adds_row_and_assignment_that_survive_reload():
     with tempfile.TemporaryDirectory() as d:
         db = _db(d, [])

@@ -13206,7 +13206,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         def _track_pick_get(self):
             if track_pick is None:
                 return self._send({"error": "track layout pick unavailable"}, 404)
-            return self._send(track_pick.status(with_layouts=True))
+            layouts = parse_qs(urlparse(self.path).query).get("layouts") == ["1"]
+            return self._send(track_pick.status(with_layouts=layouts))
 
         def _track_pick_post(self, body):
             if track_pick is None:
@@ -15496,26 +15497,24 @@ def main():
         relay.telemetry_store = telemetry_store   # the health check reads its packet counters
 
     # The event's GT7 layout (#1129): an event setting for every profile kind.
-    _profile_name = os.environ.get("RACECAST_PROFILE_NAME", "")
     _pick_tracks = (telemetry_store._eng.track_db if telemetry_store is not None
                     else gt7_tracks.TrackDB.load(
                         gt7_runtime_base(args.runtime_base, runtime, bool(args.runtime_dir)),
                         os.path.join(assets_dir, "gt7")))
 
-    def _open_recording_key():
+    def _open_recording_path():
         rec = telemetry_store.recorder if telemetry_store is not None else None
         name = rec.status().get("file") if rec is not None else None
-        return gt7_track_pick.recording_key(_profile_name, name)
+        return os.path.join(rec_dir, name) if name else None
 
     track_pick = gt7_track_pick.Controller(
         gt7_track_pick.Store(gt7_track_pick.path_in(runtime), _pick_tracks),
-        telemetry_store, recording=_open_recording_key, log=LOG)
+        telemetry_store, recording=_open_recording_path, log=LOG)
     relay.track_pick = track_pick
     if telemetry_store is not None:
         telemetry_store.data_listeners.append(
             lambda _cars, tracks: setattr(track_pick.store, "tracks", tracks))
-        _recorder_open.append(lambda path, _dir, _rid: track_pick.assign(
-            gt7_track_pick.recording_key(_profile_name, path)))
+        _recorder_open.append(lambda path, _dir, _rid: track_pick.assign(path))
     _pick = track_pick.store.current()
     if _pick is not None:
         LOG.info("GT7 track layout picked for this event: %s", gt7_track_pick.label(_pick))

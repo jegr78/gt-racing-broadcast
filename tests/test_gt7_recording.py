@@ -790,6 +790,41 @@ class _KeyedTracks(_Tracks):
         return self.assignments.get(key)
 
 
+class _PickTracks(_Tracks):
+    def __init__(self, found):
+        super().__init__()
+        self.found = found
+
+    def match(self, points, length_m):
+        return self.found
+
+
+def t_session_tracks_use_the_pick_unless_a_lap_clearly_names_another_layout():
+    with tempfile.TemporaryDirectory() as d:
+        src = _xy_session(d)
+        _h, laps, _dropped = rec.replay_laps(src)
+        same = {"id": "pik001", "track": "T", "layout": "L", "reverse": False, "score_m": 1.0}
+        close = dict(same, id="oth001", alternatives=["pik001"])
+        other = dict(same, id="oth001")
+        for found, want in ((None, "pik001"), ({"candidates": ["a", "b"]}, "pik001"),
+                            (same, "pik001"), (close, "pik001"), (other, "oth001")):
+            got = rec.session_tracks(laps, _PickTracks(found), pick="pik001")[1]["id"]
+            assert got == want, f"match {found and found.get('id')}: {got}, expected {want}"
+        got = rec.session_tracks(laps, _PickTracks(other), key="p/s", pick="pik001")
+        assert got[1]["id"] == "oth001"
+        assigned = _PickTracks(None)
+        assigned.assigned = "set001"
+        assert rec.session_tracks(laps, assigned, key="p/s", pick="pik001")[1]["id"] == "set001", \
+            "a Set track wins over the pick"
+        tp_path = os.path.splitext(src)[0] + ".track.json"
+        with open(tp_path, "w", encoding="utf-8") as fh:
+            json.dump({"id": "pik001"}, fh)
+        gx.export_csv(src, os.path.join(d, "out2"), tracks=_PickTracks(None))
+        lap1 = [r for r in _rows(os.path.join(d, "out2", "laps.csv")) if r["lap"] == "1"][0]
+        assert (lap1["track"], lap1["layout"]) == ("Assigned", "X"), \
+            f"the export must name the recording's picked layout: {lap1['track']}"
+
+
 def t_session_tracks_prefer_a_session_assignment():
     with tempfile.TemporaryDirectory() as d:
         _h, laps, _dropped = rec.replay_laps(_xy_session(d))

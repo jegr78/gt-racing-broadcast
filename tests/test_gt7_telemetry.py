@@ -1337,6 +1337,29 @@ def t_store_keeps_the_pick_through_reset_and_reload():
     status = st.track_status()
     assert status == {"track": dict(_PICK, picked=True), "recognised": None,
                       "mismatch": False}, status
+    st.reset_analysis({"active": True})
+    assert st.track() is None, "a replayed recording must not show the event's pick"
+    other = dict(_PICK, id="aaaaaa")
+    st.set_track_pick(other)
+    assert st.track() is None, "a pick changed during a replay waits for the replay to end"
+    st.reset_analysis({"active": False})
+    assert st.track() == dict(other, picked=True), "the live analysis must get the pick back"
+
+
+def t_engine_keeps_what_recognition_named_when_the_pick_changes():
+    found = {"id": "2066d9", "track": "N", "layout": "GP", "reverse": False, "score_m": 2.0}
+    eng = tm.TelemetryEngine()
+    eng.track_db = _FakeTracks(found)
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == found
+    other = dict(_PICK, id="bbbbbb")
+    eng.set_track_pick(other)
+    assert eng.track_check == found and eng.track_mismatch() is True, \
+        "a pick made after recognition must be checked against it at once"
+    eng.set_track_pick(None)
+    assert eng.track == found, "clearing the pick must keep the recognised track and its map"
 
 
 def t_engine_logs_an_unmatched_lap_once_per_session():

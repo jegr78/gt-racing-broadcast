@@ -51,6 +51,8 @@ def t_tailnet_route_lists_sets_and_clears_the_pick():
     srv, port, ctl, tele, tmp = _serve()
     try:
         code, body = g._get(port, "/event/track")
+        assert code == 200 and "layouts" not in json.loads(body), "the poll answer stays small"
+        code, body = g._get(port, "/event/track?layouts=1")
         data = json.loads(body)
         assert code == 200 and data["pick"] is None, (code, body)
         assert [r["id"] for r in data["layouts"]] == ["aaa001", "bbb001"], data["layouts"]
@@ -77,7 +79,7 @@ def t_console_routes_are_role_gated():
         # dave is race_control only, bob is director, alice is a commentator.
         code, body = g._post(port, "/console/race-control/track", g._tok("dave"), body={"id": "aaa001"})
         assert code == 200 and json.loads(body)["pick"]["id"] == "aaa001", (code, body)
-        code, body = g._get(port, "/console/race-control/track", g._tok("dave"))
+        code, body = g._get(port, "/console/race-control/track?layouts=1", g._tok("dave"))
         assert code == 200 and len(json.loads(body)["layouts"]) == 2, (code, body)
         code, body = g._get(port, "/console/race-control/data", g._tok("dave"))
         assert json.loads(body)["track_pick"]["pick"]["id"] == "aaa001", body
@@ -108,11 +110,15 @@ def t_mismatch_is_a_quiet_health_yellow():
         relay = m.Relay(g._FakeSource(g._URLS8, [("https://youtu.be/a", "Alice", "1", 2)]),
                         [53001, 53002], g.LOGDIR)
         relay.track_pick = ctl
-        assert "Ring Full" in relay._health_facts(0)["track_mismatch"]
-        h = relay._refresh_health(0)
-        assert any("Ring Full" in r for r in relay.health_reasons), relay.health_reasons
-        assert m.aggregate_health({**relay._health_facts(0), "track_mismatch": None})["level"] == h["notify_level"], \
-            "the notify level must ignore the mismatch"
+        detect = m.detect_tailscale_ip
+        m.detect_tailscale_ip = lambda: "100.64.0.1"
+        try:
+            assert "Ring Full" in relay._health_facts(0)["track_mismatch"]
+            h = relay._refresh_health(0)
+        finally:
+            m.detect_tailscale_ip = detect
+        assert h["level"] == "yellow" and any("Ring Full" in r for r in h["reasons"]), h
+        assert h["notify_level"] == "green", f"the mismatch must not page Discord: {h}"
     finally:
         tmp.cleanup()
 

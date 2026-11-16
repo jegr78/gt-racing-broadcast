@@ -72,22 +72,14 @@ class _Telemetry:
         return self.live
 
 
-class _AssigningTracks(_Tracks):
-    def __init__(self):
-        self.assigned = []
-
-    def assign(self, key, oid):
-        self.assigned.append((key, oid))
-
-
-def t_controller_applies_assigns_and_reports_a_mismatch():
+def t_controller_applies_writes_the_sidecar_and_reports_a_mismatch():
     with tempfile.TemporaryDirectory() as d:
-        tracks, tele = _AssigningTracks(), _Telemetry()
-        ctl = tp.Controller(tp.Store(tp.path_in(d), tracks), tele,
-                            recording=lambda: tp.recording_key("lg", "20261116-1000.gt7rec.part"))
+        tele = _Telemetry()
+        rec = os.path.join(d, "20261116-1000.gt7rec")
+        ctl = tp.Controller(tp.Store(tp.path_in(d), _Tracks()), tele, recording=lambda: rec)
         st = ctl.set("aaa001")
         assert tele.picks[-1]["id"] == "aaa001", tele.picks
-        assert tracks.assigned == [("lg/20261116-1000", "aaa001")], tracks.assigned
+        assert tp.recording_pick(rec + ".part") == "aaa001", "the open recording must carry the pick"
         assert st["pick"]["id"] == "aaa001" and st["mismatch"] is False and ctl.mismatch_text() is None
         tele.live = {"track": None, "mismatch": True,
                      "recognised": {"id": "bbb001", "track": "Ring", "layout": "Full", "reverse": False}}
@@ -95,14 +87,15 @@ def t_controller_applies_assigns_and_reports_a_mismatch():
         assert text and "Ring Full" in text and "picked Oval Full" in text, text
         ctl.set(None)
         assert tele.picks[-1] is None, tele.picks
-        assert tracks.assigned[-1] == ("lg/20261116-1000", None), "clearing must drop the open recording's assignment"
-        assert "layouts" in ctl.status(with_layouts=True)
+        assert tp.recording_pick(rec) is None and not os.path.exists(tp.sidecar_path(rec)), \
+            "clearing must remove the open recording's pick"
+        assert "layouts" in ctl.status(with_layouts=True) and "layouts" not in ctl.status()
 
 
-def t_recording_key_strips_suffixes_and_needs_a_profile():
-    assert tp.recording_key("lg", "20261116-1000.gt7rec") == "lg/20261116-1000"
-    assert tp.recording_key("", "x.gt7rec") is None and tp.recording_key("lg", None) is None
-
+def t_sidecar_sits_beside_the_recording():
+    assert tp.sidecar_path("/r/20261116-1000.gt7rec.part") == "/r/20261116-1000.track.json"
+    assert tp.sidecar_path("/r/20261116-1000.gt7rec") == "/r/20261116-1000.track.json"
+    assert tp.recording_pick(None) is None
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

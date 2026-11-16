@@ -600,7 +600,8 @@ def make_handler(ctx):
                                       code=500)
             if path == "/api/event-track":
                 try:
-                    return self._json(ctx["event_track_read"]())
+                    layouts = parse_qs(urlparse(self.path).query).get("layouts") == ["1"]
+                    return self._json(ctx["event_track_read"](layouts=layouts))
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"track layout read failed: {exc}"},

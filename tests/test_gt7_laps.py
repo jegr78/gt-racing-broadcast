@@ -588,6 +588,16 @@ def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
             assert got == _cold_copy(part, d, version), spoil
 
 
+def t_index_names_the_layout_picked_while_recording():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        with open(os.path.splitext(path)[0] + ".track.json", "w", encoding="utf-8") as fh:
+            fh.write('{"id": "ring02"}')
+        idx = _index(path, FakeTracks(known=False))
+        ids = {lap["track_id"] for lap in idx["laps"]}
+        assert ids == {"ring02"}, f"an unrecognised recording must take the picked layout: {ids}"
+
+
 def t_resume_state_covers_every_engine_attribute():
     hud_only = {"_trace", "_trace_last_t", "_tyre_hist", "_delta_hist", "track",
                 "track_check", "_track_miss_logged", "_official"}

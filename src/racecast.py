@@ -3970,7 +3970,8 @@ def _telemetry_delete_path_locked(rec_dir, path, analysis_identity):
         gt7_context.delete_recording(path)
     except (OSError, ValueError) as exc:
         notes.append('could not remove recording context: ' + _telemetry_reason(exc))
-    for f in [gt7_laps.cache_path(path)] + leftovers:
+    import gt7_track_pick
+    for f in [gt7_laps.cache_path(path), gt7_track_pick.sidecar_path(path)] + leftovers:
         try:
             os.remove(f)
         except FileNotFoundError:
@@ -5637,16 +5638,23 @@ def _event_track_db():
     return gt7_tracks.TrackDB.load(_runtime_base_dir(), resource_path("assets/gt7"))
 
 
-def event_track_read_data(alive=None, fetch=None, path=None, tracks=None):
-    """The event's GT7 layout (#1129) with the layout list. Relay up -> its live pick
-    plus what recognition named; relay down -> the persisted pick. Never raises."""
+def _relay_runs_active_profile(alive, foreign):
+    """True when a relay answers and runs the active profile, not another one."""
+    return bool((alive or _relay_is_alive)()) and not (foreign or _foreign_relay_profile)()
+
+
+def event_track_read_data(alive=None, fetch=None, path=None, tracks=None, layouts=True,
+                          foreign=None):
+    """The event's GT7 layout (#1129), with the layout list unless `layouts` is False.
+    A relay of this profile -> its live pick plus what recognition named; otherwise the
+    persisted pick. Never raises."""
     import gt7_track_pick
-    alive = alive or _relay_is_alive
-    is_alive = bool(alive())
+    is_alive = _relay_runs_active_profile(alive, foreign)
     if is_alive:
         fetch = fetch or _relay_fetch_json
         try:
-            st = fetch(f"http://127.0.0.1:{RELAY_PORT}/event/track")
+            st = fetch(f"http://127.0.0.1:{RELAY_PORT}/event/track"
+                       + ("?layouts=1" if layouts else ""))
             if isinstance(st, dict) and "pick" in st:
                 return {"ok": True, "source": "relay", "relay_alive": True,
                         "pick": st.get("pick"), "recognised": st.get("recognised"),
@@ -5659,16 +5667,17 @@ def event_track_read_data(alive=None, fetch=None, path=None, tracks=None):
         pick = gt7_track_pick.describe(tracks, gt7_track_pick.read_id(path or _event_track_path()))
         return {"ok": True, "source": "file", "relay_alive": is_alive, "pick": pick,
                 "recognised": None, "mismatch": False,
-                "layouts": gt7_track_pick.layouts(tracks)}
+                "layouts": gt7_track_pick.layouts(tracks) if layouts else []}
     except Exception as exc:  # noqa: BLE001  surface as a clean error
         return {"ok": False, "error": f"could not read the track layouts: {exc}"}
 
 
-def event_track_write_data(value, alive=None, post=None, path=None, tracks=None):
-    """Pick the event's GT7 layout by id, or clear it with ""/None. Relay up -> POST
-    /event/track (live telemetry and the open recording follow at once); relay down ->
-    the file the next relay start reads. Returns {"ok", "pick", "applied"} or
-    {"ok": False, "error"}; never raises."""
+def event_track_write_data(value, alive=None, post=None, path=None, tracks=None,
+                           foreign=None):
+    """Pick the event's GT7 layout by id, or clear it with ""/None. A relay of this
+    profile -> POST /event/track (live telemetry and the open recording follow at once);
+    otherwise the file the profile's next relay start reads. Returns {"ok", "pick",
+    "applied"} or {"ok": False, "error"}; never raises."""
     import gt7_track_pick
     official_id = (value or "").strip() if isinstance(value, str) else None
     if value is not None and not isinstance(value, str):
@@ -5679,8 +5688,7 @@ def event_track_write_data(value, alive=None, post=None, path=None, tracks=None)
         if official_id is not None and gt7_track_pick.describe(tracks, official_id) is None:
             return {"ok": False, "error": f"unknown track layout {official_id!r}: "
                                           "see `racecast event track --list`"}
-        alive = alive or _relay_is_alive
-        if alive():
+        if _relay_runs_active_profile(alive, foreign):
             post = post or _relay_post_json
             try:
                 res = post(f"http://127.0.0.1:{RELAY_PORT}/event/track", {"id": official_id})
@@ -5735,7 +5743,7 @@ def event_track_cmd(rest):
             sys.exit(d["error"])
         print(_track_pick_line(d["pick"]))
         if d["applied"] == "file":
-            print("The relay is not running: the next relay start uses this layout.")
+            print("No relay runs this profile: its next relay start uses this layout.")
         return
     d = event_track_read_data()
     if not d["ok"]:

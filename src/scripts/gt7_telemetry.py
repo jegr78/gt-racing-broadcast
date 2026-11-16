@@ -492,12 +492,16 @@ class TelemetryEngine:
 
     def set_track_pick(self, info):
         """Name the track from the first packet as `info` ({id, track, layout, reverse});
-        None returns to recognition. Recognition still runs as a cross-check."""
+        None returns to recognition. Recognition still runs as a cross-check, and what it
+        already named this session is kept."""
+        if self.track_pick is None:
+            recognised = self.track if self.track and "id" in self.track else None
+        else:
+            recognised = self.track_check
         self.track_pick = None if info is None else {
             k: info[k] for k in ("id", "track", "layout", "reverse")}
-        self.track = self._picked_track()
-        self.track_check = None
-        self._track_miss_logged = False
+        self.track_check = recognised
+        self.track = self._picked_track() or (dict(recognised) if recognised else None)
 
     def _picked_track(self):
         return None if self.track_pick is None else dict(self.track_pick, picked=True)
@@ -983,6 +987,8 @@ class TelemetryStore:
                  view_path=None, cars=None, recorder=None, tracks=None, engineer=None,
                  clock=time.monotonic, packets=None):
         self._eng = TelemetryEngine()
+        self._track_pick = None        # the event's picked layout, kept across analysis resets
+        self._replaying = False
         self._clock = clock
         self._packets = packets        # gt7_packet_stats.PacketStats for live UDP, or None
         self._packets_lock = threading.Lock()
@@ -1016,10 +1022,11 @@ class TelemetryStore:
 
     def reset_analysis(self, metadata):
         with self._lock:
-            tracks, pick = self._eng.track_db, self._eng.track_pick
+            tracks = self._eng.track_db
             self._eng = TelemetryEngine()
             self._eng.track_db = tracks
-            self._eng.set_track_pick(pick)
+            self._replaying = bool((metadata or {}).get("active"))
+            self._eng.set_track_pick(None if self._replaying else self._track_pick)
             self._dirty_ref = None
             self._remove_file()
         if self.engineer is not None:
@@ -1116,9 +1123,12 @@ class TelemetryStore:
             return dict(self._eng.track) if self._eng.track else None
 
     def set_track_pick(self, info):
-        """The producer's layout for the event (see TelemetryEngine.set_track_pick)."""
+        """The producer's layout for the event (see TelemetryEngine.set_track_pick); a
+        replayed recording runs without it until the replay ends."""
         with self._lock:
-            self._eng.set_track_pick(info)
+            self._track_pick = info
+            if not self._replaying:
+                self._eng.set_track_pick(info)
         if self.engineer is not None and hasattr(self.engineer, "set_track_pick"):
             self.engineer.set_track_pick(info)
 
