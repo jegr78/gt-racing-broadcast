@@ -258,6 +258,19 @@ def t_cli_refuses_listen_with_forward_and_bad_names():
 
 
 
+def t_the_default_bind_is_one_interface_never_all():
+    assert snd.default_bind(listen=5000) == "127.0.0.1", "listen mode receives from this device only"
+    assert snd.default_bind(console="127.0.0.1") == "127.0.0.1", "the interface that reaches the console"
+    found = snd.default_bind()
+    assert found is None or (found != "0.0.0.0" and socket.inet_aton(found)), found
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None)
+    sender = snd.Sender(up, console="127.0.0.1", receive_port=0, say=lambda line: None)
+    try:
+        assert sender.sock.getsockname()[0] == "127.0.0.1", sender.sock.getsockname()
+    finally:
+        sender.sock.close()
+
+
 def t_cli_help_is_ascii():
     out = io.StringIO()
     old = sys.stdout
