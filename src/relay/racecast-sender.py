@@ -116,7 +116,7 @@ class Uploader:
                                      method="POST", headers={
             "Content-Type": "application/octet-stream", "User-Agent": USER_AGENT,
             "X-Probe-Key": self.key, "X-Sender-Stats": json.dumps(stats)})
-        started = self._clock()
+        started = time.perf_counter()        # monotonic ticks in ~15 ms steps on Windows
         try:
             with self._open(req, timeout=5) as resp:
                 reply = json.loads(resp.read().decode("utf-8") or "{}")
@@ -132,7 +132,7 @@ class Uploader:
             return self._failed(f"the relay answered {exc.code}")
         except (OSError, ValueError) as exc:
             return self._failed(f"cannot reach the relay ({exc})")
-        self.latencies.append(self._clock() - started)
+        self.latencies.append(time.perf_counter() - started)
         self._settle(delivered=True)
         self._remove_through(last)
         self._failures = 0
