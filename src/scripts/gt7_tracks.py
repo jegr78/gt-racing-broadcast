@@ -270,6 +270,22 @@ class TrackDB:
         with _LEARN_LOCK:
             return self._learn(official_id, points, length_m, key)
 
+    def assign(self, key, official_id):
+        """Assign recording `key` to a known layout, or drop its assignment with None.
+        Learns no line; a write failure (OSError) propagates like learn()."""
+        if official_id is not None and self.name(official_id) is None:
+            raise ValueError("unknown track layout")
+        with _LEARN_LOCK:
+            if not self._learned_path:
+                raise ValueError("no learned-tracks file configured")
+            doc = self._read_learned()
+            if official_id is None:
+                if doc["assignments"].pop(key, None) is None:
+                    return
+            else:
+                doc["assignments"][key] = official_id
+            self._write_learned(doc)
+
     def _learn(self, official_id, points, length_m, key):
         if not self._learned_path:
             raise ValueError("no learned-tracks file configured")

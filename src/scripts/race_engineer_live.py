@@ -296,7 +296,8 @@ def _prefix_digest(path, size, stopped=None):
 
 
 def _bounded_recording(
-    path, source, tracks, cars, targets, limit=None, stopped=None, definitions=None
+    path, source, tracks, cars, targets, limit=None, stopped=None, definitions=None,
+    pick=None,
 ):
     """Streaming local replay with finite retention, including explicitly requested laps."""
     replay = gt7_laps._Replay()
@@ -327,7 +328,9 @@ def _bounded_recording(
                 p for p in replay.times._waiting if p[0] is not raw
             ]
             samples, tyres = replay.lap_samples.pop(0), replay.lap_tyres.pop(0)
-            found = gt7_recording.session_tracks([raw], tracks).get(raw["session"])
+            found = gt7_recording.session_tracks([raw], tracks, pick=pick).get(
+                raw["session"]
+            )
             row = gt7_laps._indexed_lap(
                 source,
                 raw,
@@ -497,6 +500,7 @@ class Store:
         self._enabled_source, self._clock = enabled, clock
         self._tracks, self._cars = tracks, cars
         self._pending_data = None
+        self._pick, self._pending_pick = None, None
         self._runtime_base, self._bundled = runtime_base, bundled
         self._definitions = (
             _SteadyDefinitions(gt7_track_definitions.Store(
@@ -573,6 +577,7 @@ class Store:
     def _new_replay(self):
         replay = gt7_laps._Replay()
         replay.eng.track_db = self._tracks
+        replay.eng.set_track_pick(self._pick)
         return replay
 
     def _empty(self):
@@ -659,11 +664,19 @@ class Store:
         """Called from the GT7 data watcher; the worker swaps the tables between packets."""
         self._pending_data = (cars, tracks)
 
+    def set_track_pick(self, info):
+        """The event's picked layout, or None; the worker applies it between packets."""
+        self._pending_pick = (info,)
+
     def _apply_data(self):
         pending, self._pending_data = self._pending_data, None
         if pending is not None:
             self._cars, self._tracks = pending
             self._replay.eng.track_db = self._tracks
+        pick, self._pending_pick = self._pending_pick, None
+        if pick is not None:
+            self._pick = pick[0]
+            self._replay.eng.set_track_pick(self._pick)
 
     def reset(self, metadata, timeout=5):
         """Bound admission and acknowledgement; expired commands cannot publish later."""
@@ -788,7 +801,9 @@ class Store:
             replay.times._waiting = [
                 p for p in replay.times._waiting if p[0] is not lap
             ]
-            found = gt7_recording.session_tracks([lap], self._tracks).get(
+            found = gt7_recording.session_tracks(
+                [lap], self._tracks, pick=self._pick["id"] if self._pick else None
+            ).get(
                 lap["session"]
             )
             row = gt7_laps._indexed_lap(
@@ -1439,6 +1454,7 @@ class Store:
                     limit=stamp[4],
                     stopped=self._stop.is_set,
                     definitions=self._definitions,
+                    pick=self._pick["id"] if self._pick else None,
                 )
                 size = (
                     sum(

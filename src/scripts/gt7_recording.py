@@ -559,12 +559,13 @@ def session_key(key, session):
     return f"{key}#{session}"
 
 
-def session_tracks(laps, tracks, key=None):
+def session_tracks(laps, tracks, key=None, pick=None):
     """The track of each GT7 session: the session's learned assignment, else the
-    recording's, else the longest lap that matches."""
+    recording's, else the event's picked layout id `pick`, else the longest lap that
+    matches."""
     if tracks is None:
         return {}
-    whole = tracks.assignment(key) if key else None
+    whole = (tracks.assignment(key) if key else None) or pick
     out = {}
     for session in sorted({lap["session"] for lap in laps}):
         assigned = (tracks.assignment(session_key(key, session)) if key else None) or whole
