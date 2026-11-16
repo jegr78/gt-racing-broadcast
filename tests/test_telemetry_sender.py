@@ -164,7 +164,8 @@ def t_listener_sends_no_heartbeat_and_takes_forwarded_packets():
     posted = []
     up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
                       opener=lambda req, timeout: posted.append(req.data) or _Reply(b"{}"))
-    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=lambda line: None)
+    said = []
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append)
     port = sender.sock.getsockname()[1]
     other_app = _udp()
     for i in range(3):
@@ -173,7 +174,8 @@ def t_listener_sends_no_heartbeat_and_takes_forwarded_packets():
     sender.run(threading.Event(), duration=0.8)
     up.post_once()
     other_app.close(); sender.sock.close()
-    assert sender.stats["heartbeats"] == 0, "listener mode must leave the console to the other app"
+    assert sender.stats["heartbeats"] == 0 and not any("heartbeat" in line for line in said), \
+        f"listener mode must leave the console to the other app: {said}"
     assert sender.stats["received"] == 3 and len(tp.decode_batch(posted[0])) == 3, sender.stats
 
 
@@ -397,11 +399,13 @@ def t_simulated_console_keeps_a_receiver_through_a_late_heartbeat_and_lapses_aft
     console.emit(plain)
     assert sent[-1][0] == 296, "a running stream keeps its format"
     clock[0] += sim.ALIVE_S + 1
-    console.emit(plain)
-    assert len(sent) == 2 and not console.receivers, "a lapsed receiver gets nothing and is forgotten"
     console.heartbeat(b"~", ("10.0.0.2", 1))
     console.emit(plain)
     assert sent[-1][0] == 344, "after a lapse the console takes the newly requested format"
+    console.heartbeat(b"A", ("10.0.0.3", 1))
+    clock[0] += sim.ALIVE_S + 1
+    console.emit(plain)
+    assert len(sent) == 3 and not console.receivers, "a lapsed receiver gets nothing and is forgotten"
 
 
 if __name__ == "__main__":

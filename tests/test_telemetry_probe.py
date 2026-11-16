@@ -47,7 +47,7 @@ def t_batch_round_trip_and_limits():
 def t_ingest_counts_loss_decode_failures_and_keeps_samples():
     probe, clock = _probe()
     batch = [_wire(1, lap=2, speed_mps=50.0), _wire(2, lap=2), _wire(5, lap=2), b"\0" * 296]
-    reply = probe.ingest("Driver A", tp.encode_batch(batch), {"received": 4, "unknown": "x"})
+    reply = probe.ingest("Driver A", tp.encode_batch(batch), {"received": 4, "posted": "4", "unknown": 1})
     assert reply == {"ok": True, "rate_hz": 20, "accepted": 3}, reply
     clock.t += 0.05
     probe.ingest("Driver A", tp.encode_batch([_wire(6, lap=3)]), None)
