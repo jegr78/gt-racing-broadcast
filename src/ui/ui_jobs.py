@@ -31,7 +31,8 @@ class Job:
 class JobManager:
     def __init__(self, argv_for, env=None, spawn=None, max_lines=5000, logger=None):
         """argv_for(op_args) -> child argv (see ui_ops.job_argv). env: full
-        child environment or None (inherit). spawn: Popen-compatible test seam.
+        child environment, a callable returning one per spawn (it then sees later
+        settings edits), or None (inherit). spawn: Popen-compatible test seam.
         logger: optional logging.Logger. When set, the action's start marker, each
         output line (prefixed `[op]`) and its exit code are written to the log file;
         the in-memory buffer and SSE are unchanged. None means silent."""
@@ -51,6 +52,9 @@ class JobManager:
             self.stopping = True
             return True
 
+    def _child_env(self):
+        return self.env() if callable(self.env) else self.env
+
     def _spawn(self, argv, input_text=None):
         if input_text is not None:
             # A finite, already typed confirmation, never an interactive stdin
@@ -58,10 +62,10 @@ class JobManager:
             with tempfile.TemporaryFile() as confirmed:
                 confirmed.write(input_text.encode('utf-8'));confirmed.seek(0)
                 return subprocess.Popen(argv, stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT, stdin=confirmed, env=self.env, **_NO_WINDOW)
+                    stderr=subprocess.STDOUT, stdin=confirmed, env=self._child_env(), **_NO_WINDOW)
         return subprocess.Popen(argv, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT,
-                                stdin=subprocess.DEVNULL, env=self.env,
+                                stdin=subprocess.DEVNULL, env=self._child_env(),
                                 **_NO_WINDOW)
 
     def start(self, op, op_args, input_text=None):

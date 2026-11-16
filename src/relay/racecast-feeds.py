@@ -165,6 +165,7 @@ import av_sync   # pure parser/classifier for the A/V sync disturbances OBS logs
 import cookie_jar  # the shared "jar holds a YouTube login" rule, same as preflight (#615)
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
+import gt7_forward     # pass GT7 packets on to other telemetry apps (#1130)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
 import gt7_packet_stats
 from contextlib import nullcontext
@@ -7100,9 +7101,9 @@ def redact_console_status(full, roles):
             out["mic"] = {"state": mic.get("state")}
         out.pop("handover_next", None)                # who submitted what is director business
         telem = full.get("telemetry")
-        if isinstance(telem, dict) and "record" in telem:
-            # recording detail (file name, byte and drop counters): director/producer only.
-            out["telemetry"] = {k: v for k, v in telem.items() if k != "record"}
+        if isinstance(telem, dict) and ("record" in telem or "forward" in telem):
+            # recording detail and forward targets (machine addresses): director/producer only.
+            out["telemetry"] = {k: v for k, v in telem.items() if k not in ("record", "forward")}
         awake = full.get("keep_awake")
         if isinstance(awake, dict):                   # the note can carry a helper's stderr
             out["keep_awake"] = {"held": awake.get("held")}
@@ -13256,6 +13257,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     packets = telemetry_store.packet_stats()
                     if packets is not None:
                         base["telemetry"]["packets"] = packets
+                    forward = getattr(telemetry_store, "forward", None)
+                    if forward:
+                        base["telemetry"]["forward"] = forward.stats()
             if track_pick is not None:
                 base["track_pick"] = track_pick.status()
             return base
@@ -14719,10 +14723,12 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     return store
 
 
-def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0.0", GT7_RECV_PORT)):
+def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0.0", GT7_RECV_PORT),
+                    forward=None):
     """Bind the receive endpoint, heartbeat per gt7_telemetry.HeartbeatPolicy (the extended '~'
-    format, #711), decrypt+parse+feed each packet. Best-effort: any error logs and
-    the loop keeps running; no console -> idle."""
+    format, #711), decrypt+parse+feed each packet and pass it to `forward` (a
+    gt7_forward.Forwarder). Best-effort: any error logs and the loop keeps running;
+    no console -> idle."""
     tlog = logging.getLogger("racecast.relay.telemetry")
     sock = None
     heartbeat = gt7_telemetry.HeartbeatPolicy()
@@ -14756,6 +14762,8 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0
                 store.count_packet("decrypt", now=clock())
                 continue
             heartbeat.on_packet(kind, clock())
+            if forward and dest is not None:      # discovery: forward once the console is known
+                forward.send(data, kind, plain)
             now_wall = time.time()
             store.record(now_wall, kind, plain)
             try:
@@ -15087,6 +15095,9 @@ def main():
     ap.add_argument("--gt7-ps-ip", default=os.environ.get("RACECAST_GT7_PS_IP"),
                     help="PS4/PS5 IP for GT7 UDP telemetry (solo/POV). Empty -> "
                          "subnet-broadcast discovery.")
+    ap.add_argument("--gt7-forward", default=os.environ.get(gt7_forward.ENV_NAME, ""),
+                    help="Pass GT7 packets on to other apps: HOST:PORT[/A], comma "
+                         "separated (/A re-encrypts as format A).")
     ap.add_argument("--gt7-bind", default="0.0.0.0",
                     help="GT7 UDP receive address (default: all interfaces).")
     ap.add_argument("--gt7-port", type=int, default=GT7_RECV_PORT,
@@ -15741,9 +15752,18 @@ def main():
     if telemetry_store is not None:
         for name in gt7_recording.finalize_partials(rec_dir):
             LOG.info("telemetry recording %s finalised (left open by the previous relay)", name)
+        targets, errors = gt7_forward.parse(args.gt7_forward)
+        for error in errors:
+            LOG.warning("GT7 forward target ignored: %s", error)
+        forwarder = gt7_forward.Forwarder(targets[:gt7_forward.MAX_TARGETS],
+                                          warn=logging.getLogger("racecast.relay.telemetry").warning)
+        telemetry_store.forward = forwarder
+        if forwarder:
+            LOG.info("GT7 telemetry forwarded to %s", gt7_forward.format_targets(forwarder.targets))
         threading.Thread(target=_telemetry_loop,
                          args=(telemetry_store, args.gt7_ps_ip, stop_evt),
-                         kwargs={"listen": (args.gt7_bind, args.gt7_port)}, daemon=True).start()
+                         kwargs={"listen": (args.gt7_bind, args.gt7_port), "forward": forwarder},
+                         daemon=True).start()
         LOG.info("GT7 telemetry listener started (bind %s:%s, ps_ip=%s)",
                  args.gt7_bind, args.gt7_port, args.gt7_ps_ip or "<discovery>")
         LOG.info("GT7 telemetry recording %s",

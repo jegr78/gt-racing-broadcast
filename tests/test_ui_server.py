@@ -150,6 +150,9 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "ps_discover": ps_discover or (lambda: {
                 "ok": False, "consoles": [], "note": "", "from_relay": False}),
             "ps_write": ps_write or (lambda ip: {"ok": True, "path": "/x/.env"}),
+            "gt7_forward_write": lambda targets: (
+                {"ok": True, "value": targets} if "!" not in (targets or "")
+                else {"ok": False, "error": "x!: use HOST:PORT"}),
             "init_plan": init_plan or (lambda browser="firefox": {
                 "ok": True, "steps": [], "next_steps": []}),
             "init_step": init_step or (lambda key: {"ok": True, "key": key,
@@ -4324,6 +4327,17 @@ def t_api_ps_save_route():
         code, body = _post_json(port, "/api/ps/save", {"ip": "192.168.1.42"})
         assert code == 200 and json.loads(body)["ok"] is True
         assert saved["ip"] == "192.168.1.42"
+    finally:
+        httpd.shutdown()
+
+
+def t_api_gt7_forward_route_saves_or_names_the_mistake():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _post_json(port, "/api/gt7-forward", {"targets": "127.0.0.1:20777/A"})
+        assert code == 200 and json.loads(body) == {"ok": True, "value": "127.0.0.1:20777/A"}, body
+        code, body = _post_json(port, "/api/gt7-forward", {"targets": "x!"})
+        assert code == 400 and "HOST:PORT" in json.loads(body)["error"], body
     finally:
         httpd.shutdown()
 

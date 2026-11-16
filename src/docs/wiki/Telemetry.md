@@ -37,6 +37,28 @@ Track/sector definitions, external vehicle reference caches and AI provider sett
 are shared across profiles on this machine and labelled accordingly. Setup-specific
 shift targets remain recording/profile context snapshots.
 
+## Other telemetry apps next to the relay
+
+Only one program can receive GT7 telemetry on UDP 33740. While the relay listens,
+SimHub, GT Race Engineer or a dashboard app on the same machine gets nothing. The relay
+passes every packet it receives on to the targets in **General Settings → Devices →
+Forward GT7 to** (`RACECAST_GT7_FORWARD` in the machine `.env`), comma separated, with an
+IPv4 address or a host name:
+
+- `HOST:PORT` sends the packet as the relay received it (format `~`, which carries every
+  field).
+- `HOST:PORT/A` re-encrypts it as format `A`, for apps that read only the base format.
+
+Point the other app at that port, not at the PlayStation, and turn its own heartbeat
+off where it offers that, so only the relay talks to the console. The relay resolves
+names once at start and skips a name it cannot resolve, with a warning in the relay log.
+A target never slows the relay. An error the network reports (no route, a refused
+broadcast) is logged once, and again when the target works. An app that is simply not
+running reports nothing on most systems: the packets go out unanswered. The relay's
+`/status` counts the packets sent to each target. Changes apply at the next relay start.
+
+![Forward GT7 to in General Settings](images/cc-settings-gt7-forward.png)
+
 ## Existing analysis and data contracts
 
 ![Telemetry context editor](images/cc-context.png)

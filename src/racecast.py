@@ -3311,6 +3311,18 @@ def ps_ip_write_data(ip, path=None):
     return env_upsert_data({"RACECAST_GT7_PS_IP": ip}, path=path)
 
 
+def gt7_forward_write_data(text, path=None):
+    """Validate + upsert the GT7 forward targets (#1130) into the machine .env as
+    RACECAST_GT7_FORWARD; an empty text clears them. `path` is a test seam."""
+    import gt7_forward
+    targets, errors = gt7_forward.parse(text if isinstance(text, str) else "")
+    if errors:
+        return {"ok": False, "error": "; ".join(errors)}
+    value = gt7_forward.format_targets(targets)
+    result = env_upsert_data({gt7_forward.ENV_NAME: value}, path=path)
+    return dict(result, value=value) if result.get("ok") else result
+
+
 def _parse_gt7_discover_args(rest):
     """Return (save, print_only, timeout, pick). Raises ValueError on bad input."""
     usage = ("usage: racecast gt7-discover [--save] [--print] "
@@ -7435,7 +7447,34 @@ def env_write_data(entries, path=None):
     if foreign:
         return {"ok": False, "error": (f"machine .env keys must start with "
                                        f"{MACHINE_ENV_PREFIX}: {foreign[0]!r} is not allowed")}
-    return _write_env_file(path or _env_file(), entries)
+    target = path or _env_file()
+    before = _parse_env_path(target)
+    res = _write_env_file(target, entries)
+    if res.get("ok") and os.path.abspath(target) == os.path.abspath(_env_file()):
+        _sync_environ_with_env_file(before, dict(pairs))
+    return res
+
+
+def _parse_env_path(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return parse_env_text(fh.read())
+    except OSError:
+        return {}
+
+
+def _sync_environ_with_env_file(before, after, environ=None):
+    """Carry a machine .env edit into this process's environment. The Control Center
+    loaded the file at start with setdefault, and the services it starts inherit that
+    copy: without this a saved value reached a restarted relay only after the Control
+    Center restarted. A value the real environment set (it differs from the file) wins."""
+    environ = os.environ if environ is None else environ
+    for key, old in before.items():
+        if key not in after and environ.get(key) == old:
+            environ.pop(key, None)
+    for key, new in after.items():
+        if key not in environ or environ[key] == before.get(key):
+            environ[key] = new
 
 
 def env_upsert_data(updates, path=None):
@@ -9648,6 +9687,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "devices_write": devices_write_data,
         "ps_discover": ps_discover_data,
         "ps_write": ps_ip_write_data,
+        "gt7_forward_write": gt7_forward_write_data,
         "profiles": profiles_data,
         "profile_logo": profile_logo,
         "profile_use": profile_use_data,
@@ -9716,7 +9756,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
             lambda op_args: ops_mod.job_argv(op_args, IS_FROZEN,
                                              _rc_job_executable(),
                                              os.path.join(HERE, "racecast.py")),
-            env=_frozen_child_env(), logger=_app_logger),
+            env=_frozen_child_env, logger=_app_logger),
         "log_sources": _log_sources(),
         "resources": resources_data,
     }
