@@ -288,6 +288,20 @@ def t_track_pick_names_the_open_lap_and_yields_to_a_clear_recognition():
                 closed = {r['track_id'] for r in store.snapshot()['laps'] if r['state'] == 'confirmed'}
                 assert closed == closed_ids, f"closed laps: {closed}, expected {closed_ids}"
 
+def t_track_pick_rests_while_a_recording_is_replayed():
+    pick = {"id": "ring02", "track": "Other Ring", "layout": "Full", "reverse": False}
+    with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars()) as store:
+        store.set_track_pick(pick)
+        deadline = time.monotonic() + 5
+        while store._pick is None and time.monotonic() < deadline:
+            time.sleep(.05)
+        assert store._replay.eng.track_pick["id"] == "ring02"
+        store.reset(dict(active=True, label="old", speed=1.0, live_gap=False))
+        assert store._replay.eng.track_pick is None, "a replay must not show the event's layout"
+        store.reset(dict(active=False, label="", speed=1.0, live_gap=True))
+        assert store._replay.eng.track_pick["id"] == "ring02", "live analysis must get the pick back"
+
+
 def t_bounds_eviction_concurrent_readers_and_async_recovery():
     with tempfile.TemporaryDirectory() as d:
         path = write_circle_recording(d, lap_secs=tuple(20.0 - i * .1 for i in range(12)), n=100)

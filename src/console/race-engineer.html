@@ -204,6 +204,8 @@ function render(){const B=state.detail,pair=state.pair?.a?.id===state.a?state.pa
 }
 function revoke(message){state.epoch++;state.refSource='';state.refLaps=[];if(state.a.startsWith('r:'))state.a='';if(state.b.startsWith('r:')){state.b=state.snapshot?.current?.id||'';state.session=state.snapshot?.session_id||'';}clearPlots();say(message||'Shared reference was revoked or removed. Its protected view has been cleared.');}
 async function access(){const data=await request('/race-engineer/access');state.analysisAvailable=!!data.analysis_available;state.refs=data.references||[];$('references').replaceChildren();for(const r of state.refs){const li=document.createElement('li');li.textContent=r.label;$('references').append(li);}if(state.refSource&&!state.refs.some(r=>r.id===state.refSource))revoke();$('protected').hidden=false;pgmSync();return data;}
+// Before a lap of the layout completes, the downloaded racing line draws the map.
+async function referenceOutline(track){if(state.refOutline?.track_id!==track){let line=null;try{const r=await request('/race-engineer/outline',{track});if(r.state==='ready'&&r.trace?.length)line={id:'ref:'+track,track_id:track,trace:r.trace};}catch(e){line=null;}state.refOutline={track_id:track,line};}return state.refOutline.line;}
 async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)return;
  const latest=state.laps.filter(r=>r.session_id===state.session&&r.state==='confirmed'&&r.trace_complete).at(-1);
  const outlineId=a||latest?.id;
@@ -214,6 +216,7 @@ async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)ret
  }
  const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
  if(result.state!=='ready'){state.note=result.state==='pending'?'Preparing selected lap detail':'Selected lap detail unavailable';clearPlots(false);render();$('context').textContent=state.note;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
+ if(!state.outline&&result.lap.track_id){const line=await referenceOutline(result.lap.track_id);if(epoch!==state.epoch||b!==state.b||a!==state.a)return;if(line)state.outline=line;}
  if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
   if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&recognising(pair.b)&&pair.a?.track_id){state.detail=pair.b;state.note='Lap B is not comparable yet: the track is recognised when this lap completes';}else if(!pair.compatible&&state.follow&&state.aKind!=='pinned'){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
   else if(pair.state==='unavailable')state.note='Comparison unavailable';

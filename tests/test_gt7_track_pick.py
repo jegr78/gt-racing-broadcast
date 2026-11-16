@@ -97,6 +97,20 @@ def t_sidecar_sits_beside_the_recording():
     assert tp.sidecar_path("/r/20261116-1000.gt7rec") == "/r/20261116-1000.track.json"
     assert tp.recording_pick(None) is None
 
+def t_a_new_recording_carries_the_pick_through_the_writer_hook():
+    import gt7_recording
+    with tempfile.TemporaryDirectory() as d:
+        ctl = tp.Controller(tp.Store(tp.path_in(d), _Tracks()))
+        ctl.store.set("aaa001")
+        w = gt7_recording.RecordingWriter(d, "Solo", "dev", flush_s=0.05,
+                                          on_open=lambda path, _d, _rid: ctl.assign(path))
+        w.put(1_700_000_000.0, "A", b"\0" * 296)
+        w.close()
+        assert w.path and os.path.exists(w.path), "the writer must have opened a recording"
+        assert tp.recording_pick(w.path) == "aaa001", \
+            f"the finished recording must carry the pick: {os.listdir(d)}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

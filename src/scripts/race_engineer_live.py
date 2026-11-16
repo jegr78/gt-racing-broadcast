@@ -669,6 +669,15 @@ class Store:
         """Called from the GT7 data watcher; the worker swaps the tables between packets."""
         self._pending_data = (cars, tracks)
 
+    def reference_outline(self, track_id):
+        """The downloaded racing line of a layout as [{d, x, z}], or None. It draws the
+        map before a lap of that layout has completed."""
+        tracks = self._tracks
+        try:
+            return tracks.reference_trace(track_id) if tracks is not None else None
+        except (AttributeError, ValueError):
+            return None
+
     def set_track_pick(self, info):
         """The event's picked layout, or None; the worker applies it between packets."""
         self._picks.put(info)

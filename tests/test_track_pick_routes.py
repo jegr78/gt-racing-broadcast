@@ -123,6 +123,13 @@ def t_mismatch_is_a_quiet_health_yellow():
         tmp.cleanup()
 
 
+def t_engineer_outline_is_an_engineer_read():
+    import console_policy as cp
+    need = cp.min_capability(["race-engineer", "outline"], "GET")
+    assert need == cp.Requirement(cp.RACE_ENGINEER, False), need
+    assert cp.min_capability(["race-engineer", "outline"], "POST") is None, "the outline is read-only"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
