@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Forwarding the relay's GT7 packets to other telemetry apps (#1130).
 Run: python3 tests/test_gt7_forward.py"""
-import os, socket, struct, sys
+import errno, os, socket, struct, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -38,7 +38,7 @@ class _Sock:
 
     def sendto(self, data, addr):
         if addr in self.fail:
-            raise OSError(10054, "unreachable")
+            raise OSError(errno.ENETUNREACH, "network unreachable")  # no subclass on any OS
         self.sent.append((data, addr))
 
 
