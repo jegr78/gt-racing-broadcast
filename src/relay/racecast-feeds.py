@@ -199,6 +199,7 @@ import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt
 import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
 import gt7_tracks      # GT7 track recognition from lap positions (#787)
 import gt7_track_pick  # the event's picked GT7 layout (#1129)
+import telemetry_probe  # the driver telemetry probe ingest (#1110)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -11891,7 +11892,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
-                 event_documents_source=None, browser_hosts=(), track_pick=None):
+                 event_documents_source=None, browser_hosts=(), track_pick=None,
+                 telemetry_probe_obj=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -12812,6 +12814,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             # sufficient. A missing/invalid secret is 403 (step-up required), NEVER
             # 401, which misled operators into blaming a matching secret. Runs BEFORE
             # the subject check below precisely so no token is needed.
+            # Driver telemetry probe (#1110): a sender posts with the probe key, not
+            # a console token. Off unless the relay started with the probe enabled.
+            if sub == ["probe", "ingest"]:
+                return self._probe_ingest(method)
             if sub and sub[0] == "takeover":
                 presented = self.headers.get("X-Console-Secret")
                 if not (presented and console_auth.secret_matches(presented, console_secret)):
@@ -13907,6 +13913,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         for (n, d, pr, c, rc, x, re) in (CrewSource._member(row) for row in rows)]})
                 if p == ["event", "track"]:
                     return self._track_pick_get()
+                if p == ["telemetry", "probe"]:
+                    # Tailnet only: the probe key and every sender's counters (#1110).
+                    if telemetry_probe_obj is None:
+                        return self._send({"enabled": False}, 404)
+                    return self._send(dict(telemetry_probe_obj.snapshot(), enabled=True,
+                                           path="/console/probe/ingest",
+                                           key=telemetry_probe_obj.key))
                 if p == ["event-notes", "data"]:
                     # Notes and public document links in the shared crew dialog.
                     # Read-only; one shared list for all roles. Mirrored
@@ -14013,6 +14026,38 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return None          # client also gone before the error could be sent
         def _ok(self, r):
             self._send(r) if r else self._send({"error":"feed? (A/B)"}, 404)
+        def _probe_ingest(self, method):
+            probe = telemetry_probe_obj
+            if probe is None or method != "POST":
+                self._send({"error": "not found"}, 404)
+                return None
+            client = self.client_address[0] if self.client_address else "?"
+            if not probe.check_key(self.headers.get("X-Probe-Key")):
+                if not _console_authfail_rl.allow(client):
+                    self._send({"error": "too many attempts"}, 429)
+                    return None
+                self._send({"error": "forbidden"}, 403)
+                return None
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if not 0 < length <= telemetry_probe.MAX_BODY:
+                self._send({"error": "bad body length"}, 413 if length > 0 else 400)
+                return None
+            body = self.rfile.read(length)
+            self._body_consumed = True
+            try:
+                stats = json.loads(self.headers.get("X-Sender-Stats") or "null")
+            except ValueError:
+                stats = None
+            sender = (parse_qs(urlparse(self.path).query).get("sender") or [""])[0]
+            try:
+                self._send(probe.ingest(sender, body, stats))
+            except telemetry_probe.ProbeError as exc:
+                self._send({"error": str(exc)}, exc.status)
+            return None
+
         def _drain_body(self):
             """Read and drop a request body the handler answered without using. The
             socket then closes with nothing unread: on Windows unread bytes turn the
@@ -14268,6 +14313,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p in (["event", "track"], ["race-control", "track"]):
                     return self._track_pick_post(body)
+                if p == ["telemetry", "probe", "reset"]:
+                    if telemetry_probe_obj is None:
+                        return self._send({"enabled": False}, 404)
+                    telemetry_probe_obj.reset()
+                    return self._send({"ok": True})
                 if p == ["event", "title"]:
                     # Director live-edit of the free-text event title (#207). Tailnet
                     # trust boundary like the rest of the panel; persisted to
@@ -15564,6 +15614,12 @@ def main():
     if telemetry_store is not None:
         telemetry_store.replay = telemetry_replay.Controller(telemetry_store, rec_dir)
     track_pick.apply()      # after the Engineer analysis is attached, so it gets the pick too
+    # Driver telemetry probe (#1110): maintainer measurement, off by default.
+    probe = None
+    if os.environ.get("RACECAST_TELEMETRY_PROBE", "").strip().lower() in ("1", "true", "yes", "on"):
+        probe = telemetry_probe.Probe(secrets.token_urlsafe(16))
+        LOG.info("telemetry probe on: senders post to /console/probe/ingest; "
+                 "GET /telemetry/probe on the tailnet shows the key and the counters")
     radio_link = getattr(engineer_live, "radio_link", None)
     def radio_snapshot():
         snapshot = engineer_live.snapshot() if engineer_live is not None else {}
@@ -15641,6 +15697,7 @@ def main():
         push_url=push_url,
         telemetry_store=telemetry_store,
         track_pick=track_pick,
+        telemetry_probe_obj=probe,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

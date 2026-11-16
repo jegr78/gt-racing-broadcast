@@ -84,6 +84,24 @@ def decrypt_typed(data):
     yields the magic (foreign/corrupt datagram). The type whose length matches is
     tried first and each candidate is tested on the first keystream block only, so a
     well-formed packet costs one magic check (the pure-Python cipher runs at 60 Hz)."""
+    kind, nonce = _detect(data)
+    return (kind, salsa20_xor(KEY, nonce, data)) if kind else (None, None)
+
+
+def decrypt_head(data, size=0x80):
+    """Like decrypt_typed, but decrypts only the first `size` bytes: enough for the
+    magic and the packet id at 0x70 at less than half the cost of a whole packet."""
+    if len(data) < MIN_PACKET_LEN:
+        return None, None
+    iv1 = struct.unpack_from("<I", data, 0x40)[0]
+    for kind in sorted(IV_XOR, key=lambda k: PACKET_LEN[k] != len(data)):
+        head = salsa20_xor(KEY, struct.pack("<II", iv1 ^ IV_XOR[kind], iv1), data[:size])
+        if struct.unpack_from("<I", head, 0)[0] == MAGIC:
+            return kind, head
+    return None, None
+
+
+def _detect(data):
     if len(data) < MIN_PACKET_LEN:
         return None, None
     iv1 = struct.unpack_from("<I", data, 0x40)[0]
@@ -91,8 +109,21 @@ def decrypt_typed(data):
     for kind in order:
         nonce = struct.pack("<II", iv1 ^ IV_XOR[kind], iv1)
         if struct.unpack_from("<I", salsa20_xor(KEY, nonce, data[:4]), 0)[0] == MAGIC:
-            return kind, salsa20_xor(KEY, nonce, data)
+            return kind, nonce
     return None, None
+
+
+def encrypt(plain, kind="A", iv=0):
+    """Encrypt a decrypted packet the way the console sends type `kind`: cut to or
+    zero-padded to the type's length, keyed by `iv` (uint32), which travels in clear
+    at 0x40. A tool that replays recordings to a receiver needs this; the relay never
+    encrypts."""
+    size = PACKET_LEN[kind]
+    data = bytes(plain[:size]).ljust(size, b"\0")
+    nonce = struct.pack("<II", (iv ^ IV_XOR[kind]) & _MASK, iv & _MASK)
+    out = bytearray(salsa20_xor(KEY, nonce, data))
+    struct.pack_into("<I", out, 0x40, iv & _MASK)
+    return bytes(out)
 
 
 def decrypt_packet(data):
