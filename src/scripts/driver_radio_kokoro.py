@@ -142,7 +142,7 @@ class KokoroSpeech:
         self._lock=threading.Lock()
         self._state=threading.Condition()
         self._proc=None;self._tree=None;self._loaded=False;self._reply=None;self._next=0;self._retry_at=float('-inf')
-        self._closed=False
+        self._closed=False;self._deaf=None  # the worker whose reader has ended
         self._cache=collections.OrderedDict();self._bytes=0
 
     def _command(self):
@@ -153,7 +153,8 @@ class KokoroSpeech:
     def _start(self):
         """Start the worker unless it runs. Needs no synthesis lock: the state lock guards it."""
         with self._state:
-            if self._closed or (self._proc is not None and self._proc.poll() is None):return
+            if self._closed or (self._proc is not None and self._proc.poll() is None
+                                and self._deaf is not self._proc):return
             self._stop_locked()
             if self.clock()<self._retry_at or not self.ready_check():return
             self._retry_at=self.clock()+RETRY_S
@@ -176,14 +177,18 @@ class KokoroSpeech:
         try:
             while line:=proc.stdout.readline(JSON_MAX+1):
                 if len(line)>JSON_MAX:break
-                doc=json.loads(line)
+                try:doc=json.loads(line)
+                except ValueError:continue  # a stray library line is no reply
+                if not isinstance(doc,dict):continue
                 with self._state:
                     if proc is not self._proc:return
                     if doc.get('ready') is True:self._loaded=True
                     else:self._reply=doc
                     self._state.notify_all()
-        except (OSError,ValueError,RecursionError,AttributeError):pass  # A broken stream ends this reader; waiters see the dead process.
-        with self._state:self._state.notify_all()
+        except (OSError,ValueError,RecursionError):pass  # A broken stream ends this reader.
+        with self._state:
+            if proc is self._proc:self._deaf=proc
+            self._state.notify_all()
 
     def _wait(self,done,stopped,deadline):
         with self._state:
@@ -191,7 +196,8 @@ class KokoroSpeech:
                 if stopped.is_set():raise ProviderError('cancelled')
                 left=deadline-self.clock()
                 if left<=0:raise ProviderError('timed_out')
-                if self._proc is None or self._proc.poll() is not None:raise ProviderError('speech_failed')
+                if self._proc is None or self._proc.poll() is not None or self._deaf is self._proc:
+                    raise ProviderError('speech_failed')
                 self._state.wait(min(left,.05))
 
     def synthesize(self,text,stopped,budget,voice='am_michael'):

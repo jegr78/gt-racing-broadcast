@@ -54,6 +54,30 @@ def t_source_guards():
                 assert exc.code == "invalid_options"
 
 
+def t_a_backward_clock_step_keeps_a_recording_replayable():
+    import gt7_recording
+    from test_gt7_laps import _pkt
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp) / "telemetry-recordings"
+        root.mkdir()
+        w = gt7_recording.RecordingWriter(str(root), "Solo", "dev", flush_s=0.05, queue_max=0)
+        times = [100.0 + i * 0.1 for i in range(20)] + [40.0 + i * 0.1 for i in range(20)]
+        for i, t in enumerate(times):                          # time sync stepped back by a minute
+            w.put(t, "~", _pkt(1, 50.0, 0.01 * i, -1, i + 1))
+        w.close()
+        control = telemetry_replay.Controller(gt7_telemetry.TelemetryStore(), root)
+        try:
+            control.start(Path(w.path).name, speed=100)
+            limit = time.monotonic() + 10
+            while control.status()["active"] and time.monotonic() < limit:
+                time.sleep(.01)
+            st = control.status()
+            assert st["error"] is None, st
+            assert abs(st["duration_s"] - 3.8) < 1e-6, f"the step counts as no elapsed time: {st}"
+        finally:
+            control.stop()
+
+
 def t_clock():
     now = [10.0]
     waits = []

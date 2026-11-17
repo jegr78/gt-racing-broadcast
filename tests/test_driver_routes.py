@@ -40,7 +40,7 @@ def _req(port, path, data=None, headers=None, method=None):
         return e.code, e.read().decode(), dict(e.headers)
 
 
-def _serve(solo=True, segments=(), clock=None):
+def _serve(solo=True, segments=(), clock=None, **extra):
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
     from test_race_distance import TRACE
@@ -52,7 +52,7 @@ def _serve(solo=True, segments=(), clock=None):
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
                    sender_script_path=os.path.join(ROOT, "src", "relay", "racecast-sender.py"),
                    driver_segments=lambda: list(segments), driver_race_svc=race,
-                   driver_desk_path=os.path.join(ROOT, "src", "console", "driver-desk.js"))
+                   driver_desk_path=os.path.join(ROOT, "src", "console", "driver-desk.js"), **extra)
     srv.race_svc = race
     return srv, srv.server_address[1], path, hub
 
@@ -107,6 +107,27 @@ def t_the_public_timing_link_reaches_timing_data_and_nothing_else():
         assert _req(port, "/console/drivers/race?l=" + link)[0] in (401, 403), "the link opens nothing else"
         timing_link.clear(link_path)
         assert _req(port, f"/console/timing?l={link}")[0] == 403, "event stop ends the link"
+    finally:
+        srv.shutdown()
+
+
+def t_cross_site_clicks_open_the_public_pages_and_timing_failures_spare_the_drivers():
+    link_path = os.path.join(tempfile.mkdtemp(), "timing-link.json")
+    srv, port, path, _hub = _serve(timing_link_path=link_path,
+                                   timing_page_path=os.path.join(ROOT, "src", "console", "timing.html"))
+    cross = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+    try:
+        invite = driver_invite.create(path)["id"]
+        link = timing_link.create(link_path)["id"]
+        st, text, _h = _req(port, f"/console/drive?i={invite}", headers=cross)
+        assert st == 200 and "Cross-origin" not in text, "an invite clicked in Discord or webmail opens"
+        assert _req(port, f"/console/timing?l={link}", headers=cross)[0] == 200
+        assert _req(port, "/console/drive/register", b"{}", dict(cross, **{"Content-Type": "application/json"}))[0] == 403, \
+            "only the page GET is exempt"
+        codes = [_req(port, "/console/timing?l=wrong")[0] for _ in range(130)]
+        assert 429 in codes, "wrong timing links are capped"
+        st, _t, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": "D1:x.y"})
+        assert st == 403, f"a scan of the timing link never answers a driver with 429: {st}"
     finally:
         srv.shutdown()
 
@@ -286,6 +307,7 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
 
     class Relay:
         solo, mode, race_source, idx = False, "race", Source(), 0
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
 
         def on_air_row_idx(self):
             return self.idx
@@ -457,6 +479,38 @@ def t_race_control_lowers_only_a_cover_it_raised():
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()
+
+
+def t_a_failing_dashboard_tick_warns_once_per_distinct_error():
+    import logging
+
+    class _Relay:
+        _warn_tick_error = g.m.Relay._warn_tick_error
+        _tick_ok = g.m.Relay._tick_ok
+
+    class _Svc:
+        results = [ValueError("a")] * 4 + [None] + [ValueError("a")] * 3 + [KeyError("b")]
+
+        def tick(self):
+            r = self.results.pop(0)
+            if r is not None:
+                raise r
+
+    class _Stop:
+        n = len(_Svc.results)
+
+        def wait(self, _s):
+            self.n -= 1
+            return self.n < 0
+    warnings = []
+    handler = logging.Handler()
+    handler.emit = lambda rec: warnings.append(rec.getMessage()) if rec.levelno >= logging.WARNING else None
+    g.m.LOG.addHandler(handler)
+    try:
+        g.m.dashboard_ticks(_Relay(), _Svc(), _Stop(), 0)
+    finally:
+        g.m.LOG.removeHandler(handler)
+    assert len(warnings) == 3, f"one warning per distinct error and again after recovery: {warnings}"
 
 
 def _audit_of(srv):

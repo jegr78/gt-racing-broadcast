@@ -288,6 +288,24 @@ def t_daemon_bundle_env_redirects_the_extraction_dir_posix():
     assert "TEMP" not in env
 
 
+def t_stale_windows_bundles_are_pruned_and_a_live_one_is_kept():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        for name in ("_MEI111", "_MEI222", "_MEI333.stale", "logs"):
+            os.makedirs(os.path.join(d, name, "lib"))
+            open(os.path.join(d, name, "lib", "python3.dll"), "w").close()
+        real = os.rename
+
+        def rename(src, dst):
+            if os.path.basename(src) == "_MEI222":       # a running relay holds its DLL
+                raise PermissionError("in use")
+            real(src, dst)
+        assert sv.prune_bundle_dirs(d, os_name="posix") == 0, "POSIX bootloaders clean up themselves"
+        assert sv.prune_bundle_dirs(d, os_name="nt", rename=rename) == 2, "the stale and the set-aside bundle go, the live one stays"
+        assert sorted(os.listdir(d)) == ["_MEI222", "logs"], os.listdir(d)
+        assert os.path.exists(os.path.join(d, "_MEI222", "lib", "python3.dll")), "a live bundle stays whole"
+
+
 def t_daemon_bundle_env_sets_both_windows_vars():
     env = sv.daemon_bundle_env({"TEMP": r"C:\Users\x\AppData\Local\Temp"},
                                r"C:\rc\runtime\bundle", os_name="nt")

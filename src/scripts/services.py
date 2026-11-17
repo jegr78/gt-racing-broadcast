@@ -119,6 +119,33 @@ def daemon_bundle_env(env, bundle_dir, os_name=None):
     return out
 
 
+def prune_bundle_dirs(bundle_dir, os_name=None, rename=os.rename):
+    """Windows: remove the _MEI* extraction dirs that force-killed daemons left in
+    *bundle_dir*. A dir is renamed aside first; Windows refuses that while a running
+    process holds its DLLs, so a live bundle is never touched. Returns the count."""
+    if (os_name or os.name) != "nt":
+        return 0
+    import shutil
+    removed = 0
+    try:
+        names = os.listdir(bundle_dir)
+    except OSError:
+        return 0
+    for name in names:
+        path = os.path.join(bundle_dir, name)
+        if not name.startswith("_MEI") or not os.path.isdir(path):
+            continue
+        if not name.endswith(".stale"):         # a .stale dir is already set aside
+            try:
+                rename(path, path + ".stale")
+            except OSError:
+                continue
+            path += ".stale"
+        shutil.rmtree(path, ignore_errors=True)
+        removed += 1
+    return removed
+
+
 def stop_commands(os_name, pid, force):
     """argv to stop a PID on Windows (taskkill), or None where POSIX signals apply.
     /T kills the child tree, so the relay's streamlink/yt-dlp children are not

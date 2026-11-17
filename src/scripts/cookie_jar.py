@@ -12,12 +12,14 @@ every cookie of the browser profile into the jar (GitHub, Discord, the Google
 account set, ...). Both exports write that raw file into private_export_path()
 and filter_jar() moves only the platform's own domains onto the real jar.
 
-Pure stdlib, no sibling imports: the relay loads it too."""
+Stdlib plus the stdlib-only atomic_replace: the relay and get-cookies load it too."""
 import contextlib
 import os
 import shutil
 import tempfile
 import time
+
+import atomic_replace
 
 COOKIE_MARKERS = ("SAPISID", "__Secure-3PSID", "__Secure-1PSID", "LOGIN_INFO")
 
@@ -214,7 +216,7 @@ def filter_jar(path, platform, dest=None):
             os.chmod(tmp, 0o600)
         except OSError:
             pass   # best-effort hardening; mkstemp already created it owner-only
-        os.replace(tmp, dest)
+        atomic_replace.replace(tmp, dest)
     except OSError:
         if tmp:
             try:
