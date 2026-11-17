@@ -182,7 +182,7 @@ def t_deleting_a_recording_removes_runs_that_copied_it_as_a_reference():
             pkg = base/owner/job/'package'; pkg.mkdir(parents=True)
             (pkg/'detail.json').write_text(json.dumps({'reference_provenance': [{'recording_id': x} for x in refs]}))
         r.delete_recording_analyses(d, gone)
-        left = sorted(str(p.relative_to(base)) for p in base.glob('*/*'))
+        left = sorted(p.relative_to(base).as_posix() for p in base.glob('*/*'))
         assert left == [mate+'/'+'j3'*16], f'a reference copy of the deleted laps never survives it: {left}'
 
 
