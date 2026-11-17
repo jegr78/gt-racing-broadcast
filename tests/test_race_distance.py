@@ -567,6 +567,23 @@ def t_a_lap_time_that_disagrees_with_the_relays_clock_is_ignored():
     assert race.standings(t)["fastest"] is None, race.standings(t)["fastest"]
 
 
+def t_a_lap_faster_than_the_line_allows_never_counts():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15, "Mallory")
+    t = _drive(race, [a], [50], 0.0, 1.0)
+    for _ in range(int(L / 90) + 2):            # a whole lap in samples of 90 m every 0.1 s
+        a.along += 90
+        t = round(t + 0.1, 3)
+        a.send(t)
+    t = _drive(race, [a], [50], t, 2)
+    assert race.standings(t)["fastest"] is None, race.standings(t)["fastest"]
+    before = _row(race, "A", t)["distance_m"]
+    a.send(t)                                   # the same timestamp again
+    a.along += 80
+    a.send(t)
+    assert _row(race, "A", t)["distance_m"] == before, "a sample without new time never moves a car"
+
+
 def t_a_lap_with_a_red_flag_or_a_restart_never_sets_the_fastest_lap():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15)

@@ -291,6 +291,16 @@ def t_the_fastest_lap_survives_a_relay_restart_and_carries_the_team():
     again.tick()
     fl = again.dashboard()["fastest"]
     assert fl == {"entry": "A", "driver": "Max A", "team": "Red Bulls", "ms": 61234}, fl
+    svc.set_fastest("rc:Anna")
+    voided, _c, _p = _dash_service(ctx, path)
+    voided.tick()
+    assert voided.dashboard()["fastest"] is None, "Race Control can void a fastest lap"
+    voided.set_fastest("rc:Anna", "A", "Max A", 61234)
+    other = {"id": "other"}
+    moved = dr.Service(path, pick=lambda: other, trace_for=lambda _i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: 0.0, context=lambda: ctx)
+    moved.tick()
+    assert moved.dashboard()["fastest"] is None, "a lap on another layout is not this race's"
     dr.clear_actions(os.path.dirname(path))
     fresh, _c, _p = _dash_service(ctx, path)
     fresh.tick()
@@ -308,6 +318,12 @@ def t_qualifying_ranks_the_running_segment_by_best_lap():
     assert [(r["entry"], r["best_ms"], r["gap_ms"]) for r in rows] == [
         ("B", 90100, 0), ("A", 90500, 400), ("C", None, None)], rows
     assert rows[1]["number"] == "1" and rows[1]["driver"] == "Max"
+    forged = conns + [{"entry": "A", "segment": "Q1", "name": "Mallory", "latest": {"best_ms": 1}},
+                      {"entry": "B", "segment": "Q1", "name": "Ghost", "live": False,
+                       "latest": {"best_ms": 85000}}]
+    rows = dr.qualifying(forged, "Q1", ROSTER, min_ms=30000)
+    assert [(r["entry"], r["driver"], r["best_ms"]) for r in rows][:2] == [
+        ("B", "Ann", 90100), ("A", "Max", 90500)], f"impossible and quiet senders are ignored: {rows}"
 
 
 if __name__ == "__main__":

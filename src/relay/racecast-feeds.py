@@ -14529,6 +14529,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "correct": lambda: svc.correct(who, b.get("entry"), b.get("metres", 0.0),
                                                        b.get("pit_stops", 0), b.get("reason", "")),
                         "change": lambda: svc.override_change(who, b.get("entry"), b.get("conn")),
+                        "fastest": lambda: svc.set_fastest(who, b.get("entry"), b.get("driver"),
+                                                           b.get("ms")),
                     }
                     if action in actions:
                         try:

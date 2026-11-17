@@ -43,7 +43,7 @@ Requirement = collections.namedtuple("Requirement", ("capability", "step_up"))
 _DRIVER_DESK_GET = {("race",), ("readiness",), ("invite",)}
 _DRIVER_DESK_POST = {("reassign",), ("disconnect",)} | {
     ("race", a) for a in ("settings", "final-lap", "finish", "red-flag", "restart-mode",
-                          "release", "rejoin", "correct", "change")}
+                          "release", "rejoin", "correct", "change", "fastest")}
 
 
 def _driver_desk_route(rest, method):

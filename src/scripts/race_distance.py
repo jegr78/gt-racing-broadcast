@@ -69,7 +69,7 @@ CHANGE_WINDOW_S = 600.0     # a stint switch's window closes after this, or when
 HISTORY_S = 900.0
 MAX_HISTORY = 12000         # samples per entry, a hard cap next to HISTORY_S
 MAX_SPEED_MPS = 120.0
-STEP_SLACK_M = 100.0        # projection noise and a counter flipping a moment off the line
+STEP_SLACK_M = 20.0         # projection noise on top of MAX_SPEED_MPS over the sample's time
 SNAP_M = 40.0               # around the line the counter may be a sample early or late
 AREA_MARGIN_M = 300.0
 CAR_FORGET_S = 120.0        # a quiet connection that no entry follows is dropped
@@ -362,8 +362,8 @@ class Race:
         t, lap, speed, x, z = checked
         self._prune(t, conn)
         car = self._cars.get(conn)
-        if car is not None and car.t is not None and t < car.t:
-            return                                # older than what this car already sent
+        if car is not None and car.t is not None and t <= car.t:
+            return                                # not newer than what this car already sent
         if car is not None and car.entry != entry:
             self._move(car, entry)
         ent = self._entries.get(entry)
@@ -456,6 +456,10 @@ class Race:
         if crossed:
             self._crossing(ent, car, t)
 
+    def min_lap_s(self):
+        """The shortest believable lap: the line at MAX_SPEED_MPS."""
+        return self.length / MAX_SPEED_MPS if self.length else math.inf
+
     def _lap_timing(self, ent, car, t, line, last_ms):
         """Time the active counting car's laps and take GT7's time when it agrees."""
         if line:
@@ -469,6 +473,8 @@ class Race:
             return
         measured = car.pending[0]
         car.pending = None
+        if measured < self.min_lap_s():
+            return                                # faster than any car can drive the line
         if abs(last_ms / 1000 - measured) > max(LAP_TIME_TOLERANCE[0], LAP_TIME_TOLERANCE[1] * measured):
             return
         ent.last_lap_ms = last_ms

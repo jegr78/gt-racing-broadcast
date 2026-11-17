@@ -164,11 +164,12 @@ def clear_actions(runtime_dir):
             pass  # nothing recorded
 
 
-def _saved_fastest(path):
+def _saved_fastest(path, track):
+    """The persisted fastest lap of this track layout, or None."""
     doc = _read_json(path)
     entry, driver, ms = doc.get("entry"), doc.get("driver"), doc.get("ms")
-    if isinstance(entry, str) and isinstance(driver, str) and type(ms) is int and ms > 0 \
-            and len(entry) <= MAX_ENTRY and len(driver) <= MAX_ENTRY:
+    if doc.get("track") == track and isinstance(entry, str) and isinstance(driver, str) \
+            and type(ms) is int and ms > 0 and len(entry) <= MAX_ENTRY and len(driver) <= MAX_ENTRY:
         return {"entry": entry, "driver": driver, "ms": ms}
     return None
 
@@ -180,15 +181,19 @@ def _viewer_entry(row, roster):
             "color": info.get("bgColor") or "", "text_color": info.get("textColor") or ""}
 
 
-def qualifying(connections, segment, roster):
+def qualifying(connections, segment, roster, min_ms=0):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
-    driver, team, color, text_color, best_ms, gap_ms}]; entries without a lap last."""
+    driver, team, color, text_color, best_ms, gap_ms}]; entries without a lap last.
+    Only live senders count, and a best lap under `min_ms` (faster than the line
+    allows) is ignored."""
     best = {}
     for c in connections:
+        if not c.get("live", True):
+            continue
         if segment is not None and c.get("segment") not in (segment, None):
             continue
         ms = (c.get("latest") or {}).get("best_ms")
-        ms = ms if type(ms) is int and ms > 0 else None
+        ms = ms if type(ms) is int and ms > max(0, min_ms) else None
         cur = best.get(c["entry"])
         if cur is None or (ms is not None and (cur[0] is None or ms < cur[0])):
             best[c["entry"]] = (ms, c.get("name") or "")
@@ -248,6 +253,7 @@ class Service:
         self._snapshots = collections.deque(maxlen=int(MAX_DELAY_S / SNAPSHOT_EVERY_S) + 4)
         self._saved_fastest = None
         self._line_cache = None
+        self._settings_cache = None
         self._league = league_path
         self._last_action = _last_audited(audit_path_for(settings_path))
         self._enabled = enabled
@@ -283,7 +289,7 @@ class Service:
             race.correct(entry, metres, pits)
         for entry in rejoins:
             race.rejoin(entry, True)
-        race.fastest = _saved_fastest(self._fastest_path())
+        race.fastest = _saved_fastest(self._fastest_path(), pick_id)
         self._saved_fastest = race.fastest
         return race
 
@@ -291,14 +297,36 @@ class Service:
         return os.path.join(os.path.dirname(os.path.abspath(self._path)), FASTEST)
 
     def save_fastest(self):
-        """Persist the race's fastest lap when it changed (it survives a relay restart)."""
-        fastest = self._race.fastest if self._race is not None else None
-        if fastest is not None and fastest != self._saved_fastest:
-            try:
-                _write_json(self._fastest_path(), fastest)
-                self._saved_fastest = dict(fastest)
-            except OSError:
-                pass  # retried on the next change; the race keeps it in memory
+        """Persist the race's fastest lap with its layout when it changed (it survives a
+        relay restart); None removes the file. Runs outside the race lock."""
+        with self._lock:
+            fastest = self._race.fastest if self._race is not None else None
+            track = self._race_pick
+            if fastest == self._saved_fastest:
+                return
+            self._saved_fastest = None if fastest is None else dict(fastest)
+        try:
+            if fastest is None:
+                os.remove(self._fastest_path())
+            else:
+                _write_json(self._fastest_path(), dict(fastest, track=track))
+        except OSError:
+            pass  # the race keeps it in memory; the next change writes it again
+
+    def set_fastest(self, who, entry=None, driver=None, ms=None):
+        """Race Control's correction: clear the fastest lap (no entry) or set it."""
+        if entry is not None:
+            entry = _entry_name(entry)
+            if not isinstance(driver, str) or not 0 < len(driver) <= MAX_ENTRY:
+                raise ValueError(f"driver is 1 to {MAX_ENTRY} characters")
+            if type(ms) is not int or not 0 < ms < 3_600_000:
+                raise ValueError("ms is a lap time in milliseconds")
+        with self._lock:
+            race = self._current()
+            race.fastest = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
+            self._log(who, "fastest", **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
+        self.save_fastest()
+        return self.standings()
 
     def _viewer(self, ctx):
         """The dashboard payload: an allowlist, safe for viewers and the public page."""
@@ -306,12 +334,13 @@ class Service:
         out = {"v": 1, "mode": ctx.get("mode") or "race", "stint": ctx.get("stint"),
                "remaining": ctx.get("remaining"), "track": self._race_pick
                if isinstance(self._race_pick, str) else None}
-        if out["mode"] == "qualifying":
-            out["qualifying"] = qualifying(ctx.get("connections") or [], ctx.get("segment"), roster)
-            return out
         race = self._current()
+        if out["mode"] == "qualifying":
+            out["qualifying"] = qualifying(ctx.get("connections") or [], ctx.get("segment"), roster,
+                                           min_ms=0 if race.length is None else int(race.min_lap_s() * 1000))
+            return out
         st = race.standings(self._clock())
-        settings = read_settings(self._path)
+        settings = self._settings()
         rows = []
         for i, r in enumerate(st["entries"]):
             row = _viewer_entry(r, roster)
@@ -345,18 +374,29 @@ class Service:
                                     "points": [[round(x, 1), round(z, 1)] for x, z in pts[::step]]}
             return self._line_cache
 
+    def _settings(self):
+        """read_settings, re-read only when the file changed."""
+        try:
+            stamp = os.stat(self._path).st_mtime_ns
+        except OSError:
+            stamp = None
+        if self._settings_cache is None or self._settings_cache[0] != stamp:
+            self._settings_cache = (stamp, read_settings(self._path))
+        return self._settings_cache[1]
+
     def tick(self):
         """Take a dashboard snapshot (the relay calls this every SNAPSHOT_EVERY_S)."""
         ctx = self._context()
+        self._settings()
         with self._lock:
-            self.save_fastest()
             snap = self._viewer(ctx)
             self._snapshots.append((self._clock(), snap))
+        self.save_fastest()
 
     def dashboard(self):
         """The newest snapshot at least the delay setting old; the oldest one while the
         delay has not passed yet."""
-        delay = read_settings(self._path)["delay_s"]
+        delay = self._settings()["delay_s"]
         with self._lock:
             if not self._snapshots:
                 return None
