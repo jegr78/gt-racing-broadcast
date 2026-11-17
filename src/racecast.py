@@ -2913,6 +2913,14 @@ def app_launch_cmd(rest):
                      f"{_tailscale_login_hint()}).")
         sys.exit(f"app: cannot launch {name} on this system. Is it installed?")
     argv, cwd = cmd
+    if name == "obs":
+        try:
+            running = ev.app_running_checked("obs")
+        except Exception:  # noqa: BLE001  an unknown state takes the waiting launch path
+            running = False
+        if running:
+            print("OBS is already running.")
+            return
     # Same environment handling as `event start`: this is the documented manual
     # fallback for launching OBS, so it must not fail in the ways event start no
     # longer does (#572): the frozen library path, and no session overrides
