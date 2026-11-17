@@ -575,16 +575,61 @@ def t_timing_page_is_gzipped_and_revalidated():
         srv.shutdown()
 
 
-def t_internal_dashboard_routes_ignore_the_timing_budget():
-    kbps = g.m.TIMING_BUDGET_KBPS
-    g.m.TIMING_BUDGET_KBPS = 50
+class _SpyBudget:
+    """Wraps the real Budget and keeps every served() call and the live instance."""
+    made = []
+
+    real_class = g.m.timing_feed.Budget
+
+    def __init__(self, kbps):
+        self.real, self.calls = _SpyBudget.real_class(kbps), []
+        _SpyBudget.made.append(self)
+
+    def served(self, nbytes, interval_s):
+        self.calls.append(nbytes)
+        self.real.served(nbytes, interval_s)
+
+    def interval(self):
+        return self.real.interval()
+
+
+def _with_spy(**patch):
+    saved = {k: getattr(g.m, k) for k in patch}
+    budget, _SpyBudget.made[:] = g.m.timing_feed.Budget, []
+    g.m.timing_feed.Budget = _SpyBudget
+    for k, v in patch.items():
+        setattr(g.m, k, v)
     try:
-        srv, port, _lp, link, _hub = _timing_server()
+        srv, port, link_path, link, hub = _timing_server()
     finally:
-        g.m.TIMING_BUDGET_KBPS = kbps
+        g.m.timing_feed.Budget = budget
+        for k, v in saved.items():
+            setattr(g.m, k, v)
+    return srv, port, link, _SpyBudget.made[-1]
+
+
+def t_the_budget_counts_headers_and_rejected_requests():
+    srv, port, link, spy = _with_spy(TIMING_ABUSE_RPS=1)
+    path = f"/console/timing/data?l={link}"
     try:
-        for _ in range(60):
-            _req_raw(port, f"/console/timing/data?l={link}")
+        st, body, h = _req_raw(port, path, {"Accept-Encoding": "gzip"})
+        assert spy.calls[0] == len(body) + g.m.timing_feed.HEADER_BYTES, (spy.calls, len(body))
+        statuses = [_req_raw(port, path) for _ in range(12)]
+        rejected = [x for x in statuses if x[0] == 429]
+        assert rejected and all(float(x[2]["X-Poll-After"]) >= 5 for x in rejected), \
+            "a rejected viewer is told when to come back"
+        assert len(spy.calls) == 13, f"rejected requests count as demand: {len(spy.calls)}"
+    finally:
+        srv.shutdown()
+
+
+def t_internal_dashboard_routes_ignore_the_timing_budget():
+    srv, port, link, spy = _with_spy(TIMING_BUDGET_KBPS=50)
+    try:
+        for _ in range(3000):
+            spy.real.served(5000, 2.0)
+        h = _req_raw(port, f"/console/timing/data?l={link}")[2]
+        assert float(h["X-Poll-After"]) > 2.0, f"the budget must be exhausted for this test: {h}"
         for _ in range(2):
             srv.race_svc.tick()
             want = json.loads(json.dumps(srv.race_svc.dashboard() or {"v": 1, "entries": []}))
@@ -595,7 +640,6 @@ def t_internal_dashboard_routes_ignore_the_timing_budget():
                 assert st == 200 and "X-Poll-After" not in h and "ETag" not in h, (route, st, h)
     finally:
         srv.shutdown()
-
 
 def _audit_of(srv):
     import json as _json

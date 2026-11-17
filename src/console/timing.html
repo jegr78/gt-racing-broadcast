@@ -231,7 +231,7 @@
       const res = await fetch(DATA, {cache: "no-store", headers: etag ? {"If-None-Match": etag} : {}});
       const pace = parseFloat(res.headers.get("X-Poll-After"));
       if (pace >= 2) { interval = pace; wait = pace * 1000; }
-      if (res.status === 429) wait = 5000;
+      if (res.status === 429 && !(pace >= 2)) wait = 5000;
       else if (res.status === 403) { $("state").hidden = false; $("state").textContent = "This timing link has ended."; return; }
       else if (res.status === 304) { got = Date.now(); running = false; if (last) render(last); }
       else if (res.ok) {

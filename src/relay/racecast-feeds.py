@@ -14236,16 +14236,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     _timing_page[:] = [timing_feed.encode(page)]
                 return self._send_encoded(*_timing_page[0], "text/html; charset=utf-8",
                                           {"Content-Security-Policy": PAGE_CSP})
+            interval = _timing_budget.interval()
             if not _timing_rl.allow("all"):
+                # Counted as demand, so a crowd arriving at once is spread out.
+                interval = max(5.0, interval)
+                _timing_budget.served(timing_feed.HEADER_BYTES, interval)
                 self.send_response(429)
-                self.send_header("Retry-After", "5")
+                self.send_header("Retry-After", str(int(interval)))
+                self.send_header("X-Poll-After", f"{interval:.1f}")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return None
-            interval = _timing_budget.interval()
             sent = self._send_encoded(*_timing_body.get(), "application/json; charset=utf-8",
                                       {"X-Poll-After": f"{interval:.1f}"})
-            _timing_budget.served(sent or timing_feed.NOT_MODIFIED_BYTES, interval)
+            _timing_budget.served(sent + timing_feed.HEADER_BYTES, interval)
             return None
 
         def _send_encoded(self, etag, raw, gz, ctype, extra=None):

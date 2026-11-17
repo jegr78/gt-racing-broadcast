@@ -52,7 +52,7 @@ def t_interval_is_minimum_when_idle():
 
 def t_interval_grows_with_viewers():
     clock = _Clock()
-    b = tf.Budget(1000, clock=clock)
+    b = tf.Budget(1000, clock=clock, window_s=10.0)
     for i in range(5000):
         clock.t = 1000.0 + i * 0.002
         b.served(700, 2.0)
@@ -61,7 +61,7 @@ def t_interval_grows_with_viewers():
 
 def t_interval_clamps_and_recovers():
     clock = _Clock()
-    b = tf.Budget(50, clock=clock)
+    b = tf.Budget(50, clock=clock, window_s=10.0)
     for _ in range(2000):
         b.served(5000, 2.0)
     assert b.interval() == tf.MAX_INTERVAL_S, b.interval()
@@ -73,6 +73,33 @@ def t_budget_kbps_parses_and_clamps():
     cases = {None: 1000, "x": 1000, "10": 50, "999999": 100000, "2500": 2500}
     for raw, want in cases.items():
         assert tf.budget_kbps(raw) == want, (raw, tf.budget_kbps(raw))
+
+
+def _obeying_crowd(viewers, seconds, kbps=1000, nbytes=950):
+    """Clients that poll again after the interval they were handed; returns kbit/s per 10 s."""
+    import heapq, random
+    rnd = random.Random(7)
+    clock = _Clock()
+    b = tf.Budget(kbps, clock=clock)
+    due = [(clock.t + rnd.uniform(0, 30), i) for i in range(viewers)]
+    heapq.heapify(due)
+    end, buckets = clock.t + seconds, {}
+    while due and due[0][0] < end:
+        clock.t, i = heapq.heappop(due)
+        interval = b.interval()
+        b.served(nbytes, interval)
+        k = int((clock.t - 1000.0) // 10)
+        buckets[k] = buckets.get(k, 0) + nbytes
+        heapq.heappush(due, (clock.t + interval + rnd.uniform(-0.5, 0.5), i))
+    return [v * 8 / 1000 / 10 for k, v in sorted(buckets.items()) if k >= 12]
+
+
+def t_an_obeying_crowd_stays_near_the_budget():
+    for viewers in (500, 1500, 2500):
+        rates = _obeying_crowd(viewers, 400)
+        need = min(1000, viewers * 950 * 8 / 1000 / tf.MIN_INTERVAL_S)
+        assert max(rates) < need * 1.3 and min(rates) > need * 0.6, \
+            f"{viewers} viewers swing between {min(rates):.0f} and {max(rates):.0f} kbit/s"
 
 
 if __name__ == "__main__":

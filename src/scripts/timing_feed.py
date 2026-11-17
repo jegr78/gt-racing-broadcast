@@ -16,7 +16,7 @@ import time
 TICK_S = 2.0
 MIN_INTERVAL_S = 2.0
 MAX_INTERVAL_S = 30.0
-NOT_MODIFIED_BYTES = 200          # headers of a 304, counted against the budget
+HEADER_BYTES = 280                # response headers, counted on every answer
 DEFAULT_KBPS = 1000
 
 
@@ -56,20 +56,28 @@ class TickBody:
 class Budget:
     """Poll interval that keeps all viewers within `kbps` of upload."""
 
-    def __init__(self, kbps, clock=time.monotonic, window_s=10.0):
+    def __init__(self, kbps, clock=time.monotonic, window_s=2 * MAX_INTERVAL_S):
+        # A window shorter than the longest interval misses slow viewers and oscillates.
         self._bytes_per_s = kbps * 125
         self._clock, self._window_s = clock, window_s
         self._lock = threading.Lock()
         self._served = collections.deque()      # (at, nbytes, interval_s)
+        self._bytes = self._intervals = 0.0
 
     def _prune(self, now):
         while self._served and now - self._served[0][0] > self._window_s:
-            self._served.popleft()
+            _at, nbytes, interval_s = self._served.popleft()
+            self._bytes -= nbytes
+            self._intervals -= interval_s
+        if not self._served:
+            self._bytes = self._intervals = 0.0
 
     def served(self, nbytes, interval_s):
         with self._lock:
             now = self._clock()
             self._served.append((now, nbytes, interval_s))
+            self._bytes += nbytes
+            self._intervals += interval_s
             self._prune(now)
 
     def interval(self):
@@ -77,9 +85,9 @@ class Budget:
             self._prune(self._clock())
             if not self._served:
                 return MIN_INTERVAL_S
-            # A viewer polling every I seconds shows up I / window times per window.
-            viewers = sum(s[2] for s in self._served) / self._window_s
-            mean_bytes = sum(s[1] for s in self._served) / len(self._served)
+            # A viewer polling every I seconds shows up window / I times per window.
+            viewers = self._intervals / self._window_s
+            mean_bytes = self._bytes / len(self._served)
             need = viewers * mean_bytes / self._bytes_per_s
         need = math.ceil(need * 2) / 2
         return max(MIN_INTERVAL_S, min(MAX_INTERVAL_S, need))
