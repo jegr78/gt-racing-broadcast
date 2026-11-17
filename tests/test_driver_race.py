@@ -136,7 +136,6 @@ def _ctl(multi=False, wall=None):
 
 
 def _audit(path):
-    import json
     with open(dr.audit_path_for(path), encoding="utf-8") as fh:
         return [json.loads(line) for line in fh]
 
