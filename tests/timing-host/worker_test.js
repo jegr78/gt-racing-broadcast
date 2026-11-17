@@ -2,7 +2,7 @@
 import worker, { setPage, TimingRoom } from "../../src/timing-host/worker.js";
 
 const LINK = "linkAAAAAAAAAAAAAAAAAAAA";
-const KEY = "publish-key-1";
+const KEY = "publish-key-1-long-enough";
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
 
@@ -157,6 +157,17 @@ Deno.test("wrong publish key is 401 before any room", async () => {
   eq(res.status, 401, "wrong key");
   eq(env.calls, 0, "no Durable Object call");
   eq((await worker.fetch(req(`/t/${LINK}/publish?v=2`, PUB), env)).status, 400, "unknown version");
+});
+
+Deno.test("a missing or short publish key refuses every publisher", async () => {
+  for (const key of [undefined, "", "short"]) {
+    const env = makeEnv();
+    env.PUBLISH_KEY = key;
+    for (const auth of ["Bearer undefined", "Bearer ", `Bearer ${key}`]) {
+      const res = await worker.fetch(req(`/t/${LINK}/publish?v=1`, { ...WS, Authorization: auth }), env);
+      eq(res.status, 401, `key ${key} auth ${auth}`);
+    }
+  }
 });
 
 Deno.test("version route", async () => {

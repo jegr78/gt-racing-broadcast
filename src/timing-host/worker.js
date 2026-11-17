@@ -23,6 +23,14 @@ function text(body, status, type = "text/plain; charset=utf-8") {
   });
 }
 
+const MIN_KEY = 16;
+
+// The publisher's Authorization header against the deployed key; no key, no publisher.
+function publisherAllowed(header, key) {
+  if (typeof key !== "string" || key.length < MIN_KEY) return false;
+  return sameKey(header, `Bearer ${key}`);
+}
+
 function sameKey(given, expected) {
   if (typeof given !== "string" || typeof expected !== "string" || !expected) return false;
   let diff = given.length ^ expected.length;
@@ -45,7 +53,7 @@ export default {
     const isSocket = m[2] === "/ws" || m[2] === "/publish";
     if (m[2] === "/publish") {
       const auth = request.headers.get("Authorization") || "";
-      if (!sameKey(auth, `Bearer ${env.PUBLISH_KEY}`)) return text("unauthorized", 401);
+      if (!publisherAllowed(auth, env.PUBLISH_KEY)) return text("unauthorized", 401);
       if (url.searchParams.get("v") !== PROTOCOL_V) return text("unsupported protocol version", 400);
     }
     if (isSocket && request.headers.get("Upgrade") !== "websocket") {

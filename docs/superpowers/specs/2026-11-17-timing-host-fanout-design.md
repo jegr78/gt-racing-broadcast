@@ -80,6 +80,20 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
      parts; the page is uploaded as a text module the Worker imports.
   3. `POST /accounts/{id}/workers/scripts/{script}/subdomain` with `{"enabled": true}`.
   4. Store `TIMING_HOST_URL` and, on first deploy, `TIMING_HOST_PUBLISH_KEY` in `profile.env`.
+- Verified against a Workers Free account (2026-11-17, Task 1 of the plan):
+  - `GET /accounts/{id}/workers/subdomain` returns `result.subdomain`.
+  - The first upload carries `migrations: {"new_tag": "v1", "new_sqlite_classes": ["TimingRoom"]}`
+    and returns `result.migration_tag: "v1"`. Later uploads succeed both without `migrations` and
+    with `{"old_tag": "v1", "new_tag": "v1"}`; the deploy sends none once the tag is `v1`.
+  - The current tag is readable from `GET /accounts/{id}/workers/scripts` (`migration_tag` per
+    script), not from `.../scripts/{name}/settings` (it answers `null` there).
+  - Modules are multipart parts with `application/javascript+module`: `index.js` (main module,
+    calls `setPage`), `worker.js`, `page.js` (the viewer page as `export default "<html>"`).
+  - `POST .../scripts/{name}/subdomain {"enabled": true, "previews_enabled": false}` serves it at
+    `https://<script>.<subdomain>.workers.dev`; it answered within a few seconds.
+  - Token permissions used: Account, Workers Scripts: Edit and Account Settings: Read.
+  - End to end with the relay's `Publisher` and a `WsClient` viewer: state, ack with viewers and
+    `conns_today`, `end` forwarded, page 410 afterwards.
 - One script per league: the script name is derived from the profile name, so two leagues on one
   Cloudflare account do not collide.
 - The deploy stamps a content hash of the Worker and page into the Worker. Status compares it with
