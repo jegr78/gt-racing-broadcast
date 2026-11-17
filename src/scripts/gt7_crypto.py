@@ -116,8 +116,7 @@ def _detect(data):
 def encrypt(plain, kind="A", iv=0):
     """Encrypt a decrypted packet the way the console sends type `kind`: cut to or
     zero-padded to the type's length, keyed by `iv` (uint32), which travels in clear
-    at 0x40. A tool that replays recordings to a receiver needs this; the relay never
-    encrypts."""
+    at 0x40. Replay tools and the relay's `/A` forward targets (gt7_forward) use it."""
     size = PACKET_LEN[kind]
     data = bytes(plain[:size]).ljust(size, b"\0")
     nonce = struct.pack("<II", (iv ^ IV_XOR[kind]) & _MASK, iv & _MASK)
