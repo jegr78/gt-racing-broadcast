@@ -179,7 +179,8 @@ def t_an_unexpected_stream_stop_still_pings_here():
         relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
         _probe(relay, False)
         stops = [payload for kind, payload in posts if kind == "obs-stream"]
-        assert len(stops) == 1 and stops[0]["content"] == "@here", posts
+        assert len(stops) == 1 and stops[0].get("content") == "@here", \
+            f"an unplanned stop still pages the crew: {posts}"
 
 
 def t_rejected_end_and_unexpected_stream_loss_still_page():
@@ -219,7 +220,7 @@ def t_nonfinal_part_keeps_event_health_alerts_enabled():
         assert code == 200 and not reply.get("final") and not teardown
         relay._send_health_webhook("red", ["Feed A down"], "green")
         assert [kind for kind, _ in posts] == ["obs-stream", "health"]
-        assert posts[0][1]["content"] == "@here", "only the final end drops the stop ping"
+        assert posts[0][1].get("content") == "@here", "only the final end drops the stop ping"
         assert parts.get()["index"] == 2
 
 
