@@ -445,20 +445,32 @@ class Store:
         return dict(run, diagnostics=diagnostics, ok=True)
 
     def history(self, rec=None):
-        items = []
+        """The newest 200 runs, of one recording when `rec` is given. Run records are
+        read and filtered first; only the kept runs get the full check."""
+        want = None if rec is None else ai_package.gt7_recording.recording_stem(rec)
+        listed = []
         for path in self.base.glob("*/*/run.json"):
             try:
-                run = self.get(path.parent.name)
-                if rec is not None and ai_package.gt7_recording.recording_stem(
-                    run["selection"]["recording"]
-                ) != ai_package.gt7_recording.recording_stem(rec):
+                head = _read(path, self.root)
+                if want is not None and ai_package.gt7_recording.recording_stem(
+                    head["selection"]["recording"]
+                ) != want:
                     continue
-                run.pop("report", None)
-                items.append(run)
+                listed.append((head["created_at"], path.parent.name))
             except (ReportError, KeyError, TypeError):
                 continue
-        items.sort(key=lambda r: r["created_at"], reverse=True)
-        return dict(ok=True, profile=self.profile, runs=items[:200])
+        listed.sort(reverse=True)
+        items = []
+        for _created, job_id in listed:
+            if len(items) == 200:
+                break
+            try:
+                run = self.get(job_id)
+            except (ReportError, KeyError, TypeError):
+                continue
+            run.pop("report", None)
+            items.append(run)
+        return dict(ok=True, profile=self.profile, runs=items)
 
     def export(self, job_id, kind, origin=None):
         if origin is not None:

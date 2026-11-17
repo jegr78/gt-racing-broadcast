@@ -174,6 +174,16 @@ def t_comparable_lap_evidence_can_follow_the_shared_reference():
         fail(lambda:r.validate(output,package))
 
 
+def t_history_checks_only_the_runs_of_the_selected_recording():
+    with tempfile.TemporaryDirectory() as d:
+        s,p,run,store=setup(d)
+        calls=[];real=store.get
+        store.get=lambda job_id,**kw:calls.append(job_id) or real(job_id,**kw)
+        assert store.history('another-recording')['runs']==[] and calls==[], \
+            'runs of other recordings are filtered before their package is rebuilt'
+        assert store.history(s.name)['runs'][0]['id']==run['id'] and calls==[run['id']]
+
+
 def t_history_provenance_exports_and_profile_scope():
     with tempfile.TemporaryDirectory() as d:
         s,p,run,store=setup(d)
