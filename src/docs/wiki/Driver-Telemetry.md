@@ -108,6 +108,25 @@ laps on GT7's counter, from the car that took over after the last stint switch: 
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
 event setting.
 
+### Red flag, rejoin and corrections
+
+- **Red flag** freezes every entry's distance. In the restart lobby each car
+  continues from its anchor when it leaves the box; lap 1 there does not count. The
+  league's rule (Control Center Home, **Red flag**, or `racecast event race
+  --restart`) says whether a restart keeps the gaps or neutralises them: order and
+  laps stay, cars on the same lap start level. Race Control or the director can
+  switch it for one restart. **Restart released** ends the mode.
+- **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
+  leader's distance at the stint switch, so its later departure from the box becomes
+  its deficit.
+- **Corrections** add or remove metres and pit stops per entry, always with a reason.
+  A **change override** makes a team's other sender the active one at once.
+
+Corrections and rejoin marks survive a relay restart. Every action is logged with who
+and when in `runtime/<profile>/driver-race-audit.jsonl`. The controls for these come
+to the Race Control desk and the Director Panel with the next release; until then the
+producer reaches them on the tailnet.
+
 The box detection and the lap counter in the pit lane are not yet confirmed against a
 recording of real pit stops. The race lives in the relay's memory: a relay restart
 starts it over. The producer reads the race on the tailnet at `/drivers/race`; the

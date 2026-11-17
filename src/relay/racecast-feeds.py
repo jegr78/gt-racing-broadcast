@@ -14456,14 +14456,30 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if action == "settings":
                         try:
                             return self._send({"ok": True,
-                                               "settings": driver_race_svc.set_settings(body)})
+                                               "settings": driver_race_svc.set_settings(body, "tailnet")})
                         except ValueError as exc:
                             return self._send({"ok": False, "error": str(exc)}, 400)
                     commands = {"final-lap": driver_race_svc.final_lap,
                                 "finish": driver_race_svc.finish, "reset": driver_race_svc.reset}
                     if action in commands:
-                        commands[action]()
+                        commands[action]("tailnet")
                         return self._send({"ok": True, "state": driver_race_svc.standings()["state"]})
+                    # Race Control actions (#1113); the desks reach them with an identity in #1114.
+                    svc, b = driver_race_svc, body
+                    actions = {
+                        "red-flag": lambda: svc.red_flag("tailnet", b.get("mode")),
+                        "restart-mode": lambda: svc.set_restart_mode("tailnet", b.get("mode")),
+                        "release": lambda: svc.release("tailnet"),
+                        "rejoin": lambda: svc.rejoin("tailnet", b.get("entry"), b.get("on", True)),
+                        "correct": lambda: svc.correct("tailnet", b.get("entry"), b.get("metres", 0.0),
+                                                       b.get("pit_stops", 0), b.get("reason", "")),
+                        "change": lambda: svc.override_change("tailnet", b.get("entry"), b.get("conn")),
+                    }
+                    if action in actions:
+                        try:
+                            return self._send({"ok": True, "race": actions[action]()})
+                        except ValueError as exc:
+                            return self._send({"ok": False, "error": str(exc)}, 400)
                     return self._send({"error": "not found"}, 404)
                 if p == ["drivers", "disconnect"] and driver_hub is not None:
                     return self._send({"ok": driver_hub.disconnect(str(body.get("conn") or ""))})
@@ -15812,6 +15828,8 @@ def main():
     race_svc = driver_race.Service(
         driver_race.path_in(runtime), pick=track_pick.store.current,
         enabled=lambda: relay.mode == "race",
+        league_path=(os.path.join(os.path.dirname(args.overlay_dir), driver_race.FILENAME)
+                     if args.overlay_dir else None),
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
         multi_lobby=lambda: not relay.solo)

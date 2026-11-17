@@ -6791,19 +6791,26 @@ def t_gt7_forward_write_validates_normalises_and_clears():
 def t_driver_race_settings_go_to_the_relay_or_the_file():
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-race.json")
-    assert m.event_race_read_data(path=path)["settings"] == {"formation": True, "finish_mode": "laps",
-                                                             "lap_count": None}
-    off = m.event_race_write_data({"formation": False, "lap_count": 20}, alive=lambda: False, path=path)
+    league = os.path.join(d, "profile", "driver-race.json")
+    assert m.event_race_read_data(path=path, league_path=league)["settings"] == {
+        "formation": True, "finish_mode": "laps", "lap_count": None, "restart": "keep"}
+    off = m.event_race_write_data({"formation": False, "lap_count": 20}, alive=lambda: False, path=path, league_path=league)
     assert off["ok"] and off["applied"] == "file" and off["settings"]["lap_count"] == 20, off
-    assert m.event_race_read_data(path=path)["settings"]["formation"] is False
+    assert m.event_race_read_data(path=path, league_path=league)["settings"]["formation"] is False
     posted = []
     live = m.event_race_write_data(
-        {"finish_mode": "time"}, alive=lambda: True, foreign=lambda: False, path=path,
+        {"finish_mode": "time"}, alive=lambda: True, foreign=lambda: False, path=path, league_path=league,
         post=lambda url, body: posted.append((url, body)) or {"ok": True, "settings": dict(body)})
     assert live["applied"] == "relay" and posted[0][0].endswith("/drivers/race/settings"), live
-    bad = m.event_race_write_data({"lap_count": 0}, alive=lambda: False, path=path)
+    bad = m.event_race_write_data({"lap_count": 0}, alive=lambda: False, path=path, league_path=league)
     assert not bad["ok"] and "lap_count" in bad["error"], bad
-    assert m.event_race_read_data(path=path)["settings"]["lap_count"] == 20, "a refused change writes nothing"
+    assert m.event_race_read_data(path=path, league_path=league)["settings"]["lap_count"] == 20, "a refused change writes nothing"
+    saved = m.event_race_write_data({"restart": "neutralise"}, alive=lambda: True, path=path,
+                                    league_path=league, post=lambda *_a: 1 / 0)
+    assert saved["ok"] and saved["applied"] == "profile" and saved["settings"]["restart"] == "neutralise", \
+        "the restart default is a profile file, no relay call"
+    bad = m.event_race_write_data({"restart": "fast"}, alive=lambda: False, path=path, league_path=league)
+    assert not bad["ok"] and "restart" in bad["error"], bad
 
 
 def t_driver_invite_follows_the_event_and_regenerates():
