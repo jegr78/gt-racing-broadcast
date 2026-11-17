@@ -2056,6 +2056,13 @@ def t_csrf_cross_origin_blocked():
                                    "Origin": "https://youtube.com"})
 
 
+def t_the_report_preview_runs_sandboxed():
+    import re
+    html = open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8").read()
+    tag = re.search(r'<iframe id="report-frame"[^>]*>', html).group(0)
+    assert 'sandbox=""' in tag, "report HTML never runs in the Control Center origin"
+
+
 def t_csrf_another_loopback_port_is_another_origin():
     for key in ("Origin", "Referer"):
         assert not us.request_csrf_ok({"Host": "127.0.0.1:8089", key: "http://127.0.0.1:8088"}), \
