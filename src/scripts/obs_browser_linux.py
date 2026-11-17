@@ -272,13 +272,18 @@ def main(argv=None):
         print("obs-browser source build is Linux-only; "
               "Windows and macOS OBS ship the Browser Source already.")
         return 1
+    arch = normalize_arch(platform.machine())
+    present_dirs = obs_plugins_dirs(arch) if arch else [OBS_PLUGINS_DIR_PLAIN]
+    if browser_plugin_present(present_dirs):
+        print("obs-browser.so is already installed, nothing to do.")
+        print(browser_hwaccel_note())
+        return 0
     # Before any dpkg work: on Arch this whole path is the wrong tool.
     note = pacman_redirect_note(bool(shutil.which("pacman")),
                                 bool(shutil.which("apt-get")))
     if note:
         print(note)
         return 1
-    arch = normalize_arch(platform.machine())
     spec = None
     obs_version = _detect_obs_version()
     if arch:
@@ -295,11 +300,6 @@ def main(argv=None):
         return 1
 
     plugins = obs_plugins_dir(arch)
-    if browser_plugin_installed(plugins):
-        print(f"obs-browser.so already present in {plugins}, nothing to do.")
-        print(browser_hwaccel_note())
-        return 0
-
     print(f"Will build obs-browser {spec['obs_browser_commit'][:10]} and CEF "
           f"{spec['cef_version']} ({arch}) against the distro libobs, and install into\n"
           f"  {plugins}\nThis downloads ~340 MB of CEF and compiles for several minutes.")
