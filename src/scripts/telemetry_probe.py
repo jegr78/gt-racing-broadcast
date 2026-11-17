@@ -97,7 +97,7 @@ class Probe:
         self._senders = {}
 
     def check_key(self, presented):
-        return isinstance(presented, str) and hmac.compare_digest(
+        return isinstance(presented, str) and bool(self.key) and hmac.compare_digest(
             presented.encode("utf-8"), self.key.encode("utf-8"))
 
     def ingest(self, name, body, sender_stats):
@@ -146,6 +146,10 @@ class Probe:
                 for k in COUNTERS:
                     sender.banked[k] += sender.stats.previous.get(k, 0)
             sender.stream_seen = sender.stats.stream
+
+    def forget(self, name):
+        with self._lock:
+            self._senders.pop(name, None)
 
     def reset(self):
         with self._lock:
