@@ -10,6 +10,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
+import e2e_safety  # noqa: E402
 import e2e
 
 
@@ -190,4 +191,8 @@ async def main():
     return None
 
 
-if __name__=='__main__':asyncio.run(main())
+if __name__=='__main__':
+    contained = e2e_safety.enter(__file__, sys.argv[1:])
+    if contained is not None:
+        raise SystemExit(contained)
+    asyncio.run(main())
