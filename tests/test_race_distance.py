@@ -137,6 +137,19 @@ def t_lap_count_finish_ends_the_leader_then_each_car_at_its_next_crossing():
     assert _row(race, "B", t)["distance_m"] == frozen, "a finished car's distance is frozen"
 
 
+def t_the_corrected_leader_takes_the_flag_first():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
+    t = _drive(race, [a, b], [50, 50], 0.0, 2)
+    race.correct("B", 200.0)                                  # Race Control puts B ahead
+    t = _drive(race, [a, b], [50, 50], t, (2 * L + 60) / 50)
+    assert _row(race, "B", t)["finished"] and not _row(race, "A", t)["finished"], \
+        "the car the tower shows in front gets the chequered flag"
+    t = _drive(race, [a, b], [50, 50], t, L / 50 + 2)
+    assert [r["entry"] for r in race.standings(t)["entries"]] == ["B", "A"], \
+        "no car is classified with more laps than the winner took the flag on"
+
+
 def t_the_lap_count_follows_gt7s_counter_including_the_formation_lap():
     race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)
@@ -462,6 +475,26 @@ def t_a_neutralised_restart_levels_cars_on_the_same_lap():
     assert [r["entry"] for r in race.standings(t)["entries"]][-1] == "C"
 
 
+def t_a_neutralised_restart_levels_the_laps_the_tower_shows():
+    race = rd.Race(TRACE, formation=False)
+    a, c = Car(race, "A", "a", L - 15), Car(race, "C", "c", L - 25)
+    t = _drive(race, [a, c], [50, 25], 0.0, 160)                      # C is a lap down on the road
+    race.correct("C", L)                                              # Race Control gives the lap back
+    da = _row(race, "A", t)["distance_m"]
+    race.red_flag(t, "keep")
+    race.set_restart_mode("neutralise")
+    for car in (a, c):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, c], [None, None], t, 3)
+    t = _drive(race, [a, c], [None, None], t, 0.1)
+    for car in (a, c):
+        car.box = False
+    t = _drive(race, [a, c], [40, 40], t, 1)
+    ra, rc = _row(race, "A", t), _row(race, "C", t)
+    assert abs(ra["distance_m"] - rc["distance_m"]) < 1 and abs(ra["distance_m"] - (da + 40)) < 10, \
+        f"cars the tower shows on the same lap start level: {ra['distance_m']} {rc['distance_m']}"
+
+
 def t_corrections_move_order_gaps_and_pit_stops():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
@@ -497,6 +530,8 @@ def t_a_rejoin_starts_the_team_at_the_leaders_distance():
     rb = _row(race, "B", t)
     assert rb["driver"] == "Ben" and abs(rb["distance_m"] - (start + 200)) < 25, (rb, start)
     assert abs(rb["gap_s"] - 10.0) < 0.5, f"the later departure is the deficit: {rb}"
+    assert race.take_used_rejoins() == ["B"] and race.take_used_rejoins() == [], \
+        "a consumed rejoin is reported once, so the service can drop the saved mark"
 
 
 def t_a_change_override_switches_the_team_now():

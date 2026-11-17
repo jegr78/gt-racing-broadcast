@@ -59,10 +59,11 @@ def read_settings(path):
         doc = {}
     doc = doc if isinstance(doc, dict) else {}
     out = dict(DEFAULTS)
-    try:
-        out.update(validate(doc))
-    except ValueError:
-        pass  # a hand-edited bad file keeps the defaults
+    for key, value in doc.items():
+        try:
+            out.update(validate({key: value}))
+        except ValueError:
+            pass  # a hand-edited bad value keeps its default, the others stay
     return out
 
 
@@ -518,8 +519,16 @@ class Service:
         if not self._enabled():
             return
         with self._lock:
-            self._current().update(reg["entry"], reg["conn"], reg["name"],
-                                   dict(sample, t=sample.get("mono", self._clock())))
+            race = self._current()
+            race.update(reg["entry"], reg["conn"], reg["name"],
+                        dict(sample, t=sample.get("mono", self._clock())))
+            used = race.take_used_rejoins()
+            if used:
+                def update(doc):
+                    doc["rejoin"] = sorted(set(doc.get("rejoin") or []) - set(used))
+                self._save_actions(update)
+                for entry in used:
+                    self._log("race", "rejoin_used", entry=entry)
 
     def standings(self):
         with self._lock:
