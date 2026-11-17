@@ -84,7 +84,7 @@ def t_without_formation_the_race_starts_on_lap_one():
 
 def t_a_lapped_car_reads_plus_n_laps_and_a_pit_stop_shows_box():
     race = rd.Race(TRACE, formation=False)
-    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 6)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 6)
     t = _drive(race, [a, b], [60, 30], 0.0, L / 30 * 1.2)            # A gains more than a lap
     row = _row(race, "B", t)
     assert row["lapped"] == 1 and row["gap_s"] is None and row["status"] == "racing", row
@@ -98,7 +98,7 @@ def t_a_lapped_car_reads_plus_n_laps_and_a_pit_stop_shows_box():
 
 def t_a_spun_car_on_the_line_is_not_in_the_box():
     race = rd.Race(TRACE, formation=False)
-    a = Car(race, "A", "a", L - 5)
+    a = Car(race, "A", "a", L - 15)
     t = _drive(race, [a], [30], 0.0, 3)
     t = _drive(race, [a], [None], t, 6)                                 # stopped on the racing line
     assert _row(race, "A", t)["status"] == "racing", "standing on track is no box stop"
@@ -106,7 +106,7 @@ def t_a_spun_car_on_the_line_is_not_in_the_box():
 
 def t_no_data_after_the_sender_goes_quiet():
     race = rd.Race(TRACE, formation=False)
-    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 50)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 50)
     t = _drive(race, [a, b], [30, 30], 0.0, 3)
     t = _drive(race, [a], [30], t, rd.NO_DATA_S + 1)
     row = _row(race, "B", t)
@@ -115,7 +115,7 @@ def t_no_data_after_the_sender_goes_quiet():
 
 def t_lap_count_finish_ends_the_leader_then_each_car_at_its_next_crossing():
     race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
-    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 400)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)
     t = _drive(race, [a, b], [50, 50], 0.0, (2 * L + 5) / 50 + 1)       # A completes lap 2
     snap = race.standings(t)
     assert snap["state"] == "finishing" and _row(race, "A", t)["finished"], snap["state"]
@@ -130,7 +130,7 @@ def t_lap_count_finish_ends_the_leader_then_each_car_at_its_next_crossing():
 
 def t_the_lap_count_counts_race_laps_after_the_formation_lap():
     race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=2)
-    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 400)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)
     t = _drive(race, [a, b], [50, 50], 0.0, (2 * L + 5) / 50 + 1)       # formation + 1 race lap
     assert race.standings(t)["state"] == "racing", "the formation lap is not one of the 2 laps"
     t = _drive(race, [a, b], [50, 50], t, L / 50)
@@ -139,14 +139,14 @@ def t_the_lap_count_counts_race_laps_after_the_formation_lap():
 
 def t_final_lap_by_time_and_finish_by_hand():
     race = rd.Race(TRACE, formation=False, finish_mode="time")
-    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 300)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 300)
     t = _drive(race, [a, b], [50, 50], 0.0, 30)
     race.final_lap(t)
     assert race.standings(t)["state"] == "final_lap"
     t = _drive(race, [a, b], [50, 50], t, L / 50 + 8)
     assert race.standings(t)["state"] == "finished"
     other = rd.Race(TRACE, formation=False, finish_mode="time")
-    c = Car(other, "C", "c", L - 5)
+    c = Car(other, "C", "c", L - 15)
     t = _drive(other, [c], [50], 0.0, 10)
     other.finish(t)
     d = _row(other, "C", t)["distance_m"]
@@ -156,20 +156,20 @@ def t_final_lap_by_time_and_finish_by_hand():
 
 def t_gt7_position_disagreeing_with_the_distance_is_flagged():
     race = rd.Race(TRACE, formation=False)
-    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 60)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
     t = _drive(race, [a, b], [30, 30], 0.0, 3, positions=lambda car: 2 if car.entry == "A" else 1)
     assert _row(race, "A", t)["position_mismatch"] and _row(race, "B", t)["position_mismatch"]
 
 
 def t_endurance_change_continues_from_the_old_cars_anchor():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
-    old, rival = Car(race, "A", "a1", L - 5, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
     t = _drive(race, [old, rival], [50, 50], 0.0, 60)
     race.open_change_window(t)
     old.box = True
     t = _drive(race, [old, rival], [None, 50], t, 3)
     anchor = _row(race, "A", t)["distance_m"]
-    new = Car(race, "A", "a2", L - 5, "Lea")                           # the next lobby's car
+    new = Car(race, "A", "a2", L - 15, "Lea")                           # the next lobby's car
     t = _drive(race, [new, rival], [40, 50], t, 4)                     # lap 1 of the new lobby
     assert _row(race, "A", t)["distance_m"] == anchor, "lap 1 of a follow-up lobby never counts"
     new.box = True
@@ -183,7 +183,7 @@ def t_endurance_change_continues_from_the_old_cars_anchor():
 
 def t_a_driver_staying_on_continues_into_the_next_lobby():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
-    car, rival = Car(race, "A", "a1", L - 5, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    car, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
     t = _drive(race, [car, rival], [50, 50], 0.0, 60)
     race.open_change_window(t)
     car.box = True
@@ -199,11 +199,11 @@ def t_a_driver_staying_on_continues_into_the_next_lobby():
 
 def t_a_box_stop_outside_the_change_window_changes_nobody():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
-    old = Car(race, "A", "a1", L - 5, "Max")
+    old = Car(race, "A", "a1", L - 15, "Max")
     t = _drive(race, [old], [50], 0.0, 30)
     old.box = True
     t = _drive(race, [old], [None], t, 3)
-    other = Car(race, "A", "a2", L - 5, "Lea")
+    other = Car(race, "A", "a2", L - 15, "Lea")
     other.box = True
     t = _drive(race, [other], [None], t, 3)
     other.box = False
@@ -215,7 +215,7 @@ def t_distance_stays_continuous_when_the_line_starts_mid_lap():
     shifted = [{"d": p["d"], "x": q["x"], "z": q["z"]}
                for p, q in zip(TRACE, TRACE[240:] + TRACE[1:241], strict=True)]
     race = rd.Race(shifted, formation=False)
-    a = Car(race, "A", "a", L - 5)
+    a = Car(race, "A", "a", L - 15)
     t, last = 0.0, None
     for _ in range(int(2.5 * L / 50)):
         t = _drive(race, [a], [50], t, 1)
@@ -226,7 +226,7 @@ def t_distance_stays_continuous_when_the_line_starts_mid_lap():
 
 def t_implausible_samples_change_nothing():
     race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
-    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 50)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 50)
     t = _drive(race, [a, b], [30, 30], 0.0, 3)
     before = _row(race, "B", t)
     x, z = _pos(b.along)
@@ -253,7 +253,7 @@ def t_implausible_samples_change_nothing():
 
 def t_history_and_quiet_connections_stay_bounded():
     race = rd.Race(TRACE, formation=False)
-    a = Car(race, "A", "a", L - 5)
+    a = Car(race, "A", "a", L - 15)
     t = 0.0
     for _ in range(rd.MAX_HISTORY + 300):            # the first 100 stand on the grid
         t += 0.001                                   # a burst far denser than HISTORY_S trims
@@ -269,7 +269,7 @@ def t_history_and_quiet_connections_stay_bounded():
 
 def t_a_long_gap_mid_lap_keeps_every_lap():
     race = rd.Race(TRACE, formation=False)
-    a = Car(race, "A", "a", L - 5)
+    a = Car(race, "A", "a", L - 15)
     t = _drive(race, [a], [50], 0.0, 10)
     a.speed = 5.0
     a.send(t)                                          # a slow last sample before the outage
@@ -282,7 +282,7 @@ def t_a_long_gap_mid_lap_keeps_every_lap():
 
 def t_practice_before_the_race_restarts_the_entry():
     race = rd.Race(TRACE, formation=False)
-    a = Car(race, "A", "a", L - 5)
+    a = Car(race, "A", "a", L - 15)
     t = _drive(race, [a], [50], 0.0, L / 50 * 2.5)      # free laps in the lobby
     assert _row(race, "A", t)["laps"] == 2
     a.along = -20.0                                     # the race grid: the counter drops to 0
@@ -294,7 +294,7 @@ def t_practice_before_the_race_restarts_the_entry():
 
 def t_an_implausible_step_keeps_the_entry_live():
     race = rd.Race(TRACE, formation=False)
-    a = Car(race, "A", "a", L - 5)
+    a = Car(race, "A", "a", L - 15)
     t = _drive(race, [a], [50], 0.0, 3)
     d = _row(race, "A", t)["distance_m"]
     for _ in range(int(rd.NO_DATA_S * HZ) + 10):
@@ -307,7 +307,7 @@ def t_an_implausible_step_keeps_the_entry_live():
 
 def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
-    old, rival = Car(race, "A", "a1", L - 5, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
     t = _drive(race, [old, rival], [50, 50], 0.0, 3 * L / 50)       # lap counters near 4
     race.open_change_window(t)
     race.final_lobby(2, t)
@@ -315,12 +315,42 @@ def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
     assert race.standings(t)["state"] == "racing", "the old lobby's counters are not the final lobby's"
     old.box = True
     t = _drive(race, [old, rival], [None, 40], t, 3)
-    new = Car(race, "A", "a2", L - 5, "Lea")
+    new = Car(race, "A", "a2", L - 15, "Lea")
     new.box = True
     t = _drive(race, [new, rival], [None, 40], t, 3)
     new.box = False
     t = _drive(race, [new, rival], [50, 40], t, (2 * L) / 50 + 2)    # its lobby counter passes 2
     assert race.standings(t)["state"] in ("finishing", "finished") and _row(race, "A", t)["finished"]
+
+
+def t_one_sender_cannot_move_the_line_or_jump_the_field():
+    race = rd.Race(TRACE, formation=False)
+    x0, z0 = _pos(L / 2)
+    for i, lap in enumerate((0, 1, 2)):                # a forged crossing in mid-lap
+        race.update("X", "x", "Forger", {"t": 0.1 * (i + 1), "lap": lap, "x": x0, "z": z0,
+                                          "speed_kmh": 0.0})
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [50, 50], 1.0, 20)
+    assert abs(_row(race, "A", t)["distance_m"] - a.along) < 5, (_row(race, "A", t), a.along)
+    late = Car(race, "C", "c", L - 15)
+    late.along = 40 * L + 100                          # claims lap 41 mid-race
+    _drive(race, [late], [50], t, 2)
+    assert _row(race, "C", t)["distance_m"] is None, "a start far ahead of the field is refused"
+
+
+def t_a_change_needs_a_fresh_lobby_counter():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old = Car(race, "A", "a1", L - 15, "Max")
+    t = _drive(race, [old], [50], 0.0, 30)
+    race.open_change_window(t)
+    old.box = True
+    t = _drive(race, [old], [None], t, 3)
+    forged = Car(race, "A", "a2", L - 15, "Lea")
+    forged.along, forged.box = 40 * L - 300, True       # leaves a box on "lap 40"
+    t = _drive(race, [forged], [None], t, 3)
+    forged.box = False
+    t = _drive(race, [forged], [40], t, 3)
+    assert _row(race, "A", t)["driver"] == "Max", "a car past lap 2 of its lobby takes over nobody"
 
 
 def t_no_line_means_no_distance():

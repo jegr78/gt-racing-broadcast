@@ -3,14 +3,18 @@
 Pure: the relay feeds every decoded sample of every driver connection with its
 receive time on one clock, and reads `standings`. GT7's lap counter reads 0 on the
 grid and steps at each crossing of the finish line. The finish line's station on the
-picked layout's line is learned from the first car that crosses it. A car's distance
-is `anchor + (lap - lap0) * L + frac - frac0`, with `frac` its position past the line:
+picked layout's line is learned per car from its own crossings; a car that has not
+crossed yet uses the medoid of the others, so one sender cannot move it for everyone.
+A car's distance is `anchor + (lap - lap0) * L + frac - frac0`, with `frac` its
+position past the line:
 the counter gives whole laps, the projection the fraction. Only near the line, where
 the counter may flip a moment before or after the projection wraps, the candidate
 nearest the predicted distance decides.
 
 - Start: with a formation lap a car's distance starts when its counter reaches 2,
-  without one when it reaches 1; the crossing times form the starting gaps.
+  without one when it reaches 1; the crossing times form the starting gaps. A sender
+  that connects later starts from its counter, at most one lap ahead of every other
+  counting car.
 - A counter that drops (a new GT7 session, such as practice before the race) restarts
   that entry in a single lobby; in endurance it holds the entry until Race Control
   rejoins it (#1113).
@@ -25,7 +29,8 @@ nearest the predicted distance decides.
 - Plausibility: every field comes from a driver's machine. A sample with a non-finite
   value, a position far off the line's area or a time before the car's last sample is
   dropped; one whose distance step is faster than MAX_SPEED_MPS only keeps the
-  connection live. Loading and paused samples only keep it live.
+  connection live. Loading and paused samples only keep it live. A car takes over
+  only with a lobby counter of at most MAX_CHANGE_LAP.
 - Finish: single lobby when the leader completes `lap_count` race laps of distance;
   endurance when the leader's car of the final lobby (it took over after the final
   stint switch) passes `lap_count` on that lobby's counter. `final_lap` ends the race
@@ -51,6 +56,7 @@ SNAP_M = 40.0               # around the line the counter may be a sample early 
 AREA_MARGIN_M = 300.0
 CAR_FORGET_S = 120.0        # a quiet connection that no entry follows is dropped
 PRUNE_EVERY_S = 10.0
+MAX_CHANGE_LAP = 2          # a car leaving a fresh lobby's box has driven at most lap 1
 
 
 class _Car:
@@ -65,6 +71,7 @@ class _Car:
         self.counting = False
         self.anchor = self.f0 = 0.0
         self.lap0 = 0
+        self.line_s = None         # the finish line's station, from this car's own crossing
 
 
 class _Entry:
@@ -100,7 +107,6 @@ class Race:
         self.multi_lobby = multi_lobby
         self.finish_mode = finish_mode
         self.lap_count = lap_count
-        self.line_s = None          # the finish line's station on the line, learned
         self._cars, self._entries = {}, {}
         self._window_until = None
         self._final_at = None       # endurance: when the final stint lobby went on air
@@ -160,16 +166,29 @@ class Race:
                      if c not in active and car.t is not None and now - car.t > CAR_FORGET_S]:
             del self._cars[conn]
 
-    def _frac(self, s):
-        return (s - self.line_s) % self.length
+    def _circ(self, a, b):
+        d = abs(a - b) % self.length
+        return min(d, self.length - d)
+
+    def _line_of(self, car):
+        """This car's line station, else the medoid of the other cars' stations."""
+        if car.line_s is not None:
+            return car.line_s
+        known = [c.line_s for c in self._cars.values() if c.line_s is not None]
+        if not known:
+            return None
+        return min(known, key=lambda a: sum(self._circ(a, b) for b in known))
+
+    def _frac(self, car, s):
+        return (s - car.line) % self.length
 
     def _raw(self, car, lap, s):
-        return car.anchor + (lap - car.lap0) * self.length + self._frac(s) - car.f0
+        return car.anchor + (lap - car.lap0) * self.length + self._frac(car, s) - car.f0
 
     def _next_distance(self, ent, car, t, lap, s):
         """The counting car's distance at this sample."""
         raw = self._raw(car, lap, s)
-        frac = self._frac(s)
+        frac = self._frac(car, s)
         if SNAP_M < frac < self.length - SNAP_M or not ent.ts:
             return raw
         # Just before the line the counter may have flipped already, just after not yet.
@@ -177,15 +196,27 @@ class Race:
         predicted = ent.distance + car.speed * max(0.0, t - ent.ts[-1])
         return min((raw, other), key=lambda v: abs(v - predicted))
 
-    def _start(self, ent, car, t, anchor, lap, s, at_line=False):
-        """Count from here. `at_line`: the counter just flipped, so the car is past the
-        line even when its projection still lies a few metres short of it."""
-        if self.line_s is None:
-            self.line_s = s                    # the first crossing marks the line
-        f0 = self._frac(s)
-        car.counting, car.anchor, car.lap0 = True, anchor, lap
-        car.f0 = f0 - self.length if at_line and f0 > self.length / 2 else f0
-        ent.distance, ent.since = anchor, t
+    def _start(self, ent, car, t, anchor, lap0, s, from_line=True):
+        """Count from here; False while no line station is known. `from_line`: the
+        distance counts from the race start line (a fresh start or a late sender);
+        otherwise from `anchor` at this spot (a driver change)."""
+        line = self._line_of(car)
+        if line is None:
+            return False
+        car.line = line
+        frac = self._frac(car, s)
+        car.counting, car.anchor, car.lap0 = True, anchor, lap0
+        car.f0 = 0.0 if from_line else frac
+        ent.distance, ent.since = self._raw(car, car.lap, s), t
+        if from_line and frac > self.length - SNAP_M:
+            ent.distance -= self.length    # the counter flipped: a few metres short is past it
+        return True
+
+    def _late_start_ok(self, ent, lap, lap0):
+        """A sender may start ahead of the start lap only up to one lap past the field."""
+        ahead = [math.floor(e.distance / self.length) for e in self._entries.values()
+                 if e is not ent and e.distance is not None]
+        return lap - lap0 <= (max(ahead) + 1 if ahead else 0)
 
     def update(self, entry, conn, name, sample):
         checked = self._valid(sample)
@@ -223,6 +254,8 @@ class Race:
                     MAX_SPEED_MPS * (t - ent.ts[-1]) + STEP_SLACK_M:
                 car.t = t                         # implausible: live, but nothing moves
                 return
+        if prev_lap is not None and lap == prev_lap + 1 and car.line_s is None:
+            car.line_s = s                        # this car's own crossing marks the line
         car.t, car.lap, car.speed, car.lateral, car.s = t, lap, speed, lateral, s
         car.position = sample.get("race_position")
         self._box(car, t)
@@ -235,9 +268,11 @@ class Race:
         if not active or ent.finished_at is not None or ent.held:
             return
         if not car.counting:
-            if lap < (2 if self.formation else 1) or (self.multi_lobby and ent.changed):
+            lap0 = 2 if self.formation else 1
+            if lap < lap0 or (self.multi_lobby and ent.changed) \
+                    or not self._late_start_ok(ent, lap, lap0) \
+                    or not self._start(ent, car, t, 0.0, lap0, s):
                 return
-            self._start(ent, car, t, 0.0, lap, s, at_line=True)
         elif distance is not None:
             ent.distance = distance
         ent.ts.append(t)
@@ -266,15 +301,16 @@ class Race:
             if window and car.in_box and ent.change_anchor is None and ent.distance is not None \
                     and not ent.changed:
                 ent.change_anchor = ent.distance
-            elif car.left_box and ent.relobby and window:
-                self._start(ent, car, t, ent.change_anchor, car.lap, car.s)
-                self._changed(ent, t)
+            elif car.left_box and ent.relobby and window and car.lap <= MAX_CHANGE_LAP:
+                if self._start(ent, car, t, ent.change_anchor, car.lap, car.s, from_line=False):
+                    self._changed(ent, t)
             elif car.left_box:
                 ent.change_anchor = None          # it drove on: a pit stop, not a change
             return
-        if car.left_box and ent.change_anchor is not None and window and self.line_s is not None:
+        if car.left_box and ent.change_anchor is not None and window \
+                and car.lap <= MAX_CHANGE_LAP \
+                and self._start(ent, car, t, ent.change_anchor, car.lap, car.s, from_line=False):
             ent.active = car.conn
-            self._start(ent, car, t, ent.change_anchor, car.lap, car.s)
             self._changed(ent, t)
 
     def _changed(self, ent, t):
