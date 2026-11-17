@@ -122,13 +122,16 @@ It never carries connection ids, corrections or who made them.
   from GT7 only when both agree within a second (3 % on long laps). The formation lap,
   lap 1 of a follow-up lobby and any lap with a start, red flag, change or move in it
   do not count.
-- **The fastest race lap** is kept across stints and survives a relay restart; the next
-  `event start` or a race reset clears it.
+- **The fastest race lap** is kept across stints and survives a relay restart on the same
+  track layout; the next `event start` or a race reset clears it. A lap faster than the
+  line allows at 120 m/s never counts. Race Control and the director can clear or set it
+  (`POST /drivers/race/fastest`).
 - **Delay**: the event setting holds the dashboard, and the stint it shows, back by up to
   120 seconds to match the commentator feed on air. Race Control and the director keep
   the live race.
 - **Qualifying**: in qualifying mode the dashboard ranks the running segment by GT7's
-  best lap, with the gap to the fastest.
+  best lap of its live senders, with the gap to the fastest; a best lap faster than the
+  line allows is ignored.
 
 ### Red flag, rejoin and corrections
 
