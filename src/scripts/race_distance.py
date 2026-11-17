@@ -31,7 +31,8 @@ nearest the predicted distance decides.
   dropped; one whose distance step is faster than MAX_SPEED_MPS only keeps the
   connection live. Loading and paused samples only keep it live. A car takes over
   only with a lobby counter of at most MAX_CHANGE_LAP.
-- Finish: single lobby when the leader completes `lap_count` race laps of distance;
+- Finish: single lobby when the leader completes `lap_count` laps of GT7's counter,
+  lap 1 (a formation lap) included, checked against its distance;
   endurance when the leader's car of the final lobby (it took over after the final
   stint switch) passes `lap_count` on that lobby's counter. `final_lap` ends the race
   at the leader's next crossing. Every other car finishes at its next crossing after
@@ -346,7 +347,7 @@ class Race:
             return
         if self.finish_mode == "laps" and self.lap_count:
             by_laps = (car.lap > self.lap_count and self._final_car(ent)) if self.multi_lobby \
-                else ent.distance >= self.lap_count * self.length - SNAP_M
+                else ent.distance >= (self.lap_count - car.lap0 + 1) * self.length - SNAP_M
         else:
             by_laps = False
         by_flag = self._final_lap_at is not None and t > self._final_lap_at

@@ -93,9 +93,9 @@ and says so. Changing the layout mid-event starts the race over.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
   while its sender has been quiet for five seconds; the entry keeps its place.
 - **Pit stops** count every box stop the car drives out of.
-- **Finish after laps**: the leader finishes on completing the lap count, counted
-  as race laps (the formation lap does not count); every other car at its next
-  crossing of the line. **Timed**: Race Control or
+- **Finish after laps**: the leader finishes on completing the lap count on GT7's
+  lap counter, lap 1 included, so a formation lap counts as in the lobby's own
+  setting; every other car at its next crossing of the line. **Timed**: Race Control or
   the director triggers **Final lap**, and the race ends at the leader's next crossing.
   The race timer never ends a race. **Finish** freezes the order at once.
 

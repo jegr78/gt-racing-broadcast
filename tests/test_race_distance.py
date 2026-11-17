@@ -128,13 +128,14 @@ def t_lap_count_finish_ends_the_leader_then_each_car_at_its_next_crossing():
     assert _row(race, "B", t)["distance_m"] == frozen, "a finished car's distance is frozen"
 
 
-def t_the_lap_count_counts_race_laps_after_the_formation_lap():
-    race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=2)
+def t_the_lap_count_follows_gt7s_counter_including_the_formation_lap():
+    race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)
-    t = _drive(race, [a, b], [50, 50], 0.0, (2 * L + 5) / 50 + 1)       # formation + 1 race lap
-    assert race.standings(t)["state"] == "racing", "the formation lap is not one of the 2 laps"
+    t = _drive(race, [a, b], [50, 50], 0.0, (2 * L + 15) / 50 + 1)      # formation + 1 race lap
+    assert race.standings(t)["state"] == "racing", "two of GT7's three laps are done"
     t = _drive(race, [a, b], [50, 50], t, L / 50)
-    assert race.standings(t)["state"] in ("finishing", "finished") and _row(race, "A", t)["finished"]
+    assert race.standings(t)["state"] in ("finishing", "finished") and _row(race, "A", t)["finished"], \
+        "GT7's lap 3 completed, the formation lap included"
 
 
 def t_final_lap_by_time_and_finish_by_hand():
