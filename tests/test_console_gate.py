@@ -1743,6 +1743,14 @@ def t_console_status_keeps_obs_and_feed_errors_from_non_directors():
     assert director["obs"]["note"] and director["feeds"]["A"]["last_error"]
 
 
+def t_the_radio_routes_need_a_sign_in_and_no_role():
+    cp = m.console_policy
+    for seg, method in ((["driver-radio"], "GET"), (["driver-radio", "request"], "POST")):
+        assert cp.decide(set(), seg, method) == cp.ALLOW, \
+            "the profile's opt-in gates the radio, no Crew role does"
+    assert cp.decide({"director"}, ["driver-radio", "nope"], "GET") == cp.NOT_FOUND
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
