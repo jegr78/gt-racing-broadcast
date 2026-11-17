@@ -6848,6 +6848,10 @@ def t_driver_invite_follows_the_event_and_regenerates():
     m._stop_driver_invite(path=path)
     assert m.event_invite_data(path=path, links=links)["active"] is False, "event stop ends the link"
     assert m.event_timing_data(path=timing, links=tlinks)["active"] is False, "and the timing link"
+    for fn, p, ln in ((m.event_invite_data, path, links), (m.event_timing_data, timing, tlinks)):
+        refused = fn(new=True, path=p, links=ln)
+        assert not refused["ok"] and "Start event" in refused["error"], refused
+        assert fn(path=p, links=ln)["active"] is False, "no link opens between events"
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):

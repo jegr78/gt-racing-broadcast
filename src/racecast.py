@@ -5878,7 +5878,11 @@ def event_invite_data(new=False, path=None, links=None):
     `path` and `links` are test seams."""
     import driver_invite
     path = path or _driver_invite_path()
-    invite = driver_invite.create(path) if new else driver_invite.current(path)
+    invite = driver_invite.current(path)
+    if new and invite is None:
+        return {"ok": False, "error": "No event is running: Start event creates the invite"}
+    if new:
+        invite = driver_invite.create(path)
     if invite is None:
         return {"ok": True, "active": False}
     return dict({"ok": True, "active": True, "created": invite["created"]},
@@ -5925,7 +5929,11 @@ def event_timing_data(new=False, path=None, links=None):
     are test seams."""
     import timing_link
     path = path or timing_link.path_in(_runtime_dir())
-    link = timing_link.create(path) if new else timing_link.current(path)
+    link = timing_link.current(path)
+    if new and link is None:
+        return {"ok": False, "error": "No event is running: Start event creates the timing link"}
+    if new:
+        link = timing_link.create(path)
     if link is None:
         return {"ok": True, "active": False}
     return dict({"ok": True, "active": True, "created": link["created"]},
@@ -5938,13 +5946,16 @@ def event_timing_cmd(rest):
     parser = argparse.ArgumentParser(
         prog="racecast event timing",
         description="Show the event's public live timing link (no login, timing data only). "
-                    "--new replaces it: the old link stops working.")
+                    "--new replaces it while an event runs: the old link stops working.")
     parser.add_argument("--new", action="store_true", help="regenerate the timing link")
     args = parser.parse_args(rest)
     _apply_active_profile_env()
     d = event_timing_data(new=args.new)
+    if not d["ok"]:
+        print(d["error"])
+        sys.exit(1)
     if not d["active"]:
-        print("No public timing link: `racecast event start` creates one, `--new` makes one now.")
+        print("No public timing link: `racecast event start` creates one.")
         return
     print("New public timing link (the old one no longer works):" if args.new
           else "Public timing link:")
@@ -5958,14 +5969,17 @@ def event_invite_cmd(rest):
     import argparse
     parser = argparse.ArgumentParser(
         prog="racecast event invite",
-        description="Show the event's driver telemetry invite link. --new replaces it: "
-                    "every driver then registers again on the new link.")
+        description="Show the event's driver telemetry invite link. --new replaces it while an "
+                    "event runs: every driver then registers again on the new link.")
     parser.add_argument("--new", action="store_true", help="regenerate the invite link")
     args = parser.parse_args(rest)
     _apply_active_profile_env()
     d = event_invite_data(new=args.new)
+    if not d["ok"]:
+        print(d["error"])
+        sys.exit(1)
     if not d["active"]:
-        print("No driver invite: `racecast event start` creates one, `--new` makes one now.")
+        print("No driver invite: `racecast event start` creates one.")
         return
     print(("New driver invite link (the old one no longer works):" if args.new
            else "Driver invite link:"))
