@@ -377,6 +377,108 @@ def t_no_line_means_no_distance():
     assert snap["state"] == "no_line" and snap["entries"][0]["distance_m"] is None, snap
 
 
+def _new_lobby(car, grid):
+    """The car's console moves to the restart lobby: it stands in the box, counter 0."""
+    car.along, car.box = grid - L, True
+
+
+def t_red_flag_anchors_and_each_car_continues_from_its_anchor():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
+    t = _drive(race, [a, b], [50, 50], 0.0, 40)
+    da, db = _row(race, "A", t)["distance_m"], _row(race, "B", t)["distance_m"]
+    race.red_flag(t, "keep")
+    t = _drive(race, [a, b], [30, 30], t, 5)                         # still moving in the old lobby
+    assert race.standings(t)["red_flag"]["mode"] == "keep"
+    assert _row(race, "A", t)["distance_m"] == da, "a red flag freezes the distance"
+    for car in (a, b):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b], [None, None], t, 3)
+    a.box = False
+    t = _drive(race, [a, b], [40, None], t, 5)                        # A leaves the box first
+    assert abs(_row(race, "A", t)["distance_m"] - (da + 200)) < 25, _row(race, "A", t)
+    assert _row(race, "B", t)["distance_m"] == db and _row(race, "B", t)["status"] == "box"
+    b.box = False
+    t = _drive(race, [a, b], [40, 40], t, 5)
+    assert abs(_row(race, "B", t)["distance_m"] - (db + 200)) < 25
+    assert _row(race, "A", t)["pit_stops"] == 0 and _row(race, "B", t)["pit_stops"] == 0, \
+        "a red flag restart is no pit stop"
+    race.release(t)
+    assert race.standings(t)["red_flag"] is None
+
+
+def t_a_neutralised_restart_levels_cars_on_the_same_lap():
+    race = rd.Race(TRACE, formation=False)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115), Car(race, "C", "c", L - 25)
+    t = _drive(race, [a, b, c], [50, 50, 25], 0.0, 160)               # C is a lap down
+    da, dc = _row(race, "A", t)["distance_m"], _row(race, "C", t)["distance_m"]
+    assert _row(race, "C", t)["lapped"] == 1
+    race.red_flag(t, "keep")
+    race.set_restart_mode("neutralise")
+    for car in (a, b, c):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b, c], [None, None, None], t, 3)
+    t = _drive(race, [a, b, c], [None, None, None], t, 0.1)
+    for car in (a, b, c):
+        car.box = False
+    t = _drive(race, [a, b, c], [40, 40, 40], t, 1)
+    ra, rb, rc = (_row(race, e, t) for e in "ABC")
+    assert abs(ra["distance_m"] - rb["distance_m"]) < 1, "cars on the same lap start level"
+    assert abs(ra["distance_m"] - (da + 40)) < 10 and abs(rc["distance_m"] - (dc + 40)) < 10, \
+        "a lapped car keeps its own lap"
+    assert [r["entry"] for r in race.standings(t)["entries"]][-1] == "C"
+
+
+def t_corrections_move_order_gaps_and_pit_stops():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
+    t = _drive(race, [a, b], [50, 50], 0.0, 30)
+    race.correct("B", 150.0, pit_stops=2)
+    rows = race.standings(t)["entries"]
+    assert [r["entry"] for r in rows] == ["B", "A"], rows
+    assert abs(rows[1]["gap_s"] - 1.0) < 0.15, f"A is 50 m behind the corrected B: {rows[1]}"
+    assert rows[0]["pit_stops"] == 2 and rows[0]["correction_m"] == 150.0
+    race.correct("B", -150.0, pit_stops=-2)
+    assert [r["entry"] for r in race.standings(t)["entries"]] == ["A", "B"]
+
+
+def t_a_rejoin_starts_the_team_at_the_leaders_distance():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    lead, gone = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 115, "Ann")
+    t = _drive(race, [lead, gone], [50, 50], 0.0, 30)
+    t = _drive(race, [lead], [50], t, 30)                               # B disconnected
+    race.rejoin("B", True)
+    race.open_change_window(t)
+    lead.box = True
+    t = _drive(race, [lead], [None], t, 3)
+    start = _row(race, "A", t)["distance_m"]
+    nxt, back = Car(race, "A", "a2", L - 15, "Lea"), Car(race, "B", "b2", L - 15, "Ben")
+    t = _drive(race, [nxt, back], [40, 40], t, 2)                       # lap 1 of the next lobby
+    nxt.box = back.box = True
+    t = _drive(race, [nxt, back], [None, None], t, 3)
+    nxt.box = False
+    t = _drive(race, [nxt, back], [40, None], t, 10)                   # B departs 10 s later
+    back.box = False
+    t = _drive(race, [nxt, back], [40, 40], t, 5)
+    rb = _row(race, "B", t)
+    assert rb["driver"] == "Ben" and abs(rb["distance_m"] - (start + 200)) < 25, (rb, start)
+    assert abs(rb["gap_s"] - 10.0) < 0.5, f"the later departure is the deficit: {rb}"
+
+
+def t_a_change_override_switches_the_team_now():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old = Car(race, "A", "a1", L - 15, "Max")
+    t = _drive(race, [old], [50], 0.0, 20)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [old, new], [50, 40], t, 2)
+    before = _row(race, "A", t)["distance_m"]
+    assert race.override_change("A", "a2", t)
+    t = _drive(race, [old, new], [50, 40], t, 5)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Lea" and abs(row["distance_m"] - (before + 200)) < 25, (row, before)
+    assert not race.override_change("A", "nobody", t), "only a connection of the team"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

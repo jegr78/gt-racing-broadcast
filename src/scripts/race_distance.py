@@ -37,6 +37,15 @@ nearest the predicted distance decides.
   stint switch) passes `lap_count` on that lobby's counter. `final_lap` ends the race
   at the leader's next crossing. Every other car finishes at its next crossing after
   the leader; `finish` freezes everything at once. The race timer never ends a race.
+- Red flag (#1113): `red_flag` freezes every entry's distance. In the restart lobby
+  (a new connection, or a counter that dropped) each car continues from its anchor
+  when it leaves the box. `keep` anchors at the frozen distance, `neutralise`
+  anchors every car of a lap at that lap's best distance. `release` ends the mode;
+  an entry still waiting resumes all the same.
+- Rejoin (endurance): a marked team's next car to leave the box inside the change
+  window starts from the leader's distance when the window opened.
+- Corrections add metres and pit stops per entry; `override_change` makes a team's
+  connection active at once, continuing from the current distance.
 """
 import bisect
 import math
@@ -74,6 +83,8 @@ class _Car:
         self.anchor = self.f0 = 0.0
         self.lap0 = 0
         self.line_s = None         # the finish line's station, from this car's own crossing
+        self.entry = None
+        self.restart_ready = False # red flag: this car is in the restart lobby
 
 
 class _Entry:
@@ -86,6 +97,11 @@ class _Entry:
         self.held = False          # endurance: the counter dropped, waiting for a rejoin
         self.relobby = False       # endurance: the same driver moved on to the next lobby
         self.since = None          # when the active car began counting
+        self.frozen = None         # red flag: the distance when it was shown
+        self.waiting = False       # red flag: not yet resumed in the restart lobby
+        self.rejoin = False
+        self.adjust = 0.0          # corrections in metres
+        self.pit_adjust = 0
         self.pit_stops = 0
         self.finished_at = None
 
@@ -116,13 +132,84 @@ class Race:
         self._finishing_at = None
         self._finished = False
         self._pruned_at = None
+        self._red = None            # {"at", "mode"} while the red flag mode runs
+        self._restart_mode = "keep"
+        self._preset = {}           # entry -> [metres, pit stops, rejoin] for entries not seen yet
+        self._window_leader = None  # the leader's distance when the change window opened
 
     # -- commands ------------------------------------------------------------------
     def open_change_window(self, now):
         if self.multi_lobby:
             self._window_until = now + CHANGE_WINDOW_S
+            self._window_leader = max((self._shown(e) for e in self._entries.values()
+                                       if e.distance is not None), default=None)
             for ent in self._entries.values():
                 ent.changed = False
+
+    def red_flag(self, now, mode):
+        """Freeze every entry; each continues from its anchor in the restart lobby."""
+        self._red = {"at": now, "mode": mode}
+        self._restart_mode = mode
+        for ent in self._entries.values():
+            if ent.waiting:
+                continue                           # a second red flag keeps the first anchor
+            ent.frozen = None
+            if ent.distance is not None and ent.finished_at is None:
+                ent.frozen, ent.waiting = ent.distance, True
+            car = self._cars.get(ent.active)
+            if car is not None:
+                car.counting = False
+        for car in self._cars.values():
+            car.restart_ready = False
+
+    def set_restart_mode(self, mode):
+        """Override the restart for entries still waiting to resume."""
+        self._restart_mode = mode
+        if self._red is not None:
+            self._red["mode"] = mode
+
+    def release(self, now):
+        self._red = None
+
+    def rejoin(self, entry, on):
+        ent = self._entries.get(entry)
+        if ent is None:
+            self._preset.setdefault(entry, [0.0, 0, False])[2] = bool(on)
+        else:
+            ent.rejoin = bool(on)
+
+    def correct(self, entry, metres=0.0, pit_stops=0):
+        """Add metres and pit stops; an entry without data yet gets them on arrival."""
+        ent = self._entries.get(entry)
+        if ent is None:
+            preset = self._preset.setdefault(entry, [0.0, 0, False])
+            preset[0] += metres
+            preset[1] += pit_stops
+        else:
+            ent.adjust += metres
+            ent.pit_adjust += pit_stops
+
+    def override_change(self, entry, conn, now):
+        """Make `conn` the team's active connection now, from the current distance."""
+        ent, car = self._entries.get(entry), self._cars.get(conn)
+        if ent is None or car is None or car.entry != entry or car.s is None \
+                or ent.distance is None:
+            return False
+        old = self._cars.get(ent.active)
+        if old is not None and old is not car:
+            old.counting = False
+        ent.active = conn
+        self._start(ent, car, now, ent.distance, car.lap, car.s, from_line=False)
+        ent.changed, ent.change_anchor, ent.held, ent.relobby = True, None, False, False
+        return True
+
+    def _anchor_of(self, ent):
+        """Where an entry continues after the red flag."""
+        if self._restart_mode == "neutralise":
+            lap = math.floor(ent.frozen / self.length)
+            return max(e.frozen for e in self._entries.values()
+                       if e.frozen is not None and math.floor(e.frozen / self.length) == lap)
+        return ent.frozen
 
     def final_lobby(self, lap_count, now):
         """Endurance: the final stint lobby is on air and runs `lap_count` laps."""
@@ -236,11 +323,14 @@ class Race:
         car = self._cars.get(conn)
         if car is not None and car.t is not None and t < car.t:
             return                                # older than what this car already sent
-        if car is None:
-            car = self._cars[conn] = _Car(conn, name)
         ent = self._entries.get(entry)
         if ent is None:
             ent = self._entries[entry] = _Entry(entry, conn)
+            ent.adjust, ent.pit_adjust, ent.rejoin = self._preset.pop(entry, [0.0, 0, False])
+        if car is None:
+            car = self._cars[conn] = _Car(conn, name)
+            car.entry = entry
+            car.restart_ready = ent.waiting                # it joined the restart lobby
         if sample.get("loading") or sample.get("paused") or self._line is None \
                 or x is None or lap is None:
             car.t = t
@@ -248,7 +338,9 @@ class Race:
         _i, lateral, s = self._line.locate(x, z)
         active = conn == ent.active
         prev_lap = car.lap
-        if active and prev_lap is not None and lap < prev_lap and ent.finished_at is None:
+        if prev_lap is not None and lap < prev_lap and ent.waiting:
+            car.restart_ready = True              # the restart lobby after a red flag
+        elif active and prev_lap is not None and lap < prev_lap and ent.finished_at is None:
             car.counting = False                  # a new GT7 session on this console
             if self.multi_lobby and ent.change_anchor is not None:
                 ent.relobby = True
@@ -270,6 +362,16 @@ class Race:
         self._box(car, t)
         if active and car.left_box and car.counting:
             ent.pit_stops += 1
+        if ent.waiting:
+            if car.restart_ready and car.left_box and lap <= MAX_CHANGE_LAP:
+                old = self._cars.get(ent.active)
+                if old is not None and old is not car:
+                    old.counting = False
+                if self._start(ent, car, t, self._anchor_of(ent), lap, s, from_line=False):
+                    ent.active, ent.waiting, ent.held = conn, False, False
+                    ent.ts.append(t)
+                    ent.ds.append(ent.distance)
+            return
         if self.multi_lobby:
             self._change(ent, car, t)
             if conn != ent.active or not active:
@@ -306,6 +408,16 @@ class Race:
 
     def _change(self, ent, car, t):
         window = self._window_until is not None and t <= self._window_until
+        if ent.rejoin and window and car.left_box and car.lap <= MAX_CHANGE_LAP \
+                and self._window_leader is not None:
+            old = self._cars.get(ent.active)
+            if old is not None and old is not car:
+                old.counting = False
+            if self._start(ent, car, t, self._window_leader - ent.adjust, car.lap, car.s,
+                           from_line=False):
+                ent.active, ent.rejoin = car.conn, False
+                self._changed(ent, t)
+            return
         if car.conn == ent.active:
             if window and car.in_box and ent.change_anchor is None and ent.distance is not None \
                     and not ent.changed:
@@ -355,6 +467,9 @@ class Race:
             ent.finished_at = self._finishing_at = t
             self._finished = len(self._entries) == 1
 
+    def _shown(self, ent):
+        return None if ent.distance is None else ent.distance + ent.adjust
+
     def _quiet(self, ent, now):
         car = self._cars.get(ent.active)
         return car is None or car.t is None or now - car.t > NO_DATA_S
@@ -388,13 +503,15 @@ class Race:
         """(laps behind, seconds behind) of `ent` relative to `ahead`."""
         if ahead.distance is None or ent.distance is None:
             return None, None
-        laps = math.floor((ahead.distance - ent.distance) / self.length)
+        laps = math.floor((self._shown(ahead) - self._shown(ent)) / self.length)
         if laps >= 1:
             return laps, None
         car = self._cars[ent.active]
         if ent.finished_at is not None and ahead.finished_at is not None:
             return 0, ent.finished_at - ahead.finished_at
-        reached = self._time_at(ahead, ent.distance)
+        if ent.waiting or ahead.waiting:
+            return 0, None                         # no running time while a red flag holds them
+        reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
         return 0, (None if reached is None else max(0.0, car.t - reached))
 
     def standings(self, now):
@@ -402,7 +519,7 @@ class Race:
 
         def key(e):
             done = e.finished_at is not None and self._finishing_at is not None
-            dist = e.distance if e.distance is not None else -math.inf
+            dist = self._shown(e) if e.distance is not None else -math.inf
             laps = math.floor(dist / self.length) if self.length and e.distance is not None else -1
             return (0, -laps, e.finished_at) if done else (1, -dist, 0)
         ents.sort(key=key)
@@ -415,20 +532,26 @@ class Race:
             if e.distance is not None and not quiet:
                 lapped, gap = self._behind(ents[0], e) if i else (0, 0)
                 interval = self._behind(ents[i - 1], e)[1] if i else None
+            shown = self._shown(e)
             rows.append({
                 "entry": e.entry, "driver": car.name, "conn": e.active,
-                "distance_m": None if e.distance is None else round(e.distance, 1),
-                "laps": max(0, math.floor(e.distance / self.length)) if e.distance is not None else 0,
+                "distance_m": None if shown is None else round(shown, 1),
+                "laps": max(0, math.floor(shown / self.length)) if shown is not None else 0,
                 "gap_s": None if lapped else (None if gap is None else round(gap, 2)),
                 "interval_s": None if interval is None else round(interval, 2),
                 "lapped": lapped or 0,
-                "status": "no_data" if quiet else ("box" if car.in_box else
-                                                   ("waiting" if e.distance is None else "racing")),
+                "status": "no_data" if quiet else "box" if car.in_box else
+                          "waiting" if e.distance is None else
+                          "red_flag" if e.waiting else "racing",
                 "finished": e.finished_at is not None,
-                "pit_stops": e.pit_stops,
+                "pit_stops": max(0, e.pit_stops + e.pit_adjust),
+                "correction_m": round(e.adjust, 1),
+                "rejoin": e.rejoin,
                 "gt7_position": car.position,
                 "position_mismatch": e.entry in mismatch})
-        return {"state": self._state(), "line_length_m": self.length, "entries": rows}
+        red = None if self._red is None else dict(self._red)
+        return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
+                "restart_mode": self._restart_mode, "entries": rows}
 
     def _mismatches(self, ordered):
         """Entries whose GT7 positions contradict the distance order (single lobby only)."""

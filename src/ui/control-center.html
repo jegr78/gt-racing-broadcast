@@ -191,7 +191,12 @@
               <option value="time">Timed: Final lap by hand</option>
             </select>
             <input id="evt-race-laps" type="number" min="1" max="999" style="width:5.5em"
-                   aria-label="Lap count" placeholder="laps"></div>
+                   aria-label="Lap count" placeholder="laps">
+            <select id="evt-race-restart" aria-label="Red flag restart (league)"
+                    title="League rule after a red flag; Race Control and the director can override it per restart">
+              <option value="keep">Red flag: keep gaps</option>
+              <option value="neutralise">Red flag: neutralise</option>
+            </select></div>
           <div class="enverr" id="evt-race-err" hidden></div>
         </section>
         <section>
@@ -1329,6 +1334,7 @@ function renderEventRace(s) {
   if (document.activeElement !== $('evt-race-mode')) $('evt-race-mode').value = s.finish_mode;
   if (document.activeElement !== $('evt-race-laps')) $('evt-race-laps').value = s.lap_count || '';
   $('evt-race-laps').hidden = s.finish_mode !== 'laps';
+  if (document.activeElement !== $('evt-race-restart')) $('evt-race-restart').value = s.restart || 'keep';
 }
 async function fetchEventRace() {
   let d;
@@ -1348,6 +1354,7 @@ async function saveEventRace(changes) {
 }
 $('evt-race-formation').addEventListener('change', e => saveEventRace({formation: e.target.checked}));
 $('evt-race-mode').addEventListener('change', e => saveEventRace({finish_mode: e.target.value}));
+$('evt-race-restart').addEventListener('change', e => saveEventRace({restart: e.target.value}));
 $('evt-race-laps').addEventListener('change', e => {
   const n = parseInt(e.target.value, 10);
   saveEventRace({lap_count: Number.isFinite(n) ? n : null});

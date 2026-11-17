@@ -190,6 +190,22 @@ def t_ingested_telemetry_becomes_the_race_order_on_the_tailnet():
         code, text, _h = _req(port, "/drivers/race/settings", json.dumps({"lap_count": 0}).encode(),
                               {"Content-Type": "application/json"})
         assert code == 400 and "lap_count" in text, (code, text)
+        hdr = {"Content-Type": "application/json"}
+        code, text, _h = _req(port, "/drivers/race/correct", json.dumps(
+            {"entry": ENTRIES[1], "metres": 200, "reason": "missed lap"}).encode(), hdr)
+        race = json.loads(text)["race"]
+        assert code == 200 and [r["entry"] for r in race["entries"]] == ENTRIES[::-1], race["entries"]
+        assert race["last_action"]["who"] == "tailnet" and race["last_action"]["action"] == "correct"
+        code, text, _h = _req(port, "/drivers/race/correct", json.dumps(
+            {"entry": ENTRIES[1], "metres": 200}).encode(), hdr)
+        assert code == 400 and "reason" in text, (code, text)
+        code, text, _h = _req(port, "/drivers/race/red-flag", json.dumps({"mode": "neutralise"}).encode(), hdr)
+        assert code == 200 and json.loads(text)["race"]["red_flag"]["mode"] == "neutralise", text
+        code, text, _h = _req(port, "/drivers/race/release", b"{}", hdr)
+        assert code == 200 and json.loads(text)["race"]["red_flag"] is None
+        code, text, _h = _req(port, "/drivers/race/change", json.dumps(
+            {"entry": ENTRIES[0], "conn": "nobody"}).encode(), hdr)
+        assert code == 400 and "sender" in text, (code, text)
         for action, state in (("final-lap", "final_lap"), ("finish", "finished"), ("reset", "waiting")):
             code, text, _h = _req(port, f"/drivers/race/{action}", b"{}", {"Content-Type": "application/json"})
             assert code == 200 and json.loads(text)["state"] == state, (action, code, text)

@@ -14,7 +14,7 @@
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
   racecast event track [ID|--clear|--list]  # the event's GT7 track layout: map and corner names from the first metre
   racecast event invite [--new]             # driver telemetry invite link (event start creates it, stop ends it)
-  racecast event race [--formation on|off] [--laps N|--time]  # driver telemetry race start and finish
+  racecast event race [--formation on|off] [--laps N|--time] [--restart keep|neutralise]  # driver telemetry race
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
@@ -5734,23 +5734,48 @@ def _driver_race_path():
     return driver_race.path_in(_runtime_dir())
 
 
-def event_race_read_data(path=None):
-    """The driver race's event settings (#1112): formation lap, finish mode, lap count."""
+def _driver_race_league_path():
+    """The league's driver race file in the active profile directory, or None."""
     import driver_race
-    return {"ok": True, "settings": driver_race.read_settings(path or _driver_race_path())}
+    active = _active_profile_name()
+    if not active:
+        return None
+    root = _env_base(IS_FROZEN, _real_executable(), HERE)
+    return os.path.join(pcfg.profiles_dir(root), active, driver_race.FILENAME)
 
 
-def event_race_write_data(changes, alive=None, post=None, path=None, foreign=None):
+def event_race_read_data(path=None, league_path=None):
+    """The driver race's event settings (#1112): formation lap, finish mode, lap count,
+    and the league's red flag restart default (#1113)."""
+    import driver_race
+    league = driver_race.read_league(league_path or _driver_race_league_path())
+    return {"ok": True, "settings": dict(driver_race.read_settings(path or _driver_race_path()),
+                                         restart=league["restart"])}
+
+
+def event_race_write_data(changes, alive=None, post=None, path=None, foreign=None,
+                          league_path=None):
     """Change the driver race settings. A relay of this profile applies them live
     (POST /drivers/race/settings, which also saves them); otherwise the file the next
     relay start reads. Returns {ok, settings, applied} or {ok: False, error}."""
     import driver_race
     if not isinstance(changes, dict):
         return {"ok": False, "error": "settings must be an object"}
+    restart = changes.get("restart")
     try:
         changes = driver_race.validate(changes)
+        if restart is not None:
+            league = league_path or _driver_race_league_path()
+            if league is None:
+                return {"ok": False, "error": "no active profile for the restart setting"}
+            restart = driver_race.write_league(league, {"restart": restart})["restart"]
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+    except OSError as exc:
+        return {"ok": False, "error": f"could not save the restart setting: {exc}"}
+    if not changes:
+        return {"ok": True, "settings": event_race_read_data(path, league_path)["settings"],
+                "applied": "profile"}
     if _relay_runs_active_profile(alive, foreign):
         post = post or _relay_post_json
         try:
@@ -5759,19 +5784,22 @@ def event_race_write_data(changes, alive=None, post=None, path=None, foreign=Non
             return {"ok": False, "error": f"relay rejected the settings: {exc}"}
         if not isinstance(res, dict) or not res.get("ok"):
             return {"ok": False, "error": f"relay rejected the settings: {(res or {}).get('error', res)}"}
-        return {"ok": True, "settings": res["settings"], "applied": "relay"}
-    try:
-        return {"ok": True, "settings": driver_race.write_settings(path or _driver_race_path(), changes),
-                "applied": "file"}
-    except OSError as exc:
-        return {"ok": False, "error": f"could not save the settings: {exc}"}
+        saved, applied = res["settings"], "relay"
+    else:
+        try:
+            saved, applied = driver_race.write_settings(path or _driver_race_path(), changes), "file"
+        except OSError as exc:
+            return {"ok": False, "error": f"could not save the settings: {exc}"}
+    league = driver_race.read_league(league_path or _driver_race_league_path())
+    return {"ok": True, "settings": dict(saved, restart=league["restart"]), "applied": applied}
 
 
 def _race_line(s):
     finish = (f"after {s['lap_count']} laps" if s["finish_mode"] == "laps" and s["lap_count"]
               else "by lap count (no count set yet)" if s["finish_mode"] == "laps"
               else "by time: Final lap ends it")
-    return (f"Driver race: formation lap {'on' if s['formation'] else 'off'}, finish {finish}")
+    return (f"Driver race: formation lap {'on' if s['formation'] else 'off'}, finish {finish}, "
+            f"red flag restart {'keeps the gaps' if s.get('restart', 'keep') == 'keep' else 'neutralises'}")
 
 
 def event_race_cmd(rest):
@@ -5788,6 +5816,9 @@ def event_race_cmd(rest):
                       help="finish when the leader completes N laps (GT7 lap counter)")
     mode.add_argument("--time", action="store_true",
                       help="timed race: Race Control or the director triggers Final lap")
+    parser.add_argument("--restart", choices=("keep", "neutralise"),
+                        help="league default after a red flag: keep the gaps or neutralise "
+                             "them (saved in the profile)")
     args = parser.parse_args(rest)
     _apply_active_profile_env()
     changes = {}
@@ -5797,6 +5828,8 @@ def event_race_cmd(rest):
         changes.update(finish_mode="laps", lap_count=args.laps)
     if args.time:
         changes["finish_mode"] = "time"
+    if args.restart:
+        changes["restart"] = args.restart
     if not changes:
         print(_race_line(event_race_read_data()["settings"]))
         return
@@ -5806,6 +5839,8 @@ def event_race_cmd(rest):
     print(_race_line(d["settings"]))
     if d["applied"] == "file":
         print("No relay runs this profile: its next relay start uses these settings.")
+    elif d["applied"] == "profile":
+        print("Saved in the profile: the next red flag uses it.")
 
 
 def _driver_invite_path():
