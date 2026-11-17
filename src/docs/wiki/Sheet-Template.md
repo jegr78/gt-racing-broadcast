@@ -143,6 +143,7 @@ are found by name; without one, fixed positions apply (**A** = URL, **B** = Stre
 | `URL` | A | The stint's live stream: a `youtube.com`/`twitch.tv` URL, or a bare YouTube channel id (`UC…`, public `/live` only), or `local:` for a stint read from the producer machine's capture card ([local capture stint](Relay-Mode#local-capture-stint)) |
 | `Streamer` *(or `Name`)* | B | Commentator name (matched to the Crew/Configuration roster) |
 | `Stint` | C | Stint label shown on the HUD (optional) |
+| `Laps` | none | Lap count of that stint lobby (optional, header mode only). Only the last row's value is used: the [driver telemetry race](Driver-Telemetry#race-order-and-gaps) finishes when the leader completes it in the final lobby; empty falls back to `racecast event race --laps` |
 
 Sample:
 

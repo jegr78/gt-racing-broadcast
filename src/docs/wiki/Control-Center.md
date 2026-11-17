@@ -67,6 +67,11 @@ the event's GT7 layout for the telemetry (see [Telemetry](Telemetry)); a layout 
 link drivers open to send their telemetry ([driver guide](Driver-Telemetry)): **Start
 event** creates it, **Stop event** ends it, **Copy** copies it and **New link** replaces
 it, after which every driver registers again.
+**Driver race** sets how the telemetry race order starts and finishes: **Formation
+lap** (distance starts on lap 2), and **Finish after laps** with the lap count or
+**Timed**, where Race Control or the director triggers Final lap
+([race order and gaps](Driver-Telemetry#race-order-and-gaps)). Same as `racecast event
+race`.
 
 #### System
 

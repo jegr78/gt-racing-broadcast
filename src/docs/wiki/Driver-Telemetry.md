@@ -74,3 +74,33 @@ quiet the sender keeps its place with a short message every five seconds.
 
 For other client developers: the ingest is a versioned HTTP contract,
 [`src/docs/design/driver-telemetry-ingest.md`](https://github.com/jegr78/gt-racing-broadcast/blob/main/src/docs/design/driver-telemetry-ingest.md).
+
+## Race order and gaps
+
+From the drivers' telemetry the relay computes the race order, the gap to the leader
+and the interval to the car ahead. It needs the event's track layout (Control Center
+Home, **Track layout**) with a downloaded racing line; without one it shows no distance
+and says so. Changing the layout mid-event starts the race over.
+
+- **Distance** counts GT7's lap counter plus the car's position along the racing line.
+  With **Formation lap** on (Home, **Driver race**), it starts when a car crosses into
+  lap 2; the crossing times then form the starting gaps. Off, it starts on lap 1.
+- **Gap and interval** are the time the car ahead needed from the same point. A car a
+  full lap or more down shows `+N L`.
+- **Box** shows while a car stands off the racing line for a moment. **No data** shows
+  while its sender has been quiet for five seconds; the entry keeps its place.
+- **Pit stops** count every box stop the car drives out of.
+- **Finish after laps**: the leader finishes on completing the lap count on GT7's lap
+  counter; every other car at its next crossing of the line. **Timed**: Race Control or
+  the director triggers **Final lap**, and the race ends at the leader's next crossing.
+  The race timer never ends a race. **Finish** freezes the order at once.
+
+In an endurance race each stint switch on air opens a window for driver changes. When
+the team's car stands in the box and the next driver's car then leaves the box of the
+next lobby, the team continues from where the old car stopped. Lap 1 of the new lobby
+before that never counts. The lap count applies to the final lobby only: the last row's
+`Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the event setting.
+
+The box detection is not yet confirmed against a recording of real pit stops. The
+producer reads the race on the tailnet at `/drivers/race`; the desks that show and
+control it come with the Race Control work.

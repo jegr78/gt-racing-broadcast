@@ -1624,7 +1624,7 @@ async function refresh() {
   if (currentView === 'home') fetchEventTitle();
   // The layout list is a local file read while the relay is down: load it once then.
   if (currentView === 'home' && ((relayUp && s.relay.http_ok) || !evtTrackLoaded)) fetchEventTrack();
-  if (currentView === 'home') fetchEventInvite();
+  if (currentView === 'home') { fetchEventInvite(); fetchEventRace(); }
   if (currentView === 'profile') fetchAssetFiles();
 }
 
