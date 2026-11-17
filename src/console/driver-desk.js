@@ -262,7 +262,7 @@
     var tyreBody = el("tbody");
     var tyreTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
       "Entry", "Compound", "Set by"].map(function (h) { return el("th", {text: h}); }))]), tyreBody])]);
-    var tyreRows = {};
+    var tyreRows = Object.create(null);   // keyed by entry name: no inherited keys
     function tyreRow(entry) {
       var sel = el("select", {"aria-label": "Tyre compound of " + entry},
                    COMPOUNDS.map(function (c) { return opt(c[0], c[1]); }));
@@ -275,7 +275,8 @@
     }
     function renderTyres(entries, compounds) {
       var rows = entries.map(function (e) {
-        var t = tyreRows[e] || tyreRow(e), c = compounds[e];
+        var t = tyreRows[e] || tyreRow(e);
+        var c = Object.prototype.hasOwnProperty.call(compounds, e) ? compounds[e] : null;
         if (document.activeElement !== t.sel) t.sel.value = c ? c.code : "";
         t.by.textContent = c ? c.who + " at " + new Date(c.ts * 1000).toLocaleTimeString() : "";
         return t.tr;
@@ -394,7 +395,7 @@
       if (multi && !focus.length) focus = Array.from(new Set(rd.rows.map(function (r) { return r.segment; })));
       readyHead.replaceChildren.apply(readyHead, [el("th", {text: "Entry"})].concat(focus.map(function (f) {
         return el("th", {text: f || "Sender"}); })));
-      var byKey = {};
+      var byKey = Object.create(null);
       rd.rows.forEach(function (r) { byKey[r.entry + "\u0000" + (multi ? r.segment : null)] = r; });
       var ready = entries.map(function (e) {
         return el("tr", {}, [el("td", {text: e})].concat(focus.map(function (f) {

@@ -393,6 +393,8 @@ def t_the_crew_sets_a_tyre_compound_that_outlives_a_driver_change():
                connections=[{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90000}}])
     svc.tick()
     assert svc.dashboard()["qualifying"][0]["compound"] == "RM", "qualifying shows it too"
+    svc.set_compound("rc:Anna", " A ", "RH")
+    assert set(svc.standings()["compounds"]) == {"A"}, "entry names are stripped"
     svc.set_compound("rc:Anna", "A", None)
     svc.tick()
     assert svc.dashboard()["qualifying"][0]["compound"] is None, "no compound shows none"

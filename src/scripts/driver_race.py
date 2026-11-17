@@ -246,7 +246,8 @@ def _saved_compounds(path):
     for entry, value in (raw.items() if isinstance(raw, dict) else ()):
         if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and isinstance(value, dict) \
                 and value.get("code") in COMPOUNDS and isinstance(value.get("who"), str) \
-                and isinstance(value.get("ts"), (int, float)) and len(out) < MAX_QUALI:
+                and isinstance(value.get("ts"), (int, float)) and math.isfinite(value["ts"]) \
+                and len(out) < MAX_QUALI:
             out[entry] = {"code": value["code"], "who": value["who"][:80], "ts": float(value["ts"])}
     return out
 
@@ -270,7 +271,7 @@ def _saved_quali(path, segment):
 def _entry_name(entry):
     if not isinstance(entry, str) or not entry.strip() or len(entry) > MAX_ENTRY:
         raise ValueError(f"entry is 1 to {MAX_ENTRY} characters")
-    return entry
+    return entry.strip()
 
 
 def _mode(mode):
