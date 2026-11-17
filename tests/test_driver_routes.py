@@ -39,13 +39,14 @@ def _req(port, path, data=None, headers=None, method=None):
         return e.code, e.read().decode(), dict(e.headers)
 
 
-def _serve(solo=True, segments=()):
+def _serve(solo=True, segments=(), clock=None):
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo)
-    hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update)
+    hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
+                            **({"clock": clock} if clock else {}))
     srv = g._serve(solo=solo, hud_source=_Hud(), driver_hub=hub, driver_invite_path=path,
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
                    sender_script_path=os.path.join(ROOT, "src", "relay", "racecast-sender.py"),
@@ -188,13 +189,15 @@ def _wire_at(pid, along, lap):
 
 
 def t_ingested_telemetry_becomes_the_race_order_on_the_tailnet():
-    srv, port, path, _hub = _serve()
+    sim = [100.0]                    # the relay's clock follows the simulated packets, not the host
+    srv, port, path, _hub = _serve(clock=lambda: sim[0])
     try:
         invite = driver_invite.create(path)["id"]
         _req(port, "/drivers/race/settings", json.dumps({"formation": False}).encode(),
              {"Content-Type": "application/json"})
         codes = {e: json.loads(_register(port, invite, entry=e, name="N")[1])["code"] for e in ENTRIES}
         for i in range(0, 600, 6):                      # ten seconds at 60 Hz, sampled at 10 Hz
+            sim[0] = 100.0 + i / 60
             for entry, behind in ((ENTRIES[0], 20.0), (ENTRIES[1], 60.0)):
                 along = 50.0 * i / 60 - behind               # from the grid across the line
                 _req(port, "/console/drive/ingest",
