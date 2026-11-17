@@ -7945,12 +7945,11 @@ def t_report_send_from_the_ui_sends_only_a_generated_report():
 
 def t_a_busy_own_relay_gets_more_than_one_probe_before_a_heal():
     answers, slept = [False, False, True], []
-    assert m._relay_responds(True, probe=lambda: answers.pop(0), sleep=slept.append) is True, \
-        "a relay busy for a few seconds is not killed off the air"
-    assert len(slept) == 2
+    busy = m._relay_responds(True, probe=lambda: answers.pop(0), sleep=slept.append)
+    assert busy is True and len(slept) == 2, "a relay busy for a few seconds is not killed off the air"
     calls = []
-    assert m._relay_responds(False, probe=lambda: calls.append(1) or False, sleep=slept.append) is False
-    assert calls == [1], "a foreign or split holder is judged on one probe"
+    foreign = m._relay_responds(False, probe=lambda: calls.append(1) or False, sleep=slept.append)
+    assert foreign is False and calls == [1], "a foreign or split holder is judged on one probe"
 
 
 if __name__ == "__main__":
