@@ -28,6 +28,11 @@ def budget_kbps(raw):
         return DEFAULT_KBPS
 
 
+def encode(raw):
+    """(etag, raw, gzip) for a response body."""
+    return '"' + hashlib.sha1(raw).hexdigest()[:16] + '"', raw, gzip.compress(raw, mtime=0)
+
+
 class TickBody:
     """One encoded payload per tick: get() -> (etag, raw_json, gzip_json)."""
 
@@ -43,8 +48,7 @@ class TickBody:
             if self._value is None or now - self._at >= self._tick_s:
                 raw = json.dumps(self._build(), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
                 if self._value is None or raw != self._value[1]:
-                    etag = '"' + hashlib.sha1(raw).hexdigest()[:16] + '"'
-                    self._value = (etag, raw, gzip.compress(raw, mtime=0))
+                    self._value = encode(raw)
                 self._at = now
             return self._value
 

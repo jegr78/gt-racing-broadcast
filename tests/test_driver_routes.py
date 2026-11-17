@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The driver telemetry routes under /console/drive and on the tailnet (#1111).
 Run: python3 tests/test_driver_routes.py"""
-import json, os, struct, sys, tempfile, time, urllib.error, urllib.request
+import gzip, json, os, struct, sys, tempfile, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -38,6 +38,24 @@ def _req(port, path, data=None, headers=None, method=None):
             return r.status, r.read().decode(), dict(r.headers)
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode(), dict(e.headers)
+
+
+def _req_raw(port, path, headers=None):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), dict(e.headers)
+
+
+def _timing_server(**extra):
+    d = tempfile.mkdtemp()
+    link_path = os.path.join(d, "timing-link.json")
+    srv, port, _path, hub = _serve(timing_link_path=link_path,
+                                   timing_page_path=os.path.join(ROOT, "src", "console", "timing.html"),
+                                   **extra)
+    return srv, port, link_path, timing_link.create(link_path)["id"], hub
 
 
 def _serve(solo=True, segments=(), clock=None, **extra):
@@ -79,13 +97,8 @@ def t_the_public_timing_link_reaches_timing_data_and_nothing_else():
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: False)
-    rps = g.m.TIMING_MAX_RPS
-    g.m.TIMING_MAX_RPS = 1                                  # ten requests per ten seconds
-    try:
-        srv = g._serve(driver_race_svc=race, timing_link_path=link_path,
-                       timing_page_path=os.path.join(ROOT, "src", "console", "timing.html"))
-    finally:
-        g.m.TIMING_MAX_RPS = rps
+    srv = g._serve(driver_race_svc=race, timing_link_path=link_path,
+                   timing_page_path=os.path.join(ROOT, "src", "console", "timing.html"))
     port = srv.server_address[1]
     try:
         assert _req(port, "/console/timing?l=x")[0] == 403, "no event, no timing link"
@@ -101,8 +114,6 @@ def t_the_public_timing_link_reaches_timing_data_and_nothing_else():
         for leak in ("conn", "https://", "visible", '"x"'):
             assert leak not in text, f"{leak} must not reach the public page"
         assert _req(port, f"/console/timing/data?l={link}", b"{}", {"Content-Type": "application/json"})[0] == 404
-        codes = [_req(port, f"/console/timing/data?l={link}")[0] for _ in range(12)]
-        assert 429 in codes, f"all viewers together share one cap: {codes}"
         assert _req(port, f"/console/race-control/drivers/timing-link?t={g._tok('dave')}")[0] == 200
         assert _req(port, "/console/drivers/race?l=" + link)[0] in (401, 403), "the link opens nothing else"
         timing_link.clear(link_path)
@@ -511,6 +522,79 @@ def t_a_failing_dashboard_tick_warns_once_per_distinct_error():
     finally:
         g.m.LOG.removeHandler(handler)
     assert len(warnings) == 3, f"one warning per distinct error and again after recovery: {warnings}"
+
+
+def t_timing_data_is_gzipped_revalidated_and_paced():
+    srv, port, _lp, link, _hub = _timing_server()
+    path = f"/console/timing/data?l={link}"
+    try:
+        st, body, h = _req_raw(port, path, {"Accept-Encoding": "gzip"})
+        assert st == 200 and h.get("Content-Encoding") == "gzip", (st, h)
+        assert json.loads(gzip.decompress(body))["v"] == 1
+        etag = h.get("ETag")
+        assert etag and float(h["X-Poll-After"]) >= 2.0, h
+        st, body, h = _req_raw(port, path, {"Accept-Encoding": "gzip", "If-None-Match": etag})
+        assert st == 304 and body == b"" and float(h["X-Poll-After"]) >= 2.0, (st, h)
+        st, body, h = _req_raw(port, path)
+        assert st == 200 and "Content-Encoding" not in h and json.loads(body)["v"] == 1, h
+        assert h.get("ETag") == etag, "plain and gzip bodies share one ETag"
+    finally:
+        srv.shutdown()
+
+
+def t_no_viewer_is_turned_away_by_load():
+    srv, port, _lp, link, _hub = _timing_server()
+    try:
+        codes = {_req_raw(port, f"/console/timing/data?l={link}")[0] for _ in range(60)}
+        assert codes <= {200, 304}, f"load stretches the interval, it never rejects: {codes}"
+    finally:
+        srv.shutdown()
+
+
+def t_ended_link_beats_a_held_etag():
+    srv, port, link_path, link, _hub = _timing_server()
+    path = f"/console/timing/data?l={link}"
+    try:
+        etag = _req_raw(port, path)[2]["ETag"]
+        timing_link.clear(link_path)
+        assert _req_raw(port, path, {"If-None-Match": etag})[0] == 403, "event stop ends the link"
+    finally:
+        srv.shutdown()
+
+
+def t_timing_page_is_gzipped_and_revalidated():
+    srv, port, _lp, link, _hub = _timing_server()
+    path = f"/console/timing?l={link}"
+    try:
+        st, body, h = _req_raw(port, path, {"Accept-Encoding": "gzip"})
+        assert st == 200 and h.get("Content-Encoding") == "gzip", (st, h)
+        assert "Live timing" in gzip.decompress(body).decode("utf-8")
+        st, body, h = _req_raw(port, path, {"If-None-Match": h["ETag"]})
+        assert st == 304 and body == b"", st
+    finally:
+        srv.shutdown()
+
+
+def t_internal_dashboard_routes_ignore_the_timing_budget():
+    kbps = g.m.TIMING_BUDGET_KBPS
+    g.m.TIMING_BUDGET_KBPS = 50
+    try:
+        srv, port, _lp, link, _hub = _timing_server()
+    finally:
+        g.m.TIMING_BUDGET_KBPS = kbps
+    try:
+        for _ in range(60):
+            _req_raw(port, f"/console/timing/data?l={link}")
+        for _ in range(2):
+            srv.race_svc.tick()
+            want = json.loads(json.dumps(srv.race_svc.dashboard() or {"v": 1, "entries": []}))
+            st, body, h = _req_raw(port, "/drivers/dashboard")
+            assert st == 200 and json.loads(body) == want, "the overlay gets the newest snapshot at once"
+            for route in ("/drivers/dashboard", "/drivers/race", "/drivers/data"):
+                st, _b, h = _req_raw(port, route)
+                assert st == 200 and "X-Poll-After" not in h and "ETag" not in h, (route, st, h)
+    finally:
+        srv.shutdown()
 
 
 def _audit_of(srv):

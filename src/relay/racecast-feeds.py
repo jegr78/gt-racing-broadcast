@@ -203,6 +203,7 @@ import gt7_track_pick  # the event's picked GT7 layout (#1129)
 import telemetry_probe  # the driver telemetry probe ingest (#1110)
 import driver_invite    # event invite link and driver codes (#1111)
 import timing_link      # the event's public live timing link (#1128)
+import timing_feed      # its shared body and upload budget
 import driver_ingest    # driver telemetry connections behind the invite (#1111)
 import driver_race      # race distance, gaps and finish from driver telemetry (#1112)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
@@ -721,15 +722,10 @@ RED_FLAG_BANNER = "Red Flag - Race Suspended"   # the HUD banner of the panel's 
 RED_FLAG_MIN_S = 2.0                            # one Race Control red flag change per person
 
 
-def _timing_max_rps(raw):
-    """RACECAST_TIMING_MAX_RPS: public timing data requests per second, all viewers together."""
-    try:
-        return max(1, min(1000, int(raw)))
-    except (TypeError, ValueError):
-        return 40                               # a 2 s poll: about 80 viewers
-
-
-TIMING_MAX_RPS = _timing_max_rps(os.environ.get("RACECAST_TIMING_MAX_RPS"))
+TIMING_BUDGET_KBPS = timing_feed.budget_kbps(os.environ.get("RACECAST_TIMING_BUDGET_KBPS"))
+PAGE_CSP = ("img-src 'self' data: https://static-cdn.jtvnw.net "
+            "https://yt3.ggpht.com https://yt4.ggpht.com")
+TIMING_ABUSE_RPS = 300                    # far above honest load, which the budget paces
 _AUTO_COVER_FALSEY = {"0", "false", "no", "off"}
 
 
@@ -12049,10 +12045,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _timing_cache = timing_link.Cache(timing_link_path) if timing_link_path else None
-    # Public timing (#1128): one cap for all viewers together, so a crowd cannot eat the
-    # producer's upload; the page backs off on 429.
-    _timing_rl = console_auth.RateLimiter(limit=TIMING_MAX_RPS * 10, window_s=10)
-    _timing_body = [None, b""]          # (snapshot, its public JSON) shared by every viewer
+    # Public timing (#1128): one body per tick for every viewer, and the poll interval
+    # stretches with the crowd so the page stays within its share of the upload.
+    _timing_rl = console_auth.RateLimiter(limit=TIMING_ABUSE_RPS * 10, window_s=10)
+    _timing_body = timing_feed.TickBody(lambda: driver_race.public_view(
+        driver_race_svc.dashboard() if driver_race_svc is not None else None))
+    _timing_budget = timing_feed.Budget(TIMING_BUDGET_KBPS)
+    _timing_page = []                   # (etag, raw, gzip) of the page, built once
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
     # Every open crew page polls the take view; one OBS read serves them all for a
@@ -12437,11 +12436,22 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             """Serve an HTML page, substituting the __RC_API_BASE__ placeholder with
             api_base ("" at the tailnet/loopback root, "/console" behind Funnel) and
             optionally setting the rc_console auth cookie scoped to cookie_path."""
+            body = self._page_bytes(path, api_base)
+            if body is None:
+                return self._send({"error": "page not found"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            return self._send_page_tail(body, cookie_token, cookie_path)
+
+        def _page_bytes(self, path, api_base=""):
+            """The page at `path` with its placeholders filled, or None when unreadable."""
             try:
                 with open(path, "rb") as fh:
                     body = fh.read()
             except OSError:
-                return self._send({"error": "page not found"}, 404)
+                return None
             body = body.replace(b"__RC_API_BASE__", (api_base or "").encode())
             oauth_flag = b"1" if (discord_client_id and discord_client_secret) else b""
             body = body.replace(b"__RC_OAUTH__", oauth_flag)
@@ -12460,19 +12470,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 except OSError:
                     event_info = b""  # Component absent from an older package.
                 body = body.replace(b"<!--__EVENT_INFO__-->", event_info)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            return body
+
+        def _send_page_tail(self, body, cookie_token, cookie_path):
             # Restrict where inline images may load from (#351 broadcast-chat
             # emotes). Only `img-src` is set -- with no default-src the page's
             # inline scripts/styles are untouched; `'self'` covers same-origin
             # program stills + HUD flag/brand assets, the two CDNs cover YouTube
             # and Twitch emotes. Defense in depth atop the builder host allowlist.
-            self.send_header(
-                "Content-Security-Policy",
-                "img-src 'self' data: https://static-cdn.jtvnw.net "
-                "https://yt3.ggpht.com https://yt4.ggpht.com")
+            self.send_header("Content-Security-Policy", PAGE_CSP)
             if cookie_token is not None and cookie_path:
                 # `Secure` only behind the HTTPS Funnel (X-Forwarded-Proto); browsers
                 # drop a Secure cookie over plain http, which would break the tailnet
@@ -14223,27 +14229,48 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "too many attempts"}, 429)
                 return self._send({"error": "this timing link is not valid (any more)"}, 403)
             if rest == []:
-                if not timing_page_path:
-                    return self._send({"error": "page not found"}, 404)
-                return self._send_page(timing_page_path, "/console")
+                if not _timing_page:
+                    page = self._page_bytes(timing_page_path, "/console") if timing_page_path else None
+                    if page is None:
+                        return self._send({"error": "page not found"}, 404)
+                    _timing_page[:] = [timing_feed.encode(page)]
+                return self._send_encoded(*_timing_page[0], "text/html; charset=utf-8",
+                                          {"Content-Security-Policy": PAGE_CSP})
             if not _timing_rl.allow("all"):
                 self.send_response(429)
                 self.send_header("Retry-After", "5")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return None
-            snap = driver_race_svc.dashboard() if driver_race_svc is not None else None
-            if _timing_body[0] is not snap or not _timing_body[1]:
-                _timing_body[:] = [snap, json.dumps(driver_race.public_view(snap), separators=(",", ":"),
-                                                    ensure_ascii=False).encode("utf-8")]
-            body = _timing_body[1]
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            interval = _timing_budget.interval()
+            sent = self._send_encoded(*_timing_body.get(), "application/json; charset=utf-8",
+                                      {"X-Poll-After": f"{interval:.1f}"})
+            _timing_budget.served(sent or timing_feed.NOT_MODIFIED_BYTES, interval)
             return None
+
+        def _send_encoded(self, etag, raw, gz, ctype, extra=None):
+            """Send a pre-encoded body: 304 on a matching If-None-Match, gzip when the
+            client takes it. Returns the body bytes sent (0 for a 304)."""
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                body = b""
+            else:
+                gzipped = "gzip" in (self.headers.get("Accept-Encoding") or "")
+                body = gz if gzipped else raw
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                if gzipped:
+                    self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+            return len(body)
 
         def _drive(self, rest, method):
             hub, invite = driver_hub, self._drive_invite()
