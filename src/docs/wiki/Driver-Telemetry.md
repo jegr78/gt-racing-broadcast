@@ -212,14 +212,15 @@ Set it up once per league:
 With a host, both pages run side by side. The Home row and the desks show the link to
 hand out (hosted by default) with the number of viewers on the host, and the other link
 below it. `racecast event timing --serve funnel` (or **Serve Funnel** in the Home row)
-switches to the Funnel link and moves the viewers on the hosted page there; `--serve
-hosted` moves the Funnel viewers to the host. If the host itself fails, its viewers move
-to the Funnel page on their own. If only the relay restarts, they stay on the hosted page
-and see "relay reconnecting".
+switches to the Funnel link and moves the viewers on the hosted page there; it needs
+Funnel switched on (`racecast funnel on`). `--serve hosted` moves the Funnel viewers to
+the host. If the host itself becomes unreachable, its viewers move to the Funnel page
+on their own, as long as Funnel is on. If the relay restarts or its machine drops off,
+they stay on the hosted page and see "relay reconnecting".
 
 The free plan allows 100,000 requests a day per Cloudflare account (reset at 00:00
-UTC). Each viewer connection costs one; the relay's updates cost about 2,200 for a 24 h
-event. That leaves room for roughly 97,000 viewer connections a day. The Home row shows
+UTC). Each viewer costs two (the page and its live connection); the relay's updates cost
+about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The Home row shows
 an estimate of today's use; it does not count other Workers on the same account, so use
 one Cloudflare account per league. Above the limit Cloudflare stops serving the hosted
 page; switch to Funnel before that.

@@ -24,7 +24,7 @@ class _EchoServer:
     """One-connection loopback WebSocket server: records the request, echoes text,
     optionally sends a ping first."""
 
-    def __init__(self, ping=False, echo=True):
+    def __init__(self, ping=False, echo=True, read_delay=0.0, close_reason=None):
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
         self.sock.listen(1)
@@ -32,6 +32,8 @@ class _EchoServer:
         self.request = b""
         self.got_pong = threading.Event()
         self.ping, self.echo = ping, echo
+        self.read_delay, self.close_reason = read_delay, close_reason
+        self.received = 0
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
@@ -46,6 +48,11 @@ class _EchoServer:
                       f"{obs_ws.accept_key(key)}\r\n\r\n").encode())
         if self.ping:
             conn.sendall(_server_frame(b"p", opcode=0x9))
+        if self.close_reason is not None:
+            conn.sendall(_server_frame(struct.pack(">H", 1000) + self.close_reason.encode(), opcode=0x8))
+        if self.read_delay:
+            import time
+            time.sleep(self.read_delay)
         buf = b""
         try:
             while True:
@@ -53,6 +60,7 @@ class _EchoServer:
                 if not data:
                     return
                 buf += data
+                self.received += len(data)
                 while True:
                     frame = obs_ws.decode_frame(buf)
                     if frame is None:
@@ -107,6 +115,34 @@ def t_ws_client_close_from_peer_raises():
     except ConnectionError:
         return
     raise AssertionError("a closed client raises ConnectionError")
+
+
+def t_ws_client_send_keeps_its_timeout_after_a_short_read():
+    srv = _EchoServer(echo=False, read_delay=1.0)
+    c = ws_client.WsClient.connect(f"ws://127.0.0.1:{srv.port}/", {}, timeout=5)
+    assert c.recv_text(timeout=0.05) is None
+    c.send_text("x" * 4_000_000)      # fills the socket buffers while the peer sleeps 1 s
+    c.close()
+
+
+def t_ws_client_close_reason_reaches_the_caller():
+    srv = _EchoServer(echo=False, close_reason="replaced by a newer publisher")
+    c = ws_client.WsClient.connect(f"ws://127.0.0.1:{srv.port}/", {}, timeout=5)
+    try:
+        c.recv_text(timeout=2)
+    except ConnectionError as e:
+        assert "replaced by a newer publisher" in str(e), str(e)
+        return
+    raise AssertionError("a close frame raises ConnectionError")
+
+
+def t_ws_client_unknown_host_is_an_oserror():
+    try:
+        ws_client.WsClient.connect("ws://name.invalid/", {}, timeout=5)
+    except OSError as e:
+        assert not isinstance(e, TimeoutError) or "resolving" in str(e), e
+        return
+    raise AssertionError("an unresolvable host fails")
 
 
 def t_ws_client_refuses_other_schemes():

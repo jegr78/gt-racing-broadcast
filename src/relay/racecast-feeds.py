@@ -11963,6 +11963,32 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
 MAX_POST_BODY = 65536
 
 
+def _funnel_watch(max_age_s=60.0):
+    """A getter for this machine's MagicDNS name while Funnel serves /console, else
+    None. It answers from a cache and refreshes in the background at most once a
+    minute, so a request never waits on the tailscale CLI."""
+    state = {"host": None, "at": None, "busy": False}
+    lock = threading.Lock()
+
+    def refresh():
+        try:
+            name = tailscale.detect_magicdns_name()
+            host = name if name and tailscale.funnel_on("/console") else None
+        except Exception:
+            host = None
+        with lock:
+            state.update(host=host, at=time.monotonic(), busy=False)
+
+    def get():
+        with lock:
+            stale = state["at"] is None or time.monotonic() - state["at"] > max_age_s
+            if stale and not state["busy"]:
+                state["busy"] = True
+                threading.Thread(target=refresh, name="funnel-watch", daemon=True).start()
+            return state["host"]
+    return get
+
+
 def _start_timing_publisher(**fns):
     """The timing host publisher thread (#1161); idle until the league has a host. It
     re-reads the host keys from the league's profile.env, so a deploy needs no restart."""
@@ -12073,9 +12099,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return "funnel"
         return timing_link.served(timing_link_path) or "hosted"
 
+    _funnel_host = funnel_host if callable(funnel_host) else (lambda: funnel_host)
+
     def _timing_funnel_url():
-        link_id = _timing_link_id()
-        return f"https://{funnel_host}/console/timing?l={link_id}" if funnel_host and link_id else None
+        """The Funnel page URL, only while Funnel serves /console (else None)."""
+        host, link_id = _funnel_host(), _timing_link_id()
+        return f"https://{host}/console/timing?l={link_id}" if host and link_id else None
 
     def _timing_hosted_url():
         pub, link_id = _timing_pub[0], _timing_link_id()
@@ -14141,6 +14170,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"active": bool(link), "id": link["id"] if link else None,
                                        "served": _timing_served(),
                                        "hosted_url": _timing_hosted_url(),
+                                       "funnel_url": _timing_funnel_url(),
                                        "host": pub.status() if pub is not None else None},
                                       no_store=True)
 
@@ -16311,7 +16341,7 @@ def main():
         driver_desk_path=driver_desk_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
-        timing_publisher=_start_timing_publisher, funnel_host=tailscale.detect_magicdns_name(),
+        timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(),
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

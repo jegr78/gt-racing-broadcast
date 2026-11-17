@@ -67,10 +67,14 @@
       const m = /^\/t\/([A-Za-z0-9_-]{16,64})\/?$/.exec(pathname);
       return m ? m[1] : null;
     },
-    // Leave the hosted page only when the host fails; a missing relay would take Funnel down too.
+    // Leave the hosted page only when the host itself is unreachable. Silence on an open
+    // socket means the relay went quiet, and Funnel runs on that same relay.
     fallbackDecision: function (s) {
       if (!s.fallback || s.publisherUp === false) return "stay";
-      return s.failedReconnects >= 3 || s.silentForS >= 20 ? "redirect" : "stay";
+      return s.failedReconnects >= 3 ? "redirect" : "stay";
+    },
+    fallbackUrl: function (url) {
+      return typeof url === "string" && /^https:\/\//.test(url) ? url : null;
     },
     fallbackTarget: function (url) {
       return url + (url.indexOf("?") >= 0 ? "&" : "?") + "from=host";
@@ -95,7 +99,7 @@
   const STATUS = {box: "Box", no_data: "No data", red_flag: "Red flag"};
   const DATA = location.pathname.replace(/\/?$/, "/data") + location.search;
   // Hosted page state: the WebSocket to the host and what it last said.
-  let sock = null, failed = 0, heard = 0, publisherUp = true, fallback = null, ended = false;
+  let sock = null, failed = 0, publisherUp = true, fallback = null, ended = false;
   // A phone starts without laps, interval and fuel; the switches bring them back.
   let hidden = new Set(window.matchMedia("(max-width: 600px)").matches ? ["laps", "int", "fuel"] : []);
   try {
@@ -250,8 +254,9 @@
     if (ageEl && got) {
       const age = Math.round(since + dataAge);
       const delay = last && last.delay_s > 0 ? " · " + last.delay_s + " s delay" : "";
-      ageEl.textContent = (publisherUp ? "" : "relay reconnecting · ") + "updated " + age + " s ago" + delay;
-      ageEl.className = !publisherUp || age > 3 * interval + 2 ? "stale" : "";
+      const quiet = !publisherUp || (HOSTED && age > 20);
+      ageEl.textContent = (quiet ? "relay reconnecting · " : "") + "updated " + age + " s ago" + delay;
+      ageEl.className = quiet || age > 3 * interval + 2 ? "stale" : "";
     }
     if (HOSTED && !ended) maybeFallBack();
   }
@@ -262,8 +267,7 @@
     $("state").textContent = "This timing link has ended.";
   }
   function maybeFallBack() {
-    const silent = heard ? (Date.now() - heard) / 1000 : 0;
-    if (LOGIC.fallbackDecision({failedReconnects: failed, silentForS: silent,
+    if (LOGIC.fallbackDecision({failedReconnects: failed,
                                 publisherUp: publisherUp, fallback: fallback}) === "redirect") {
       ended = true;
       location.replace(LOGIC.fallbackTarget(fallback));
@@ -271,14 +275,13 @@
   }
   function connect() {
     sock = new WebSocket(location.href.replace(/^http/, "ws").replace(/[?#].*$/, "").replace(/\/?$/, "/ws"));
-    sock.onopen = function () { failed = 0; heard = Date.now(); };
+    sock.onopen = function () { failed = 0; };
     sock.onmessage = function (ev) {
       let m;
       try { m = JSON.parse(ev.data); } catch (e) { return; }
-      heard = Date.now();
       if (m.t === "state") {
         publisherUp = true;
-        if (typeof m.fallback === "string") fallback = m.fallback;
+        fallback = LOGIC.fallbackUrl(m.fallback);
         got = Date.now();
         dataAge = typeof m.age_s === "number" ? m.age_s : 0;
         render(m.data); activity(m.data);

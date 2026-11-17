@@ -26,13 +26,13 @@ def t_end_and_moved_frames():
 
 
 def t_parse_host_frame_reads_ack():
-    ack = th.parse_host_frame('{"t":"ack","seq":5,"viewers":12,"conns_today":40}')
-    assert ack == {"t": "ack", "seq": 5, "viewers": 12, "conns_today": 40}, ack
+    ack = th.parse_host_frame('{"t":"ack","seq":5,"viewers":12,"requests_today":40}')
+    assert ack == {"t": "ack", "seq": 5, "viewers": 12, "requests_today": 40}, ack
 
 
 def t_parse_host_frame_rejects_unknown():
-    for text in ('{"t":"x"}', "not json", "[]", '{"t":"ack","seq":"5","viewers":1,"conns_today":1}',
-                 '{"t":"ack","seq":true,"viewers":1,"conns_today":1}'):
+    for text in ('{"t":"x"}', "not json", "[]", '{"t":"ack","seq":"5","viewers":1,"requests_today":1}',
+                 '{"t":"ack","seq":true,"viewers":1,"requests_today":1}'):
         assert th.parse_host_frame(text) is None, text
 
 

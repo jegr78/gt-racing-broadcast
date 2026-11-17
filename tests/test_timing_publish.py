@@ -105,10 +105,10 @@ def t_no_settings_no_connection():
 
 def t_ack_updates_status():
     r = _Rig()
-    r.acks.append('{"t":"ack","seq":1,"viewers":7,"conns_today":30}')
+    r.acks.append('{"t":"ack","seq":1,"viewers":7,"requests_today":30}')
     r.step()
     st = r.pub.status()
-    assert st["connected"] and st["viewers"] == 7 and st["conns_today"] == 30, st
+    assert st["connected"] and st["viewers"] == 7 and st["requests_today"] == 30, st
 
 
 def t_ack_timeout_reconnects():
@@ -173,6 +173,43 @@ def t_moved_resent_after_reconnect():
     r.step(2.0)
     r.step(2.0)
     assert {"t": "moved", "to": FALLBACK} in r.conns[-1].sent, "a new connection repeats the switch"
+
+
+def t_moved_waits_for_a_funnel_url():
+    r = _Rig()
+    url = [None]
+    r.pub._fallback_fn = lambda: url[0]
+    r.step()
+    r.served = "funnel"
+    r.step(2.0)
+    assert not [f for f in r.conns[0].sent if f["t"] == "moved" and f["to"]], "no target, no move"
+    url[0] = FALLBACK
+    r.step(2.0)
+    assert {"t": "moved", "to": FALLBACK} in r.conns[0].sent, "the move goes out once Funnel is known"
+
+
+def t_refused_upgrades_name_the_fix():
+    for status, words in (("410 Gone", "event timing --new"), ("401 Unauthorized", "timing-host deploy")):
+        r = _Rig()
+        r.fail = None
+        r.pub._connect = lambda *a, s=status, **k: (_ for _ in ()).throw(
+            ValueError(f"WebSocket upgrade refused: HTTP/1.1 {s}"))
+        r.step()
+        assert words in r.pub.status()["last_error"], (status, r.pub.status())
+
+
+def t_a_replacing_publisher_backs_off_quietly():
+    r = _Rig()
+    r.step()
+
+    def replaced(timeout):
+        raise ConnectionError("closed by the peer: replaced by a newer publisher")
+    for _ in range(3):
+        r.conns[-1].recv_text = replaced
+        r.step(100.0)
+        r.step(100.0)
+    assert len(r.log.warnings) == 1 and "another relay" in r.log.warnings[0], r.log.warnings
+    assert r.pub._backoff == tp.BACKOFF_MAX_S
 
 
 def t_connect_failure_backs_off_and_logs_once():

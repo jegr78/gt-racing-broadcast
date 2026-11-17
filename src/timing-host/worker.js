@@ -16,12 +16,16 @@ export function setPage(html) {
   PAGE = html;
 }
 
-const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
-  "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// Older Safari versions do not count wss: as 'self', so the socket origin is named too.
+function pageCsp(host) {
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+    `img-src 'self' data:; connect-src 'self' wss://${host}; base-uri 'none'; ` +
+    "form-action 'none'; frame-ancestors 'none'";
+}
 
-function text(body, status, type = "text/plain; charset=utf-8") {
+function text(body, status, type = "text/plain; charset=utf-8", host = null) {
   const headers = { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" };
-  if (type.startsWith("text/html")) headers["content-security-policy"] = PAGE_CSP;
+  if (host) headers["content-security-policy"] = pageCsp(host);
   return new Response(body, { status, headers });
 }
 
@@ -75,7 +79,7 @@ export class TimingRoom {
     this.state = null;
     this.moved = null;
     this.day = null;
-    this.connsToday = 0;
+    this.requestsToday = 0;
     this.lastPersist = 0;
   }
 
@@ -90,7 +94,7 @@ export class TimingRoom {
     this.state = (await s.get("state")) ?? null;
     this.moved = (await s.get("moved")) ?? null;
     this.day = (await s.get("day")) ?? null;
-    this.connsToday = (await s.get("conns_today")) ?? 0;
+    this.requestsToday = (await s.get("requests_today")) ?? 0;
     this.loaded = true;
   }
 
@@ -114,10 +118,12 @@ export class TimingRoom {
 
   async fetch(request) {
     await this.load();
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
     if (path.endsWith("/publish")) return this.acceptPublisher();
+    this.countRequest();
     if (path.endsWith("/ws")) return this.acceptViewer();
-    if (this.phase === "live") return text(PAGE, 200, "text/html; charset=utf-8");
+    if (this.phase === "live") return text(PAGE, 200, "text/html; charset=utf-8", url.host);
     if (this.phase === "ended") return text("this timing link has ended", 410);
     return text("unknown timing link", 404);
   }
@@ -138,22 +144,27 @@ export class TimingRoom {
     const pair = new WebSocketPair();
     const ws = pair[1];
     this.ctx.acceptWebSocket(ws, ["viewer"]);
-    const day = utcDay(this.now());
-    if (day !== this.day) {
-      this.day = day;
-      this.connsToday = 0;
-      await this.ctx.storage.put("day", day);
-    }
-    this.connsToday++;
-    await this.ctx.storage.put("conns_today", this.connsToday);
     if (this.state) ws.send(this.state);
     if (this.moved) ws.send(JSON.stringify({ t: "moved", to: this.moved }));
     if (this.publishers().length === 0) ws.send(JSON.stringify({ t: "publisher", up: false }));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
+  // Viewer page loads and socket upgrades since 00:00 UTC; stored with the state.
+  countRequest() {
+    const day = utcDay(this.now());
+    if (day !== this.day) {
+      this.day = day;
+      this.requestsToday = 0;
+    }
+    this.requestsToday++;
+  }
+
   async webSocketMessage(ws, message) {
-    if (!this.ctx.getTags(ws).includes("publisher")) return; // viewers only listen
+    if (!this.ctx.getTags(ws).includes("publisher")) {
+      ws.close(1008, "viewers only listen"); // every inbound message is billed
+      return;
+    }
     await this.load();
     let msg;
     try {
@@ -182,17 +193,24 @@ export class TimingRoom {
     if (now - this.lastPersist >= PERSIST_EVERY_MS) {
       this.lastPersist = now;
       await this.ctx.storage.put("state", raw);
+      await this.ctx.storage.put("day", this.day);
+      await this.ctx.storage.put("requests_today", this.requestsToday);
     }
     this.broadcast(raw);
     ws.send(JSON.stringify({
       t: "ack",
       seq: msg.seq,
       viewers: this.viewers().length,
-      conns_today: this.connsToday,
+      requests_today: this.requestsToday,
     }));
   }
 
   async webSocketClose(ws, _code, _reason, _clean) {
+    try {
+      ws.close(1000, "closing"); // completes the handshake on runtimes without the automatic reply
+    } catch (_e) {
+      // already closed
+    }
     if (!this.ctx.getTags(ws).includes("publisher")) return;
     await this.load();
     if (this.phase !== "live") return;

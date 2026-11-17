@@ -272,9 +272,7 @@ def _profile_env_pairs(rc):
              ("RACECAST_DISCORD_CLIENT_ID", rc.discord_client_id),
              ("RACECAST_DISCORD_CLIENT_SECRET", rc.discord_client_secret),
              ("RACECAST_DISCORD_VOICE_URL", rc.discord_voice_url),
-             ("RACECAST_TIMING_HOST_ACCOUNT_ID", rc.timing_host_account_id),
-             ("RACECAST_TIMING_HOST_API_TOKEN", rc.timing_host_api_token),
-             ("RACECAST_TIMING_HOST_PUBLISH_KEY", rc.timing_host_publish_key),
+             # The token and the publish key stay in profile.env; only the URL is shown.
              ("RACECAST_TIMING_HOST_URL", rc.timing_host_url),
              # the relay re-reads the timing host keys from here without a restart
              ("RACECAST_PROFILE_ENV_FILE",
@@ -5063,8 +5061,11 @@ def gt7_data_update_data():
 def _timing_host_sources():
     """(worker.js bytes, timing page text) from the checkout, the package or the binary."""
     worker = resource_path("timing-host/worker.js")
-    page = next(p for p in (resource_path("console/timing.html"), resource_path("timing.html"))
-                if os.path.exists(p))
+    page = next((p for p in (resource_path("console/timing.html"), resource_path("timing.html"))
+                 if os.path.exists(p)), None)
+    if page is None or not os.path.exists(worker):
+        raise FileNotFoundError("this install lacks the timing host files (timing-host/worker.js, "
+                                "timing.html): reinstall or update racecast")
     with open(worker, "rb") as fh:
         worker_src = fh.read()
     with open(page, encoding="utf-8") as fh:
@@ -5094,7 +5095,10 @@ def timing_host_deploy_data(deploy_fn=None, env=None, nudge=None):
         written = _set_env_key(path, "TIMING_HOST_PUBLISH_KEY", key)
         if not written.get("ok"):
             return {"ok": False, "error": written.get("error") or "could not store the publish key"}
-    worker_src, page_src = _timing_host_sources()
+    try:
+        worker_src, page_src = _timing_host_sources()
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
     r = (deploy_fn or timing_host_deploy.deploy)(account, token, active, worker_src, page_src, key)
     if not r.get("ok"):
         return r
@@ -6109,11 +6113,12 @@ def _nudge_relay_timing_host():
         pass  # no relay running: it reads the files at start
 
 
-def event_timing_data(new=False, serve=None, path=None, links=None, relay=None, nudge=None):
+def event_timing_data(new=False, serve=None, path=None, links=None, relay=None, nudge=None,
+                      funnel_on=None):
     """The event's public live timing link (#1128): {ok, active, funnel, tailnet, created,
     served, hosted, host}. `new` replaces it, so the old link stops working. `serve`
     (hosted|funnel, #1161) picks the link the producer hands out. `path`, `links`,
-    `relay` and `nudge` are test seams."""
+    `relay`, `nudge` and `funnel_on` are test seams."""
     import timing_host
     timing_link = timing_link_mod()
     path = path or timing_link.path_in(_runtime_dir())
@@ -6127,12 +6132,21 @@ def event_timing_data(new=False, serve=None, path=None, links=None, relay=None, 
     if link is None:
         return {"ok": True, "active": False}
     urls = (links or _timing_links)(link["id"])
-    if serve == "funnel" and not urls.get("funnel"):
-        return {"ok": False, "error": "No Funnel link: is Tailscale up with MagicDNS and Funnel on?"}
+    live = (relay or _relay_timing_link)()
+    if serve == "funnel":
+        # The running relay's view wins: it is the one that would send viewers there.
+        if live:
+            serving = bool(live.get("funnel_url"))
+        else:
+            import tailscale
+            serving = bool(urls.get("funnel")) and (funnel_on or (lambda: tailscale.funnel_on("/console")))()
+        if not serving:
+            return {"ok": False, "error": "Funnel is not serving /console: turn Funnel on first "
+                                          "(racecast funnel on), then switch."}
     if serve is not None:
         timing_link.set_served(path, serve)
         (nudge or _nudge_relay_timing_host)()
-    live = (relay or _relay_timing_link)()
+        live = (relay or _relay_timing_link)() if live else None
     if live:
         served, hosted, host = live.get("served"), live.get("hosted_url"), live.get("host")
     else:
@@ -8069,14 +8083,26 @@ def profile_env_entries_data():
         return {"ok": False, "error": f"could not read profile.env: {exc}"}
 
 
-def profile_env_write_data(entries):
+def _timing_host_values(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return {k: v for k, v in parse_env_text(fh.read()).items() if k.startswith("TIMING_HOST_")}
+
+
+def profile_env_write_data(entries, nudge=None):
     """Persist the Profile editor entries to the active profile's profile.env
     (validate + comment-preserving merge, atomic). {ok,path} or {ok:false,error}.
-    Server resolves the path from the active profile, never a client value."""
+    Server resolves the path from the active profile, never a client value. A changed
+    timing host key reaches a running relay at once (`nudge` is a test seam)."""
     active, path = _active_profile_env_strict()
     if not active:
         return {"ok": False, "error": "no active profile: create or select one first"}
-    return _write_env_file(path, entries)
+    before = _timing_host_values(path)
+    result = _write_env_file(path, entries)
+    if result.get("ok") and _timing_host_values(path) != before:
+        (nudge or _nudge_relay_timing_host)()
+    return result
 
 
 def _machine_env_value(name):

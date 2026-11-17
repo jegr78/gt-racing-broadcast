@@ -55,14 +55,14 @@ def _count(v):
 
 
 def parse_host_frame(text):
-    """The host's ack {t, seq, viewers, conns_today}, or None for anything else."""
+    """The host's ack {t, seq, viewers, requests_today}, or None for anything else."""
     try:
         doc = json.loads(text)
     except (TypeError, ValueError):
         return None
     if not isinstance(doc, dict) or doc.get("t") != "ack":
         return None
-    keys = ("seq", "viewers", "conns_today")
+    keys = ("seq", "viewers", "requests_today")
     if not all(_count(doc.get(k)) for k in keys):
         return None
     return {"t": "ack", **{k: doc[k] for k in keys}}

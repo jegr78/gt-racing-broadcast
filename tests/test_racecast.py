@@ -3058,9 +3058,9 @@ def t_timing_host_keys_injected():
                                timing_host_publish_key="key", timing_host_url="https://h",
                                profile_dir=os.path.join("p", "profiles", "demo"))
     out = m._profile_env_vars(rc)
-    assert (out["RACECAST_TIMING_HOST_ACCOUNT_ID"], out["RACECAST_TIMING_HOST_API_TOKEN"],
-            out["RACECAST_TIMING_HOST_PUBLISH_KEY"], out["RACECAST_TIMING_HOST_URL"]) == \
-        ("acc", "tok", "key", "https://h")
+    assert out["RACECAST_TIMING_HOST_URL"] == "https://h", out
+    for secret in ("acc", "tok", "key"):
+        assert secret not in out.values(), f"no child process inherits the Cloudflare credentials: {secret}"
     assert out["RACECAST_PROFILE_ENV_FILE"] == os.path.join("p", "profiles", "demo", "profile.env")
 
 
@@ -6926,7 +6926,7 @@ def t_serve_switch_stores_and_nudges_the_relay():
     path, _link, tlinks = _timing_rig()
     nudged = []
     d = m.event_timing_data(serve="funnel", path=path, links=tlinks, relay=lambda: None,
-                            nudge=lambda: nudged.append(1))
+                            nudge=lambda: nudged.append(1), funnel_on=lambda: True)
     assert d["ok"] and m.timing_link_mod().served(path) == "funnel" and nudged == [1], d
 
 
@@ -6937,6 +6937,18 @@ def t_serve_funnel_refused_without_funnel_host():
                             nudge=lambda: None)
     assert not d["ok"] and "Funnel" in d["error"], d
     assert m.timing_link_mod().served(path) is None, "a refused switch changes nothing"
+
+
+def t_serve_funnel_refused_while_funnel_is_off():
+    path, _link, tlinks = _timing_rig()
+    d = m.event_timing_data(serve="funnel", path=path, links=tlinks, relay=lambda: None,
+                            nudge=lambda: None, funnel_on=lambda: False)
+    assert not d["ok"] and "Funnel" in d["error"], d
+    live = {"served": "hosted", "hosted_url": "https://x/t/y", "host": {}, "funnel_url": None}
+    d = m.event_timing_data(serve="funnel", path=path, links=tlinks, relay=lambda: live,
+                            nudge=lambda: None, funnel_on=lambda: True)
+    assert not d["ok"], "the running relay's view of Funnel wins"
+    assert m.timing_link_mod().served(path) is None
 
 
 def t_serve_rejects_unknown_path_and_needs_an_event():
@@ -7016,6 +7028,35 @@ def t_cli_deploy_needs_account_and_token():
                                   env=("demo", path), nudge=lambda: None)
     assert not r["ok"] and "TIMING_HOST_ACCOUNT_ID" in r["error"], r
     assert "TIMING_HOST_PUBLISH_KEY" not in _read_env(path), "nothing is written without a host"
+
+
+def t_profile_save_touching_the_host_nudges_the_relay():
+    path = _host_profile("NAME=Demo\nTIMING_HOST_URL=https://h\nTIMING_HOST_PUBLISH_KEY=" + "k" * 32 + "\n")
+    nudged = []
+    saved = m._active_profile_env_strict
+    m._active_profile_env_strict = lambda: ("demo", path)
+    try:
+        m.profile_env_write_data([{"key": "NAME", "value": "Demo 2"},
+                                  {"key": "TIMING_HOST_URL", "value": "https://h"},
+                                  {"key": "TIMING_HOST_PUBLISH_KEY", "value": "k" * 32}],
+                                 nudge=lambda: nudged.append(1))
+        assert nudged == [], "an unrelated edit leaves the publisher alone"
+        m.profile_env_write_data([{"key": "NAME", "value": "Demo 2"}], nudge=lambda: nudged.append(1))
+        assert nudged == [1], "removing the host stops publishing without a relay restart"
+    finally:
+        m._active_profile_env_strict = saved
+
+
+def t_deploy_without_shipped_sources_is_a_clear_error():
+    path = _host_profile("TIMING_HOST_ACCOUNT_ID=acc\nTIMING_HOST_API_TOKEN=tok\n")
+    saved = m.resource_path
+    m.resource_path = lambda rel: os.path.join(tempfile.mkdtemp(), rel)
+    try:
+        r = m.timing_host_deploy_data(deploy_fn=lambda *a, **k: {"ok": True, "url": "x"},
+                                      env=("demo", path), nudge=lambda: None)
+    finally:
+        m.resource_path = saved
+    assert not r["ok"] and "timing" in r["error"], r
 
 
 def t_timing_host_sources_exist():

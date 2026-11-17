@@ -10,24 +10,29 @@ function eq(a, b, msg) {
   if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${msg}: ${JSON.stringify(a)} !== ${JSON.stringify(b)}`);
 }
 const F = "https://relay.example.ts.net/console/timing?l=linkAAAAAAAAAAAAAAAAAAAA";
-const base = { failedReconnects: 0, silentForS: 0, publisherUp: true, fallback: F };
+const base = { failedReconnects: 0, publisherUp: true, fallback: F };
 
 Deno.test("3 failed reconnects with a fallback redirects", () => {
   eq(L.fallbackDecision({ ...base, failedReconnects: 2 }), "stay", "two");
   eq(L.fallbackDecision({ ...base, failedReconnects: 3 }), "redirect", "three");
 });
 
-Deno.test("20 s silent open socket redirects", () => {
-  eq(L.fallbackDecision({ ...base, silentForS: 19 }), "stay", "19 s");
-  eq(L.fallbackDecision({ ...base, silentForS: 20 }), "redirect", "20 s");
+Deno.test("a silent open socket stays: the relay, not the host, went quiet", () => {
+  eq(L.fallbackDecision({ ...base }), "stay", "relay lost without a close: nothing but silence");
+});
+
+Deno.test("only https fallbacks count", () => {
+  eq(L.fallbackUrl("https://f/x"), "https://f/x", "https");
+  eq(L.fallbackUrl("javascript:alert(1)"), null, "script");
+  eq(L.fallbackUrl(null), null, "cleared");
 });
 
 Deno.test("publisher down stays on the hosted page", () => {
-  eq(L.fallbackDecision({ ...base, publisherUp: false, silentForS: 600 }), "stay", "relay restart");
+  eq(L.fallbackDecision({ ...base, publisherUp: false, failedReconnects: 9 }), "stay", "relay restart");
 });
 
 Deno.test("null fallback stays", () => {
-  eq(L.fallbackDecision({ ...base, fallback: null, failedReconnects: 9, silentForS: 99 }), "stay", "no Funnel");
+  eq(L.fallbackDecision({ ...base, fallback: null, failedReconnects: 9 }), "stay", "no Funnel");
 });
 
 Deno.test("redirect target marks the visit from the host", () => {

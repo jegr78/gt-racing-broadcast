@@ -742,6 +742,7 @@ def t_timing_link_route_reports_host():
         assert json.loads(body)["v"] == 1 and isinstance(age, float)
         assert pub.fns["link_fn"]() == link and pub.fns["served_fn"]() == "hosted"
         assert pub.fns["fallback_fn"]() == f"https://{FUNNEL_HOST}/console/timing?l={link}"
+        assert d["funnel_url"] == pub.fns["fallback_fn"](), d
     finally:
         srv.shutdown()
 
@@ -776,6 +777,39 @@ def t_funnel_data_stays_when_funnel_served_or_host_down():
             assert "moved_to" not in data, (served, connected, data)
         finally:
             srv.shutdown()
+
+
+def t_no_funnel_no_fallback_and_no_funnel_url():
+    pub = _FakePublisher()
+    srv, port, _lp, _link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=lambda: None)
+    try:
+        d = json.loads(_req(port, "/drivers/timing-link")[1])
+        assert d["funnel_url"] is None, d
+        assert pub.fns["fallback_fn"]() is None, "hosted viewers are never sent to a Funnel that is off"
+    finally:
+        srv.shutdown()
+
+
+def t_funnel_watch_reports_the_host_only_while_funnel_serves():
+    import time as _time
+    ts = g.m.tailscale
+    saved = (ts.detect_magicdns_name, ts.funnel_on)
+    calls = []
+    try:
+        ts.detect_magicdns_name = lambda *a, **k: calls.append(1) or FUNNEL_HOST
+        for on, want in ((True, FUNNEL_HOST), (False, None)):
+            ts.funnel_on = lambda *a, on=on, **k: on
+            get = g.m._funnel_watch()
+            first = get()
+            _wait_for(lambda get=get, on=on: get() is not None or not on)
+            _time.sleep(0.05)
+            assert first is None and get() == want, (on, first, get())
+        n = len(calls)
+        for _ in range(20):
+            get()
+        assert len(calls) == n, "the cache answers; no tailscale call per request"
+    finally:
+        ts.detect_magicdns_name, ts.funnel_on = saved
 
 
 def t_timing_host_reload_is_tailnet_only():

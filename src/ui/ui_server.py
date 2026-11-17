@@ -1120,9 +1120,12 @@ def make_handler(ctx):
                 if body is None:
                     return self._json({"ok": False, "error": self._body_error}, code=400)
                 try:
-                    serve = body.get("serve")
-                    if serve is not None:
-                        return self._json(ctx["event_timing"](serve=str(serve)))
+                    if body.get("serve") is not None:
+                        return self._json(ctx["event_timing"](serve=str(body["serve"])))
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not switch the timing link: {exc}"},
+                                      code=500)
+                try:
                     return self._json(ctx["event_timing"](new=body.get("new") is True))
                 except Exception as exc:
                     return self._json({"ok": False, "error": f"could not renew the timing link: {exc}"},

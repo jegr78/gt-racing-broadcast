@@ -4,6 +4,7 @@ import base64
 import os
 import socket
 import ssl
+import threading
 import time
 import urllib.parse
 
@@ -12,10 +13,30 @@ import obs_ws
 OP_TEXT, OP_CLOSE, OP_PING, OP_PONG = 0x1, 0x8, 0x9, 0xA
 
 
+def _resolve(host, port, timeout):
+    """(address, port) with the DNS lookup bounded too; create_connection's timeout is not."""
+    found, failed = [], []
+
+    def lookup():
+        try:
+            found.append(socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+        except OSError as e:
+            failed.append(e)
+    t = threading.Thread(target=lookup, daemon=True)
+    t.start()
+    t.join(timeout)
+    if failed:
+        raise failed[0]
+    if not found:
+        raise TimeoutError(f"resolving {host} timed out")
+    return found[0][0][4][:2]
+
+
 class WsClient:
-    def __init__(self, sock, buf=b""):
+    def __init__(self, sock, buf=b"", timeout=5.0):
         self._sock = sock
         self._buf = buf
+        self._timeout = timeout       # every send; a read sets its own shorter one
         self._closed = False
 
     @classmethod
@@ -27,7 +48,7 @@ class WsClient:
         tls = parts.scheme == "wss"
         port = parts.port or (443 if tls else 80)
         path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-        sock = socket.create_connection((parts.hostname, port), timeout=timeout)
+        sock = socket.create_connection(_resolve(parts.hostname, port, timeout), timeout=timeout)
         try:
             if tls:
                 ctx = ssl_context or ssl.create_default_context()
@@ -49,11 +70,12 @@ class WsClient:
         except BaseException:
             sock.close()
             raise
-        return cls(sock, rest)
+        return cls(sock, rest, timeout)
 
     def _send(self, opcode, payload):
         if self._closed:
             raise ConnectionError("WebSocket is closed")
+        self._sock.settimeout(self._timeout)
         self._sock.sendall(obs_ws.encode_frame(payload, opcode=opcode))
 
     def send_text(self, text):
@@ -74,8 +96,9 @@ class WsClient:
                 if opcode == OP_PING:
                     self._send(OP_PONG, payload)
                 elif opcode == OP_CLOSE:
+                    reason = payload[2:].decode("utf-8", "replace") if len(payload) > 2 else ""
                     self.close()
-                    raise ConnectionError("closed by the peer")
+                    raise ConnectionError("closed by the peer" + (f": {reason}" if reason else ""))
                 continue
             left = deadline - time.monotonic()
             if left <= 0:

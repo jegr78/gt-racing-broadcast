@@ -20,6 +20,20 @@ RECV_POLL_S = 0.05
 
 LOG = logging.getLogger("racecast.timing_publish")
 
+REPLACED = "another relay publishes to this timing link and took it over"
+
+
+def _explain(error):
+    """A refused or closed connection as the producer's next step."""
+    text = str(error)
+    if "410" in text:
+        return "this timing link has ended on the host: renew it with `racecast event timing --new`"
+    if "401" in text:
+        return "the host refused the publish key: run `racecast timing-host deploy` again"
+    if "replaced by a newer publisher" in text:
+        return REPLACED
+    return None
+
 
 class Publisher:
     """settings_fn() -> timing_host.Settings | None; link_fn() -> link id | None;
@@ -47,7 +61,7 @@ class Publisher:
         self._last_error = None
         self._logged_error = None
         self._viewers = 0
-        self._conns_today = 0
+        self._requests_today = 0
         self._msgs_today = 0
         self._day = None
 
@@ -68,7 +82,7 @@ class Publisher:
                     "connected": self._conn is not None,
                     "last_ack_age_s": None if self._conn is None or self._last_ack is None
                     else round(now - self._last_ack, 1),
-                    "viewers": self._viewers, "conns_today": self._conns_today,
+                    "viewers": self._viewers, "requests_today": self._requests_today,
                     "msgs_today": self._msgs_today, "last_error": self._last_error}
 
     def run(self, stop):
@@ -123,19 +137,22 @@ class Publisher:
             conn = self._connect(url, {"Authorization": f"Bearer {self._settings.key}"},
                                  timeout=SOCKET_TIMEOUT_S)
         except (OSError, ValueError) as e:
-            self._fail(f"cannot reach the timing host: {e}", now)
+            self._fail(_explain(e) or f"cannot reach the timing host: {e}", now)
             return False
         with self._lock:
             self._conn, self._conn_link = conn, link
             self._last_ack, self._last_sent, self._moved = now, None, None
-            self._backoff, self._last_error = 0.0, None
-        if self._logged_error:
+            replaced = self._logged_error == REPLACED
+            self._backoff = BACKOFF_MAX_S if replaced else 0.0
+            self._last_error = None
+        if self._logged_error and not replaced:
             self._log.info("timing host: connected")
             self._logged_error = None
         return True
 
     def _fail(self, message, now):
-        self._backoff = min(BACKOFF_MAX_S, max(BACKOFF_MIN_S, self._backoff * 2))
+        self._backoff = BACKOFF_MAX_S if message == REPLACED else \
+            min(BACKOFF_MAX_S, max(BACKOFF_MIN_S, self._backoff * 2))
         self._next_attempt = now + self._backoff
         self._error(message)
 
@@ -171,6 +188,8 @@ class Publisher:
             return
         # Also on every fresh connection: the room may still hold a redirect from before.
         to = self._fallback_fn() if served == "funnel" else None
+        if served == "funnel" and not to:
+            return                    # no Funnel URL yet: keep trying, never move viewers to nowhere
         if self._send(timing_host.moved_frame(to)):
             self._moved = served
 
@@ -190,7 +209,7 @@ class Publisher:
                 text = self._conn.recv_text(timeout=RECV_POLL_S)
             except (OSError, ConnectionError) as e:
                 self._close()
-                self._fail(f"the timing host closed the connection: {e}", self._clock())
+                self._fail(_explain(e) or f"the timing host closed the connection: {e}", self._clock())
                 return
             if text is None:
                 return
@@ -198,7 +217,7 @@ class Publisher:
             if ack is not None:
                 with self._lock:
                     self._last_ack = self._clock()
-                    self._viewers, self._conns_today = ack["viewers"], ack["conns_today"]
+                    self._viewers, self._requests_today = ack["viewers"], ack["requests_today"]
 
     def _close(self):
         conn = self._conn

@@ -1701,6 +1701,20 @@ def t_fonts_restore_route_passes_only_a_literal_true_force():
         httpd.shutdown()
 
 
+def t_api_event_timing_serve_failure_names_the_switch():
+    ctx = _ctx()
+
+    def broken(new=False, serve=None):
+        raise OSError("disk")
+    ctx["event_timing"] = broken
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/event-timing", {"serve": "funnel"})
+        assert code == 500 and "switch" in json.loads(body)["error"], body
+    finally:
+        httpd.shutdown()
+
+
 def t_api_timing_host_routes():
     httpd, port = _serve(_ctx())
     try:

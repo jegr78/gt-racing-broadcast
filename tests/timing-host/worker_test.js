@@ -196,14 +196,60 @@ Deno.test("first publish makes the room live and fans out to every viewer", asyn
   eq(b.ws.sent.at(-1).seq, 2, "viewer b");
 });
 
-Deno.test("acks every state with viewers and conns_today", async () => {
+Deno.test("requests_today counts page loads and socket upgrades", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  await worker.fetch(req(`/t/${LINK}`), env);
+  await viewer(env);
+  await publish(room, ws, state(2));
+  eq(ws.sent.at(-1).requests_today, 2, "one page load plus one socket");
+});
+
+Deno.test("requests_today is stored with the state, not per request", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  const before = room.ctx.storage.puts;
+  for (let i = 0; i < 20; i++) await viewer(env);
+  eq(room.ctx.storage.puts, before, "no storage write per viewer");
+});
+
+Deno.test("a viewer that sends is closed", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  const v = await viewer(env);
+  await room.webSocketMessage(v.ws, "hello");
+  assert(v.ws.closed, "viewers only listen");
+});
+
+Deno.test("the page CSP names the wss origin", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  const page = await worker.fetch(req(`/t/${LINK}`), env);
+  const csp = page.headers.get("content-security-policy");
+  assert(csp.includes("wss://racecast-timing-demo.example.workers.dev"), csp);
+});
+
+Deno.test("a closing socket is closed by the room", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  const v = await viewer(env);
+  await room.webSocketClose(v.ws, 1001, "", true);
+  assert(v.ws.closed, "the room completes the close handshake");
+});
+
+Deno.test("acks every state with viewers and requests_today", async () => {
   const env = makeEnv();
   const { room, ws } = await publisher(env);
   await publish(room, ws, state(1));
   await viewer(env);
   await viewer(env);
   await publish(room, ws, state(2));
-  eq(ws.sent.at(-1), { t: "ack", seq: 2, viewers: 2, conns_today: 2 }, "ack");
+  eq(ws.sent.at(-1), { t: "ack", seq: 2, viewers: 2, requests_today: 2 }, "ack");
 });
 
 Deno.test("publisher close tells viewers, reconnect tells them again", async () => {
