@@ -410,6 +410,55 @@ def t_both_desks_act_with_their_identity():
         srv.shutdown()
 
 
+class _CoverObs:
+    """OBS with one Standby Cover: reads and switches it."""
+    def __init__(self, up):
+        self.up = up
+
+    def graphic_scene(self, solo):
+        return "Stint"
+
+    def read_obs_state(self, items, _inputs):
+        return {"scene": "Stint", "sources": [{"enabled": self.up}]}, None
+
+    def set_scene_item_enabled(self, scene, source, on):
+        if source == "Standby Cover":
+            self.up = bool(on)
+        return True, None
+
+
+def t_race_control_lowers_only_a_cover_it_raised():
+    obs, hdr = _CoverObs(up=True), {"Content-Type": "application/json"}
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, obs, 0.0
+    srv, port, _path, _hub = _serve()
+    rc = g._tok("dave")
+    flag = lambda on: _req(port, f"/console/race-control/red-flag?t={rc}",
+                           json.dumps({"on": on}).encode(), hdr)
+    try:
+        assert flag(True)[0] == 200 and flag(False)[0] == 200
+        assert obs.up, "an auto-cover that was already up stays up"
+        obs.up = False
+        flag(True)
+        assert obs.up, "a raise from the desk shows the cover"
+        st, _t, _h = _req(port, "/obs/source", json.dumps(
+            {"scene": "Stint", "source": "Standby Cover", "on": True}).encode(), hdr)
+        assert st == 200
+        flag(False)
+        assert obs.up, "once the director switched the cover, the desk no longer owns it"
+        obs.up = False
+        flag(True)
+        assert _req(port, "/obs/graphic/show/Standby%20Cover")[0] == 200
+        flag(False)
+        assert obs.up, "a Companion switch of the cover ends the desk's ownership too"
+        obs.up = False
+        flag(True)
+        flag(False)
+        assert not obs.up, "the desk lowers the cover it raised"
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
 def _audit_of(srv):
     import json as _json
     with open(driver_race.audit_path_for(srv.race_svc._path), encoding="utf-8") as fh:

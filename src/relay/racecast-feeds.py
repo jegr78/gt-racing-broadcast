@@ -5493,6 +5493,8 @@ def apply_graphic(relay, obs_ws, verb, source):
             return {"ok": False, "error": f"no scene item {source!r} in {scene!r}"}, 503
         verb = "hide" if enabled else "show"
     ok, note = obs_ws.set_scene_item_enabled(scene, source, verb == "show")
+    if ok and source == STANDBY_COVER_SOURCE:
+        relay.rc_red_flag_raised = False
     payload = {"ok": bool(ok), "scene": scene, "source": source, "enabled": verb == "show"}
     if note:
         payload["note"] = str(note)
@@ -10429,6 +10431,7 @@ class Relay:
                 return
             self._cover_fired = True
             self._cover_auto_owned = True
+            self.rc_red_flag_raised = False
             LOG.warning("Auto-cover: on-air feed %s source %s -> raised Standby Cover (#495)",
                         f.name, ss)
         elif action == "lower":
@@ -14636,21 +14639,27 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # HUD banner and the race's red flag mode. Reached only under /console.
                     on = body.get("on") is not False
                     now = time.monotonic()
+                    cover, note, banner = False, "obs unavailable", {"error": "not raised here"}
                     with _red_flag_lock:
                         if now - _red_flag_last.get(who, -RED_FLAG_MIN_S) < RED_FLAG_MIN_S:
                             return self._send({"ok": False, "error": "one red flag change per 2 s"}, 429)
                         _red_flag_last[who] = now
-                        # Lowering undoes only a red flag raised here: never an auto-cover
-                        # over a dead feed (#495) or the director's own cover and banner.
+                        # Lowering undoes only a cover this route turned on: never an
+                        # auto-cover over a dead feed (#495) or the director's own.
                         owned = getattr(relay, "rc_red_flag_raised", False)
-                        relay.rc_red_flag_raised = on or False
-                    cover, note, banner = False, "obs unavailable", {"error": "not raised here"}
-                    if on or owned:
-                        if _obs_ws is not None:
-                            cover, note = relay._obs.set_scene_item_enabled(
-                                _obs_ws.graphic_scene(relay.solo), STANDBY_COVER_SOURCE, on)
-                        banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
-                                  if setup_ctl else {"error": "no Setup tab control"})
+                        if on or owned:
+                            if _obs_ws is not None:
+                                scene = _obs_ws.graphic_scene(relay.solo)
+                                state, note = relay._obs.read_obs_state([(scene, STANDBY_COVER_SOURCE)], [])
+                                was_up = bool(state and ((state.get("sources") or [{}])[0] or {}).get("enabled"))
+                                if on and was_up:
+                                    cover, note = True, None
+                                elif state is not None:
+                                    cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
+                                relay.rc_red_flag_raised = bool(on and cover and not was_up) or (
+                                    not on and not cover)
+                            banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
+                                      if setup_ctl else {"error": "no Setup tab control"})
                     race = None
                     if driver_race_svc is not None:
                         race = (driver_race_svc.red_flag(who) if on
@@ -14725,6 +14734,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     _crew_takes.forget(body.get("source"))
                     ok, note = relay._obs.set_scene_item_enabled(
                         body.get("scene"), body.get("source"), bool(body.get("on")))
+                    if ok and body.get("source") == STANDBY_COVER_SOURCE:
+                        relay.rc_red_flag_raised = False
                     return self._send({"ok": True} if ok
                                       else {"ok": False, "error": note}, 200 if ok else 503)
                 if p == ["obs", "audio"]:
