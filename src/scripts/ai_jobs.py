@@ -928,12 +928,12 @@ class Runner:
                     def send_prompt():
                         try:
                             proc.stdin.write(summary)
-                        except BrokenPipeError:
+                        except OSError:  # a closed pipe, EINVAL on Windows
                             pass  # Classify early CLI rejection from its diagnostics.
                         finally:
                             try:
                                 proc.stdin.close()
-                            except BrokenPipeError:
+                            except OSError:
                                 pass  # The CLI can exit before reading the prompt.
 
                     writer = threading.Thread(target=send_prompt, daemon=True)
