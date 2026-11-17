@@ -10,8 +10,22 @@ import ai_report_charts as charts
 import ai_report_text as text
 
 
+_URL = re.compile(r"(?:[A-Za-z][A-Za-z0-9+.-]*://|www\.)\S+|[\w.+-]+@[\w-]+\.[\w.-]+", re.IGNORECASE)
+
+
 def _markdown(value):
-    return re.sub(r"([\\`*_{}\[\]()<>#+!|])", r"\\\1", str(value))
+    """Provider text as literal Markdown: syntax escaped, bare URLs and e-mail
+    addresses as code spans, which GFM never autolinks."""
+    out, at, text_ = [], 0, str(value)
+    for m in _URL.finditer(text_):
+        out.append(re.sub(r"([\\`*_{}\[\]()<>#+!|])", r"\\\1", text_[at:m.start()]))
+        url = m.group(0)
+        fence = "``" if "`" in url else "`"
+        pad = " " if "`" in url else ""
+        out.append(fence + pad + url.replace("``", "` `") + pad + fence)
+        at = m.end()
+    out.append(re.sub(r"([\\`*_{}\[\]()<>#+!|])", r"\\\1", text_[at:]))
+    return "".join(out)
 
 
 STRINGS = {

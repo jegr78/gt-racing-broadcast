@@ -174,6 +174,15 @@ def t_comparable_lap_evidence_can_follow_the_shared_reference():
         fail(lambda:r.validate(output,package))
 
 
+def t_markdown_export_never_turns_provider_text_into_a_link():
+    import ai_report_view
+    out=ai_report_view._markdown('see https://evil.example/x and www.evil.example, then [a](b) or a.b@evil.example')
+    assert '`https://evil.example/x`' in out and '`www.evil.example,`' in out, \
+        'a bare URL is a code span, which GFM never autolinks'
+    assert '\\[a\\]\\(b\\)' in out and '`a.b@evil.example`' in out
+    assert ai_report_view._markdown('a`b https://x/`y') .count('``')==2, 'a backtick in a URL keeps the span closed'
+
+
 def t_history_checks_only_the_runs_of_the_selected_recording():
     with tempfile.TemporaryDirectory() as d:
         s,p,run,store=setup(d)
