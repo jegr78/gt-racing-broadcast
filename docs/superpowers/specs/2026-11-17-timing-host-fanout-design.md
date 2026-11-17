@@ -100,7 +100,9 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
 - Host to relay: `{"t": "ack", "seq": n, "viewers": k}` at least every 5 states. No ack for 15 s
   counts as a dead connection: the publisher closes and reconnects.
 - Relay to host: `{"t": "moved", "to": "<funnel url>"}` when the producer switches the served path
-  to Funnel (see "Choosing and switching the path").
+  to Funnel (see "Choosing and switching the path"), `{"t": "moved", "to": null}` when it switches
+  back and on every fresh publisher connection while hosted. The room keeps the last `moved` target
+  and sends it to viewers who connect later.
 - Host to viewers, besides `state` and `end`: `{"t": "publisher", "up": bool}` when the publisher
   socket closes or returns, and `{"t": "moved", "to": url}` forwarded from the relay.
 - The ack also carries `conns_today`: viewer connections this room accepted since 00:00 UTC.
