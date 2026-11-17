@@ -1789,6 +1789,7 @@ def _build_report_file(frm=None, to=None, gap=None, out=None):
     report = rbuild.build_report(bucketed, events, _report_name_map(), title,
                                  (frm, to), time.time(), host=_report_host(),
                                  telemetry=_report_telemetry(frm, to),
+                                 solo=_profile_is_solo(),
                                  **_report_backlog_thresholds())
     html = rbuild.render_html(report)
     os.makedirs(_reports_dir(), exist_ok=True)
