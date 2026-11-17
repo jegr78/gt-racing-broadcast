@@ -82,6 +82,21 @@ def t_probes():
     assert a.Adapter(config('claude'), which=lambda _: sys.executable).probe(run=Fake('claude', auth='{}'), env={})['status'] == 'auth_unknown'
 
 
+def t_probes_never_hand_league_secrets_to_the_provider_cli():
+    for provider in ('codex', 'claude'):
+        seen, fake = [], Fake(provider)
+
+        def run(argv, seen=seen, fake=fake, **kw):
+            seen.append(kw['env'])
+            return fake(argv, **kw)
+        env = {'PATH': '/usr/bin', 'HOME': '/home/x', 'RACECAST_CONSOLE_SECRET': 's1',
+               'RACECAST_DISCORD_CLIENT_SECRET': 's2', 'RACECAST_SHEET_PUSH_URL': 'https://x'}
+        assert a.Adapter(config(provider), which=lambda name: '/fake/' + name).probe(run=run, env=env)['status'] == 'ready'
+        assert seen and all(e.get('PATH') == '/usr/bin' for e in seen), seen
+        assert not any(k.startswith('RACECAST_') for e in seen for k in e), \
+            'a probe runs with the same allowlisted environment as the analysis'
+
+
 def t_invocation_and_guards():
     with tempfile.TemporaryDirectory() as d:
         pkg = Path(d) / 'package'; out = Path(d) / 'output'

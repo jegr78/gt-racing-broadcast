@@ -58,6 +58,47 @@ WINDOWS_RUNTIME_ENV = (
     "LOCALAPPDATA",
     "USERNAME",
 )
+ENV_KEYS = {
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "USERNAME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "SYSTEMROOT",
+    "WINDIR",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "PROGRAMDATA",
+    "ALLUSERSPROFILE",
+    "PROGRAMW6432",
+    "SYSTEMDRIVE",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "CODEX_HOME",
+    "CLAUDE_CONFIG_DIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+}
+
+
+def execution_env(original):
+    """Preserve installation/login locations, never profile secrets or API overrides."""
+    return {k: v for k, v in original.items() if k.upper() in ENV_KEYS}
+
+
 AUTH_ENV = {
     "codex": (
         "OPENAI_API_KEY",
@@ -331,6 +372,7 @@ class Adapter:
                 status="auth_conflict",
                 guidance="Remove API/gateway authentication overrides from the Racecast process environment; log in with the provider subscription CLI.",
             )
+        env = execution_env(env)
         try:
             code, version = _probe_command([self.executable, "--version"], run, env)
             if code or not re.search(r"\d+\.\d+\.\d+", version):

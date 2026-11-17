@@ -3762,7 +3762,9 @@ def telemetry_analyze_cmd(rest):
                 payload[key] = value
         if args.start:
             import ai_control
+            import ai_jobs
 
+            ai_jobs.interrupt_on_termination()
             try:
                 result = _ai_controller().start(payload, background=False)
             except ai_control.ControlError as exc:
@@ -10104,6 +10106,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
     print(f"Local UI service: {url}  (Ctrl+C or Stop UI service stops both interfaces)")
     if open_browser:
         _open_url(url)
+    import ai_jobs
+    ai_jobs.interrupt_on_termination()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """AI execution with real controlled subprocesses and no provider credentials."""
 import json
+import textwrap
 import os
 import subprocess
 import sys
@@ -466,6 +467,40 @@ def t_a_crash_left_job_record_stops_costing_the_lease():
         assert not runner.active_path.exists(), 'the record of a dead run goes once the lease shows it ended'
         with mock.patch.object(j.Lease, 'acquire', side_effect=AssertionError('status took the lease')):
             assert runner.status('p')['busy'] is False
+
+
+def t_a_terminated_parent_still_ends_its_provider_tree():
+    if os.name == 'nt':
+        return                                    # the kill-on-close Job Object covers Windows
+    import signal
+    child = textwrap.dedent("""
+        import subprocess, sys
+        sys.path.insert(0, sys.argv[1])
+        import ai_jobs
+        ai_jobs.interrupt_on_termination()
+        p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
+        print(p.pid, flush=True)
+        try:
+            p.wait()
+        except KeyboardInterrupt:
+            ai_jobs.terminate_tree(p)
+    """)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        parent = subprocess.Popen([sys.executable, '-c', child, str(Path(j.__file__).parent)],
+                                  stdout=subprocess.PIPE, text=True, errors='replace')
+        provider = int(parent.stdout.readline())
+        parent.send_signal(sig)
+        parent.wait(10)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(provider, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            os.kill(provider, signal.SIGKILL)
+            raise AssertionError(f'the provider outlived a {sig.name} of its parent')
 
 
 if __name__=='__main__':

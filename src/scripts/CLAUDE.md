@@ -216,7 +216,9 @@ analyze` and same-origin `/api/ai/*` callbacks. `ai_jobs` owns a machine-wide OS
 lease, freezes the profile destination, and runs one isolated provider invocation.
 Windows uses a suspended process assigned to a kill-on-close Job Object before
 execution; POSIX uses an owned process group. Both clean descendants on normal
-exit, timeout and cancellation. Output is bounded and remains incomplete until a
+exit, timeout and cancellation; on POSIX `interrupt_on_termination` turns a SIGTERM or
+SIGHUP of `racecast ui` or `telemetry analyze --start` into that same cleanup. Provider
+probes run with the same allowlisted environment as the analysis. Output is bounded and remains incomplete until a
 report validator accepts it. Run artifacts retain input, diagnostics and the same
 restricted manual invocation for deliberate retry. Settings preferences use a
 locked reload/update so concurrent agent edits are preserved.
