@@ -15,6 +15,9 @@ wins, so a counter that flips a moment before or after the line cannot jump a la
   standing in the box sets the team's anchor; another connection of the team that
   then leaves the box continues from it. Lap 1 of the follow-up lobby, driven before
   that car leaves the box, never counts.
+- Plausibility: every field comes from a driver's machine. A sample with a non-finite
+  value, a position far off the line's area, a time before the car's last sample or a
+  distance step faster than MAX_SPEED_MPS is dropped before it changes anything.
 - Finish: by lap count (the leader completes `lap_count` on its lobby's lap counter,
   lap 1 included) or by `final_lap` (the leader's next crossing); every other car at
   its next crossing after the leader; `finish` freezes everything at once. The race
@@ -32,6 +35,12 @@ BOX_HOLD_S = 1.5
 BOX_LEAVE_MPS = 2.0
 CHANGE_WINDOW_S = 600.0     # a stint switch's window closes after this, or when every team changed
 HISTORY_S = 900.0
+MAX_HISTORY = 12000         # samples per entry, a hard cap next to HISTORY_S
+MAX_SPEED_MPS = 120.0
+STEP_SLACK_M = 100.0        # projection noise and a counter flipping a moment off the line
+AREA_MARGIN_M = 300.0
+CAR_FORGET_S = 120.0        # a quiet connection that no entry follows is dropped
+PRUNE_EVERY_S = 10.0
 
 
 class _Car:
@@ -64,6 +73,12 @@ class Race:
         pts = [(p["x"], p["z"]) for p in trace] if trace else None
         self._line = _Line(pts) if pts and len(pts) >= 3 else None
         self.length = self._line.length if self._line else None
+        self._area = None
+        if self._line is not None:
+            xs, zs = [p[0] for p in pts], [p[1] for p in pts]
+            self._area = (min(xs) - AREA_MARGIN_M, max(xs) + AREA_MARGIN_M,
+                          min(zs) - AREA_MARGIN_M, max(zs) + AREA_MARGIN_M)
+        self._pruned_at = None
         self.formation = formation
         self.multi_lobby = multi_lobby
         self.finish_mode = finish_mode
@@ -92,21 +107,60 @@ class Race:
         self._finished = True
 
     # -- samples -------------------------------------------------------------------
+    @staticmethod
+    def _finite(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+    def _valid(self, sample):
+        """The sample's checked (t, lap, speed m/s, x, z); None drops it."""
+        t, lap = sample.get("t"), sample.get("lap")
+        speed, x, z = sample.get("speed_kmh") or 0.0, sample.get("x"), sample.get("z")
+        if not self._finite(t) or not self._finite(speed) or speed < 0:
+            return None
+        if lap is not None and type(lap) is not int:
+            return None
+        if x is not None or z is not None:
+            if not (self._finite(x) and self._finite(z)):
+                return None
+            a = self._area
+            if a is not None and not (a[0] <= x <= a[1] and a[2] <= z <= a[3]):
+                return None
+        return t, lap, speed / 3.6, x, z
+
+    def _prune(self, now):
+        if self._pruned_at is not None and now - self._pruned_at < PRUNE_EVERY_S:
+            return
+        self._pruned_at = now
+        active = {e.active for e in self._entries.values()}
+        for conn in [c for c, car in self._cars.items()
+                     if c not in active and car.t is not None and now - car.t > CAR_FORGET_S]:
+            del self._cars[conn]
+
     def update(self, entry, conn, name, sample):
-        t = sample["t"]
+        checked = self._valid(sample)
+        if checked is None:
+            return
+        t, lap, speed, x, z = checked
         car = self._cars.get(conn)
+        if car is not None and car.t is not None and t < car.t:
+            return                                # older than what this car already sent
         if car is None:
             car = self._cars[conn] = _Car(conn, name)
         ent = self._entries.get(entry)
         if ent is None:
             ent = self._entries[entry] = _Entry(entry, conn)
+        self._prune(t)
+        located = None
+        if self._line is not None and x is not None:
+            located = self._line.locate(x, z)
+            if lap is not None and not self._plausible(ent, car, t, lap, located[2]):
+                return
         prev_lap = car.lap
-        car.t, car.lap = t, sample.get("lap")
-        car.speed = (sample.get("speed_kmh") or 0.0) / 3.6
+        car.t, car.lap, car.speed = t, lap, speed
         car.position = sample.get("race_position")
-        if self._line is None or sample.get("x") is None:
+        if located is None:
             return
-        _i, car.lateral, car.s = self._line.locate(sample["x"], sample["z"])
+        _i, car.lateral, car.s = located
         self._box(car, t)
         if conn == ent.active and car.left_box and car.counting:
             ent.pit_stops += 1
@@ -132,8 +186,18 @@ class Race:
         if ent.ts[0] < t - HISTORY_S:
             cut = bisect.bisect_left(ent.ts, t - HISTORY_S)
             del ent.ts[:cut], ent.ds[:cut]
+        if len(ent.ts) > MAX_HISTORY:
+            del ent.ts[:len(ent.ts) - MAX_HISTORY], ent.ds[:len(ent.ds) - MAX_HISTORY]
         if crossed:
             self._crossing(ent, car, t)
+
+    def _plausible(self, ent, car, t, lap, s):
+        """False when the counting active car's next distance is out of reach."""
+        if not car.counting or car.conn != ent.active or ent.distance is None or not ent.ts:
+            return True
+        raw = car.anchor + (lap - car.lap0) * self.length + (s - car.s0)
+        step = min((raw, raw - self.length, raw + self.length), key=lambda v: abs(v - ent.distance))
+        return abs(step - ent.distance) <= MAX_SPEED_MPS * (t - ent.ts[-1]) + STEP_SLACK_M
 
     def _raw(self, car):
         return car.anchor + (car.lap - car.lap0) * self.length + (car.s - car.s0)

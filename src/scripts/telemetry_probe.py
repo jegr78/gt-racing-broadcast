@@ -143,7 +143,7 @@ class Probe:
                         sender.stats.on_parse_failure(now)
                         continue
                     # Every packet of a batch arrives at once: date each by its id.
-                    sample["mono"] = now - max(0, newest - pid) / PACKET_HZ
+                    sample["mono"] = now - min(MAX_BATCH, max(0, newest - pid)) / PACKET_HZ
                     sender.samples.append(sample)
                     fresh.append(sample)
         if self._on_sample is not None:

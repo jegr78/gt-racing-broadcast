@@ -133,8 +133,21 @@ def t_a_failing_race_hook_never_fails_the_upload():
     def boom(_reg, _sample):
         raise ValueError("bad sample")
     hub = ing.Hub(multi_lobby=lambda: False, on_sample=boom)
-    res = hub.ingest(_reg("c1"), _batch(*range(1, 7)), None)
-    assert res["ok"] and res["accepted"] == 6, res
+    import logging
+    seen = []
+
+    class Grab(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+    handler = Grab()
+    logging.getLogger("racecast.relay").addHandler(handler)
+    try:
+        for start in (1, 7, 13):
+            res = hub.ingest(_reg("c1"), _batch(*range(start, start + 6)), None)
+            assert res["ok"] and res["accepted"] == 6, res
+    finally:
+        logging.getLogger("racecast.relay").removeHandler(handler)
+    assert len(seen) == 1 and "c1" in seen[0], f"one warning per connection, not one per sample: {seen}"
 
 
 def t_reset_drops_every_connection():

@@ -198,6 +198,41 @@ def t_distance_stays_continuous_when_the_line_starts_mid_lap():
         last = d
 
 
+def t_implausible_samples_change_nothing():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [30, 30], 0.0, 3)
+    before = _row(race, "B", t)
+    x, z = _pos(b.along)
+    bad = [{"x": float("nan"), "z": z}, {"x": float("inf"), "z": z}, {"x": 1e9, "z": 1e9},
+           {"x": x, "z": z, "speed_kmh": float("nan")}, {"x": x, "z": z, "lap": 32767},
+           {"x": x, "z": z, "t": t - 30}, {"x": x, "z": z, "lap": 2.5}]
+    for over in bad:
+        sample = dict({"t": t + 0.05, "lap": b.lap(), "speed_kmh": 108.0, "race_position": None},
+                      **over)
+        race.update("B", "b", "Driver", sample)
+        row = _row(race, "B", t)
+        assert row["distance_m"] == before["distance_m"] and race.standings(t)["state"] == "racing", \
+            f"{over} must be dropped: {row}"
+    assert race._cars["b"].lap == b.lap(), "a dropped sample leaves the lap counter alone"
+
+
+def t_history_and_quiet_connections_stay_bounded():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 5)
+    t = 0.0
+    for _ in range(rd.MAX_HISTORY + 50):
+        t += 0.001                                   # a burst far denser than HISTORY_S trims
+        a.along += 0.05
+        a.speed = 50
+        a.send(t)
+    assert len(race._entries["A"].ts) == rd.MAX_HISTORY, len(race._entries["A"].ts)
+    for i in range(30):
+        race.update("A", f"gone{i}", "X", {"t": t, "lap": 1, "x": 0.0, "z": 0.0, "speed_kmh": 0})
+    _drive(race, [a], [50], t, rd.CAR_FORGET_S + rd.PRUNE_EVERY_S + 1)
+    assert set(race._cars) == {"a"}, f"quiet connections no entry follows are dropped: {set(race._cars)}"
+
+
 def t_no_line_means_no_distance():
     race = rd.Race(None, formation=False)
     a = Car(race, "A", "a", 0)

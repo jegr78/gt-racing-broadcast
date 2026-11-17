@@ -15,6 +15,8 @@ import time
 
 import telemetry_probe
 
+LOG = logging.getLogger("racecast.relay")
+
 CONTRACT = 1
 RATE_HZ = 20
 LIVE_S = 20.0         # a connection without a batch for this long frees its entry slot
@@ -46,6 +48,7 @@ class Hub:
         self._lock = threading.Lock()
         self._conns = {}        # conn -> {entry, segment, name, last}
         self._dropped = set()
+        self._hook_failed = set()
 
     def _live(self, now):
         return {c: m for c, m in self._conns.items() if now - m["last"] < LIVE_S}
@@ -102,8 +105,14 @@ class Hub:
             reg.pop("last", None)
             try:
                 self._on_sample(reg, sample)
-            except Exception:  # noqa: BLE001  the race must never break a driver's upload
-                logging.getLogger("racecast").exception("driver race: sample rejected")
+            except Exception as exc:  # noqa: BLE001  the race must never break a driver's upload
+                with self._lock:
+                    first = conn not in self._hook_failed
+                    if first and len(self._hook_failed) < 4 * self._max:
+                        self._hook_failed.add(conn)
+                if first:
+                    LOG.warning("driver race: a sample of %s failed (%s: %s); further failures "
+                                "of this connection are not logged", conn, type(exc).__name__, exc)
 
     def disconnect(self, conn):
         with self._lock:
