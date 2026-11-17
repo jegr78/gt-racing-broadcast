@@ -83,24 +83,32 @@ Home, **Track layout**) with a downloaded racing line; without one it shows no d
 and says so. Changing the layout mid-event starts the race over.
 
 - **Distance** counts GT7's lap counter plus the car's position along the racing line.
-  With **Formation lap** on (Home, **Driver race**), it starts when a car crosses into
-  lap 2; the crossing times then form the starting gaps. Off, it starts on lap 1.
+  GT7 shows lap 0 on the grid. With **Formation lap** on (Home, **Driver race**),
+  distance starts when a car crosses the line the second time; off, at the first
+  crossing. The crossing times form the starting gaps. Laps driven before the race in
+  the same lobby are dropped when GT7 resets the lap counter, and nothing counts while
+  the relay is in qualifying mode.
 - **Gap and interval** are the time the car ahead needed from the same point. A car a
   full lap or more down shows `+N L`.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
   while its sender has been quiet for five seconds; the entry keeps its place.
 - **Pit stops** count every box stop the car drives out of.
-- **Finish after laps**: the leader finishes on completing the lap count on GT7's lap
-  counter; every other car at its next crossing of the line. **Timed**: Race Control or
+- **Finish after laps**: the leader finishes on completing the lap count, counted
+  as race laps (the formation lap does not count); every other car at its next
+  crossing of the line. **Timed**: Race Control or
   the director triggers **Final lap**, and the race ends at the leader's next crossing.
   The race timer never ends a race. **Finish** freezes the order at once.
 
 In an endurance race each stint switch on air opens a window for driver changes. When
 the team's car stands in the box and the next driver's car then leaves the box of the
-next lobby, the team continues from where the old car stopped. Lap 1 of the new lobby
-before that never counts. The lap count applies to the final lobby only: the last row's
-`Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the event setting.
+next lobby, the team continues from where the old car stopped. A driver who stays on
+for the next stint does the same with one sender. Lap 1 of the new lobby before that
+never counts. The lap count applies to the final lobby only and counts that lobby's
+laps on GT7's counter, from the car that took over after the last stint switch: the
+last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
+event setting.
 
-The box detection is not yet confirmed against a recording of real pit stops. The
-producer reads the race on the tailnet at `/drivers/race`; the desks that show and
-control it come with the Race Control work.
+The box detection and the lap counter in the pit lane are not yet confirmed against a
+recording of real pit stops. The race lives in the relay's memory: a relay restart
+starts it over. The producer reads the race on the tailnet at `/drivers/race`; the
+desks that show and control it come with the Race Control work.
