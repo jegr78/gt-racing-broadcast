@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for cookie_jar.py (#615). Run: python3 tests/test_cookie_jar.py"""
-import importlib.util, os, tempfile, time
+import importlib.util, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 spec = importlib.util.spec_from_file_location(
     "cookie_jar", os.path.join(ROOT, "src", "scripts", "cookie_jar.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
@@ -113,6 +114,27 @@ def t_filter_jar_rewrites_the_file_owner_only():
             assert os.stat(p).st_mode & 0o777 == 0o600, oct(os.stat(p).st_mode)
         assert os.listdir(d) == ["yt-cookies.txt"], os.listdir(d)   # no temp file left
         assert m.filter_jar(p, "youtube") == 0                      # idempotent
+
+
+def t_filter_jar_waits_out_a_reader_holding_the_jar_on_windows():
+    import atomic_replace
+    real, calls = os.replace, []
+
+    def held_once(src, dst):
+        calls.append(dst)
+        if len(calls) == 1:
+            err = PermissionError("in use"); err.winerror = 32
+            raise err
+        real(src, dst)
+    with tempfile.TemporaryDirectory() as d:
+        p = _jar(d, BROWSER_JAR)
+        orig = atomic_replace._on_windows
+        atomic_replace._on_windows, os.replace = (lambda: True), held_once
+        try:
+            dropped = m.filter_jar(p, "youtube")
+        finally:
+            atomic_replace._on_windows, os.replace = orig, real
+        assert dropped == 8 and len(calls) == 2, "a yt-dlp read of the jar delays the refresh, it does not fail it"
 
 
 def t_filter_jar_is_none_without_a_jar():
