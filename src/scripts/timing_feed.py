@@ -29,8 +29,43 @@ def budget_kbps(raw):
 
 
 def encode(raw):
-    """(etag, raw, gzip) for a response body."""
-    return '"' + hashlib.sha1(raw).hexdigest()[:16] + '"', raw, gzip.compress(raw, mtime=0)
+    """(etag, raw, gzip, gzip_etag) for a response body; each encoding has its own strong tag."""
+    tag = hashlib.sha1(raw).hexdigest()[:16]
+    return f'"{tag}"', raw, gzip.compress(raw, mtime=0), f'"{tag}-gz"'
+
+
+def _q(params):
+    for p in params:
+        k, _, v = p.strip().partition("=")
+        if k.strip().lower() == "q":
+            try:
+                return float(v)
+            except ValueError:
+                return 0.0
+    return 1.0
+
+
+def accepts_gzip(header):
+    """True when an Accept-Encoding header takes gzip (explicitly or through *) with q > 0."""
+    explicit = star = None
+    for item in (header or "").split(","):
+        coding, *params = item.split(";")
+        coding = coding.strip().lower()
+        if coding in ("gzip", "x-gzip"):
+            explicit = _q(params) > 0
+        elif coding == "*":
+            star = _q(params) > 0
+    return explicit if explicit is not None else bool(star)
+
+
+def etag_matches(header, *etags):
+    """If-None-Match against our tags: weak comparison, lists and * as RFC 9110 says."""
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+    tags = {t.strip().removeprefix("W/") for t in header.split(",")}
+    return any(e in tags for e in etags)
 
 
 class TickBody:
@@ -40,17 +75,31 @@ class TickBody:
         self._build, self._clock, self._tick_s = build, clock, tick_s
         self._lock = threading.Lock()
         self._at = None
+        self._built = None
         self._value = None
 
     def get(self):
+        """The current body; a failing build keeps the last one and raises only without one."""
         with self._lock:
             now = self._clock()
-            if self._value is None or now - self._at >= self._tick_s:
-                raw = json.dumps(self._build(), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            if self._at is None or now - self._at >= self._tick_s:
+                self._at = now
+                try:
+                    raw = json.dumps(self._build(), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                except Exception:
+                    if self._value is None:
+                        self._at = None
+                        raise
+                    return self._value
                 if self._value is None or raw != self._value[1]:
                     self._value = encode(raw)
-                self._at = now
+                self._built = now
             return self._value
+
+    def age(self):
+        """Seconds since the body last came from a successful build."""
+        with self._lock:
+            return 0.0 if self._built is None else self._clock() - self._built
 
 
 class Budget:

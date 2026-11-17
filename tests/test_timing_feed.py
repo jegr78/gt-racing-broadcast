@@ -30,7 +30,7 @@ def t_one_build_per_tick():
 def t_etag_stable_for_same_content_and_changes_with_it():
     clock, data = _Clock(), {"v": 1, "entries": [{"pos": 1}]}
     body = tf.TickBody(lambda: data, clock=clock)
-    etag, raw, gz = body.get()
+    etag, raw, gz, _gz_etag = body.get()
     assert gzip.decompress(gz) == raw and json.loads(raw) == data
     clock.t += 2.0
     assert body.get()[0] == etag, "unchanged content keeps its ETag across ticks"
@@ -42,7 +42,7 @@ def t_etag_stable_for_same_content_and_changes_with_it():
 def t_qualifying_and_empty_payloads_pass():
     for payload in ({"v": 1, "mode": "race", "entries": []},
                     {"v": 1, "mode": "qualifying", "qualifying": [{"pos": 1, "best_ms": 90123}]}):
-        _etag, raw, _gz = tf.TickBody(lambda p=payload: p, clock=_Clock()).get()
+        raw = tf.TickBody(lambda p=payload: p, clock=_Clock()).get()[1]
         assert json.loads(raw.decode("utf-8")) == payload
 
 
@@ -74,6 +74,54 @@ def t_budget_kbps_parses_and_clamps():
     for raw, want in cases.items():
         assert tf.budget_kbps(raw) == want, (raw, tf.budget_kbps(raw))
 
+
+
+def t_gzip_only_when_accepted():
+    for header, want in (("gzip, deflate, br", True), ("br;q=1.0, gzip;q=0.8", True), ("GZIP", True),
+                         ("gzip;q=0", False), ("gzip; q=0.000", False), ("identity", False), (None, False),
+                         ("*", True), ("*;q=0", False), ("x-gzip-ish", False)):
+        assert tf.accepts_gzip(header) is want, (header, want)
+
+
+def t_etag_matching_follows_if_none_match():
+    e, g = '"abc"', '"abc-gz"'
+    for header, want in ((e, True), (g, True), ('W/"abc"', True), ('"x", "abc-gz"', True), ("*", True),
+                         ('"x"', False), (None, False), ("", False)):
+        assert tf.etag_matches(header, e, g) is want, (header, want)
+
+
+def t_gzip_and_plain_bodies_have_their_own_etags():
+    etag, raw, gz, gz_etag = tf.encode(b"{}")
+    assert etag != gz_etag and gz_etag.startswith(etag[:-1]), (etag, gz_etag)
+
+
+def t_a_failing_build_keeps_the_last_body_and_retries_once_per_tick():
+    clock, calls, fail = _Clock(), [], [False]
+
+    def build():
+        calls.append(1)
+        if fail[0]:
+            raise RuntimeError("boom")
+        return {"v": 1}
+    body = tf.TickBody(build, clock=clock)
+    first = body.get()
+    fail[0] = True
+    clock.t += 2.0
+    assert body.get() == first and body.get() == first, "viewers keep the last good body"
+    assert len(calls) == 2, f"one attempt per tick, not per request: {len(calls)}"
+    try:
+        tf.TickBody(build, clock=_Clock()).get()
+        raise AssertionError("no body yet: the error must reach the caller")
+    except RuntimeError:
+        pass
+
+
+def t_the_body_reports_its_age():
+    clock = _Clock()
+    body = tf.TickBody(lambda: {"v": 1}, clock=clock)
+    body.get()
+    clock.t += 1.5
+    assert body.age() == 1.5, body.age()
 
 def _obeying_crowd(viewers, seconds, kbps=1000, nbytes=950):
     """Clients that poll again after the interval they were handed; returns kbit/s per 10 s."""

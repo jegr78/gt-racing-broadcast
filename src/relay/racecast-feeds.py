@@ -12051,7 +12051,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _timing_body = timing_feed.TickBody(lambda: driver_race.public_view(
         driver_race_svc.dashboard() if driver_race_svc is not None else None))
     _timing_budget = timing_feed.Budget(TIMING_BUDGET_KBPS)
-    _timing_page = []                   # (etag, raw, gzip) of the page, built once
+    _timing_page = []                   # the page's encode() tuple, built once
+    _timing_error = [None]              # last build error, logged once
+    _timing_page_lock = threading.Lock()
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
     # Every open crew page polls the take view; one OBS read serves them all for a
@@ -14229,11 +14231,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "too many attempts"}, 429)
                 return self._send({"error": "this timing link is not valid (any more)"}, 403)
             if rest == []:
+                with _timing_page_lock:
+                    if not _timing_page:
+                        page = self._page_bytes(timing_page_path, "/console") if timing_page_path else None
+                        if page is not None:
+                            _timing_page[:] = [timing_feed.encode(page)]
                 if not _timing_page:
-                    page = self._page_bytes(timing_page_path, "/console") if timing_page_path else None
-                    if page is None:
-                        return self._send({"error": "page not found"}, 404)
-                    _timing_page[:] = [timing_feed.encode(page)]
+                    return self._send({"error": "page not found"}, 404)
                 return self._send_encoded(*_timing_page[0], "text/html; charset=utf-8",
                                           {"Content-Security-Policy": PAGE_CSP})
             interval = _timing_budget.interval()
@@ -14247,27 +14251,41 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return None
-            sent = self._send_encoded(*_timing_body.get(), "application/json; charset=utf-8",
-                                      {"X-Poll-After": f"{interval:.1f}"})
+            try:
+                encoded = _timing_body.get()
+            except Exception as e:
+                if _timing_error[0] != repr(e):
+                    _timing_error[0] = repr(e)
+                    LOG.warning("public timing: building the data failed: %r", e)
+                _timing_budget.served(timing_feed.HEADER_BYTES, interval)
+                self.send_response(503)
+                self.send_header("X-Poll-After", f"{interval:.1f}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            _timing_error[0] = None
+            sent = self._send_encoded(*encoded, "application/json; charset=utf-8",
+                                      {"X-Poll-After": f"{interval:.1f}",
+                                       "X-Data-Age": f"{_timing_body.age():.1f}"})
             _timing_budget.served(sent + timing_feed.HEADER_BYTES, interval)
             return None
 
-        def _send_encoded(self, etag, raw, gz, ctype, extra=None):
+        def _send_encoded(self, etag, raw, gz, gz_etag, ctype, extra=None):
             """Send a pre-encoded body: 304 on a matching If-None-Match, gzip when the
             client takes it. Returns the body bytes sent (0 for a 304)."""
-            if self.headers.get("If-None-Match") == etag:
+            gzipped = timing_feed.accepts_gzip(self.headers.get("Accept-Encoding"))
+            if timing_feed.etag_matches(self.headers.get("If-None-Match"), etag, gz_etag):
                 self.send_response(304)
                 body = b""
             else:
-                gzipped = "gzip" in (self.headers.get("Accept-Encoding") or "")
                 body = gz if gzipped else raw
                 self.send_response(200)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
                 if gzipped:
                     self.send_header("Content-Encoding", "gzip")
-                self.send_header("Vary", "Accept-Encoding")
-            self.send_header("ETag", etag)
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("ETag", gz_etag if gzipped else etag)
             self.send_header("Cache-Control", "no-cache")
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
@@ -16116,6 +16134,7 @@ def main():
             remaining = timer["remaining_s"]
         return {"roster": hud_source.roster_details() if hud_source else {},
                 "stint": cur["stint"] if cur else None, "remaining": remaining,
+                "remaining_running": bool(timer and timer["mode"] == "running" and timer["end"]),
                 "mode": relay.mode, "segment": cur["stint"] if cur and relay.mode == "qualifying" else None,
                 "connections": driver_hub.connections() if relay.mode == "qualifying" else []}
 

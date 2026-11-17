@@ -537,7 +537,7 @@ def t_timing_data_is_gzipped_revalidated_and_paced():
         assert st == 304 and body == b"" and float(h["X-Poll-After"]) >= 2.0, (st, h)
         st, body, h = _req_raw(port, path)
         assert st == 200 and "Content-Encoding" not in h and json.loads(body)["v"] == 1, h
-        assert h.get("ETag") == etag, "plain and gzip bodies share one ETag"
+        assert h.get("ETag") not in (None, etag), "a plain body has its own strong ETag"
     finally:
         srv.shutdown()
 
@@ -574,6 +574,55 @@ def t_timing_page_is_gzipped_and_revalidated():
     finally:
         srv.shutdown()
 
+
+
+def t_timing_revalidation_handles_lists_weak_tags_and_encodings():
+    srv, port, _lp, link, _hub = _timing_server()
+    path = f"/console/timing/data?l={link}"
+    try:
+        _s, _b, hg = _req_raw(port, path, {"Accept-Encoding": "gzip"})
+        _s, _b, hp = _req_raw(port, path)
+        assert hg["ETag"] != hp["ETag"], "gzip and plain bodies need their own strong ETags"
+        for inm in (hg["ETag"], hp["ETag"], f'"other", {hg["ETag"]}', "W/" + hp["ETag"], "*"):
+            st, _b, h = _req_raw(port, path, {"If-None-Match": inm})
+            assert st == 304 and h.get("Vary") == "Accept-Encoding", (inm, st, h)
+        st, _b, h = _req_raw(port, path, {"Accept-Encoding": "gzip;q=0"})
+        assert st == 200 and "Content-Encoding" not in h, "q=0 refuses gzip"
+        assert float(h["X-Data-Age"]) >= 0, h
+    finally:
+        srv.shutdown()
+
+
+def t_a_failing_timing_build_answers_503_with_a_pace():
+    srv, port, _lp, link, _hub = _timing_server()
+    srv.race_svc.dashboard = lambda: 1 / 0
+    try:
+        st, _b, h = _req_raw(port, f"/console/timing/data?l={link}")
+        assert st == 503 and float(h["X-Poll-After"]) >= 2.0, (st, h)
+    finally:
+        srv.shutdown()
+
+
+def t_the_timing_page_is_built_once_under_concurrent_first_requests():
+    import threading
+    srv, port, _lp, link, _hub = _timing_server()
+    real, calls = g.m.timing_feed.encode, []
+
+    def slow(raw):
+        calls.append(1)
+        time.sleep(0.2)
+        return real(raw)
+    g.m.timing_feed.encode = slow
+    try:
+        threads = [threading.Thread(target=_req_raw, args=(port, f"/console/timing?l={link}")) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(calls) == 1, f"concurrent first viewers build the page once: {len(calls)}"
+    finally:
+        g.m.timing_feed.encode = real
+        srv.shutdown()
 
 class _SpyBudget:
     """Wraps the real Budget and keeps every served() call and the live instance."""

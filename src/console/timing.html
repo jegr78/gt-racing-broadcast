@@ -77,7 +77,7 @@
   } catch (e) { /* defaults */ }
   let last = null;
   // Poll pacing comes from the server (X-Poll-After); between polls the clock runs locally.
-  let etag = null, interval = 2, got = 0, running = false, prevLeft = null;
+  let etag = null, interval = 2, got = 0, dataAge = 0;
   const $ = (id) => document.getElementById(id);
 
   function el(tag, cls, text) {
@@ -211,17 +211,20 @@
     seen = now;
   }
 
-  // The remaining time only counts down locally while the server's value is falling.
+  // The remaining time counts down locally only while the race timer runs.
   function tick() {
-    const age = got ? Math.max(0, Math.round((Date.now() - got) / 1000)) : 0;
+    const since = got ? Math.max(0, (Date.now() - got) / 1000) : 0;
     const left = $("left");
     if (left && last && typeof last.remaining === "number") {
-      left.textContent = clock(Math.max(0, last.remaining - (running ? age : 0))) + " left";
+      const run = last.remaining_running === true ? Math.floor(since + dataAge) : 0;
+      left.textContent = clock(Math.max(0, last.remaining - run)) + " left";
     }
     const ageEl = $("age");
     if (ageEl && got) {
-      ageEl.textContent = "updated " + age + " s ago";
-      ageEl.className = age > 3 * interval ? "stale" : "";
+      const age = Math.round(since + dataAge);
+      const delay = last && last.delay_s > 0 ? " · " + last.delay_s + " s delay" : "";
+      ageEl.textContent = "updated " + age + " s ago" + delay;
+      ageEl.className = age > 3 * interval + 2 ? "stale" : "";
     }
   }
 
@@ -233,13 +236,12 @@
       if (pace >= 2) { interval = pace; wait = pace * 1000; }
       if (res.status === 429 && !(pace >= 2)) wait = 5000;
       else if (res.status === 403) { $("state").hidden = false; $("state").textContent = "This timing link has ended."; return; }
-      else if (res.status === 304) { got = Date.now(); running = false; if (last) render(last); }
+      else if (res.status === 304) { got = Date.now(); dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0; if (last) render(last); }
       else if (res.ok) {
         const d = await res.json();
         etag = res.headers.get("ETag");
         got = Date.now();
-        running = typeof d.remaining === "number" && prevLeft !== null && d.remaining < prevLeft;
-        prevLeft = typeof d.remaining === "number" ? d.remaining : null;
+        dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0;
         render(d); activity(d);
       }
     } catch (e) { wait = 5000; }
