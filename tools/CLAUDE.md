@@ -31,7 +31,10 @@ Linux archives are built natively on the `ubuntu-latest` (x86-64) and
 per `platform.machine()` so a self-updating ARM64 binary never fetches the x86-64
 archive. release-please tags via GITHUB_TOKEN, which cannot
 trigger on-tag workflows, so `release-please.yml` dispatches `release.yml`
-explicitly. `ci.yml` runs the suite on all
+explicitly. `release.yml` fails at once on a ref that is not a `v*` tag, so a
+dispatch from a branch cannot publish a release named after it. It creates the
+GitHub release only when release-please has not already done so; any other create
+failure stops the run before the builds. `ci.yml` runs the suite on all
 three OSes for every PR. Under macOS arm64 capacity constraints GitHub cancels a job
 after about 15 minutes with "The job was not acquired by Runner of type hosted even
 after multiple attempts" (no runner, no step); `rerun-unacquired.yml` then reruns the
