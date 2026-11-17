@@ -301,7 +301,7 @@
 
     root.replaceChildren(el("div", {cls: "dd"}, [
       el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
-      el("div", {cls: "row"}, [el("strong", {text: "Public timing"}), timingText, timingCopy]),
+      el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
       lastChange,
       el("div", {cls: "row"}, [mode, laps, finalLap, finish]),
       el("div", {cls: "row"}, [redFlag, restart, release]),
