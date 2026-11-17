@@ -211,6 +211,8 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "machine_font_delete": lambda name: {"ok": True, "removed": name},
             "fonts_restore": lambda force: {"ok": True, "library": [], "profiles": {}},
             "gt7_data_status": lambda: {"ok": True, "checked": None, "files": {}},
+            "timing_host_status": lambda: {"ok": True, "deployed": True, "up_to_date": False,
+                                           "url": "https://x.example.workers.dev", "relay": None},
             "overlay_font_upload": lambda name, data: {"ok": bool(name),
                                                        "name": name,
                                                        "_len": len(data)},
@@ -1695,6 +1697,18 @@ def t_fonts_restore_route_passes_only_a_literal_true_force():
         assert code == 200 and json.loads(body)["profiles"] == {"demo": ["Oswald.woff2"]}
         _post_json(port, "/api/fonts/restore", {"force": "yes"})
         assert seen == [True, False], seen
+    finally:
+        httpd.shutdown()
+
+
+def t_api_timing_host_routes():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _get(port, "/api/timing-host")
+        d = json.loads(body)
+        assert code == 200 and d["deployed"] and d["up_to_date"] is False, body
+        code, _b = _post_json(port, "/api/timing-host", {})
+        assert code == 404, "deploy runs as the timing-host-deploy job, not in a request thread"
     finally:
         httpd.shutdown()
 

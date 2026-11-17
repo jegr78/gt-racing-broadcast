@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Runs the timing host Worker's deno tests (#1161). Skips without deno unless
 RACECAST_REQUIRE_DENO=1 (CI sets it). Run: python3 tests/test_timing_worker.py"""
-import os, shutil, subprocess, sys
+import os, shutil, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

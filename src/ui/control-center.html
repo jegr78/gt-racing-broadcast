@@ -343,6 +343,17 @@
         </section>
 
         <section>
+          <div class="viewhead"><h3>Public timing host</h3>
+            <span class="sub">optional Cloudflare Worker for the public live timing page</span></div>
+          <div class="row"><span class="name">Status</span>
+            <span class="dim grow" id="th-status">…</span>
+            <button id="th-check" onclick="loadTimingHost()" title="Ask Cloudflare whether the league's Worker is deployed and current">Check</button>
+            <button id="th-deploy" onclick="deployTimingHost()" title="Upload or update the league's Worker; a running relay uses it at once">Deploy</button></div>
+          <div class="enverr" id="th-err" hidden></div>
+          <p class="envhint">Hands the public timing page to a Cloudflare Worker (Workers Free) so the viewer count no longer costs upload. Set <b>TIMING_HOST_ACCOUNT_ID</b> and <b>TIMING_HOST_API_TOKEN</b> (permissions Workers Scripts: Edit, Account Settings: Read) above, then <b>Deploy</b>. It fills in <b>TIMING_HOST_URL</b> and <b>TIMING_HOST_PUBLISH_KEY</b>. Deploy again after a racecast update.</p>
+        </section>
+
+        <section>
           <div class="viewhead"><h3>Crew</h3>
             <span class="sub">named roster for Director Panel access + /console roles</span>
             <span class="spacer"></span>
@@ -1009,7 +1020,7 @@ let jobES = null, logES = null;
 
 let preflightRun = false, assetsLoaded = false,
     settingsLoaded = false, streamsLoaded = false, docsLoaded = false,
-    wizardLoaded = false, profilesLoaded = false, logsLoaded = false;
+    wizardLoaded = false, profilesLoaded = false, logsLoaded = false, timingHostLoaded = false;
 // op name -> the last job exit code run from the wizard, as a string. It lets a
 // step with no persistent "done" state, and a failed job, show its real outcome
 // instead of a misleading "pending".
@@ -1034,6 +1045,7 @@ function showView(name) {
   // Profile view: switcher/profile.env loaded once; graphics/media gallery
   // (the old 'assets' view's job) likewise re-uses fetchAssetFiles.
   if (name === 'profile' && !profilesLoaded) { profilesLoaded = true; loadProfiles(); }
+  if (name === 'profile' && !timingHostLoaded) { timingHostLoaded = true; loadTimingHost(); }
   if (name === 'profile' && !assetsLoaded) { assetsLoaded = true; fetchAssetFiles(); }
   if (name === 'preflight' && !preflightRun) { preflightRun = true; runPreflight(); }
   if (name === 'preflight') loadSpeedtest();
@@ -2982,6 +2994,34 @@ function setHeaderLogo(active, hasLogo) {
   } else {
     img.hidden = true;
     img.removeAttribute('src');
+  }
+}
+
+// The league's public timing host (#1161)
+async function loadTimingHost() {
+  let d;
+  $('th-status').textContent = 'checking…';
+  try { d = await (await fetch('/api/timing-host', {cache: 'no-store'})).json(); }
+  catch (e) { $('th-status').textContent = 'Control Center not reachable.'; return; }
+  $('th-err').hidden = !!d.ok;
+  if (!d.ok) { $('th-status').textContent = '—'; $('th-err').textContent = d.error; return; }
+  if (d.configured === false) { $('th-status').textContent = 'not set up'; return; }
+  if (!d.deployed) { $('th-status').textContent = 'not deployed yet'; return; }
+  const relay = d.relay ? (d.relay.connected ? 'relay connected, ' + d.relay.viewers + ' viewers'
+                                             : 'relay not connected') : 'relay not running';
+  $('th-status').textContent = d.url + ' · ' + (d.up_to_date ? 'current' : 'update needed') + ' · ' + relay;
+}
+async function deployTimingHost() {
+  const b = $('th-deploy'); b.disabled = true;
+  $('th-status').textContent = 'deploying…';
+  const job = await startJob('timing-host-deploy');
+  const r = job.error ? job : await jobResult(job.job_id, 60);
+  b.disabled = false;
+  await loadTimingHost();          // refreshes the status first; it would hide a deploy error
+  if (r.error || r.code !== 0) {
+    const lines = (r.lines || []).filter(l => l.trim());
+    $('th-err').hidden = false;
+    $('th-err').textContent = r.error || lines.slice(-3).join('\n') || 'deploy failed';
   }
 }
 

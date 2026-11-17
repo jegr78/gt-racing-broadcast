@@ -6961,6 +6961,68 @@ def t_fresh_event_resets_the_served_path():
     assert m.timing_link_mod().served(timing) is None, "a new event starts on the default"
 
 
+def t_timing_host_parse():
+    assert m.route(["timing-host", "deploy"]) == \
+        {"kind": "service", "command": "timing-host", "verb": "deploy", "rest": []}
+    assert ("timing-host", "status") in m.DISPATCH
+    try:
+        m.route(["timing-host", "bogus"])
+    except ValueError:
+        return
+    raise AssertionError("unknown verbs are refused")
+
+
+def _host_profile(body):
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "profile.env")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(body)
+    return path
+
+
+def _read_env(path):
+    with open(path, encoding="utf-8") as fh:
+        return m.parse_env_text(fh.read())
+
+
+def t_cli_deploy_writes_url_and_generates_key_once():
+    path = _host_profile("NAME=Demo\nTIMING_HOST_ACCOUNT_ID=acc\nTIMING_HOST_API_TOKEN=tok\n")
+    calls, nudged = [], []
+
+    def fake(account, token, profile, worker, page, key, request=None):
+        calls.append((account, token, profile, key))
+        return {"ok": True, "url": "https://racecast-timing-demo.sub.workers.dev"}
+    r = m.timing_host_deploy_data(deploy_fn=fake, env=("demo", path), nudge=lambda: nudged.append(1))
+    env = _read_env(path)
+    assert r["ok"] and env["TIMING_HOST_URL"] == "https://racecast-timing-demo.sub.workers.dev", (r, env)
+    key = env["TIMING_HOST_PUBLISH_KEY"]
+    assert len(key) >= 32 and calls[0] == ("acc", "tok", "demo", key), calls
+    assert env["NAME"] == "Demo", "other keys stay"
+    m.timing_host_deploy_data(deploy_fn=fake, env=("demo", path), nudge=lambda: nudged.append(1))
+    assert _read_env(path)["TIMING_HOST_PUBLISH_KEY"] == key and calls[1][3] == key, "the key is kept"
+    assert nudged == [1, 1], "a running relay picks the host up at once"
+
+
+def t_cli_deploy_failure_keeps_url_unset():
+    path = _host_profile("TIMING_HOST_ACCOUNT_ID=acc\nTIMING_HOST_API_TOKEN=tok\n")
+    r = m.timing_host_deploy_data(deploy_fn=lambda *a, **k: {"ok": False, "error": "nope"},
+                                  env=("demo", path), nudge=lambda: None)
+    assert not r["ok"] and "TIMING_HOST_URL" not in _read_env(path), r
+
+
+def t_cli_deploy_needs_account_and_token():
+    path = _host_profile("NAME=Demo\n")
+    r = m.timing_host_deploy_data(deploy_fn=lambda *a, **k: {"ok": True, "url": "x"},
+                                  env=("demo", path), nudge=lambda: None)
+    assert not r["ok"] and "TIMING_HOST_ACCOUNT_ID" in r["error"], r
+    assert "TIMING_HOST_PUBLISH_KEY" not in _read_env(path), "nothing is written without a host"
+
+
+def t_timing_host_sources_exist():
+    worker, page = m._timing_host_sources()
+    assert b"TimingRoom" in worker and "timing-logic" in page
+
+
 def t_gt7_discover_cmd_single_save(capsys=None):
     # One console found + --save -> writes RACECAST_GT7_PS_IP via ps_ip_write_data
     # (both resolve_console and ps_ip_write_data are mocked, so no real .env is touched).

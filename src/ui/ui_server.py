@@ -734,6 +734,8 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"could not read profile .env: {exc}"},
                                       code=500)
+            if path == "/api/timing-host":
+                return self._json(ctx["timing_host_status"]())
             if path == "/api/gt7-data":
                 try:
                     return self._json(ctx["gt7_data_status"]())
