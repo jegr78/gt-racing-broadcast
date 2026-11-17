@@ -35,9 +35,18 @@ class Car:
 
     def send(self, t, position=None):
         x, z = _pos(self.along, self.box)
+        lap = self.lap()
+        if lap != getattr(self, "_lap", lap):          # GT7 reports a lap time after the line
+            self.last_ms = getattr(self, "forge", None) or (
+                round((t - self._line_t) * 1000) if hasattr(self, "_line_t") else -1)
+            self._line_t = t
+        elif not hasattr(self, "_line_t") and lap >= 1:
+            self._line_t = t
+        self._lap = lap
         self.race.update(self.entry, self.conn, self.name, {
-            "t": t, "lap": self.lap(), "x": x, "z": z, "speed_kmh": self.speed * 3.6,
-            "race_position": position, "on_track": True, "paused": False, "loading": False})
+            "t": t, "lap": lap, "x": x, "z": z, "speed_kmh": self.speed * 3.6,
+            "race_position": position, "on_track": True, "paused": False, "loading": False,
+            "last_ms": getattr(self, "last_ms", -1), "fuel_l": getattr(self, "fuel", 50.0)})
 
 
 def _drive(race, cars, speeds, t0, seconds, positions=None):
@@ -530,6 +539,41 @@ def t_a_lap_count_finish_after_a_red_flag_restart_counts_the_whole_race():
     assert race.standings(t)["state"] == "racing", race.standings(t)["entries"][0]
     t = _drive(race, [a], [50], t, 0.2 * L / 50)
     assert _row(race, "A", t)["finished"], "3 laps of race distance finish it, whatever the restart lobby counts"
+
+
+def t_lap_times_fuel_and_the_fastest_race_lap():
+    race = rd.Race(TRACE, formation=True)
+    a, b = Car(race, "A", "a", L - 15, "Lena"), Car(race, "B", "b", L - 60, "Marco")
+    t = _drive(race, [a, b], [50, 50], 0.0, 1.5 * L / 50)          # formation lap, half of race lap 1
+    assert _row(race, "A", t)["last_lap_ms"] is None, "the formation lap is no race lap"
+    t = _drive(race, [a, b], [50, 50], t, 0.5 * L / 50 + 2)
+    t = _drive(race, [a, b], [50, 60], t, L / 50 + 1)                # B laps faster
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert abs(ra["last_lap_ms"] - L / 50 * 1000) < 150, ra
+    assert abs(rb["last_lap_ms"] - L / 60 * 1000) < 150 or rb["last_lap_ms"] is None, rb
+    t = _drive(race, [a, b], [50, 60], t, L / 50 + 1)
+    fl = race.standings(t)["fastest"]
+    assert fl["entry"] == "B" and fl["driver"] == "Marco" and abs(fl["ms"] - L / 60 * 1000) < 150, fl
+    assert _row(race, "A", t)["fuel_l"] == 50.0 and _row(race, "A", t)["stint_laps"] >= 2
+
+
+def t_a_lap_time_that_disagrees_with_the_relays_clock_is_ignored():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    a.forge = 1000                                            # every lap reported as 1 s
+    t = _drive(race, [a], [50], 0.0, 2 * L / 50 + 2)
+    assert race.standings(t)["fastest"] is None, race.standings(t)["fastest"]
+
+
+def t_a_lap_with_a_red_flag_or_a_restart_never_sets_the_fastest_lap():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    t = _drive(race, [a], [50], 0.0, 10)
+    race.red_flag(t, "keep")
+    t = _drive(race, [a], [50], t, 5)
+    race.release(t)
+    t = _drive(race, [a], [50], t, L / 50)                  # completes the interrupted lap
+    assert race.standings(t)["fastest"] is None, "the lap with the red flag in it waits"
 
 
 if __name__ == "__main__":
