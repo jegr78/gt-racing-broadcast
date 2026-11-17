@@ -198,12 +198,13 @@ def _fmt_fps(v):
     return f"{v:g}"
 
 
-def _finding(backlog, quality, on_air_s, handovers, consumer_events=0):
+def _finding(backlog, quality, on_air_s, handovers, consumer_events=0, solo=False):
     """#586: the report's verdict, backlog first. The backlog is what the audience and
     the commentators lived through; the frame rate is why. None when neither was
     recorded. `level` is green/yellow/red for the page's colour only. `consumer_events`
     is how many OBS consumer events the report lists, the only lead when the frame
-    rate does not explain a backlog."""
+    rate does not explain a backlog. A solo relay has no A/B feeds, so `solo` leaves
+    the backlog cause and the handover note empty."""
     q = quality or {}
     fps, target, low = q.get("obs_fps_avg"), q.get("obs_fps_target"), q.get("obs_fps_low")
     rate = q.get("render_skip_rate_avg")
@@ -238,10 +239,13 @@ def _finding(backlog, quality, on_air_s, handovers, consumer_events=0):
     else:
         level = "yellow" if low else "green"
         headline = f"{fps_line}."
-        cause = ("How far the output ran behind live was not recorded (feed fan-out "
-                 "off, or a relay from before it was measured), so its effect on the "
-                 "audience is unknown.")
-    if handovers:
+        cause = "" if solo else (
+            "How far the output ran behind live was not recorded (feed fan-out "
+            "off, or a relay from before it was measured), so its effect on the "
+            "audience is unknown.")
+    if solo:
+        handover_note = ""
+    elif handovers:
         handover_note = (f"A backlog clears at every stint handover; this session had "
                          f"{handovers} handover{'s' if handovers != 1 else ''}.")
     else:
@@ -499,13 +503,14 @@ def broadcast_timeline(events):
 
 def build_report(samples, events, name_for_stint, event_title, window, now,
                  host=None, prebuffer_s=hs.DEFAULT_FEED_PREBUFFER_S,
-                 backlog_warn_s=hs.FEED_BACKLOG_WARN_S, telemetry=None):
+                 backlog_warn_s=hs.FEED_BACKLOG_WARN_S, telemetry=None, solo=False):
     """Aggregate ONE session (already bucket-deduplicated) into the report dict.
     `window` = (from_ts, to_ts). `samples` is assumed non-empty (the caller guards).
     `host` is the producer machine's name, surfaced in the report so it is clear
     which box produced it. `prebuffer_s`/`backlog_warn_s` are the relay's fan-out
     reserve and backlog threshold, which decide when the output counts as behind live.
-    `telemetry` is the solo POV block from report_telemetry.telemetry_block, or None."""
+    `telemetry` is the solo POV block from report_telemetry.telemetry_block, or None.
+    `solo` drops the stint, commentator and A/B feed content a solo profile never has."""
     frm, to = window
     duration_s = max(0.0, (to or 0) - (frm or 0))
     windows = on_air_windows(events, to)
@@ -589,7 +594,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "quality": quality,
         "backlog": backlog,
         "finding": _finding(backlog, quality, on_air_s, on_air["stint_handovers"],
-                            len(obs_consumer)),
+                            len(obs_consumer), solo=solo),
+        "solo": solo,
         "producer_handovers": handovers,
         "substitutions": substitutions,
         "recoveries": recoveries,
@@ -854,8 +860,9 @@ def render_html(report):
         parts.append(f"<div class='finding lvl-{_esc(fd['level'])}'>"
                      "<h2 style='border:0;margin:0 0 6px;padding:0'>Finding</h2>"
                      f"<p class='head'>{_esc(fd['headline'])}</p>"
-                     f"<p>{_esc(fd['cause'])}</p>"
-                     f"<p class='note'>{_esc(fd['handover_note'])}</p>")
+                     + (f"<p>{_esc(fd['cause'])}</p>" if fd["cause"] else "")
+                     + (f"<p class='note'>{_esc(fd['handover_note'])}</p>"
+                        if fd["handover_note"] else ""))
         if report.get("backlog"):
             bl = report["backlog"]
             parts.append("<p class='note'>Behind live means more than "
@@ -865,17 +872,20 @@ def render_html(report):
                          "30 s interval, so the peak is a lower bound.</p>")
         parts.append("</div>")
 
-    parts.append("<h2>On air per commentator</h2>")
-    rows = [(c["name"], _fmt_dur(c["seconds"]), c["stints"]) for c in oa["commentators"]]
-    parts.append(_table(["Commentator", "On air", "Stints"], rows) if rows
-                 else "<p class='note'>No on-air data recorded.</p>")
-    if oa["resolved"]:
-        parts.append(f"<p class='caveat'>Names resolved from the schedule as of "
-                     f"{_esc(_fmt_clock(oa['resolved_at']))}; a later running-order edit "
-                     f"could change them.</p>")
-    else:
-        parts.append("<p class='caveat'>Commentator names were unavailable (relay not "
-                     "running at report time), so they are shown by stint index.</p>")
+    solo = report.get("solo")
+    if not solo:
+        parts.append("<h2>On air per commentator</h2>")
+        rows = [(c["name"], _fmt_dur(c["seconds"]), c["stints"]) for c in oa["commentators"]]
+        parts.append(_table(["Commentator", "On air", "Stints"], rows) if rows
+                     else "<p class='note'>No on-air data recorded.</p>")
+        if oa["resolved"]:
+            parts.append(f"<p class='caveat'>Names resolved from the schedule as of "
+                         f"{_esc(_fmt_clock(oa['resolved_at']))}; a later running-order "
+                         f"edit could change them.</p>")
+        elif rows:
+            parts.append("<p class='caveat'>Commentator names were unavailable at report "
+                         "time (relay unreachable or no schedule rows), so they are shown "
+                         "by stint index.</p>")
     if oa.get("av_repairs", 0) > 0:
         # #619: OBS repaired each of these itself, so this is a record, not an alarm.
         # The unexplained ones are the only part worth a second look, and the line says
@@ -972,12 +982,13 @@ def render_html(report):
                  for o in report["obs_consumer"]]
         parts.append(_table(["Time", "Feed", "Stint", "Commentator", "Event"], orows))
 
-    parts.append("<h2>Feed reliability</h2>")
-    frows = [(f["feed"], f["drops"], _fmt_dur(f["downtime_s"]), _fmt_dur(f["longest_outage_s"]))
-             for f in report["feeds"]]
-    parts.append(_table(["Feed", "Drops", "Downtime", "Longest outage"], frows))
-    parts.append("<p class='note'>POV (optional picture-in-picture) is not tracked for "
-                 "reliability: it has no drop signal and is paused by design.</p>")
+    if not solo:
+        parts.append("<h2>Feed reliability</h2>")
+        frows = [(f["feed"], f["drops"], _fmt_dur(f["downtime_s"]),
+                  _fmt_dur(f["longest_outage_s"])) for f in report["feeds"]]
+        parts.append(_table(["Feed", "Drops", "Downtime", "Longest outage"], frows))
+        parts.append("<p class='note'>POV (optional picture-in-picture) is not tracked "
+                     "for reliability: it has no drop signal and is paused by design.</p>")
 
     # Broadcast timeline (part / OBS-stream start & stop), context for downtime
     tl = report.get("broadcast_timeline") or []
@@ -1015,6 +1026,8 @@ def render_html(report):
                  ("Net down (Mbps)", q["net_down_avg"], q["net_down_peak"]),
                  ("Net up (Mbps)", q["net_up_avg"], q["net_up_peak"]),
                  ("Max inbound gap (s)", "—", q["inbound_gap_peak"])]
+        if solo and q["inbound_gap_peak"] is None:
+            qrows.pop()
         parts.append(_table(["Metric", "Average", "Peak"],
                             [(m, a if a is not None else "—", p if p is not None else "—")
                              for m, a, p in qrows]))
@@ -1046,7 +1059,7 @@ def render_summary_text(report):
             pass  # a malformed telemetry block must not fail the whole report
     if report.get("finding"):
         lines.append(f"  {report_finding_text(report)}")
-    for f in report["feeds"]:
+    for f in [] if report.get("solo") else report["feeds"]:
         lines.append(f"  Feed {f['feed']}: {f['drops']} drop(s), "
                      f"{_fmt_dur(f['downtime_s'])} down")
     return "\n".join(lines)

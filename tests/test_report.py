@@ -110,6 +110,35 @@ def t_generate_leads_with_the_backlog_finding():
         assert "45.8 of 60" in r["html"]
 
 
+def t_generate_tells_the_builder_a_solo_profile_has_no_feeds():
+    with tempfile.TemporaryDirectory() as d:
+        db = os.path.join(d, "health-history.db")
+        conn = hs.open_db(db)
+        hs.migrate(conn)
+        now = 1_700_000_000.0
+        for i in range(3):
+            hs.record(conn, {"ts": now + i * 30, "health_level": "green", "obs_fps": 60.0,
+                             "obs_fps_target": 60.0, "health_reasons": []}, "periodic")
+        conn.close()
+        orig = (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
+                rc._report_event_title, rc._machine_env_value, rc._profile_has_telemetry,
+                rc._profile_is_solo)
+        rc._health_db_path = lambda: db
+        rc._runtime_dir = lambda: d
+        rc._report_name_map = lambda: {}
+        rc._report_event_title = lambda: "Unit Event"
+        rc._machine_env_value = lambda k: ""
+        rc._profile_has_telemetry = lambda: False
+        rc._profile_is_solo = lambda: True
+        try:
+            r = rc._build_report_file()
+        finally:
+            (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
+             rc._report_event_title, rc._machine_env_value, rc._profile_has_telemetry,
+             rc._profile_is_solo) = orig
+        assert r["report"]["solo"] is True and "Feed A" not in r["summary"], r["summary"]
+
+
 def t_generate_no_data_exits():
     with tempfile.TemporaryDirectory() as d:
         db = os.path.join(d, "health-history.db")

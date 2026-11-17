@@ -919,6 +919,32 @@ def t_finding_notes_the_handover_effect():
     assert "no handover" in h0, h0
 
 
+def t_a_solo_report_makes_no_feed_or_stint_claims():
+    rep = rb.build_report(_broadcast(3, obs_fps=60.0, obs_fps_target=60.0), [], {}, "E",
+                          (0.0, 60.0), now=1000.0, solo=True)
+    f = rep["finding"]
+    assert f["headline"] == "OBS held its configured frame rate (60 of 60 fps).", f
+    assert not f["cause"] and not f["handover_note"], \
+        f"a solo relay has no A/B feeds, so backlog and handovers never apply: {f}"
+    assert rb.report_finding_text(rep) == f["headline"]
+    html = rb.render_html(rep)
+    for claim in ("On air per commentator", "Commentator names", "Feed reliability",
+                  "stint handover", "fan-out", "Max inbound gap"):
+        assert claim not in html, f"a solo report does not mention {claim!r}"
+    assert "Feed A" not in rb.render_summary_text(rep)
+
+
+def t_the_name_caveat_appears_only_when_stints_are_shown_by_index():
+    idle = rb.render_html(rb.build_report([_sample(0.0), _sample(30.0)], [], {}, "E",
+                                          (0.0, 30.0), now=1.0))
+    assert "Commentator names" not in idle, "nothing was shown by stint index"
+    shown = rb.render_html(rb.build_report([_sample(0.0, live_stint=1, live_feed="A"),
+                                            _sample(30.0, live_stint=1, live_feed="A")],
+                                           [], {}, "E", (0.0, 30.0), now=1.0))
+    assert "Stint 1" in shown and "relay unreachable or no schedule rows" in shown
+    assert "relay not running" not in shown, "an empty name map is not proof the relay was down"
+
+
 def t_discord_payload_carries_the_finding():
     rep = rb.build_report(_broadcast(4, feed_a_backlog_s=19.0), [], {}, "E", (0.0, 90.0),
                           now=1000.0)
