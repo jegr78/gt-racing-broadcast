@@ -301,6 +301,11 @@ def t_both_desks_act_with_their_identity():
         assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
         actions = [r["action"] for r in _audit_of(srv)]
         assert actions == ["correct", "final_lap", "reassign", "red_flag"], actions
+        carol = g._tok("carol")                                   # producer: every role
+        assert _req(port, f"/console/race-control/drivers/data?t={carol}")[0] == 403
+        assert _req(port, f"/console/drivers/data?t={carol}")[0] == 404
+        assert _req(port, f"/console/drivers/race/reset?t={carol}", b"{}", hdr)[0] == 404, \
+            "the race reset stays on the tailnet"
         st, text, h = _req(port, "/console/driver-desk.js")
         assert st == 200 and "javascript" in h.get("Content-Type", ""), (st, h)
     finally:

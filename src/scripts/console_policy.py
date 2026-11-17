@@ -37,6 +37,19 @@ NOT_FOUND = "not_found"
 Requirement = collections.namedtuple("Requirement", ("capability", "step_up"))
 
 
+# The driver telemetry desk routes (#1114), reached as /console/drivers/* by directors
+# and /console/race-control/drivers/* by Race Control. /drivers/data and the race
+# reset stay on the tailnet.
+_DRIVER_DESK_GET = {("race",), ("readiness",), ("invite",)}
+_DRIVER_DESK_POST = {("reassign",), ("disconnect",)} | {
+    ("race", a) for a in ("settings", "final-lap", "finish", "red-flag", "restart-mode",
+                          "release", "rejoin", "correct", "change")}
+
+
+def _driver_desk_route(rest, method):
+    return tuple(rest) in (_DRIVER_DESK_GET if method == "GET" else _DRIVER_DESK_POST)
+
+
 def min_capability(segments, method="GET"):
     """Map a /console request to its minimum Requirement, or None if the route is
     not a recognized console route. *segments* is the path AFTER the /console
@@ -107,7 +120,7 @@ def min_capability(segments, method="GET"):
     if p in (["event", "title"], ["event", "track"]):
         return Requirement(DIRECTOR, False)
     # Driver telemetry: connections, readiness and the race with its actions (#1114).
-    if p and p[0] == "drivers":
+    if p and p[0] == "drivers" and _driver_desk_route(p[1:], method):
         return Requirement(DIRECTOR, False)
     if p == ["submissions"] or (len(p) == 2 and p[0] == "submissions"):
         return Requirement(DIRECTOR, False)
@@ -137,7 +150,7 @@ def min_capability(segments, method="GET"):
                                  and p[1] in ("data", "cues", "presets", "track", "red-flag")):
         return Requirement(RACE_CONTROL, False)
     # The same driver telemetry controls as the Director Panel's /drivers/* (#1114).
-    if len(p) >= 2 and p[:2] == ["race-control", "drivers"]:
+    if len(p) >= 2 and p[:2] == ["race-control", "drivers"] and _driver_desk_route(p[2:], method):
         return Requirement(RACE_CONTROL, False)
 
     # Health monitor: the page and its combined data endpoint. It carries no stream

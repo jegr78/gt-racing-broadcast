@@ -360,6 +360,11 @@ def t_driver_telemetry_controls_for_directors_and_race_control():
         assert cp.decide({"race_control"}, path, method) == cp.FORBIDDEN, path
         assert cp.decide({"race_control"}, ["race-control"] + path, method) == cp.ALLOW, path
         assert cp.decide({"commentator"}, ["race-control"] + path, method) == cp.FORBIDDEN, path
+    for tailnet_only, method in ((["drivers", "data"], "GET"), (["drivers", "race", "reset"], "POST"),
+                                 (["drivers", "race"], "POST"), (["drivers", "readiness"], "POST")):
+        assert cp.decide({"producer", "director"}, tailnet_only, method) == cp.NOT_FOUND, tailnet_only
+        assert cp.decide({"producer", "race_control"}, ["race-control"] + tailnet_only, method) \
+            == cp.NOT_FOUND, tailnet_only
     assert cp.decide({"race_control"}, ["race-control", "red-flag"], "POST") == cp.ALLOW
     assert cp.decide({"director"}, ["race-control", "red-flag"], "POST") == cp.FORBIDDEN
 
