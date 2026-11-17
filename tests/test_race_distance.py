@@ -560,8 +560,10 @@ def t_lap_times_fuel_and_the_fastest_race_lap():
 def t_a_lap_time_that_disagrees_with_the_relays_clock_is_ignored():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15)
-    a.forge = 1000                                            # every lap reported as 1 s
-    t = _drive(race, [a], [50], 0.0, 2 * L / 50 + 2)
+    t = _drive(race, [a], [50], 0.0, L / 50 - 2)            # just before the end of race lap 1
+    a.forge = 1000                                            # GT7 reports that lap as 1 s
+    t = _drive(race, [a], [50], t, 5)
+    assert a.last_ms == 1000, "the forged time reached the race"
     assert race.standings(t)["fastest"] is None, race.standings(t)["fastest"]
 
 
