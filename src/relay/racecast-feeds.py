@@ -204,6 +204,8 @@ import telemetry_probe  # the driver telemetry probe ingest (#1110)
 import driver_invite    # event invite link and driver codes (#1111)
 import timing_link      # the event's public live timing link (#1128)
 import timing_feed      # its shared body and upload budget
+import timing_host      # optional external fan-out of the public timing (#1161)
+import timing_publish
 import driver_ingest    # driver telemetry connections behind the invite (#1111)
 import driver_race      # race distance, gaps and finish from driver telemetry (#1112)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
@@ -11961,6 +11963,16 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
 MAX_POST_BODY = 65536
 
 
+def _start_timing_publisher(**fns):
+    """The timing host publisher thread (#1161); idle until the league has a host. It
+    re-reads the host keys from the league's profile.env, so a deploy needs no restart."""
+    env_file = os.environ.get("RACECAST_PROFILE_ENV_FILE", "")
+    pub = timing_publish.Publisher(lambda: timing_host.read_settings(env_file), **fns)
+    threading.Thread(target=pub.run, args=(threading.Event(),), name="timing-host",
+                     daemon=True).start()
+    return pub
+
+
 def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_dir=None,
                  timer_store=None, setup_ctl=None, overlay_dir=None,
                  chat_store=None, cue_store=None, preview_path=None, graphics_dir=None,
@@ -11983,7 +11995,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
                  drive_page_path=None, sender_script_path=None, driver_segments=None,
                  driver_desk_path=None,
-                 driver_race_svc=None, timing_link_path=None, timing_page_path=None):
+                 driver_race_svc=None, timing_link_path=None, timing_page_path=None,
+                 timing_publisher=None, funnel_host=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -12048,8 +12061,40 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Public timing (#1128): one body per tick for every viewer, and the poll interval
     # stretches with the crowd so the page stays within its share of the upload.
     _timing_rl = console_auth.RateLimiter(limit=TIMING_ABUSE_RPS * 10, window_s=10)
-    _timing_body = timing_feed.TickBody(lambda: driver_race.public_view(
-        driver_race_svc.dashboard() if driver_race_svc is not None else None))
+    _timing_pub = [None]                # the timing host publisher, when the league has a host
+
+    def _timing_link_id():
+        link = _timing_cache.get() if _timing_cache else None
+        return link["id"] if link else None
+
+    def _timing_served():
+        """The link the producer hands out: hosted (default with a host) or funnel."""
+        if _timing_pub[0] is None or not _timing_pub[0].host_url():
+            return "funnel"
+        return timing_link.served(timing_link_path) or "hosted"
+
+    def _timing_funnel_url():
+        link_id = _timing_link_id()
+        return f"https://{funnel_host}/console/timing?l={link_id}" if funnel_host and link_id else None
+
+    def _timing_hosted_url():
+        pub, link_id = _timing_pub[0], _timing_link_id()
+        url = pub.host_url() if pub is not None else None
+        return timing_host.viewer_url(url, link_id) if url and link_id else None
+
+    def _timing_public():
+        view = driver_race.public_view(
+            driver_race_svc.dashboard() if driver_race_svc is not None else None)
+        hosted = _timing_hosted_url()
+        # Funnel viewers move to the host only while it is the served path and live.
+        if hosted and _timing_served() == "hosted" and _timing_pub[0].status().get("connected"):
+            view = dict(view, moved_to=hosted)
+        return view
+    _timing_body = timing_feed.TickBody(_timing_public)
+    if timing_publisher is not None and timing_link_path:
+        _timing_pub[0] = timing_publisher(
+            link_fn=_timing_link_id, served_fn=_timing_served, fallback_fn=_timing_funnel_url,
+            body_fn=lambda: (_timing_body.get()[1], round(_timing_body.age(), 1)))
     _timing_budget = timing_feed.Budget(TIMING_BUDGET_KBPS)
     _timing_page = []                   # the page's encode() tuple, built once
     _timing_error = [None]              # last build error, logged once
@@ -14092,7 +14137,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                        "id": invite["id"] if invite else None}, no_store=True)
                 if p == ["drivers", "timing-link"]:
                     link = _timing_cache.get() if _timing_cache else None
-                    return self._send({"active": bool(link), "id": link["id"] if link else None},
+                    pub = _timing_pub[0]
+                    return self._send({"active": bool(link), "id": link["id"] if link else None,
+                                       "served": _timing_served(),
+                                       "hosted_url": _timing_hosted_url(),
+                                       "host": pub.status() if pub is not None else None},
                                       no_store=True)
 
                 if p == ["telemetry", "probe"]:
@@ -14706,6 +14755,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         except ValueError as exc:
                             return self._send({"ok": False, "error": str(exc)}, 400)
                     return self._send({"error": "not found"}, 404)
+                if p == ["drivers", "timing-host", "reload"] and _timing_pub[0] is not None:
+                    # Tailnet only: deploy, settings and the path switch nudge the publisher.
+                    _timing_pub[0].reload()
+                    return self._send({"ok": True})
                 if p == ["drivers", "disconnect"] and driver_hub is not None:
                     conn = str(body.get("conn") or "")
                     done = driver_hub.disconnect(conn)
@@ -16258,6 +16311,7 @@ def main():
         driver_desk_path=driver_desk_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
+        timing_publisher=_start_timing_publisher, funnel_host=tailscale.detect_magicdns_name(),
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

@@ -6889,6 +6889,78 @@ def t_driver_invite_follows_the_event_and_regenerates():
         assert fn(path=p, links=ln)["active"] is False, "no link opens between events"
 
 
+def _timing_rig():
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "timing-link.json")
+    link = m.timing_link_mod().create(path)["id"]
+    tlinks = lambda i: {"funnel": f"https://h/console/timing?l={i}", "tailnet": "t"}  # noqa: E731
+    return path, link, tlinks
+
+
+def t_event_timing_reports_hosted_link_and_default_path():
+    path, link, tlinks = _timing_rig()
+    saved = os.environ.get("RACECAST_TIMING_HOST_URL")
+    os.environ["RACECAST_TIMING_HOST_URL"] = "https://racecast-timing-demo.example.workers.dev"
+    try:
+        d = m.event_timing_data(path=path, links=tlinks, relay=lambda: None)
+        assert d["hosted"] == f"https://racecast-timing-demo.example.workers.dev/t/{link}", d
+        assert d["served"] == "hosted" and d["host"] is None, d
+        os.environ["RACECAST_TIMING_HOST_URL"] = ""
+        d = m.event_timing_data(path=path, links=tlinks, relay=lambda: None)
+        assert d["hosted"] is None and d["served"] == "funnel", "without a host only Funnel exists"
+    finally:
+        if saved is None:
+            os.environ.pop("RACECAST_TIMING_HOST_URL", None)
+        else:
+            os.environ["RACECAST_TIMING_HOST_URL"] = saved
+
+
+def t_event_timing_prefers_the_running_relay():
+    path, link, tlinks = _timing_rig()
+    live = {"served": "funnel", "hosted_url": "https://x/t/" + link, "host": {"viewers": 9}}
+    d = m.event_timing_data(path=path, links=tlinks, relay=lambda: live)
+    assert (d["served"], d["hosted"], d["host"]) == ("funnel", live["hosted_url"], {"viewers": 9}), d
+
+
+def t_serve_switch_stores_and_nudges_the_relay():
+    path, _link, tlinks = _timing_rig()
+    nudged = []
+    d = m.event_timing_data(serve="funnel", path=path, links=tlinks, relay=lambda: None,
+                            nudge=lambda: nudged.append(1))
+    assert d["ok"] and m.timing_link_mod().served(path) == "funnel" and nudged == [1], d
+
+
+def t_serve_funnel_refused_without_funnel_host():
+    path, _link, _t = _timing_rig()
+    d = m.event_timing_data(serve="funnel", path=path,
+                            links=lambda i: {"funnel": None, "tailnet": "t"}, relay=lambda: None,
+                            nudge=lambda: None)
+    assert not d["ok"] and "Funnel" in d["error"], d
+    assert m.timing_link_mod().served(path) is None, "a refused switch changes nothing"
+
+
+def t_serve_rejects_unknown_path_and_needs_an_event():
+    path, _link, tlinks = _timing_rig()
+    assert not m.event_timing_data(serve="cdn", path=path, links=tlinks, relay=lambda: None,
+                                   nudge=lambda: None)["ok"]
+    m.timing_link_mod().clear(path)
+    d = m.event_timing_data(serve="hosted", path=path, links=tlinks, relay=lambda: None,
+                            nudge=lambda: None)
+    assert not d["ok"] and "Start event" in d["error"], d
+
+
+def t_fresh_event_resets_the_served_path():
+    d = tempfile.mkdtemp()
+    invite = os.path.join(d, "driver-invite.json")
+    timing = os.path.join(d, "timing-link.json")
+    m._start_driver_invite(True, path=invite)
+    m.timing_link_mod().set_served(timing, "funnel")
+    m._start_driver_invite(False, path=invite)
+    assert m.timing_link_mod().served(timing) == "funnel", "a takeover keeps the choice"
+    m._start_driver_invite(True, path=invite)
+    assert m.timing_link_mod().served(timing) is None, "a new event starts on the default"
+
+
 def t_gt7_discover_cmd_single_save(capsys=None):
     # One console found + --save -> writes RACECAST_GT7_PS_IP via ps_ip_write_data
     # (both resolve_console and ps_ip_write_data are mocked, so no real .env is touched).

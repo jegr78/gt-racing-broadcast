@@ -468,8 +468,15 @@
       copyBtn.disabled = !state.invite;
       var t = await call("/drivers/timing-link", undefined, true);
       if (!t) return;
-      state.timing = t.active ? location.origin + "/console/timing?l=" + encodeURIComponent(t.id) : null;
-      timingText.textContent = state.timing || "No timing link: it starts with the event.";
+      var funnel = t.active ? location.origin + "/console/timing?l=" + encodeURIComponent(t.id) : null;
+      state.timing = t.active && t.served === "hosted" && t.hosted_url ? t.hosted_url : funnel;
+      var note = "";
+      if (t.active && t.hosted_url) {   // the league's timing host (#1161)
+        var h = t.host || {};
+        note = t.served === "hosted" ? " (hosted, " : " (Funnel; hosted page also live, ";
+        note += h.connected ? h.viewers + " viewers on the host)" : "host not reachable)";
+      }
+      timingText.textContent = state.timing ? state.timing + note : "No timing link: it starts with the event.";
       timingCopy.disabled = !state.timing;
     }
     refresh(); refreshInvite();

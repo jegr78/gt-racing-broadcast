@@ -56,6 +56,11 @@ class Publisher:
         self._reload = True
         self._wake.set()
 
+    def host_url(self):
+        """The configured host URL, or None without a host."""
+        settings = self._settings
+        return settings.url if settings is not None else None
+
     def status(self):
         with self._lock:
             now = self._clock()

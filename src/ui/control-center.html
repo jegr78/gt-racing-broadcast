@@ -188,6 +188,10 @@
                     title="Copy the public live timing link: no login, timing data only">Copy</button>
             <button id="evt-timing-new"
                     title="Replace the public timing link. The old link stops working">New link</button></div>
+          <div class="row" id="evt-timing-host-row" hidden><span class="name"></span>
+            <span class="dim grow" id="evt-timing-host">—</span>
+            <button id="evt-timing-serve"
+                    title="Switch the link to hand out. Viewers on the other page are moved over">Serve Funnel</button></div>
           <div class="enverr" id="evt-timing-err" hidden></div>
           <div class="row"><span class="name">Driver race</span>
             <label class="grow" title="Driver telemetry distance starts when a car crosses into lap 2 (formation lap) or at lap 1">
@@ -1400,12 +1404,36 @@ async function fetchEventTiming(regenerate) {
   if (seq !== linkSeq.timing) return;
   $('evt-timing-err').hidden = !!(d && d.ok);
   if (!d || !d.ok) { $('evt-timing-err').textContent = (d && d.error) || 'could not read the timing link'; return; }
-  const link = d.active ? (d.funnel || d.tailnet) : null;
+  const hosted = d.active && d.hosted && d.served === 'hosted';
+  const link = d.active ? (hosted ? d.hosted : (d.funnel || d.tailnet)) : null;
   $('evt-timing-text').textContent = link || (d.active ? 'Tailscale is not up: no link to share'
                                                        : 'none: Start event creates one');
   $('evt-timing-copy').hidden = !link;
   $('evt-timing-new').hidden = !d.active;
   $('evt-timing-copy').onclick = () => navigator.clipboard.writeText(link);
+  // The league's timing host (#1161): both pages run; the switch moves the viewers.
+  $('evt-timing-host-row').hidden = !(d.active && d.hosted);
+  if (!(d.active && d.hosted)) return;
+  const h = d.host;
+  const other = d.served === 'hosted' ? (d.funnel ? 'Funnel: ' + d.funnel : 'Funnel: off')
+                                      : 'Hosted: ' + d.hosted;
+  let state;
+  if (!h) state = 'host status: relay not running';
+  else if (!h.connected) state = 'host not reachable' + (h.last_error ? ': ' + h.last_error : '');
+  else state = h.viewers + ' viewers, about ' + Math.round((h.conns_today || 0) + (h.msgs_today || 0) / 20)
+               + ' of 100000 requests today';
+  $('evt-timing-host').textContent = state + ' · ' + other;
+  $('evt-timing-serve').textContent = d.served === 'hosted' ? 'Serve Funnel' : 'Serve hosted';
+  $('evt-timing-serve').onclick = async () => {
+    const to = d.served === 'hosted' ? 'funnel' : 'hosted';
+    if (!(await confirmModal(to === 'funnel'
+        ? 'Hand out the Funnel link? Viewers on the hosted page are moved to the Funnel page.'
+        : 'Hand out the hosted link? Viewers on the Funnel page are moved to the hosted page.'))) return;
+    const r = await (await fetch('/api/event-timing', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({serve: to})})).json();
+    if (!r.ok) { $('evt-timing-err').hidden = false; $('evt-timing-err').textContent = r.error; return; }
+    fetchEventTiming(false);
+  };
 }
 $('evt-timing-new').addEventListener('click', async () => {
   if (!(await confirmModal('Replace the public timing link? Everyone with the old link loses the timing page.'))) return;

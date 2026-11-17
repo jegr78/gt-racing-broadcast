@@ -14,7 +14,7 @@
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
   racecast event track [ID|--clear|--list]  # the event's GT7 track layout: map and corner names from the first metre
   racecast event invite [--new]             # driver telemetry invite link (event start creates it, stop ends it)
-  racecast event timing [--new]             # public live timing link (event start creates it, stop ends it)
+  racecast event timing [--new] [--serve hosted|funnel]  # public live timing link (event start creates it, stop ends it)
   racecast event race [--formation on|off] [--laps N|--time] [--restart keep|neutralise]  # driver telemetry race
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
@@ -5958,6 +5958,8 @@ def _start_driver_invite(fresh, path=None):
     if fresh or driver_invite.current(path) is None:
         driver_invite.create(path)
     timing = timing_link.path_in(runtime)
+    if fresh:
+        timing_link.clear(timing)       # a new event also starts on the default served path
     if fresh or timing_link.current(timing) is None:
         timing_link.create(timing)
 
@@ -5979,34 +5981,78 @@ def _timing_links(link_id, magic=None, host=None):
             "tailnet": f"http://{host}:{RELAY_PORT}/console/timing?l={link_id}" if host else None}
 
 
-def event_timing_data(new=False, path=None, links=None):
-    """The event's public live timing link (#1128): {ok, active, funnel, tailnet,
-    created}. `new` replaces it, so the old link stops working. `path` and `links`
-    are test seams."""
+def timing_link_mod():
     import timing_link
+    return timing_link
+
+
+def _relay_timing_link():
+    """The running relay's /drivers/timing-link (served path, hosted link, host status)."""
+    try:
+        return _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/timing-link", timeout=2)
+    except Exception:
+        return None
+
+
+def _nudge_relay_timing_host():
+    """Let a running relay's timing host publisher act on a change now (best effort)."""
+    try:
+        _relay_post_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/timing-host/reload", {}, timeout=2)
+    except Exception:
+        pass  # no relay running: it reads the files at start
+
+
+def event_timing_data(new=False, serve=None, path=None, links=None, relay=None, nudge=None):
+    """The event's public live timing link (#1128): {ok, active, funnel, tailnet, created,
+    served, hosted, host}. `new` replaces it, so the old link stops working. `serve`
+    (hosted|funnel, #1161) picks the link the producer hands out. `path`, `links`,
+    `relay` and `nudge` are test seams."""
+    import timing_host
+    timing_link = timing_link_mod()
     path = path or timing_link.path_in(_runtime_dir())
     link = timing_link.current(path)
-    if new and link is None:
+    if (new or serve) and link is None:
         return {"ok": False, "error": "No event is running: Start event creates the timing link"}
+    if serve is not None and serve not in timing_link.PATHS:
+        return {"ok": False, "error": f"serve must be one of {', '.join(timing_link.PATHS)}"}
     if new:
         link = timing_link.create(path)
     if link is None:
         return {"ok": True, "active": False}
-    return dict({"ok": True, "active": True, "created": link["created"]},
-                **(links or _timing_links)(link["id"]))
+    urls = (links or _timing_links)(link["id"])
+    if serve == "funnel" and not urls.get("funnel"):
+        return {"ok": False, "error": "No Funnel link: is Tailscale up with MagicDNS and Funnel on?"}
+    if serve is not None:
+        timing_link.set_served(path, serve)
+        (nudge or _nudge_relay_timing_host)()
+    live = (relay or _relay_timing_link)()
+    if live:
+        served, hosted, host = live.get("served"), live.get("hosted_url"), live.get("host")
+    else:
+        host_url = os.environ.get("RACECAST_TIMING_HOST_URL", "")
+        hosted = timing_host.viewer_url(host_url, link["id"]) if host_url else None
+        served = (timing_link.served(path) or "hosted") if hosted else "funnel"
+        host = None
+    return dict({"ok": True, "active": True, "created": link["created"], "served": served,
+                 "hosted": hosted, "host": host}, **urls)
 
 
 def event_timing_cmd(rest):
-    """racecast event timing [--new]: show the public live timing link, or replace it."""
+    """racecast event timing [--new] [--serve hosted|funnel]: show the public live timing
+    link, replace it, or pick the link to hand out."""
     import argparse
     parser = argparse.ArgumentParser(
         prog="racecast event timing",
         description="Show the event's public live timing link (no login, timing data only). "
-                    "--new replaces it while an event runs: the old link stops working.")
+                    "--new replaces it while an event runs: the old link stops working. "
+                    "--serve picks the link to hand out when the league has a timing host; "
+                    "viewers on the other page are moved over.")
     parser.add_argument("--new", action="store_true", help="regenerate the timing link")
+    parser.add_argument("--serve", choices=("hosted", "funnel"),
+                        help="hand out the timing host link or the Funnel link")
     args = parser.parse_args(rest)
     _apply_active_profile_env()
-    d = event_timing_data(new=args.new)
+    d = event_timing_data(new=args.new, serve=args.serve)
     if not d["ok"]:
         print(d["error"])
         sys.exit(1)
@@ -6015,7 +6061,15 @@ def event_timing_cmd(rest):
         return
     print("New public timing link (the old one no longer works):" if args.new
           else "Public timing link:")
-    print(f"  funnel:  {d['funnel'] or 'unknown (is Tailscale up with MagicDNS?)'}\n"
+    funnel = d["funnel"] or "unknown (is Tailscale up with MagicDNS?)"
+    if d.get("hosted"):
+        print(f"  hand out ({d['served']}): {d['hosted'] if d['served'] == 'hosted' else funnel}")
+        print(f"  hosted:  {d['hosted']}")
+        host = d.get("host") or {}
+        if host:
+            state = "connected" if host.get("connected") else (host.get("last_error") or "not connected")
+            print(f"  host:    {state}, {host.get('viewers', 0)} viewers")
+    print(f"  funnel:  {funnel}\n"
           f"  tailnet: {d['tailnet'] or 'unknown (is Tailscale up?)'}")
 
 

@@ -642,6 +642,13 @@ class _SpyBudget:
         return self.real.interval()
 
 
+def _wait_for(cond, timeout=2.0):
+    import time as _time
+    end = _time.monotonic() + timeout
+    while not cond() and _time.monotonic() < end:
+        _time.sleep(0.01)
+
+
 def _with_spy(**patch):
     saved = {k: getattr(g.m, k) for k in patch}
     budget, _SpyBudget.made[:] = g.m.timing_feed.Budget, []
@@ -662,11 +669,13 @@ def t_the_budget_counts_headers_and_rejected_requests():
     path = f"/console/timing/data?l={link}"
     try:
         st, body, h = _req_raw(port, path, {"Accept-Encoding": "gzip"})
+        _wait_for(lambda: spy.calls)      # the server counts after the body is written
         assert spy.calls[0] == len(body) + g.m.timing_feed.HEADER_BYTES, (spy.calls, len(body))
         statuses = [_req_raw(port, path) for _ in range(12)]
         rejected = [x for x in statuses if x[0] == 429]
         assert rejected and all(float(x[2]["X-Poll-After"]) >= 5 for x in rejected), \
             "a rejected viewer is told when to come back"
+        _wait_for(lambda: len(spy.calls) >= 13)
         assert len(spy.calls) == 13, f"rejected requests count as demand: {len(spy.calls)}"
     finally:
         srv.shutdown()
@@ -700,6 +709,118 @@ def t_internal_dashboard_routes_ignore_the_timing_budget():
                 assert st == 200 and "X-Poll-After" not in h and "ETag" not in h, (route, st, h)
     finally:
         srv.shutdown()
+
+class _FakePublisher:
+    def __init__(self, connected=True):
+        self.connected, self.reloads, self.fns = connected, 0, None
+
+    def make(self, **fns):
+        self.fns = fns
+        return self
+
+    def status(self):
+        return {"configured": True, "connected": self.connected, "viewers": 4}
+
+    def host_url(self):
+        return "https://racecast-timing-demo.example.workers.dev"
+
+    def reload(self):
+        self.reloads += 1
+
+
+FUNNEL_HOST = "relay.example.ts.net"
+
+
+def t_timing_link_route_reports_host():
+    pub = _FakePublisher()
+    srv, port, _lp, link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
+    try:
+        d = json.loads(_req(port, "/drivers/timing-link")[1])
+        assert d["served"] == "hosted" and d["host"]["viewers"] == 4, d
+        assert d["hosted_url"] == f"https://racecast-timing-demo.example.workers.dev/t/{link}", d
+        body, age = pub.fns["body_fn"]()
+        assert json.loads(body)["v"] == 1 and isinstance(age, float)
+        assert pub.fns["link_fn"]() == link and pub.fns["served_fn"]() == "hosted"
+        assert pub.fns["fallback_fn"]() == f"https://{FUNNEL_HOST}/console/timing?l={link}"
+    finally:
+        srv.shutdown()
+
+
+def t_timing_link_route_without_host():
+    srv, port, _lp, _link, _hub = _timing_server()
+    try:
+        d = json.loads(_req(port, "/drivers/timing-link")[1])
+        assert d["served"] == "funnel" and d["hosted_url"] is None and d["host"] is None, d
+    finally:
+        srv.shutdown()
+
+
+def t_funnel_data_moved_to_when_hosted():
+    pub = _FakePublisher()
+    srv, port, _lp, link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
+    try:
+        data = json.loads(_req(port, f"/console/timing/data?l={link}")[1])
+        assert data.get("moved_to") == f"https://racecast-timing-demo.example.workers.dev/t/{link}", data
+    finally:
+        srv.shutdown()
+
+
+def t_funnel_data_stays_when_funnel_served_or_host_down():
+    for served, connected in (("funnel", True), (None, False)):
+        pub = _FakePublisher(connected=connected)
+        srv, port, lp, link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
+        try:
+            if served:
+                timing_link.set_served(lp, served)
+            data = json.loads(_req(port, f"/console/timing/data?l={link}")[1])
+            assert "moved_to" not in data, (served, connected, data)
+        finally:
+            srv.shutdown()
+
+
+def t_timing_host_reload_is_tailnet_only():
+    pub = _FakePublisher()
+    srv, port, _lp, _link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
+    try:
+        assert _req(port, "/drivers/timing-host/reload", b"{}", {"Content-Type": "application/json"})[0] == 200
+        assert pub.reloads == 1
+        st = _req(port, f"/console/drivers/timing-host/reload?t={g._tok('dave')}", b"{}",
+                  {"Content-Type": "application/json"})[0]
+        assert st in (403, 404) and pub.reloads == 1, st
+    finally:
+        srv.shutdown()
+
+
+def t_internal_dashboard_routes_ignore_a_dead_host():
+    import threading
+    import time as _time
+    import timing_host
+    import timing_publish
+
+    def hang(*_a, **_k):
+        _time.sleep(3)
+        raise OSError("host unreachable")
+
+    stop = threading.Event()
+
+    def make(**fns):
+        pub = timing_publish.Publisher(lambda: timing_host.Settings("https://h.example.workers.dev", "k"),
+                                       connect=hang, **fns)
+        threading.Thread(target=pub.run, args=(stop,), daemon=True).start()
+        return pub
+    srv, port, _lp, link, _hub = _timing_server(timing_publisher=make, funnel_host=FUNNEL_HOST)
+    try:
+        _time.sleep(0.2)
+        for _ in range(3):
+            srv.race_svc.tick()
+            t0 = _time.monotonic()
+            st, _b, _h = _req_raw(port, "/drivers/dashboard")
+            assert st == 200 and _time.monotonic() - t0 < 1.0, "a hanging host never delays the overlay"
+            assert _req_raw(port, f"/console/timing/data?l={link}")[0] == 200
+    finally:
+        stop.set()
+        srv.shutdown()
+
 
 def _audit_of(srv):
     import json as _json
