@@ -148,18 +148,28 @@ class Controller:
                         self._state["error"] = "Live analysis could not reset; telemetry resumed without analysis"
             return self.status()
 
+    @staticmethod
+    def _timeline(packets):
+        """(time, kind, plain): a backward wall-clock step (time sync) counts as no
+        elapsed time, so the intervals after it keep their length."""
+        last = virtual = None
+        for wall, kind, plain in packets:
+            if not math.isfinite(wall):
+                raise ValueError("Recording timestamps must be finite")
+            virtual = wall if virtual is None else virtual + max(0.0, wall - last)
+            last = wall
+            yield virtual, kind, plain
+
     def _run(self, path, speed, skip):
         error = None
         try:
             recording = gt7_recording.Recording(str(path))
-            first = previous = last = None
-            for wall, _kind, _plain in recording.packets():
+            first = last = None
+            for wall, _kind, _plain in self._timeline(recording.packets()):
                 if self._stop.is_set():
                     return
-                if not math.isfinite(wall) or previous is not None and wall < previous:
-                    raise ValueError("Recording timestamps must be finite and ordered")
                 first = wall if first is None else first
-                previous = last = wall
+                last = wall
             if first is None:
                 raise ValueError("Recording contains no telemetry packets")
             if not math.isfinite(last - first):
@@ -169,7 +179,7 @@ class Controller:
             origin = self.clock()
             count = 0
             paced = False
-            for wall, _kind, plain in recording.packets():
+            for wall, _kind, plain in self._timeline(recording.packets()):
                 position = wall - first
                 if position >= skip and not paced:
                     if self.store.engineer is not None and not self.store.engineer.flush():
