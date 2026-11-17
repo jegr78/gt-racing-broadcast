@@ -3,7 +3,7 @@
 
 Importing build.py only runs its module-level defs (the __main__ guard does not
 fire), so this never triggers an actual build."""
-import importlib.util, json, os, re
+import importlib.util, json, os, re, shutil, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -196,6 +196,57 @@ def t_solo_templates_secret_free_and_tokenized():
             raw = fh.read()
         assert not b.has_appscript_secret(raw), fn
         assert "__RACECAST_CAPTURE__" in raw and "__RACECAST_WEBCAM__" in raw, fn
+        assert "__RACECAST_GRAPHICS__/" in raw and "__RACECAST_MEDIA__/" in raw, \
+            f"{fn} carries untokenized graphics or media paths"
+        assert "GoogleDrive" not in raw and "drive.google.com" not in raw, \
+            f"{fn} references Google Drive instead of the graphics token"
+        assert not re.search(r"/spreadsheets/d/[A-Za-z0-9_-]{20,}/", raw), \
+            f"{fn} contains a raw sheet URL"
+
+
+def _copy_templates(obs, names):
+    """Fill the package obs/ dir `obs` with the real templates for `names` (source names)."""
+    for src_name in names:
+        shutil.copy2(os.path.join(ROOT, "src", "obs", src_name),
+                     os.path.join(obs, b.template_name(src_name)))
+    return obs
+
+
+def t_every_obs_template_is_shipped_by_build():
+    for src_name in ("GT_Racing_Endurance.json", "GT_Racing_Solo_Commentary.json",
+                     "GT_Racing_Solo_POV.json"):
+        assert src_name in b.OBS_TEMPLATES, f"build.py does not ship {src_name}"
+
+
+def t_shipped_templates_pass_verify():
+    with tempfile.TemporaryDirectory() as obs:
+        checks = b.shipped_obs_template_checks(_copy_templates(obs, b.OBS_TEMPLATES))
+    bad = [k for k, v in checks.items() if not v]
+    assert not bad, f"the real templates fail the build verify: {bad}"
+
+
+def t_missing_solo_template_fails_verify():
+    with tempfile.TemporaryDirectory() as obs:
+        checks = b.shipped_obs_template_checks(_copy_templates(
+            obs, ["GT_Racing_Endurance.json", "GT_Racing_Solo_Commentary.json"]))
+    assert checks.get("GT_Racing_Solo_POV.template.json shipped") is False, \
+        f"a missing solo template must fail the verify, got {checks}"
+
+
+def t_solo_template_with_drive_or_sheet_url_fails_verify():
+    sheet = "https://docs.google.com/spreadsheets/d/" + "A" * 30 + "/edit"
+    with tempfile.TemporaryDirectory() as obs:
+        path = os.path.join(_copy_templates(obs, b.OBS_TEMPLATES),
+                            "GT_Racing_Solo_POV.template.json")
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(raw.replace("__RACECAST_GRAPHICS__/", "C:/GoogleDrive/", 1) + sheet)
+        checks = b.shipped_obs_template_checks(obs)
+    assert checks["GT_Racing_Solo_POV.template.json graphics tokenized"] is False, \
+        "a Google Drive path in a solo template must fail the verify"
+    assert checks["GT_Racing_Solo_POV.template.json no raw sheet url"] is False, \
+        "a raw sheet URL in a solo template must fail the verify"
 
 
 if __name__ == "__main__":

@@ -575,7 +575,7 @@ def t_buttons_ws_passthrough_and_strips_token():
     try:
         c = _socket.create_connection(("127.0.0.1", port), timeout=5)
         req = ("GET /console/buttons/trpc?t=%s HTTP/1.1\r\n"
-               "Host: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+               "Host: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                "Sec-WebSocket-Version: 13\r\n\r\n") % _tok("bob")
         c.sendall(req.encode())
@@ -618,7 +618,7 @@ def t_buttons_ws_does_not_forward_relay_cookie_and_carries_prefix():
     try:
         c = _socket.create_connection(("127.0.0.1", port), timeout=5)
         req = ("GET /console/buttons/trpc?t=%s HTTP/1.1\r\n"
-               "Host: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+               "Host: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                "Sec-WebSocket-Version: 13\r\n"
                "Cookie: rc_console=%s\r\n\r\n") % (_tok("bob"), _tok("bob"))
@@ -1732,6 +1732,24 @@ def t_obs_graphics_carries_the_panel_catalog():
     panel = json.loads(body)["panel"]
     assert panel["graphicsGrid"][0]["label"] == "STARTING GRID", panel["graphicsGrid"][0]
     assert panel["graphics"][0] == {"label": "HUD", "scene": "Stint", "source": "Stint HUD"}
+
+def t_console_status_keeps_obs_and_feed_errors_from_non_directors():
+    full = {"obs": {"reachable": False, "note": "connect 127.0.0.1:4455 refused"},
+            "feeds": {"A": {"channel": "https://youtu.be/x", "last_error": "HTTP 403 for https://x"}}}
+    crew = m.redact_console_status(full, ["commentator"])
+    assert crew["obs"] == {"reachable": False}, "the OBS note can name the WebSocket host"
+    assert "last_error" not in crew["feeds"]["A"], "a feed error can carry its stream URL"
+    director = m.redact_console_status(full, ["director"])
+    assert director["obs"]["note"] and director["feeds"]["A"]["last_error"]
+
+
+def t_the_radio_routes_need_a_sign_in_and_no_role():
+    cp = m.console_policy
+    for seg, method in ((["driver-radio"], "GET"), (["driver-radio", "request"], "POST")):
+        assert cp.decide(set(), seg, method) == cp.ALLOW, \
+            "the profile's opt-in gates the radio, no Crew role does"
+    assert cp.decide({"director"}, ["driver-radio", "nope"], "GET") == cp.NOT_FOUND
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

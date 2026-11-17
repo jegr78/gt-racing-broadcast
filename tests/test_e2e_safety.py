@@ -184,6 +184,14 @@ def t_disposable_hosted_runner_uses_its_ci_job_boundary():
         assert admitted is None
 
 
+def t_every_e2e_script_enters_containment():
+    tools=Path(__file__).resolve().parents[1]/'tools'
+    scripts=sorted(tools.glob('e2e-*.py'))+[tools/'e2e.py']
+    assert len(scripts)>1,'no e2e scripts found'
+    missing=[p.name for p in scripts if 'e2e_safety.enter(__file__' not in p.read_text(encoding='utf8')]
+    assert not missing,f'e2e scripts that start services outside e2e_safety containment: {missing}'
+
+
 if __name__=='__main__':
     for name,fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

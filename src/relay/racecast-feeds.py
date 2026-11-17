@@ -7108,14 +7108,18 @@ def redact_console_status(full, roles):
     Feed stream URLs (feeds[*].channel), the POV stream URL, and the Sheet id are
     director/producer-only: the same boundary as /schedule/data, which already exposes
     per-stint URLs to directors (the panel's Preview button + POV editor consume them
-    over Funnel). They are KEPT for director/producer and stripped for every other role.
+    over Funnel). They are KEPT for director/producer and stripped for every other role,
+    with the feed errors (which can quote a URL) and the OBS note (which can name its host).
     The tailnet /status is unaffected (served verbatim). Pure → unit-tested."""
     out = dict(full)
     keep_urls = bool({"director", "producer"} & set(roles or ()))
     out["feeds"] = {
-        k: {kk: vv for kk, vv in (fd or {}).items() if keep_urls or kk != "channel"}
+        k: {kk: vv for kk, vv in (fd or {}).items() if keep_urls or kk not in ("channel", "last_error")}
         for k, fd in (full.get("feeds") or {}).items()}
     if not keep_urls:
+        obs = full.get("obs")
+        if isinstance(obs, dict):                     # the note can name the WebSocket host
+            out["obs"] = {k: v for k, v in obs.items() if k != "note"}
         pov = full.get("pov")
         if isinstance(pov, dict):
             out["pov"] = {k: v for k, v in pov.items() if k != "url"}
@@ -13383,9 +13387,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return True
             if not intermission_live.allow_control_origin(self.headers):
                 return False
-            if not any(self.headers.get(key) for key in
-                       ("Origin", "Referer", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest")):
-                return True  # Headerless native clients retain trusted-network access.
+            if not self.headers.get("Host"):
+                return True  # Without a Host there is no name a rebinding page could own.
             try:
                 host = urlparse("http://" + self.headers.get("Host", ""))
                 name = (host.hostname or "").lower().rstrip(".")

@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
+import e2e_safety  # noqa: E402
 sys.path.insert(0,str(ROOT/'tools'))
 import e2e_visual
 from engineer_ui_fixture import Fixture, gate
@@ -475,4 +476,8 @@ async def run():
     return None
 
 
-if __name__=='__main__':asyncio.run(run())
+if __name__=='__main__':
+    contained = e2e_safety.enter(__file__, sys.argv[1:])
+    if contained is not None:
+        raise SystemExit(contained)
+    asyncio.run(run())

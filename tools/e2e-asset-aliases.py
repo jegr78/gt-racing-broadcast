@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
+import e2e_safety  # noqa: E402
 import test_racecast as cli  # noqa: E402
 import test_ui_server as ui  # noqa: E402
 import test_console_gate as gate  # noqa: E402
@@ -392,4 +393,7 @@ def main():
 
 
 if __name__ == "__main__":
+    contained = e2e_safety.enter(__file__, sys.argv[1:])
+    if contained is not None:
+        raise SystemExit(contained)
     main()

@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "tests"), str(ROOT / "src/scripts"), str(ROOT / "src/ui")]
+import e2e_safety  # noqa: E402
 from engineer_ui_fixture import Fixture, gate
 import telemetry_replay
 import ui_ops
@@ -139,4 +140,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    contained = e2e_safety.enter(__file__, sys.argv[1:])
+    if contained is not None:
+        raise SystemExit(contained)
     sys.exit(asyncio.run(main()))
