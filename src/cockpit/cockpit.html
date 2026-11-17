@@ -68,6 +68,21 @@
   #timer .t { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
   /* Read-only stint plan. max-height shows about 3 stints; the rest scrolls. */
   #stintPlan { max-height: 110px; overflow-y: auto; }
+  /* Driver timing (#1115): the dashboard's data as a plain table for the commentator. */
+  #timingHead { display: flex; gap: 10px; padding: 0 12px 6px; font-size: 13px; opacity: .85; flex-wrap: wrap; }
+  #timingHead .flag { color: #ff6b6b; font-weight: 700; }
+  #timingWrap { max-height: 420px; overflow: auto; }
+  #timing { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  #timing th { position: sticky; top: 0; background: #14171c; text-align: left; font-weight: 600;
+               opacity: .7; padding: 4px 6px; white-space: nowrap; }
+  #timing td { padding: 4px 6px; border-top: 1px solid #232830; white-space: nowrap; }
+  #timing td.num span { display: inline-block; min-width: 26px; text-align: center; border-radius: 4px;
+                        padding: 1px 4px; font-weight: 700; background: #39414d; color: #fff; }
+  #timing td.drv { white-space: normal; min-width: 110px; }
+  #timing td.drv small { display: block; opacity: .6; }
+  #timing tr.box td { color: #ffd361; }
+  #timing .fl { color: #c49bff; font-weight: 700; }
+  #timingFl { padding: 6px 12px 10px; font-size: 13px; }
   #stintPlan .row { display: flex; align-items: center; gap: 8px; padding: 6px 12px;
                     border-bottom: 1px solid #1c2027; font-size: 13px; }
   #stintPlan .row:last-child { border-bottom: 0; }
@@ -334,6 +349,12 @@
     <div class="card" id="rcCard" data-tab="talk" style="margin-top:12px;" hidden>
       <h2>Race Control <span class="ro">info</span></h2>
       <div id="rcNotes"><div class="empty">No notes.</div></div>
+    </div>
+    <div class="card" id="timingCard" data-tab="plan" style="margin-top:12px;" hidden>
+      <h2>Timing <span class="ro">drivers</span></h2>
+      <div id="timingHead"></div>
+      <div id="timingWrap"><table id="timing"><thead></thead><tbody></tbody></table></div>
+      <div id="timingFl"></div>
     </div>
     <div class="card" data-tab="plan" style="margin-top:12px;"><h2>Stint plan</h2>
       <div id="stintPlan"><div class="empty">Loading…</div></div></div>
@@ -793,6 +814,98 @@ async function pollCues() {
   });
   setTimeout(pollCues, 3000);
 }
+
+// Driver timing (#1115): the delayed dashboard payload, every column at once.
+function lapTime(ms) {
+  if (typeof ms !== 'number' || ms <= 0) return '';
+  const m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
+  return m + ':' + s.toFixed(3).padStart(6, '0');
+}
+function timingCells(tr, cells) {
+  cells.forEach(function (c) {
+    const td = document.createElement('td');
+    if (c && typeof c === 'object') { td.className = c.cls || ''; td.appendChild(c.node); }
+    else td.textContent = c === null || c === undefined ? '' : String(c);
+    tr.appendChild(td);
+  });
+}
+function timingNum(e) {
+  const s = document.createElement('span');
+  s.textContent = e.number || String(e.entry || '').slice(0, 3);
+  if (/^#[0-9a-fA-F]{3,8}$/.test(e.color || '')) s.style.background = e.color;
+  if (/^#[0-9a-fA-F]{3,8}$/.test(e.text_color || '')) s.style.color = e.text_color;
+  return {cls: 'num', node: s};
+}
+function timingDriver(e) {
+  const d = document.createElement('div');
+  d.textContent = e.driver || '';
+  const small = document.createElement('small');
+  small.textContent = e.team || e.entry || '';
+  d.appendChild(small);
+  return {cls: 'drv', node: d};
+}
+const TIMING_STATUS = {box: 'Box', no_data: 'No data', red_flag: 'Red flag'};
+async function pollTiming() {
+  let d;
+  try { d = await j('/drivers/dashboard'); } catch (e) { setTimeout(pollTiming, 5000); return; }
+  const rows = d.mode === 'qualifying' ? (d.qualifying || []) : (d.entries || []);
+  $('timingCard').hidden = !rows.length;
+  const head = $('timingHead');
+  head.textContent = '';
+  const parts = [];
+  if (d.mode === 'qualifying') parts.push('Qualifying');
+  else if (d.lap && d.lap.leader) parts.push('Lap ' + d.lap.leader + (d.lap.count ? ' / ' + d.lap.count : ''));
+  if (typeof d.remaining === 'number') {
+    const r = d.remaining;
+    parts.push(Math.floor(r / 3600) + ':' + String(Math.floor(r % 3600 / 60)).padStart(2, '0') + ':' +
+               String(Math.floor(r % 60)).padStart(2, '0') + ' left');
+  }
+  if (d.track_name) parts.push(d.track_name);
+  if (d.stint) parts.push(d.stint);
+  parts.forEach(function (p) { const s = document.createElement('span'); s.textContent = p; head.appendChild(s); });
+  if (d.red_flag) { const s = document.createElement('span'); s.className = 'flag'; s.textContent = 'RED FLAG'; head.appendChild(s); }
+  const quali = d.mode === 'qualifying';
+  const cols = quali ? ['Pos', '#', 'Driver', 'Best', 'Gap']
+                     : ['Pos', '#', 'Driver', 'Laps', 'Gap', 'Int.', 'Last', 'Fuel', 'Pits'];
+  const thead = $('timing').tHead;
+  thead.textContent = '';
+  const htr = document.createElement('tr');
+  cols.forEach(function (c) { const th = document.createElement('th'); th.textContent = c; htr.appendChild(th); });
+  thead.appendChild(htr);
+  const body = $('timing').tBodies[0];
+  body.textContent = '';
+  const fl = d.fastest;
+  rows.forEach(function (e, i) {
+    const tr = document.createElement('tr');
+    if (quali) {
+      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), lapTime(e.best_ms),
+                       e.gap_ms ? '+' + (e.gap_ms / 1000).toFixed(3) : '']);
+    } else {
+      if (e.status === 'box') tr.className = 'box';
+      const laps = e.stint_laps !== undefined && e.stint_laps !== e.laps ? e.laps + ' (' + e.stint_laps + ')' : e.laps;
+      const gap = TIMING_STATUS[e.status] || (i === 0 ? '' : e.lapped ? '+' + e.lapped + ' L'
+                  : typeof e.gap_s === 'number' ? '+' + e.gap_s.toFixed(1) : '');
+      const last = document.createElement('span');
+      last.textContent = lapTime(e.last_lap_ms);
+      if (fl && fl.entry === e.entry && fl.ms === e.last_lap_ms) last.className = 'fl';
+      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), laps, gap,
+                       typeof e.interval_s === 'number' && i ? '+' + e.interval_s.toFixed(1) : '',
+                       {node: last}, typeof e.fuel_l === 'number' ? e.fuel_l.toFixed(1) + ' L' : '',
+                       e.pit_stops || 0]);
+    }
+    body.appendChild(tr);
+  });
+  const flBox = $('timingFl');
+  flBox.textContent = '';
+  if (fl && !quali) {
+    const s = document.createElement('span');
+    s.className = 'fl'; s.textContent = 'Fastest lap ' + lapTime(fl.ms);
+    flBox.appendChild(s);
+    flBox.appendChild(document.createTextNode(' · ' + fl.driver + ' (' + (fl.team || fl.entry) + ')'));
+  }
+  setTimeout(pollTiming, 2000);
+}
+pollTiming();
 
 // Race Control notes (#376): a rolling card of heads-ups. Unlike director cues these
 // persist in the card as reference; the newest unseen one flashes once as a toast.

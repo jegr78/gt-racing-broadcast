@@ -463,7 +463,8 @@ class Race:
     def _lap_timing(self, ent, car, t, line, last_ms):
         """Time the active counting car's laps and take GT7's time when it agrees."""
         if line:
-            ent.stint_laps += 1
+            if car.lap_ok:
+                ent.stint_laps += 1               # a lap counted from its own line
             if car.lap_ok and car.line_t is not None:
                 car.pending = (t - car.line_t, t)
             car.line_t, car.lap_ok = t, True

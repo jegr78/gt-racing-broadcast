@@ -71,6 +71,7 @@ def main():
     cp("obs/hud-preview.html", "hud-preview.html")
     cp("obs/splitscreen.html", "splitscreen.html")
     cp("obs/intermission.html", "intermission.html")  # /intermission chat-box overlay
+    cp("obs/drivers.html", "drivers.html")  # /drivers driver dashboard overlay (#1115)
     cp("cockpit/cockpit.html", "cockpit.html")
     cp("racecontrol/race-control.html", "race-control.html")
     cp("console/race-engineer.html", "race-engineer.html")

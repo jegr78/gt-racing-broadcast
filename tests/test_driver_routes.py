@@ -55,6 +55,22 @@ def _serve(solo=True, segments=()):
     return srv, srv.server_address[1], path, hub
 
 
+def t_the_dashboard_page_and_its_override_are_served_on_the_tailnet():
+    od = tempfile.mkdtemp()
+    with open(os.path.join(od, "drivers.css"), "w", encoding="utf-8") as fh:
+        fh.write("#drivers-tower{left:90px}")
+    srv = g._serve(drivers_path=os.path.join(ROOT, "src", "obs", "drivers.html"), overlay_dir=od)
+    port = srv.server_address[1]
+    try:
+        st, text, _h = _req(port, "/drivers")
+        assert st == 200 and 'id="drivers-tower"' in text and "/drivers/override.css" in text, (st, text[:80])
+        st, text, h = _req(port, "/drivers/override.css")
+        assert st == 200 and text == "#drivers-tower{left:90px}" and h["Content-Type"].startswith("text/css"), text
+        assert _req(port, "/console/drivers")[0] in (401, 403), "the overlay page is not funnelled"
+    finally:
+        srv.shutdown()
+
+
 def _register(port, invite, **body):
     return _req(port, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
                 {"Content-Type": "application/json"})
@@ -284,6 +300,15 @@ def t_both_desks_act_with_their_identity():
         st, text, _h = _req(port, f"/console/drivers/race/final-lap?t={director}", b"{}", hdr)
         assert st == 200 and srv.race_svc.standings()["last_action"]["who"] == "director:bob", text
         assert _req(port, f"/console/drivers/race?t={rc}")[0] == 403, "the panel route is director-tier"
+        on_air = _json.dumps({"visible": True}).encode()
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/settings?t={rc}", on_air, hdr)
+        assert st == 403 and not driver_race.read_settings(srv.race_svc._path)["visible"], \
+            f"race control never puts the dashboard on air: {st} {text}"
+        st, _t, _h = _req(port, f"/console/race-control/drivers/race/settings?t={rc}",
+                          _json.dumps({"delay_s": 10}).encode(), hdr)
+        assert st == 200, "race control keeps the other race settings"
+        st, _t, _h = _req(port, f"/console/drivers/race/settings?t={director}", on_air, hdr)
+        assert st == 200 and driver_race.read_settings(srv.race_svc._path)["visible"], "the director does"
         st, text, _h = _req(port, f"/console/race-control/drivers/readiness?t={rc}")
         rows = _json.loads(text)["rows"]
         assert st == 200 and [r["entry"] for r in rows if r["ready"]] == [ENTRIES[0]], rows
@@ -309,7 +334,8 @@ def t_both_desks_act_with_their_identity():
             "one red flag change per person in 2 s"
         assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
         actions = [r["action"] for r in _audit_of(srv)]
-        assert actions == ["correct", "final_lap", "reassign", "red_flag_cover_down", "red_flag"], actions
+        assert actions == ["correct", "final_lap", "settings", "settings", "reassign", "red_flag_cover_down",
+            "red_flag"], actions
         carol = g._tok("carol")                                   # producer: every role
         assert _req(port, f"/console/race-control/drivers/data?t={carol}")[0] == 403
         assert _req(port, f"/console/drivers/data?t={carol}")[0] == 404

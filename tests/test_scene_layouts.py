@@ -27,6 +27,27 @@ def t_intermission_slots_follow_profile_kind():
         assert 'intermission-webcam' not in {s['id'] for s in m.overlay_slots_data('hud')['slots']}
 
 
+def t_the_driver_dashboard_is_a_builder_page_in_both_profile_kinds():
+    for solo in (False, True):
+        with patch.object(m, '_profile_is_solo', return_value=solo):
+            data = m.overlay_slots_data('drivers')
+        assert data['ok'], data
+        assert {s['id'] for s in data['slots']} >= {
+            'drivers-header', 'drivers-tower', 'drivers-fastest', 'drivers-map'}, data['slots']
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        od = Path(td) / 'profiles/demo/overlay'
+        try:
+            saved = m.overlay_layout_write_data('drivers', {
+                'page': 'drivers', 'slots': {'drivers-tower': {'left': 90, 'fontSize': 24}}})
+            assert saved['ok'], saved
+            css = (od / 'drivers.css').read_text(encoding="utf-8")
+            assert '#drivers-tower' in css and 'left: 90px' in css, css
+            assert not (od / 'hud.css').exists(), "the dashboard has its own stylesheet"
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
 def t_intermission_layout_is_independent_and_migrates_legacy_css():
     with tempfile.TemporaryDirectory() as td:
         original = cli._mk_active_profile(td)
