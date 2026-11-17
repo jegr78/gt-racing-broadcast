@@ -1733,6 +1733,16 @@ def t_obs_graphics_carries_the_panel_catalog():
     assert panel["graphicsGrid"][0]["label"] == "STARTING GRID", panel["graphicsGrid"][0]
     assert panel["graphics"][0] == {"label": "HUD", "scene": "Stint", "source": "Stint HUD"}
 
+def t_console_status_keeps_obs_and_feed_errors_from_non_directors():
+    full = {"obs": {"reachable": False, "note": "connect 127.0.0.1:4455 refused"},
+            "feeds": {"A": {"channel": "https://youtu.be/x", "last_error": "HTTP 403 for https://x"}}}
+    crew = m.redact_console_status(full, ["commentator"])
+    assert crew["obs"] == {"reachable": False}, "the OBS note can name the WebSocket host"
+    assert "last_error" not in crew["feeds"]["A"], "a feed error can carry its stream URL"
+    director = m.redact_console_status(full, ["director"])
+    assert director["obs"]["note"] and director["feeds"]["A"]["last_error"]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
