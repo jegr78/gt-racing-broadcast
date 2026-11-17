@@ -115,14 +115,19 @@ event setting.
   league's rule (Control Center Home, **Red flag**, or `racecast event race
   --restart`) says whether a restart keeps the gaps or neutralises them: order and
   laps stay, cars on the same lap start level. Race Control or the director can
-  switch it for one restart. **Restart released** ends the mode.
+  switch it for one restart. **Restart released** ends the mode. A car still in the
+  lobby it raced in (a red flag pressed by mistake, or a suspension the lobby drove
+  through) counts on from where it is; a car in a restart lobby still resumes when it
+  leaves the box. A lap count is counted in race distance, so a restart from the box
+  does not shift it.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
   leader's distance at the stint switch, so its later departure from the box becomes
   its deficit.
 - **Corrections** add or remove metres and pit stops per entry, always with a reason.
   A **change override** makes a team's other sender the active one at once.
 
-Corrections and rejoin marks survive a relay restart. Every action is logged with who
+Corrections and rejoin marks survive a relay restart; a race reset and the next
+`event start` drop them. Every action is logged with who
 and when in `runtime/<profile>/driver-race-audit.jsonl`. Race Control and the director
 use them from the Race Control desk ([Console](Console)) and the Director Panel
 ([Director](Director#driver-telemetry)).

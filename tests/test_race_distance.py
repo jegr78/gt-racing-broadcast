@@ -523,12 +523,12 @@ def t_a_lap_count_finish_after_a_red_flag_restart_counts_the_whole_race():
     t = _drive(race, [a], [50], 0.0, (L + 30) / 50)            # 1 lap and a bit
     frozen = _row(race, "A", t)["distance_m"]
     race.red_flag(t, "keep")
-    _new_lobby(a, L - 15)
+    _new_lobby(a, L / 2)                                        # the restart box sits mid-lap
     t = _drive(race, [a], [None], t, 3)
     a.box = False
-    t = _drive(race, [a], [50], t, (L - frozen + 2 * L) / 50 - 3)   # just short of 3 race laps
+    t = _drive(race, [a], [50], t, (3 * L - frozen) / 50 - 3)   # just short of 3 race laps
     assert race.standings(t)["state"] == "racing", race.standings(t)["entries"][0]
-    t = _drive(race, [a], [50], t, L / 50 + 2)
+    t = _drive(race, [a], [50], t, 0.2 * L / 50)
     assert _row(race, "A", t)["finished"], "3 laps of race distance finish it, whatever the restart lobby counts"
 
 
