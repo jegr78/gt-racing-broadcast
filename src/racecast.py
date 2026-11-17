@@ -5776,18 +5776,26 @@ def event_race_write_data(changes, alive=None, post=None, path=None, foreign=Non
     restart = changes.get("restart")
     try:
         changes = driver_race.validate(changes)
-        if restart is not None:
-            league = league_path or _driver_race_league_path()
-            if league is None:
-                return {"ok": False, "error": "no active profile for the restart setting"}
-            driver_race.write_league(league, {"restart": restart})
+        if restart is not None and restart not in driver_race.RESTART_MODES:
+            raise ValueError("restart is keep or neutralise")
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    except OSError as exc:
-        return {"ok": False, "error": f"could not save the restart setting: {exc}"}
+    league = league_path or _driver_race_league_path()
+    if restart is not None and league is None:
+        return {"ok": False, "error": "no active profile for the restart setting"}
+
+    def save_restart():
+        """The league's restart default, written only once the rest is applied."""
+        if restart is None:
+            return None
+        try:
+            driver_race.write_league(league, {"restart": restart})
+        except OSError as exc:
+            return {"ok": False, "error": f"could not save the restart setting: {exc}"}
+        return None
     if not changes:
-        return {"ok": True, "settings": event_race_read_data(path, league_path)["settings"],
-                "applied": "profile"}
+        return save_restart() or {"ok": True, "settings": event_race_read_data(path, league_path)["settings"],
+                                  "applied": "profile"}
     if _relay_runs_active_profile(alive, foreign):
         post = post or _relay_post_json
         try:
@@ -5802,8 +5810,11 @@ def event_race_write_data(changes, alive=None, post=None, path=None, foreign=Non
             saved, applied = driver_race.write_settings(path or _driver_race_path(), changes), "file"
         except OSError as exc:
             return {"ok": False, "error": f"could not save the settings: {exc}"}
-    league = driver_race.read_league(league_path or _driver_race_league_path())
-    return {"ok": True, "settings": dict(saved, restart=league["restart"]), "applied": applied}
+    failed = save_restart()
+    if failed:
+        return failed
+    return {"ok": True, "settings": dict(saved, restart=driver_race.read_league(league)["restart"]),
+            "applied": applied}
 
 
 def _race_line(s):

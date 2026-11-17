@@ -6813,6 +6813,12 @@ def t_driver_race_settings_go_to_the_relay_or_the_file():
         "the restart default is a profile file, no relay call"
     bad = m.event_race_write_data({"restart": "fast"}, alive=lambda: False, path=path, league_path=league)
     assert not bad["ok"] and "restart" in bad["error"], bad
+    both = m.event_race_write_data({"restart": "keep", "finish_mode": "laps"}, alive=lambda: True,
+                                   foreign=lambda: False, path=path, league_path=league,
+                                   post=lambda *_a: {"ok": False, "error": "busy"})
+    assert not both["ok"], both
+    assert m.event_race_read_data(path=path, league_path=league)["settings"]["restart"] == "neutralise", \
+        "a refused combined change leaves the restart default as it was"
 
 
 def t_driver_invite_follows_the_event_and_regenerates():
