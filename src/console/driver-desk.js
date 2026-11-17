@@ -23,6 +23,8 @@
     ".dd input[type=number]{width:6.5em}",
     ".dd input[type=text]{width:9em}.dd input[type=text].wide{width:13em}",
     ".dd input[type=text].grow{width:auto;flex:1 1 12em}",
+    ".dd input[type=checkbox]{width:auto;margin:0;padding:0}",
+    ".dd label.check{display:inline-flex;align-items:center;gap:6px;cursor:pointer}",
     ".dd table{width:100%;border-collapse:collapse}",
     ".dd th,.dd td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--edge,#2a2f37);vertical-align:middle}",
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
@@ -252,7 +254,8 @@
         var body = {}; body[key] = box.checked;
         act("/drivers/race/settings", body, label + (box.checked ? " on" : " off"));
       });
-      return [box, el("label", {cls: "muted", text: label})];
+      var text = el("span", {cls: "muted", text: label});
+      return {box: box, label: el("label", {cls: "check"}, [box, text])};
     }
     var showTyre = toggle("Show compound", "show_compound");
     var showFuel = toggle("Show fuel", "show_fuel");
@@ -305,7 +308,7 @@
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qDelete, qRestore]),
       qList,
       el("h3", {text: "Tyres"}),
-      el("div", {cls: "row"}, showTyre.concat(showFuel)),
+      el("div", {cls: "row"}, [showTyre.label, showFuel.label]),
       tyreTable,
       el("h3", {text: "Readiness"}), readyTable,
       el("h3", {text: "Senders"}), sendTable,
@@ -323,8 +326,8 @@
       onAir.textContent = s.visible ? "Hide dashboard" : "Show dashboard";
       onAir.className = s.visible ? "warn" : "";
       if (document.activeElement !== delay) delay.value = s.delay_s || 0;
-      showTyre[0].checked = s.show_compound !== false;
-      showFuel[0].checked = s.show_fuel !== false;
+      showTyre.box.checked = s.show_compound !== false;
+      showFuel.box.checked = s.show_fuel !== false;
       var known = (r.entries || []).map(function (e) { return e.entry; });
       Object.keys(r.compounds || {}).forEach(function (e) { if (known.indexOf(e) < 0) known.push(e); });
       renderTyres(known, r.compounds || {});

@@ -148,6 +148,13 @@ It never carries connection ids, corrections or who made them.
   `visible`; a new install starts off air. The director puts it on air with **Show
   dashboard** in the panel's Driver telemetry section; Race Control cannot, because it
   is a program change.
+- **Tyre compound**: GT7 sends none, so Race Control and the director set it per entry
+  in the desks' **Tyres** section: Racing Soft `RS` (red), Racing Medium `RM` (yellow),
+  Racing Hard `RH` (white), Intermediate `I` (green) or Wet `W` (blue). It stays through
+  driver changes and applies to the race and qualifying; the last change wins and the
+  desks show who made it. **Show compound** and **Show fuel** switch those two columns
+  on the dashboard for every entry; name and number always show. The cockpit always
+  shows both.
 - **Corrections** from both desks: clear or set the fastest lap, and set or delete an
   entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart
   and end with the race reset or the next `event start`.

@@ -32,19 +32,20 @@
     position: absolute; left: 48px; top: 136px; width: 420px; box-sizing: border-box;
     background: var(--dd-bg); font-size: 20px; padding: 4px 0;
   }
-  .dd-row { display: grid; grid-template-columns: 38px 52px 1fr 30px 112px 40px; align-items: center;
+  .dd-row { display: grid; grid-template-columns: 38px 52px 1fr 30px 96px 40px; align-items: center;
             height: 40px; padding: 0 10px; gap: 8px; }
   .dd-row:nth-child(even) { background: var(--dd-row); }
   .dd-pos { font-weight: 800; text-align: right; }
   /* Tyre compound: a coloured letter in a ring, as GT7 broadcasts show it. */
-  .dd-tyre { width: 24px; height: 24px; box-sizing: border-box; border-radius: 50%; border: 3px solid transparent;
-             display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; }
+  .dd-tyre { width: 30px; height: 30px; box-sizing: border-box; border-radius: 50%; border: 3px solid transparent;
+             display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800;
+             letter-spacing: -.02em; }
   .dd-tyre.RS { border-color: #e10600; color: #ff5a4f; }
   .dd-tyre.RM { border-color: #ffd23f; color: #ffd23f; }
   .dd-tyre.RH { border-color: #f2f4f7; color: #f2f4f7; }
   .dd-tyre.I  { border-color: #2fbf55; color: #4fdc74; }
   .dd-tyre.W  { border-color: #1e88e5; color: #4aa8ff; }
-  #drivers-tower.no-tyre .dd-row { grid-template-columns: 38px 52px 1fr 112px 40px; }
+  #drivers-tower.no-tyre .dd-row { grid-template-columns: 38px 52px 1fr 96px 40px; }
   #drivers-tower.no-tyre .dd-tyre { display: none; }
   .dd-num { height: 28px; line-height: 28px; text-align: center; font-weight: 800; font-size: 16px;
             border-radius: 4px; background: #39414d; color: #fff; overflow: hidden; }
