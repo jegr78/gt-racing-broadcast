@@ -144,6 +144,22 @@ def t_a_confirmed_stop_is_announced_once_before_the_report_runs():
         assert types_.count("obs_stream_stop") == 1, types_
 
 
+def t_a_wall_clock_step_back_after_a_stop_does_not_hide_a_restart():
+    with _event() as (relay, obs, posts, teardown, parts, port):
+        relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
+        relay._obs.get_health_stats = lambda: (True, {"stream_active": True}, "")
+        relay._set_obs_stream(False)
+        real = m.time.time
+        m.time.time = lambda: real() - 3600
+        try:
+            _probe(relay, True)
+        finally:
+            m.time.time = real
+        titles = [payload["embeds"][0]["title"] for kind, payload in posts if kind == "obs-stream"]
+        assert len(titles) == 2 and "started" in titles[1], \
+            f"a live sample after the stop counts even if the wall clock stepped back: {titles}"
+
+
 def t_failed_final_stop_restores_alarm_and_does_not_consume_the_transition():
     with _event() as (relay, obs, posts, teardown, parts, port):
         obs.result = (False, "OBS refused stop")

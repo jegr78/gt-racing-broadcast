@@ -1199,6 +1199,8 @@ def t_event_stop_argv():
 def t_the_spawned_event_stop_writes_its_output_to_the_relay_log_dir():
     with tempfile.TemporaryDirectory() as td:
         r = _mk_relay(td, ["https://youtu.be/a"])
+        with open(os.path.join(td, "event-stop.log"), "wb") as fh:
+            fh.write(b"previous event\n")
         seen = {}
 
         def popen(argv, **kw):
@@ -1213,7 +1215,9 @@ def t_the_spawned_event_stop_writes_its_output_to_the_relay_log_dir():
         assert seen["err"] == m.subprocess.STDOUT and seen["out"].closed, seen
         log = os.path.join(td, "event-stop.log")
         with open(log, "rb") as fh:
-            assert b"Report sent" in fh.read(), "the auto-stop leaves a readable trace"
+            body = fh.read()
+        assert b"Report sent" in body, "the auto-stop leaves a readable trace"
+        assert b"previous event" not in body, "each auto-stop replaces the log, so it stays bounded"
 
 
 def t_classify_source_state():

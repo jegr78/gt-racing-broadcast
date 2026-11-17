@@ -9482,7 +9482,7 @@ class Relay:
         self.stream_expected = False      # latched True once OBS is seen streaming
                                           # (off-air alarm only fires after this)
         self._stream_active_prev = None   # last bool stream_active, for start/stop events (#317)
-        self._stream_stop_ts = 0.0        # last confirmed stop; older live samples are stale
+        self._stream_stop_mono = None     # monotonic time of the last confirmed stop
         self._stream_started_ts = None    # when OBS last went live, for the stop-line uptime
         # POV is a THIRD, independent feed, not part of the A/B index. Starts
         # paused (off) until the Director calls /pov/reload.
@@ -11294,7 +11294,7 @@ class Relay:
         owns the stop transition, None when a probe already announced it."""
         now = time.time()
         with self._obs_lock:
-            self._stream_stop_ts = now
+            self._stream_stop_mono = time.monotonic()
             if self._stream_active_prev is not True:
                 return None
             self._stream_active_prev = False
@@ -11312,6 +11312,7 @@ class Relay:
                 self.obs_stats = {}
             return
         now = time.time()
+        sampled = time.monotonic()
         try:
             reachable, stats, note = self._obs.get_health_stats()
             kbps = _obs_ws.stream_kbps(self._obs_last_bytes, self._obs_last_bytes_ts,
@@ -11328,7 +11329,8 @@ class Relay:
                 redacted["stream_kbps"] = kbps
                 self.obs_stats = redacted
                 active = stats.get("stream_active")    # True / False / None
-                if active and now < self._stream_stop_ts:
+                if (active and self._stream_stop_mono is not None
+                        and sampled < self._stream_stop_mono):
                     active = None                      # sampled before a confirmed stop
                 prev = self._stream_active_prev
                 if active is not None:                 # ignore unreachable blips
@@ -11379,7 +11381,7 @@ class Relay:
         """Detached `racecast event stop`. It generates+sends the report (we are
         still up, so names resolve) then tears racecast down (kills us by PID).
         Detach into a new session so our own teardown cannot cascade-kill the child.
-        Its output is appended to event-stop.log in the relay log dir.
+        Its output replaces event-stop.log in the relay log dir.
         Best-effort: a spawn failure is logged, never raised."""
         try:
             frozen = bool(getattr(sys, "frozen", False))
@@ -11393,7 +11395,7 @@ class Relay:
                                            | subprocess.CREATE_NEW_PROCESS_GROUP)
             else:
                 kwargs["start_new_session"] = True
-            with open(os.path.join(self._logdir, "event-stop.log"), "ab") as log:
+            with open(os.path.join(self._logdir, "event-stop.log"), "wb") as log:
                 subprocess.Popen(argv, stdout=log, **kwargs)
             LOG.info("Last part ended: spawned `event stop` (report + teardown).")
         except Exception:      # noqa: BLE001  best-effort
