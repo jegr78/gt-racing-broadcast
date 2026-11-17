@@ -609,6 +609,17 @@ def t_a_race_built_mid_race_counts_the_cars_from_their_own_laps():
     assert _row(race, "C", t)["distance_m"] is None, "a late sender cannot claim more laps than the field"
 
 
+def t_one_sender_cannot_lift_the_start_bound_of_a_fresh_race():
+    race = rd.Race(TRACE, formation=False)
+    liar = Car(race, "A", "a", 40 * L - 60)                   # alone, claiming lap 40
+    t = _drive(race, [liar], [50], 0.0, 4)
+    assert _row(race, "A", t)["distance_m"] is None, "a lone sender past the start lap waits for a second car"
+    b, c = Car(race, "B", "b", L - 15), Car(race, "C", "c", L - 40)
+    t = _drive(race, [liar, b, c], [50, 50, 50], t, 4)
+    assert _row(race, "A", t)["distance_m"] is None, "the field's lap bounds the claim"
+    assert _row(race, "B", t)["distance_m"] is not None, "the honest cars start"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
