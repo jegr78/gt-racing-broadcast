@@ -579,7 +579,7 @@ def t_a_lap_faster_than_the_line_allows_never_counts():
     assert race.standings(t)["fastest"] is None, race.standings(t)["fastest"]
     before = _row(race, "A", t)["distance_m"]
     a.send(t)                                   # the same timestamp again
-    a.along += 80
+    a.along += 10
     a.send(t)
     assert _row(race, "A", t)["distance_m"] == before, "a sample without new time never moves a car"
 
