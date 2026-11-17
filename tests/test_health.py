@@ -1196,6 +1196,26 @@ def t_event_stop_argv():
     assert "src/relay/../racecast.py".split("/")[-1] in argv[1]
 
 
+def t_the_spawned_event_stop_writes_its_output_to_the_relay_log_dir():
+    with tempfile.TemporaryDirectory() as td:
+        r = _mk_relay(td, ["https://youtu.be/a"])
+        seen = {}
+
+        def popen(argv, **kw):
+            seen["out"], seen["err"] = kw["stdout"], kw["stderr"]
+            kw["stdout"].write(b"Report sent to Discord.\n")
+        orig = m.subprocess.Popen
+        m.subprocess.Popen = popen
+        try:
+            r._spawn_event_stop()
+        finally:
+            m.subprocess.Popen = orig
+        assert seen["err"] == m.subprocess.STDOUT and seen["out"].closed, seen
+        log = os.path.join(td, "event-stop.log")
+        with open(log, "rb") as fh:
+            assert b"Report sent" in fh.read(), "the auto-stop leaves a readable trace"
+
+
 def t_classify_source_state():
     # Twitch: channel offline / not live yet.
     assert m.classify_source_state(

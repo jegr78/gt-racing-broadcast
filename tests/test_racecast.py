@@ -5851,6 +5851,21 @@ def t_running_relay_dir_follows_profile_stamp():
         m._runtime_base_dir, m._active_profile_name = orig_base, orig_active
 
 
+def t_the_relay_log_source_includes_the_auto_stop_log():
+    with tempfile.TemporaryDirectory() as td:
+        logs = os.path.join(td, "logs")
+        os.makedirs(logs)
+        for name in ("relay.console.log", "event-stop.log"):
+            open(os.path.join(logs, name), "w").close()
+        orig = m._running_relay_dir
+        m._running_relay_dir = lambda: td
+        try:
+            names = [os.path.basename(p) for p in m._relay_files()]
+        finally:
+            m._running_relay_dir = orig
+        assert "event-stop.log" in names, f"the auto-stop output is readable in the Control Center: {names}"
+
+
 def t_relay_start_plan_port_free_starts():
     action, kill, reason = m.relay_start_plan(
         port_pids=[], feed_pids=[], pidfile_pid=None, pidfile_alive=False,

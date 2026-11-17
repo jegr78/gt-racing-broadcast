@@ -858,7 +858,8 @@ def _relay_feed_logs():
     return sorted(glob.glob(os.path.join(d, "feed_*.log")))
 
 def _relay_files():
-    files = [_relay_log_path()] + _relay_feed_logs()
+    files = ([_relay_log_path()] + _relay_feed_logs()
+             + [os.path.join(_running_relay_dir(), "logs", "event-stop.log")])
     return [f for f in files if os.path.exists(f)]
 
 def _app_files():

@@ -9414,6 +9414,7 @@ class Relay:
                  qual_source=None, mode="race", discord_webhook_url=None,
                  sheet_id=None, event_title_store=None, league_name="",
                  producer_name="", solo=False):
+        self._logdir = logdir
         self.race_source = source
         self.qual_source = qual_source
         self.sheet_id = sheet_id          # league identity, surfaced in /status for takeover
@@ -11378,6 +11379,7 @@ class Relay:
         """Detached `racecast event stop`. It generates+sends the report (we are
         still up, so names resolve) then tears racecast down (kills us by PID).
         Detach into a new session so our own teardown cannot cascade-kill the child.
+        Its output is appended to event-stop.log in the relay log dir.
         Best-effort: a spawn failure is logged, never raised."""
         try:
             frozen = bool(getattr(sys, "frozen", False))
@@ -11385,14 +11387,16 @@ class Relay:
             env = os.environ.copy()
             if frozen:
                 env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-            kwargs = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-                      "stderr": subprocess.DEVNULL, "env": env}
+            log = open(os.path.join(self._logdir, "event-stop.log"), "ab")
+            kwargs = {"stdin": subprocess.DEVNULL, "stdout": log,
+                      "stderr": subprocess.STDOUT, "env": env}
             if os.name == "nt":
                 kwargs["creationflags"] = (subprocess.DETACHED_PROCESS
                                            | subprocess.CREATE_NEW_PROCESS_GROUP)
             else:
                 kwargs["start_new_session"] = True
-            subprocess.Popen(argv, **kwargs)
+            with log:
+                subprocess.Popen(argv, **kwargs)
             LOG.info("Last part ended: spawned `event stop` (report + teardown).")
         except Exception:      # noqa: BLE001  best-effort
             LOG.exception("failed to spawn event stop")
