@@ -169,6 +169,7 @@ def main():
         profile.write_text("NAME=Demo Racing\nKIND=endurance\n", encoding="utf-8")
         overlay = profile.parent / "overlay"
         ctx = ui._ctx()
+        ctx['active_profile'] = cli.m._active_profile_name  # writes carry the league the page loaded
         ctx.update(
             version="dev build",
             status=lambda: {
