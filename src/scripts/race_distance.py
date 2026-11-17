@@ -350,10 +350,12 @@ class Race:
         return True
 
     def _late_start_ok(self, ent, lap, lap0):
-        """A sender may start past the start lap only up to the leader's lap."""
+        """A sender may start past the start lap only up to the leader's lap. With no
+        entry counting yet (a race rebuilt mid-race: relay restart, new pick, reset)
+        the first senders count from their own laps."""
         ahead = [math.floor(e.distance / self.length) for e in self._entries.values()
                  if e is not ent and e.distance is not None]
-        return lap - lap0 <= (max(ahead) if ahead else 0)
+        return not ahead or lap - lap0 <= max(ahead)
 
     def update(self, entry, conn, name, sample):
         checked = self._valid(sample)

@@ -596,6 +596,19 @@ def t_a_lap_with_a_red_flag_or_a_restart_never_sets_the_fastest_lap():
     assert race.standings(t)["fastest"] is None, "the lap with the red flag in it waits"
 
 
+def t_a_race_built_mid_race_counts_the_cars_from_their_own_laps():
+    race = rd.Race(TRACE, formation=False)                  # a relay restart late in lap 5
+    a, b = Car(race, "A", "a", 5 * L - 60), Car(race, "B", "b", 5 * L - 120)
+    t = _drive(race, [a, b], [50, 50], 0.0, 4)              # both cross into lap 6
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert race.standings(t)["state"] == "racing", race.standings(t)
+    assert ra["laps"] == 4 and abs(ra["distance_m"] - a.along) < 10, "the same distance as a race counted from the start"
+    assert rb["laps"] == 4 and ra["distance_m"] > rb["distance_m"], (ra, rb)
+    c = Car(race, "C", "c", 9 * L + 10)                       # a later sender still meets the bound
+    t = _drive(race, [a, b, c], [50, 50, 50], t, 2)
+    assert _row(race, "C", t)["distance_m"] is None, "a late sender cannot claim more laps than the field"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
