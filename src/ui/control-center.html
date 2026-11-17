@@ -3163,6 +3163,7 @@ function offerRestart() {
 }
 
 // profile.env editor, mirroring the machine-.env editor, on #penvrows.
+let penvActive = '';                       // the league the editor rows came from
 async function loadProfileEnv(force) {
   if (force && !(await confirmModal('Reload from disk and discard any unsaved edits?'))) return;
   let d;
@@ -3176,6 +3177,7 @@ async function loadProfileEnv(force) {
     return;
   }
   $('penv-err').hidden = true;
+  penvActive = d.active;
   $('penv-path').textContent = d.path;
   const c = $('penvrows');
   c.textContent = '';
@@ -3205,7 +3207,7 @@ async function saveProfileEnv() {
   try {
     d = await (await fetch('/api/profile/env', {method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({entries: collectEnvEditor('penvrows')})})).json();
+        body: JSON.stringify({entries: collectEnvEditor('penvrows'), expectedProfile: penvActive})})).json();
   } catch (e) { showProfileErr('penv-err', 'Control Center not reachable.'); b.disabled = false; return; }
   if (!d.ok) { showProfileErr('penv-err', d.error || 'could not save profile.env'); b.disabled = false; return; }
   const orig = b.innerHTML;
@@ -3873,10 +3875,13 @@ function ovFontFaceCss() {
   // library, so a library font previews before it is copied into the profile).
   const rules = ovFontFaceRules((ovState.fonts || []).concat(ovState.library || []));
   if (rules.length) css += rules.join('\n') + '\n';
-  if (ovState.layout && ovState.layout.bodyFont) {
-    css += '\n:host{font-family:"' + ovState.layout.bodyFont + '"}';
-  }
   return css;
+}
+
+// The layout's body font as one rule; a name that could leave the CSS string is ignored.
+function ovBodyFontCss() {
+  const f = ovState.layout && ovState.layout.bodyFont;
+  return f && /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/.test(f) ? ':host{font-family:"' + f + '"}' : '';
 }
 
 // A slot the HUD keeps off unless the profile turns Visible on (overlay_build
@@ -3907,12 +3912,13 @@ function ovBuildCanvas() {
   // override.css. Slot values are rules, not inline styles, or they would beat
   // customCss here while losing to it on air. The builder chrome goes last.
   sh.innerHTML = '<style>' + ovState.baseCss + '\n' + ovFontFaceCss() + '</style>' +
-    '<style id="ov-slot-css"></style><style id="ov-custom-css"></style>' +
+    '<style id="ov-body-font"></style><style id="ov-slot-css"></style><style id="ov-custom-css"></style>' +
     '<style>' + OV_SHADOW_CSS + ovDefaultHiddenCss() + '</style>' + ovState.body;
   sh.querySelectorAll('[data-audience-widget]').forEach(el => {
     if (!Object.prototype.hasOwnProperty.call(ovState.layout.slots, el.id)) el.remove();
   });
   ovState.slotRules = {};
+  sh.getElementById('ov-body-font').textContent = ovBodyFontCss();
   sh.getElementById('ov-custom-css').textContent = $('overlayCss').value;
   // Reference grid: inserted right after <style> (before the slots) + pointer-events
   // none, so it paints UNDER the slots and over the Overlay.png backdrop.
@@ -5276,7 +5282,7 @@ async function saveOverlay() {
   try {
     d = await (await fetch('/api/overlay/layout', {method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({page: savedPage, layout})})).json();
+        body: JSON.stringify({page: savedPage, layout, expectedProfile: savedActive})})).json();
   } catch (e) { showProfileErr('overlay-err', 'Control Center not reachable.'); b.disabled = false; return; }
   if (savedPage !== overlayPage || savedActive !== ovState.active) { b.disabled = false; return; }
   if (!d.ok) { showProfileErr('overlay-err', d.error || 'could not save overlay'); b.disabled = false; return; }
@@ -5359,7 +5365,7 @@ async function applyOverlay() {
   $('overlay-err').hidden = true;
   try {
     const d = await (await fetch('/api/overlay/apply', {method:'POST',
-      headers:{'Content-Type':'application/json'}, body:JSON.stringify({page:overlayPage})})).json();
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({page:overlayPage, expectedProfile:ovState.active})})).json();
     if (!d.ok) showProfileErr('overlay-err', d.error || 'Could not apply scene.');
   } catch(e) { showProfileErr('overlay-err', 'Control Center not reachable.'); }
 }
