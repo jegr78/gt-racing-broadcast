@@ -407,6 +407,21 @@ def t_red_flag_anchors_and_each_car_continues_from_its_anchor():
     assert race.standings(t)["red_flag"] is None
 
 
+def t_a_box_stop_in_the_old_lobby_is_no_restart():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    t = _drive(race, [a], [50], 0.0, 20)
+    da = _row(race, "A", t)["distance_m"]
+    race.red_flag(t, "keep")
+    a.box = True
+    t = _drive(race, [a], [None], t, 3)
+    a.box = False
+    t = _drive(race, [a], [40], t, 5)
+    row = _row(race, "A", t)
+    assert row["distance_m"] == da and row["status"] == "red_flag", \
+        f"only the restart lobby's box exit resumes: {row}"
+
+
 def t_a_neutralised_restart_levels_cars_on_the_same_lap():
     race = rd.Race(TRACE, formation=False)
     a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115), Car(race, "C", "c", L - 25)
@@ -436,7 +451,8 @@ def t_corrections_move_order_gaps_and_pit_stops():
     race.correct("B", 150.0, pit_stops=2)
     rows = race.standings(t)["entries"]
     assert [r["entry"] for r in rows] == ["B", "A"], rows
-    assert abs(rows[1]["gap_s"] - 1.0) < 0.15, f"A is 50 m behind the corrected B: {rows[1]}"
+    assert rows[1]["gap_s"] is not None and abs(rows[1]["gap_s"] - 1.0) < 0.15, \
+        f"A is 50 m behind the corrected B: {rows[1]}"
     assert rows[0]["pit_stops"] == 2 and rows[0]["correction_m"] == 150.0
     race.correct("B", -150.0, pit_stops=-2)
     assert [r["entry"] for r in race.standings(t)["entries"]] == ["A", "B"]

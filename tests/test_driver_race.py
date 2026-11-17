@@ -173,7 +173,8 @@ def t_corrections_and_rejoins_survive_a_relay_restart():
     rec = _audit(path)[0]
     assert rec == {"ts": 1_800_000_000.0, "who": "rc:Anna", "action": "correct", "entry": "A",
                    "metres": -250.0, "pit_stops": 1, "reason": "missed a cut"}, rec
-    assert again.standings()["last_action"]["who"] == "rc:Anna"
+    last = again.standings()["last_action"]
+    assert last is not None and last["who"] == "rc:Anna", f"the last action survives a restart: {last}"
 
 
 def t_actions_validate_their_input():
