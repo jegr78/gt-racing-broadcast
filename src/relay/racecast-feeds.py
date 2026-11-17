@@ -10672,6 +10672,11 @@ class Relay:
             seen[name] = msg
             LOG.warning("%s tick failed (it keeps running): %s", name, msg, exc_info=True)
 
+    def _tick_ok(self, name):
+        """A tick that failed before succeeded: say so once, and warn again on the next error."""
+        if self.__dict__.get("_tick_errors", {}).pop(name, None) is not None:
+            LOG.info("%s tick recovered", name)
+
     def _ensure_covers(self, now):
         """Create missing cover items: on the first tick, then every COVER_REASSERT_S
         while any feed's cover is still missing (OBS started late, an old collection)."""
@@ -12009,6 +12014,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Its own bucket: senders still holding codes of a regenerated invite retry once a
     # minute and must not lock console logins out of the shared one.
     _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
+    _timing_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)   # public scans spare the drivers
     _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _timing_cache = timing_link.Cache(timing_link_path) if timing_link_path else None
@@ -13368,7 +13374,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             p = tuple(x for x in urlparse(self.path).path.split("/") if x)
             if method == "GET":
                 if p[:1] == ("console",):
-                    if p[1:] in _CONSOLE_PAGE_GETS or p[1:] in (("login",), ("oauth", "callback"), ("timing",)):
+                    if p[1:] in _CONSOLE_PAGE_GETS or p[1:] in (("login",), ("oauth", "callback"), ("timing",),
+                                                                ("drive",)):
                         return True
                 elif p and (p in _CONSOLE_PAGE_GETS or p in (("hud",), ("hud", "preview"),
                                                      ("splitscreen",), ("splitscreen", "hud"), ("intermission",),
@@ -14181,7 +14188,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return None
             if not link or not hmac.compare_digest(presented.encode("utf-8", "replace"),
                                                    link["id"].encode("utf-8")):
-                return self._drive_refuse(403, "this timing link is not valid (any more)")
+                client = self.client_address[0] if self.client_address else "?"
+                if not _timing_authfail_rl.allow(client):
+                    return self._send({"error": "too many attempts"}, 429)
+                return self._send({"error": "this timing link is not valid (any more)"}, 403)
             if rest == []:
                 if not timing_page_path:
                     return self._send({"error": "page not found"}, 404)
@@ -15080,6 +15090,17 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     return store
 
 
+def dashboard_ticks(relay, race_svc, stop_evt, every):
+    """Advance the driver dashboard snapshots until stop_evt; a failure warns once per
+    distinct error and never touches the broadcast."""
+    while not stop_evt.wait(every):
+        try:
+            race_svc.tick()
+            relay._tick_ok("driver dashboard")
+        except Exception as e:  # noqa: BLE001
+            relay._warn_tick_error("driver dashboard", e)
+
+
 def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
     """Tell the driver race when the broadcast switches stints: that opens the driver
     change window, and the switch onto the last schedule row brings the final lobby's
@@ -15102,8 +15123,9 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
                              else "on air at start:", idx + 1,
                              f", final lobby over {final} laps" if final else "")
             last = idx
+            relay._tick_ok("driver race stint watch")
         except Exception as e:  # noqa: BLE001  a watcher error must never touch the broadcast
-            LOG.warning("driver race: stint watch failed: %s", e)
+            relay._warn_tick_error("driver race stint watch", e)
 
 
 def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0.0", GT7_RECV_PORT),
@@ -16045,13 +16067,8 @@ def main():
         if track_pick.store.tracks else None,
         multi_lobby=lambda: not relay.solo)
     driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update)
-    def _dashboard_ticks():
-        while not stop_evt.wait(driver_race.SNAPSHOT_EVERY_S):
-            try:
-                race_svc.tick()
-            except Exception as e:  # noqa: BLE001  the dashboard never touches the broadcast
-                LOG.warning("driver dashboard: snapshot failed: %s", type(e).__name__)
-    threading.Thread(target=_dashboard_ticks, daemon=True).start()
+    threading.Thread(target=dashboard_ticks, daemon=True,
+                     args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"])).start()
