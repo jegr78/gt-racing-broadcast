@@ -23,6 +23,8 @@
     ".dd input[type=number]{width:6.5em}",
     ".dd input[type=text]{width:9em}.dd input[type=text].wide{width:13em}",
     ".dd input[type=text].grow{width:auto;flex:1 1 12em}",
+    ".dd input[type=checkbox]{width:auto;margin:0;padding:0}",
+    ".dd label.check{display:inline-flex;align-items:center;gap:6px;cursor:pointer}",
     ".dd table{width:100%;border-collapse:collapse}",
     ".dd th,.dd td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--edge,#2a2f37);vertical-align:middle}",
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
@@ -62,7 +64,9 @@
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
                  reassign: "reassign", disconnect: "disconnect", red_flag_cover_down: "cover down",
-                 fastest: "fastest lap", quali: "qualifying time"};
+                 fastest: "fastest lap", quali: "qualifying time", compound: "tyre compound"};
+  var COMPOUNDS = [["", "—"], ["RS", "RS Racing Soft"], ["RM", "RM Racing Medium"], ["RH", "RH Racing Hard"],
+                   ["I", "I Intermediate"], ["W", "W Wet"]];
 
   function lapTime(ms) {
     if (typeof ms !== "number" || ms <= 0) return "";
@@ -243,6 +247,44 @@
     });
     var qList = el("div", {cls: "muted"});
 
+    // -- tyres: compound per entry and the two display switches ----------------------
+    function toggle(label, key) {
+      var box = el("input", {type: "checkbox", "aria-label": label});
+      box.addEventListener("change", function () {
+        var body = {}; body[key] = box.checked;
+        act("/drivers/race/settings", body, label + (box.checked ? " on" : " off"));
+      });
+      var text = el("span", {cls: "muted", text: label});
+      return {box: box, label: el("label", {cls: "check"}, [box, text])};
+    }
+    var showTyre = toggle("Show compound", "show_compound");
+    var showFuel = toggle("Show fuel", "show_fuel");
+    var tyreBody = el("tbody");
+    var tyreTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
+      "Entry", "Compound", "Set by"].map(function (h) { return el("th", {text: h}); }))]), tyreBody])]);
+    var tyreRows = Object.create(null);   // keyed by entry name: no inherited keys
+    function tyreRow(entry) {
+      var sel = el("select", {"aria-label": "Tyre compound of " + entry},
+                   COMPOUNDS.map(function (c) { return opt(c[0], c[1]); }));
+      sel.addEventListener("change", function () {
+        act("/drivers/race/compound", {entry: entry, code: sel.value || null}, "Compound set");
+      });
+      var by = el("td", {cls: "muted"});
+      var tr = el("tr", {}, [el("td", {text: entry}), el("td", {}, [sel]), by]);
+      return tyreRows[entry] = {tr: tr, sel: sel, by: by};
+    }
+    function renderTyres(entries, compounds) {
+      var rows = entries.map(function (e) {
+        var t = tyreRows[e] || tyreRow(e);
+        var c = Object.prototype.hasOwnProperty.call(compounds, e) ? compounds[e] : null;
+        if (document.activeElement !== t.sel) t.sel.value = c ? c.code : "";
+        t.by.textContent = c ? c.who + " at " + new Date(c.ts * 1000).toLocaleTimeString() : "";
+        return t.tr;
+      });
+      if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No entries yet."})])];
+      tyreBody.replaceChildren.apply(tyreBody, rows);
+    }
+
     // -- readiness and senders -------------------------------------------------------
     var readyHead = el("tr");
     var readyBody = el("tbody");
@@ -266,6 +308,9 @@
       el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet]),
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qDelete, qRestore]),
       qList,
+      el("h3", {text: "Tyres"}),
+      el("div", {cls: "row"}, [showTyre.label, showFuel.label]),
+      tyreTable,
       el("h3", {text: "Readiness"}), readyTable,
       el("h3", {text: "Senders"}), sendTable,
       msg]));
@@ -282,6 +327,11 @@
       onAir.textContent = s.visible ? "Hide dashboard" : "Show dashboard";
       onAir.className = s.visible ? "warn" : "";
       if (document.activeElement !== delay) delay.value = s.delay_s || 0;
+      showTyre.box.checked = s.show_compound !== false;
+      showFuel.box.checked = s.show_fuel !== false;
+      var known = (r.entries || []).map(function (e) { return e.entry; });
+      Object.keys(r.compounds || {}).forEach(function (e) { if (known.indexOf(e) < 0) known.push(e); });
+      renderTyres(known, r.compounds || {});
       var fl = r.fastest;
       flText.textContent = fl ? "Fastest lap " + lapTime(fl.ms) + " · " + fl.driver + " (" + fl.entry + ")"
                               : "No fastest lap yet.";
@@ -345,7 +395,7 @@
       if (multi && !focus.length) focus = Array.from(new Set(rd.rows.map(function (r) { return r.segment; })));
       readyHead.replaceChildren.apply(readyHead, [el("th", {text: "Entry"})].concat(focus.map(function (f) {
         return el("th", {text: f || "Sender"}); })));
-      var byKey = {};
+      var byKey = Object.create(null);
       rd.rows.forEach(function (r) { byKey[r.entry + "\u0000" + (multi ? r.segment : null)] = r; });
       var ready = entries.map(function (e) {
         return el("tr", {}, [el("td", {text: e})].concat(focus.map(function (f) {

@@ -317,6 +317,8 @@ desk:
   seconds, the fastest lap with **Clear fastest lap** and a form to set it, and
   qualifying corrections per entry: **Set time**, **Delete time** (for example after a
   track limits penalty) and **GT7 time** to undo the correction
+- the tyre compound per entry and the dashboard's **Show compound** / **Show fuel**
+  switches
 - readiness per entry (in endurance for the stint on air and the next one) and every
   sender with **Move** (to another entry) and **Disconnect**
 
