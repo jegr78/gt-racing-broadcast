@@ -672,6 +672,17 @@ def t_the_budget_counts_headers_and_rejected_requests():
         srv.shutdown()
 
 
+
+def t_retry_after_never_comes_before_the_pace():
+    srv, port, link, spy = _with_spy(TIMING_ABUSE_RPS=1)
+    spy.interval = lambda: 5.5
+    try:
+        rejected = [x for x in (_req_raw(port, f"/console/timing/data?l={link}") for _ in range(12)) if x[0] == 429]
+        assert rejected and all(int(x[2]["Retry-After"]) >= 5.5 for x in rejected), \
+            [x[2].get("Retry-After") for x in rejected]
+    finally:
+        srv.shutdown()
+
 def t_internal_dashboard_routes_ignore_the_timing_budget():
     srv, port, link, spy = _with_spy(TIMING_BUDGET_KBPS=50)
     try:

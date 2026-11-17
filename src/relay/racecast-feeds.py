@@ -14246,7 +14246,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 interval = max(5.0, interval)
                 _timing_budget.served(timing_feed.HEADER_BYTES, interval)
                 self.send_response(429)
-                self.send_header("Retry-After", str(int(interval)))
+                self.send_header("Retry-After", str(math.ceil(interval)))
                 self.send_header("X-Poll-After", f"{interval:.1f}")
                 self.send_header("Content-Length", "0")
                 self.end_headers()

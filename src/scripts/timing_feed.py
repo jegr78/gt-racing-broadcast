@@ -1,7 +1,7 @@
 """The public timing page's shared response body and upload budget (#1128).
 
-`TickBody` builds the payload at most once per tick, as JSON and gzip with an ETag, so
-every viewer within a tick gets the same bytes. `Budget` estimates the viewers from the
+`TickBody` builds the payload at most once per tick, as JSON and gzip, each with its own
+strong ETag, so every viewer within a tick gets the same bytes. `Budget` estimates the viewers from the
 responses it served and returns the poll interval that keeps them within the upload
 budget. Stdlib only; the relay imports it.
 """
@@ -69,7 +69,7 @@ def etag_matches(header, *etags):
 
 
 class TickBody:
-    """One encoded payload per tick: get() -> (etag, raw_json, gzip_json)."""
+    """One encoded payload per tick: get() -> encode()'s (etag, raw, gzip, gzip_etag)."""
 
     def __init__(self, build, clock=time.monotonic, tick_s=TICK_S):
         self._build, self._clock, self._tick_s = build, clock, tick_s
@@ -103,7 +103,8 @@ class TickBody:
 
 
 class Budget:
-    """Poll interval that keeps all viewers within `kbps` of upload."""
+    """Poll interval that keeps all viewers within `kbps` of upload, up to the crowd that
+    MAX_INTERVAL_S still covers; beyond it the upload grows with the viewers again."""
 
     def __init__(self, kbps, clock=time.monotonic, window_s=2 * MAX_INTERVAL_S):
         # A window shorter than the longest interval misses slow viewers and oscillates.

@@ -182,7 +182,9 @@ activity list notes new fastest laps, red flags and the chequered flag.
 
 All viewers together share an upload budget (`RACECAST_TIMING_BUDGET_KBPS` in the
 machine `.env`, default 1000 kbit/s). With more viewers the page refreshes less often,
-at least every 30 s, and shows how old its data is; nobody is turned away. Race
+at least every 30 s, and shows how old its data is; nobody is turned away. At the
+default budget that holds roughly 4000 viewers; beyond them the page stays at 30 s and
+the upload grows again. Race
 Control, the desks and the stream overlay never slow down for it.
 
 ### Red flag, rejoin and corrections
