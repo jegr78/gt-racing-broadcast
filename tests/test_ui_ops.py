@@ -148,6 +148,8 @@ def t_radio_voice_actions_map_to_the_cli():
     assert ui_ops.build_argv('radio-provision', None) == ['radio', 'provision']
     assert ui_ops.build_argv('radio-provision', {'whisper': True}) == ['radio', 'provision', '--whisper']
     assert ui_ops.build_argv('radio-provision', {'whisper': False}) == ['radio', 'provision']
+    assert ui_ops.build_argv('radio-provision', {'whisper': 'false'}) == ['radio', 'provision'], \
+        "only a real true asks for the Whisper model"
     assert ui_ops.build_argv('radio-smoke', None) == ['radio', 'smoke', '--allow-cloud']
     assert ui_ops.build_argv('radio-kokoro-install', None) == ['radio', 'provision', '--kokoro']
     assert ui_ops.build_argv('radio-kokoro-smoke', None) == ['radio', 'smoke', '--kokoro']

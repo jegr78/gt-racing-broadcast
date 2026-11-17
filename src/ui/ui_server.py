@@ -1545,7 +1545,7 @@ def make_handler(ctx):
                             return self._json({'ok':False,'error':'Active league changed. Reload and try again'},code=409)
                         argv = ['--profile', current] + argv
                     profile = self.analysis_profile or (ctx.get("telemetry_default_profile", lambda: None)() if name in ANALYSIS_OPS else None)
-                    if profile:
+                    if profile and current is None:
                         argv = ["--profile", profile] + argv
                 except ValueError as exc:
                     return self._json({"ok": False, "error": str(exc)}, code=400)

@@ -13,9 +13,6 @@ window.fetch = (input, options) => {
   }
   return workspaceFetch(input, options);
 };
-function escapeHtml(text) {
-  const node = document.createElement('span'); node.textContent = text; return node.innerHTML;
-}
 function workspaceStatus(message, error=true) {
   $('workspace-status').className=error?'enverr':'sub';$('workspace-status').textContent = message?.message || message || ''; $('workspace-status').hidden = !message;
 }
