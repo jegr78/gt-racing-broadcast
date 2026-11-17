@@ -145,8 +145,9 @@ It never carries connection ids, corrections or who made them.
   the last lap and the fuel; a car in the box shows `Box`. In qualifying the tower shows
   best lap and gap.
 - **On air only when switched on.** The page stays empty until the race settings say
-  `visible`; a new install starts off air. `POST /drivers/race/settings
-  {"visible": true}` from either desk puts it on air.
+  `visible`; a new install starts off air. The director puts it on air with
+  `POST /drivers/race/settings {"visible": true}`; Race Control cannot, because it is a
+  program change.
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every

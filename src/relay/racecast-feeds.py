@@ -14516,6 +14516,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p[:2] == ["drivers", "race"] and driver_race_svc is not None:
                     action = p[2] if len(p) == 3 else None
                     if action == "settings":
+                        if "visible" in body and str(who).startswith("race_control:"):
+                            # Putting the dashboard on air is a program change: director only.
+                            return self._send({"ok": False, "error": "the director shows the dashboard"}, 403)
                         try:
                             return self._send({"ok": True,
                                                "settings": driver_race_svc.set_settings(body, who)})
