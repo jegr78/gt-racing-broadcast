@@ -185,7 +185,10 @@ monitor shows the takeover marker too.
 Ending the final broadcast Part deliberately stops health-alert pings before
 OBS stops. The relay keeps recording health and stream-stop events while the
 post-event report and service teardown finish. The regular stream-stop post
-still appears. A refused stop leaves health alerts enabled, and an unexpected
+still appears. The relay posts it as soon as OBS confirms the stop, so it comes
+before the report. The `racecast event stop` that ending the final Part starts
+writes its output to `event-stop.log`, listed with the relay logs in the Control
+Center. A refused stop leaves health alerts enabled, and an unexpected
 stream loss during the event still raises CRITICAL. A successful explicit stream
 start enables health alerts again.
 
@@ -238,7 +241,8 @@ the first relay start.
 
 The relay's health history also powers a **post-event report**, a static, self-contained
 HTML file summarising the last broadcast session: commentators per stint, Feed A / Feed B
-activity, incidents and quality metrics. It can be generated and sent to Discord from the
+activity, incidents and quality metrics. A solo profile has no stints or A/B feeds, so its
+report leaves out the commentator and feed sections and the backlog lines. It can be generated and sent to Discord from the
 [Control Center Report view](Control-Center#post-event-report) or via the CLI:
 
 ```
@@ -275,7 +279,7 @@ what the audience saw, then gives the reason:
   and skipped 23.5% of its frames.* The configured rate comes from OBS's video settings; a
   broadcast average more than 2% below it is flagged.
 - A backlog clears at every stint handover, so the report states how many handovers the
-  session had. A session without one (qualifying, solo) lets a backlog grow for its whole
+  session had. A session without one (qualifying) lets a backlog grow for its whole
   length.
 
 A history recorded before the relay measured the backlog gets a frame-rate-only finding.
@@ -284,7 +288,8 @@ OBS's own counter runs from the moment OBS started, so hours of idle OBS before 
 broadcast would hide a bad one (1.8% shown for a broadcast that skipped 23.5%).
 
 **Name resolution:** commentator names in the report come from the running relay's schedule.
-If the relay is not running at generation time, the report falls back to stint indices.
+If the relay is unreachable or its schedule has no rows at generation time, the report
+shows stint indices and says so.
 
 **Telemetry (solo POV):** when the active profile is solo POV and a GT7 telemetry
 recording (see [Relay mode](Relay-Mode)) overlaps the report window, the report gains a
