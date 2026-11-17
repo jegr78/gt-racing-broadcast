@@ -13347,7 +13347,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if p[1:] in _CONSOLE_PAGE_GETS or p[1:] in (("login",), ("oauth", "callback")):
                         return True
                 elif p and (p in _CONSOLE_PAGE_GETS or p in (("hud",), ("hud", "preview"),
-                                                     ("splitscreen",), ("splitscreen", "hud"), ("intermission",))):
+                                                     ("splitscreen",), ("splitscreen", "hud"), ("intermission",),
+                                                     ("drivers",))):
                     return True
             if not intermission_live.allow_control_origin(self.headers):
                 return False
