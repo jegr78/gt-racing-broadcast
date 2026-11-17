@@ -49,6 +49,7 @@ class Hub:
         self._conns = {}        # conn -> {entry, segment, name, last}
         self._dropped = set()
         self._hook_failed = set()
+        self._reassigned = {}      # conn -> entry the producer moved it to
 
     def _live(self, now):
         return {c: m for c, m in self._conns.items() if now - m["last"] < LIVE_S}
@@ -64,6 +65,7 @@ class Hub:
         with self._lock:
             if conn in self._dropped:
                 raise IngestError("disconnected by the producer: register again on the invite page", 410)
+            entry = self._reassigned.get(conn, reg["entry"])
             live = self._live(now)
             if conn not in live:
                 # A known sender that went quiet competes for its slot like a new one.
@@ -74,14 +76,14 @@ class Hub:
                 if conn not in self._conns and len(self._conns) >= self._max:
                     raise IngestError("too many senders for this event", 429)
                 allowed = 2 if self._multi_lobby() else 1
-                peers = [m for c, m in live.items() if m["entry"] == reg["entry"] and c != conn]
+                peers = [m for c, m in live.items() if m["entry"] == entry and c != conn]
                 if len(peers) >= allowed:
                     raise IngestError(
                         "this team already has two senders" if allowed == 2
                         else "this entry already has a sender", 409)
             # Hold the slot now; decryption runs outside the lock (see Probe.ingest).
             held = self._conns.get(conn)
-            self._conns[conn] = {"entry": reg["entry"], "segment": reg.get("segment"),
+            self._conns[conn] = {"entry": entry, "segment": reg.get("segment"),
                                  "name": reg["name"], "last": now}
         try:
             reply = self._counts.ingest(conn, body, sender_stats)
@@ -116,6 +118,16 @@ class Hub:
                     LOG.warning("driver race: a sample of %s failed (%s); further failures "
                                 "of this connection are not logged", safe, type(exc).__name__)
 
+    def reassign(self, conn, entry):
+        """Count a known sender for `entry` from now on (a producer's correction of a
+        wrong registration). It keeps its slot even when `entry` already has one."""
+        with self._lock:
+            if conn not in self._conns or conn in self._dropped:
+                return False
+            self._reassigned[conn] = entry
+            self._conns[conn]["entry"] = entry
+            return True
+
     def disconnect(self, conn):
         with self._lock:
             if conn not in self._conns:
@@ -129,6 +141,7 @@ class Hub:
         with self._lock:
             self._conns.clear()
             self._dropped.clear()
+            self._reassigned.clear()
         self._counts.reset()
 
     def connections(self):
@@ -136,15 +149,30 @@ class Hub:
         senders = self._counts.snapshot()["senders"]
         with self._lock:
             conns = dict(self._conns)
+            moved = set(self._reassigned)
         out = []
         for conn, meta in conns.items():
             stats = senders.get(conn, {})
             samples = stats.get("samples") or []
             out.append({"conn": conn, "entry": meta["entry"], "segment": meta["segment"],
                         "name": meta["name"], "live": now - meta["last"] < LIVE_S,
+                        "reassigned": conn in moved,
                         "idle_s": round(now - meta["last"], 1),
                         "packets": stats.get("packets", {}),
                         "packets_per_s": stats.get("packets_per_s"),
                         "sender_stats": stats.get("sender_stats", {}),
                         "latest": samples[-1] if samples else None})
         return sorted(out, key=lambda c: (c["entry"], c["name"]))
+
+
+def readiness(roster, segments, connections, multi_lobby):
+    """One row per entry (in endurance per entry and stint label) with its senders:
+    {entry, segment, ready, senders: [{conn, name, live}]}. Senders registered for an
+    entry or label outside the roster get their own rows, so nobody is hidden."""
+    slots = [(e, s) for e in roster for s in (segments if multi_lobby and segments else [None])]
+    rows = {slot: [] for slot in slots}
+    for c in connections:
+        key = (c["entry"], c["segment"] if multi_lobby and segments else None)
+        rows.setdefault(key, []).append({"conn": c["conn"], "name": c["name"], "live": c["live"]})
+    return [{"entry": e, "segment": s, "ready": any(x["live"] for x in senders),
+             "senders": senders} for (e, s), senders in rows.items()]

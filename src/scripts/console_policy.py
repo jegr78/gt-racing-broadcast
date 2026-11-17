@@ -106,6 +106,9 @@ def min_capability(segments, method="GET"):
         return Requirement(DIRECTOR, False)
     if p in (["event", "title"], ["event", "track"]):
         return Requirement(DIRECTOR, False)
+    # Driver telemetry: connections, readiness and the race with its actions (#1114).
+    if p and p[0] == "drivers":
+        return Requirement(DIRECTOR, False)
     if p == ["submissions"] or (len(p) == 2 and p[0] == "submissions"):
         return Requirement(DIRECTOR, False)
     if p and p[0] == "cues":                    # /cues/send|data|presets|reload
@@ -131,7 +134,10 @@ def min_capability(segments, method="GET"):
     # quick-note send plus presets (#244, #376). The desk reuses the ANY cockpit
     # monitors below; only these are race_control-gated.
     if p == ["race-control"] or (len(p) == 2 and p[0] == "race-control"
-                                 and p[1] in ("data", "cues", "presets", "track")):
+                                 and p[1] in ("data", "cues", "presets", "track", "red-flag")):
+        return Requirement(RACE_CONTROL, False)
+    # The same driver telemetry controls as the Director Panel's /drivers/* (#1114).
+    if len(p) >= 2 and p[:2] == ["race-control", "drivers"]:
         return Requirement(RACE_CONTROL, False)
 
     # Health monitor: the page and its combined data endpoint. It carries no stream

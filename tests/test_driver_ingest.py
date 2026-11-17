@@ -155,6 +155,36 @@ def t_a_failing_race_hook_never_fails_the_upload():
     assert "bad sample" not in seen[0], "the exception text can carry client data: only its type is logged"
 
 
+def t_the_producer_reassigns_a_sender_to_another_entry():
+    got = []
+    hub = ing.Hub(multi_lobby=lambda: False, on_sample=lambda reg, s: got.append(reg["entry"]))
+    hub.ingest(_reg("c1", entry="Team A #1"), _batch(6), None)
+    assert hub.reassign("c1", "Team B #2")
+    hub.ingest(_reg("c1", entry="Team A #1"), _batch(12), None)
+    assert got == ["Team A #1", "Team B #2"], got
+    assert hub.connections()[0]["entry"] == "Team B #2" and hub.connections()[0]["reassigned"]
+    try:
+        hub.ingest(_reg("c2", entry="Team B #2"), _batch(18), None)
+    except ing.IngestError as exc:
+        assert exc.status == 409, exc
+    else:
+        raise AssertionError("the reassigned sender holds Team B's slot")
+    assert not hub.reassign("nobody", "Team B #2")
+
+
+def t_readiness_lists_every_entry_and_stint_with_its_senders():
+    conns = [{"conn": "c1", "entry": "A", "segment": "S1", "name": "Max", "live": True},
+             {"conn": "c2", "entry": "B", "segment": "S2", "name": "Ann", "live": False},
+             {"conn": "c3", "entry": "Z", "segment": "S1", "name": "Odd", "live": True}]
+    rows = ing.readiness(["A", "B"], ["S1", "S2"], conns, multi_lobby=True)
+    got = {(r["entry"], r["segment"]): (r["ready"], [s["name"] for s in r["senders"]]) for r in rows}
+    assert got == {("A", "S1"): (True, ["Max"]), ("A", "S2"): (False, []),
+                   ("B", "S1"): (False, []), ("B", "S2"): (False, ["Ann"]),
+                   ("Z", "S1"): (True, ["Odd"])}, got
+    single = ing.readiness(["A", "B"], ["S1"], conns[:1], multi_lobby=False)
+    assert [(r["entry"], r["segment"], r["ready"]) for r in single] == [("A", None, True), ("B", None, False)]
+
+
 def t_reset_drops_every_connection():
     hub, _clock = _hub()
     hub.ingest(_reg("c1"), _batch(1), None)

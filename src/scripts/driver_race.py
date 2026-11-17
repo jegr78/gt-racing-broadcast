@@ -223,6 +223,12 @@ class Service:
             race.rejoin(entry, True)
         return race
 
+    def log(self, who, action, **fields):
+        """Audit an action taken outside the race (a disconnect, a cover change)."""
+        with self._lock:
+            self._log(who, action, **fields)
+        return self.standings()
+
     def _log(self, who, action, **fields):
         """Audit one action (best-effort) and remember it for the desks."""
         record = dict({"ts": self._wall(), "who": str(who)[:80], "action": action}, **fields)

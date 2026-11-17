@@ -966,6 +966,10 @@
             <div class="hint">Names the track, draws the map and shows corner names from the first metre. Recognition checks the pick after the first complete lap.</div>
           </div>
         </section>
+        <details class="bus urls" id="driverBox">
+          <summary>Driver telemetry</summary>
+          <div class="body" id="driverDesk"></div>
+        </details>
         <details class="bus chat" id="gfxBrowseBox" open>
           <summary>Graphics library<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
           <div class="body">
@@ -1264,6 +1268,9 @@ const redFlagBtn = mkKey("RED FLAG", "alarm", async ()=>{
   await obsSource(redFlagItem.scene, redFlagItem.source, on);
   log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
   setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
+  // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
+  if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
+                                           body: "{}"}).catch(() => {});
   obsStatePoll();
 });
 redFlagBtn.classList.add("redflag");
@@ -3921,5 +3928,14 @@ pollCueBacks(); setInterval(pollCueBacks, 2000);
     <button type="button" id="partModalConfirm" onclick="submitPart()" disabled>Confirm</button>
   </div>
 </dialog>
+<script>
+/* Driver telemetry controls (#1114), shared with the Race Control desk. */
+(function () {
+  const s = document.createElement("script");
+  s.src = RC_API("/driver-desk.js");
+  s.onload = () => window.DriverDesk.mount(document.getElementById("driverDesk"), {base: ""});
+  document.body.appendChild(s);
+})();
+</script>
 </body>
 </html>

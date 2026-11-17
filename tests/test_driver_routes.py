@@ -49,7 +49,9 @@ def _serve(solo=True, segments=()):
     srv = g._serve(solo=solo, hud_source=_Hud(), driver_hub=hub, driver_invite_path=path,
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
                    sender_script_path=os.path.join(ROOT, "src", "relay", "racecast-sender.py"),
-                   driver_segments=lambda: list(segments), driver_race_svc=race)
+                   driver_segments=lambda: list(segments), driver_race_svc=race,
+                   driver_desk_path=os.path.join(ROOT, "src", "console", "driver-desk.js"))
+    srv.race_svc = race
     return srv, srv.server_address[1], path, hub
 
 
@@ -263,6 +265,52 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     stop.set()
     worker.join(2)
     assert calls == [("start", 24)], f"a relay start on the last row passes its laps once: {calls}"
+
+
+def t_both_desks_act_with_their_identity():
+    import json as _json
+    srv, port, path, hub = _serve()
+    hdr = {"Content-Type": "application/json"}
+    try:
+        invite = driver_invite.create(path)["id"]
+        code = _json.loads(_register(port, invite, entry=ENTRIES[0], name="Max")[1])["code"]
+        _req(port, "/console/drive/ingest", tp.encode_batch([_wire_at(6, -20.0, 0)]),
+             {"X-Driver-Code": code})
+        conn = hub.connections()[0]["conn"]
+        rc, director = g._tok("dave"), g._tok("bob")
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/correct?t={rc}", _json.dumps(
+            {"entry": ENTRIES[0], "metres": 50, "reason": "cut"}).encode(), hdr)
+        assert st == 200 and _json.loads(text)["race"]["last_action"]["who"] == "race_control:dave", text
+        st, text, _h = _req(port, f"/console/drivers/race/final-lap?t={director}", b"{}", hdr)
+        assert st == 200 and srv.race_svc.standings()["last_action"]["who"] == "director:bob", text
+        assert _req(port, f"/console/drivers/race?t={rc}")[0] == 403, "the panel route is director-tier"
+        st, text, _h = _req(port, f"/console/race-control/drivers/readiness?t={rc}")
+        rows = _json.loads(text)["rows"]
+        assert st == 200 and [r["entry"] for r in rows if r["ready"]] == [ENTRIES[0]], rows
+        st, text, _h = _req(port, f"/console/race-control/drivers/invite?t={rc}")
+        assert st == 200 and _json.loads(text)["id"] == invite, text
+        st, text, _h = _req(port, f"/console/race-control/drivers/reassign?t={rc}",
+                            _json.dumps({"conn": conn, "entry": ENTRIES[1]}).encode(), hdr)
+        assert st == 200 and hub.connections()[0]["entry"] == ENTRIES[1], text
+        st, text, _h = _req(port, f"/console/race-control/drivers/reassign?t={rc}",
+                            _json.dumps({"conn": conn, "entry": "Nobody #0"}).encode(), hdr)
+        assert st == 400 and "entry" in text, (st, text)
+        st, text, _h = _req(port, f"/console/race-control/red-flag?t={rc}", b"{}", hdr)
+        body = _json.loads(text)
+        assert st == 200 and body["on"] and body["race"]["red_flag"] is not None, text
+        assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
+        actions = [r["action"] for r in _audit_of(srv)]
+        assert actions == ["correct", "final_lap", "reassign", "red_flag"], actions
+        st, text, h = _req(port, "/console/driver-desk.js")
+        assert st == 200 and "javascript" in h.get("Content-Type", ""), (st, h)
+    finally:
+        srv.shutdown()
+
+
+def _audit_of(srv):
+    import json as _json
+    with open(driver_race.audit_path_for(srv.race_svc._path), encoding="utf-8") as fh:
+        return [_json.loads(line) for line in fh]
 
 
 if __name__ == "__main__":

@@ -275,6 +275,18 @@ class Race:
         close = sum(1 for b in known if self._circ(medoid, b) <= SNAP_M)
         return medoid if 2 * close > len(known) else None
 
+    def _move(self, car, entry):
+        """The producer moved this connection to `entry`: it stops counting for the old
+        entry, which disappears when no other car of it is known."""
+        old = self._entries.get(car.entry)
+        car.entry, car.counting = entry, False
+        if old is not None and old.active == car.conn:
+            others = [c.conn for c in self._cars.values() if c.entry == old.entry]
+            if others:
+                old.active = others[0]
+            else:
+                del self._entries[old.entry]
+
     def _frac(self, car, s):
         return (s - car.line) % self.length
 
@@ -323,6 +335,8 @@ class Race:
         car = self._cars.get(conn)
         if car is not None and car.t is not None and t < car.t:
             return                                # older than what this car already sent
+        if car is not None and car.entry != entry:
+            self._move(car, entry)
         ent = self._entries.get(entry)
         if ent is None:
             ent = self._entries[entry] = _Entry(entry, conn)

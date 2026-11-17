@@ -227,6 +227,10 @@ Security boundaries that apply everywhere:
   signs (`driver_invite`), and the maintainer probe ingest `/console/probe/ingest`, off
   unless `RACECAST_TELEMETRY_PROBE=1`, with a random per-relay-start key in `X-Probe-Key`.
   Both only accept encrypted GT7 packets and count them.
+- The `race_control` role reaches exactly one program change: the full `RED FLAG`
+  (`POST /console/race-control/red-flag`, #1114) raises the Standby Cover, sets the HUD
+  banner and holds the driver race. No step-up; it is logged with the person's identity.
+  Every other program control stays director-gated.
 - No destructive HTTP endpoint for chat or cues: clear/import/pull stay producer-only CLI
   actions. A commentator's stream-link submission is own-rows-only and lands as pending,
   never auto-published.
