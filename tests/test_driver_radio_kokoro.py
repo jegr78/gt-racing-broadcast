@@ -7,6 +7,7 @@ import tarfile
 import tempfile
 import textwrap
 import threading
+import time
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,6 +51,11 @@ FAKE_WORKER = textwrap.dedent("""
             raise SystemExit(3)
         if request["text"] == "slow":
             time.sleep(1.5)
+        if request["text"] == "noise":
+            print("a stray library line", flush=True)
+        if request["text"] == "flood":
+            print("x" * int(sys.argv[2]), flush=True)
+            continue
         if request["text"] == "bad" or "5.7" in request["text"]:
             print(json.dumps({"id": request["id"], "error": "speech_failed"}), flush=True)
             continue
@@ -60,7 +66,7 @@ FAKE_WORKER = textwrap.dedent("""
 def speech(directory, **kwargs):
     script = Path(directory) / 'fake_worker.py'
     script.write_text(FAKE_WORKER, encoding='utf8')
-    argv = [sys.executable, str(script), base64.b64encode(wav()).decode()]
+    argv = [sys.executable, str(script), base64.b64encode(wav()).decode(), str(kokoro.JSON_MAX + 10)]
     return kokoro.KokoroSpeech(directory, argv=argv, ready_check=lambda: True, **kwargs)
 
 
@@ -114,6 +120,24 @@ def t_a_crashed_worker_restarts_after_its_backoff():
             rejected(lambda: s.synthesize('Two.', stopped, 30), 'speech_failed')
             now[0] += kokoro.RETRY_S
             assert s.synthesize('Two.', stopped, 30) == wav()
+        finally:
+            s.close()
+
+
+def t_a_stray_line_is_skipped_and_a_lost_reader_replaces_the_worker():
+    with tempfile.TemporaryDirectory() as d:
+        skew = [0.0]
+        s = speech(d, clock=lambda: time.monotonic() + skew[0])
+        try:
+            stopped = threading.Event()
+            assert s.synthesize('noise', stopped, 10) == wav(), "a line that is no reply is skipped"
+            started = time.monotonic()
+            rejected(lambda: s.synthesize('flood', stopped, 10), 'speech_failed')
+            assert time.monotonic() - started < 5, "a worker without its reader fails at once, not at the budget"
+            proc = s._proc
+            skew[0] += kokoro.RETRY_S
+            assert s.synthesize('Three.', stopped, 30) == wav() and s._proc is not proc, \
+                "the next request runs on a fresh worker"
         finally:
             s.close()
 
