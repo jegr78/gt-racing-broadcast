@@ -313,6 +313,13 @@ def t_both_desks_act_with_their_identity():
         st, text, _h = _req(port, f"/console/race-control/drivers/race/quali?t={rc}",
                             _json.dumps({"entry": ENTRIES[0], "ms": None}).encode(), hdr)
         assert st == 200 and _json.loads(text)["race"]["quali_overrides"] == {ENTRIES[0]: None}, text
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/compound?t={rc}",
+                            _json.dumps({"entry": ENTRIES[0], "code": "RS"}).encode(), hdr)
+        tyre = _json.loads(text)["race"]["compounds"][ENTRIES[0]]
+        assert st == 200 and tyre["code"] == "RS" and tyre["who"] == "race_control:dave", text
+        st, _t, _h = _req(port, f"/console/race-control/drivers/race/compound?t={rc}",
+                          _json.dumps({"entry": "Invented Team", "code": "RS"}).encode(), hdr)
+        assert st == 400, "only roster entries carry a compound"
         st, text, _h = _req(port, f"/console/race-control/drivers/race/quali?t={rc}",
                             _json.dumps({"entry": "Invented Team", "ms": 1000}).encode(), hdr)
         assert st == 400 and "unknown entry" in text, "only roster entries get a qualifying time"
@@ -343,8 +350,8 @@ def t_both_desks_act_with_their_identity():
             "one red flag change per person in 2 s"
         assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
         actions = [r["action"] for r in _audit_of(srv)]
-        assert actions == ["correct", "final_lap", "settings", "quali", "settings", "reassign",
-            "red_flag_cover_down", "red_flag"], actions
+        assert actions == ["correct", "final_lap", "settings", "quali", "compound", "settings",
+            "reassign", "red_flag_cover_down", "red_flag"], actions
         carol = g._tok("carol")                                   # producer: every role
         assert _req(port, f"/console/race-control/drivers/data?t={carol}")[0] == 403
         assert _req(port, f"/console/drivers/data?t={carol}")[0] == 404

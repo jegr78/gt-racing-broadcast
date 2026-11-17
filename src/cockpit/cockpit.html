@@ -82,6 +82,9 @@
   #timing td.drv small { display: block; opacity: .6; }
   #timing tr.box td { color: #ffd361; }
   #timing .fl { color: #c49bff; font-weight: 700; }
+  #timing .tyre { font-weight: 800; }
+  #timing .tyre.RS { color: #ff5a4f; } #timing .tyre.RM { color: #ffd23f; } #timing .tyre.RH { color: #f2f4f7; }
+  #timing .tyre.I { color: #4fdc74; } #timing .tyre.W { color: #4aa8ff; }
   #timingFl { padding: 6px 12px 10px; font-size: 13px; }
   #stintPlan .row { display: flex; align-items: center; gap: 8px; padding: 6px 12px;
                     border-bottom: 1px solid #1c2027; font-size: 13px; }
@@ -845,6 +848,13 @@ function timingDriver(e) {
   return {cls: 'drv', node: d};
 }
 const TIMING_STATUS = {box: 'Box', no_data: 'No data', red_flag: 'Red flag'};
+function timingTyre(e) {
+  const s = document.createElement('span');
+  const code = ['RS', 'RM', 'RH', 'I', 'W'].indexOf(e.compound) >= 0 ? e.compound : '';
+  s.className = 'tyre' + (code ? ' ' + code : '');
+  s.textContent = code;
+  return {node: s};
+}
 async function pollTiming() {
   let d;
   try { d = await j('/drivers/dashboard'); } catch (e) { setTimeout(pollTiming, 5000); return; }
@@ -865,8 +875,8 @@ async function pollTiming() {
   parts.forEach(function (p) { const s = document.createElement('span'); s.textContent = p; head.appendChild(s); });
   if (d.red_flag) { const s = document.createElement('span'); s.className = 'flag'; s.textContent = 'RED FLAG'; head.appendChild(s); }
   const quali = d.mode === 'qualifying';
-  const cols = quali ? ['Pos', '#', 'Driver', 'Best', 'Gap']
-                     : ['Pos', '#', 'Driver', 'Laps', 'Gap', 'Int.', 'Last', 'Fuel', 'Pits'];
+  const cols = quali ? ['Pos', '#', 'Driver', 'Tyre', 'Best', 'Gap']
+                     : ['Pos', '#', 'Driver', 'Tyre', 'Laps', 'Gap', 'Int.', 'Last', 'Fuel', 'Pits'];
   const thead = $('timing').tHead;
   thead.textContent = '';
   const htr = document.createElement('tr');
@@ -878,7 +888,7 @@ async function pollTiming() {
   rows.forEach(function (e, i) {
     const tr = document.createElement('tr');
     if (quali) {
-      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), lapTime(e.best_ms),
+      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), timingTyre(e), lapTime(e.best_ms),
                        e.gap_ms ? '+' + (e.gap_ms / 1000).toFixed(3) : '']);
     } else {
       if (e.status === 'box') tr.className = 'box';
@@ -888,7 +898,7 @@ async function pollTiming() {
       const last = document.createElement('span');
       last.textContent = lapTime(e.last_lap_ms);
       if (fl && fl.entry === e.entry && fl.ms === e.last_lap_ms) last.className = 'fl';
-      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), laps, gap,
+      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), timingTyre(e), laps, gap,
                        typeof e.interval_s === 'number' && i ? '+' + e.interval_s.toFixed(1) : '',
                        {node: last}, typeof e.fuel_l === 'number' ? e.fuel_l.toFixed(1) + ' L' : '',
                        e.pit_stops || 0]);

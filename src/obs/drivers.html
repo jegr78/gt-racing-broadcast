@@ -32,10 +32,20 @@
     position: absolute; left: 48px; top: 136px; width: 420px; box-sizing: border-box;
     background: var(--dd-bg); font-size: 20px; padding: 4px 0;
   }
-  .dd-row { display: grid; grid-template-columns: 38px 52px 1fr 112px 40px; align-items: center;
+  .dd-row { display: grid; grid-template-columns: 38px 52px 1fr 30px 112px 40px; align-items: center;
             height: 40px; padding: 0 10px; gap: 8px; }
   .dd-row:nth-child(even) { background: var(--dd-row); }
   .dd-pos { font-weight: 800; text-align: right; }
+  /* Tyre compound: a coloured letter in a ring, as GT7 broadcasts show it. */
+  .dd-tyre { width: 24px; height: 24px; box-sizing: border-box; border-radius: 50%; border: 3px solid transparent;
+             display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; }
+  .dd-tyre.RS { border-color: #e10600; color: #ff5a4f; }
+  .dd-tyre.RM { border-color: #ffd23f; color: #ffd23f; }
+  .dd-tyre.RH { border-color: #f2f4f7; color: #f2f4f7; }
+  .dd-tyre.I  { border-color: #2fbf55; color: #4fdc74; }
+  .dd-tyre.W  { border-color: #1e88e5; color: #4aa8ff; }
+  #drivers-tower.no-tyre .dd-row { grid-template-columns: 38px 52px 1fr 112px 40px; }
+  #drivers-tower.no-tyre .dd-tyre { display: none; }
   .dd-num { height: 28px; line-height: 28px; text-align: center; font-weight: 800; font-size: 16px;
             border-radius: 4px; background: #39414d; color: #fff; overflow: hidden; }
   .dd-name { min-width: 0; display: flex; flex-direction: column; line-height: 1.05; }
@@ -66,9 +76,9 @@
     <span id="dd-lap">LAP 7 / 20</span><span id="dd-session">Suzuka · Stint 2</span>
   </div>
   <div id="drivers-tower" data-edit="Timing tower" data-edit-kind="text"><div id="dd-rows">
-    <div class="dd-row"><span class="dd-pos">1</span><span class="dd-num" style="background:#c00000">7</span><span class="dd-name"><span class="dd-team">Team Redline</span><span class="dd-driver">BERG</span></span><span class="dd-val">Leader</span><span class="dd-pit">P1</span></div>
-    <div class="dd-row"><span class="dd-pos">2</span><span class="dd-num" style="background:#0050a0">12</span><span class="dd-name"><span class="dd-team">Blue Arrow</span><span class="dd-driver">LIND</span></span><span class="dd-val">+1.4</span><span class="dd-pit">P1</span></div>
-    <div class="dd-row"><span class="dd-pos">3</span><span class="dd-num" style="background:#2b8a3e">33</span><span class="dd-name"><span class="dd-team">Green Line</span><span class="dd-driver">KOVAC</span></span><span class="dd-val">+3.9</span><span class="dd-pit">P0</span></div>
+    <div class="dd-row"><span class="dd-pos">1</span><span class="dd-num" style="background:#c00000">7</span><span class="dd-name"><span class="dd-team">Team Redline</span><span class="dd-driver">BERG</span></span><span class="dd-tyre RM">RM</span><span class="dd-val">Leader</span><span class="dd-pit">P1</span></div>
+    <div class="dd-row"><span class="dd-pos">2</span><span class="dd-num" style="background:#0050a0">12</span><span class="dd-name"><span class="dd-team">Blue Arrow</span><span class="dd-driver">LIND</span></span><span class="dd-tyre RM">RM</span><span class="dd-val">+1.4</span><span class="dd-pit">P1</span></div>
+    <div class="dd-row"><span class="dd-pos">3</span><span class="dd-num" style="background:#2b8a3e">33</span><span class="dd-name"><span class="dd-team">Green Line</span><span class="dd-driver">KOVAC</span></span><span class="dd-tyre RM">RM</span><span class="dd-val">+3.9</span><span class="dd-pit">P0</span></div>
   </div></div>
   <div id="drivers-fastest" data-edit="Fastest lap" data-edit-kind="text">
     <b>FL</b><span id="dd-fl-who">BERG · Team Redline</span><span id="dd-fl-time">1:58.412</span>
@@ -108,12 +118,13 @@
   function safeColor(c, fallback) {
     return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;
   }
+  let showFuel = true;
   function column(e, i) {
     if (e.status === "box") return "Box";
     if (e.status === "no_data") return "No data";
     if (e.status === "red_flag") return "Red flag";
     if (e.finished) return "Finished";
-    const phase = Math.floor(Date.now() / CYCLE_MS) % 3;
+    const phase = Math.floor(Date.now() / CYCLE_MS) % (showFuel ? 3 : 2);
     if (phase === 1 && e.last_lap_ms) return lapTime(e.last_lap_ms);
     if (phase === 2 && typeof e.fuel_l === "number") return e.fuel_l.toFixed(1) + " L";
     if (i === 0) return "Leader";
@@ -132,6 +143,8 @@
     name.appendChild(el("span", "dd-team", e.team || String(e.entry || "").replace(/\s*#\d+$/, "")));
     name.appendChild(el("span", "dd-driver", surname(e.driver)));
     r.appendChild(name);
+    const code = ["RS", "RM", "RH", "I", "W"].indexOf(e.compound) >= 0 ? e.compound : "";
+    r.appendChild(el("span", "dd-tyre" + (code ? " " + code : ""), code));
     r.appendChild(el("span", "dd-val" + (fl ? " fl" : ""), value));
     r.appendChild(el("span", "dd-pit", pits));
     return r;
@@ -144,7 +157,8 @@
     const fl = d.fastest;
     rows.replaceChildren(...(d.entries || []).slice(0, MAX_ROWS).map(function (e, i) {
       return row(e, i, column(e, i), "P" + (e.pit_stops || 0),
-                 fl && fl.entry === e.entry && e.last_lap_ms === fl.ms && Math.floor(Date.now() / CYCLE_MS) % 3 === 1);
+                 fl && fl.entry === e.entry && e.last_lap_ms === fl.ms &&
+                 Math.floor(Date.now() / CYCLE_MS) % (showFuel ? 3 : 2) === 1);
     }));
     const box = document.getElementById("drivers-fastest");
     box.classList.toggle("none", !fl);
@@ -245,6 +259,9 @@
         document.getElementById("dd-session").textContent =
           [d.track_name, d.stint, d.red_flag ? "Red flag" : ""].filter(Boolean).join(" · ");
         if ((d.track || null) !== lineTrack) await loadLine(d.track || null);
+        const show = d.show || {};
+        showFuel = show.fuel !== false;
+        document.getElementById("drivers-tower").classList.toggle("no-tyre", show.compound === false);
         if (d.mode === "qualifying") renderQualifying(d); else renderRace(d);
       }
     } catch (e) { /* transient; keep the last render */ }
