@@ -554,7 +554,8 @@ def t_lap_times_fuel_and_the_fastest_race_lap():
     t = _drive(race, [a, b], [50, 60], t, L / 50 + 1)
     fl = race.standings(t)["fastest"]
     assert fl["entry"] == "B" and fl["driver"] == "Marco" and abs(fl["ms"] - L / 60 * 1000) < 150, fl
-    assert _row(race, "A", t)["fuel_l"] == 50.0 and _row(race, "A", t)["stint_laps"] >= 2
+    ra = _row(race, "A", t)
+    assert ra["fuel_l"] == 50.0 and ra["stint_laps"] == ra["laps"] == 3, ra
 
 
 def t_a_lap_time_that_disagrees_with_the_relays_clock_is_ignored():

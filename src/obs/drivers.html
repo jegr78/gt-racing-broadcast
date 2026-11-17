@@ -57,7 +57,7 @@
                  background: var(--dd-bg); padding: 16px; }
   #drivers-map svg { width: 100%; height: 100%; display: block; overflow: visible; }
   #drivers-map .line { fill: none; stroke: #59626e; stroke-width: 6; stroke-linejoin: round; }
-  #drivers-map .dot text { font-size: 11px; font-weight: 800; text-anchor: middle; dominant-baseline: central; }
+  #drivers-map .dot text { font-weight: 800; text-anchor: middle; dominant-baseline: central; }
 </style>
 <link rel="stylesheet" href="/drivers/override.css">
 </head>
@@ -129,7 +129,7 @@
     num.style.color = safeColor(e.text_color, "#fff");
     r.appendChild(num);
     const name = el("span", "dd-name");
-    name.appendChild(el("span", "dd-team", e.team || e.entry || ""));
+    name.appendChild(el("span", "dd-team", e.team || String(e.entry || "").replace(/\s*#\d+$/, "")));
     name.appendChild(el("span", "dd-driver", surname(e.driver)));
     r.appendChild(name);
     r.appendChild(el("span", "dd-val" + (fl ? " fl" : ""), value));
@@ -149,7 +149,8 @@
     const box = document.getElementById("drivers-fastest");
     box.classList.toggle("none", !fl);
     if (fl) {
-      document.getElementById("dd-fl-who").textContent = surname(fl.driver) + (fl.team ? " · " + fl.team : " · " + fl.entry);
+      document.getElementById("dd-fl-who").textContent =
+        surname(fl.driver) + " · " + (fl.team || String(fl.entry).replace(/\s*#\d+$/, ""));
       document.getElementById("dd-fl-time").textContent = lapTime(fl.ms);
     }
     drawCars(d.entries || []);
