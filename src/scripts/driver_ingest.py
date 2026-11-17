@@ -30,13 +30,18 @@ class Hub:
     """Connections keyed by the code's connection id. Thread-safe."""
 
     def __init__(self, multi_lobby, clock=time.monotonic, wall=time.time, rate_hz=RATE_HZ,
-                 max_connections=MAX_CONNECTIONS):
+                 max_connections=MAX_CONNECTIONS, on_sample=None):
+        """`on_sample(reg, sample)` receives every decoded sample with its connection's
+        {conn, entry, segment, name}, outside every lock; `sample["mono"]` is the
+        receive time on `clock`."""
         self._multi_lobby = multi_lobby
         self._clock = clock
         self.rate_hz = rate_hz
         self._max = max_connections
+        self._on_sample = on_sample
         self._counts = telemetry_probe.Probe(None, clock=clock, wall=wall, rate_hz=rate_hz,
-                                             max_senders=max_connections, samples=1)
+                                             max_senders=max_connections, samples=1,
+                                             on_sample=self._sample if on_sample else None)
         self._lock = threading.Lock()
         self._conns = {}        # conn -> {entry, segment, name, last}
         self._dropped = set()
@@ -87,6 +92,14 @@ class Hub:
             self._counts.forget(conn)
             raise IngestError("disconnected by the producer: register again on the invite page", 410)
         return {"ok": True, "v": CONTRACT, "rate_hz": self.rate_hz, "accepted": reply["accepted"]}
+
+    def _sample(self, conn, sample):
+        with self._lock:
+            meta = self._conns.get(conn)
+            reg = dict(meta, conn=conn) if meta and conn not in self._dropped else None
+        if reg is not None:
+            reg.pop("last", None)
+            self._on_sample(reg, sample)
 
     def disconnect(self, conn):
         with self._lock:

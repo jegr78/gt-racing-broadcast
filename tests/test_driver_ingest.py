@@ -117,6 +117,18 @@ def t_a_refused_first_batch_frees_its_slot():
     assert hub.connections() == [], "no slot stays held by a refused first batch"
 
 
+def t_every_sample_reaches_the_race_dated_by_its_packet_id():
+    got = []
+    clock = _Clock()
+    hub = ing.Hub(multi_lobby=lambda: False, clock=clock,
+                  on_sample=lambda reg, sample: got.append((reg, sample)))
+    hub.ingest(_reg("c1", name="Max"), _batch(*range(1, 13)), None)   # a catch-up batch of 12
+    assert [s["pid"] for _r, s in got] == [1, 6, 12], [s["pid"] for _r, s in got]
+    assert got[0][0] == {"conn": "c1", "entry": "Team A #1", "segment": None, "name": "Max"}, got[0][0]
+    ages = [round(clock.t - s["mono"], 3) for _r, s in got]
+    assert ages == [round(11 / 60, 3), round(6 / 60, 3), 0.0], f"older packets are dated earlier: {ages}"
+
+
 def t_reset_drops_every_connection():
     hub, _clock = _hub()
     hub.ingest(_reg("c1"), _batch(1), None)
