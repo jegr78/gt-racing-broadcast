@@ -103,7 +103,7 @@ qualifying `qualifying [{pos, entry, number, driver, team, color, text_color, be
 gap_ms}]` instead. `GET /drivers/line` returns the picked layout's line `{track,
 length_m, points [[x, z]]}`. The settings take `delay_s` (0 to 120). `POST /drivers/race/fastest` with no `entry`
 clears the fastest lap, with `{entry, driver, ms}` sets it. `POST /drivers/race/quali
-{entry, ms}` sets an entry's qualifying time, `ms: null` deletes it, `clear: true` gives
+{entry, ms}` sets a roster entry's time in the running qualifying segment, `ms: null` deletes it, `clear: true` gives
 GT7's time back; `GET /drivers/race` lists them as `quali_overrides`.
 `state` is `no_line`, `waiting`, `racing`, `final_lap`, `finishing` or `finished`;
 each entry carries `distance_m`, `laps`, `gap_s`, `interval_s`, `lapped`, `status`

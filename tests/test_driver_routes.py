@@ -310,6 +310,9 @@ def t_both_desks_act_with_their_identity():
         st, text, _h = _req(port, f"/console/race-control/drivers/race/quali?t={rc}",
                             _json.dumps({"entry": ENTRIES[0], "ms": None}).encode(), hdr)
         assert st == 200 and _json.loads(text)["race"]["quali_overrides"] == {ENTRIES[0]: None}, text
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/quali?t={rc}",
+                            _json.dumps({"entry": "Invented Team", "ms": 1000}).encode(), hdr)
+        assert st == 400 and "unknown entry" in text, "only roster entries get a qualifying time"
         st, _t, _h = _req(port, f"/console/drivers/race/settings?t={director}", on_air, hdr)
         assert st == 200 and driver_race.read_settings(srv.race_svc._path)["visible"], "the director does"
         st, text, _h = _req(port, f"/console/race-control/drivers/readiness?t={rc}")

@@ -10,7 +10,9 @@ readable.
   python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4
 
 The relay must run with the event's invite (racecast event invite --new) and the
-same track picked (racecast event track ID).
+same track picked (racecast event track ID). Never run it against a league during an
+event: its senders take real entries and its laps reach the real race, fastest lap
+included. Any profile but demo needs --force.
 """
 import argparse
 import bisect
@@ -83,7 +85,10 @@ def main():
     ap.add_argument("--gap", type=float, default=22.0, help="metres between cars at the start")
     ap.add_argument("--seconds", type=float, default=600.0, help="how long to drive")
     ap.add_argument("--relay", default="http://127.0.0.1:8088", help="relay base URL")
+    ap.add_argument("--force", action="store_true", help="allow a profile other than demo")
     args = ap.parse_args()
+    if args.profile != "demo" and not args.force:
+        ap.error("this registers fake drivers on real entries; pass --force for a profile other than demo")
     if not 1 <= args.cars <= len(NAMES):
         ap.error(f"--cars is 1 to {len(NAMES)}")
     with open(os.path.join(ROOT, "runtime", args.profile, "driver-invite.json"), encoding="utf-8") as fh:

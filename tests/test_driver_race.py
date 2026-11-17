@@ -350,12 +350,25 @@ def t_race_control_corrects_a_qualifying_time():
     again.set_quali("rc:Anna", "B", clear=True)
     again.tick()
     assert again.dashboard()["qualifying"][0]["entry"] == "B", "clearing gives GT7's time back"
+    ctx["segment"] = "Q2"
+    assert again.standings()["quali_overrides"] == {}, "a correction belongs to its segment"
+    again.set_quali("rc:Anna", "B", 80000)
+    ctx["segment"] = "Q1"
+    assert again.standings()["quali_overrides"] == {"A": 91000}, again.standings()["quali_overrides"]
     for bad in ({"ms": 0}, {"ms": 10**8}, {"ms": "1:30"}, {"ms": True}):
         try:
             again.set_quali("rc:Anna", "A", **bad)
         except ValueError:
             continue
         raise AssertionError(f"{bad} must be refused")
+    full = {"qualifying": {"Q1": {f"E{i}": 90000 for i in range(dr.MAX_QUALI)}}}
+    dr._write_json(dr._actions_path_for(path), full)
+    try:
+        again.set_quali("rc:Anna", "A-new", 90000)
+    except ValueError:
+        pass  # refused, as it must be
+    else:
+        raise AssertionError("a full list refuses instead of claiming success")
     dr.clear_actions(os.path.dirname(path))
     assert dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
                       multi_lobby=lambda: False).standings()["quali_overrides"] == {}

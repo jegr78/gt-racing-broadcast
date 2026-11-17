@@ -205,7 +205,9 @@ and post encrypted GT7 packets along the picked layout's line through the real i
 route, with lap times, best laps and fuel. `--gap` sets the start spacing (small values
 give a dense pack for the track map). Needs `racecast event invite --new` and the same
 `racecast event track ID`; screenshots of the dashboard, desks and cockpit use it with
-the demo profile. `tests/test_driver_replay.py` pins its packets to the GT7 layout.
+the demo profile. Never point it at a league during an event: its senders take real
+entries and its laps reach the race and the fastest lap; a profile other than `demo`
+needs `--force`. `tests/test_driver_replay.py` pins its packets to the GT7 layout.
 
 ```bash
 python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4

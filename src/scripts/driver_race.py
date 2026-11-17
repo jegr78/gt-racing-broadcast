@@ -233,9 +233,14 @@ def _saved_actions(path):
     return corrections, rejoins
 
 
-def _saved_quali(path):
-    """{entry: best lap ms, or None for a deleted time} from the actions file."""
+def _segment_key(segment):
+    return segment if isinstance(segment, str) else ""
+
+
+def _saved_quali(path, segment):
+    """{entry: best lap ms, or None for a deleted time} of one qualifying segment."""
     raw = _read_json(path).get("qualifying")
+    raw = raw.get(_segment_key(segment)) if isinstance(raw, dict) else None
     out = {}
     for entry, ms in (raw.items() if isinstance(raw, dict) else ()):
         if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and (
@@ -361,7 +366,7 @@ class Service:
             out["qualifying"] = qualifying(
                 ctx.get("connections") or [], ctx.get("segment"), roster,
                 min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
-                overrides=_saved_quali(_actions_path_for(self._path)))
+                overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")))
             return out
         st = race.standings(self._clock())
         settings = self._settings()
@@ -468,7 +473,8 @@ class Service:
             out = race.standings(self._clock())
             pick_id = self._race_pick
         out.update(settings=read_settings(self._path), track=pick_id,
-                   quali_overrides=_saved_quali(_actions_path_for(self._path)),
+                   quali_overrides=_saved_quali(_actions_path_for(self._path),
+                                                self._context().get("segment")),
                    league=read_league(self._league), last_action=self._last_action)
         return out
 
@@ -493,19 +499,24 @@ class Service:
         return self.standings()
 
     def set_quali(self, who, entry, ms=None, clear=False):
-        """Correct an entry's qualifying time: `ms` replaces GT7's best lap, None
-        deletes it, `clear` gives GT7's time back."""
+        """Correct an entry's time in the running qualifying segment: `ms` replaces
+        GT7's best lap, None deletes it, `clear` gives GT7's time back."""
         entry = _entry_name(entry)
         if not clear and ms is not None and (type(ms) is not int or not 0 < ms < MAX_LAP_MS):
             raise ValueError("ms is a lap time in milliseconds, or null to delete it")
+        segment = _segment_key(self._context().get("segment"))
 
         def update(doc):
-            done = doc.get("qualifying") if isinstance(doc.get("qualifying"), dict) else {}
+            raw = doc.get("qualifying") if isinstance(doc.get("qualifying"), dict) else {}
+            done = raw.get(segment) if isinstance(raw.get(segment), dict) else {}
             if clear:
                 done.pop(entry, None)
             elif entry in done or len(done) < MAX_QUALI:
                 done[entry] = ms
-            doc["qualifying"] = done
+            else:
+                raise ValueError(f"at most {MAX_QUALI} qualifying corrections per segment")
+            raw[segment] = done
+            doc["qualifying"] = raw
         with self._lock:
             self._save_actions(update)
             self._log(who, "quali", entry=entry, **({"cleared": True} if clear else {"ms": ms}))
