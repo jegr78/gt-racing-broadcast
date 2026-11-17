@@ -58,6 +58,10 @@ Config comes from **two layers** and one resolver:
   on first relay start), and optionally `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET`
   (per-league Discord OAuth app: when present, `/console/login` + `/console/oauth/callback`
   are activated; when absent, OAuth is off and signed links remain the only entry path).
+  Optional `TIMING_HOST_ACCOUNT_ID` / `TIMING_HOST_API_TOKEN` enable the league's public
+  timing host (#1161); `racecast timing-host deploy` writes `TIMING_HOST_URL` and
+  `TIMING_HOST_PUBLISH_KEY` (`timing_host_deploy`, Cloudflare REST, no Wrangler). The CLI
+  also injects `RACECAST_PROFILE_ENV_FILE` so the relay re-reads those keys live.
   The shipped `profiles/example/` is a template, excluded from the usable-league list.
   One install hosts several leagues this way.
 
