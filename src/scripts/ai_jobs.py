@@ -26,51 +26,14 @@ import gt7_recording
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 _STATE_IO_LOCK = threading.RLock()
 TERMINAL = {"completed", "awaiting_validation", "failed", "cancelled", "timed_out"}
-ENV_KEYS = {
-    "PATH",
-    "HOME",
-    "USER",
-    "LOGNAME",
-    "USERNAME",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "SYSTEMROOT",
-    "WINDIR",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "PROGRAMFILES",
-    "PROGRAMFILES(X86)",
-    "PROGRAMDATA",
-    "ALLUSERSPROFILE",
-    "PROGRAMW6432",
-    "SYSTEMDRIVE",
-    "COMSPEC",
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-    "LANG",
-    "LC_ALL",
-    "CODEX_HOME",
-    "CLAUDE_CONFIG_DIR",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "NODE_EXTRA_CA_CERTS",
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "NO_PROXY",
-}
+ENV_KEYS = ai_agents.ENV_KEYS
+execution_env = ai_agents.execution_env
 
 
 class JobError(ValueError):
     def __init__(self, code, message):
         self.code = code
         super().__init__(message)
-
-
-def execution_env(original):
-    """Preserve installation/login locations, never profile secrets or API overrides."""
-    return {k: v for k, v in original.items() if k.upper() in ENV_KEYS}
 
 
 def _now():
@@ -595,6 +558,18 @@ class BackgroundJobs:
 
 
 _BACKGROUND = BackgroundJobs()
+
+
+def interrupt_on_termination():
+    """POSIX: SIGTERM and SIGHUP raise KeyboardInterrupt in the main thread, so the
+    caller's cleanup ends a provider tree in its own session before the process exits."""
+    if os.name == "nt" or threading.current_thread() is not threading.main_thread():
+        return
+
+    def interrupt(_sig, _frame):
+        raise KeyboardInterrupt
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, interrupt)
 
 
 def shutdown_background():
