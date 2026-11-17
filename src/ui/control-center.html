@@ -182,6 +182,17 @@
             <button id="evt-invite-new"
                     title="Replace the invite link. Every driver then registers again on the new link">New link</button></div>
           <div class="enverr" id="evt-invite-err" hidden></div>
+          <div class="row"><span class="name">Driver race</span>
+            <label class="grow" title="Driver telemetry distance starts when a car crosses into lap 2 (formation lap) or at lap 1">
+              <input type="checkbox" id="evt-race-formation"> Formation lap</label>
+            <select id="evt-race-mode" aria-label="How the race finishes"
+                    title="Lap count: the leader finishes on completing it. Time: Race Control or the director triggers Final lap">
+              <option value="laps">Finish after laps</option>
+              <option value="time">Timed: Final lap by hand</option>
+            </select>
+            <input id="evt-race-laps" type="number" min="1" max="999" style="width:5.5em"
+                   aria-label="Lap count" placeholder="laps"></div>
+          <div class="enverr" id="evt-race-err" hidden></div>
         </section>
         <section>
           <div class="row"><span class="name">Tailscale</span>
@@ -1028,7 +1039,7 @@ function showView(name) {
   if (name === 'home') loadTakeoverPeers();
   if (name === 'home') fetchProducerSchedule();
   if (name === 'home') fetchEventTitle();
-  if (name === 'home') { fetchEventTrack(); fetchEventInvite(); }
+  if (name === 'home') { fetchEventTrack(); fetchEventInvite(); fetchEventRace(); }
 }
 
 let _reportPath = null;
@@ -1310,6 +1321,36 @@ $('evt-track').addEventListener('change', async (e) => {
     $('evt-track-err').hidden = false;
   }
   fetchEventTrack();
+});
+
+// The driver telemetry race settings (Home; #1112)
+function renderEventRace(s) {
+  if (document.activeElement !== $('evt-race-formation')) $('evt-race-formation').checked = !!s.formation;
+  if (document.activeElement !== $('evt-race-mode')) $('evt-race-mode').value = s.finish_mode;
+  if (document.activeElement !== $('evt-race-laps')) $('evt-race-laps').value = s.lap_count || '';
+  $('evt-race-laps').hidden = s.finish_mode !== 'laps';
+}
+async function fetchEventRace() {
+  let d;
+  try { d = await (await fetch('/api/event-race', {cache: 'no-store'})).json(); }
+  catch (e) { return; }                    // server gone, keep last state
+  if (d && d.ok) renderEventRace(d.settings);
+}
+async function saveEventRace(changes) {
+  let d;
+  try {
+    d = await (await fetch('/api/event-race', {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(changes)})).json();
+  } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  $('evt-race-err').hidden = !!d.ok;
+  if (!d.ok) { $('evt-race-err').textContent = d.error || 'could not save the race settings'; fetchEventRace(); return; }
+  renderEventRace(d.settings);
+}
+$('evt-race-formation').addEventListener('change', e => saveEventRace({formation: e.target.checked}));
+$('evt-race-mode').addEventListener('change', e => saveEventRace({finish_mode: e.target.value}));
+$('evt-race-laps').addEventListener('change', e => {
+  const n = parseInt(e.target.value, 10);
+  saveEventRace({lap_count: Number.isFinite(n) ? n : null});
 });
 
 // The event's driver telemetry invite link (Home; #1111)

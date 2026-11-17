@@ -6788,6 +6788,24 @@ def t_gt7_forward_write_validates_normalises_and_clears():
         os.remove(path)
 
 
+def t_driver_race_settings_go_to_the_relay_or_the_file():
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "driver-race.json")
+    assert m.event_race_read_data(path=path)["settings"] == {"formation": True, "finish_mode": "laps",
+                                                             "lap_count": None}
+    off = m.event_race_write_data({"formation": False, "lap_count": 20}, alive=lambda: False, path=path)
+    assert off["ok"] and off["applied"] == "file" and off["settings"]["lap_count"] == 20, off
+    assert m.event_race_read_data(path=path)["settings"]["formation"] is False
+    posted = []
+    live = m.event_race_write_data(
+        {"finish_mode": "time"}, alive=lambda: True, foreign=lambda: False, path=path,
+        post=lambda url, body: posted.append((url, body)) or {"ok": True, "settings": dict(body)})
+    assert live["applied"] == "relay" and posted[0][0].endswith("/drivers/race/settings"), live
+    bad = m.event_race_write_data({"lap_count": 0}, alive=lambda: False, path=path)
+    assert not bad["ok"] and "lap_count" in bad["error"], bad
+    assert m.event_race_read_data(path=path)["settings"]["lap_count"] == 20, "a refused change writes nothing"
+
+
 def t_driver_invite_follows_the_event_and_regenerates():
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
