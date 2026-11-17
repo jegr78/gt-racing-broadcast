@@ -255,6 +255,13 @@ machine-wide **font library** (see below); a profile-specific font can also be u
 under **Fonts & advanced CSS**, where **advanced CSS** is a raw escape hatch appended
 verbatim after the generated rules.
 
+### Driver dashboard layout
+
+Choose **Driver dashboard** in the builder's scene selector to place and style the
+[driver dashboard](Driver-Telemetry#on-air-and-in-the-cockpit): the lap and session
+header, the timing tower, the fastest lap row and the track map. It has its own
+`drivers.css` and `layout-drivers.json`; **Apply in OBS** reloads the page.
+
 ### Fonts: a machine-wide library
 
 A curated set of broadcast-friendly Google Fonts **ships with every install** and is

@@ -133,6 +133,25 @@ It never carries connection ids, corrections or who made them.
   best lap of its live senders, with the gap to the fastest; a best lap faster than the
   line allows is ignored.
 
+### On air and in the cockpit
+
+![Driver dashboard overlay with timing tower, fastest lap and track map](images/driver-dashboard.png)
+
+- **OBS overlay** `http://127.0.0.1:8088/drivers`: the browser source **Driver
+  Dashboard** in the Stint scene (Program in the solo collections). It shows a timing
+  tower of up to 15 entries, the lap against the lap count (or the race timer's
+  remaining time), the fastest lap and a track map with each car as a numbered dot in
+  its entry colour. The value column alternates every 15 seconds between the interval,
+  the last lap and the fuel; a car in the box shows `Box`. In qualifying the tower shows
+  best lap and gap.
+- **On air only when switched on.** The page stays empty until the race settings say
+  `visible`; a new install starts off air. `POST /drivers/race/settings
+  {"visible": true}` from either desk puts it on air.
+- **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
+  selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
+- **Commentator Cockpit**: the **Timing** card shows the same delayed data with every
+  column at once.
+
 ### Red flag, rejoin and corrections
 
 - **Red flag** freezes every entry's distance. In the restart lobby each car

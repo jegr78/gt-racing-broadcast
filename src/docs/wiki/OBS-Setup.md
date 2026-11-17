@@ -128,6 +128,12 @@ needed.
 > The HUD and graphics pull from **shared** production resources (the sheet): changes
 > affect everyone. The sheet must stay shared.
 
+### The driver dashboard
+
+The browser source **Driver Dashboard** (`http://127.0.0.1:8088/drivers`) sits above
+the HUD in the Stint scene (Program in the solo collections). It stays empty until the
+director switches the dashboard on; see [Driver Telemetry](Driver-Telemetry#on-air-and-in-the-cockpit).
+
 ### The lower-third HUD: one relay-served overlay
 
 The lower-third HUD (streamer, session, round, flag, top-3 teams, race control) is a
