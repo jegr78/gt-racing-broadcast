@@ -13383,9 +13383,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return True
             if not intermission_live.allow_control_origin(self.headers):
                 return False
-            if not any(self.headers.get(key) for key in
-                       ("Origin", "Referer", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest")):
-                return True  # Headerless native clients retain trusted-network access.
+            if not self.headers.get("Host"):
+                return True  # Without a Host there is no name a rebinding page could own.
             try:
                 host = urlparse("http://" + self.headers.get("Host", ""))
                 name = (host.hostname or "").lower().rstrip(".")

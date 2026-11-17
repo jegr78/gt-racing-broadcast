@@ -128,6 +128,34 @@ def t_cross_origin_controls_are_rejected_before_any_dispatch():
             server.server_close()
 
 
+def t_a_rebound_host_without_browser_headers_is_refused():
+    import http.client
+    calls = []
+    with patch.object(gate.m.Relay, 'next_auto', side_effect=lambda **kw: (
+            calls.append('next'), {'obs_cut': False})[1]):
+        server = gate._serve(browser_hosts=('producer.tail123.ts.net',))
+        try:
+            def get(path, host):
+                conn = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+                conn.putrequest('GET', path, skip_host=True, skip_accept_encoding=True)
+                if host is not None:
+                    conn.putheader('Host', host)
+                conn.endheaders()
+                status = conn.getresponse().status
+                conn.close()
+                return status
+            for path in ('/status', '/next'):
+                assert get(path, 'attacker.example:8088') == 403, \
+                    f"a rebinding page without Fetch Metadata never reaches {path}"
+            assert calls == []
+            assert get('/status', f'127.0.0.1:{server.server_port}') == 200
+            assert get('/status', 'localhost') == 200
+            assert get('/status', None) == 200, 'a client without a Host header keeps its access'
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
 def t_start_reaps_a_slow_attempt_before_retry_and_cleans_the_final_failure():
     for can_stop in (True, False):
         m = cli.m

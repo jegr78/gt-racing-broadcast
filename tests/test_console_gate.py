@@ -575,7 +575,7 @@ def t_buttons_ws_passthrough_and_strips_token():
     try:
         c = _socket.create_connection(("127.0.0.1", port), timeout=5)
         req = ("GET /console/buttons/trpc?t=%s HTTP/1.1\r\n"
-               "Host: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+               "Host: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                "Sec-WebSocket-Version: 13\r\n\r\n") % _tok("bob")
         c.sendall(req.encode())
@@ -618,7 +618,7 @@ def t_buttons_ws_does_not_forward_relay_cookie_and_carries_prefix():
     try:
         c = _socket.create_connection(("127.0.0.1", port), timeout=5)
         req = ("GET /console/buttons/trpc?t=%s HTTP/1.1\r\n"
-               "Host: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+               "Host: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                "Sec-WebSocket-Version: 13\r\n"
                "Cookie: rc_console=%s\r\n\r\n") % (_tok("bob"), _tok("bob"))
