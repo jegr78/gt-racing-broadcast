@@ -26,7 +26,7 @@ SLIDES_DATA = "docs/slides"
 # racecast.py's own imports do not already guarantee.
 HIDDEN_STDLIB = [
     # racecast-feeds.py
-    "http.server", "ipaddress",
+    "http.server", "ipaddress", "gzip",
     # racecast-feeds.py + get-graphics.py + get-media.py
     "urllib.parse", "urllib.request",
     # preflight.py
@@ -123,7 +123,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "gt7_packet_stats",
            "--hidden-import", "telemetry_replay", "--hidden-import", "gt7_recording", "--hidden-import", "gt7_telemetry",
            "--hidden-import", "gt7_cars",
-           "--hidden-import", "gt7_data", "--hidden-import", "gt7_tracks", "--hidden-import", "gt7_track_pick", "--hidden-import", "telemetry_probe", "--hidden-import", "gt7_forward", "--hidden-import", "driver_invite", "--hidden-import", "timing_link", "--hidden-import", "driver_ingest", "--hidden-import", "driver_race", "--hidden-import", "race_distance",
+           "--hidden-import", "gt7_data", "--hidden-import", "gt7_tracks", "--hidden-import", "gt7_track_pick", "--hidden-import", "telemetry_probe", "--hidden-import", "gt7_forward", "--hidden-import", "driver_invite", "--hidden-import", "timing_link", "--hidden-import", "timing_feed", "--hidden-import", "driver_ingest", "--hidden-import", "driver_race", "--hidden-import", "race_distance",
            "--hidden-import", "gt7_laps",
            "--hidden-import", "gt7_context", "--hidden-import", "gt7_export",
            "--hidden-import", "gt7_track_definitions",
