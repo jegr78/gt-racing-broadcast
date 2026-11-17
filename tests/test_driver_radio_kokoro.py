@@ -136,8 +136,11 @@ def t_a_stray_line_is_skipped_and_a_lost_reader_replaces_the_worker():
             assert time.monotonic() - started < 5, "a worker without its reader fails at once, not at the budget"
             proc = s._proc
             skew[0] += kokoro.RETRY_S
-            assert s.synthesize('Three.', stopped, 30) == wav() and s._proc is not proc, \
-                "the next request runs on a fresh worker"
+            try:
+                out = s.synthesize('Three.', stopped, 10)
+            except ProviderError as exc:
+                raise AssertionError("the next request runs on a fresh worker") from exc
+            assert out == wav() and s._proc is not proc
         finally:
             s.close()
 
