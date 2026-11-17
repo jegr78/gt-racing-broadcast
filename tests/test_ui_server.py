@@ -2057,8 +2057,8 @@ def t_csrf_cross_origin_blocked():
 
 
 def t_the_report_preview_runs_sandboxed():
-    import re
-    html = open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8").read()
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
     tag = re.search(r'<iframe id="report-frame"[^>]*>', html).group(0)
     assert 'sandbox=""' in tag, "report HTML never runs in the Control Center origin"
 
