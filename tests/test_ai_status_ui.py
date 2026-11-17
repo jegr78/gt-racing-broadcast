@@ -199,6 +199,20 @@ def t_cancellation_and_connection_errors_keep_the_current_job_identity():
         assert out.strip().splitlines() == ['Stopping analysis true', 'Analysis status unavailable Y'], out
 
 
+def t_a_cancel_that_found_nothing_to_stop_can_be_retried():
+    out = _run_js(_harness() + _func_src(_src(), 'cancel') + r"""
+(async () => {
+  state.job = 'Y';
+  replies.cancel = {ok: true, cancelled: false};
+  await cancel();
+  console.log($id('ai-feedback-title').textContent, $id('ai-cancel').disabled, state.cancelJob || null);
+})();
+""")
+    if out is not None:
+        assert out.strip() == 'Analysis not stopped false null', \
+            f"no cancel request exists, so the button stays usable: {out}"
+
+
 def t_slow_old_report_cannot_replace_a_newer_completed_run():
     out = _run_js(_harness() + r"""
 (async () => {

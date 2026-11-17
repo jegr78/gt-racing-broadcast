@@ -220,6 +220,7 @@ async function status(){
 async function cancel(){
  if(!state.job)return;const id=state.job,generation=state.generation;$id('ai-cancel').disabled=true;
  const result=await request('cancel',{id});if(generation!==state.generation||state.job!==id)return;
+ if(result.ok&&result.cancelled===false){$id('ai-cancel').disabled=false;feedback('error','Analysis not stopped','No running analysis of this profile matched, or its state could not be read. Try again.',state.run);return;}
  if(result.ok)state.cancelJob=id;
  feedback(result.ok?'cancelling':'error',result.ok?'Stopping analysis':'Cancellation failed',result.ok?'Waiting for the provider process to exit. Already consumed subscription quota cannot be recovered.':error(result),state.run);
 }
