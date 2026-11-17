@@ -73,6 +73,23 @@ def t_settings_apply_live_and_the_final_stint_brings_its_lap_count():
     assert team._race.lap_count is None and team._race._window_until is not None
     team.stint_switch(final_laps=17)
     assert team._race.lap_count == 17
+    restarted, _c = _service([{"id": "good"}], multi=True)
+    restarted.stint_switch(final_laps=9, window=False)
+    assert restarted._race.lap_count == 9 and restarted._race._window_until is None, \
+        "a relay start on the last row brings its lap count without a change window"
+
+
+def t_qualifying_mode_feeds_no_race():
+    path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
+    dr.write_settings(path, {"formation": False})
+    mode = ["qualifying"]
+    svc = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                     multi_lobby=lambda: False, clock=lambda: 1.0, enabled=lambda: mode[0] == "race")
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, 5, 1))
+    assert svc.standings()["entries"] == [], "qualifying laps are no race distance"
+    mode[0] = "race"
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.2, 10, 1))
+    assert [r["entry"] for r in svc.standings()["entries"]] == ["A"]
 
 
 def t_a_line_downloaded_after_the_pick_is_picked_up():

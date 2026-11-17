@@ -216,8 +216,8 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     calls, relay, stop = [], Relay(), threading.Event()
 
     class Svc:
-        def stint_switch(self, final_laps=None):
-            calls.append(final_laps)
+        def stint_switch(self, final_laps=None, window=True):
+            calls.append(final_laps if window else ("start", final_laps))
     worker = threading.Thread(target=g.m.stint_switch_watch,
                               args=(relay, Svc(), stop, lambda: 9, 0.01), daemon=True)
     seen = threading.Event()
@@ -235,6 +235,17 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
         stop.set()
         worker.join(2)
     assert calls == [None, 24], f"switches to row 2 and to the last row: {calls}"
+    calls.clear()
+    relay.idx, stop = 2, threading.Event()
+    worker = threading.Thread(target=g.m.stint_switch_watch,
+                              args=(relay, Svc(), stop, lambda: 9, 0.01), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 2
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stop.set()
+    worker.join(2)
+    assert calls == [("start", 24)], f"a relay start on the last row passes its laps once: {calls}"
 
 
 if __name__ == "__main__":

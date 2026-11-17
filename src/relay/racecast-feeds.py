@@ -14884,13 +14884,16 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
         try:
             idx = relay.on_air_row_idx()
             rows = relay.race_source.get_rows() if relay.race_source else []
-            if last is not None and idx != last and relay.mode == "race":
+            switched = last is not None and idx != last
+            if (switched or last is None) and relay.mode == "race":
                 final = None
                 if rows and idx == len(rows) - 1:
                     final = relay.race_source.final_laps() or settings_laps()
-                race_svc.stint_switch(final_laps=final)
-                LOG.info("driver race: stint switch to row %d%s", idx + 1,
-                         f", final lobby over {final} laps" if final else "")
+                if switched or final:
+                    race_svc.stint_switch(final_laps=final, window=switched)
+                    LOG.info("driver race: %s row %d%s", "stint switch to" if switched
+                             else "on air at start:", idx + 1,
+                             f", final lobby over {final} laps" if final else "")
             last = idx
         except Exception as e:  # noqa: BLE001  a watcher error must never touch the broadcast
             LOG.warning("driver race: stint watch failed: %s", e)
@@ -15808,6 +15811,7 @@ def main():
     # start/stop and a regenerate in the CLI or Control Center act without a restart.
     race_svc = driver_race.Service(
         driver_race.path_in(runtime), pick=track_pick.store.current,
+        enabled=lambda: relay.mode == "race",
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
         multi_lobby=lambda: not relay.solo)

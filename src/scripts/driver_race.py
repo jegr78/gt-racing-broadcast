@@ -79,11 +79,14 @@ def write_settings(path, changes):
 class Service:
     """Thread-safe holder of the live race."""
 
-    def __init__(self, settings_path, pick, trace_for, multi_lobby, clock=time.monotonic):
+    def __init__(self, settings_path, pick, trace_for, multi_lobby, clock=time.monotonic,
+                 enabled=lambda: True):
+        """`enabled()` False (the relay in qualifying mode) ignores samples."""
         self._path = settings_path
         self._pick, self._trace_for = pick, trace_for
         self._multi_lobby = multi_lobby
         self._clock = clock
+        self._enabled = enabled
         self._lock = threading.Lock()
         self._race = None
         self._race_pick = object()
@@ -106,11 +109,16 @@ class Service:
         self._race_pick = pick_id
         self._line_tried = self._clock()
         trace = self._trace_for(pick_id) if pick_id else None
-        return race_distance.Race(
+        race = race_distance.Race(
             trace, formation=s["formation"], multi_lobby=multi, finish_mode=s["finish_mode"],
-            lap_count=self._final_lobby_laps if multi else s["lap_count"])
+            lap_count=None if multi else s["lap_count"])
+        if multi and self._final_lobby_laps is not None:
+            race.final_lobby(self._final_lobby_laps, self._clock())
+        return race
 
     def update(self, reg, sample):
+        if not self._enabled():
+            return
         with self._lock:
             self._current().update(reg["entry"], reg["conn"], reg["name"],
                                    dict(sample, t=sample.get("mono", self._clock())))
@@ -134,14 +142,17 @@ class Service:
                 race.lap_count = saved["lap_count"]
         return saved
 
-    def stint_switch(self, final_laps=None):
-        """The broadcast switched stints: open the change window; `final_laps` is the
-        lap count of the final stint lobby when the switch put the last row on air."""
+    def stint_switch(self, final_laps=None, window=True):
+        """The broadcast switched stints: open the change window (unless `window` is
+        False, a relay start that finds the last row on air); `final_laps` is the lap
+        count of the final stint lobby when the last row is on air."""
         with self._lock:
             race = self._current()
-            race.open_change_window(self._clock())
+            if window:
+                race.open_change_window(self._clock())
             if final_laps is not None and race.multi_lobby:
-                self._final_lobby_laps = race.lap_count = final_laps
+                self._final_lobby_laps = final_laps
+                race.final_lobby(final_laps, self._clock())
 
     def final_lap(self):
         with self._lock:

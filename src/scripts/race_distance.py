@@ -1,27 +1,36 @@
 """Race distance, order, gaps, driver changes and finish from driver telemetry (#1112).
 
 Pure: the relay feeds every decoded sample of every driver connection with its
-receive time on one clock, and reads `standings`. Each entry's distance is
-`anchor + (lap - lap0) * L + (station - station0)` along the picked layout's line:
-GT7's lap counter gives the whole laps, the projection onto the line the fraction,
-and of the three candidates one lap apart the one nearest the predicted distance
-wins, so a counter that flips a moment before or after the line cannot jump a lap.
+receive time on one clock, and reads `standings`. GT7's lap counter reads 0 on the
+grid and steps at each crossing of the finish line. The finish line's station on the
+picked layout's line is learned from the first car that crosses it. A car's distance
+is `anchor + (lap - lap0) * L + frac - frac0`, with `frac` its position past the line:
+the counter gives whole laps, the projection the fraction. Only near the line, where
+the counter may flip a moment before or after the projection wraps, the candidate
+nearest the predicted distance decides.
 
-- Start: with a formation lap a car's distance starts when it crosses into lap 2,
-  without one at its first sample on lap 1 (the grid lies behind the line).
+- Start: with a formation lap a car's distance starts when its counter reaches 2,
+  without one when it reaches 1; the crossing times form the starting gaps.
+- A counter that drops (a new GT7 session, such as practice before the race) restarts
+  that entry in a single lobby; in endurance it holds the entry until Race Control
+  rejoins it (#1113).
 - Box: a car standing (below BOX_SPEED_MPS) more than BOX_LATERAL_M off the line for
   BOX_HOLD_S. Not confirmed by a recording yet (#1110 measures pit stops).
 - Driver change (multi-lobby only): inside the change window the active car
   standing in the box sets the team's anchor; another connection of the team that
-  then leaves the box continues from it. Lap 1 of the follow-up lobby, driven before
-  that car leaves the box, never counts.
+  then leaves the box continues from it. A driver who stays on for the next stint keeps
+  the connection: its counter drops in the new lobby, and leaving that lobby's box
+  continues from the anchor too. Lap 1 of the follow-up lobby, driven before that car
+  leaves the box, never counts.
 - Plausibility: every field comes from a driver's machine. A sample with a non-finite
-  value, a position far off the line's area, a time before the car's last sample or a
-  distance step faster than MAX_SPEED_MPS is dropped before it changes anything.
-- Finish: by lap count (the leader completes `lap_count` on its lobby's lap counter,
-  lap 1 included) or by `final_lap` (the leader's next crossing); every other car at
-  its next crossing after the leader; `finish` freezes everything at once. The race
-  timer never ends a race.
+  value, a position far off the line's area or a time before the car's last sample is
+  dropped; one whose distance step is faster than MAX_SPEED_MPS only keeps the
+  connection live. Loading and paused samples only keep it live.
+- Finish: single lobby when the leader completes `lap_count` race laps of distance;
+  endurance when the leader's car of the final lobby (it took over after the final
+  stint switch) passes `lap_count` on that lobby's counter. `final_lap` ends the race
+  at the leader's next crossing. Every other car finishes at its next crossing after
+  the leader; `finish` freezes everything at once. The race timer never ends a race.
 """
 import bisect
 import math
@@ -38,6 +47,7 @@ HISTORY_S = 900.0
 MAX_HISTORY = 12000         # samples per entry, a hard cap next to HISTORY_S
 MAX_SPEED_MPS = 120.0
 STEP_SLACK_M = 100.0        # projection noise and a counter flipping a moment off the line
+SNAP_M = 40.0               # around the line the counter may be a sample early or late
 AREA_MARGIN_M = 300.0
 CAR_FORGET_S = 120.0        # a quiet connection that no entry follows is dropped
 PRUNE_EVERY_S = 10.0
@@ -53,7 +63,8 @@ class _Car:
         self.in_box = False
         self.left_box = False      # this sample left the box
         self.counting = False
-        self.anchor = self.lap0 = self.s0 = 0.0
+        self.anchor = self.f0 = 0.0
+        self.lap0 = 0
 
 
 class _Entry:
@@ -63,8 +74,15 @@ class _Entry:
         self.ts, self.ds = [], []
         self.change_anchor = None
         self.changed = False
+        self.held = False          # endurance: the counter dropped, waiting for a rejoin
+        self.relobby = False       # endurance: the same driver moved on to the next lobby
+        self.since = None          # when the active car began counting
         self.pit_stops = 0
         self.finished_at = None
+
+    def restart(self):
+        self.distance, self.ts, self.ds = None, [], []
+        self.pit_stops, self.finished_at, self.since = 0, None, None
 
 
 class Race:
@@ -78,16 +96,18 @@ class Race:
             xs, zs = [p[0] for p in pts], [p[1] for p in pts]
             self._area = (min(xs) - AREA_MARGIN_M, max(xs) + AREA_MARGIN_M,
                           min(zs) - AREA_MARGIN_M, max(zs) + AREA_MARGIN_M)
-        self._pruned_at = None
         self.formation = formation
         self.multi_lobby = multi_lobby
         self.finish_mode = finish_mode
         self.lap_count = lap_count
+        self.line_s = None          # the finish line's station on the line, learned
         self._cars, self._entries = {}, {}
         self._window_until = None
+        self._final_at = None       # endurance: when the final stint lobby went on air
         self._final_lap_at = None
         self._finishing_at = None
         self._finished = False
+        self._pruned_at = None
 
     # -- commands ------------------------------------------------------------------
     def open_change_window(self, now):
@@ -95,6 +115,10 @@ class Race:
             self._window_until = now + CHANGE_WINDOW_S
             for ent in self._entries.values():
                 ent.changed = False
+
+    def final_lobby(self, lap_count, now):
+        """Endurance: the final stint lobby is on air and runs `lap_count` laps."""
+        self.lap_count, self._final_at = lap_count, now
 
     def final_lap(self, now):
         if self._final_lap_at is None and not self._finished:
@@ -127,20 +151,48 @@ class Race:
                 return None
         return t, lap, speed / 3.6, x, z
 
-    def _prune(self, now):
+    def _prune(self, now, keep):
         if self._pruned_at is not None and now - self._pruned_at < PRUNE_EVERY_S:
             return
         self._pruned_at = now
-        active = {e.active for e in self._entries.values()}
+        active = {e.active for e in self._entries.values()} | {keep}
         for conn in [c for c, car in self._cars.items()
                      if c not in active and car.t is not None and now - car.t > CAR_FORGET_S]:
             del self._cars[conn]
+
+    def _frac(self, s):
+        return (s - self.line_s) % self.length
+
+    def _raw(self, car, lap, s):
+        return car.anchor + (lap - car.lap0) * self.length + self._frac(s) - car.f0
+
+    def _next_distance(self, ent, car, t, lap, s):
+        """The counting car's distance at this sample."""
+        raw = self._raw(car, lap, s)
+        frac = self._frac(s)
+        if SNAP_M < frac < self.length - SNAP_M or not ent.ts:
+            return raw
+        # Just before the line the counter may have flipped already, just after not yet.
+        other = raw - self.length if frac > self.length / 2 else raw + self.length
+        predicted = ent.distance + car.speed * max(0.0, t - ent.ts[-1])
+        return min((raw, other), key=lambda v: abs(v - predicted))
+
+    def _start(self, ent, car, t, anchor, lap, s, at_line=False):
+        """Count from here. `at_line`: the counter just flipped, so the car is past the
+        line even when its projection still lies a few metres short of it."""
+        if self.line_s is None:
+            self.line_s = s                    # the first crossing marks the line
+        f0 = self._frac(s)
+        car.counting, car.anchor, car.lap0 = True, anchor, lap
+        car.f0 = f0 - self.length if at_line and f0 > self.length / 2 else f0
+        ent.distance, ent.since = anchor, t
 
     def update(self, entry, conn, name, sample):
         checked = self._valid(sample)
         if checked is None:
             return
         t, lap, speed, x, z = checked
+        self._prune(t, conn)
         car = self._cars.get(conn)
         if car is not None and car.t is not None and t < car.t:
             return                                # older than what this car already sent
@@ -149,38 +201,45 @@ class Race:
         ent = self._entries.get(entry)
         if ent is None:
             ent = self._entries[entry] = _Entry(entry, conn)
-        self._prune(t)
-        located = None
-        if self._line is not None and x is not None:
-            located = self._line.locate(x, z)
-            if lap is not None and not self._plausible(ent, car, t, lap, located[2]):
-                return
-        prev_lap = car.lap
-        car.t, car.lap, car.speed = t, lap, speed
-        car.position = sample.get("race_position")
-        if located is None:
+        if sample.get("loading") or sample.get("paused") or self._line is None \
+                or x is None or lap is None:
+            car.t = t
             return
-        _i, car.lateral, car.s = located
+        _i, lateral, s = self._line.locate(x, z)
+        active = conn == ent.active
+        prev_lap = car.lap
+        if active and prev_lap is not None and lap < prev_lap and ent.finished_at is None:
+            car.counting = False                  # a new GT7 session on this console
+            if self.multi_lobby and ent.change_anchor is not None:
+                ent.relobby = True
+            elif self.multi_lobby:
+                ent.held = ent.distance is not None
+            else:
+                ent.restart()
+        distance = None
+        if active and car.counting and ent.finished_at is None:
+            distance = self._next_distance(ent, car, t, lap, s)
+            if ent.ts and abs(distance - ent.distance) > \
+                    MAX_SPEED_MPS * (t - ent.ts[-1]) + STEP_SLACK_M:
+                car.t = t                         # implausible: live, but nothing moves
+                return
+        car.t, car.lap, car.speed, car.lateral, car.s = t, lap, speed, lateral, s
+        car.position = sample.get("race_position")
         self._box(car, t)
-        if conn == ent.active and car.left_box and car.counting:
+        if active and car.left_box and car.counting:
             ent.pit_stops += 1
         if self.multi_lobby:
             self._change(ent, car, t)
-        if conn != ent.active or ent.finished_at is not None or car.lap is None:
-            return
-        crossed = prev_lap is not None and car.lap > prev_lap
-        if not car.counting:
-            if self.formation and not ent.changed and car.lap < 2:
+            if conn != ent.active or not active:
                 return
-            car.counting = True
-            car.anchor, car.lap0, car.s0 = 0.0, (2 if self.formation else 1), 0.0
-            raw = self._raw(car)
-            ent.distance = raw - self.length if raw > self.length / 2 else raw
-        else:
-            raw = self._raw(car)
-            predicted = ent.distance + car.speed * max(0.0, t - ent.ts[-1]) if ent.ts else raw
-            ent.distance = min((raw, raw - self.length, raw + self.length),
-                               key=lambda v: abs(v - predicted))
+        if not active or ent.finished_at is not None or ent.held:
+            return
+        if not car.counting:
+            if lap < (2 if self.formation else 1) or (self.multi_lobby and ent.changed):
+                return
+            self._start(ent, car, t, 0.0, lap, s, at_line=True)
+        elif distance is not None:
+            ent.distance = distance
         ent.ts.append(t)
         ent.ds.append(ent.distance)
         if ent.ts[0] < t - HISTORY_S:
@@ -188,19 +247,8 @@ class Race:
             del ent.ts[:cut], ent.ds[:cut]
         if len(ent.ts) > MAX_HISTORY:
             del ent.ts[:len(ent.ts) - MAX_HISTORY], ent.ds[:len(ent.ds) - MAX_HISTORY]
-        if crossed:
+        if prev_lap is not None and lap > prev_lap:
             self._crossing(ent, car, t)
-
-    def _plausible(self, ent, car, t, lap, s):
-        """False when the counting active car's next distance is out of reach."""
-        if not car.counting or car.conn != ent.active or ent.distance is None or not ent.ts:
-            return True
-        raw = car.anchor + (lap - car.lap0) * self.length + (s - car.s0)
-        step = min((raw, raw - self.length, raw + self.length), key=lambda v: abs(v - ent.distance))
-        return abs(step - ent.distance) <= MAX_SPEED_MPS * (t - ent.ts[-1]) + STEP_SLACK_M
-
-    def _raw(self, car):
-        return car.anchor + (car.lap - car.lap0) * self.length + (car.s - car.s0)
 
     def _box(self, car, t):
         car.left_box = False
@@ -218,17 +266,26 @@ class Race:
             if window and car.in_box and ent.change_anchor is None and ent.distance is not None \
                     and not ent.changed:
                 ent.change_anchor = ent.distance
+            elif car.left_box and ent.relobby and window:
+                self._start(ent, car, t, ent.change_anchor, car.lap, car.s)
+                self._changed(ent, t)
             elif car.left_box:
                 ent.change_anchor = None          # it drove on: a pit stop, not a change
             return
-        if car.left_box and ent.change_anchor is not None and window:
+        if car.left_box and ent.change_anchor is not None and window and self.line_s is not None:
             ent.active = car.conn
-            car.counting = True
-            car.anchor, car.lap0, car.s0 = ent.change_anchor, car.lap, car.s
-            ent.distance = ent.change_anchor
-            ent.change_anchor, ent.changed = None, True
-            if all(e.changed for e in self._entries.values()):
-                self._window_until = None
+            self._start(ent, car, t, ent.change_anchor, car.lap, car.s)
+            self._changed(ent, t)
+
+    def _changed(self, ent, t):
+        ent.change_anchor, ent.changed, ent.held, ent.relobby = None, True, False, False
+        ent.ts.append(t)
+        ent.ds.append(ent.distance)
+        if all(e.changed for e in self._entries.values()):
+            self._window_until = None
+
+    def _final_car(self, ent):
+        return self._final_at is not None and ent.since is not None and ent.since >= self._final_at
 
     def _crossing(self, ent, car, t):
         if self._finished:
@@ -243,7 +300,11 @@ class Race:
                      default=None)
         if ent.distance is None or ent.distance < leader:
             return
-        by_laps = self.finish_mode == "laps" and self.lap_count and car.lap > self.lap_count
+        if self.finish_mode == "laps" and self.lap_count:
+            by_laps = (car.lap > self.lap_count and self._final_car(ent)) if self.multi_lobby \
+                else ent.distance >= self.lap_count * self.length - SNAP_M
+        else:
+            by_laps = False
         by_flag = self._final_lap_at is not None and t > self._final_lap_at
         if by_laps or by_flag:
             ent.finished_at = self._finishing_at = t

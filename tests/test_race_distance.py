@@ -21,8 +21,8 @@ def _pos(station, box=False):
 
 
 class Car:
-    """A car in one lobby: `along` is metres driven along the line from the lobby's
-    grid; the GT7 lap counter starts at 1 and steps at every crossing of station 0."""
+    """A car in one lobby: `along` is metres past the finish line (negative on the grid);
+    GT7's lap counter reads 0 on the grid and steps at every crossing of the line."""
 
     def __init__(self, race, entry, conn, grid_s, name="Driver"):
         self.race, self.entry, self.conn, self.name = race, entry, conn, name
@@ -31,7 +31,7 @@ class Car:
         self.speed = 0.0
 
     def lap(self):
-        return 1 + max(0, math.floor(self.along / L) + 1)
+        return max(0, math.floor(self.along / L) + 1)
 
     def send(self, t, position=None):
         x, z = _pos(self.along, self.box)
@@ -69,7 +69,8 @@ def t_formation_lap_sets_the_start_and_the_starting_gaps():
     assert abs(gap_b - 0.5) < 0.15 and abs(gap_c - 1.0) < 0.15, \
         f"20 m apart at 40 m/s: 0.5 s and 1.0 s at the line: {gap_b} {gap_c}"
     assert abs(_row(race, "C", t)["interval_s"] - 0.5) < 0.15
-    assert _row(race, "A", t)["gap_s"] == 0 and _row(race, "A", t)["laps"] == 1
+    assert _row(race, "A", t)["gap_s"] == 0 and _row(race, "A", t)["laps"] == 0, \
+        "the formation lap is no race lap"
 
 
 def t_without_formation_the_race_starts_on_lap_one():
@@ -115,7 +116,7 @@ def t_no_data_after_the_sender_goes_quiet():
 def t_lap_count_finish_ends_the_leader_then_each_car_at_its_next_crossing():
     race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
     a, b = Car(race, "A", "a", L - 5), Car(race, "B", "b", L - 400)
-    t = _drive(race, [a, b], [50, 50], 0.0, (L + 5) / 50 + 1)   # A's counter passes 2 (lap 1 is the start)
+    t = _drive(race, [a, b], [50, 50], 0.0, (2 * L + 5) / 50 + 1)       # A completes lap 2
     snap = race.standings(t)
     assert snap["state"] == "finishing" and _row(race, "A", t)["finished"], snap["state"]
     assert not _row(race, "B", t)["finished"]
@@ -169,6 +170,22 @@ def t_endurance_change_continues_from_the_old_cars_anchor():
     row = _row(race, "A", t)
     assert row["driver"] == "Lea" and abs(row["distance_m"] - (anchor + 400)) < 25, (row, anchor)
     assert row["pit_stops"] == 0, "a driver change is no pit stop"
+
+
+def t_a_driver_staying_on_continues_into_the_next_lobby():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    car, rival = Car(race, "A", "a1", L - 5, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [car, rival], [50, 50], 0.0, 60)
+    race.open_change_window(t)
+    car.box = True
+    t = _drive(race, [car, rival], [None, 50], t, 3)
+    anchor = _row(race, "A", t)["distance_m"]
+    car.along = -5.0                                  # the next lobby: same console, counter 0
+    t = _drive(race, [car, rival], [None, 50], t, 3)
+    car.box = False
+    t = _drive(race, [car, rival], [40, 50], t, 10)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Max" and abs(row["distance_m"] - (anchor + 400)) < 25, (row, anchor)
 
 
 def t_a_box_stop_outside_the_change_window_changes_nobody():
@@ -229,7 +246,7 @@ def t_history_and_quiet_connections_stay_bounded():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 5)
     t = 0.0
-    for _ in range(rd.MAX_HISTORY + 50):
+    for _ in range(rd.MAX_HISTORY + 300):            # the first 100 stand on the grid
         t += 0.001                                   # a burst far denser than HISTORY_S trims
         a.along += 0.05
         a.speed = 50
@@ -239,6 +256,62 @@ def t_history_and_quiet_connections_stay_bounded():
         race.update("A", f"gone{i}", "X", {"t": t, "lap": 1, "x": 0.0, "z": 0.0, "speed_kmh": 0})
     _drive(race, [a], [50], t, rd.CAR_FORGET_S + rd.PRUNE_EVERY_S + 1)
     assert set(race._cars) == {"a"}, f"quiet connections no entry follows are dropped: {set(race._cars)}"
+
+
+def t_a_long_gap_mid_lap_keeps_every_lap():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 5)
+    t = _drive(race, [a], [50], 0.0, 10)
+    a.speed = 5.0
+    a.send(t)                                          # a slow last sample before the outage
+    a.along += 0.8 * L - 400                           # 0.67 laps unseen, landing mid-lap
+    t += (0.8 * L - 400) / 50
+    a.speed = 50.0
+    a.send(t)
+    assert abs(_row(race, "A", t)["distance_m"] - a.along) < 5, (_row(race, "A", t), a.along)
+
+
+def t_practice_before_the_race_restarts_the_entry():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 5)
+    t = _drive(race, [a], [50], 0.0, L / 50 * 2.5)      # free laps in the lobby
+    assert _row(race, "A", t)["laps"] == 2
+    a.along = -20.0                                     # the race grid: the counter drops to 0
+    t = _drive(race, [a], [None], t, 1)
+    assert _row(race, "A", t)["distance_m"] is None, _row(race, "A", t)
+    t = _drive(race, [a], [50], t, 3)
+    assert 0 < _row(race, "A", t)["distance_m"] < 200 and _row(race, "A", t)["laps"] == 0
+
+
+def t_an_implausible_step_keeps_the_entry_live():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 5)
+    t = _drive(race, [a], [50], 0.0, 3)
+    d = _row(race, "A", t)["distance_m"]
+    for _ in range(int(rd.NO_DATA_S * HZ) + 10):
+        t += 1.0 / HZ
+        x, z = _pos(a.along)
+        race.update("A", "a", "Driver", {"t": t, "lap": 40, "x": x, "z": z, "speed_kmh": 180.0})
+    row = _row(race, "A", t)
+    assert row["distance_m"] == d and row["status"] == "racing", row
+
+
+def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    old, rival = Car(race, "A", "a1", L - 5, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 3 * L / 50)       # lap counters near 4
+    race.open_change_window(t)
+    race.final_lobby(2, t)
+    t = _drive(race, [old, rival], [50, 40], t, L / 50 + 2)          # the old cars' in-laps
+    assert race.standings(t)["state"] == "racing", "the old lobby's counters are not the final lobby's"
+    old.box = True
+    t = _drive(race, [old, rival], [None, 40], t, 3)
+    new = Car(race, "A", "a2", L - 5, "Lea")
+    new.box = True
+    t = _drive(race, [new, rival], [None, 40], t, 3)
+    new.box = False
+    t = _drive(race, [new, rival], [50, 40], t, (2 * L) / 50 + 2)    # its lobby counter passes 2
+    assert race.standings(t)["state"] in ("finishing", "finished") and _row(race, "A", t)["finished"]
 
 
 def t_no_line_means_no_distance():
