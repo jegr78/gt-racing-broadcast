@@ -614,8 +614,11 @@ def t_one_sender_cannot_lift_the_start_bound_of_a_fresh_race():
     liar = Car(race, "A", "a", 40 * L - 60)                   # alone, claiming lap 40
     t = _drive(race, [liar], [50], 0.0, 4)
     assert _row(race, "A", t)["distance_m"] is None, "a lone sender past the start lap waits for a second car"
+    twin = Car(race, "A", "a2", 40 * L - 30)                  # a second connection of the same entry
+    t = _drive(race, [liar, twin], [50, 50], t, 2)
+    assert _row(race, "A", t)["distance_m"] is None, "an entry's own connections never vouch for it"
     b, c = Car(race, "B", "b", L - 15), Car(race, "C", "c", L - 40)
-    t = _drive(race, [liar, b, c], [50, 50, 50], t, 4)
+    t = _drive(race, [liar, twin, b, c], [50, 50, 50, 50], t, 4)
     assert _row(race, "A", t)["distance_m"] is None, "the field's lap bounds the claim"
     assert _row(race, "B", t)["distance_m"] is not None, "the honest cars start"
 
