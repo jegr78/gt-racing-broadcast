@@ -296,6 +296,16 @@ def t_the_driver_radio_journal_travels_with_the_package():
         assert any('transkribierte Sprache' in note for note in german['limitations']),german['limitations']
 
 
+def t_the_manifest_lists_every_free_text_the_package_sends():
+    package = {"selection": {"recording_id": "r"}, "reference_provenance": [],
+               "context": {"data": {"sessions": {"1": {"label": "Wet test",
+                                                       "stints": [{"note": "box early"}]}}}}}
+    notes = a._included_notes(package)
+    assert {"scope": "r/sessions/1", "text": "Wet test", "kind": "label"} in notes, \
+        "an operator's session label reaches the provider, so the manifest shows it"
+    assert {"scope": "r/sessions/1/stints/0", "text": "box early"} in notes, notes
+
+
 if __name__=='__main__':
     for n,f in sorted(globals().copy().items()):
         if n.startswith('t_'):f();print('PASS',n)
