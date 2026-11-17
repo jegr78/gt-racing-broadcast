@@ -717,6 +717,7 @@ AUTO_COVER_POLL_S = 5                     # how often the auto-cover tick evalua
 AUTO_COVER_SETTLE_S = 12                  # source_state must persist this long before the cover raises
 STANDBY_COVER_SOURCE = "Standby Cover"    # the #378 cover source in the Stint scene
 RED_FLAG_BANNER = "Red Flag - Race Suspended"   # the HUD banner of the panel's RED FLAG
+RED_FLAG_MIN_S = 2.0                            # one Race Control red flag change per person
 _AUTO_COVER_FALSEY = {"0", "false", "no", "off"}
 
 
@@ -11982,6 +11983,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Its own bucket: senders still holding codes of a regenerated invite retry once a
     # minute and must not lock console logins out of the shared one.
     _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
+    _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
@@ -14526,7 +14528,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["drivers", "reassign"] and driver_hub is not None:
                     conn, entry = str(body.get("conn") or ""), body.get("entry")
                     roster = hud_source.roster_names() if hud_source else []
-                    if not isinstance(entry, str) or (roster and entry not in roster):
+                    if not isinstance(entry, str) or not 0 < len(entry) <= driver_invite.MAX_ENTRY \
+                            or (roster and entry not in roster):
                         return self._send({"ok": False, "error": "unknown entry"}, 400)
                     if not driver_hub.reassign(conn, entry):
                         return self._send({"ok": False, "error": "unknown sender"}, 400)
@@ -14537,12 +14540,22 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # The full RED FLAG from Race Control (#1114): the Standby Cover, the
                     # HUD banner and the race's red flag mode. Reached only under /console.
                     on = body.get("on") is not False
-                    cover, note = False, "obs unavailable"
-                    if _obs_ws is not None:
-                        cover, note = relay._obs.set_scene_item_enabled(
-                            _obs_ws.graphic_scene(relay.solo), STANDBY_COVER_SOURCE, on)
-                    banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
-                              if setup_ctl else {"error": "no Setup tab control"})
+                    now = time.monotonic()
+                    with _red_flag_lock:
+                        if now - _red_flag_last.get(who, -RED_FLAG_MIN_S) < RED_FLAG_MIN_S:
+                            return self._send({"ok": False, "error": "one red flag change per 2 s"}, 429)
+                        _red_flag_last[who] = now
+                        # Lowering undoes only a red flag raised here: never an auto-cover
+                        # over a dead feed (#495) or the director's own cover and banner.
+                        owned = getattr(relay, "rc_red_flag_raised", False)
+                        relay.rc_red_flag_raised = on or False
+                    cover, note, banner = False, "obs unavailable", {"error": "not raised here"}
+                    if on or owned:
+                        if _obs_ws is not None:
+                            cover, note = relay._obs.set_scene_item_enabled(
+                                _obs_ws.graphic_scene(relay.solo), STANDBY_COVER_SOURCE, on)
+                        banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
+                                  if setup_ctl else {"error": "no Setup tab control"})
                     race = None
                     if driver_race_svc is not None:
                         race = (driver_race_svc.red_flag(who) if on
@@ -14550,8 +14563,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     LOG.warning("RED FLAG %s by %s (cover %s)", "raised" if on else "lowered",
                                 str(who).replace("\r", "").replace("\n", "")[:60],
                                 "ok" if cover else note)
+                    # The OBS note can name the WebSocket host: keep it in the relay log.
                     return self._send({"ok": True, "on": on, "cover": cover,
-                                       "note": None if cover else note,
+                                       "note": None if cover else ("cover not changed" if on or owned
+                                                                   else "not raised from this desk"),
                                        "banner": banner.get("error") or "ok", "race": race})
                 if p == ["telemetry", "probe", "reset"]:
                     if telemetry_probe_obj is None:

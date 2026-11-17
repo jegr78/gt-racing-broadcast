@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The driver telemetry routes under /console/drive and on the tailnet (#1111).
 Run: python3 tests/test_driver_routes.py"""
-import json, os, struct, sys, tempfile, urllib.error, urllib.request
+import json, os, struct, sys, tempfile, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -295,12 +295,21 @@ def t_both_desks_act_with_their_identity():
         st, text, _h = _req(port, f"/console/race-control/drivers/reassign?t={rc}",
                             _json.dumps({"conn": conn, "entry": "Nobody #0"}).encode(), hdr)
         assert st == 400 and "entry" in text, (st, text)
+        st, text, _h = _req(port, f"/console/race-control/red-flag?t={rc}",
+                            _json.dumps({"on": False}).encode(), hdr)
+        body = _json.loads(text)
+        assert st == 200 and body["banner"] == "not raised here" and body["note"] == "not raised from this desk", \
+            "a cover or banner this desk did not raise is never lowered from it"
+        time.sleep(g.m.RED_FLAG_MIN_S + 0.1)
         st, text, _h = _req(port, f"/console/race-control/red-flag?t={rc}", b"{}", hdr)
         body = _json.loads(text)
         assert st == 200 and body["on"] and body["race"]["red_flag"] is not None, text
+        assert "127.0.0.1" not in text and "4455" not in text, "no OBS address reaches the desk"
+        assert _req(port, f"/console/race-control/red-flag?t={rc}", b"{}", hdr)[0] == 429, \
+            "one red flag change per person in 2 s"
         assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
         actions = [r["action"] for r in _audit_of(srv)]
-        assert actions == ["correct", "final_lap", "reassign", "red_flag"], actions
+        assert actions == ["correct", "final_lap", "reassign", "red_flag_cover_down", "red_flag"], actions
         carol = g._tok("carol")                                   # producer: every role
         assert _req(port, f"/console/race-control/drivers/data?t={carol}")[0] == 403
         assert _req(port, f"/console/drivers/data?t={carol}")[0] == 404
