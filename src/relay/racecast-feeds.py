@@ -9481,6 +9481,7 @@ class Relay:
         self.stream_expected = False      # latched True once OBS is seen streaming
                                           # (off-air alarm only fires after this)
         self._stream_active_prev = None   # last bool stream_active, for start/stop events (#317)
+        self._stream_stop_ts = 0.0        # last confirmed stop; older live samples are stale
         self._stream_started_ts = None    # when OBS last went live, for the stop-line uptime
         # POV is a THIRD, independent feed, not part of the A/B index. Starts
         # paused (off) until the Director calls /pov/reload.
@@ -11261,7 +11262,10 @@ class Relay:
         health/history and the regular stream-stop post, but stop health pages
         until teardown or a successful explicit start. A failed request restores
         the previous notification state. Never hold the OBS sampling lock here.
+        A confirmed stop is announced here, not on the next probe, so the stop post
+        and its health event precede the report and survive a fast teardown.
         """
+        stopped_at = None
         with self._stream_control_lock:
             with self._health_webhook_lock:
                 previous = self._event_ending
@@ -11274,11 +11278,26 @@ class Relay:
                 if ok and on:
                     with self._health_webhook_lock:
                         self._event_ending = False
-                return ok, note
+                if ok and not on:
+                    stopped_at = self._claim_stream_stop()
             finally:
                 if not succeeded:
                     with self._health_webhook_lock:
                         self._event_ending = previous
+        if stopped_at is not None:
+            self._on_stream_transition("stopped", stopped_at)
+        return ok, note
+
+    def _claim_stream_stop(self):
+        """Record a confirmed stop as the stream state. The stop time when this call
+        owns the stop transition, None when a probe already announced it."""
+        now = time.time()
+        with self._obs_lock:
+            self._stream_stop_ts = now
+            if self._stream_active_prev is not True:
+                return None
+            self._stream_active_prev = False
+            return now
 
     def _run_obs_probe(self):
         """Body of the OBS probe (own method so it is testable synchronously).
@@ -11308,6 +11327,8 @@ class Relay:
                 redacted["stream_kbps"] = kbps
                 self.obs_stats = redacted
                 active = stats.get("stream_active")    # True / False / None
+                if active and now < self._stream_stop_ts:
+                    active = None                      # sampled before a confirmed stop
                 prev = self._stream_active_prev
                 if active is not None:                 # ignore unreachable blips
                     self._stream_active_prev = active

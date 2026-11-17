@@ -34,6 +34,7 @@ def _event(*, qualifying=False, count=1):
         relay.obs_reachable = True
         relay.obs_stats = {"stream_active": True}
         relay.stream_expected = True
+        relay._stream_active_prev = True
         relay._stream_started_ts = 1000
         relay._notified_level = "green"
         for name in ("_maybe_probe_obs", "_sample_connectivity", "_sample_inbound_gaps",
@@ -86,6 +87,11 @@ def _post(port, path, body):
         return response.status, json.loads(response.read())
 
 
+def _probe(relay, active):
+    relay._obs.get_health_stats = lambda: (True, {"stream_active": active}, "")
+    relay._run_obs_probe()
+
+
 def _off_air(relay):
     relay.obs_stats = {"stream_active": False}
     relay._heartbeat_tick(2000)
@@ -95,8 +101,8 @@ def t_final_end_keeps_stop_marker_and_report_without_late_health_pings():
     with _event() as (relay, obs, posts, teardown, parts, port):
         def stop(on):
             assert on is False
-            relay._on_stream_transition("stopped", 2000)
-            _off_air(relay)  # The heartbeat can observe OBS stopping before the request returns.
+            _probe(relay, False)  # The probe can observe OBS stopping before the request returns.
+            _off_air(relay)
         obs.effect = stop
         code, reply = _post(port, "parts/end", {"intent": "END PART 1"})
         assert code == 200 and reply["final"] is True, (code, reply)
@@ -109,6 +115,33 @@ def t_final_end_keeps_stop_marker_and_report_without_late_health_pings():
         assert parts.get()["live"] is False
         events = relay.health_store.events(0, 1e12)
         assert [event["type"] for event in events] == ["obs_stream_stop", "part_end"]
+
+
+def t_a_confirmed_stop_is_announced_once_before_the_report_runs():
+    with _event() as (relay, obs, posts, teardown, parts, port):
+        relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
+        relay._spawn_event_stop = lambda: teardown.append([kind for kind, _ in posts])
+        sampling, release = threading.Event(), threading.Event()
+
+        def stale_stats():
+            sampling.set()
+            assert release.wait(5), "the in-flight probe must be released"
+            return True, {"stream_active": True}, ""
+        relay._obs.get_health_stats = stale_stats
+        probe = threading.Thread(target=relay._run_obs_probe)
+        probe.start()
+        assert sampling.wait(5)
+        code, reply = _post(port, "parts/end", {"intent": "END PART 1"})
+        release.set()
+        probe.join(5)
+        assert code == 200 and reply["final"] is True, (code, reply)
+        assert teardown == [["obs-stream"]], \
+            f"the stop post precedes the report instead of waiting for a probe: {teardown}"
+        _probe(relay, False)
+        assert [kind for kind, _ in posts] == ["obs-stream"], \
+            f"a probe sampled before the stop must not announce it a second time: {posts}"
+        types_ = [event["type"] for event in relay.health_store.events(0, 1e12)]
+        assert types_.count("obs_stream_stop") == 1, types_
 
 
 def t_failed_final_stop_restores_alarm_and_does_not_consume_the_transition():
@@ -142,7 +175,7 @@ def t_new_explicit_start_rearms_health_after_a_completed_final_stop():
         code, _ = _post(port, "obs/stream", {"on": True})
         assert code == 200
         _off_air(relay)
-        assert [kind for kind, _ in posts] == ["health"], posts
+        assert [kind for kind, _ in posts] == ["obs-stream", "health"], posts
 
 
 def t_qualifying_end_also_finishes_health_notifications():
@@ -153,7 +186,7 @@ def t_qualifying_end_also_finishes_health_notifications():
         code, reply = _post(port, "parts/end", {"intent": "END PART Q"})
         assert code == 200 and reply["final"] is True
         _off_air(relay)
-        assert not posts and teardown == ["report+teardown"]
+        assert [kind for kind, _ in posts] == ["obs-stream"] and teardown == ["report+teardown"]
 
 
 def t_nonfinal_part_keeps_event_health_alerts_enabled():
@@ -161,7 +194,7 @@ def t_nonfinal_part_keeps_event_health_alerts_enabled():
         code, reply = _post(port, "parts/end", {"intent": "END PART 1"})
         assert code == 200 and not reply.get("final") and not teardown
         relay._send_health_webhook("red", ["Feed A down"], "green")
-        assert [kind for kind, _ in posts] == ["health"]
+        assert [kind for kind, _ in posts] == ["obs-stream", "health"]
         assert parts.get()["index"] == 2
 
 
@@ -187,6 +220,9 @@ def t_inflight_health_send_finishes_before_the_final_stop_can_run():
         order = []
 
         def post(payload, what):
+            if what != "health":
+                order.append(f"{what}-posted")
+                return
             entered.set()
             assert release.wait(5), "The fake Discord send must be released"
             order.append("health-delivered")
@@ -211,7 +247,7 @@ def t_inflight_health_send_finishes_before_the_final_stop_can_run():
             if stopper.ident is not None:
                 stopper.join(5)
         assert not sender.is_alive() and not stopper.is_alive()
-        assert order == ["health-delivered", "obs-stop"], order
+        assert order == ["health-delivered", "obs-stop", "obs-stream-posted"], order
 
 
 if __name__ == "__main__":
