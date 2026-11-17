@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import driver_ingest  # noqa: E402
 import driver_race  # noqa: E402
 import driver_invite  # noqa: E402
+import timing_link  # noqa: E402
 import gt7_crypto  # noqa: E402
 import telemetry_probe as tp  # noqa: E402
 import test_console_gate as g  # noqa: E402
@@ -68,6 +69,44 @@ def t_the_dashboard_page_and_its_override_are_served_on_the_tailnet():
         st, text, h = _req(port, "/drivers/override.css")
         assert st == 200 and text == "#drivers-tower{left:90px}" and h["Content-Type"].startswith("text/css"), text
         assert _req(port, "/console/drivers")[0] in (401, 403), "the overlay page is not funnelled"
+    finally:
+        srv.shutdown()
+
+
+def t_the_public_timing_link_reaches_timing_data_and_nothing_else():
+    d = tempfile.mkdtemp()
+    link_path = os.path.join(d, "timing-link.json")
+    from test_race_distance import TRACE
+    race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
+                               trace_for=lambda _i: TRACE, multi_lobby=lambda: False)
+    rps = g.m.TIMING_MAX_RPS
+    g.m.TIMING_MAX_RPS = 1                                  # ten requests per ten seconds
+    try:
+        srv = g._serve(driver_race_svc=race, timing_link_path=link_path,
+                       timing_page_path=os.path.join(ROOT, "src", "console", "timing.html"))
+    finally:
+        g.m.TIMING_MAX_RPS = rps
+    port = srv.server_address[1]
+    try:
+        assert _req(port, "/console/timing?l=x")[0] == 403, "no event, no timing link"
+        link = timing_link.create(link_path)["id"]
+        invite_like = driver_invite.create(os.path.join(d, "driver-invite.json"))["id"]
+        assert _req(port, f"/console/timing?l={invite_like}")[0] == 403, "the drivers' invite is no timing link"
+        st, text, h = _req(port, f"/console/timing?l={link}")
+        assert st == 200 and "Live timing" in text and "Set-Cookie" not in h, (st, h)
+        race.tick()
+        st, text, _h = _req(port, f"/console/timing/data?l={link}")
+        data = json.loads(text)
+        assert st == 200 and data["v"] == 1 and "entries" in data, text[:200]
+        for leak in ("conn", "https://", "visible", '"x"'):
+            assert leak not in text, f"{leak} must not reach the public page"
+        assert _req(port, f"/console/timing/data?l={link}", b"{}", {"Content-Type": "application/json"})[0] == 404
+        codes = [_req(port, f"/console/timing/data?l={link}")[0] for _ in range(12)]
+        assert 429 in codes, f"all viewers together share one cap: {codes}"
+        assert _req(port, f"/console/race-control/drivers/timing-link?t={g._tok('dave')}")[0] == 200
+        assert _req(port, "/console/drivers/race?l=" + link)[0] in (401, 403), "the link opens nothing else"
+        timing_link.clear(link_path)
+        assert _req(port, f"/console/timing?l={link}")[0] == 403, "event stop ends the link"
     finally:
         srv.shutdown()
 

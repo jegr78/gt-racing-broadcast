@@ -182,6 +182,13 @@
             <button id="evt-invite-new"
                     title="Replace the invite link. Every driver then registers again on the new link">New link</button></div>
           <div class="enverr" id="evt-invite-err" hidden></div>
+          <div class="row"><span class="name">Public timing</span>
+            <span class="dim grow" id="evt-timing-text">—</span>
+            <button id="evt-timing-copy" hidden
+                    title="Copy the public live timing link: no login, timing data only">Copy</button>
+            <button id="evt-timing-new"
+                    title="Replace the public timing link. The old link stops working">New link</button></div>
+          <div class="enverr" id="evt-timing-err" hidden></div>
           <div class="row"><span class="name">Driver race</span>
             <label class="grow" title="Driver telemetry distance starts when a car crosses into lap 2 (formation lap) or at lap 1">
               <input type="checkbox" id="evt-race-formation"> Formation lap</label>
@@ -1044,7 +1051,7 @@ function showView(name) {
   if (name === 'home') loadTakeoverPeers();
   if (name === 'home') fetchProducerSchedule();
   if (name === 'home') fetchEventTitle();
-  if (name === 'home') { fetchEventTrack(); fetchEventInvite(); fetchEventRace(); }
+  if (name === 'home') { fetchEventTrack(); fetchEventInvite(); fetchEventTiming(); fetchEventRace(); }
 }
 
 let _reportPath = null;
@@ -1376,6 +1383,26 @@ async function fetchEventInvite(regenerate) {
   $('evt-invite-copy').hidden = !link;
   $('evt-invite-copy').onclick = () => navigator.clipboard.writeText(link);
 }
+// The event's public live timing link (Home; #1128)
+async function fetchEventTiming(regenerate) {
+  let d;
+  try {
+    d = await (await fetch('/api/event-timing', regenerate
+      ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{"new":true}'}
+      : {cache: 'no-store'})).json();
+  } catch (e) { return; }
+  $('evt-timing-err').hidden = !!(d && d.ok);
+  if (!d || !d.ok) { $('evt-timing-err').textContent = (d && d.error) || 'could not read the timing link'; return; }
+  const link = d.active ? (d.funnel || d.tailnet) : null;
+  $('evt-timing-text').textContent = link || (d.active ? 'Tailscale is not up: no link to share'
+                                                       : 'none: Start event creates one');
+  $('evt-timing-copy').hidden = !link;
+  $('evt-timing-copy').onclick = () => navigator.clipboard.writeText(link);
+}
+$('evt-timing-new').addEventListener('click', async () => {
+  if (!(await confirmModal('Replace the public timing link? Everyone with the old link loses the timing page.'))) return;
+  fetchEventTiming(true);
+});
 $('evt-invite-new').addEventListener('click', async () => {
   if (!(await confirmModal('Replace the driver invite link? Every driver has to register again on the new link.'))) return;
   fetchEventInvite(true);
@@ -1631,7 +1658,7 @@ async function refresh() {
   if (currentView === 'home') fetchEventTitle();
   // The layout list is a local file read while the relay is down: load it once then.
   if (currentView === 'home' && ((relayUp && s.relay.http_ok) || !evtTrackLoaded)) fetchEventTrack();
-  if (currentView === 'home') { fetchEventInvite(); fetchEventRace(); }
+  if (currentView === 'home') { fetchEventInvite(); fetchEventTiming(); fetchEventRace(); }
   if (currentView === 'profile') fetchAssetFiles();
 }
 

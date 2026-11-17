@@ -605,6 +605,12 @@ def make_handler(ctx):
                 except Exception as exc:
                     return self._json({"ok": False, "error": f"race settings read failed: {exc}"},
                                       code=500)
+            if path == "/api/event-timing":
+                try:
+                    return self._json(ctx["event_timing"]())
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"timing link read failed: {exc}"},
+                                      code=500)
             if path == "/api/event-invite":
                 try:
                     return self._json(ctx["event_invite"]())
@@ -1103,6 +1109,15 @@ def make_handler(ctx):
                                        "error": f"could not save the race settings: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/event-timing":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error}, code=400)
+                try:
+                    return self._json(ctx["event_timing"](new=body.get("new") is True))
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not renew the timing link: {exc}"},
+                                      code=500)
             if path == "/api/event-invite":
                 body = self._body_json()
                 if body is None:

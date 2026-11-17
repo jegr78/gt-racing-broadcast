@@ -14,6 +14,7 @@
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
   racecast event track [ID|--clear|--list]  # the event's GT7 track layout: map and corner names from the first metre
   racecast event invite [--new]             # driver telemetry invite link (event start creates it, stop ends it)
+  racecast event timing [--new]             # public live timing link (event start creates it, stop ends it)
   racecast event race [--formation on|off] [--laps N|--time] [--restart keep|neutralise]  # driver telemetry race
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
@@ -1048,7 +1049,7 @@ EXTRA_VERBS = {
 # Internal verbs: routed but never advertised (frozen feed children use run-feed).
 HIDDEN_VERBS = {"streams": ("run-feed",)}
 ONESHOTS = ("preflight", "speedtest", "cookies", "graphics", "media", "brands", "setup", "install-tools", "install-apps", "obs-browser", "update")
-EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite", "race")
+EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite", "timing", "race")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
@@ -5884,20 +5885,70 @@ def event_invite_data(new=False, path=None, links=None):
 
 
 def _start_driver_invite(fresh, path=None):
-    """A fresh event gets a new invite and a driver race without the last event's
-    corrections; a takeover or recovery restart keeps both."""
+    """A fresh event gets a new invite, a new public timing link and a driver race
+    without the last event's corrections; a takeover or recovery restart keeps them."""
     import driver_invite
     import driver_race
+    import timing_link
     path = path or _driver_invite_path()
+    runtime = os.path.dirname(os.path.abspath(path))
     if fresh:
-        driver_race.clear_actions(os.path.dirname(os.path.abspath(path)))
+        driver_race.clear_actions(runtime)
     if fresh or driver_invite.current(path) is None:
         driver_invite.create(path)
+    timing = timing_link.path_in(runtime)
+    if fresh or timing_link.current(timing) is None:
+        timing_link.create(timing)
 
 
 def _stop_driver_invite(path=None):
+    """Event stop ends the invite and the public timing link."""
     import driver_invite
-    driver_invite.clear(path or _driver_invite_path())
+    import timing_link
+    path = path or _driver_invite_path()
+    driver_invite.clear(path)
+    timing_link.clear(timing_link.path_in(os.path.dirname(os.path.abspath(path))))
+
+
+def _timing_links(link_id, magic=None, host=None):
+    """Funnel and tailnet URLs of the public timing page; None for an unknown host."""
+    if magic is None and host is None:
+        magic, host = _invite_hosts()
+    return {"funnel": f"https://{magic}/console/timing?l={link_id}" if magic else None,
+            "tailnet": f"http://{host}:{RELAY_PORT}/console/timing?l={link_id}" if host else None}
+
+
+def event_timing_data(new=False, path=None, links=None):
+    """The event's public live timing link (#1128): {ok, active, funnel, tailnet,
+    created}. `new` replaces it, so the old link stops working. `path` and `links`
+    are test seams."""
+    import timing_link
+    path = path or timing_link.path_in(_runtime_dir())
+    link = timing_link.create(path) if new else timing_link.current(path)
+    if link is None:
+        return {"ok": True, "active": False}
+    return dict({"ok": True, "active": True, "created": link["created"]},
+                **(links or _timing_links)(link["id"]))
+
+
+def event_timing_cmd(rest):
+    """racecast event timing [--new]: show the public live timing link, or replace it."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="racecast event timing",
+        description="Show the event's public live timing link (no login, timing data only). "
+                    "--new replaces it: the old link stops working.")
+    parser.add_argument("--new", action="store_true", help="regenerate the timing link")
+    args = parser.parse_args(rest)
+    _apply_active_profile_env()
+    d = event_timing_data(new=args.new)
+    if not d["active"]:
+        print("No public timing link: `racecast event start` creates one, `--new` makes one now.")
+        return
+    print("New public timing link (the old one no longer works):" if args.new
+          else "Public timing link:")
+    print(f"  funnel:  {d['funnel'] or 'unknown (is Tailscale up with MagicDNS?)'}\n"
+          f"  tailnet: {d['tailnet'] or 'unknown (is Tailscale up?)'}")
 
 
 def event_invite_cmd(rest):
@@ -6922,6 +6973,7 @@ DISPATCH = {
     ("event", "stop"): event_stop, ("event", "takeover"): event_takeover,
     ("event", "track"): event_track_cmd,
     ("event", "invite"): event_invite_cmd,
+    ("event", "timing"): event_timing_cmd,
     ("event", "race"): event_race_cmd,
     ("tailscale", "up"): tailscale_up_cmd, ("tailscale", "down"): tailscale_down_cmd,
     ("tailscale", "status"): tailscale_status_cmd,
@@ -9865,6 +9917,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "event_title_write": event_title_write_data,
         "event_track_read": event_track_read_data,
         "event_invite": event_invite_data,
+        "event_timing": event_timing_data,
         "event_race_read": event_race_read_data,
         "event_race_write": event_race_write_data,
         "event_track_write": event_track_write_data,
