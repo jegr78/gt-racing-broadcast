@@ -123,7 +123,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "gt7_packet_stats",
            "--hidden-import", "telemetry_replay", "--hidden-import", "gt7_recording", "--hidden-import", "gt7_telemetry",
            "--hidden-import", "gt7_cars",
-           "--hidden-import", "gt7_data", "--hidden-import", "gt7_tracks", "--hidden-import", "gt7_track_pick", "--hidden-import", "telemetry_probe", "--hidden-import", "gt7_forward",
+           "--hidden-import", "gt7_data", "--hidden-import", "gt7_tracks", "--hidden-import", "gt7_track_pick", "--hidden-import", "telemetry_probe", "--hidden-import", "gt7_forward", "--hidden-import", "driver_invite", "--hidden-import", "driver_ingest",
            "--hidden-import", "gt7_laps",
            "--hidden-import", "gt7_context", "--hidden-import", "gt7_export",
            "--hidden-import", "gt7_track_definitions",
@@ -206,7 +206,9 @@ def main():
                            "racecast.py", "racecast", windowed=False)
     ui_bin = build_target(launcher, workdir, version_file, sep,
                           "racecast_ui.py", "racecast-ui", windowed=True)
+    sender_bin = build_sender(launcher, workdir)
     if not a.skip_smoke:
+        smoke_sender(sender_bin)
         smoke(rc_bin, a.version)
         smoke_ui(ui_bin)
         # macOS ships the windowed launcher as racecast-ui.app, so smoke its inner
@@ -280,6 +282,34 @@ def smoke_ui(binary):
         if ui.poll() is None:
             ui.kill()
     print("Smoke test OK (racecast-ui: ping, sibling-racecast job, quit).")
+
+
+def build_sender(launcher, workdir):
+    """The driver telemetry sender as a one-file console program (#1111): stdlib only,
+    no bundled data, for drivers without Python. Returns the executable path."""
+    name = "racecast-sender"
+    cmd = launcher + ["--onefile", "--name", name, "--clean", "--noconfirm",
+                      "--distpath", os.path.join(ROOT, "dist", "bin"),
+                      "--workpath", os.path.join(workdir, "build", name),
+                      "--specpath", workdir, os.path.join(SRC, "relay", "racecast-sender.py")]
+    print("Running:", " ".join(cmd), flush=True)
+    if subprocess.call(cmd) != 0:
+        sys.exit("pyinstaller failed for racecast-sender.")
+    binary = os.path.join(ROOT, "dist", "bin", name + (".exe" if os.name == "nt" else ""))
+    if not os.path.isfile(binary):
+        sys.exit(f"expected binary missing: {binary}")
+    print(f"Built {binary} ({os.path.getsize(binary) // (1024 * 1024)} MB)")
+    return binary
+
+
+def smoke_sender(binary):
+    """The frozen sender must start and print its help with the invite options."""
+    out = subprocess.run([binary, "--help"], capture_output=True, text=True,
+                         errors="replace", timeout=60)
+    if out.returncode != 0 or "--code" not in out.stdout or "--listen" not in out.stdout:
+        sys.exit(f"smoke racecast-sender FAILED: rc={out.returncode} out={out.stdout!r} "
+                 f"err={out.stderr!r}")
+    print("Smoke test OK (racecast-sender: --help).")
 
 
 def smoke(binary, version):

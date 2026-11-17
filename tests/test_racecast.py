@@ -12,6 +12,9 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 # saved original is verified in its own seam-isolated test below. (#317)
 _ORIG_ANNOUNCE_TAKEOVER = m._announce_takeover
 m._announce_takeover = lambda *a, **k: None
+# event start/stop must never touch the invite a running event on this machine holds.
+_INVITE_DIR = tempfile.mkdtemp(prefix="racecast-invite-")
+m._driver_invite_path = lambda: os.path.join(_INVITE_DIR, "driver-invite.json")
 
 
 def t_frozen_child_env_moves_the_extraction_dir_out_of_os_temp():
@@ -6733,6 +6736,25 @@ def t_gt7_forward_write_validates_normalises_and_clears():
         assert "10.0.0.5" not in text, f"an empty text clears the targets: {text!r}"
     finally:
         os.remove(path)
+
+
+def t_driver_invite_follows_the_event_and_regenerates():
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "driver-invite.json")
+    links = lambda i: {"funnel": f"https://h/console/drive?i={i}", "tailnet": "t"}  # noqa: E731
+    assert m.event_invite_data(path=path, links=links) == {"ok": True, "active": False}
+    m._start_driver_invite(True, path=path)
+    first = m.event_invite_data(path=path, links=links)
+    assert first["active"] and first["funnel"].startswith("https://h/console/drive?i="), first
+    m._start_driver_invite(False, path=path)
+    assert m.event_invite_data(path=path, links=links)["funnel"] == first["funnel"], \
+        "a takeover or recovery restart keeps the invite the drivers hold"
+    m._start_driver_invite(True, path=path)
+    assert m.event_invite_data(path=path, links=links)["funnel"] != first["funnel"], "a new event, a new link"
+    renewed = m.event_invite_data(new=True, path=path, links=links)
+    assert renewed["active"] and renewed["funnel"] != first["funnel"]
+    m._stop_driver_invite(path=path)
+    assert m.event_invite_data(path=path, links=links)["active"] is False, "event stop ends the link"
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):

@@ -1,1 +1,141 @@
-<!doctype html><html><body>placeholder</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Send your telemetry</title>
+<style>
+:root{--bg:#0b1016;--panel:#111820;--edge:#303946;--ink:#e7edf3;--dim:#aeb8c5;--accent:#5ba8ef;--warn:#ffb454;--bad:#ff7b72;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 6px}
+h2{font-size:16px;margin:0 0 10px}
+p{margin:0 0 10px}
+.dim{color:var(--dim);font-size:13px}
+section{background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:16px;margin-top:16px}
+label{display:block;font-weight:600;margin:12px 0 4px}
+select,input{width:100%;font:inherit;color:var(--ink);background:#17202b;border:1px solid #344155;border-radius:6px;padding:9px 10px}
+select:focus,input:focus,button:focus-visible,a:focus-visible{outline:2px solid #8ac6ff;outline-offset:2px}
+button{font:inherit;cursor:pointer;color:var(--ink);background:#1b2533;border:1px solid #344155;border-radius:6px;padding:8px 14px}
+button.primary{background:#234d79;border-color:var(--accent);margin-top:14px}
+button:disabled{opacity:.5;cursor:default}
+.err{color:var(--bad);margin-top:10px}
+.cmd{display:flex;gap:8px;align-items:flex-start;margin:6px 0 12px}
+.cmd code{flex:1;min-width:0;display:block;font:13px/1.45 var(--mono);background:#0e141b;border:1px solid var(--edge);border-radius:6px;padding:9px 10px;overflow-wrap:anywhere;white-space:pre-wrap}
+a{color:#8ac6ff}
+ul{margin:0 0 10px;padding-left:20px}
+li{margin-bottom:6px}
+[hidden]{display:none !important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Send your telemetry</h1>
+  <p class="dim">The sender runs on a device next to your PlayStation and sends your car's GT7
+    telemetry to the broadcast. It sends nothing else.</p>
+
+  <section id="regSec">
+    <h2>1. Who are you?</h2>
+    <label for="entry">Entry</label>
+    <select id="entry"><option value="">Pick your entry</option></select>
+    <div id="segBox" hidden>
+      <label for="segment">Stint or qualifying segment</label>
+      <select id="segment"><option value="">Pick your stint</option></select>
+    </div>
+    <label for="name">Your name</label>
+    <input id="name" maxlength="32" autocomplete="nickname" placeholder="Letters, digits, spaces, _ . -">
+    <button id="register" class="primary">Get my sender command</button>
+    <div id="err" class="err" role="alert" hidden></div>
+  </section>
+
+  <section id="runSec" hidden>
+    <h2>2. Start the sender</h2>
+    <p>With Python 3.8 or newer (Windows, macOS, Linux, Termux on Android, a-Shell on iOS):
+      download <a id="script" download="racecast-sender.py">racecast-sender.py</a>, then run</p>
+    <div class="cmd"><code id="cmdPy"></code><button data-copy="cmdPy">Copy</button></div>
+    <p>Without Python, the program for <a id="winExe">Windows</a> or <a id="macExe">macOS</a>
+      takes the same options:</p>
+    <div class="cmd"><code id="cmdExe"></code><button data-copy="cmdExe">Copy</button></div>
+    <p class="dim">The code is yours for this event. If the producer renews the invite link,
+      register again here.</p>
+  </section>
+
+  <section id="helpSec">
+    <h2>Which setup?</h2>
+    <ul>
+      <li><b>Nothing else receives your telemetry:</b> run the command as shown.</li>
+      <li><b>A dashboard app on your phone:</b> run the sender on a second device on the same
+        network (PC, laptop, tablet). Two programs cannot share one device's telemetry port.</li>
+      <li><b>SimHub on the same PC:</b> add <code>--forward 127.0.0.1:PORT</code> and point
+        SimHub at that port with its own heartbeat off.</li>
+      <li><b>GT Race Engineer forwards to a port:</b> add <code>--listen PORT</code>; the sender
+        then sends no heartbeat.</li>
+    </ul>
+    <p class="dim">Allow inbound UDP 33740 in the device's firewall: the console answers from a
+      port of its own. On iOS keep a-Shell in front with the screen on and the device charging.
+      The driver guide in the GT Racing Broadcast wiki covers every platform.</p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const invite = new URLSearchParams(location.search).get('i') || '';
+  const version = '__RC_VERSION__';
+  const repo = 'https://github.com/jegr78/gt-racing-broadcast/releases/';
+  const release = version === 'dev' || !version.startsWith('v') ? repo + 'latest/download/' : repo + 'download/' + version + '/';
+  let multi = false;
+
+  function fail(text) { $('err').textContent = text; $('err').hidden = !text; }
+  function fill(select, values) {
+    for (const v of values) select.appendChild(new Option(v, v));
+  }
+  async function load() {
+    let d;
+    try {
+      const r = await fetch('/console/drive/data?i=' + encodeURIComponent(invite), {cache: 'no-store'});
+      d = await r.json();
+      if (!r.ok) { fail(d.error || 'This invite link does not work.'); $('register').disabled = true; return; }
+    } catch (e) { fail('The broadcast is not reachable.'); return; }
+    multi = !!d.multi_lobby;
+    fill($('entry'), d.entries || []);
+    $('segBox').hidden = !multi;
+    if (multi) fill($('segment'), d.segments || []);
+    if (!(d.entries || []).length) fail('The league has no entries in its Configuration tab yet.');
+  }
+  $('register').addEventListener('click', async () => {
+    fail('');
+    const body = {entry: $('entry').value, name: $('name').value.trim()};
+    if (multi) body.segment = $('segment').value;
+    if (!body.entry) return fail('Pick your entry.');
+    if (multi && !body.segment) return fail('Pick your stint or segment.');
+    if (!/^[A-Za-z0-9 _.\-]{1,32}$/.test(body.name)) return fail('Use up to 32 letters, digits, spaces, _ . - for your name.');
+    let d, r;
+    try {
+      r = await fetch('/console/drive/register?i=' + encodeURIComponent(invite), {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+      d = await r.json();
+    } catch (e) { return fail('The broadcast is not reachable.'); }
+    if (!r.ok || !d.ok) return fail(d.error || 'Registration failed.');
+    const args = '--url ' + location.origin + '/console/drive/ingest --code ' + d.code;
+    $('cmdPy').textContent = 'python3 racecast-sender.py ' + args;
+    $('cmdExe').textContent = 'racecast-sender ' + args;
+    $('script').href = '/console/drive/sender.py?i=' + encodeURIComponent(invite);
+    $('winExe').href = release + 'racecast-sender-windows.exe';
+    $('macExe').href = release + 'racecast-sender-macos';
+    $('runSec').hidden = false;
+    $('runSec').scrollIntoView({behavior: 'smooth', block: 'start'});
+  });
+  document.addEventListener('click', e => {
+    const id = e.target.dataset && e.target.dataset.copy;
+    if (id) navigator.clipboard.writeText($(id).textContent).then(() => {
+      e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500);
+    }, () => {});
+  });
+  load();
+})();
+</script>
+</body>
+</html>

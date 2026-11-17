@@ -175,6 +175,13 @@
             </select></div>
           <div class="note-warn" id="evt-track-note" hidden></div>
           <div class="enverr" id="evt-track-err" hidden></div>
+          <div class="row"><span class="name">Driver invite</span>
+            <span class="dim grow" id="evt-invite-text">—</span>
+            <button id="evt-invite-copy" hidden
+                    title="Copy the invite link for the drivers: they pick their entry and get a sender code">Copy</button>
+            <button id="evt-invite-new"
+                    title="Replace the invite link. Every driver then registers again on the new link">New link</button></div>
+          <div class="enverr" id="evt-invite-err" hidden></div>
         </section>
         <section>
           <div class="row"><span class="name">Tailscale</span>
@@ -1021,7 +1028,7 @@ function showView(name) {
   if (name === 'home') loadTakeoverPeers();
   if (name === 'home') fetchProducerSchedule();
   if (name === 'home') fetchEventTitle();
-  if (name === 'home') fetchEventTrack();
+  if (name === 'home') { fetchEventTrack(); fetchEventInvite(); }
 }
 
 let _reportPath = null;
@@ -1305,6 +1312,25 @@ $('evt-track').addEventListener('change', async (e) => {
   fetchEventTrack();
 });
 
+// The event's driver telemetry invite link (Home; #1111)
+async function fetchEventInvite(regenerate) {
+  let d;
+  try {
+    d = await (await fetch('/api/event-invite', regenerate
+      ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{"new":true}'}
+      : {cache: 'no-store'})).json();
+  } catch (e) { return; }                  // server gone, keep last state
+  $('evt-invite-err').hidden = !!(d && d.ok);
+  if (!d || !d.ok) { $('evt-invite-err').textContent = (d && d.error) || 'could not read the invite'; return; }
+  $('evt-invite-text').textContent = d.active ? d.funnel : 'none: Start event creates one';
+  $('evt-invite-copy').hidden = !d.active;
+  $('evt-invite-copy').onclick = () => navigator.clipboard.writeText(d.funnel);
+}
+$('evt-invite-new').addEventListener('click', async () => {
+  if (!(await confirmModal('Replace the driver invite link? Every driver has to register again on the new link.'))) return;
+  fetchEventInvite(true);
+});
+
 function renderTimer() {
   if (!liveTimer) return;
   const t = liveTimer.t;
@@ -1555,6 +1581,7 @@ async function refresh() {
   if (currentView === 'home') fetchEventTitle();
   // The layout list is a local file read while the relay is down: load it once then.
   if (currentView === 'home' && ((relayUp && s.relay.http_ok) || !evtTrackLoaded)) fetchEventTrack();
+  if (currentView === 'home') fetchEventInvite();
   if (currentView === 'profile') fetchAssetFiles();
 }
 

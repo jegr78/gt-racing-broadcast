@@ -81,6 +81,7 @@ def main():
     cp("console/driver-radio.js", "driver-radio.js")
     cp("console/driver-radio-messages.html", "driver-radio-messages.html")
     cp("console/event-info.html", "event-info.html")
+    cp("console/drive.html", "drive.html")             # driver telemetry invite page (#1111)
     cp("console/crew-frame.html", "crew-frame.html")   # cockpit/race-control tab bar (#745)
     cp("setup-assets.py", "setup-assets.py")
     cp("racecast.py", "racecast.py")
