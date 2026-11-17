@@ -1322,9 +1322,11 @@ async function fetchEventInvite(regenerate) {
   } catch (e) { return; }                  // server gone, keep last state
   $('evt-invite-err').hidden = !!(d && d.ok);
   if (!d || !d.ok) { $('evt-invite-err').textContent = (d && d.error) || 'could not read the invite'; return; }
-  $('evt-invite-text').textContent = d.active ? d.funnel : 'none: Start event creates one';
-  $('evt-invite-copy').hidden = !d.active;
-  $('evt-invite-copy').onclick = () => navigator.clipboard.writeText(d.funnel);
+  const link = d.active ? (d.funnel || d.tailnet) : null;   // tailnet only while MagicDNS is unknown
+  $('evt-invite-text').textContent = link || (d.active ? 'Tailscale is not up: no link to share'
+                                                       : 'none: Start event creates one');
+  $('evt-invite-copy').hidden = !link;
+  $('evt-invite-copy').onclick = () => navigator.clipboard.writeText(link);
 }
 $('evt-invite-new').addEventListener('click', async () => {
   if (!(await confirmModal('Replace the driver invite link? Every driver has to register again on the new link.'))) return;

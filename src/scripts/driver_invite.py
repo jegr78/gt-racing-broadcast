@@ -66,9 +66,29 @@ def create(path, now=None):
 
 def clear(path):
     try:
-        os.remove(path)
+        atomic_replace.retry_windows_file_operation(lambda: os.remove(path))
     except FileNotFoundError:
         pass  # no invite: nothing to revoke
+
+
+class Cache:
+    """`current(path)` re-read only when the file changes: the relay asks on every
+    ingest post, 300 times a second with 15 senders."""
+
+    def __init__(self, path):
+        self.path = path
+        self._stamp = self._invite = None
+
+    def get(self):
+        try:
+            st = os.stat(self.path)
+            stamp = (st.st_mtime_ns, st.st_size, st.st_ino)
+        except OSError:
+            self._stamp = self._invite = None
+            return None
+        if stamp != self._stamp:
+            self._invite, self._stamp = current(self.path), stamp
+        return self._invite
 
 
 def _b64(raw):

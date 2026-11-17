@@ -66,6 +66,18 @@ def t_the_link_alone_cannot_mint_codes():
     assert di.current(fh.name) is None, "an invite file without a signing key is no invite"
 
 
+def t_the_cache_follows_create_and_clear():
+    path = os.path.join(tempfile.mkdtemp(), "i.json")
+    cache = di.Cache(path)
+    assert cache.get() is None
+    first = di.create(path)
+    assert cache.get() == first
+    second = di.create(path)
+    assert cache.get()["id"] == second["id"], "a regenerated invite replaces the cached one"
+    di.clear(path)
+    assert cache.get() is None, "event stop ends the cached invite at once"
+
+
 def t_names_and_entries_are_bounded():
     invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
     for bad in ("", "x" * 33, "Car #7", "a;rm -rf", "Jörg"):

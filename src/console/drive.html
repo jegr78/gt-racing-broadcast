@@ -52,12 +52,17 @@ li{margin-bottom:6px}
 
   <section id="runSec" hidden>
     <h2>2. Start the sender</h2>
-    <p>With Python 3.8 or newer (Windows, macOS, Linux, Termux on Android, a-Shell on iOS):
-      download <a id="script" download="racecast-sender.py">racecast-sender.py</a>, then run</p>
+    <p>With Python 3.8 or newer: download
+      <a id="script" download="racecast-sender.py">racecast-sender.py</a>, open a terminal in
+      that folder and run, on macOS, Linux, Termux (Android) or a-Shell (iOS)</p>
     <div class="cmd"><code id="cmdPy"></code><button data-copy="cmdPy">Copy</button></div>
-    <p>Without Python, the program for <a id="winExe">Windows</a> or <a id="macExe">macOS</a>
-      takes the same options:</p>
-    <div class="cmd"><code id="cmdExe"></code><button data-copy="cmdExe">Copy</button></div>
+    <p>or on Windows</p>
+    <div class="cmd"><code id="cmdPyWin"></code><button data-copy="cmdPyWin">Copy</button></div>
+    <p>Without Python: download the <a id="winExe">Windows program</a> and run in its folder</p>
+    <div class="cmd"><code id="cmdWin"></code><button data-copy="cmdWin">Copy</button></div>
+    <p>or the <a id="macExe">macOS program</a>, once <code>chmod +x racecast-sender-macos</code>,
+      then</p>
+    <div class="cmd"><code id="cmdMac"></code><button data-copy="cmdMac">Copy</button></div>
     <p class="dim">The code is yours for this event. If the producer renews the invite link,
       register again here.</p>
   </section>
@@ -85,7 +90,8 @@ li{margin-bottom:6px}
   const invite = new URLSearchParams(location.search).get('i') || '';
   const version = '__RC_VERSION__';
   const repo = 'https://github.com/jegr78/gt-racing-broadcast/releases/';
-  const release = version === 'dev' || !version.startsWith('v') ? repo + 'latest/download/' : repo + 'download/' + version + '/';
+  // A release build links its own programs; dev and preview builds the latest release.
+  const release = /^v\d+\.\d+\.\d+$/.test(version) ? repo + 'download/' + version + '/' : repo + 'latest/download/';
   let multi = false;
 
   function fail(text) { $('err').textContent = text; $('err').hidden = !text; }
@@ -99,11 +105,15 @@ li{margin-bottom:6px}
       d = await r.json();
       if (!r.ok) { fail(d.error || 'This invite link does not work.'); $('register').disabled = true; return; }
     } catch (e) { fail('The broadcast is not reachable.'); return; }
-    multi = !!d.multi_lobby;
+    multi = !!d.multi_lobby && (d.segments || []).length > 0;
     fill($('entry'), d.entries || []);
     $('segBox').hidden = !multi;
-    if (multi) fill($('segment'), d.segments || []);
-    if (!(d.entries || []).length) fail('The league has no entries in its Configuration tab yet.');
+    if (multi) fill($('segment'), d.segments);
+    if (!(d.entries || []).length) {
+      fail(d.roster === false ? 'The broadcast has no entry list: ask the producer.'
+                              : 'The league has no entries in its Configuration tab yet.');
+      $('register').disabled = true;
+    }
   }
   $('register').addEventListener('click', async () => {
     fail('');
@@ -121,7 +131,9 @@ li{margin-bottom:6px}
     if (!r.ok || !d.ok) return fail(d.error || 'Registration failed.');
     const args = '--url ' + location.origin + '/console/drive/ingest --code ' + d.code;
     $('cmdPy').textContent = 'python3 racecast-sender.py ' + args;
-    $('cmdExe').textContent = 'racecast-sender ' + args;
+    $('cmdPyWin').textContent = 'py racecast-sender.py ' + args;
+    $('cmdWin').textContent = '.\\racecast-sender-windows.exe ' + args;
+    $('cmdMac').textContent = './racecast-sender-macos ' + args;
     $('script').href = '/console/drive/sender.py?i=' + encodeURIComponent(invite);
     $('winExe').href = release + 'racecast-sender-windows.exe';
     $('macExe').href = release + 'racecast-sender-macos';

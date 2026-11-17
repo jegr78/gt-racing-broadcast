@@ -63,7 +63,8 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         assert code == 200 and "<html" in text.lower() and "Set-Cookie" not in headers, (code, headers)
         code, text, _h = _req(port, f"/console/drive/data?i={invite}")
         data = json.loads(text)
-        assert data == {"v": 1, "multi_lobby": False, "entries": ENTRIES, "segments": [], "rate_hz": 20}, data
+        assert data == {"v": 1, "multi_lobby": False, "roster": True, "entries": ENTRIES,
+                        "segments": [], "rate_hz": 20}, data
         assert "https://" not in text, "the invite data carries no stream URLs"
         code, text, _h = _req(port, f"/console/drive/sender.py?i={invite}")
         assert code == 200 and "racecast relay" in text, code
@@ -82,8 +83,10 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         conns = json.loads(text)["connections"]
         assert [(c["entry"], c["name"], c["packets"]["received"]) for c in conns] == [("Team A #1", "Max", 2)], conns
         ENTRIES.append("Team C #3")
-        late = json.loads(_register(port, invite, entry="Team C #3", name="Lea")[1])["code"]
-        ENTRIES.remove("Team C #3")                                   # the league dropped the entry
+        try:
+            late = json.loads(_register(port, invite, entry="Team C #3", name="Lea")[1])["code"]
+        finally:
+            ENTRIES.remove("Team C #3")                               # the league dropped the entry
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": late})
         assert code == 403 and "no longer in the league" in text, (code, text)
         driver_invite.create(path)                                    # the producer regenerates
@@ -106,6 +109,18 @@ def t_endurance_asks_for_the_stint_and_allows_two_per_team():
         batch = tp.encode_batch([_wire(1)])
         replies = [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0] for c in codes]
         assert replies == [200, 200, 409], replies
+    finally:
+        srv.shutdown()
+
+
+def t_endurance_without_stint_labels_registers_by_entry():
+    srv, port, path, _hub = _serve(solo=False, segments=[])
+    try:
+        invite = driver_invite.create(path)["id"]
+        code, text, _h = _register(port, invite, entry="Team A #1", name="Max", segment="whatever")
+        assert code == 200, (code, text)
+        reg = driver_invite.verify(driver_invite.current(path), json.loads(text)["code"])
+        assert reg["segment"] is None, reg
     finally:
         srv.shutdown()
 

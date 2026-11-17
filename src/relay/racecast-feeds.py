@@ -11955,6 +11955,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Its own bucket: senders still holding codes of a regenerated invite retry once a
     # minute and must not lock console logins out of the shared one.
     _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
+    _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
     # Every open crew page polls the take view; one OBS read serves them all for a
@@ -12812,6 +12813,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._oauth_login()
             if sub == ["oauth", "callback"]:
                 return self._oauth_callback()
+            # Driver telemetry probe (#1110): a sender posts with the probe key, not
+            # a console token. Off unless the relay started with the probe enabled.
+            if sub == ["probe", "ingest"]:
+                return self._probe_ingest(method)
+            # Driver telemetry (#1111): the invite link and the codes it issues are the
+            # credential here, never a console token, and they reach nothing else.
+            if sub[:1] == ["drive"]:
+                return self._drive(sub[1:], method)
             # Producer-to-producer takeover pull (#216 Phase 7): authorized by the
             # shared per-league step-up secret ALONE. Producer B holds the league
             # CONSOLE_SECRET (it signs every token). NOT a per-person commentator
@@ -12821,14 +12830,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             # sufficient. A missing/invalid secret is 403 (step-up required), NEVER
             # 401, which misled operators into blaming a matching secret. Runs BEFORE
             # the subject check below precisely so no token is needed.
-            # Driver telemetry probe (#1110): a sender posts with the probe key, not
-            # a console token. Off unless the relay started with the probe enabled.
-            if sub == ["probe", "ingest"]:
-                return self._probe_ingest(method)
-            # Driver telemetry (#1111): the invite link and the codes it issues are the
-            # credential here, never a console token, and they reach nothing else.
-            if sub[:1] == ["drive"]:
-                return self._drive(sub[1:], method)
             if sub and sub[0] == "takeover":
                 presented = self.headers.get("X-Console-Secret")
                 if not (presented and console_auth.secret_matches(presented, console_secret)):
@@ -14046,7 +14047,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         def _ok(self, r):
             self._send(r) if r else self._send({"error":"feed? (A/B)"}, 404)
         def _drive_invite(self):
-            return driver_invite.current(driver_invite_path) if driver_invite_path else None
+            return _invite_cache.get() if _invite_cache else None
 
         def _drive_refuse(self, status, message):
             client = self.client_address[0] if self.client_address else "?"
@@ -14066,7 +14067,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 reg = driver_invite.verify(invite, self.headers.get("X-Driver-Code"))
                 if reg is None:
                     return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
-                if hud_source and reg["entry"] not in hud_source.roster_names():
+                roster = hud_source.roster_names() if hud_source else []
+                if roster and reg["entry"] not in roster:   # an unread roster blocks nobody
                     return self._drive_refuse(403, "this entry is no longer in the league's list: register again")
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
@@ -14097,6 +14099,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 multi = not relay.solo
                 return self._send({
                     "v": driver_ingest.CONTRACT, "multi_lobby": multi,
+                    "roster": hud_source is not None,
                     "entries": hud_source.roster_names() if hud_source else [],
                     "segments": (driver_segments() if driver_segments else []) if multi else [],
                     "rate_hz": hub.rate_hz}, no_store=True)
@@ -14120,12 +14123,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 segment = body.get("segment") or None
                 if body.get("entry") not in entries:
                     return self._send({"error": "pick an entry from the list"}, 400)
-                if not relay.solo and driver_segments and segment not in driver_segments():
+                segments = driver_segments() if (driver_segments and not relay.solo) else []
+                if segments and segment not in segments:
                     return self._send({"error": "pick your stint or segment from the list"}, 400)
+                if not segments:
+                    segment = None   # a league without stint labels registers by entry only
                 try:
                     issued = driver_invite.issue(invite, entry=body["entry"],
-                                                 name=body.get("name"),
-                                                 segment=None if relay.solo else segment)
+                                                 name=body.get("name"), segment=segment)
                 except ValueError as exc:
                     return self._send({"error": str(exc)}, 400)
                 return self._send({"ok": True, "code": issued, "v": driver_ingest.CONTRACT}, no_store=True)

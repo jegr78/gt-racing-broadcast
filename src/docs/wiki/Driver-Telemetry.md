@@ -40,21 +40,24 @@ the sender (or the `--listen` port). The console sends from a port of its own, s
 packets do not count as an answer to the sender and a firewall drops them by default.
 
 - **Windows.** With Python 3.8 or newer from python.org, download
-  `racecast-sender.py` from the invite page and run the Python command in a terminal.
-  Without Python, download the Windows program from the invite page and run the second
-  command in the folder you saved it to. The program is not signed: SmartScreen shows
+  `racecast-sender.py` from the invite page and run the Windows Python command (`py
+  racecast-sender.py ...`) in a terminal in that folder. Without Python, download the
+  Windows program and run the `.\racecast-sender-windows.exe ...` command in its folder.
+  The program is not signed: SmartScreen shows
   "Windows protected your PC", choose **More info → Run anyway**. When Windows asks
   whether to allow the program on networks, allow **private networks**.
-- **macOS.** Python 3 from python.org, or the macOS program from the invite page. For
-  the program, run `chmod +x racecast-sender-macos` once. It is not signed: macOS refuses
-  the first start, then open **System Settings → Privacy & Security** and choose **Open
+- **macOS.** Python 3 from python.org with the `python3 racecast-sender.py ...` command,
+  or the macOS program: run `chmod +x racecast-sender-macos` once, then the
+  `./racecast-sender-macos ...` command. The program is not signed: macOS refuses the
+  first start, then open **System Settings → Privacy & Security** and choose **Open
   Anyway**. Allow incoming connections when the firewall asks.
 - **Linux.** Run the Python command. With ufw: `sudo ufw allow 33740/udp`.
 - **Android (Termux).** Install Termux, run `pkg install python`, download the script
-  with `curl -O <script link from the invite page>`, then run the Python command. Run
-  `termux-wake-lock` first so Android does not pause Termux.
-- **iPhone and iPad (a-Shell).** Download the script with `curl -O <script link>` and
-  run the Python command. iOS runs a-Shell only in the foreground: keep the screen on,
+  with `curl -o racecast-sender.py "<script link from the invite page>"` (the quotes
+  matter), then run the Python command. Run `termux-wake-lock` first so Android does not
+  pause Termux.
+- **iPhone and iPad (a-Shell).** Download the script with
+  `curl -o racecast-sender.py "<script link>"` and run the Python command. iOS runs a-Shell only in the foreground: keep the screen on,
   a-Shell in front and the device charging.
 
 ## While it runs
@@ -64,9 +67,10 @@ console and batches sent to the relay. It says when the console goes quiet (menu
 replays, network) and when the upload is interrupted, and it catches up after a short
 outage. Stop it with Ctrl+C.
 
-The producer sees every sender with your entry and name, and can disconnect one. If the
-sender says your entry already has a sender, someone else registered for it; ask the
-producer.
+The relay accepts one sender per entry in a single-lobby race and two per team in an
+endurance race (the driver on track and the one waiting for the next stint). If the
+sender says someone else sends for your entry, ask the producer. While the console is
+quiet the sender keeps its place with a short message every five seconds.
 
 For other client developers: the ingest is a versioned HTTP contract,
 [`src/docs/design/driver-telemetry-ingest.md`](https://github.com/jegr78/gt-racing-broadcast/blob/main/src/docs/design/driver-telemetry-ingest.md).

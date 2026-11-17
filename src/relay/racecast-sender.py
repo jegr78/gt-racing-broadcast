@@ -44,6 +44,7 @@ RECEIVE_PORT = 33740
 MIN_PACKET = 0x94         # shorter datagrams are not GT7 telemetry
 MAX_PACKET = 512          # the relay refuses longer ones; GT7 sends at most 344 bytes
 REFUSED_WAIT_S = 60.0     # a refused link or key is retried once a minute
+KEEPALIVE_S = 5.0         # an empty post while the console is quiet keeps the entry slot
 RELATCH_S = 30.0          # a discovered console silent this long is searched again
 QUIET_S = 2.0             # no packet for this long is an interruption
 DISCOVERY_HINT_S = 15.0
@@ -74,6 +75,16 @@ def default_bind(console=None, listen=None):
         return None
     finally:
         probe.close()
+
+
+REFUSED = {   # what the driver does about a refusal; the sender retries once a minute
+    401: "Check the link and the code",
+    403: "Register again on the invite page",
+    404: "Check the link: the event may not run yet",
+    409: "Someone else sends for this entry: ask the producer",
+    410: "Register again on the invite page",
+    429: "Retrying in a minute",
+}
 
 
 def _reason(exc):
@@ -111,6 +122,7 @@ class Uploader:
         self.extra_stats = lambda: {}
         self._failing_since = None
         self._failures = 0                       # consecutive, for the backoff
+        self._last_post = clock()
         self.latencies = collections.deque(maxlen=2000)
 
     def put(self, packet):
@@ -140,9 +152,9 @@ class Uploader:
             batch = [self._queue[i] for i in range(min(MAX_BATCH, len(self._queue)))]
             if batch:
                 self._inflight, self._evicted_inflight = batch[-1][0], 0
-        if not batch:
+        if not batch and self._clock() - self._last_post < KEEPALIVE_S:
             return 1.0 / self.rate_hz
-        last = batch[-1][0]
+        last = batch[-1][0] if batch else None
         stats = dict(self.stats, **self.extra_stats())
         req = urllib.request.Request(self.url, data=encode_batch([p for _s, p in batch]),
                                      method="POST", headers={
@@ -158,15 +170,17 @@ class Uploader:
                 self._remove_through(last)
                 self.stats["rejected"] += len(batch)
                 return self._failed("the relay refused a batch (400)", wait=1.0 / self.rate_hz)
-            if exc.code in (401, 403, 404, 409, 410, 429):
+            if exc.code in REFUSED:
                 return self._failed(f"the relay answered {exc.code} ({_reason(exc)}). "
-                                    "Check the link and the code", wait=REFUSED_WAIT_S, repeat=True)
+                                    + REFUSED[exc.code], wait=REFUSED_WAIT_S, repeat=True)
             return self._failed(f"the relay answered {exc.code}")
         except (OSError, ValueError) as exc:
             return self._failed(f"cannot reach the relay ({exc})")
         self.latencies.append(time.perf_counter() - started)
+        self._last_post = self._clock()
         self._settle(delivered=True)
-        self._remove_through(last)
+        if last is not None:
+            self._remove_through(last)
         self._failures = 0
         with self._lock:
             self.stats["posted"] += 1

@@ -2,8 +2,8 @@
 
 The HTTP contract between a driver's sender and the relay (#1111). The sender script
 `src/relay/racecast-sender.py` implements it; any other client, such as a later native
-dashboard app, can implement it from this page. The product design lives in
-`driver-telemetry-dashboard.md`.
+dashboard app, can implement it from this page. The product design is the spec in
+epic #1109.
 
 ## Credentials
 
@@ -27,7 +27,8 @@ dashboard app, can implement it from this page. The product design lives in
 {"v": 1, "multi_lobby": false, "entries": ["OVO eSports #111"], "segments": [], "rate_hz": 20}
 ```
 
-`entries` are the rows of the league's `Configuration` tab. `multi_lobby` is true for
+`entries` are the rows of the league's `Configuration` tab; `roster` is false when the
+relay runs without the HUD and so has no entry list. `multi_lobby` is true for
 endurance; `segments` then lists the stint and qualifying labels of the `Schedule` and
 `Qualifying` tabs, and registration needs one of them.
 
@@ -72,7 +73,10 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
   driver on track and the one waiting in the next lobby). A connection is live while
   its batches arrive; after 20 s without one its slot is free.
 - A second registration for a full entry is refused, not swapped in. A sender that
-  restarts with its own code is the same connection.
+  restarts with its own code is the same connection. While the console sends nothing, a
+  client keeps its slot with an empty batch (`RCT1` alone) at least every 20 s; the
+  sender script sends one every 5 s.
+- A league without stint labels registers by entry alone, in endurance too.
 - The producer sees every connection on the tailnet (`GET /drivers/data`) and
   disconnects one with `POST /drivers/disconnect {"conn": "..."}`.
 

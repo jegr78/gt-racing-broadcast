@@ -5746,12 +5746,11 @@ def _invite_hosts(now=None):
 
 
 def _invite_links(invite_id, magic=None, host=None):
+    """Funnel and tailnet invite URLs; None for one whose host Tailscale does not know."""
     if magic is None and host is None:
         magic, host = _invite_hosts()
-    magic = magic or "<your-magicdns-host>"
-    host = host or "<tailscale-ip>"
-    return {"funnel": f"https://{magic}/console/drive?i={invite_id}",
-            "tailnet": f"http://{host}:{RELAY_PORT}/console/drive?i={invite_id}"}
+    return {"funnel": f"https://{magic}/console/drive?i={invite_id}" if magic else None,
+            "tailnet": f"http://{host}:{RELAY_PORT}/console/drive?i={invite_id}" if host else None}
 
 
 def event_invite_data(new=False, path=None, links=None):
@@ -5797,7 +5796,8 @@ def event_invite_cmd(rest):
         return
     print(("New driver invite link (the old one no longer works):" if args.new
            else "Driver invite link:"))
-    print(f"  funnel:  {d['funnel']}\n  tailnet: {d['tailnet']}")
+    print(f"  funnel:  {d['funnel'] or 'unknown (is Tailscale up with MagicDNS?)'}\n"
+          f"  tailnet: {d['tailnet'] or 'unknown (is Tailscale up?)'}")
 
 
 def event_track_cmd(rest):
@@ -6321,16 +6321,20 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # qualifying mode, and --title sets the event title. Reset the broadcast-Part
     # pointer before the relay starts, so its PartStore comes up on the right Part.
     _write_part_reset(_part_index(rest))
+    fresh = _new_session and not _is_continuation_start(rest)
+    relay_was_running = _relay_already_running_for_active_profile() if fresh else False
+    try:
+        # Start event again on a running event (OBS or Companion back up) keeps the
+        # drivers' codes; only a new event gets a new link.
+        _start_driver_invite(fresh and not relay_was_running)
+    except OSError as exc:
+        print(f"driver invite: not created ({exc}).")
     # Mark THIS event's start so the report window begins here: a restart within
     # report_build.SESSION_GAP_S must not merge the previous event's health samples
     # into this report. A fresh broadcast only, since a takeover or a mid-event
     # recovery restart keeps the existing window so the report stays continuous.
-    try:
-        _start_driver_invite(_new_session and not _is_continuation_start(rest))
-    except OSError as exc:
-        print(f"driver invite: not created ({exc}).")
-    if _new_session and not _is_continuation_start(rest):
-        was_running = _relay_already_running_for_active_profile()
+    if fresh:
+        was_running = relay_was_running
         _write_session_start()
         _reset_telemetry_record()
         if was_running:   # same relay, same profile: it won't re-read the file itself

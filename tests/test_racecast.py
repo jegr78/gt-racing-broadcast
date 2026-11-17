@@ -3188,6 +3188,56 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
         "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
 
 
+def t_event_start_and_stop_drive_the_invite():
+    class _Reached(Exception):
+        pass
+
+    def _start(rest, running, new_session=True):
+        ev = m._event_modules()[0]
+        calls = []
+        saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+                 m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
+                 m._start_driver_invite)
+        restore = _stub_relay_signals((4242,) if running else (), 4242 if running else None,
+                                      running, "demo" if running else "", "demo")
+        with tempfile.TemporaryDirectory() as tmp:
+            m._event_gate_results = lambda e, p: []
+            m._tailscale_connect = lambda e: "ok"
+            ev.app_running = lambda app, platform=None: True
+            m._runtime_dir = lambda: tmp
+            m._sync_live_telemetry_record = lambda: None
+            m._wait_for_obs_ready = lambda timeout=0, early=False: False
+            m._start_driver_invite = calls.append
+
+            def _boom(_rest):
+                raise _Reached()
+            m.relay_start = _boom
+            try:
+                m.event_start(rest, _new_session=new_session)
+            except _Reached:
+                return calls
+            finally:
+                restore()
+                (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+                 m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
+                 m._start_driver_invite) = saved
+        raise AssertionError("expected to reach relay_start")
+
+    assert _start([], running=False) == [True], "a new event gets a new invite link"
+    assert _start([], running=True) == [False], "Start event on a running event keeps the drivers' codes"
+    assert _start(["--stint", "3"], running=False) == [False], "a recovery restart keeps the link"
+    assert _start([], running=False, new_session=False) == [False], "a takeover keeps or creates one"
+    stopped = []
+    saved = (m._stop_driver_invite, m._relay_is_alive)
+    try:
+        m._stop_driver_invite = lambda: stopped.append(True)
+        m._relay_is_alive = lambda: False
+        m.event_stop([])
+    finally:
+        m._stop_driver_invite, m._relay_is_alive = saved
+    assert stopped == [True], "event stop ends the invite even when the relay is already gone"
+
+
 def t_profile_env_vars_includes_event_title():
     rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
                                event_title="GTEC - Round 4")
