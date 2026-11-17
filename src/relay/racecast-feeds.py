@@ -2265,6 +2265,7 @@ def _crew_truthy(v):
 TEAM_BG_COLOR_HEADERS = ("bg color", "bg colour", "background color",
                          "background colour")
 TEAM_TEXT_COLOR_HEADERS = ("text color", "text colour", "fg color", "fg colour")
+CUP_TEAM_HEADERS = ("cup team",)   # team-vs-team leagues: the driver's team (#1115)
 
 # A plausible CSS colour token: #rgb/#rgba/#rrggbb/#rrggbbaa, an
 # rgb()/rgba()/hsl()/hsla() function, or a bare keyword. Anything else -> "". This
@@ -2377,6 +2378,7 @@ def parse_config_roster(text):
     ni = next((header.index(h) for h in NUMBER_HEADERS if h in header), None)
     ci = next((header.index(h) for h in TEAM_BG_COLOR_HEADERS if h in header), None)
     fi = next((header.index(h) for h in TEAM_TEXT_COLOR_HEADERS if h in header), None)
+    ui = next((header.index(h) for h in CUP_TEAM_HEADERS if h in header), None)
     out = {}
     for row in rows[1:]:
         if len(row) <= ti:
@@ -2388,6 +2390,7 @@ def parse_config_roster(text):
         col_num = (row[ni].strip() if ni is not None and len(row) > ni else "")
         brand_raw = (row[bi].strip() if bi is not None and len(row) > bi else "")
         override = (row[oi].strip() if oi is not None and len(row) > oi else "")
+        cup_team = row[ui].strip()[:60] if ui is not None and len(row) > ui else ""
         out[label] = {"number": col_num or embedded,
                       "brandKey": asset_key(brand_raw),
                       "brandName": override or brand_raw,
@@ -2395,6 +2398,8 @@ def parse_config_roster(text):
                           row[ci] if ci is not None and len(row) > ci else ""),
                       "textColor": sanitize_css_color(
                           row[fi] if fi is not None and len(row) > fi else "")}
+        if cup_team:
+            out[label]["cupTeam"] = cup_team
     return out
 
 
@@ -7998,6 +8003,11 @@ class HudSource:
         """Team names from the Configuration roster, in sheet order (panel vocab)."""
         with self.lock:
             return list(self._roster.keys())
+
+    def roster_details(self):
+        """{entry: {number, bgColor, textColor, cupTeam, ...}} from the Configuration tab."""
+        with self.lock:
+            return {k: dict(v) for k, v in self._roster.items()}
 
     def quali_times(self):
         """The Quali Times map {asset_key: lap}, last-good (empty when the tab is
@@ -13981,6 +13991,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["drivers", "race"] and driver_race_svc is not None:
                     # Order, distances and gaps from driver telemetry (#1112).
                     return self._send(driver_race_svc.standings(), no_store=True)
+                if p == ["drivers", "dashboard"] and driver_race_svc is not None:
+                    # The viewer payload, delayed (#1115): overlay, cockpit, public page.
+                    return self._send(driver_race_svc.dashboard() or {"v": 1, "entries": []},
+                                      no_store=True)
+                if p == ["drivers", "line"] and driver_race_svc is not None:
+                    line = driver_race_svc.line()
+                    return self._send(line or {"error": "no racing line"}, 200 if line else 404)
                 if p == ["drivers", "readiness"] and driver_hub is not None:
                     roster = hud_source.roster_names() if hud_source else []
                     rows_now = schedule_rows(relay)
@@ -15910,15 +15927,37 @@ def main():
                  "GET /telemetry/probe on the tailnet shows the key and the counters")
     # Driver telemetry (#1111): the invite file is read per request, so event
     # start/stop and a regenerate in the CLI or Control Center act without a restart.
+    def _dashboard_context():
+        """What the driver dashboard shows beside the race (#1115)."""
+        rows = schedule_rows(relay)
+        cur = live_schedule_row(rows, relay.on_air_row_idx()) if rows else None
+        timer = timer_store.data() if timer_store else None
+        remaining = None
+        if timer and timer["mode"] == "running" and timer["end"]:
+            remaining = max(0, round(timer["end"] - timer["server_now"]))
+        elif timer and timer["mode"] == "paused":
+            remaining = timer["remaining_s"]
+        return {"roster": hud_source.roster_details() if hud_source else {},
+                "stint": cur["stint"] if cur else None, "remaining": remaining,
+                "mode": relay.mode, "segment": cur["stint"] if cur and relay.mode == "qualifying" else None,
+                "connections": driver_hub.connections() if relay.mode == "qualifying" else []}
+
     race_svc = driver_race.Service(
         driver_race.path_in(runtime), pick=track_pick.store.current,
-        enabled=lambda: relay.mode == "race",
+        enabled=lambda: relay.mode == "race", context=_dashboard_context,
         league_path=(os.path.join(os.path.dirname(args.overlay_dir), driver_race.FILENAME)
                      if args.overlay_dir else None),
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
         multi_lobby=lambda: not relay.solo)
     driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update)
+    def _dashboard_ticks():
+        while not stop_evt.wait(driver_race.SNAPSHOT_EVERY_S):
+            try:
+                race_svc.tick()
+            except Exception as e:  # noqa: BLE001  the dashboard never touches the broadcast
+                LOG.warning("driver dashboard: snapshot failed: %s", type(e).__name__)
+    threading.Thread(target=_dashboard_ticks, daemon=True).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"])).start()

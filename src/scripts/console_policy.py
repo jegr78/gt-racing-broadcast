@@ -120,6 +120,9 @@ def min_capability(segments, method="GET"):
     if p in (["event", "title"], ["event", "track"]):
         return Requirement(DIRECTOR, False)
     # Driver telemetry: connections, readiness and the race with its actions (#1114).
+    # The delayed dashboard and its track line: the cockpit's view, no controls.
+    if method == "GET" and p in (["drivers", "dashboard"], ["drivers", "line"]):
+        return Requirement(ANY, False)
     if p and p[0] == "drivers" and _driver_desk_route(p[1:], method):
         return Requirement(DIRECTOR, False)
     if p == ["submissions"] or (len(p) == 2 and p[0] == "submissions"):
