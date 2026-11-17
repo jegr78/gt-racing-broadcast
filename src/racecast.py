@@ -271,6 +271,13 @@ def _profile_env_pairs(rc):
              ("RACECAST_DISCORD_CLIENT_ID", rc.discord_client_id),
              ("RACECAST_DISCORD_CLIENT_SECRET", rc.discord_client_secret),
              ("RACECAST_DISCORD_VOICE_URL", rc.discord_voice_url),
+             ("RACECAST_TIMING_HOST_ACCOUNT_ID", rc.timing_host_account_id),
+             ("RACECAST_TIMING_HOST_API_TOKEN", rc.timing_host_api_token),
+             ("RACECAST_TIMING_HOST_PUBLISH_KEY", rc.timing_host_publish_key),
+             ("RACECAST_TIMING_HOST_URL", rc.timing_host_url),
+             # the relay re-reads the timing host keys from here without a restart
+             ("RACECAST_PROFILE_ENV_FILE",
+              os.path.join(rc.profile_dir, "profile.env") if rc.profile_dir else ""),
              ("RACECAST_EVENT_TITLE", rc.event_title),
              ("RACECAST_GRAPHICS_TAKE", rc.graphics_take),
              ("RACECAST_TELEMETRY_RECORD", rc.telemetry_record),

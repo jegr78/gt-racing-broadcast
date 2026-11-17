@@ -3052,6 +3052,18 @@ def t_profile_env_vars_includes_graphics_take():
     assert m._profile_env_vars(rc)["RACECAST_GRAPHICS_TAKE"] == "direct"
 
 
+def t_timing_host_keys_injected():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               timing_host_account_id="acc", timing_host_api_token="tok",
+                               timing_host_publish_key="key", timing_host_url="https://h",
+                               profile_dir=os.path.join("p", "profiles", "demo"))
+    out = m._profile_env_vars(rc)
+    assert (out["RACECAST_TIMING_HOST_ACCOUNT_ID"], out["RACECAST_TIMING_HOST_API_TOKEN"],
+            out["RACECAST_TIMING_HOST_PUBLISH_KEY"], out["RACECAST_TIMING_HOST_URL"]) == \
+        ("acc", "tok", "key", "https://h")
+    assert out["RACECAST_PROFILE_ENV_FILE"] == os.path.join("p", "profiles", "demo", "profile.env")
+
+
 def t_profile_env_vars_includes_telemetry_record():
     rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
                                telemetry_record="1")
@@ -6546,7 +6558,9 @@ def t_profile_env_vars_includes_kind():
         discord_webhook_url = ""; obs_collection = ""; console_secret = ""
         discord_client_id = ""; discord_client_secret = ""; discord_voice_url = ""
         event_title = ""; graphics_take = ""; name = "Solo League"; logo_path = ""; kind = "solo"
-        template = ""; telemetry_record = ""
+        template = ""; telemetry_record = ""; profile_dir = ""
+        timing_host_account_id = timing_host_api_token = timing_host_publish_key = ""
+        timing_host_url = ""
     env = m._profile_env_vars(_RC())
     assert env["RACECAST_KIND"] == "solo"
     assert env["RACECAST_SHEET_ID"] == "abc"

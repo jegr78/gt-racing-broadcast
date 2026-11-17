@@ -181,6 +181,10 @@ class ResolvedConfig:
     discord_client_id: str = ""      # per-league Discord OAuth app (console login)
     discord_client_secret: str = ""  # never leaves the producer machine
     discord_voice_url: str = ""      # league voice channel (fallback; Sheet override wins)
+    timing_host_account_id: str = ""   # optional public timing host (#1161)
+    timing_host_api_token: str = ""
+    timing_host_publish_key: str = ""
+    timing_host_url: str = ""
     event_title: str = ""        # optional free-text event title (Panel/Cockpit/Discord, #207)
     graphics_take: str = ""      # crew graphic takes: off (blank) | request | direct
     telemetry_record: str = ""   # solo POV: record GT7 telemetry from relay start
@@ -247,6 +251,10 @@ def resolve_config(root, *, override=None, runtime_root=None, environ=None):
         discord_client_id=prof.get("DISCORD_CLIENT_ID", ""),
         discord_client_secret=prof.get("DISCORD_CLIENT_SECRET", ""),
         discord_voice_url=prof.get("DISCORD_VOICE_URL", ""),
+        timing_host_account_id=prof.get("TIMING_HOST_ACCOUNT_ID", ""),
+        timing_host_api_token=prof.get("TIMING_HOST_API_TOKEN", ""),
+        timing_host_publish_key=prof.get("TIMING_HOST_PUBLISH_KEY", ""),
+        timing_host_url=prof.get("TIMING_HOST_URL", ""),
         event_title=prof.get("EVENT_TITLE", ""),
         graphics_take=prof.get("GRAPHICS_TAKE", ""),
         telemetry_record=prof.get("TELEMETRY_RECORD", ""),
