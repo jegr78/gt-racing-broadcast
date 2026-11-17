@@ -221,10 +221,12 @@ Security boundaries that apply everywhere:
   (the redacted takeover status is an allowlist, not a blocklist).
 - Everything under `/console` is authenticated server-side: a per-person token signed
   with the league `CONSOLE_SECRET`, or Discord OAuth when configured. The takeover
-  endpoints additionally require the step-up `X-Console-Secret` header. The one
-  exception is the driver telemetry probe ingest `/console/probe/ingest`, off unless
-  `RACECAST_TELEMETRY_PROBE=1`: it takes a random per-relay-start key in `X-Probe-Key`
-  and only counts packets.
+  endpoints additionally require the step-up `X-Console-Secret` header. Two exceptions
+  take no console identity and reach nothing else: the driver telemetry routes under
+  `/console/drive` (#1111), authorized by the event's invite link and the driver codes it
+  signs (`driver_invite`), and the maintainer probe ingest `/console/probe/ingest`, off
+  unless `RACECAST_TELEMETRY_PROBE=1`, with a random per-relay-start key in `X-Probe-Key`.
+  Both only accept encrypted GT7 packets and count them.
 - No destructive HTTP endpoint for chat or cues: clear/import/pull stay producer-only CLI
   actions. A commentator's stream-link submission is own-rows-only and lands as pending,
   never auto-published.
