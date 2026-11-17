@@ -571,8 +571,8 @@ def t_a_lap_faster_than_the_line_allows_never_counts():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15, "Mallory")
     t = _drive(race, [a], [50], 0.0, 1.0)
-    for _ in range(int(L / 90) + 2):            # a whole lap in samples of 90 m every 0.1 s
-        a.along += 90
+    for _ in range(int(L / 30) + 2):            # a whole lap at 300 m/s, inside the step check
+        a.along += 30
         t = round(t + 0.1, 3)
         a.send(t)
     t = _drive(race, [a], [50], t, 2)
