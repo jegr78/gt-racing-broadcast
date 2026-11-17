@@ -1065,7 +1065,7 @@ SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHE
 TELEMETRY_VERBS = ("ui", "replay", "import", "record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
 RADIO_VERBS = ("smoke", "provision")
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
-TIMINGHOST_VERBS = ("deploy", "status")   # the league's public timing host (#1161)
+TIMING_HOST_VERBS = ("deploy", "status")   # the league's public timing host (#1161)
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
 
@@ -1145,8 +1145,8 @@ def route(argv):
         return {"kind": "service", "command": "gt7-data", "verb": verb, "rest": rest[1:]}
     if cmd == "timing-host":
         verb = rest[0] if rest else None
-        if verb not in TIMINGHOST_VERBS:
-            raise ValueError(f"usage: racecast timing-host {{{'|'.join(TIMINGHOST_VERBS)}}}")
+        if verb not in TIMING_HOST_VERBS:
+            raise ValueError(f"usage: racecast timing-host {{{'|'.join(TIMING_HOST_VERBS)}}}")
         return {"kind": "service", "command": "timing-host", "verb": verb, "rest": rest[1:]}
     if cmd == "app":
         verb = rest[0] if rest else None

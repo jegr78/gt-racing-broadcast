@@ -195,6 +195,10 @@
     "handler": "showView",
     "surface": "ui/control-center.html"
   },
+  "timing-host status": {
+    "handler": "loadTimingHost",
+    "surface": "ui/control-center.html"
+  },
   "ui": {
     "handler": "showView",
     "surface": "ui/control-center.html"
