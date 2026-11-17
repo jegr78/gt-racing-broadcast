@@ -36,6 +36,7 @@
     ".dd .pill.amb{border-color:#ffb454;color:#ffb454}",
     ".dd .banner{border:1px solid #ff4d5e;color:#ff4d5e;border-radius:6px;padding:6px 9px}",
     ".dd .msg{min-height:1.2em;font-size:12px}.dd .msg.err{color:#ff4d5e}",
+    ".dd .stale{opacity:.45}",
     ".dd [hidden]{display:none!important}",
     ".dd select{width:auto;max-width:100%}",
     ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}"
@@ -89,6 +90,10 @@
     }
     var state = {race: null, ready: null, invite: null, armed: null, armTimer: null};
     var msg = el("div", {cls: "msg", role: "status"});
+    // Shown after STALE_POLLS failed polls: decisions must not rest on frozen gaps.
+    var staleNote = el("div", {cls: "msg err", role: "alert"});
+    staleNote.hidden = true;
+    var STALE_POLLS = 3;
     function say(text, err) { msg.textContent = text || ""; msg.className = "msg" + (err ? " err" : ""); }
 
     async function call(path, body, quiet) {
@@ -300,6 +305,7 @@
       "Sender", "Entry", "", ""].map(function (h) { return el("th", {text: h}); }))]), sendBody])]);
 
     root.replaceChildren(el("div", {cls: "dd"}, [
+      staleNote,
       el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
       el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
       lastChange,
@@ -438,8 +444,18 @@
       sendBody.replaceChildren.apply(sendBody, rows);
     }
 
+    function markStale(ok) {
+      if (ok) { state.fails = 0; state.staleSince = null; }
+      else { state.fails = (state.fails || 0) + 1; state.staleSince = state.staleSince || new Date(); }
+      var stale = state.fails >= STALE_POLLS;
+      staleNote.hidden = !stale;
+      if (stale) staleNote.textContent = "Relay not reachable since " + state.staleSince.toLocaleTimeString() +
+        ": the tables below are not current.";
+      [raceTable, readyTable, sendTable].forEach(function (t) { t.classList.toggle("stale", stale); });
+    }
     async function refresh() {
       var r = await call("/drivers/race", undefined, true);
+      markStale(!!r);
       if (r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
       if (rd) renderSenders(rd);
