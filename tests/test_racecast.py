@@ -6821,10 +6821,15 @@ def t_driver_invite_follows_the_event_and_regenerates():
     m._start_driver_invite(True, path=path)
     first = m.event_invite_data(path=path, links=links)
     assert first["active"] and first["funnel"].startswith("https://h/console/drive?i="), first
+    actions = os.path.join(d, "driver-race-actions.json")
+    with open(actions, "w", encoding="utf-8") as fh:
+        fh.write('{"corrections": {"A": [10.0, 0]}}')
     m._start_driver_invite(False, path=path)
     assert m.event_invite_data(path=path, links=links)["funnel"] == first["funnel"], \
         "a takeover or recovery restart keeps the invite the drivers hold"
+    assert os.path.exists(actions), "a takeover keeps the race's corrections"
     m._start_driver_invite(True, path=path)
+    assert not os.path.exists(actions), "a new event drops the last event's corrections"
     assert m.event_invite_data(path=path, links=links)["funnel"] != first["funnel"], "a new event, a new link"
     renewed = m.event_invite_data(new=True, path=path, links=links)
     assert renewed["active"] and renewed["funnel"] != first["funnel"]

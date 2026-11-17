@@ -5882,9 +5882,13 @@ def event_invite_data(new=False, path=None, links=None):
 
 
 def _start_driver_invite(fresh, path=None):
-    """A fresh event gets a new invite; a takeover or recovery restart keeps one."""
+    """A fresh event gets a new invite and a driver race without the last event's
+    corrections; a takeover or recovery restart keeps both."""
     import driver_invite
+    import driver_race
     path = path or _driver_invite_path()
+    if fresh:
+        driver_race.clear_actions(os.path.dirname(os.path.abspath(path)))
     if fresh or driver_invite.current(path) is None:
         driver_invite.create(path)
 
