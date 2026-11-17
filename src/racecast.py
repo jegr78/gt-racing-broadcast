@@ -5768,7 +5768,7 @@ def event_race_write_data(changes, alive=None, post=None, path=None, foreign=Non
             league = league_path or _driver_race_league_path()
             if league is None:
                 return {"ok": False, "error": "no active profile for the restart setting"}
-            restart = driver_race.write_league(league, {"restart": restart})["restart"]
+            driver_race.write_league(league, {"restart": restart})
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     except OSError as exc:
