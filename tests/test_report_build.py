@@ -934,10 +934,15 @@ def t_a_solo_report_makes_no_feed_or_stint_claims():
     assert "Feed A" not in rb.render_summary_text(rep)
 
 
-def t_an_empty_schedule_is_not_reported_as_a_stopped_relay():
-    html = rb.render_html(rb.build_report(_broadcast(2), [], {}, "E", (0.0, 30.0), now=1.0))
-    assert "relay not running" not in html, \
-        "an empty name map also means a reachable relay with no schedule rows"
+def t_the_name_caveat_appears_only_when_stints_are_shown_by_index():
+    idle = rb.render_html(rb.build_report([_sample(0.0), _sample(30.0)], [], {}, "E",
+                                          (0.0, 30.0), now=1.0))
+    assert "Commentator names" not in idle, "nothing was shown by stint index"
+    shown = rb.render_html(rb.build_report([_sample(0.0, live_stint=1, live_feed="A"),
+                                            _sample(30.0, live_stint=1, live_feed="A")],
+                                           [], {}, "E", (0.0, 30.0), now=1.0))
+    assert "Stint 1" in shown and "relay unreachable or no schedule rows" in shown
+    assert "relay not running" not in shown, "an empty name map is not proof the relay was down"
 
 
 def t_discord_payload_carries_the_finding():
