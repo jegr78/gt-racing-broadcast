@@ -190,10 +190,12 @@ def accept_key(key):
     return base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
 
 
-def handshake_request(host, port, key):
+def handshake_request(host, port, key, path="/", headers=None, host_header=None):
     """The HTTP Upgrade request opening the WebSocket."""
-    return (f"GET / HTTP/1.1\r\n"
-            f"Host: {host}:{port}\r\n"
+    extra = "".join(f"{k}: {v}\r\n" for k, v in (headers or {}).items())
+    return (f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host_header or f'{host}:{port}'}\r\n"
+            f"{extra}"
             f"Upgrade: websocket\r\n"
             f"Connection: Upgrade\r\n"
             f"Sec-WebSocket-Key: {key}\r\n"

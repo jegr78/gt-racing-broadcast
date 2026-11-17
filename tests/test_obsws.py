@@ -36,6 +36,18 @@ def t_accept_key_rfc6455_vector():
     assert m.accept_key("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
 
 
+def t_handshake_request_default_unchanged():
+    assert m.handshake_request("h", 1, "k") == (
+        b"GET / HTTP/1.1\r\nHost: h:1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        b"Sec-WebSocket-Key: k\r\nSec-WebSocket-Version: 13\r\n\r\n")
+
+
+def t_handshake_request_path_headers_host():
+    text = m.handshake_request("h", 443, "k", path="/t/x?v=1", headers={"Authorization": "Bearer z"},
+                               host_header="h").decode()
+    assert text.startswith("GET /t/x?v=1 HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer z\r\n"), text
+
+
 def t_handshake_request_format():
     req = m.handshake_request("127.0.0.1", 4455, "AAAAAAAAAAAAAAAAAAAAAA==")
     assert isinstance(req, bytes)
