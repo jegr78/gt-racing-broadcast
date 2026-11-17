@@ -68,6 +68,7 @@ def t_one_sender_per_entry_in_one_lobby_two_per_team_in_endurance():
     hub.ingest(_reg("c3", entry="Team B #2"), _batch(1), None)
     clock.t += ing.LIVE_S + 1                          # the first sender went quiet
     hub.ingest(_reg("c2", name="Ann"), _batch(1), None)
+    _refused(lambda: hub.ingest(_reg("c1"), _batch(3), None), 409, "already has a sender")
     team, clock = _hub(multi_lobby=True)
     team.ingest(_reg("d1", name="Max", segment="Stint 1"), _batch(1), None)
     team.ingest(_reg("d2", name="Ann", segment="Stint 2"), _batch(1), None)

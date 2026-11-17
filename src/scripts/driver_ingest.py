@@ -50,15 +50,17 @@ class Hub:
         with self._lock:
             if conn in self._dropped:
                 raise IngestError("disconnected by the producer: register again on the invite page", 410)
-            if conn not in self._conns:
-                if len(self._conns) >= self._max:
+            live = self._live(now)
+            if conn not in live:
+                # A known sender that went quiet competes for its slot like a new one.
+                if conn not in self._conns and len(self._conns) >= self._max:
                     for stale in [c for c in self._conns if c not in self._live(now)]:
                         del self._conns[stale]
                         self._counts.forget(stale)
-                if len(self._conns) >= self._max:
+                if conn not in self._conns and len(self._conns) >= self._max:
                     raise IngestError("too many senders for this event", 429)
                 allowed = 2 if self._multi_lobby() else 1
-                peers = [m for c, m in self._live(now).items() if m["entry"] == reg["entry"]]
+                peers = [m for c, m in live.items() if m["entry"] == reg["entry"] and c != conn]
                 if len(peers) >= allowed:
                     raise IngestError(
                         "this team already has two senders" if allowed == 2

@@ -201,6 +201,8 @@ import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
 import gt7_tracks      # GT7 track recognition from lap positions (#787)
 import gt7_track_pick  # the event's picked GT7 layout (#1129)
 import telemetry_probe  # the driver telemetry probe ingest (#1110)
+import driver_invite    # event invite link and driver codes (#1111)
+import driver_ingest    # driver telemetry connections behind the invite (#1111)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -11894,7 +11896,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
                  event_documents_source=None, browser_hosts=(), track_pick=None,
-                 telemetry_probe_obj=None):
+                 telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
+                 drive_page_path=None, sender_script_path=None, driver_segments=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -11949,6 +11952,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     if health_store is not None:
         relay.health_store = health_store
     _console_authfail_rl = console_auth.RateLimiter(limit=20, window_s=60)
+    # Its own bucket: senders still holding codes of a regenerated invite retry once a
+    # minute and must not lock console logins out of the shared one.
+    _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
     # Every open crew page polls the take view; one OBS read serves them all for a
@@ -12819,6 +12825,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             # a console token. Off unless the relay started with the probe enabled.
             if sub == ["probe", "ingest"]:
                 return self._probe_ingest(method)
+            # Driver telemetry (#1111): the invite link and the codes it issues are the
+            # credential here, never a console token, and they reach nothing else.
+            if sub[:1] == ["drive"]:
+                return self._drive(sub[1:], method)
             if sub and sub[0] == "takeover":
                 presented = self.headers.get("X-Console-Secret")
                 if not (presented and console_auth.secret_matches(presented, console_secret)):
@@ -14030,6 +14040,90 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return None          # client also gone before the error could be sent
         def _ok(self, r):
             self._send(r) if r else self._send({"error":"feed? (A/B)"}, 404)
+        def _drive_invite(self):
+            return driver_invite.current(driver_invite_path) if driver_invite_path else None
+
+        def _drive_refuse(self, status, message):
+            client = self.client_address[0] if self.client_address else "?"
+            if status in (401, 403) and not _drive_authfail_rl.allow(client):
+                status, message = 429, "too many attempts"
+            self._send({"error": message}, status)
+            return None
+
+        def _drive(self, rest, method):
+            hub, invite = driver_hub, self._drive_invite()
+            if hub is None or not driver_invite_path:
+                self._send({"error": "not found"}, 404)
+                return None
+            if rest == ["ingest"]:
+                if method != "POST":
+                    return self._drive_refuse(405, "POST only")
+                reg = driver_invite.verify(invite and invite["id"], self.headers.get("X-Driver-Code"))
+                if reg is None:
+                    return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 < length <= telemetry_probe.MAX_BODY:
+                    return self._drive_refuse(413 if length > 0 else 400, "bad body length")
+                body = self.rfile.read(length)
+                self._body_consumed = True
+                try:
+                    stats = json.loads(self.headers.get("X-Sender-Stats") or "null")
+                except ValueError:
+                    stats = None
+                try:
+                    self._send(hub.ingest(reg, body, stats))
+                except driver_ingest.IngestError as exc:
+                    self._send({"error": str(exc)}, exc.status)
+                return None
+            presented = (parse_qs(urlparse(self.path).query).get("i") or [""])[0]
+            if not invite or not hmac.compare_digest(presented.encode("utf-8", "replace"),
+                                                     invite["id"].encode("utf-8")):
+                return self._drive_refuse(403, "this invite link is not valid (any more)")
+            if rest == [] and method == "GET":
+                if not drive_page_path:
+                    return self._send({"error": "page not found"}, 404)
+                return self._send_page(drive_page_path, "/console")
+            if rest == ["data"] and method == "GET":
+                multi = not relay.solo
+                return self._send({
+                    "v": driver_ingest.CONTRACT, "multi_lobby": multi,
+                    "entries": hud_source.roster_names() if hud_source else [],
+                    "segments": (driver_segments() if driver_segments else []) if multi else [],
+                    "rate_hz": hub.rate_hz}, no_store=True)
+            if rest == ["sender.py"] and method == "GET":
+                return self._send_file(sender_script_path, "text/x-python; charset=utf-8")
+            if rest == ["register"] and method == "POST":
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 < length <= 4096:
+                    return self._drive_refuse(400, "bad body length")
+                try:
+                    body = json.loads(self.rfile.read(length))
+                except ValueError:
+                    body = None
+                self._body_consumed = True
+                if not isinstance(body, dict):
+                    return self._send({"error": "body must be a JSON object"}, 400)
+                entries = hud_source.roster_names() if hud_source else []
+                segment = body.get("segment") or None
+                if body.get("entry") not in entries:
+                    return self._send({"error": "pick an entry from the list"}, 400)
+                if not relay.solo and driver_segments and segment not in driver_segments():
+                    return self._send({"error": "pick your stint or segment from the list"}, 400)
+                try:
+                    issued = driver_invite.issue(invite["id"], entry=body["entry"],
+                                                 name=body.get("name"),
+                                                 segment=None if relay.solo else segment)
+                except ValueError as exc:
+                    return self._send({"error": str(exc)}, 400)
+                return self._send({"ok": True, "code": issued, "v": driver_ingest.CONTRACT}, no_store=True)
+            return self._drive_refuse(404, "not found")
+
         def _probe_ingest(self, method):
             probe = telemetry_probe_obj
             if probe is None or method != "POST":
