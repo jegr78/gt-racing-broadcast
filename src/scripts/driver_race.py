@@ -19,6 +19,7 @@ import race_distance
 FILENAME = "driver-race.json"
 DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None}
 MAX_LAPS = 999
+LINE_RETRY_S = 10.0       # a pick without a downloaded line is looked up again this often
 
 
 def path_in(runtime_dir):
@@ -86,6 +87,7 @@ class Service:
         self._lock = threading.Lock()
         self._race = None
         self._race_pick = object()
+        self._line_tried = None
         self._final_lobby_laps = None
 
     def _current(self):
@@ -93,12 +95,16 @@ class Service:
         pick_id = pick["id"] if pick else None
         if self._race is None or pick_id != self._race_pick:
             self._race = self._build(pick_id)
+        elif pick_id and self._race.length is None \
+                and self._clock() - self._line_tried >= LINE_RETRY_S:
+            self._race = self._build(pick_id)     # the line may have been downloaded since
         return self._race
 
     def _build(self, pick_id):
         s = read_settings(self._path)
         multi = bool(self._multi_lobby())
         self._race_pick = pick_id
+        self._line_tried = self._clock()
         trace = self._trace_for(pick_id) if pick_id else None
         return race_distance.Race(
             trace, formation=s["formation"], multi_lobby=multi, finish_mode=s["finish_mode"],

@@ -9,6 +9,7 @@ for a full entry is refused while the others are live, not swapped in; a sender
 that reconnects with its own code is the same connection. Live data only, nothing
 is written to disk. The HTTP contract is `src/docs/design/driver-telemetry-ingest.md`.
 """
+import logging
 import threading
 import time
 
@@ -99,7 +100,10 @@ class Hub:
             reg = dict(meta, conn=conn) if meta and conn not in self._dropped else None
         if reg is not None:
             reg.pop("last", None)
-            self._on_sample(reg, sample)
+            try:
+                self._on_sample(reg, sample)
+            except Exception:  # noqa: BLE001  the race must never break a driver's upload
+                logging.getLogger("racecast").exception("driver race: sample rejected")
 
     def disconnect(self, conn):
         with self._lock:

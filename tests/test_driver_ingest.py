@@ -129,6 +129,14 @@ def t_every_sample_reaches_the_race_dated_by_its_packet_id():
     assert ages == [round(11 / 60, 3), round(6 / 60, 3), 0.0], f"older packets are dated earlier: {ages}"
 
 
+def t_a_failing_race_hook_never_fails_the_upload():
+    def boom(_reg, _sample):
+        raise ValueError("bad sample")
+    hub = ing.Hub(multi_lobby=lambda: False, on_sample=boom)
+    res = hub.ingest(_reg("c1"), _batch(*range(1, 7)), None)
+    assert res["ok"] and res["accepted"] == 6, res
+
+
 def t_reset_drops_every_connection():
     hub, _clock = _hub()
     hub.ingest(_reg("c1"), _batch(1), None)

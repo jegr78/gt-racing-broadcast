@@ -75,6 +75,19 @@ def t_settings_apply_live_and_the_final_stint_brings_its_lap_count():
     assert team._race.lap_count == 17
 
 
+def t_a_line_downloaded_after_the_pick_is_picked_up():
+    path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
+    clock, lines = [0.0], {}
+    svc = dr.Service(path, pick=lambda: {"id": "late"}, trace_for=lines.get,
+                     multi_lobby=lambda: False, clock=lambda: clock[0])
+    assert svc.standings()["state"] == "no_line"
+    lines["late"] = TRACE
+    clock[0] = dr.LINE_RETRY_S - 1
+    assert svc.standings()["state"] == "no_line", "the lookup is rate-limited"
+    clock[0] = dr.LINE_RETRY_S + 1
+    assert svc.standings()["state"] == "waiting", "the downloaded line is used without a new pick"
+
+
 def t_final_lap_finish_and_reset():
     pick = [{"id": "good"}]
     svc, clock = _service(pick)
