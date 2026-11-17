@@ -299,8 +299,10 @@ def t_an_invite_code_authenticates_and_a_quiet_console_keeps_the_slot():
 
 
 def t_cli_takes_a_code_or_the_probe_key_and_name_never_both():
-    for argv, text in ((["--url", "u", "--code", "D1:a.b", "--name", "n"], "leave out --key and --name"),
-                       (["--url", "u"], "pass --code from the invite page")):
+    quick = ["--listen", "0", "--bind", "127.0.0.1", "--duration", "0"]
+    for argv, text in ((["--url", "http://127.0.0.1:9/i", "--code", "D1:a.b", "--name", "n"] + quick,
+                        "leave out --key and --name"),
+                       (["--url", "http://127.0.0.1:9/i"] + quick, "pass --code from the invite page")):
         err = io.StringIO()
         old = sys.stderr
         sys.stderr = err

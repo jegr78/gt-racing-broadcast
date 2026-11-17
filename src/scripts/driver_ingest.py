@@ -71,12 +71,21 @@ class Hub:
                         "this team already has two senders" if allowed == 2
                         else "this entry already has a sender", 409)
             # Hold the slot now; decryption runs outside the lock (see Probe.ingest).
+            held = self._conns.get(conn)
             self._conns[conn] = {"entry": reg["entry"], "segment": reg.get("segment"),
                                  "name": reg["name"], "last": now}
         try:
             reply = self._counts.ingest(conn, body, sender_stats)
         except telemetry_probe.ProbeError as exc:
+            with self._lock:
+                if held is None:
+                    self._conns.pop(conn, None)
             raise IngestError(str(exc), exc.status) from None
+        with self._lock:
+            gone = conn in self._dropped or conn not in self._conns
+        if gone:                     # disconnected or reset while this batch decrypted
+            self._counts.forget(conn)
+            raise IngestError("disconnected by the producer: register again on the invite page", 410)
         return {"ok": True, "v": CONTRACT, "rate_hz": self.rate_hz, "accepted": reply["accepted"]}
 
     def disconnect(self, conn):

@@ -96,6 +96,27 @@ def t_bad_batches_and_too_many_connections_are_refused():
     assert [c["conn"] for c in small.connections()] == ["c"], "quiet connections make room"
 
 
+def t_a_disconnect_during_a_batch_leaves_no_ghost():
+    hub, _clock = _hub()
+    real = hub._counts.ingest
+
+    def slow(conn, body, stats):
+        reply = real(conn, body, stats)
+        hub.disconnect(conn)           # the producer clicks while this batch decrypts
+        return reply
+    hub._counts.ingest = slow
+    _refused(lambda: hub.ingest(_reg("c1"), _batch(1), None), 410, "disconnected")
+    assert hub.connections() == [] and "c1" not in hub._counts.snapshot()["senders"], \
+        "a sender disconnected mid-batch must not come back in the counters"
+
+
+def t_a_refused_first_batch_frees_its_slot():
+    hub = ing.Hub(multi_lobby=lambda: False, clock=_Clock(), max_connections=4)
+    hub._counts._max_senders = 0      # the counter refuses: the reservation must roll back
+    _refused(lambda: hub.ingest(_reg("c1"), _batch(1), None), 429, "too many")
+    assert hub.connections() == [], "no slot stays held by a refused first batch"
+
+
 def t_reset_drops_every_connection():
     hub, _clock = _hub()
     hub.ingest(_reg("c1"), _batch(1), None)
