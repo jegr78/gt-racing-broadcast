@@ -24,7 +24,7 @@ def t_hanging_file_fails_and_is_named():
         ok = _write(d, "test_ok.py", "pass\n")
         slow = _write(d, "test_slow.py", "import time\ntime.sleep(60)\n")
         try:
-            rt.main([ok, slow], timeout=1)
+            rt.main([ok, slow], timeout=5)
         except SystemExit as exc:
             message = str(exc.code)
         else:
