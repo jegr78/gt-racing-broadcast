@@ -316,6 +316,7 @@ def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
     old.box = True
     t = _drive(race, [old, rival], [None, 40], t, 3)
     new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [new, rival], [40, 40], t, 2)                   # lap 1 of the final lobby
     new.box = True
     t = _drive(race, [new, rival], [None, 40], t, 3)
     new.box = False
@@ -333,9 +334,23 @@ def t_one_sender_cannot_move_the_line_or_jump_the_field():
     t = _drive(race, [a, b], [50, 50], 1.0, 20)
     assert abs(_row(race, "A", t)["distance_m"] - a.along) < 5, (_row(race, "A", t), a.along)
     late = Car(race, "C", "c", L - 15)
-    late.along = 40 * L + 100                          # claims lap 41 mid-race
+    late.along = L + 100                               # claims lap 2 while the field is on lap 1
     _drive(race, [late], [50], t, 2)
-    assert _row(race, "C", t)["distance_m"] is None, "a start far ahead of the field is refused"
+    assert _row(race, "C", t)["distance_m"] is None, "a start ahead of the leader's lap is refused"
+
+
+def t_the_line_medoid_needs_a_quorum_of_counting_entries():
+    race = rd.Race(TRACE, formation=False)
+    cars = [Car(race, e, e.lower(), L - 15 - 10 * i) for i, e in enumerate("ABC")]
+    _drive(race, cars, [50, 50, 50], 0.0, 3)
+    loner = rd._Car("z", "Z")
+    assert race._line_of(loner) is not None, "three counting entries that agree give a line"
+    race._cars["a"].line_s, race._cars["b"].line_s = L / 2, L / 4
+    assert race._line_of(loner) is None, "no majority within SNAP_M: no shared line"
+    two = rd.Race(TRACE, formation=False)
+    pair = [Car(two, e, e.lower(), L - 15 - 10 * i) for i, e in enumerate("AB")]
+    _drive(two, pair, [50, 50], 0.0, 3)
+    assert two._line_of(loner) is None, "two entries are no quorum"
 
 
 def t_a_change_needs_a_fresh_lobby_counter():

@@ -49,9 +49,11 @@ def t_the_picked_line_drives_the_race_and_a_new_pick_starts_over():
     svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
     assert svc.standings()["state"] == "no_line", "no pick: no distance, and it says so"
     pick[0] = {"id": "good"}
-    for i in range(1, 30):
+    for i in range(1, 34):                       # from the grid across the line
         clock[0] = i / 10
-        svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(i / 10, i * 5, 2))
+        along = i * 5 - 20
+        svc.update({"entry": "A", "conn": "a", "name": "Max"},
+                   _sample(i / 10, along, 1 if along >= 0 else 0))
     snap = svc.standings()
     assert snap["state"] == "racing" and snap["track"] == "good" and snap["entries"][0]["distance_m"] > 100, snap
     pick[0] = {"id": "other"}

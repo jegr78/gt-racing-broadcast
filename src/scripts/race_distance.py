@@ -4,7 +4,8 @@ Pure: the relay feeds every decoded sample of every driver connection with its
 receive time on one clock, and reads `standings`. GT7's lap counter reads 0 on the
 grid and steps at each crossing of the finish line. The finish line's station on the
 picked layout's line is learned per car from its own crossings; a car that has not
-crossed yet uses the medoid of the others, so one sender cannot move it for everyone.
+crossed yet uses the agreeing medoid of the counting cars of at least LINE_QUORUM
+entries, so one sender cannot move it for everyone.
 A car's distance is `anchor + (lap - lap0) * L + frac - frac0`, with `frac` its
 position past the line:
 the counter gives whole laps, the projection the fraction. Only near the line, where
@@ -13,8 +14,7 @@ nearest the predicted distance decides.
 
 - Start: with a formation lap a car's distance starts when its counter reaches 2,
   without one when it reaches 1; the crossing times form the starting gaps. A sender
-  that connects later starts from its counter, at most one lap ahead of every other
-  counting car.
+  that connects later starts from its counter, at most on the leader's lap.
 - A counter that drops (a new GT7 session, such as practice before the race) restarts
   that entry in a single lobby; in endurance it holds the entry until Race Control
   rejoins it (#1113).
@@ -57,6 +57,7 @@ AREA_MARGIN_M = 300.0
 CAR_FORGET_S = 120.0        # a quiet connection that no entry follows is dropped
 PRUNE_EVERY_S = 10.0
 MAX_CHANGE_LAP = 2          # a car leaving a fresh lobby's box has driven at most lap 1
+LINE_QUORUM = 3
 
 
 class _Car:
@@ -171,13 +172,20 @@ class Race:
         return min(d, self.length - d)
 
     def _line_of(self, car):
-        """This car's line station, else the medoid of the other cars' stations."""
+        """This car's line station; else the medoid of the counting cars of at least
+        LINE_QUORUM entries when most of them agree within SNAP_M; else None."""
         if car.line_s is not None:
             return car.line_s
-        known = [c.line_s for c in self._cars.values() if c.line_s is not None]
-        if not known:
+        known = []
+        for e in self._entries.values():
+            c = self._cars.get(e.active)
+            if c is not None and c.counting and c.line_s is not None:
+                known.append(c.line_s)
+        if len(known) < LINE_QUORUM:
             return None
-        return min(known, key=lambda a: sum(self._circ(a, b) for b in known))
+        medoid = min(known, key=lambda a: sum(self._circ(a, b) for b in known))
+        close = sum(1 for b in known if self._circ(medoid, b) <= SNAP_M)
+        return medoid if 2 * close > len(known) else None
 
     def _frac(self, car, s):
         return (s - car.line) % self.length
@@ -213,10 +221,10 @@ class Race:
         return True
 
     def _late_start_ok(self, ent, lap, lap0):
-        """A sender may start ahead of the start lap only up to one lap past the field."""
+        """A sender may start past the start lap only up to the leader's lap."""
         ahead = [math.floor(e.distance / self.length) for e in self._entries.values()
                  if e is not ent and e.distance is not None]
-        return lap - lap0 <= (max(ahead) + 1 if ahead else 0)
+        return lap - lap0 <= (max(ahead) if ahead else 0)
 
     def update(self, entry, conn, name, sample):
         checked = self._valid(sample)

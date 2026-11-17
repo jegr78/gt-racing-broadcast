@@ -177,9 +177,10 @@ def t_ingested_telemetry_becomes_the_race_order_on_the_tailnet():
              {"Content-Type": "application/json"})
         codes = {e: json.loads(_register(port, invite, entry=e, name="N")[1])["code"] for e in ENTRIES}
         for i in range(0, 600, 6):                      # ten seconds at 60 Hz, sampled at 10 Hz
-            for entry, behind in ((ENTRIES[0], 0.0), (ENTRIES[1], 100.0)):
-                along = 50.0 * i / 60 - behind
-                _req(port, "/console/drive/ingest", tp.encode_batch([_wire_at(i + 1, along, 1)]),
+            for entry, behind in ((ENTRIES[0], 20.0), (ENTRIES[1], 60.0)):
+                along = 50.0 * i / 60 - behind               # from the grid across the line
+                _req(port, "/console/drive/ingest",
+                     tp.encode_batch([_wire_at(i + 6, along, 1 if along >= 0 else 0)]),
                      {"X-Driver-Code": codes[entry]})
         code, text, _h = _req(port, "/drivers/race")
         race = json.loads(text)
