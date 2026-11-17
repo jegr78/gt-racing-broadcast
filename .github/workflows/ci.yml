@@ -39,6 +39,7 @@ jobs:
           version: "0.17.0"    # pinned: new ruff rules must not break CI silently
 
   test:
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:

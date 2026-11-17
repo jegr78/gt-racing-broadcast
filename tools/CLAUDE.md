@@ -37,8 +37,10 @@ after about 15 minutes with "The job was not acquired by Runner of type hosted e
 after multiple attempts" (no runner, no step); `rerun-unacquired.yml` then reruns the
 CI run through `tools/rerun-unacquired.py`, only when every failed job is of that kind
 and at most twice, so a real failure stays red (#1080). Raising `timeout-minutes`
-does not help: the test job has none and was cancelled all the same. Unsigned binaries: SmartScreen/Gatekeeper show a
-one-time "run anyway" warning.
+does not help: the test job was cancelled this way while it had no timeout at all.
+The test job stops after 40 minutes, a release build after 90, and
+`tools/run-tests.py` fails a test file that runs longer than 600 seconds and names it.
+Unsigned binaries: SmartScreen/Gatekeeper show a one-time "run anyway" warning.
 
 A separate **preview** channel (`.github/workflows/preview.yml`, helper
 `tools/preview_meta.py`) publishes pre-release binaries for testing ahead of a
