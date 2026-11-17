@@ -11387,16 +11387,14 @@ class Relay:
             env = os.environ.copy()
             if frozen:
                 env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-            log = open(os.path.join(self._logdir, "event-stop.log"), "ab")
-            kwargs = {"stdin": subprocess.DEVNULL, "stdout": log,
-                      "stderr": subprocess.STDOUT, "env": env}
+            kwargs = {"stdin": subprocess.DEVNULL, "stderr": subprocess.STDOUT, "env": env}
             if os.name == "nt":
                 kwargs["creationflags"] = (subprocess.DETACHED_PROCESS
                                            | subprocess.CREATE_NEW_PROCESS_GROUP)
             else:
                 kwargs["start_new_session"] = True
-            with log:
-                subprocess.Popen(argv, **kwargs)
+            with open(os.path.join(self._logdir, "event-stop.log"), "ab") as log:
+                subprocess.Popen(argv, stdout=log, **kwargs)
             LOG.info("Last part ended: spawned `event stop` (report + teardown).")
         except Exception:      # noqa: BLE001  best-effort
             LOG.exception("failed to spawn event stop")
