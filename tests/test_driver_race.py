@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """The relay's live race service: settings, layout pick and stint switch (#1112).
 Run: python3 tests/test_driver_race.py"""
-import os, sys, tempfile
+import json, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src", "scripts"))
 import driver_race as dr  # noqa: E402
-from test_race_distance import TRACE, _pos  # noqa: E402
+from test_race_distance import TRACE, L, _pos  # noqa: E402
 
 
 def _sample(t, along, lap, speed=50.0):
@@ -17,9 +17,10 @@ def _sample(t, along, lap, speed=50.0):
 
 def t_settings_validate_persist_and_fall_back():
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
-    assert dr.read_settings(path) == {"formation": True, "finish_mode": "laps", "lap_count": None}
+    assert dr.read_settings(path) == {"formation": True, "finish_mode": "laps", "lap_count": None,
+                                      "delay_s": 0}
     saved = dr.write_settings(path, {"formation": False, "lap_count": 12})
-    assert saved == {"formation": False, "finish_mode": "laps", "lap_count": 12} == dr.read_settings(path)
+    assert saved == {"formation": False, "finish_mode": "laps", "lap_count": 12, "delay_s": 0} == dr.read_settings(path)
     for bad in ({"formation": "no"}, {"finish_mode": "sprint"}, {"lap_count": 0},
                 {"lap_count": 2.5}, {"lap_count": True}):
         try:
@@ -219,6 +220,110 @@ def t_a_damaged_actions_file_never_breaks_the_race():
     svc.update({"entry": "C", "conn": "c", "name": "Max"}, _sample(0.1, -20, 0))
     rows = svc.standings()["entries"]
     assert rows[0]["correction_m"] == 5.0 and rows[0]["pit_stops"] == 2 and not rows[0]["rejoin"], rows
+
+
+ROSTER = {"A": {"number": "1", "bgColor": "#c00", "textColor": "#fff", "cupTeam": "Red Bulls"},
+          "B": {"number": "2", "bgColor": "#00c", "textColor": "#fff", "cupTeam": ""}}
+
+
+def _dash_service(ctx, path=None):
+    path = path or os.path.join(tempfile.mkdtemp(), "driver-race.json")
+    dr.write_settings(path, {"formation": False})
+    clock = [0.0]
+    svc = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                     multi_lobby=lambda: False, clock=lambda: clock[0], context=lambda: ctx)
+    return svc, clock, path
+
+
+def _feed(svc, clock, entry, conn, start, until, speed=50.0):
+    t = clock[0]
+    along = start
+    while t < until:
+        t = round(t + 0.1, 3)
+        along += speed * 0.1
+        clock[0] = t
+        svc.update({"entry": entry, "conn": conn, "name": "Max " + entry},
+                   _sample(t, along, max(0, int(along // L) + 1), speed))
+    return along
+
+
+def t_the_dashboard_payload_is_an_allowlist_with_roster_details():
+    ctx = {"roster": ROSTER, "stint": "Stint 3", "remaining": "1:02:03", "mode": "race"}
+    svc, clock, _path = _dash_service(ctx)
+    _feed(svc, clock, "A", "a", -20.0, 3.0)
+    svc.correct("rc:Anna", "A", metres=5.0, reason="secret reason")
+    svc.tick()
+    d = svc.dashboard()
+    assert d["stint"] == "Stint 3" and d["remaining"] == "1:02:03" and d["mode"] == "race", d
+    row = d["entries"][0]
+    assert row["number"] == "1" and row["color"] == "#c00" and row["team"] == "Red Bulls", row
+    flat = json.dumps(d)
+    for leak in ("conn", "secret reason", "rc:Anna", "last_action", "correction"):
+        assert leak not in flat, f"{leak} must not reach viewers"
+
+
+def t_the_delay_holds_the_dashboard_back():
+    ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": None, "mode": "race"}
+    svc, clock, _path = _dash_service(ctx)
+    svc.set_settings({"delay_s": 5})
+    _feed(svc, clock, "A", "a", -20.0, 1.0)
+    svc.tick()
+    first = svc.dashboard()["entries"][0]["laps"]
+    ctx["stint"] = "Stint 2"
+    clock[0] = 3.0
+    svc.tick()
+    assert svc.dashboard()["stint"] == "Stint 1", "the stint switch waits for the delay too"
+    clock[0] = 7.5
+    svc.tick()
+    assert svc.dashboard()["stint"] == "Stint 1", "a switch at 3 s shows at 8 s"
+    clock[0] = 8.5
+    svc.tick()
+    assert svc.dashboard()["stint"] == "Stint 2" and first == 0
+    assert dr.read_settings(svc._path)["delay_s"] == 5
+
+
+def t_the_fastest_lap_survives_a_relay_restart_and_carries_the_team():
+    ctx = {"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"}
+    svc, clock, path = _dash_service(ctx)
+    svc._current().fastest = {"entry": "A", "driver": "Max A", "ms": 61234}
+    svc.save_fastest()
+    again, _clock, _p = _dash_service(ctx, path)
+    again.tick()
+    fl = again.dashboard()["fastest"]
+    assert fl == {"entry": "A", "driver": "Max A", "team": "Red Bulls", "ms": 61234}, fl
+    svc.set_fastest("rc:Anna")
+    voided, _c, _p = _dash_service(ctx, path)
+    voided.tick()
+    assert voided.dashboard()["fastest"] is None, "Race Control can void a fastest lap"
+    voided.set_fastest("rc:Anna", "A", "Max A", 61234)
+    other = {"id": "other"}
+    moved = dr.Service(path, pick=lambda: other, trace_for=lambda _i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: 0.0, context=lambda: ctx)
+    moved.tick()
+    assert moved.dashboard()["fastest"] is None, "a lap on another layout is not this race's"
+    dr.clear_actions(os.path.dirname(path))
+    fresh, _c, _p = _dash_service(ctx, path)
+    fresh.tick()
+    assert fresh.dashboard()["fastest"] is None, "a new event starts without a fastest lap"
+
+
+def t_qualifying_ranks_the_running_segment_by_best_lap():
+    conns = [
+        {"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500}},
+        {"entry": "B", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90100}},
+        {"entry": "A", "segment": "Q2", "name": "Lea", "latest": {"best_ms": 80000}},
+        {"entry": "C", "segment": "Q1", "name": "Bo", "latest": {"best_ms": -1}},
+    ]
+    rows = dr.qualifying(conns, "Q1", ROSTER)
+    assert [(r["entry"], r["best_ms"], r["gap_ms"]) for r in rows] == [
+        ("B", 90100, 0), ("A", 90500, 400), ("C", None, None)], rows
+    assert rows[1]["number"] == "1" and rows[1]["driver"] == "Max"
+    forged = conns + [{"entry": "A", "segment": "Q1", "name": "Mallory", "latest": {"best_ms": 1}},
+                      {"entry": "B", "segment": "Q1", "name": "Ghost", "live": False,
+                       "latest": {"best_ms": 85000}}]
+    rows = dr.qualifying(forged, "Q1", ROSTER, min_ms=30000)
+    assert [(r["entry"], r["driver"], r["best_ms"]) for r in rows][:2] == [
+        ("B", "Ann", 90100), ("A", "Max", 90500)], f"impossible and quiet senders are ignored: {rows}"
 
 
 if __name__ == "__main__":

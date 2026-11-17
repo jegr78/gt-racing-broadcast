@@ -128,6 +128,7 @@ class Probe:
                 sender.sender_stats = {k: sender_stats[k] for k in SENDER_STAT_KEYS
                                        if type(sender_stats.get(k)) is int}
             accepted = 0
+            sampled = set()          # a repeated packet id is one sample, never two
             for (kind, _head, raw), pid in zip(decoded, pids, strict=True):
                 if pid is None:
                     sender.stats.on_decrypt_failure(now)
@@ -136,7 +137,8 @@ class Probe:
                 self._bank(sender)
                 sender.kinds[kind] += 1
                 accepted += 1
-                if pid % SAMPLE_EVERY == 0 or not sender.samples:
+                if (pid % SAMPLE_EVERY == 0 or not sender.samples) and pid not in sampled:
+                    sampled.add(pid)
                     try:
                         sample = _sample(kind, pid, gt7_crypto.decrypt_typed(raw)[1], wall)
                     except (struct.error, ValueError, IndexError, TypeError):

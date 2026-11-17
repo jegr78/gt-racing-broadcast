@@ -82,6 +82,14 @@ def t_parse_config_roster():
                                         "bgColor": "", "textColor": ""}, r
 
 
+def t_parse_config_roster_reads_the_cup_team():
+    csv_text = "Teams,Number,Cup Team,BG Color\nAnna Berg #7,7,Red Bulls,#c00\nBo Lind #9,9,,\n"
+    r = m.parse_config_roster(csv_text)
+    assert r["Anna Berg #7"]["cupTeam"] == "Red Bulls" and r["Anna Berg #7"]["bgColor"] == "#c00", r
+    assert "cupTeam" not in r["Bo Lind #9"], "an empty cell is no team"
+    assert "cupTeam" not in m.parse_config_roster("Teams\nX #1\n")["X #1"], "the column is optional"
+
+
 def t_parse_config_roster_missing_team_header_safe():
     assert m.parse_config_roster("a,b,c\n1,2,3\n") == {}
 

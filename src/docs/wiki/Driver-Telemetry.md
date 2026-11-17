@@ -108,6 +108,31 @@ laps on GT7's counter, from the car that took over after the last stint switch: 
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
 event setting.
 
+### Dashboard
+
+The relay keeps a viewer version of the race for the broadcast dashboard, the
+Commentator Cockpit and later the public live timing page: order, entry number and
+colour, driver, the `Cup Team` from the [Configuration tab](Sheet-Template), gaps, status,
+pit stops, race laps (in endurance also the laps of the current stint lobby), the last
+completed lap time, fuel, each car's position for the track map, the leader's lap
+against the lap count, the remaining time of the race timer and the fastest race lap.
+It never carries connection ids, corrections or who made them.
+
+- **Lap times** are timed by the relay between two crossings of the line and taken
+  from GT7 only when both agree within a second (3 % on long laps). The formation lap,
+  lap 1 of a follow-up lobby and any lap with a start, red flag, change or move in it
+  do not count.
+- **The fastest race lap** is kept across stints and survives a relay restart on the same
+  track layout; the next `event start` or a race reset clears it. A lap faster than the
+  line allows at 120 m/s never counts. Race Control and the director can clear or set it
+  (`POST /drivers/race/fastest`).
+- **Delay**: the event setting holds the dashboard, and the stint it shows, back by up to
+  120 seconds to match the commentator feed on air. Race Control and the director keep
+  the live race.
+- **Qualifying**: in qualifying mode the dashboard ranks the running segment by GT7's
+  best lap of its live senders, with the gap to the fastest; a best lap faster than the
+  line allows is ignored.
+
 ### Red flag, rejoin and corrections
 
 - **Red flag** freezes every entry's distance. In the restart lobby each car

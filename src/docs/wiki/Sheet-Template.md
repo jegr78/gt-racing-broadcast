@@ -106,6 +106,7 @@ A header row (row 1) plus one row per team. Columns are located **by header text
 | `Cue Preset` | optional | Quick-cue presets for the director text-cue channel |
 | `BG Color` *(or `BG Colour`/`Background Color`/`Background Colour`)* | optional | Per-team tile background colour: any plain CSS colour (`#C00000`, `rgb(0,80,160)`, `white`); implausible values are ignored |
 | `Text Color` *(or `Text Colour`/`FG Color`/`FG Colour`)* | optional | Per-team tile text colour, same rules as `BG Color` |
+| `Cup Team` | optional | Team-vs-team leagues: the team a driver's entry races for. The [driver dashboard](Driver-Telemetry#dashboard) shows it with the row's `BG Color`, so give every driver of a team the same colour |
 
 Sample:
 

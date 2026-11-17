@@ -93,6 +93,16 @@ Race Control actions (#1113), each answering `{ok, race}` or 400 with `error`:
 `/change {entry, conn}`. The race adds `red_flag`, `restart_mode`, `league` and
 `last_action {ts, who, action}`; entries add `correction_m` and `rejoin`, and the
 status `red_flag` while an entry waits for its restart.
+
+The viewer side (#1115): `GET /drivers/dashboard` (also `/console/drivers/dashboard` for
+every crew role) returns the delayed allowlist payload `{v, mode, stint, remaining,
+track, state, red_flag, lap {leader, count}, fastest {entry, driver, team, ms}, entries
+[{pos, entry, number, driver, team, color, text_color, laps, stint_laps, gap_s,
+interval_s, lapped, status, pit_stops, last_lap_ms, fuel_l, finished, x, z}]}`, in
+qualifying `qualifying [{pos, entry, number, driver, team, color, text_color, best_ms,
+gap_ms}]` instead. `GET /drivers/line` returns the picked layout's line `{track,
+length_m, points [[x, z]]}`. The settings take `delay_s` (0 to 120). `POST /drivers/race/fastest` with no `entry`
+clears the fastest lap, with `{entry, driver, ms}` sets it.
 `state` is `no_line`, `waiting`, `racing`, `final_lap`, `finishing` or `finished`;
 each entry carries `distance_m`, `laps`, `gap_s`, `interval_s`, `lapped`, `status`
 (`waiting`, `racing`, `box`, `no_data`), `finished`, `pit_stops`, `gt7_position`

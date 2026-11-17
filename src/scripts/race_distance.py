@@ -46,6 +46,12 @@ nearest the predicted distance decides.
   still resumes at its box exit.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
   window starts from the leader's distance when the window opened.
+- Lap times (#1115): the relay times every lap of the active car between two steps
+  of GT7's counter. A lap counts only when the car counted for all of it (not the
+  formation lap, not lap 1 of a follow-up lobby, not a lap with a start, red flag,
+  change or move in it), and GT7's `last_ms` for it is taken only when it agrees with
+  the relay's own timing within LAP_TIME_TOLERANCE. The fastest of those is the race's
+  fastest lap.
 - Corrections add metres and pit stops per entry; `override_change` makes a team's
   connection active at once, continuing from the current distance.
 """
@@ -63,10 +69,12 @@ CHANGE_WINDOW_S = 600.0     # a stint switch's window closes after this, or when
 HISTORY_S = 900.0
 MAX_HISTORY = 12000         # samples per entry, a hard cap next to HISTORY_S
 MAX_SPEED_MPS = 120.0
-STEP_SLACK_M = 100.0        # projection noise and a counter flipping a moment off the line
+STEP_SLACK_M = 20.0         # projection noise on top of MAX_SPEED_MPS over the sample's time
 SNAP_M = 40.0               # around the line the counter may be a sample early or late
 AREA_MARGIN_M = 300.0
 CAR_FORGET_S = 120.0        # a quiet connection that no entry follows is dropped
+LAP_TIME_TOLERANCE = (1.0, 0.03)   # GT7's lap time vs the relay's: 1 s or 3 %, the larger
+LAP_TIME_WAIT_S = 6.0       # GT7 reports a lap's time shortly after the line
 PRUNE_EVERY_S = 10.0
 MAX_CHANGE_LAP = 2          # a car leaving a fresh lobby's box has driven at most lap 1
 LINE_QUORUM = 3
@@ -87,6 +95,11 @@ class _Car:
         self.line_s = None         # the finish line's station, from this car's own crossing
         self.entry = None
         self.restart_ready = False # red flag: this car is in the restart lobby
+        self.fuel = self.x = self.z = None
+        self.line_t = None         # relay time of the last counter step while counting
+        self.lap_ok = False        # the running lap has been counted from its line
+        self.pending = None        # (relay lap time, line time) waiting for GT7's last_ms
+        self.last_ms = None        # the last last_ms seen
 
 
 class _Entry:
@@ -106,6 +119,8 @@ class _Entry:
         self.pit_adjust = 0
         self.pit_stops = 0
         self.finished_at = None
+        self.last_lap_ms = None
+        self.stint_laps = 0        # race laps since the active car began counting
 
     def restart(self):
         self.distance, self.ts, self.ds = None, [], []
@@ -137,6 +152,7 @@ class Race:
         self._red = None            # {"at", "mode"} while the red flag mode runs
         self._restart_mode = "keep"
         self._preset = {}           # entry -> [metres, pit stops, rejoin] for entries not seen yet
+        self.fastest = None         # {entry, driver, ms}
         self._window_leader = None  # the leader's distance when the change window opened
 
     # -- commands ------------------------------------------------------------------
@@ -163,6 +179,7 @@ class Race:
                 car.counting = False
         for car in self._cars.values():
             car.restart_ready = False
+            car.lap_ok, car.pending = False, None
 
     def set_restart_mode(self, mode):
         """Override the restart for entries still waiting to resume."""
@@ -289,6 +306,7 @@ class Race:
         entry, which disappears when no other car of it is known."""
         old = self._entries.get(car.entry)
         car.entry, car.counting = entry, False
+        car.lap_ok, car.pending = False, None
         if old is not None and old.active == car.conn:
             others = [c.conn for c in self._cars.values() if c.entry == old.entry]
             if others:
@@ -324,6 +342,8 @@ class Race:
         frac = self._frac(car, s)
         car.counting, car.anchor, car.lap0 = True, anchor, lap0
         car.f0 = 0.0 if from_line else frac
+        car.lap_ok, car.line_t, car.pending = False, None, None   # the running lap is partial
+        ent.stint_laps = 0
         ent.distance, ent.since = self._raw(car, car.lap, s), t
         if from_line and frac > self.length - SNAP_M:
             ent.distance -= self.length    # the counter flipped: a few metres short is past it
@@ -342,8 +362,8 @@ class Race:
         t, lap, speed, x, z = checked
         self._prune(t, conn)
         car = self._cars.get(conn)
-        if car is not None and car.t is not None and t < car.t:
-            return                                # older than what this car already sent
+        if car is not None and car.t is not None and t <= car.t:
+            return                                # not newer than what this car already sent
         if car is not None and car.entry != entry:
             self._move(car, entry)
         ent = self._entries.get(entry)
@@ -382,6 +402,13 @@ class Race:
             car.line_s = s                        # this car's own crossing marks the line
         car.t, car.lap, car.speed, car.lateral, car.s = t, lap, speed, lateral, s
         car.position = sample.get("race_position")
+        car.x, car.z = x, z
+        fuel = sample.get("fuel_l")
+        car.fuel = fuel if self._finite(fuel) and 0 <= fuel <= 1000 else None
+        last_ms = sample.get("last_ms")
+        new_lap_time = type(last_ms) is int and last_ms > 0 and last_ms != car.last_ms
+        if type(last_ms) is int:
+            car.last_ms = last_ms
         self._box(car, t)
         if active and car.left_box and car.counting:
             ent.pit_stops += 1
@@ -417,6 +444,8 @@ class Race:
             del ent.ts[:cut], ent.ds[:cut]
         if len(ent.ts) > MAX_HISTORY:
             del ent.ts[:len(ent.ts) - MAX_HISTORY], ent.ds[:len(ent.ds) - MAX_HISTORY]
+        self._lap_timing(ent, car, t, prev_lap is not None and lap > prev_lap,
+                         last_ms if new_lap_time else None)
         # A single lobby counts laps in race distance: after a red flag restart from the
         # box the restart lobby's line no longer sits on a whole lap of it.
         if self.multi_lobby:
@@ -426,6 +455,31 @@ class Race:
                 math.floor(ent.distance / self.length) > math.floor(before / self.length)
         if crossed:
             self._crossing(ent, car, t)
+
+    def min_lap_s(self):
+        """The shortest believable lap: the line at MAX_SPEED_MPS."""
+        return self.length / MAX_SPEED_MPS if self.length else math.inf
+
+    def _lap_timing(self, ent, car, t, line, last_ms):
+        """Time the active counting car's laps and take GT7's time when it agrees."""
+        if line:
+            ent.stint_laps += 1
+            if car.lap_ok and car.line_t is not None:
+                car.pending = (t - car.line_t, t)
+            car.line_t, car.lap_ok = t, True
+        if car.pending is not None and t - car.pending[1] > LAP_TIME_WAIT_S:
+            car.pending = None
+        if last_ms is None or car.pending is None:
+            return
+        measured = car.pending[0]
+        car.pending = None
+        if measured < self.min_lap_s():
+            return                                # faster than any car can drive the line
+        if abs(last_ms / 1000 - measured) > max(LAP_TIME_TOLERANCE[0], LAP_TIME_TOLERANCE[1] * measured):
+            return
+        ent.last_lap_ms = last_ms
+        if self.fastest is None or last_ms < self.fastest["ms"]:
+            self.fastest = {"entry": ent.entry, "driver": car.name, "ms": last_ms}
 
     def _box(self, car, t):
         car.left_box = False
@@ -577,12 +631,15 @@ class Race:
                 "finished": e.finished_at is not None,
                 "pit_stops": max(0, e.pit_stops + e.pit_adjust),
                 "correction_m": round(e.adjust, 1),
+                "last_lap_ms": e.last_lap_ms, "stint_laps": e.stint_laps,
+                "fuel_l": None if car.fuel is None else round(car.fuel, 1),
+                "x": car.x, "z": car.z,
                 "rejoin": e.rejoin,
                 "gt7_position": car.position,
                 "position_mismatch": e.entry in mismatch})
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
-                "restart_mode": self._restart_mode, "entries": rows}
+                "restart_mode": self._restart_mode, "fastest": self.fastest, "entries": rows}
 
     def _mismatches(self, ordered):
         """Entries whose GT7 positions contradict the distance order (single lobby only)."""

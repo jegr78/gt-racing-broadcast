@@ -315,6 +315,14 @@ def t_both_desks_act_with_their_identity():
         assert _req(port, f"/console/drivers/data?t={carol}")[0] == 404
         assert _req(port, f"/console/drivers/race/reset?t={carol}", b"{}", hdr)[0] == 404, \
             "the race reset stays on the tailnet"
+        srv.race_svc.tick()
+        alice = g._tok("alice")                                   # a commentator
+        st, text, _h = _req(port, f"/console/drivers/dashboard?t={alice}")
+        dash = _json.loads(text)
+        assert st == 200 and dash["v"] == 1 and "conn" not in text, (st, text[:200])
+        st, text, _h = _req(port, f"/console/drivers/line?t={alice}")
+        assert st == 200 and len(_json.loads(text)["points"]) > 100, text[:120]
+        assert _req(port, f"/console/drivers/readiness?t={alice}")[0] == 403, "controls stay crew-only"
         st, text, h = _req(port, "/console/driver-desk.js")
         assert st == 200 and "javascript" in h.get("Content-Type", ""), (st, h)
     finally:
