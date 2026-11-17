@@ -230,11 +230,14 @@ class Race:
         return True
 
     def _anchor_of(self, ent):
-        """Where an entry continues after the red flag."""
+        """Where an entry continues after the red flag. Neutralise levels the cars the
+        tower shows on one lap, corrections included."""
         if self._restart_mode == "neutralise":
-            lap = math.floor(ent.frozen / self.length)
-            return max(e.frozen for e in self._entries.values()
-                       if e.frozen is not None and math.floor(e.frozen / self.length) == lap)
+            lap = math.floor((ent.frozen + ent.adjust) / self.length)
+            level = max(e.frozen + e.adjust for e in self._entries.values()
+                        if e.frozen is not None
+                        and math.floor((e.frozen + e.adjust) / self.length) == lap)
+            return level - ent.adjust
         return ent.frozen
 
     def final_lobby(self, lap_count, now):
@@ -551,13 +554,15 @@ class Race:
                 self._finished = all(e.finished_at is not None or self._quiet(e, t)
                                      for e in self._entries.values())
             return
-        leader = max((e.distance for e in self._entries.values() if e.distance is not None),
+        # The order Race Control's corrections set is the order that takes the flag.
+        shown = self._shown(ent)
+        leader = max((self._shown(e) for e in self._entries.values() if e.distance is not None),
                      default=None)
-        if ent.distance is None or ent.distance < leader:
+        if shown is None or shown < leader:
             return
         if self.finish_mode == "laps" and self.lap_count:
             by_laps = (car.lap > self.lap_count and self._final_car(ent)) if self.multi_lobby \
-                else ent.distance >= (self.lap_count - (1 if self.formation else 0)) * self.length - SNAP_M
+                else shown >= (self.lap_count - (1 if self.formation else 0)) * self.length - SNAP_M
         else:
             by_laps = False
         by_flag = self._final_lap_at is not None and t > self._final_lap_at
@@ -614,12 +619,16 @@ class Race:
 
     def standings(self, now):
         ents = list(self._entries.values())
+        winner = next((e for e in ents if self._finishing_at is not None
+                       and e.finished_at == self._finishing_at and e.distance is not None), None)
+        # No car is classified with more laps than the winner took the flag on.
+        cap = math.floor(self._shown(winner) / self.length) if winner and self.length else math.inf
 
         def key(e):
             done = e.finished_at is not None and self._finishing_at is not None
             dist = self._shown(e) if e.distance is not None else -math.inf
             laps = math.floor(dist / self.length) if self.length and e.distance is not None else -1
-            return (0, -laps, e.finished_at) if done else (1, -dist, 0)
+            return (0, -min(laps, cap), e.finished_at) if done else (1, -dist, 0)
         ents.sort(key=key)
         mismatch = self._mismatches(ents)
         rows = []
