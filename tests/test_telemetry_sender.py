@@ -355,7 +355,7 @@ def t_refused_posts_drop_or_wait_instead_of_retrying_forever():
     up.put(b"p")
     assert up.post_once() == snd.REFUSED_WAIT_S and up.post_once() == snd.REFUSED_WAIT_S, \
         "a refused key waits a minute between tries"
-    assert sum("Check the link and the key" in line for line in said) == 2, said
+    assert sum("Check the link and the code" in line for line in said) == 2, said
     assert up.post_once() == 0.05 and up.pending() == 0
 
 

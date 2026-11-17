@@ -5,7 +5,10 @@ Run it on a device on the same network as the PlayStation. It asks the console f
 the base packet format (A), so a dashboard app or SimHub that already receives the
 telemetry keeps working, and posts the encrypted packets unchanged to the relay.
 
-  python3 racecast-sender.py --url https://<host>/console/probe/ingest --key KEY --name "Car 7"
+  python3 racecast-sender.py --url https://<host>/console/drive/ingest --code CODE
+
+The invite page of the event prints that line with your code. A maintainer probe
+run takes --key and --name instead of --code.
 
 Modes:
   default     heartbeat the console, receive on UDP 33740
@@ -73,6 +76,14 @@ def default_bind(console=None, listen=None):
         probe.close()
 
 
+def _reason(exc):
+    """The relay's error text from a refused post, or the HTTP reason."""
+    try:
+        return json.loads(exc.read().decode("utf-8", "replace"))["error"]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return exc.reason or "refused"
+
+
 def _say(line):
     print(time.strftime("%H:%M:%S ") + line, flush=True)
 
@@ -80,10 +91,13 @@ def _say(line):
 class Uploader:
     """Posts queued packets to the relay at the rate it asks for. Thread-safe."""
 
-    def __init__(self, url, key, name, rate_hz=20.0, opener=None, say=_say,
-                 clock=time.monotonic):
-        self.url = url + ("&" if "?" in url else "?") + "sender=" + urllib.parse.quote(name)
-        self.key = key
+    def __init__(self, url, key=None, name=None, rate_hz=20.0, opener=None, say=_say,
+                 clock=time.monotonic, code=None):
+        if code:
+            self.url, self._auth = url, {"X-Driver-Code": code}
+        else:
+            self.url = url + ("&" if "?" in url else "?") + "sender=" + urllib.parse.quote(name)
+            self._auth = {"X-Probe-Key": key}
         self.rate_hz = rate_hz
         self._open = opener or urllib.request.urlopen
         self._say = say
@@ -133,7 +147,7 @@ class Uploader:
         req = urllib.request.Request(self.url, data=encode_batch([p for _s, p in batch]),
                                      method="POST", headers={
             "Content-Type": "application/octet-stream", "User-Agent": USER_AGENT,
-            "X-Probe-Key": self.key, "X-Sender-Stats": json.dumps(stats)})
+            "X-Sender-Stats": json.dumps(stats), **self._auth})
         started = time.perf_counter()        # monotonic ticks in ~15 ms steps on Windows
         try:
             with self._open(req, timeout=5) as resp:
@@ -144,9 +158,9 @@ class Uploader:
                 self._remove_through(last)
                 self.stats["rejected"] += len(batch)
                 return self._failed("the relay refused a batch (400)", wait=1.0 / self.rate_hz)
-            if exc.code in (401, 403, 404, 429):
-                return self._failed(f"the relay answered {exc.code}. Check the link and the key",
-                                    wait=REFUSED_WAIT_S, repeat=True)
+            if exc.code in (401, 403, 404, 409, 410, 429):
+                return self._failed(f"the relay answered {exc.code} ({_reason(exc)}). "
+                                    "Check the link and the code", wait=REFUSED_WAIT_S, repeat=True)
             return self._failed(f"the relay answered {exc.code}")
         except (OSError, ValueError) as exc:
             return self._failed(f"cannot reach the relay ({exc})")
@@ -320,10 +334,11 @@ def main(argv=None):
         except (AttributeError, ValueError):
             pass  # an older or replaced stream keeps its settings
     parser = argparse.ArgumentParser(description="Send GT7 telemetry to a racecast relay.")
-    parser.add_argument("--url", required=True, help="ingest URL from the invite or probe link")
-    parser.add_argument("--key", required=True, help="key from the invite or probe link")
-    parser.add_argument("--name", required=True,
-                        help="your name or car: up to 32 ASCII letters, digits, spaces, _ . -")
+    parser.add_argument("--url", required=True, help="ingest URL from the invite page")
+    parser.add_argument("--code", help="your code from the invite page")
+    parser.add_argument("--key", help="maintainer probe only: the probe key")
+    parser.add_argument("--name", help="maintainer probe only: up to 32 ASCII letters, "
+                                       "digits, spaces, _ . -")
     parser.add_argument("--console", help="PlayStation IP when discovery does not find it")
     parser.add_argument("--forward", type=_hostport, metavar="HOST:PORT",
                         help="also pass every packet to this local app (SimHub)")
@@ -337,9 +352,16 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.listen is not None and args.forward is not None:
         parser.error("--listen and --forward do not combine: the other app already receives")
-    if not NAME.match(args.name):
-        parser.error("--name takes up to 32 ASCII letters, digits, spaces, _ . -")
-    up = Uploader(args.url, args.key, args.name)
+    if args.code:
+        if args.key or args.name:
+            parser.error("--code already names you: leave out --key and --name")
+        up = Uploader(args.url, code=args.code)
+    else:
+        if not args.key or not args.name:
+            parser.error("pass --code from the invite page (or --key and --name for a probe)")
+        if not NAME.match(args.name):
+            parser.error("--name takes up to 32 ASCII letters, digits, spaces, _ . -")
+        up = Uploader(args.url, args.key, args.name)
     try:
         sender = Sender(up, console=args.console, listen=args.listen, forward=args.forward,
                         bind=args.bind, console_port=args.console_port,
@@ -352,7 +374,7 @@ def main(argv=None):
     stop = threading.Event()
     poster = threading.Thread(target=up.run, args=(stop,), daemon=True)
     poster.start()
-    _say("sending as %r to %s%s" % (args.name, args.url,
+    _say("sending %sto %s%s" % ("as %r " % args.name if args.name else "", args.url,
                                      " (listening, no heartbeat)" if args.listen is not None else ""))
     try:
         sender.run(stop, duration=args.duration)

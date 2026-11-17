@@ -21,10 +21,15 @@ import time
 
 import atomic_replace
 
+FILENAME = "driver-invite.json"
 PREFIX = "D1:"
 MAX_CODE = 1024
 NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # it ends up in a shell command line
 MAX_ENTRY = 120
+
+
+def path_in(runtime_dir):
+    return os.path.join(runtime_dir, FILENAME)
 
 
 def current(path):

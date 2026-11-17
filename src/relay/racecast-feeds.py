@@ -13927,6 +13927,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         for (n, d, pr, c, rc, x, re) in (CrewSource._member(row) for row in rows)]})
                 if p == ["event", "track"]:
                     return self._track_pick_get()
+                if p == ["drivers", "data"] and driver_hub is not None:
+                    # Tailnet only: every driver sender with its entry and counters (#1111).
+                    invite = self._drive_invite()
+                    return self._send({"invite": bool(invite), "connections": driver_hub.connections()},
+                                      no_store=True)
                 if p == ["telemetry", "probe"]:
                     # Tailnet only: the probe key and every sender's counters (#1110).
                     if telemetry_probe_obj is None:
@@ -14411,6 +14416,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p in (["event", "track"], ["race-control", "track"]):
                     return self._track_pick_post(body)
+                if p == ["drivers", "disconnect"] and driver_hub is not None:
+                    return self._send({"ok": driver_hub.disconnect(str(body.get("conn") or ""))})
                 if p == ["telemetry", "probe", "reset"]:
                     if telemetry_probe_obj is None:
                         return self._send({"enabled": False}, 404)
@@ -15725,6 +15732,26 @@ def main():
         probe = telemetry_probe.Probe(secrets.token_urlsafe(16))
         LOG.info("telemetry probe on: senders post to /console/probe/ingest; "
                  "GET /telemetry/probe on the tailnet shows the key and the counters")
+    # Driver telemetry (#1111): the invite file is read per request, so event
+    # start/stop and a regenerate in the CLI or Control Center act without a restart.
+    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo)
+    sender_script_path = os.path.join(here, "racecast-sender.py")
+    drive_page_path = None
+    for cand in (os.path.join(here, "drive.html"), os.path.join(here, "..", "drive.html"),
+                 os.path.join(here, "..", "console", "drive.html")):
+        if os.path.exists(cand):
+            drive_page_path = os.path.abspath(cand)
+            break
+
+    def driver_segments():
+        """Stint and qualifying labels a driver can register for, in sheet order."""
+        out = []
+        for src in (relay.race_source, relay.qual_source):
+            for row in (src.get_rows() if src else []):
+                label = (row[2] or "").strip()
+                if label and label not in out:
+                    out.append(label)
+        return out
     radio_link = getattr(engineer_live, "radio_link", None)
     def radio_snapshot():
         snapshot = engineer_live.snapshot() if engineer_live is not None else {}
@@ -15803,6 +15830,9 @@ def main():
         telemetry_store=telemetry_store,
         track_pick=track_pick,
         telemetry_probe_obj=probe,
+        driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
+        drive_page_path=drive_page_path, sender_script_path=sender_script_path,
+        driver_segments=driver_segments,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,
