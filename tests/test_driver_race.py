@@ -196,6 +196,15 @@ def t_actions_validate_their_input():
     assert not os.path.exists(dr.audit_path_for(path)), "a refused action logs nothing"
 
 
+def t_a_damaged_actions_file_never_breaks_the_race():
+    svc, _clock, path, _league = _ctl()
+    with open(os.path.join(os.path.dirname(path), dr.ACTIONS), "w", encoding="utf-8") as fh:
+        fh.write('{"corrections": {"A": [1], "B": ["x", 1], "C": [5.0, 2]}, "rejoin": "D"}')
+    svc.update({"entry": "C", "conn": "c", "name": "Max"}, _sample(0.1, -20, 0))
+    rows = svc.standings()["entries"]
+    assert rows[0]["correction_m"] == 5.0 and rows[0]["pit_stops"] == 2 and not rows[0]["rejoin"], rows
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -143,6 +143,25 @@ def _last_audited(path):
     return {k: record[k] for k in ("ts", "who", "action")}
 
 
+def _saved_actions(path):
+    """(corrections {entry: (metres, pit stops)}, rejoin entries) from the actions file;
+    anything malformed is skipped, never raised."""
+    doc = _read_json(path)
+    corrections, rejoins = {}, []
+    raw = doc.get("corrections")
+    for entry, value in (raw.items() if isinstance(raw, dict) else ()):
+        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and isinstance(value, list) \
+                and len(value) == 2 and isinstance(value[0], (int, float)) \
+                and not isinstance(value[0], bool) and math.isfinite(value[0]) \
+                and type(value[1]) is int:
+            corrections[entry] = (float(value[0]), value[1])
+    raw = doc.get("rejoin")
+    for entry in (raw if isinstance(raw, list) else ()):
+        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY:
+            rejoins.append(entry)
+    return corrections, rejoins
+
+
 def _entry_name(entry):
     if not isinstance(entry, str) or not entry.strip() or len(entry) > MAX_ENTRY:
         raise ValueError(f"entry is 1 to {MAX_ENTRY} characters")
@@ -197,10 +216,10 @@ class Service:
             lap_count=None if multi else s["lap_count"])
         if multi and self._final_lobby_laps is not None:
             race.final_lobby(self._final_lobby_laps, self._clock())
-        actions = _read_json(_actions_path_for(self._path))
-        for entry, (metres, pits) in (actions.get("corrections") or {}).items():
+        corrections, rejoins = _saved_actions(_actions_path_for(self._path))
+        for entry, (metres, pits) in corrections.items():
             race.correct(entry, metres, pits)
-        for entry in actions.get("rejoin") or []:
+        for entry in rejoins:
             race.rejoin(entry, True)
         return race
 
