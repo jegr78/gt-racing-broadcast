@@ -1515,6 +1515,13 @@ def t_builder_property_map_matches_the_compiler():
     assert {"fitMax", "fitMin", "teamNameMax", "teamNameMin"} <= px, px
 
 
+def t_a_quote_or_backslash_never_reaches_a_generated_rule():
+    slots = [{"id": "a", "props": ["fontFamily", "color"], "kind": "text"}]
+    for bad in ('X\\', 'X"', 'rgb(1,2"', 'rgb(1,2', 'a)b('):
+        css = ob.compile_overlay_css({"slots": {"a": {"fontFamily": bad, "color": bad}}}, slots)
+        assert '\\' not in css and bad not in css, f"{bad!r} would open a CSS string: {css}"
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):
