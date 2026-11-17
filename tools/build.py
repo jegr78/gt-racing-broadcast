@@ -34,6 +34,45 @@ def has_appscript_secret(text):
     return bool(_APPSCRIPT_SECRET_RE.search(text or ""))
 
 
+# The OBS collections in src/obs/, each shipped as <stem>.template.json.
+OBS_TEMPLATES = ("GT_Racing_Endurance.json", "GT_Racing_Solo_Commentary.json",
+                 "GT_Racing_Solo_POV.json")
+SOLO_TEMPLATES = ("GT_Racing_Solo_Commentary.json", "GT_Racing_Solo_POV.json")
+_RAW_SHEET_URL_RE = re.compile(r"/spreadsheets/d/[A-Za-z0-9_-]{20,}/")
+
+
+def template_name(src_name):
+    """The shipped file name of the OBS collection `src_name`."""
+    return src_name.replace(".json", ".template.json")
+
+
+def shipped_obs_template_checks(obs_dir):
+    """Verify checks for every template in the package's `obs_dir`: shipped,
+    tokenized and secret-free. A missing template fails all of its checks."""
+    checks = {}
+    for src_name in OBS_TEMPLATES:
+        name = template_name(src_name)
+        path = os.path.join(obs_dir, name)
+        shipped = os.path.isfile(path)
+        text = ""
+        if shipped:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        checks[f"{name} shipped"] = shipped
+        checks[f"{name} graphics tokenized"] = (
+            "__RACECAST_GRAPHICS__/" in text
+            and "GoogleDrive" not in text and "drive.google.com" not in text)
+        checks[f"{name} media tokenized"] = "__RACECAST_MEDIA__/" in text
+        # The relay serves /hud, so a template has no sheet token; a raw sheet URL is a leak.
+        checks[f"{name} no raw sheet url"] = shipped and not _RAW_SHEET_URL_RE.search(text)
+        # No Apps Script SHEET_PUSH_URL leaked into the template. (#103)
+        checks[f"{name} no apps-script webhook"] = shipped and not has_appscript_secret(text)
+        if src_name in SOLO_TEMPLATES:
+            checks[f"{name} device tokenized"] = (
+                "__RACECAST_CAPTURE__" in text and "__RACECAST_WEBCAM__" in text)
+    return checks
+
+
 def blank_pass(o):
     if isinstance(o, dict):
         for k, v in o.items():
@@ -135,16 +174,11 @@ def main():
     with open(os.path.join(PKG, "companion", "racecast-buttons.companionconfig"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=1)
 
-    # obs: ship the tokenized collection as .template.json (setup-assets localizes it)
+    # obs: ship the tokenized collections as .template.json (setup-assets localizes them)
     os.makedirs(os.path.join(PKG, "obs"))
-    shutil.copy2(os.path.join(SRC, "obs", "GT_Racing_Endurance.json"),
-                 os.path.join(PKG, "obs", "GT_Racing_Endurance.template.json"))
-    # solo-mode collections (#303): ship the same way, when present.
-    for solo in ("GT_Racing_Solo_Commentary.json", "GT_Racing_Solo_POV.json"):
-        solo_src = os.path.join(SRC, "obs", solo)
-        if os.path.exists(solo_src):
-            shutil.copy2(solo_src, os.path.join(
-                PKG, "obs", solo.replace(".json", ".template.json")))
+    for src_name in OBS_TEMPLATES:
+        shutil.copy2(os.path.join(SRC, "obs", src_name),
+                     os.path.join(PKG, "obs", template_name(src_name)))
     # obs-browser source-build wrapper CMakeLists, used by `racecast obs-browser`
     # on Linux to compile the Browser Source plugin against the distro libobs.
     cp("obs/obs-browser-build", "obs/obs-browser-build")
@@ -197,17 +231,10 @@ def main():
     checks = {
         "companion pov buttons": "pov/reload" in blob,
         "companion password empty": not has_pw(written),
-        "obs graphics tokenized": "__RACECAST_GRAPHICS__/" in tpl
-            and "GoogleDrive" not in tpl and "drive.google.com" not in tpl,
-        # The relay serves /hud, so the collection legitimately has no
-        # __RACECAST_SHEET__ token; only a raw sheet URL would be a leak.
-        "obs no raw sheet url": not re.search(r"/spreadsheets/d/[A-Za-z0-9_-]{20,}/", tpl),
         # No Apps Script SHEET_PUSH_URL leaked into the secret-free artifacts. (#103)
-        "obs no apps-script webhook": not has_appscript_secret(tpl),
         "relay no apps-script webhook": not has_appscript_secret(relay),
         "companion no apps-script webhook": not has_appscript_secret(blob),
         "relay timer endpoint": "/timer/data" in relay,
-        "obs media tokenized": "__RACECAST_MEDIA__/" in tpl,
         "relay pov endpoint": "pov/reload" in relay,
         "no .sh/.bat shipped": not any(fn.endswith((".sh", ".bat")) for _, _, fs in os.walk(PKG) for fn in fs),
         "preflight shipped": os.path.isfile(os.path.join(PKG, "scripts", "preflight.py")),
@@ -235,7 +262,7 @@ def main():
         "demo profile secret-free": not re.search(
             r"^[ \t]*(SHEET_PUSH_URL|CONSOLE_SECRET|DISCORD_WEBHOOK_URL)[ \t]*=[ \t]*\S",
             demo_env, re.MULTILINE),
-        "no sheet url in relay": not re.search(r"/spreadsheets/d/[A-Za-z0-9_-]{20,}/", relay),
+        "no sheet url in relay": not _RAW_SHEET_URL_RE.search(relay),
         "racecast cli shipped": os.path.isfile(os.path.join(PKG, "racecast.py")),
         "racecast-ui launcher shipped": os.path.isfile(os.path.join(PKG, "racecast_ui.py")),
         "services helper shipped": os.path.isfile(os.path.join(PKG, "scripts", "services.py")),
@@ -265,16 +292,7 @@ def main():
         "slides cheat-sheet shipped": os.path.isfile(
             os.path.join(PKG, "docs", "slides", "cheat_sheets.html")),
     }
-    # solo-mode collections (#303): the same tokenized, secret-free verification
-    # as the endurance template above, when shipped.
-    for solo in ("GT_Racing_Solo_Commentary.template.json", "GT_Racing_Solo_POV.template.json"):
-        sp = os.path.join(PKG, "obs", solo)
-        if os.path.exists(sp):
-            with open(sp, encoding="utf-8") as fh:
-                stpl = fh.read()
-            checks[f"{solo} device tokenized"] = (
-                "__RACECAST_CAPTURE__" in stpl and "__RACECAST_WEBCAM__" in stpl)
-            checks[f"{solo} no secret"] = not has_appscript_secret(stpl)
+    checks.update(shipped_obs_template_checks(os.path.join(PKG, "obs")))
     bad = [k for k, v in checks.items() if not v]
     print(f"Built {PKG}")
     print(f"ZIP   {zip_path}  ({os.path.getsize(zip_path)//1024} KB)")
