@@ -112,6 +112,10 @@ def request_csrf_ok(headers):
             parsed = urlparse(origin)
             if parsed.scheme not in {'http', 'https'} or parsed.hostname not in LOOPBACK_HOSTS:
                 return False
+            default = 443 if parsed.scheme == "https" else 80
+            served = urlparse("http://" + (headers.get("Host") or "")).port or 80
+            if headers.get("Host") and (parsed.port or default) != served:
+                return False                     # another local port is another origin
         except ValueError:
             return False
     return True
@@ -1550,7 +1554,7 @@ def make_handler(ctx):
                             return self._json({'ok':False,'error':'Active league changed. Reload and try again'},code=409)
                         argv = ['--profile', current] + argv
                     profile = self.analysis_profile or (ctx.get("telemetry_default_profile", lambda: None)() if name in ANALYSIS_OPS else None)
-                    if profile:
+                    if profile and current is None:
                         argv = ["--profile", profile] + argv
                 except ValueError as exc:
                     return self._json({"ok": False, "error": str(exc)}, code=400)

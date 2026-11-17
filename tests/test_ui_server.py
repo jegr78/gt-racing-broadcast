@@ -2077,6 +2077,22 @@ def t_csrf_cross_origin_blocked():
                                    "Origin": "https://youtube.com"})
 
 
+def t_the_report_preview_runs_sandboxed():
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    tag = re.search(r'<iframe id="report-frame"[^>]*>', html).group(0)
+    assert 'sandbox=""' in tag, "report HTML never runs in the Control Center origin"
+
+
+def t_csrf_another_loopback_port_is_another_origin():
+    for key in ("Origin", "Referer"):
+        assert not us.request_csrf_ok({"Host": "127.0.0.1:8089", key: "http://127.0.0.1:8088"}), \
+            f"a page on another local port (the relay) cannot drive the API through {key}"
+        assert not us.request_csrf_ok({"Host": "127.0.0.1:8089", key: "http://localhost"})
+    assert us.request_csrf_ok({"Host": "127.0.0.1:8089", "Referer": "http://127.0.0.1:8089/#profile"})
+    assert us.request_csrf_ok({"Host": "localhost", "Origin": "http://localhost"})
+
+
 def t_csrf_opaque_or_malformed_origin_and_referer_are_blocked():
     for key in ('Origin','Referer'):
         for value in ('','ftp://localhost','null','file:///tmp/local.html','data:text/html,example','http://[invalid','localhost'):
@@ -3041,7 +3057,7 @@ def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
         for headers, error in (({'Origin': 'https://foreign.example'}, 'cross-origin request blocked'),
                                ({'Host': f'foreign.example:{port}'}, 'cross-origin request blocked'),
                                ({'Origin': 'null'}, 'cross-origin request blocked'),
-                               ({'Origin': f'http://localhost:{port + 1}'}, 'foreign context origin')):
+                               ({'Origin': f'http://localhost:{port + 1}'}, 'cross-origin request blocked')):
             request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/context',
                                              method='POST', data=b'{}', headers=headers)
             try:

@@ -180,7 +180,8 @@ async function preview(){
  for(const [value,label] of [[m.laps.length,'usable laps'],[m.references.length,'reference laps'],[Math.ceil(m.detail_bytes/1024)+' KiB','detail data'],[Math.ceil(m.summary_bytes/1024)+' / '+Math.floor(m.limits.summary_bytes/1024)+' KiB','summary budget']]){const tile=node('div',null,metrics);node('strong',String(value),tile);node('span',label,tile);}
  node('p',m.transmission,box);node('p','Provider: '+result.agent.provider+' · Model: '+result.requested_model+' · Report language: '+m.language+' · One invocation',box);
  const notes=disclosure(box,'Included context notes · '+m.notes.length);if(!m.notes.length)node('p','No included notes.',notes);
- m.notes.forEach(n=>node('p',typeof n==='string'?n:[n.scope==='recording'?'Recording':'Session '+n.session,n.lap!=null?'lap '+n.lap:'',n.text].filter(Boolean).join(' · '),notes));
+ const noteScope=n=>n.scope==='recording'?'Recording':n.session!=null?'Session '+n.session:(n.kind==='label'?'Label ':'Note ')+String(n.scope||'').split('/').slice(1).join(' / ');
+ m.notes.forEach(n=>node('p',typeof n==='string'?n:[noteScope(n),n.lap!=null?'lap '+n.lap:'',n.text].filter(Boolean).join(' · '),notes));
  const radio=m.radio||[];if(radio.length){const said=disclosure(box,'Included driver radio · '+radio.length+' messages');radio.forEach(r=>node('p',[r.lap!=null?'After lap '+r.lap:'',r.question?'Driver: '+r.question:'',(r.source==='coach'?'Coach: ':'Engineer: ')+r.text].filter(Boolean).join(' · '),said));}
  const contexts=disclosure(box,'Selected comparison context · '+(m.lap_contexts||[]).length+' laps');
  (m.lap_contexts||[]).forEach(c=>{const lap=disclosure(contexts,'Lap '+c.lap+' · '+c.compound+' · '+c.role+' · '+(c.confirmed?'confirmed':'unconfirmed'));node('p',c.rec+' · S'+c.session+' · '+c.car+' · '+c.layout,lap);
@@ -219,6 +220,7 @@ async function status(){
 async function cancel(){
  if(!state.job)return;const id=state.job,generation=state.generation;$id('ai-cancel').disabled=true;
  const result=await request('cancel',{id});if(generation!==state.generation||state.job!==id)return;
+ if(result.ok&&result.cancelled===false){$id('ai-cancel').disabled=false;feedback('error','Analysis not stopped','No running analysis of this profile matched, or its state could not be read. Try again.',state.run);return;}
  if(result.ok)state.cancelJob=id;
  feedback(result.ok?'cancelling':'error',result.ok?'Stopping analysis':'Cancellation failed',result.ok?'Waiting for the provider process to exit. Already consumed subscription quota cannot be recovered.':error(result),state.run);
 }

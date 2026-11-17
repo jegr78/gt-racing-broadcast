@@ -855,7 +855,7 @@
           <button id="report-send" class="btn" onclick="reportSend()" hidden>Send to Discord</button>
         </div>
         <p id="report-msg" class="muted"></p>
-        <iframe id="report-frame" title="Report preview"
+        <iframe id="report-frame" title="Report preview" sandbox=""
                 style="width:100%;height:70vh;border:1px solid #ddd;border-radius:8px;background:#fff"
                 hidden></iframe>
       </div>
@@ -1368,35 +1368,43 @@ $('evt-race-laps').addEventListener('change', e => {
 });
 
 // The event's driver telemetry invite link (Home; #1111)
+// A reply older than the newest request (a poll sent before "New link") is dropped.
+const linkSeq = {invite: 0, timing: 0};
 async function fetchEventInvite(regenerate) {
+  const seq = ++linkSeq.invite;
   let d;
   try {
     d = await (await fetch('/api/event-invite', regenerate
       ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{"new":true}'}
       : {cache: 'no-store'})).json();
   } catch (e) { return; }                  // server gone, keep last state
+  if (seq !== linkSeq.invite) return;
   $('evt-invite-err').hidden = !!(d && d.ok);
   if (!d || !d.ok) { $('evt-invite-err').textContent = (d && d.error) || 'could not read the invite'; return; }
   const link = d.active ? (d.funnel || d.tailnet) : null;   // tailnet only while MagicDNS is unknown
   $('evt-invite-text').textContent = link || (d.active ? 'Tailscale is not up: no link to share'
                                                        : 'none: Start event creates one');
   $('evt-invite-copy').hidden = !link;
+  $('evt-invite-new').hidden = !d.active;
   $('evt-invite-copy').onclick = () => navigator.clipboard.writeText(link);
 }
 // The event's public live timing link (Home; #1128)
 async function fetchEventTiming(regenerate) {
+  const seq = ++linkSeq.timing;
   let d;
   try {
     d = await (await fetch('/api/event-timing', regenerate
       ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{"new":true}'}
       : {cache: 'no-store'})).json();
   } catch (e) { return; }
+  if (seq !== linkSeq.timing) return;
   $('evt-timing-err').hidden = !!(d && d.ok);
   if (!d || !d.ok) { $('evt-timing-err').textContent = (d && d.error) || 'could not read the timing link'; return; }
   const link = d.active ? (d.funnel || d.tailnet) : null;
   $('evt-timing-text').textContent = link || (d.active ? 'Tailscale is not up: no link to share'
                                                        : 'none: Start event creates one');
   $('evt-timing-copy').hidden = !link;
+  $('evt-timing-new').hidden = !d.active;
   $('evt-timing-copy').onclick = () => navigator.clipboard.writeText(link);
 }
 $('evt-timing-new').addEventListener('click', async () => {

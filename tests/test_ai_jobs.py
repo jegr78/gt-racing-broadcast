@@ -457,6 +457,17 @@ def t_windows_runtime_locations_survive_without_credentials():
     assert not any(key in filtered for key in ('ANTHROPIC_API_KEY','CONSOLE_SECRET','RACECAST_OBS_WS_PASSWORD'))
 
 
+def t_a_crash_left_job_record_stops_costing_the_lease():
+    with tempfile.TemporaryDirectory() as d:
+        runner = j.Runner(Path(d) / 'machine', Path(d) / 'profile', 'p')
+        runner.machine.mkdir(parents=True)
+        runner.active_path.write_text(json.dumps({'id': 'a' * 32, 'profile': 'p', 'state': 'running'}))
+        assert runner.status('p') == {'active': None, 'busy': False}
+        assert not runner.active_path.exists(), 'the record of a dead run goes once the lease shows it ended'
+        with mock.patch.object(j.Lease, 'acquire', side_effect=AssertionError('status took the lease')):
+            assert runner.status('p')['busy'] is False
+
+
 if __name__=='__main__':
     for name,fn in sorted(globals().copy().items()):
         if name.startswith('t_'):fn();print('PASS',name)

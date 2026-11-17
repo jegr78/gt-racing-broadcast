@@ -636,7 +636,10 @@ class Runner:
                 }
             return {"active": active, "busy": True}
         else:
-            lease.close()
+            try:
+                _remove_state(self.active_path)  # a crashed run's record; no job holds the lease
+            finally:
+                lease.close()
             return {"active": None, "busy": False}
 
     def cancel(self, job_id):
@@ -928,12 +931,12 @@ class Runner:
                     def send_prompt():
                         try:
                             proc.stdin.write(summary)
-                        except BrokenPipeError:
+                        except OSError:  # a closed pipe, EINVAL on Windows
                             pass  # Classify early CLI rejection from its diagnostics.
                         finally:
                             try:
                                 proc.stdin.close()
-                            except BrokenPipeError:
+                            except OSError:
                                 pass  # The CLI can exit before reading the prompt.
 
                     writer = threading.Thread(target=send_prompt, daemon=True)

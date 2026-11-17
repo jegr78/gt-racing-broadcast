@@ -445,20 +445,32 @@ class Store:
         return dict(run, diagnostics=diagnostics, ok=True)
 
     def history(self, rec=None):
-        items = []
+        """The newest 200 runs, of one recording when `rec` is given. Run records are
+        read and filtered first; only the kept runs get the full check."""
+        want = None if rec is None else ai_package.gt7_recording.recording_stem(rec)
+        listed = []
         for path in self.base.glob("*/*/run.json"):
             try:
-                run = self.get(path.parent.name)
-                if rec is not None and ai_package.gt7_recording.recording_stem(
-                    run["selection"]["recording"]
-                ) != ai_package.gt7_recording.recording_stem(rec):
+                head = _read(path, self.root)
+                if want is not None and ai_package.gt7_recording.recording_stem(
+                    head["selection"]["recording"]
+                ) != want:
                     continue
-                run.pop("report", None)
-                items.append(run)
+                listed.append((head["created_at"], path.parent.name))
             except (ReportError, KeyError, TypeError):
                 continue
-        items.sort(key=lambda r: r["created_at"], reverse=True)
-        return dict(ok=True, profile=self.profile, runs=items[:200])
+        listed.sort(reverse=True)
+        items = []
+        for _created, job_id in listed:
+            if len(items) == 200:
+                break
+            try:
+                run = self.get(job_id)
+            except (ReportError, KeyError, TypeError):
+                continue
+            run.pop("report", None)
+            items.append(run)
+        return dict(ok=True, profile=self.profile, runs=items)
 
     def export(self, job_id, kind, origin=None):
         if origin is not None:
@@ -598,3 +610,15 @@ def delete_recording_analyses(profile_root, recording_id, recording_name=None):
             )
         if directory.exists():
             shutil.rmtree(directory)
+    # Runs of other recordings carry a full copy of a reference lap in their package.
+    for detail in base.glob("*/*/package/detail.json"):
+        try:
+            package = _read(detail, root, max_bytes=ai_package.MAX_DETAIL_BYTES)
+            refs = {p.get("recording_id") for p in package.get("reference_provenance") or []}
+        except (ReportError, AttributeError, TypeError):
+            continue
+        if identities & refs:
+            run_dir = detail.parent.parent
+            if run_dir.is_symlink() or not run_dir.resolve().is_relative_to(root):
+                raise ReportError("invalid_artifact", "Refusing redirected analysis deletion")
+            shutil.rmtree(run_dir)

@@ -121,6 +121,19 @@ def t_install_hint_only_when_missing_on_supported_arch():
     assert m.install_hint("armv7l", obs_present=True, browser_present=False) is None
 
 
+def t_an_installed_browser_source_is_success_even_on_arch():
+    import io, contextlib
+    from unittest import mock
+    seen = []
+    with mock.patch.object(m.sys, "platform", "linux"), \
+            mock.patch.object(m.shutil, "which", lambda name: "/usr/bin/pacman" if name == "pacman" else None), \
+            mock.patch.object(m, "browser_plugin_present", lambda dirs: seen.append(dirs) or True), \
+            contextlib.redirect_stdout(io.StringIO()) as out:
+        code = m.main([])
+    assert code == 0 and "already" in out.getvalue(), (code, out.getvalue())
+    assert seen and m.OBS_PLUGINS_DIR_PLAIN in seen[0], "the Arch plugin dir is checked"
+
+
 def t_pacman_hosts_get_the_package_not_a_source_build():
     # This command is an apt/dpkg path end to end (BUILD_APT_DEPS, dpkg-query).
     # Arch has no dpkg-query, so probing it there reports "OBS Studio not

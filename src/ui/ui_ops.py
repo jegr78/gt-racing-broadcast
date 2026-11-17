@@ -133,7 +133,7 @@ def _update_flag(value):
 
 
 def _whisper_flag(value):
-    return ["--whisper"] if value else []
+    return ["--whisper"] if value is True else []
 
 
 def _qualifying_flag(value):

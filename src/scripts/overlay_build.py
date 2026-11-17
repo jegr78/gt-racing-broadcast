@@ -82,8 +82,9 @@ KIND_PROPS = {"text": KIND_TEXT, "box": KIND_BOX}
 FIT_ALIASES = ("teamNameMax", "teamNameMin")
 
 # A structured value must never close the rule or inject extra CSS; the only
-# verbatim path is customCss. Reject anything carrying CSS-structural characters.
-_UNSAFE_VALUE = re.compile(r"[;{}<>]|/\*|\*/")
+# verbatim path is customCss. Reject anything carrying CSS-structural characters,
+# and quotes or backslashes, which would open a string that swallows the rule.
+_UNSAFE_VALUE = re.compile(r"[;{}<>\"\\]|/\*|\*/")
 
 # Sample content for the same-origin builder canvas, so the operator positions
 # slots against realistic text. Each team is four slots (#136): number, name and
@@ -583,6 +584,16 @@ def pov_box_from_css(css_text):
     return box_from_css(css_text, "pov")
 
 
+def _parens_balanced(v):
+    """An unclosed parenthesis makes a CSS function that runs to the next one."""
+    depth = 0
+    for ch in v:
+        depth += (ch == "(") - (ch == ")")
+        if depth < 0:
+            return False
+    return depth == 0
+
+
 def _safe_value(value):
     """A style value safe to drop into a generated rule, else None."""
     if isinstance(value, bool):                 # bool is an int subclass, reject
@@ -591,7 +602,7 @@ def _safe_value(value):
         return value
     if isinstance(value, str):
         v = value.strip()
-        return v if v and not _UNSAFE_VALUE.search(v) else None
+        return v if v and not _UNSAFE_VALUE.search(v) and _parens_balanced(v) else None
     return None
 
 

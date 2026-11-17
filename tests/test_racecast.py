@@ -6813,6 +6813,12 @@ def t_driver_race_settings_go_to_the_relay_or_the_file():
         "the restart default is a profile file, no relay call"
     bad = m.event_race_write_data({"restart": "fast"}, alive=lambda: False, path=path, league_path=league)
     assert not bad["ok"] and "restart" in bad["error"], bad
+    both = m.event_race_write_data({"restart": "keep", "finish_mode": "laps"}, alive=lambda: True,
+                                   foreign=lambda: False, path=path, league_path=league,
+                                   post=lambda *_a: {"ok": False, "error": "busy"})
+    assert not both["ok"], both
+    assert m.event_race_read_data(path=path, league_path=league)["settings"]["restart"] == "neutralise", \
+        "a refused combined change leaves the restart default as it was"
 
 
 def t_driver_invite_follows_the_event_and_regenerates():
@@ -6848,6 +6854,10 @@ def t_driver_invite_follows_the_event_and_regenerates():
     m._stop_driver_invite(path=path)
     assert m.event_invite_data(path=path, links=links)["active"] is False, "event stop ends the link"
     assert m.event_timing_data(path=timing, links=tlinks)["active"] is False, "and the timing link"
+    for fn, p, ln in ((m.event_invite_data, path, links), (m.event_timing_data, timing, tlinks)):
+        refused = fn(new=True, path=p, links=ln)
+        assert not refused["ok"] and "Start event" in refused["error"], refused
+        assert fn(path=p, links=ln)["active"] is False, "no link opens between events"
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):

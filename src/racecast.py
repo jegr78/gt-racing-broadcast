@@ -2939,6 +2939,14 @@ def app_launch_cmd(rest):
                      f"{_tailscale_login_hint()}).")
         sys.exit(f"app: cannot launch {name} on this system. Is it installed?")
     argv, cwd = cmd
+    if name == "obs":
+        try:
+            running = ev.app_running_checked("obs")
+        except Exception:  # noqa: BLE001  an unknown state takes the waiting launch path
+            running = False
+        if running:
+            print("OBS is already running.")
+            return
     # Same environment handling as `event start`: this is the documented manual
     # fallback for launching OBS, so it must not fail in the ways event start no
     # longer does (#572): the frozen library path, and no session overrides
@@ -5794,18 +5802,26 @@ def event_race_write_data(changes, alive=None, post=None, path=None, foreign=Non
     restart = changes.get("restart")
     try:
         changes = driver_race.validate(changes)
-        if restart is not None:
-            league = league_path or _driver_race_league_path()
-            if league is None:
-                return {"ok": False, "error": "no active profile for the restart setting"}
-            driver_race.write_league(league, {"restart": restart})
+        if restart is not None and restart not in driver_race.RESTART_MODES:
+            raise ValueError("restart is keep or neutralise")
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    except OSError as exc:
-        return {"ok": False, "error": f"could not save the restart setting: {exc}"}
+    league = league_path or _driver_race_league_path()
+    if restart is not None and league is None:
+        return {"ok": False, "error": "no active profile for the restart setting"}
+
+    def save_restart():
+        """The league's restart default, written only once the rest is applied."""
+        if restart is None:
+            return None
+        try:
+            driver_race.write_league(league, {"restart": restart})
+        except OSError as exc:
+            return {"ok": False, "error": f"could not save the restart setting: {exc}"}
+        return None
     if not changes:
-        return {"ok": True, "settings": event_race_read_data(path, league_path)["settings"],
-                "applied": "profile"}
+        return save_restart() or {"ok": True, "settings": event_race_read_data(path, league_path)["settings"],
+                                  "applied": "profile"}
     if _relay_runs_active_profile(alive, foreign):
         post = post or _relay_post_json
         try:
@@ -5820,8 +5836,11 @@ def event_race_write_data(changes, alive=None, post=None, path=None, foreign=Non
             saved, applied = driver_race.write_settings(path or _driver_race_path(), changes), "file"
         except OSError as exc:
             return {"ok": False, "error": f"could not save the settings: {exc}"}
-    league = driver_race.read_league(league_path or _driver_race_league_path())
-    return {"ok": True, "settings": dict(saved, restart=league["restart"]), "applied": applied}
+    failed = save_restart()
+    if failed:
+        return failed
+    return {"ok": True, "settings": dict(saved, restart=driver_race.read_league(league)["restart"]),
+            "applied": applied}
 
 
 def _race_line(s):
@@ -5904,7 +5923,11 @@ def event_invite_data(new=False, path=None, links=None):
     `path` and `links` are test seams."""
     import driver_invite
     path = path or _driver_invite_path()
-    invite = driver_invite.create(path) if new else driver_invite.current(path)
+    invite = driver_invite.current(path)
+    if new and invite is None:
+        return {"ok": False, "error": "No event is running: Start event creates the invite"}
+    if new:
+        invite = driver_invite.create(path)
     if invite is None:
         return {"ok": True, "active": False}
     return dict({"ok": True, "active": True, "created": invite["created"]},
@@ -5951,7 +5974,11 @@ def event_timing_data(new=False, path=None, links=None):
     are test seams."""
     import timing_link
     path = path or timing_link.path_in(_runtime_dir())
-    link = timing_link.create(path) if new else timing_link.current(path)
+    link = timing_link.current(path)
+    if new and link is None:
+        return {"ok": False, "error": "No event is running: Start event creates the timing link"}
+    if new:
+        link = timing_link.create(path)
     if link is None:
         return {"ok": True, "active": False}
     return dict({"ok": True, "active": True, "created": link["created"]},
@@ -5964,13 +5991,16 @@ def event_timing_cmd(rest):
     parser = argparse.ArgumentParser(
         prog="racecast event timing",
         description="Show the event's public live timing link (no login, timing data only). "
-                    "--new replaces it: the old link stops working.")
+                    "--new replaces it while an event runs: the old link stops working.")
     parser.add_argument("--new", action="store_true", help="regenerate the timing link")
     args = parser.parse_args(rest)
     _apply_active_profile_env()
     d = event_timing_data(new=args.new)
+    if not d["ok"]:
+        print(d["error"])
+        sys.exit(1)
     if not d["active"]:
-        print("No public timing link: `racecast event start` creates one, `--new` makes one now.")
+        print("No public timing link: `racecast event start` creates one.")
         return
     print("New public timing link (the old one no longer works):" if args.new
           else "Public timing link:")
@@ -5984,14 +6014,17 @@ def event_invite_cmd(rest):
     import argparse
     parser = argparse.ArgumentParser(
         prog="racecast event invite",
-        description="Show the event's driver telemetry invite link. --new replaces it: "
-                    "every driver then registers again on the new link.")
+        description="Show the event's driver telemetry invite link. --new replaces it while an "
+                    "event runs: every driver then registers again on the new link.")
     parser.add_argument("--new", action="store_true", help="regenerate the invite link")
     args = parser.parse_args(rest)
     _apply_active_profile_env()
     d = event_invite_data(new=args.new)
+    if not d["ok"]:
+        print(d["error"])
+        sys.exit(1)
     if not d["active"]:
-        print("No driver invite: `racecast event start` creates one, `--new` makes one now.")
+        print("No driver invite: `racecast event start` creates one.")
         return
     print(("New driver invite link (the old one no longer works):" if args.new
            else "Driver invite link:"))

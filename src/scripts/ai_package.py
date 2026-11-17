@@ -886,10 +886,11 @@ def _included_notes(package):
     def walk(value, path):
         if isinstance(value, dict):
             for key, item in value.items():
-                if key == "note" and isinstance(item, str):
+                if key in ("note", "label") and isinstance(item, str):
                     token = (path, item)
                     if token not in seen:
-                        notes.append({"scope": path, "text": item})
+                        notes.append(dict({"scope": path, "text": item},
+                                          **({"kind": "label"} if key == "label" else {})))
                         seen.add(token)
                 elif key == "notes" and isinstance(item, list):
                     for note in item:

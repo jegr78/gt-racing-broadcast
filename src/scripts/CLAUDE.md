@@ -230,9 +230,10 @@ Normal reports require a valid frozen output plus unchanged input/prompt hashes.
 Profile-owned history derives stale/interrupted status without rewriting artifacts.
 Relevant staleness rebuilds the same selection, ignoring unrelated context-revision
 increments. HTML escapes all provider text and Markdown escapes active link/image
-syntax. HTTP exports use the current loopback origin; report links validate the
+syntax and writes bare URLs and e-mail addresses as code spans. HTTP exports use the current loopback origin; report links validate the
 profile and recording identity before opening the existing lap comparison.
-Recording deletion shares machine admission with jobs and removes owned artifacts;
+Recording deletion shares machine admission with jobs and removes owned artifacts
+and every run that copied the recording as a reference;
 references are revalidated under that lease before a new run can begin. Machine
 agent settings survive deletion. See `src/docs/design/ai-analysis-reports.md`.
 

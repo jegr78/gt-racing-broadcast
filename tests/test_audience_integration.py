@@ -128,14 +128,14 @@ def t_local_http_validates_origin_profile_and_error_shape():
         code, data = request(origin=f"http://127.0.0.1:{port + 1}")
         assert code == 403 and data == {
             "ok": False,
-            "error": "foreign context origin",
+            "error": "cross-origin request blocked",
         }, (code, data)
         code, data = request(
             {"action": "create"}, origin=f"http://127.0.0.1:{port + 1}"
         )
         assert code == 403 and data == {
             "ok": False,
-            "error": "foreign context origin",
+            "error": "cross-origin request blocked",
         }, (code, data)
         assert len(writes) == 1
     finally:

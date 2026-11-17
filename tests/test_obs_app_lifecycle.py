@@ -132,6 +132,7 @@ class Lifecycle(unittest.TestCase):
 
     def test_manual_and_event_launch_refuse_overlap(self):
         with patch.object(m, '_wait_for_obs_exit', return_value=False), \
+             patch.object(ev, 'app_running_checked', return_value=False), \
              patch.object(ev, 'launch_command', return_value=(['obs'], None)), \
              patch.object(m.subprocess, 'Popen', side_effect=AssertionError('second OBS')), \
              patch('install_apps.app_present', return_value=True), \
@@ -139,6 +140,16 @@ class Lifecycle(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'still running'):
                 m.app_launch_cmd(['obs'])
             self.assertFalse(m._event_launch(ev, 'obs'))
+
+    def test_launching_a_running_obs_is_a_quick_no_op(self):
+        out = io.StringIO()
+        with patch.object(ev, 'app_running_checked', return_value=True), \
+             patch.object(ev, 'launch_command', return_value=(['obs'], None)), \
+             patch.object(m, '_wait_for_obs_exit', side_effect=AssertionError('waited 30 s for a running OBS')), \
+             patch.object(m.subprocess, 'Popen', side_effect=AssertionError('second OBS')), \
+             contextlib.redirect_stdout(out):
+            m.app_launch_cmd(['obs'])
+        self.assertIn('already running', out.getvalue())
 
     def test_quit_confirms_exit_and_preserves_budget(self):
         clock = Clock()
