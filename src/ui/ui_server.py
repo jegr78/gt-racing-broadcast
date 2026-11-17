@@ -599,6 +599,12 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"relay stats failed: {exc}"},
                                       code=500)
+            if path == "/api/event-race":
+                try:
+                    return self._json(ctx["event_race_read"]())
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"race settings read failed: {exc}"},
+                                      code=500)
             if path == "/api/event-invite":
                 try:
                     return self._json(ctx["event_invite"]())
@@ -1083,6 +1089,18 @@ def make_handler(ctx):
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not save the forward targets: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/event-race":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error},
+                                      code=400)
+                try:
+                    result = ctx["event_race_write"](body)
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not save the race settings: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/event-invite":

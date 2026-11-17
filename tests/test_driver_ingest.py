@@ -117,6 +117,43 @@ def t_a_refused_first_batch_frees_its_slot():
     assert hub.connections() == [], "no slot stays held by a refused first batch"
 
 
+def t_every_sample_reaches_the_race_dated_by_its_packet_id():
+    got = []
+    clock = _Clock()
+    hub = ing.Hub(multi_lobby=lambda: False, clock=clock,
+                  on_sample=lambda reg, sample: got.append((reg, sample)))
+    hub.ingest(_reg("c1", name="Max"), _batch(*range(1, 13)), None)   # a catch-up batch of 12
+    assert [s["pid"] for _r, s in got] == [1, 6, 12], [s["pid"] for _r, s in got]
+    assert got[0][0] == {"conn": "c1", "entry": "Team A #1", "segment": None, "name": "Max"}, got[0][0]
+    ages = [round(clock.t - s["mono"], 3) for _r, s in got]
+    assert ages == [round(11 / 60, 3), round(6 / 60, 3), 0.0], f"older packets are dated earlier: {ages}"
+    got.clear()
+    hub.ingest(_reg("c1", name="Max"), _batch(6, 1_000_001), None)     # a forged far-ahead id
+    age = clock.t - got[0][1]["mono"]
+    assert age <= tp.MAX_BATCH / tp.PACKET_HZ + 1e-9, f"back-dating stays within one batch: {age}"
+
+
+def t_a_failing_race_hook_never_fails_the_upload():
+    def boom(_reg, _sample):
+        raise ValueError("bad sample")
+    hub = ing.Hub(multi_lobby=lambda: False, on_sample=boom)
+    import logging
+    seen = []
+
+    class Grab(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+    handler = Grab()
+    logging.getLogger("racecast.relay").addHandler(handler)
+    try:
+        for start in (1, 7, 13):
+            res = hub.ingest(_reg("c1"), _batch(*range(start, start + 6)), None)
+            assert res["ok"] and res["accepted"] == 6, res
+    finally:
+        logging.getLogger("racecast.relay").removeHandler(handler)
+    assert len(seen) == 1 and "c1" in seen[0], f"one warning per connection, not one per sample: {seen}"
+
+
 def t_reset_drops_every_connection():
     hub, _clock = _hub()
     hub.ingest(_reg("c1"), _batch(1), None)

@@ -14,6 +14,7 @@
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
   racecast event track [ID|--clear|--list]  # the event's GT7 track layout: map and corner names from the first metre
   racecast event invite [--new]             # driver telemetry invite link (event start creates it, stop ends it)
+  racecast event race [--formation on|off] [--laps N|--time]  # driver telemetry race start and finish
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
@@ -1045,7 +1046,7 @@ EXTRA_VERBS = {
 # Internal verbs: routed but never advertised (frozen feed children use run-feed).
 HIDDEN_VERBS = {"streams": ("run-feed",)}
 ONESHOTS = ("preflight", "speedtest", "cookies", "graphics", "media", "brands", "setup", "install-tools", "install-apps", "obs-browser", "update")
-EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite")
+EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite", "race")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
@@ -5728,6 +5729,85 @@ def _track_pick_line(pick):
             + (f"\nwarning: {pick['warning']}" if pick.get("warning") else ""))
 
 
+def _driver_race_path():
+    import driver_race
+    return driver_race.path_in(_runtime_dir())
+
+
+def event_race_read_data(path=None):
+    """The driver race's event settings (#1112): formation lap, finish mode, lap count."""
+    import driver_race
+    return {"ok": True, "settings": driver_race.read_settings(path or _driver_race_path())}
+
+
+def event_race_write_data(changes, alive=None, post=None, path=None, foreign=None):
+    """Change the driver race settings. A relay of this profile applies them live
+    (POST /drivers/race/settings, which also saves them); otherwise the file the next
+    relay start reads. Returns {ok, settings, applied} or {ok: False, error}."""
+    import driver_race
+    if not isinstance(changes, dict):
+        return {"ok": False, "error": "settings must be an object"}
+    try:
+        changes = driver_race.validate(changes)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if _relay_runs_active_profile(alive, foreign):
+        post = post or _relay_post_json
+        try:
+            res = post(f"http://127.0.0.1:{RELAY_PORT}/drivers/race/settings", changes)
+        except Exception as exc:  # noqa: BLE001  surface as a clean error to the UI
+            return {"ok": False, "error": f"relay rejected the settings: {exc}"}
+        if not isinstance(res, dict) or not res.get("ok"):
+            return {"ok": False, "error": f"relay rejected the settings: {(res or {}).get('error', res)}"}
+        return {"ok": True, "settings": res["settings"], "applied": "relay"}
+    try:
+        return {"ok": True, "settings": driver_race.write_settings(path or _driver_race_path(), changes),
+                "applied": "file"}
+    except OSError as exc:
+        return {"ok": False, "error": f"could not save the settings: {exc}"}
+
+
+def _race_line(s):
+    finish = (f"after {s['lap_count']} laps" if s["finish_mode"] == "laps" and s["lap_count"]
+              else "by lap count (no count set yet)" if s["finish_mode"] == "laps"
+              else "by time: Final lap ends it")
+    return (f"Driver race: formation lap {'on' if s['formation'] else 'off'}, finish {finish}")
+
+
+def event_race_cmd(rest):
+    """racecast event race [--formation on|off] [--laps N | --time]: show or change the
+    driver telemetry race settings (#1112)."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="racecast event race",
+        description="Show or change how the driver telemetry race starts and finishes.")
+    parser.add_argument("--formation", choices=("on", "off"),
+                        help="distance starts after a formation lap (on) or at lap 1 (off)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--laps", type=int, metavar="N",
+                      help="finish when the leader completes N laps (GT7 lap counter)")
+    mode.add_argument("--time", action="store_true",
+                      help="timed race: Race Control or the director triggers Final lap")
+    args = parser.parse_args(rest)
+    _apply_active_profile_env()
+    changes = {}
+    if args.formation:
+        changes["formation"] = args.formation == "on"
+    if args.laps is not None:
+        changes.update(finish_mode="laps", lap_count=args.laps)
+    if args.time:
+        changes["finish_mode"] = "time"
+    if not changes:
+        print(_race_line(event_race_read_data()["settings"]))
+        return
+    d = event_race_write_data(changes)
+    if not d["ok"]:
+        sys.exit(d["error"])
+    print(_race_line(d["settings"]))
+    if d["applied"] == "file":
+        print("No relay runs this profile: its next relay start uses these settings.")
+
+
 def _driver_invite_path():
     import driver_invite
     return driver_invite.path_in(_runtime_dir())
@@ -6801,6 +6881,7 @@ DISPATCH = {
     ("event", "stop"): event_stop, ("event", "takeover"): event_takeover,
     ("event", "track"): event_track_cmd,
     ("event", "invite"): event_invite_cmd,
+    ("event", "race"): event_race_cmd,
     ("tailscale", "up"): tailscale_up_cmd, ("tailscale", "down"): tailscale_down_cmd,
     ("tailscale", "status"): tailscale_status_cmd,
     ("obs", "refresh"): obs_refresh_cmd, ("obs", "collection"): obs_collection_cmd,
@@ -9743,6 +9824,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "event_title_write": event_title_write_data,
         "event_track_read": event_track_read_data,
         "event_invite": event_invite_data,
+        "event_race_read": event_race_read_data,
+        "event_race_write": event_race_write_data,
         "event_track_write": event_track_write_data,
         "tailscale_peers": _tailscale_peers,
         "obs_collection": obs_collection_data,

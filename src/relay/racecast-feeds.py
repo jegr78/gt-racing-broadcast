@@ -203,6 +203,7 @@ import gt7_track_pick  # the event's picked GT7 layout (#1129)
 import telemetry_probe  # the driver telemetry probe ingest (#1110)
 import driver_invite    # event invite link and driver codes (#1111)
 import driver_ingest    # driver telemetry connections behind the invite (#1111)
+import driver_race      # race distance, gaps and finish from driver telemetry (#1112)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -2232,6 +2233,7 @@ NUMBER_HEADERS = ("number",)
 SCHEDULE_URL_HEADERS = ("url",)
 SCHEDULE_STREAMER_HEADERS = ("streamer", "name")  # "name" = the POV tab's column
 SCHEDULE_STINT_HEADERS = ("stint",)
+SCHEDULE_LAPS_HEADERS = ("laps",)   # optional: a stint lobby's lap count (#1112)
 # Crew tab headers (matched case-insensitively). The Crew tab carries
 # Name | Director | Producer boolean columns; commentator capability is NOT
 # listed here -- it is implied by presence in the live Schedule roster
@@ -7324,6 +7326,7 @@ class ScheduleSource:
         self.lock = threading.Lock()
         self.items = []
         self.rows = []
+        self.laps = {}
         self.last_ok = None
         self.last_error = None
         # Pending panel saves (spec 2026-10-06): applied after every refresh so a
@@ -7393,6 +7396,25 @@ class ScheduleSource:
         return out or None
 
     @staticmethod
+    def _parse_laps(text):
+        """{line: lap count} from an optional `Laps` header column; {} without one.
+        Kept apart from the 4-tuple rows that the whole relay unpacks."""
+        rows = list(csv.reader(io.StringIO(text)))
+        header = [(h or "").strip().lower() for h in rows[0]] if rows else []
+        laps_i = next((header.index(h) for h in SCHEDULE_LAPS_HEADERS if h in header), None)
+        out = {}
+        for line, r in enumerate(rows[1:], 2):
+            cell = r[laps_i].strip() if laps_i is not None and len(r) > laps_i else ""
+            if cell.isascii() and cell.isdigit() and 0 < int(cell) <= 999:
+                out[line] = int(cell)
+        return out
+
+    def final_laps(self):
+        """The `Laps` cell of the last schedule row, or None."""
+        with self.lock:
+            return self.laps.get(self.rows[-1][3]) if self.rows else None
+
+    @staticmethod
     def _parse_csv(text):
         """URL-only wrapper around _parse_rows; kept for the URL-list callers/tests."""
         rows = ScheduleSource._parse_rows(text)
@@ -7406,6 +7428,7 @@ class ScheduleSource:
             with urlopen(req, timeout=timeout) as resp:
                 text = resp.read().decode("utf-8", "replace")
             rows = self._parse_rows(text, self.allow_local)
+            self._fetched_laps = self._parse_laps(text)
             if not rows:
                 self.last_error = ("Sheet reachable, but no channel IDs found "
                                    "(correct tab name? a column with UC… IDs / watch URLs? sharing?)")
@@ -7420,6 +7443,7 @@ class ScheduleSource:
         if rows:
             with self.lock:
                 self.rows = rows
+                self.laps = getattr(self, "_fetched_laps", {})
                 self.items = [u for u, _n, _s, _l in rows]
                 self.last_ok = time.time()
                 self.last_error = None
@@ -11897,7 +11921,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
                  event_documents_source=None, browser_hosts=(), track_pick=None,
                  telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
-                 drive_page_path=None, sender_script_path=None, driver_segments=None):
+                 drive_page_path=None, sender_script_path=None, driver_segments=None,
+                 driver_race_svc=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -13933,6 +13958,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     invite = self._drive_invite()
                     return self._send({"invite": bool(invite), "connections": driver_hub.connections()},
                                       no_store=True)
+                if p == ["drivers", "race"] and driver_race_svc is not None:
+                    # Tailnet only: order, distances and gaps from driver telemetry (#1112).
+                    return self._send(driver_race_svc.standings(), no_store=True)
                 if p == ["telemetry", "probe"]:
                     # Tailnet only: the probe key and every sender's counters (#1110).
                     if telemetry_probe_obj is None:
@@ -14423,6 +14451,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p in (["event", "track"], ["race-control", "track"]):
                     return self._track_pick_post(body)
+                if p[:2] == ["drivers", "race"] and driver_race_svc is not None:
+                    action = p[2] if len(p) == 3 else None
+                    if action == "settings":
+                        try:
+                            return self._send({"ok": True,
+                                               "settings": driver_race_svc.set_settings(body)})
+                        except ValueError as exc:
+                            return self._send({"ok": False, "error": str(exc)}, 400)
+                    commands = {"final-lap": driver_race_svc.final_lap,
+                                "finish": driver_race_svc.finish, "reset": driver_race_svc.reset}
+                    if action in commands:
+                        commands[action]()
+                        return self._send({"ok": True, "state": driver_race_svc.standings()["state"]})
+                    return self._send({"error": "not found"}, 404)
                 if p == ["drivers", "disconnect"] and driver_hub is not None:
                     return self._send({"ok": driver_hub.disconnect(str(body.get("conn") or ""))})
                 if p == ["telemetry", "probe", "reset"]:
@@ -14829,6 +14871,32 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     telemetry.engineer = store
     telemetry.data_listeners.append(store.reload_data)
     return store
+
+
+def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
+    """Tell the driver race when the broadcast switches stints: that opens the driver
+    change window, and the switch onto the last schedule row brings the final lobby's
+    lap count (the row's `Laps` cell, else the event setting). Endurance only."""
+    last = None
+    while not stop_evt.wait(interval):
+        if relay.solo:
+            continue
+        try:
+            idx = relay.on_air_row_idx()
+            rows = relay.race_source.get_rows() if relay.race_source else []
+            switched = last is not None and idx != last
+            if (switched or last is None) and relay.mode == "race":
+                final = None
+                if rows and idx == len(rows) - 1:
+                    final = relay.race_source.final_laps() or settings_laps()
+                if switched or final:
+                    race_svc.stint_switch(final_laps=final, window=switched)
+                    LOG.info("driver race: %s row %d%s", "stint switch to" if switched
+                             else "on air at start:", idx + 1,
+                             f", final lobby over {final} laps" if final else "")
+            last = idx
+        except Exception as e:  # noqa: BLE001  a watcher error must never touch the broadcast
+            LOG.warning("driver race: stint watch failed: %s", e)
 
 
 def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0.0", GT7_RECV_PORT),
@@ -15741,7 +15809,16 @@ def main():
                  "GET /telemetry/probe on the tailnet shows the key and the counters")
     # Driver telemetry (#1111): the invite file is read per request, so event
     # start/stop and a regenerate in the CLI or Control Center act without a restart.
-    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo)
+    race_svc = driver_race.Service(
+        driver_race.path_in(runtime), pick=track_pick.store.current,
+        enabled=lambda: relay.mode == "race",
+        trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
+        if track_pick.store.tracks else None,
+        multi_lobby=lambda: not relay.solo)
+    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update)
+    threading.Thread(target=stint_switch_watch, daemon=True, args=(
+        relay, race_svc, stop_evt,
+        lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"])).start()
     sender_script_path = os.path.join(here, "racecast-sender.py")
     drive_page_path = None
     for cand in (os.path.join(here, "drive.html"), os.path.join(here, "..", "drive.html"),
@@ -15839,7 +15916,7 @@ def main():
         telemetry_probe_obj=probe,
         driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
-        driver_segments=driver_segments,
+        driver_segments=driver_segments, driver_race_svc=race_svc,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

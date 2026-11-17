@@ -9,10 +9,13 @@ for a full entry is refused while the others are live, not swapped in; a sender
 that reconnects with its own code is the same connection. Live data only, nothing
 is written to disk. The HTTP contract is `src/docs/design/driver-telemetry-ingest.md`.
 """
+import logging
 import threading
 import time
 
 import telemetry_probe
+
+LOG = logging.getLogger("racecast.relay")
 
 CONTRACT = 1
 RATE_HZ = 20
@@ -30,16 +33,22 @@ class Hub:
     """Connections keyed by the code's connection id. Thread-safe."""
 
     def __init__(self, multi_lobby, clock=time.monotonic, wall=time.time, rate_hz=RATE_HZ,
-                 max_connections=MAX_CONNECTIONS):
+                 max_connections=MAX_CONNECTIONS, on_sample=None):
+        """`on_sample(reg, sample)` receives every decoded sample with its connection's
+        {conn, entry, segment, name}, outside every lock; `sample["mono"]` is the
+        receive time on `clock`."""
         self._multi_lobby = multi_lobby
         self._clock = clock
         self.rate_hz = rate_hz
         self._max = max_connections
+        self._on_sample = on_sample
         self._counts = telemetry_probe.Probe(None, clock=clock, wall=wall, rate_hz=rate_hz,
-                                             max_senders=max_connections, samples=1)
+                                             max_senders=max_connections, samples=1,
+                                             on_sample=self._sample if on_sample else None)
         self._lock = threading.Lock()
         self._conns = {}        # conn -> {entry, segment, name, last}
         self._dropped = set()
+        self._hook_failed = set()
 
     def _live(self, now):
         return {c: m for c, m in self._conns.items() if now - m["last"] < LIVE_S}
@@ -87,6 +96,23 @@ class Hub:
             self._counts.forget(conn)
             raise IngestError("disconnected by the producer: register again on the invite page", 410)
         return {"ok": True, "v": CONTRACT, "rate_hz": self.rate_hz, "accepted": reply["accepted"]}
+
+    def _sample(self, conn, sample):
+        with self._lock:
+            meta = self._conns.get(conn)
+            reg = dict(meta, conn=conn) if meta and conn not in self._dropped else None
+        if reg is not None:
+            reg.pop("last", None)
+            try:
+                self._on_sample(reg, sample)
+            except Exception as exc:  # noqa: BLE001  the race must never break a driver's upload
+                with self._lock:
+                    first = conn not in self._hook_failed
+                    if first and len(self._hook_failed) < 4 * self._max:
+                        self._hook_failed.add(conn)
+                if first:
+                    LOG.warning("driver race: a sample of %s failed (%s: %s); further failures "
+                                "of this connection are not logged", conn, type(exc).__name__, exc)
 
     def disconnect(self, conn):
         with self._lock:

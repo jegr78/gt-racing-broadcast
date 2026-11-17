@@ -25,6 +25,7 @@ MAX_BATCH = 120           # two seconds of packets at 60 Hz
 MAX_BODY = len(MAGIC) + MAX_BATCH * (2 + MAX_PACKET)
 RATE_HZ = 20              # how often a sender posts; the reply tells the sender
 SAMPLE_EVERY = 6          # decrypt every 6th packet whole: 10 Hz samples at 60 Hz
+PACKET_HZ = 60.0          # GT7's send rate: back-dates a sample within its batch
 SENDER_STAT_KEYS = ("received", "forwarded", "posted", "dropped", "post_failed",
                     "interruptions", "heartbeats")
 COUNTERS = ("received", "lost", "reordered", "decrypt_failed", "parse_failed")
@@ -88,13 +89,14 @@ class Probe:
     """Per-sender counters behind one probe key. Thread-safe."""
 
     def __init__(self, key, clock=time.monotonic, wall=time.time, rate_hz=RATE_HZ,
-                 max_senders=16, samples=600):
+                 max_senders=16, samples=600, on_sample=None):
         self.key = key
         self._clock, self._wall = clock, wall
         self.rate_hz = rate_hz
         self._max_senders, self._samples = max_senders, samples
         self._lock = threading.Lock()
         self._senders = {}
+        self._on_sample = on_sample      # (name, sample) for every decoded sample, outside the lock
 
     def check_key(self, presented):
         return isinstance(presented, str) and bool(self.key) and hmac.compare_digest(
@@ -106,6 +108,10 @@ class Probe:
         packets = decode_batch(body)
         now, wall = self._clock(), self._wall()
         decoded = [gt7_crypto.decrypt_head(raw) + (raw,) for raw in packets]
+        pids = [gt7_packet_stats.packet_id(head) if head is not None else None
+                for _kind, head, _raw in decoded]
+        newest = max((p for p in pids if p is not None), default=None)
+        fresh = []
         with self._lock:
             sender = self._senders.get(name)
             if sender is None:
@@ -122,8 +128,7 @@ class Probe:
                 sender.sender_stats = {k: sender_stats[k] for k in SENDER_STAT_KEYS
                                        if type(sender_stats.get(k)) is int}
             accepted = 0
-            for kind, head, raw in decoded:
-                pid = gt7_packet_stats.packet_id(head) if head is not None else None
+            for (kind, _head, raw), pid in zip(decoded, pids, strict=True):
                 if pid is None:
                     sender.stats.on_decrypt_failure(now)
                     continue
@@ -133,10 +138,17 @@ class Probe:
                 accepted += 1
                 if pid % SAMPLE_EVERY == 0 or not sender.samples:
                     try:
-                        sender.samples.append(
-                            _sample(kind, pid, gt7_crypto.decrypt_typed(raw)[1], wall))
+                        sample = _sample(kind, pid, gt7_crypto.decrypt_typed(raw)[1], wall)
                     except (struct.error, ValueError, IndexError, TypeError):
                         sender.stats.on_parse_failure(now)
+                        continue
+                    # Every packet of a batch arrives at once: date each by its id.
+                    sample["mono"] = now - min(MAX_BATCH, max(0, newest - pid)) / PACKET_HZ
+                    sender.samples.append(sample)
+                    fresh.append(sample)
+        if self._on_sample is not None:
+            for sample in fresh:
+                self._on_sample(name, sample)
         return {"ok": True, "rate_hz": self.rate_hz, "accepted": accepted}
 
     @staticmethod

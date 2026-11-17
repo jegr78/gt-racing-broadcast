@@ -80,6 +80,18 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 - The producer sees every connection on the tailnet (`GET /drivers/data`) and
   disconnects one with `POST /drivers/disconnect {"conn": "..."}`.
 
+## Race
+
+`on_sample` of the hub hands every decoded sample to `driver_race.Service`
+(`race_distance.Race`), dated on the relay's clock by its packet id. Tailnet only:
+`GET /drivers/race` returns `{state, track, settings, line_length_m, entries}`;
+`POST /drivers/race/settings` takes `formation`, `finish_mode` (`laps`/`time`) and
+`lap_count`; `POST /drivers/race/final-lap`, `/finish` and `/reset` act on the race.
+`state` is `no_line`, `waiting`, `racing`, `final_lap`, `finishing` or `finished`;
+each entry carries `distance_m`, `laps`, `gap_s`, `interval_s`, `lapped`, `status`
+(`waiting`, `racing`, `box`, `no_data`), `finished`, `pit_stops`, `gt7_position`
+and `position_mismatch` (single lobby: GT7's position contradicts the distance order).
+
 ## Versioning
 
 `v` in every reply is the contract version. A change that an existing client cannot

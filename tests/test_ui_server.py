@@ -150,6 +150,11 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "ps_discover": ps_discover or (lambda: {
                 "ok": False, "consoles": [], "note": "", "from_relay": False}),
             "ps_write": ps_write or (lambda ip: {"ok": True, "path": "/x/.env"}),
+            "event_race_read": lambda: {"ok": True, "settings": {"formation": True,
+                                                                  "finish_mode": "laps", "lap_count": None}},
+            "event_race_write": lambda changes: (
+                {"ok": True, "settings": changes, "applied": "file"} if changes.get("lap_count") != 0
+                else {"ok": False, "error": "lap_count is 1 to 999, or none"}),
             "event_invite": lambda new=False: {"ok": True, "active": True, "renewed": new,
                                                "funnel": "https://h/console/drive?i=x", "tailnet": None},
             "gt7_forward_write": lambda targets: (
@@ -4329,6 +4334,19 @@ def t_api_ps_save_route():
         code, body = _post_json(port, "/api/ps/save", {"ip": "192.168.1.42"})
         assert code == 200 and json.loads(body)["ok"] is True
         assert saved["ip"] == "192.168.1.42"
+    finally:
+        httpd.shutdown()
+
+
+def t_api_event_race_reads_and_saves():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _get(port, "/api/event-race")
+        assert code == 200 and json.loads(body)["settings"]["formation"] is True, body
+        code, body = _post_json(port, "/api/event-race", {"lap_count": 12})
+        assert code == 200 and json.loads(body)["settings"] == {"lap_count": 12}, body
+        code, body = _post_json(port, "/api/event-race", {"lap_count": 0})
+        assert code == 400 and "lap_count" in json.loads(body)["error"], body
     finally:
         httpd.shutdown()
 
