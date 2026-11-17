@@ -39,6 +39,10 @@
     "handler": "fetchEventInvite",
     "surface": "ui/control-center.html"
   },
+  "event timing": {
+    "handler": "fetchEventTiming",
+    "surface": "ui/control-center.html"
+  },
   "event race": {
     "handler": "fetchEventRace",
     "surface": "ui/control-center.html"
