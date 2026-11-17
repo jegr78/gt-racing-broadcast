@@ -12,6 +12,9 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 # saved original is verified in its own seam-isolated test below. (#317)
 _ORIG_ANNOUNCE_TAKEOVER = m._announce_takeover
 m._announce_takeover = lambda *a, **k: None
+# event start/stop must never touch the invite a running event on this machine holds.
+_INVITE_DIR = tempfile.mkdtemp(prefix="racecast-invite-")
+m._driver_invite_path = lambda: os.path.join(_INVITE_DIR, "driver-invite.json")
 
 
 def t_frozen_child_env_moves_the_extraction_dir_out_of_os_temp():
@@ -3183,6 +3186,56 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
     assert _drive(False, "", "demo") == [], "no relay yet: relay_start seeds state from scratch"
     assert _drive(True, "other-league", "demo") == [], \
         "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
+
+
+def t_event_start_and_stop_drive_the_invite():
+    class _Reached(Exception):
+        pass
+
+    def _start(rest, running, new_session=True):
+        ev = m._event_modules()[0]
+        calls = []
+        saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+                 m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
+                 m._start_driver_invite)
+        restore = _stub_relay_signals((4242,) if running else (), 4242 if running else None,
+                                      running, "demo" if running else "", "demo")
+        with tempfile.TemporaryDirectory() as tmp:
+            m._event_gate_results = lambda e, p: []
+            m._tailscale_connect = lambda e: "ok"
+            ev.app_running = lambda app, platform=None: True
+            m._runtime_dir = lambda: tmp
+            m._sync_live_telemetry_record = lambda: None
+            m._wait_for_obs_ready = lambda timeout=0, early=False: False
+            m._start_driver_invite = calls.append
+
+            def _boom(_rest):
+                raise _Reached()
+            m.relay_start = _boom
+            try:
+                m.event_start(rest, _new_session=new_session)
+            except _Reached:
+                return calls
+            finally:
+                restore()
+                (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+                 m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
+                 m._start_driver_invite) = saved
+        raise AssertionError("expected to reach relay_start")
+
+    assert _start([], running=False) == [True], "a new event gets a new invite link"
+    assert _start([], running=True) == [False], "Start event on a running event keeps the drivers' codes"
+    assert _start(["--stint", "3"], running=False) == [False], "a recovery restart keeps the link"
+    assert _start([], running=False, new_session=False) == [False], "a takeover keeps or creates one"
+    stopped = []
+    saved = (m._stop_driver_invite, m._relay_is_alive)
+    try:
+        m._stop_driver_invite = lambda: stopped.append(True)
+        m._relay_is_alive = lambda: False
+        m.event_stop([])
+    finally:
+        m._stop_driver_invite, m._relay_is_alive = saved
+    assert stopped == [True], "event stop ends the invite even when the relay is already gone"
 
 
 def t_profile_env_vars_includes_event_title():
@@ -6733,6 +6786,25 @@ def t_gt7_forward_write_validates_normalises_and_clears():
         assert "10.0.0.5" not in text, f"an empty text clears the targets: {text!r}"
     finally:
         os.remove(path)
+
+
+def t_driver_invite_follows_the_event_and_regenerates():
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "driver-invite.json")
+    links = lambda i: {"funnel": f"https://h/console/drive?i={i}", "tailnet": "t"}  # noqa: E731
+    assert m.event_invite_data(path=path, links=links) == {"ok": True, "active": False}
+    m._start_driver_invite(True, path=path)
+    first = m.event_invite_data(path=path, links=links)
+    assert first["active"] and first["funnel"].startswith("https://h/console/drive?i="), first
+    m._start_driver_invite(False, path=path)
+    assert m.event_invite_data(path=path, links=links)["funnel"] == first["funnel"], \
+        "a takeover or recovery restart keeps the invite the drivers hold"
+    m._start_driver_invite(True, path=path)
+    assert m.event_invite_data(path=path, links=links)["funnel"] != first["funnel"], "a new event, a new link"
+    renewed = m.event_invite_data(new=True, path=path, links=links)
+    assert renewed["active"] and renewed["funnel"] != first["funnel"]
+    m._stop_driver_invite(path=path)
+    assert m.event_invite_data(path=path, links=links)["active"] is False, "event stop ends the link"
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):

@@ -201,6 +201,8 @@ import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
 import gt7_tracks      # GT7 track recognition from lap positions (#787)
 import gt7_track_pick  # the event's picked GT7 layout (#1129)
 import telemetry_probe  # the driver telemetry probe ingest (#1110)
+import driver_invite    # event invite link and driver codes (#1111)
+import driver_ingest    # driver telemetry connections behind the invite (#1111)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -11894,7 +11896,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
                  intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None, radio_service=None, radio_native=None,
                  event_documents_source=None, browser_hosts=(), track_pick=None,
-                 telemetry_probe_obj=None):
+                 telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
+                 drive_page_path=None, sender_script_path=None, driver_segments=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -11949,6 +11952,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     if health_store is not None:
         relay.health_store = health_store
     _console_authfail_rl = console_auth.RateLimiter(limit=20, window_s=60)
+    # Its own bucket: senders still holding codes of a regenerated invite retry once a
+    # minute and must not lock console logins out of the shared one.
+    _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
+    _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
     # Every open crew page polls the take view; one OBS read serves them all for a
@@ -12806,6 +12813,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._oauth_login()
             if sub == ["oauth", "callback"]:
                 return self._oauth_callback()
+            # Driver telemetry probe (#1110): a sender posts with the probe key, not
+            # a console token. Off unless the relay started with the probe enabled.
+            if sub == ["probe", "ingest"]:
+                return self._probe_ingest(method)
+            # Driver telemetry (#1111): the invite link and the codes it issues are the
+            # credential here, never a console token, and they reach nothing else.
+            if sub[:1] == ["drive"]:
+                return self._drive(sub[1:], method)
             # Producer-to-producer takeover pull (#216 Phase 7): authorized by the
             # shared per-league step-up secret ALONE. Producer B holds the league
             # CONSOLE_SECRET (it signs every token). NOT a per-person commentator
@@ -12815,10 +12830,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             # sufficient. A missing/invalid secret is 403 (step-up required), NEVER
             # 401, which misled operators into blaming a matching secret. Runs BEFORE
             # the subject check below precisely so no token is needed.
-            # Driver telemetry probe (#1110): a sender posts with the probe key, not
-            # a console token. Off unless the relay started with the probe enabled.
-            if sub == ["probe", "ingest"]:
-                return self._probe_ingest(method)
             if sub and sub[0] == "takeover":
                 presented = self.headers.get("X-Console-Secret")
                 if not (presented and console_auth.secret_matches(presented, console_secret)):
@@ -13917,6 +13928,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         for (n, d, pr, c, rc, x, re) in (CrewSource._member(row) for row in rows)]})
                 if p == ["event", "track"]:
                     return self._track_pick_get()
+                if p == ["drivers", "data"] and driver_hub is not None:
+                    # Tailnet only: every driver sender with its entry and counters (#1111).
+                    invite = self._drive_invite()
+                    return self._send({"invite": bool(invite), "connections": driver_hub.connections()},
+                                      no_store=True)
                 if p == ["telemetry", "probe"]:
                     # Tailnet only: the probe key and every sender's counters (#1110).
                     if telemetry_probe_obj is None:
@@ -14030,6 +14046,96 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return None          # client also gone before the error could be sent
         def _ok(self, r):
             self._send(r) if r else self._send({"error":"feed? (A/B)"}, 404)
+        def _drive_invite(self):
+            return _invite_cache.get() if _invite_cache else None
+
+        def _drive_refuse(self, status, message):
+            client = self.client_address[0] if self.client_address else "?"
+            if status in (401, 403) and not _drive_authfail_rl.allow(client):
+                status, message = 429, "too many attempts"
+            self._send({"error": message}, status)
+            return None
+
+        def _drive(self, rest, method):
+            hub, invite = driver_hub, self._drive_invite()
+            if hub is None or not driver_invite_path:
+                self._send({"error": "not found"}, 404)
+                return None
+            if rest == ["ingest"]:
+                if method != "POST":
+                    return self._drive_refuse(405, "POST only")
+                reg = driver_invite.verify(invite, self.headers.get("X-Driver-Code"))
+                if reg is None:
+                    return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
+                roster = hud_source.roster_names() if hud_source else []
+                if roster and reg["entry"] not in roster:   # an unread roster blocks nobody
+                    return self._drive_refuse(403, "this entry is no longer in the league's list: register again")
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 < length <= telemetry_probe.MAX_BODY:
+                    return self._drive_refuse(413 if length > 0 else 400, "bad body length")
+                body = self.rfile.read(length)
+                self._body_consumed = True
+                try:
+                    stats = json.loads(self.headers.get("X-Sender-Stats") or "null")
+                except ValueError:
+                    stats = None
+                try:
+                    self._send(hub.ingest(reg, body, stats))
+                except driver_ingest.IngestError as exc:
+                    self._send({"error": str(exc)}, exc.status)
+                return None
+            presented = (parse_qs(urlparse(self.path).query).get("i") or [""])[0]
+            if not invite or not hmac.compare_digest(presented.encode("utf-8", "replace"),
+                                                     invite["id"].encode("utf-8")):
+                return self._drive_refuse(403, "this invite link is not valid (any more)")
+            if rest == [] and method == "GET":
+                if not drive_page_path:
+                    return self._send({"error": "page not found"}, 404)
+                return self._send_page(drive_page_path, "/console")
+            if rest == ["data"] and method == "GET":
+                multi = not relay.solo
+                return self._send({
+                    "v": driver_ingest.CONTRACT, "multi_lobby": multi,
+                    "roster": hud_source is not None,
+                    "entries": hud_source.roster_names() if hud_source else [],
+                    "segments": (driver_segments() if driver_segments else []) if multi else [],
+                    "rate_hz": hub.rate_hz}, no_store=True)
+            if rest == ["sender.py"] and method == "GET":
+                return self._send_file(sender_script_path, "text/x-python; charset=utf-8")
+            if rest == ["register"] and method == "POST":
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = -1
+                if not 0 < length <= 4096:
+                    return self._drive_refuse(400, "bad body length")
+                try:
+                    body = json.loads(self.rfile.read(length))
+                except ValueError:
+                    body = None
+                self._body_consumed = True
+                if not isinstance(body, dict):
+                    return self._send({"error": "body must be a JSON object"}, 400)
+                entries = hud_source.roster_names() if hud_source else []
+                segment = body.get("segment") or None
+                if body.get("entry") not in entries:
+                    return self._send({"error": "pick an entry from the list"}, 400)
+                segments = driver_segments() if (driver_segments and not relay.solo) else []
+                if segments and segment not in segments:
+                    return self._send({"error": "pick your stint or segment from the list"}, 400)
+                if not segments:
+                    segment = None   # a league without stint labels registers by entry only
+                try:
+                    issued = driver_invite.issue(invite, entry=body["entry"],
+                                                 name=body.get("name"), segment=segment)
+                except ValueError as exc:
+                    return self._send({"error": str(exc)}, 400)
+                return self._send({"ok": True, "code": issued, "v": driver_ingest.CONTRACT}, no_store=True)
+            return self._drive_refuse(404, "not found")
+
         def _probe_ingest(self, method):
             probe = telemetry_probe_obj
             if probe is None or method != "POST":
@@ -14317,6 +14423,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p in (["event", "track"], ["race-control", "track"]):
                     return self._track_pick_post(body)
+                if p == ["drivers", "disconnect"] and driver_hub is not None:
+                    return self._send({"ok": driver_hub.disconnect(str(body.get("conn") or ""))})
                 if p == ["telemetry", "probe", "reset"]:
                     if telemetry_probe_obj is None:
                         return self._send({"enabled": False}, 404)
@@ -15631,6 +15739,26 @@ def main():
         probe = telemetry_probe.Probe(secrets.token_urlsafe(16))
         LOG.info("telemetry probe on: senders post to /console/probe/ingest; "
                  "GET /telemetry/probe on the tailnet shows the key and the counters")
+    # Driver telemetry (#1111): the invite file is read per request, so event
+    # start/stop and a regenerate in the CLI or Control Center act without a restart.
+    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo)
+    sender_script_path = os.path.join(here, "racecast-sender.py")
+    drive_page_path = None
+    for cand in (os.path.join(here, "drive.html"), os.path.join(here, "..", "drive.html"),
+                 os.path.join(here, "..", "console", "drive.html")):
+        if os.path.exists(cand):
+            drive_page_path = os.path.abspath(cand)
+            break
+
+    def driver_segments():
+        """Stint and qualifying labels a driver can register for, in sheet order."""
+        out = []
+        for src in (relay.race_source, relay.qual_source):
+            for row in (src.get_rows() if src else []):
+                label = (row[2] or "").strip()
+                if label and label not in out:
+                    out.append(label)
+        return out
     radio_link = getattr(engineer_live, "radio_link", None)
     def radio_snapshot():
         snapshot = engineer_live.snapshot() if engineer_live is not None else {}
@@ -15709,6 +15837,9 @@ def main():
         telemetry_store=telemetry_store,
         track_pick=track_pick,
         telemetry_probe_obj=probe,
+        driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
+        drive_page_path=drive_page_path, sender_script_path=sender_script_path,
+        driver_segments=driver_segments,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

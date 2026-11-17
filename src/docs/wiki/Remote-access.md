@@ -155,6 +155,13 @@ What stays private (reachable only on the tailnet or loopback, never over Funnel
   not funnelled; the relay proxies only the web-buttons page at `/console/buttons` (see
   below).
 
+**Driver telemetry (`/console/drive`).** It takes no console identity, like the
+step-up-secret takeover pull: the event's invite link (`?i=`) opens the registration page, and the driver
+code it issues authorizes only `POST /console/drive/ingest`, which accepts encrypted GT7
+packets and counts them. Neither credential opens any other `/console` page. `racecast
+event stop` ends the invite and `racecast event invite --new` replaces it, which revokes
+every code. See the [driver guide](Driver-Telemetry).
+
 Confirm the boundary from outside the tailnet after `racecast funnel on`:
 `https://<magicdns-host>/status` and `/panel` must **not** load, only `/console` should.
 

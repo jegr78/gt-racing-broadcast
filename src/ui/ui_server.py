@@ -599,6 +599,12 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"relay stats failed: {exc}"},
                                       code=500)
+            if path == "/api/event-invite":
+                try:
+                    return self._json(ctx["event_invite"]())
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"invite read failed: {exc}"},
+                                      code=500)
             if path == "/api/event-track":
                 try:
                     layouts = parse_qs(urlparse(self.path).query).get("layouts") == ["1"]
@@ -1079,6 +1085,17 @@ def make_handler(ctx):
                                        "error": f"could not save the forward targets: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/event-invite":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error},
+                                      code=400)
+                try:
+                    return self._json(ctx["event_invite"](new=body.get("new") is True))
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not renew the invite: {exc}"},
+                                      code=500)
             if path == "/api/event-track":
                 body = self._body_json()
                 if body is None:

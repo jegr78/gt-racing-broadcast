@@ -150,6 +150,8 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "ps_discover": ps_discover or (lambda: {
                 "ok": False, "consoles": [], "note": "", "from_relay": False}),
             "ps_write": ps_write or (lambda ip: {"ok": True, "path": "/x/.env"}),
+            "event_invite": lambda new=False: {"ok": True, "active": True, "renewed": new,
+                                               "funnel": "https://h/console/drive?i=x", "tailnet": None},
             "gt7_forward_write": lambda targets: (
                 {"ok": True, "value": targets} if "!" not in (targets or "")
                 else {"ok": False, "error": "x!: use HOST:PORT"}),
@@ -4327,6 +4329,19 @@ def t_api_ps_save_route():
         code, body = _post_json(port, "/api/ps/save", {"ip": "192.168.1.42"})
         assert code == 200 and json.loads(body)["ok"] is True
         assert saved["ip"] == "192.168.1.42"
+    finally:
+        httpd.shutdown()
+
+
+def t_api_event_invite_reads_and_renews():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _get(port, "/api/event-invite")
+        assert code == 200 and json.loads(body)["renewed"] is False, body
+        code, body = _post_json(port, "/api/event-invite", {"new": True})
+        assert code == 200 and json.loads(body)["renewed"] is True, body
+        code, body = _post_json(port, "/api/event-invite", {"new": "yes"})
+        assert json.loads(body)["renewed"] is False, "only a literal true renews the link"
     finally:
         httpd.shutdown()
 

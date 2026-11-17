@@ -63,7 +63,10 @@ the `racecast` services down. The sidebar also shows the **active league profile
 (click it to jump to the Profile view). From here you also open the Director panel
 and copy the director / Web Buttons links. Under the event title, **Track layout** picks
 the event's GT7 layout for the telemetry (see [Telemetry](Telemetry)); a layout marked
-"no line" has no downloaded racing line and shows a warning.
+"no line" has no downloaded racing line and shows a warning. **Driver invite** shows the
+link drivers open to send their telemetry ([driver guide](Driver-Telemetry)): **Start
+event** creates it, **Stop event** ends it, **Copy** copies it and **New link** replaces
+it, after which every driver registers again.
 
 #### System
 
@@ -76,7 +79,7 @@ Center is open, whether or not the relay is running, the machine-resource histor
 in the [Health Monitor](Health-Monitor), by contrast, are recorded by the relay.
 
 > **CLI alternative:** `racecast status`, `racecast event start [--stint N]`, `racecast event stop`,
-> `racecast event track [ID|--clear|--list]`.
+> `racecast event track [ID|--clear|--list]`, `racecast event invite [--new]`.
 
 ### Profile
 

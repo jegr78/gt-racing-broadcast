@@ -13,6 +13,7 @@
   racecast event start --qualifying          # bring up in qualifying mode (Feed A serves the Qualifying tab)
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
   racecast event track [ID|--clear|--list]  # the event's GT7 track layout: map and corner names from the first metre
+  racecast event invite [--new]             # driver telemetry invite link (event start creates it, stop ends it)
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
@@ -1044,7 +1045,7 @@ EXTRA_VERBS = {
 # Internal verbs: routed but never advertised (frozen feed children use run-feed).
 HIDDEN_VERBS = {"streams": ("run-feed",)}
 ONESHOTS = ("preflight", "speedtest", "cookies", "graphics", "media", "brands", "setup", "install-tools", "install-apps", "obs-browser", "update")
-EVENT_VERBS = ("status", "start", "stop", "takeover", "track")
+EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
@@ -5727,6 +5728,78 @@ def _track_pick_line(pick):
             + (f"\nwarning: {pick['warning']}" if pick.get("warning") else ""))
 
 
+def _driver_invite_path():
+    import driver_invite
+    return driver_invite.path_in(_runtime_dir())
+
+
+_INVITE_HOSTS = {"at": None, "magic": "", "ip": None}
+
+
+def _invite_hosts(now=None):
+    """MagicDNS name and Tailscale IP, looked up at most once a minute: the Control
+    Center polls the invite every few seconds and each lookup runs `tailscale`."""
+    now = time.monotonic() if now is None else now
+    if _INVITE_HOSTS["at"] is None or now - _INVITE_HOSTS["at"] > 60:
+        _INVITE_HOSTS.update(at=now, magic=_tailscale_magicdns(), ip=_tailscale_ip())
+    return _INVITE_HOSTS["magic"], _INVITE_HOSTS["ip"]
+
+
+def _invite_links(invite_id, magic=None, host=None):
+    """Funnel and tailnet invite URLs; None for one whose host Tailscale does not know."""
+    if magic is None and host is None:
+        magic, host = _invite_hosts()
+    return {"funnel": f"https://{magic}/console/drive?i={invite_id}" if magic else None,
+            "tailnet": f"http://{host}:{RELAY_PORT}/console/drive?i={invite_id}" if host else None}
+
+
+def event_invite_data(new=False, path=None, links=None):
+    """The event's driver telemetry invite (#1111): {ok, active, funnel, tailnet,
+    created}. `new` regenerates it, which revokes every driver code of the old one.
+    `path` and `links` are test seams."""
+    import driver_invite
+    path = path or _driver_invite_path()
+    invite = driver_invite.create(path) if new else driver_invite.current(path)
+    if invite is None:
+        return {"ok": True, "active": False}
+    return dict({"ok": True, "active": True, "created": invite["created"]},
+                **(links or _invite_links)(invite["id"]))
+
+
+def _start_driver_invite(fresh, path=None):
+    """A fresh event gets a new invite; a takeover or recovery restart keeps one."""
+    import driver_invite
+    path = path or _driver_invite_path()
+    if fresh or driver_invite.current(path) is None:
+        driver_invite.create(path)
+
+
+def _stop_driver_invite(path=None):
+    import driver_invite
+    driver_invite.clear(path or _driver_invite_path())
+
+
+def event_invite_cmd(rest):
+    """racecast event invite [--new]: show the driver telemetry invite link, or
+    regenerate it (#1111)."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="racecast event invite",
+        description="Show the event's driver telemetry invite link. --new replaces it: "
+                    "every driver then registers again on the new link.")
+    parser.add_argument("--new", action="store_true", help="regenerate the invite link")
+    args = parser.parse_args(rest)
+    _apply_active_profile_env()
+    d = event_invite_data(new=args.new)
+    if not d["active"]:
+        print("No driver invite: `racecast event start` creates one, `--new` makes one now.")
+        return
+    print(("New driver invite link (the old one no longer works):" if args.new
+           else "Driver invite link:"))
+    print(f"  funnel:  {d['funnel'] or 'unknown (is Tailscale up with MagicDNS?)'}\n"
+          f"  tailnet: {d['tailnet'] or 'unknown (is Tailscale up?)'}")
+
+
 def event_track_cmd(rest):
     """racecast event track [ID | --clear | --list]: show, pick or clear the event's
     GT7 layout (#1129)."""
@@ -6248,12 +6321,20 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # qualifying mode, and --title sets the event title. Reset the broadcast-Part
     # pointer before the relay starts, so its PartStore comes up on the right Part.
     _write_part_reset(_part_index(rest))
+    fresh = _new_session and not _is_continuation_start(rest)
+    relay_was_running = _relay_already_running_for_active_profile() if fresh else False
+    try:
+        # Start event again on a running event (OBS or Companion back up) keeps the
+        # drivers' codes; only a new event gets a new link.
+        _start_driver_invite(fresh and not relay_was_running)
+    except OSError as exc:
+        print(f"driver invite: not created ({exc}).")
     # Mark THIS event's start so the report window begins here: a restart within
     # report_build.SESSION_GAP_S must not merge the previous event's health samples
     # into this report. A fresh broadcast only, since a takeover or a mid-event
     # recovery restart keeps the existing window so the report stays continuous.
-    if _new_session and not _is_continuation_start(rest):
-        was_running = _relay_already_running_for_active_profile()
+    if fresh:
+        was_running = relay_was_running
         _write_session_start()
         _reset_telemetry_record()
         if was_running:   # same relay, same profile: it won't re-read the file itself
@@ -6337,6 +6418,10 @@ def event_stop(rest):
     now would resolve NO commentator names and drop the qualifying marker (both need
     the live relay), overwriting/re-sending a strictly worse report. So a stop with no
     live relay is a no-op. The good report stands."""
+    try:
+        _stop_driver_invite()          # the invite link dies with the event
+    except OSError as exc:
+        print(f"driver invite: not removed ({exc}).")
     if not _relay_is_alive():
         print("Event already stopped: nothing to do "
               "(the last-part auto-stop already ran the report + teardown; the "
@@ -6715,6 +6800,7 @@ DISPATCH = {
     ("event", "status"): event_status, ("event", "start"): event_start,
     ("event", "stop"): event_stop, ("event", "takeover"): event_takeover,
     ("event", "track"): event_track_cmd,
+    ("event", "invite"): event_invite_cmd,
     ("tailscale", "up"): tailscale_up_cmd, ("tailscale", "down"): tailscale_down_cmd,
     ("tailscale", "status"): tailscale_status_cmd,
     ("obs", "refresh"): obs_refresh_cmd, ("obs", "collection"): obs_collection_cmd,
@@ -9656,6 +9742,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "event_title_read": event_title_read_data,
         "event_title_write": event_title_write_data,
         "event_track_read": event_track_read_data,
+        "event_invite": event_invite_data,
         "event_track_write": event_track_write_data,
         "tailscale_peers": _tailscale_peers,
         "obs_collection": obs_collection_data,

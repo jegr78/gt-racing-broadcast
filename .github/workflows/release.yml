@@ -25,12 +25,16 @@ jobs:
         include:
           - os: windows-latest
             asset: racecast-windows.zip
+            sender: dist/bin/racecast-sender.exe
+            sender_asset: racecast-sender-windows.exe
             built: dist/bin/racecast.exe
             binary: racecast.exe
             built_ui: dist/bin/racecast-ui.exe
             binary_ui: racecast-ui.exe
           - os: macos-latest
             asset: racecast-macos.tar.gz
+            sender: dist/bin/racecast-sender
+            sender_asset: racecast-sender-macos
             built: dist/bin/racecast
             binary: racecast
             built_ui: dist/bin/racecast-ui.app
@@ -75,3 +79,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.ref_name }}" "${{ matrix.asset }}" --clobber
+      - name: Upload the driver sender program (Windows, macOS)
+        if: matrix.sender_asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "${{ matrix.sender }}" "${{ matrix.sender_asset }}"
+          gh release upload "${{ github.ref_name }}" "${{ matrix.sender_asset }}" --clobber

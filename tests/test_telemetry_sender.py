@@ -271,6 +271,52 @@ def t_the_default_bind_is_one_interface_never_all():
         sender.sock.close()
 
 
+def t_an_invite_code_authenticates_and_a_quiet_console_keeps_the_slot():
+    import urllib.error
+    calls, clock, said = [], [0.0], []
+
+    def opener(req, timeout):
+        calls.append((req.full_url, dict(req.header_items()), req.data))
+        if len(calls) == 3:
+            raise urllib.error.HTTPError(req.full_url, 409, "Conflict", {}, None)
+        return _Reply(b'{"ok": true}')
+    up = snd.Uploader("https://h/console/drive/ingest", code="D1:abc.def", opener=opener,
+                      say=said.append, clock=lambda: clock[0])
+    up.put(b"p1")
+    up.post_once()
+    url, headers, data = calls[0]
+    assert url == "https://h/console/drive/ingest" and headers["X-driver-code"] == "D1:abc.def", (url, headers)
+    assert "X-probe-key" not in headers and tp.decode_batch(data) == [b"p1"]
+    clock[0] = snd.KEEPALIVE_S - 1
+    up.post_once()
+    assert len(calls) == 1, "no empty post while packets flow or the console was quiet only briefly"
+    clock[0] = 1 + snd.KEEPALIVE_S
+    up.post_once()
+    assert len(calls) == 2 and tp.decode_batch(calls[1][2]) == [], "a keepalive is an empty batch"
+    clock[0] = 2 * snd.KEEPALIVE_S + 2
+    assert up.post_once() == snd.REFUSED_WAIT_S
+    assert said and "Someone else sends for this entry" in said[-1], said
+
+
+def t_cli_takes_a_code_or_the_probe_key_and_name_never_both():
+    quick = ["--listen", "0", "--bind", "127.0.0.1", "--duration", "0"]
+    for argv, text in ((["--url", "http://127.0.0.1:9/i", "--code", "D1:a.b", "--name", "n"] + quick,
+                        "leave out --key and --name"),
+                       (["--url", "http://127.0.0.1:9/i"] + quick, "pass --code from the invite page")):
+        err = io.StringIO()
+        old = sys.stderr
+        sys.stderr = err
+        try:
+            snd.main(argv)
+        except SystemExit as exc:
+            assert exc.code == 2, argv
+        else:
+            raise AssertionError(f"{argv} must be refused")
+        finally:
+            sys.stderr = old
+        assert text in err.getvalue(), (argv, err.getvalue())
+
+
 def t_cli_help_is_ascii():
     out = io.StringIO()
     old = sys.stdout
@@ -355,7 +401,7 @@ def t_refused_posts_drop_or_wait_instead_of_retrying_forever():
     up.put(b"p")
     assert up.post_once() == snd.REFUSED_WAIT_S and up.post_once() == snd.REFUSED_WAIT_S, \
         "a refused key waits a minute between tries"
-    assert sum("Check the link and the key" in line for line in said) == 2, said
+    assert sum("Register again on the invite page" in line for line in said) == 2, said
     assert up.post_once() == 0.05 and up.pending() == 0
 
 

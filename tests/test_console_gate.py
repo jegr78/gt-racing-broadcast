@@ -50,7 +50,7 @@ class _Crew:
 
 def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None,
            graphics_take="off", flag_graphic_store=None, solo=False, browser_hosts=(),
-           track_pick=None, telemetry_probe_obj=None):
+           track_pick=None, telemetry_probe_obj=None, **extra):
     rows = [("https://youtu.be/a", "Alice", "1", 2)]           # alice -> commentator
     src = _FakeSource(_URLS8, rows)
     relay = m.Relay(src, [53001, 53002], LOGDIR, sheet_id=sheet_id)
@@ -76,7 +76,7 @@ def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None,
         graphics_dir=graphics_dir,
         graphics_take=graphics_take,
         flag_graphic_store=flag_graphic_store,
-        track_pick=track_pick, telemetry_probe_obj=telemetry_probe_obj)
+        track_pick=track_pick, telemetry_probe_obj=telemetry_probe_obj, **extra)
     srv = m.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
