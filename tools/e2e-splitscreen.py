@@ -35,6 +35,7 @@ def main():
         trace = []
         state = {'current': 'A', 'next_active': True}
         ctx = ui._ctx()
+        ctx['active_profile'] = cli.m._active_profile_name  # writes carry the league the page loaded
         ctx.update(version='dev build',
             status=lambda: {'relay': {'alive': False}, 'streams': [], 'companion': {'running': False}},
             overlay_asset_serve=m.overlay_asset_serve,

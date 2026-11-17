@@ -214,6 +214,7 @@ def main():
         profile.write_text('NAME=Demo Racing\nKIND=solo\nTEMPLATE=pov\n', encoding="utf-8")
         calls = []
         ctx = ui._ctx()
+        ctx['active_profile'] = cli.m._active_profile_name  # writes carry the league the page loaded
         ctx.update(version='dev build',
             status=lambda: {'relay': {'alive': False}, 'streams': [], 'companion': {'running': False}},
             overlay_asset_serve=m.overlay_asset_serve,
