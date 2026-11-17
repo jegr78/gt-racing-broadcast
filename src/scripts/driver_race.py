@@ -195,7 +195,8 @@ def _viewer_entry(row, roster):
             "color": info.get("bgColor") or "", "text_color": info.get("textColor") or ""}
 
 
-_PUBLIC_TOP = ("v", "mode", "stint", "remaining", "track_name", "state", "red_flag", "lap", "show")
+_PUBLIC_TOP = ("v", "mode", "stint", "remaining", "remaining_running", "delay_s", "track_name", "state",
+               "red_flag", "lap", "show")
 _PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color", "laps",
                "stint_laps", "gap_s", "interval_s", "lapped", "status", "pit_stops",
                "last_lap_ms", "finished", "best_ms", "gap_ms")
@@ -409,10 +410,12 @@ class Service:
         roster = ctx.get("roster") or {}
         pick = self._pick() or {}
         out = {"v": 1, "mode": ctx.get("mode") or "race", "stint": ctx.get("stint"),
-               "remaining": ctx.get("remaining"), "track": pick.get("id"),
-               "track_name": pick.get("track") or None, "visible": self._settings()["visible"]}
+               "remaining": ctx.get("remaining"), "remaining_running": bool(ctx.get("remaining_running")),
+               "track": pick.get("id"), "track_name": pick.get("track") or None,
+               "visible": self._settings()["visible"]}
         race = self._current()
         settings = self._settings()
+        out["delay_s"] = settings["delay_s"]
         out["show"] = {"compound": settings["show_compound"], "fuel": settings["show_fuel"]}
         compounds = _saved_compounds(_actions_path_for(self._path))
         if out["mode"] == "qualifying":

@@ -7,7 +7,7 @@
 <title>Live timing</title>
 <style>
   :root { color-scheme: dark; --bg: #0b0d10; --panel: #14171c; --edge: #232830; --ink: #e8eaed;
-          --muted: #9aa0a6; --accent: #e10600; --purple: #c49bff; }
+          --muted: #9aa0a6; --accent: #e10600; --purple: #c49bff; --warn: #ffd361; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; }
   header { padding: 14px 16px 10px; background: var(--panel); border-bottom: 3px solid var(--accent); }
@@ -15,6 +15,7 @@
   header h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: .02em; }
   #session { margin-top: 4px; color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
   #session .flag { color: #ff6b6b; font-weight: 800; }
+  #session .stale { color: var(--warn); }
   main { padding: 12px 16px 24px; max-width: 1100px; margin: 0 auto; }
   .cols { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .cols label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted);
@@ -29,7 +30,7 @@
                 font-weight: 800; background: #39414d; color: #fff; }
   td.drv { white-space: normal; min-width: 120px; }
   td.drv small { display: block; color: var(--muted); font-size: 12px; }
-  tr.box td { color: #ffd361; }
+  tr.box td { color: var(--warn); }
   tr.off td { color: var(--muted); }
   .fl { color: var(--purple); font-weight: 700; }
   .tyre { font-weight: 800; }
@@ -75,6 +76,8 @@
     if (saved !== null) hidden = new Set(JSON.parse(saved));
   } catch (e) { /* defaults */ }
   let last = null;
+  // Poll pacing comes from the server (X-Poll-After); between polls the clock runs locally.
+  let etag = null, interval = 2, got = 0, dataAge = 0;
   const $ = (id) => document.getElementById(id);
 
   function el(tag, cls, text) {
@@ -146,11 +149,17 @@
     const parts = [];
     if (quali) parts.push("Qualifying");
     else if (d.lap && d.lap.leader) parts.push("Lap " + d.lap.leader + (d.lap.count ? " / " + d.lap.count : ""));
-    if (typeof d.remaining === "number") parts.push(clock(d.remaining) + " left");
+    if (typeof d.remaining === "number") parts.push(null);
     if (d.track_name) parts.push(d.track_name);
     if (d.stint) parts.push(d.stint);
-    $("session").replaceChildren(...parts.map(function (p) { return el("span", "", p); }));
+    $("session").replaceChildren(...parts.map(function (p) {
+      const span = el("span", "", p);
+      if (p === null) span.id = "left";
+      return span;
+    }));
     if (d.red_flag) $("session").appendChild(el("span", "flag", "RED FLAG"));
+    $("session").appendChild(el("span", "", "")).id = "age";
+    tick();
     $("timing").tHead.replaceChildren(el("tr"));
     cols.forEach(function (c) { $("timing").tHead.rows[0].appendChild(el("th", "", c[1])); });
     const rows = quali ? (d.qualifying || []) : (d.entries || []);
@@ -202,17 +211,44 @@
     seen = now;
   }
 
+  // The remaining time counts down locally only while the race timer runs.
+  function tick() {
+    const since = got ? Math.max(0, (Date.now() - got) / 1000) : 0;
+    const left = $("left");
+    if (left && last && typeof last.remaining === "number") {
+      const run = last.remaining_running === true ? Math.floor(since + dataAge) : 0;
+      left.textContent = clock(Math.max(0, last.remaining - run)) + " left";
+    }
+    const ageEl = $("age");
+    if (ageEl && got) {
+      const age = Math.round(since + dataAge);
+      const delay = last && last.delay_s > 0 ? " · " + last.delay_s + " s delay" : "";
+      ageEl.textContent = "updated " + age + " s ago" + delay;
+      ageEl.className = age > 3 * interval + 2 ? "stale" : "";
+    }
+  }
+
   async function poll() {
     let wait = 2000;
     try {
-      const res = await fetch(DATA, {cache: "no-store"});
-      if (res.status === 429) wait = 5000;
+      const res = await fetch(DATA, {cache: "no-store", headers: etag ? {"If-None-Match": etag} : {}});
+      const pace = parseFloat(res.headers.get("X-Poll-After"));
+      if (pace >= 2) { interval = pace; wait = pace * 1000; }
+      if (res.status === 429 && !(pace >= 2)) wait = 5000;
       else if (res.status === 403) { $("state").hidden = false; $("state").textContent = "This timing link has ended."; return; }
-      else if (res.ok) { const d = await res.json(); render(d); activity(d); }
+      else if (res.status === 304) { got = Date.now(); dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0; if (last) render(last); }
+      else if (res.ok) {
+        const d = await res.json();
+        etag = res.headers.get("ETag");
+        got = Date.now();
+        dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0;
+        render(d); activity(d);
+      }
     } catch (e) { wait = 5000; }
     setTimeout(poll, wait);
   }
   switches();
+  setInterval(tick, 1000);
   poll();
 </script>
 </body>

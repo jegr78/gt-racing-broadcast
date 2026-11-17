@@ -285,6 +285,23 @@ def t_the_dashboard_payload_is_an_allowlist_with_roster_details():
         assert leak not in flat, f"{leak} must not reach viewers"
 
 
+
+def t_the_dashboard_says_whether_the_clock_runs_and_how_much_it_is_delayed():
+    ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": 600, "remaining_running": True, "mode": "race"}
+    svc, clock, _path = _dash_service(ctx)
+    svc.set_settings({"delay_s": 5})
+    svc.tick()
+    d = svc.dashboard()
+    assert d["remaining_running"] is True and d["delay_s"] == 5, d
+    pub = dr.public_view(d)
+    assert pub["remaining_running"] is True and pub["delay_s"] == 5, "the public page counts down and names the delay"
+    ctx["remaining_running"] = False
+    clock[0] = 10.0
+    svc.tick()
+    clock[0] = 16.0
+    svc.tick()
+    assert svc.dashboard()["remaining_running"] is False, "a paused timer stops the page's clock"
+
 def t_the_delay_holds_the_dashboard_back():
     ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": None, "mode": "race"}
     svc, clock, _path = _dash_service(ctx)
