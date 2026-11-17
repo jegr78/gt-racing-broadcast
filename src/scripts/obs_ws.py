@@ -1856,7 +1856,8 @@ def set_scene_collection(name=EXPECTED_SCENE_COLLECTION, host="127.0.0.1",
     """Switch OBS to scene collection `name`. Returns (ok, note). Best effort:
     - already on `name`            -> (True, "already on '<name>'"), no switch
     - `name` not in the live list  -> (False, "...not found..."), never created
-    - OBS rejects it, output active -> (False, <obs error>); _Session.request
+    - a stream or recording is active -> (False, note), checked here before the switch
+    - OBS rejects it               -> (False, <obs error>); _Session.request
       raises ValueError on a failed requestStatus, caught here and never re-raised
     - OBS unreachable              -> (False, reason)
     The switch is heavyweight in OBS: it tears down and rebuilds ALL sources,
@@ -1878,6 +1879,9 @@ def set_scene_collection(name=EXPECTED_SCENE_COLLECTION, host="127.0.0.1",
         if name not in available:
             return False, (f"scene collection '{name}' not found in OBS "
                            f"(import it with `racecast setup`)")
+        for req in ("GetStreamStatus", "GetRecordStatus"):
+            if (session.request(req, {}) or {}).get("outputActive"):
+                return False, "OBS is streaming or recording, so the collection is not switched"
         session.request("SetCurrentSceneCollection", {"sceneCollectionName": name})
         return True, ""
     except Exception as exc:                         # noqa: BLE001  best-effort contract

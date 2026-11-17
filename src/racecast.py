@@ -2633,12 +2633,31 @@ def _relay_start_signals():
     cannot see."""
     port_pids = pt.pids_on_port(RELAY_PORT)
     pid = sv.read_pid(_relay_pid_path())
+    alive = sv.pid_alive(pid)
+    own = len(set(port_pids)) == 1 and alive and pid in port_pids
     return {"port_pids": port_pids,
             "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
-            "pidfile_pid": pid, "pidfile_alive": sv.pid_alive(pid),
+            "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
-            "http_ok": _relay_http_ok() if port_pids else False}
+            "http_ok": _relay_responds(own) if port_pids else False}
+
+
+RELAY_PROBE_TRIES = 3     # our own relay may be busy (Sheet refresh, telemetry load)
+RELAY_PROBE_GAP_S = 2.0
+
+
+def _relay_responds(own, probe=None, sleep=time.sleep):
+    """Whether the relay answers. Our own relay gets RELAY_PROBE_TRIES probes before
+    `relay start` treats it as hung and heals, which would cut both feeds."""
+    probe = probe or _relay_http_ok
+    tries = RELAY_PROBE_TRIES if own else 1
+    for i in range(tries):
+        if probe():
+            return True
+        if i + 1 < tries:
+            sleep(RELAY_PROBE_GAP_S)
+    return False
 
 
 RELAY_START_VERIFY_S = 15   # seconds to confirm the freshly spawned relay bound its control port

@@ -59,7 +59,7 @@ for key, label, off, fmt, unit, sentinel in [
         ('best_time_ms', 'Game best lap time', 0x78, 'i', 'ms', -1),
         ('last_time_ms', 'Game last lap time', 0x7C, 'i', 'ms', -1),
         ('day_ms', 'Game time of day', 0x80, 'i', 'ms since midnight', None),
-        ('pre_race_position', 'Pre-race position', 0x84, 'h', '1', -1),
+        ('pre_race_position', 'Race position (live offline; online lobbies unverified)', 0x84, 'h', '1', -1),
         ('pre_race_cars', 'Pre-race car count', 0x86, 'h', '1', -1),
         ('alert_min_rpm', 'RPM display alert minimum', 0x88, 'h', 'rpm', None),
         ('alert_max_rpm', 'RPM display alert maximum', 0x8A, 'h', 'rpm', None),
