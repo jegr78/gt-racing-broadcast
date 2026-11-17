@@ -596,6 +596,42 @@ def t_a_lap_with_a_red_flag_or_a_restart_never_sets_the_fastest_lap():
     assert race.standings(t)["fastest"] is None, "the lap with the red flag in it waits"
 
 
+def t_a_race_built_mid_race_counts_the_cars_from_their_own_laps():
+    race = rd.Race(TRACE, formation=False)                  # a relay restart late in lap 5
+    a, b = Car(race, "A", "a", 5 * L - 60), Car(race, "B", "b", 5 * L - 120)
+    t = _drive(race, [a, b], [50, 50], 0.0, 4)              # both cross into lap 6
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert race.standings(t)["state"] == "racing", race.standings(t)
+    assert ra["laps"] == 4 and abs(ra["distance_m"] - a.along) < 10, "the same distance as a race counted from the start"
+    assert rb["laps"] == 4 and ra["distance_m"] > rb["distance_m"], (ra, rb)
+    c = Car(race, "C", "c", 9 * L + 10)                       # a later sender still meets the bound
+    t = _drive(race, [a, b, c], [50, 50, 50], t, 2)
+    assert _row(race, "C", t)["distance_m"] is None, "a late sender cannot claim more laps than the field"
+
+
+def t_one_sender_cannot_lift_the_start_bound_of_a_fresh_race():
+    race = rd.Race(TRACE, formation=False)
+    liar = Car(race, "A", "a", 40 * L - 60)                   # alone, claiming lap 40
+    t = _drive(race, [liar], [50], 0.0, 4)
+    assert _row(race, "A", t)["distance_m"] is None, "a lone sender past the start lap waits for a second car"
+    twin = Car(race, "A", "a2", 40 * L - 30)                  # a second connection of the same entry
+    t = _drive(race, [liar, twin], [50, 50], t, 2)
+    assert _row(race, "A", t)["distance_m"] is None, "an entry's own connections never vouch for it"
+    b, c = Car(race, "B", "b", L - 15), Car(race, "C", "c", L - 40)
+    t = _drive(race, [liar, twin, b, c], [50, 50, 50, 50], t, 4)
+    assert _row(race, "A", t)["distance_m"] is None, "the field's lap bounds the claim"
+    assert _row(race, "B", t)["distance_m"] is not None, "the honest cars start"
+
+
+def t_one_other_entry_cannot_vouch_alone_when_more_are_known():
+    race = rd.Race(TRACE, formation=False)
+    cars = [Car(race, "B", "b", 100), Car(race, "C", "c", 60),       # still on the grid
+            Car(race, "A", "a", 40 * L - 60), Car(race, "D", "d", 40 * L - 30)]
+    t = _drive(race, cars, [50] * 4, 0.0, 4)
+    assert _row(race, "A", t)["distance_m"] is None and _row(race, "D", t)["distance_m"] is None, \
+        "two entries out of four do not set the field's lap"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
