@@ -39,13 +39,14 @@ def _req(port, path, data=None, headers=None, method=None):
         return e.code, e.read().decode(), dict(e.headers)
 
 
-def _serve(solo=True, segments=()):
+def _serve(solo=True, segments=(), clock=None):
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo)
-    hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update)
+    hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
+                            **({"clock": clock} if clock else {}))
     srv = g._serve(solo=solo, hud_source=_Hud(), driver_hub=hub, driver_invite_path=path,
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
                    sender_script_path=os.path.join(ROOT, "src", "relay", "racecast-sender.py"),
@@ -188,13 +189,15 @@ def _wire_at(pid, along, lap):
 
 
 def t_ingested_telemetry_becomes_the_race_order_on_the_tailnet():
-    srv, port, path, _hub = _serve()
+    sim = [100.0]                    # the relay's clock follows the simulated packets, not the host
+    srv, port, path, _hub = _serve(clock=lambda: sim[0])
     try:
         invite = driver_invite.create(path)["id"]
         _req(port, "/drivers/race/settings", json.dumps({"formation": False}).encode(),
              {"Content-Type": "application/json"})
         codes = {e: json.loads(_register(port, invite, entry=e, name="N")[1])["code"] for e in ENTRIES}
         for i in range(0, 600, 6):                      # ten seconds at 60 Hz, sampled at 10 Hz
+            sim[0] = 100.0 + i / 60
             for entry, behind in ((ENTRIES[0], 20.0), (ENTRIES[1], 60.0)):
                 along = 50.0 * i / 60 - behind               # from the grid across the line
                 _req(port, "/console/drive/ingest",
@@ -307,6 +310,12 @@ def t_both_desks_act_with_their_identity():
         st, _t, _h = _req(port, f"/console/race-control/drivers/race/settings?t={rc}",
                           _json.dumps({"delay_s": 10}).encode(), hdr)
         assert st == 200, "race control keeps the other race settings"
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/quali?t={rc}",
+                            _json.dumps({"entry": ENTRIES[0], "ms": None}).encode(), hdr)
+        assert st == 200 and _json.loads(text)["race"]["quali_overrides"] == {ENTRIES[0]: None}, text
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/quali?t={rc}",
+                            _json.dumps({"entry": "Invented Team", "ms": 1000}).encode(), hdr)
+        assert st == 400 and "unknown entry" in text, "only roster entries get a qualifying time"
         st, _t, _h = _req(port, f"/console/drivers/race/settings?t={director}", on_air, hdr)
         assert st == 200 and driver_race.read_settings(srv.race_svc._path)["visible"], "the director does"
         st, text, _h = _req(port, f"/console/race-control/drivers/readiness?t={rc}")
@@ -334,8 +343,8 @@ def t_both_desks_act_with_their_identity():
             "one red flag change per person in 2 s"
         assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
         actions = [r["action"] for r in _audit_of(srv)]
-        assert actions == ["correct", "final_lap", "settings", "settings", "reassign", "red_flag_cover_down",
-            "red_flag"], actions
+        assert actions == ["correct", "final_lap", "settings", "quali", "settings", "reassign",
+            "red_flag_cover_down", "red_flag"], actions
         carol = g._tok("carol")                                   # producer: every role
         assert _req(port, f"/console/race-control/drivers/data?t={carol}")[0] == 403
         assert _req(port, f"/console/drivers/data?t={carol}")[0] == 404

@@ -14516,6 +14516,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 who = getattr(self, "_race_who", None) or "tailnet"
                 if p[:2] == ["drivers", "race"] and driver_race_svc is not None:
                     action = p[2] if len(p) == 3 else None
+                    if action in ("quali", "fastest") and body.get("entry") is not None and hud_source:
+                        roster = hud_source.roster_names()
+                        if roster and body.get("entry") not in roster:
+                            return self._send({"ok": False, "error": "unknown entry"}, 400)
                     if action == "settings":
                         if "visible" in body and str(who).startswith("race_control:"):
                             # Putting the dashboard on air is a program change: director only.
@@ -14542,6 +14546,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "change": lambda: svc.override_change(who, b.get("entry"), b.get("conn")),
                         "fastest": lambda: svc.set_fastest(who, b.get("entry"), b.get("driver"),
                                                            b.get("ms")),
+                        "quali": lambda: svc.set_quali(who, b.get("entry"), b.get("ms"),
+                                                       b.get("clear") is True),
                     }
                     if action in actions:
                         try:

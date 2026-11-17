@@ -1,8 +1,9 @@
 /* Driver telemetry controls shared by the Race Control desk and the Director Panel
-   (#1114). DriverDesk.mount(el, {base, fullRedFlag}) polls the relay and renders:
-   the invite link, the race with its finish and red flag controls, corrections,
-   rejoin and change overrides, and the senders with readiness, reassign and
-   disconnect. `base` prefixes every route: "/race-control" on the desk (its fetch
+   (#1114, #1115). DriverDesk.mount(el, {base, fullRedFlag, dashboardToggle}) polls the
+   relay and renders: the invite link, the race with its finish and red flag controls,
+   corrections, rejoin and change overrides, the dashboard's delay, fastest lap and
+   qualifying corrections (plus its on-air switch with dashboardToggle), and the
+   senders with readiness, reassign and disconnect. `base` prefixes every route: "/race-control" on the desk (its fetch
    shim adds /console), "" on the panel. Every text goes in through textContent. */
 (function () {
   "use strict";
@@ -20,6 +21,8 @@
     ".dd button.alarm{border-color:#ff4d5e;color:#ff4d5e;font-weight:600}",
     ".dd button.armed{background:#ff4d5e;color:#fff}",
     ".dd input[type=number]{width:6.5em}",
+    ".dd input[type=text]{width:9em}.dd input[type=text].wide{width:13em}",
+    ".dd input[type=text].grow{width:auto;flex:1 1 12em}",
     ".dd table{width:100%;border-collapse:collapse}",
     ".dd th,.dd td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--edge,#2a2f37);vertical-align:middle}",
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
@@ -58,11 +61,25 @@
   var ACTIONS = {correct: "correction", final_lap: "Final lap", finish: "Finish", reset: "reset",
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
-                 reassign: "reassign", disconnect: "disconnect", red_flag_cover_down: "cover down"};
+                 reassign: "reassign", disconnect: "disconnect", red_flag_cover_down: "cover down",
+                 fastest: "fastest lap", quali: "qualifying time"};
+
+  function lapTime(ms) {
+    if (typeof ms !== "number" || ms <= 0) return "";
+    var m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
+    return m + ":" + s.toFixed(3).padStart(6, "0");
+  }
+  // "1:58.412" or "58.412" -> milliseconds; NaN when it is no lap time.
+  function parseLap(text) {
+    var t = String(text || "").trim().match(/^(?:(\d{1,2}):)?(\d{1,2}(?:\.\d{1,3})?)$/);
+    if (!t) return NaN;
+    return Math.round(((t[1] ? parseInt(t[1], 10) : 0) * 60 + parseFloat(t[2])) * 1000);
+  }
 
   function mount(root, opts) {
     var base = (opts && opts.base) || "";
     var fullRedFlag = !!(opts && opts.fullRedFlag);
+    var dashboardToggle = !!(opts && opts.dashboardToggle);
     if (!document.getElementById("dd-style")) {
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
     }
@@ -184,6 +201,48 @@
     });
     multiRow.append(rejoinEntry, rejoinOn, rejoinOff, changeSel, changeBtn);
 
+    // -- dashboard: on air, delay, fastest lap, qualifying ---------------------------
+    var onAir = button("Show dashboard", "", null, function () {
+      var show = onAir.dataset.on !== "1";
+      act("/drivers/race/settings", {visible: show}, show ? "Dashboard on air" : "Dashboard off air");
+    });
+    onAir.hidden = !dashboardToggle;
+    var delay = el("input", {type: "number", min: "0", max: "120", step: "1", placeholder: "delay s",
+                             "aria-label": "Dashboard delay in seconds"});
+    delay.addEventListener("change", function () {
+      var n = parseInt(delay.value || "0", 10);
+      act("/drivers/race/settings", {delay_s: isFinite(n) ? n : 0}, "Delay saved");
+    });
+    var flText = el("span", {cls: "grow"});
+    var flClear = button("Clear fastest lap", "warn", "fl-clear", function () {
+      act("/drivers/race/fastest", {}, "Fastest lap cleared");
+    });
+    var flEntry = el("select", {"aria-label": "Fastest lap entry"});
+    var flDriver = el("input", {type: "text", maxlength: "32", placeholder: "driver", cls: "wide",
+                                "aria-label": "Fastest lap driver"});
+    var flTime = el("input", {type: "text", placeholder: "1:58.412", "aria-label": "Fastest lap time", size: "9"});
+    var flSet = button("Set fastest lap", "", null, async function () {
+      var ms = parseLap(flTime.value);
+      if (!isFinite(ms) || ms <= 0) return say("Lap time as m:ss.mmm", true);
+      var d = await act("/drivers/race/fastest", {entry: flEntry.value, driver: flDriver.value.trim(), ms: ms},
+                        "Fastest lap set");
+      if (d) { flDriver.value = ""; flTime.value = ""; }
+    });
+    var qEntry = el("select", {"aria-label": "Qualifying entry"});
+    var qTime = el("input", {type: "text", placeholder: "1:58.412", "aria-label": "Qualifying time", size: "9"});
+    var qSet = button("Set time", "", null, function () {
+      var ms = parseLap(qTime.value);
+      if (!isFinite(ms) || ms <= 0) return say("Lap time as m:ss.mmm", true);
+      act("/drivers/race/quali", {entry: qEntry.value, ms: ms}, "Qualifying time set");
+    });
+    var qDelete = button("Delete time", "warn", "q-del", function () {
+      act("/drivers/race/quali", {entry: qEntry.value, ms: null}, "Qualifying time deleted");
+    });
+    var qRestore = button("GT7 time", "", null, function () {
+      act("/drivers/race/quali", {entry: qEntry.value, clear: true}, "GT7's time restored");
+    });
+    var qList = el("div", {cls: "muted"});
+
     // -- readiness and senders -------------------------------------------------------
     var readyHead = el("tr");
     var readyBody = el("tbody");
@@ -201,6 +260,12 @@
       el("h3", {text: "Race"}), raceNote, raceTable,
       el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
       multiRow,
+      el("h3", {text: "Dashboard"}),
+      el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
+      el("div", {cls: "row"}, [flText, flClear]),
+      el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet]),
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qDelete, qRestore]),
+      qList,
       el("h3", {text: "Readiness"}), readyTable,
       el("h3", {text: "Senders"}), sendTable,
       msg]));
@@ -213,6 +278,18 @@
 
     function renderRace(r) {
       var s = r.settings || {};
+      onAir.dataset.on = s.visible ? "1" : "";
+      onAir.textContent = s.visible ? "Hide dashboard" : "Show dashboard";
+      onAir.className = s.visible ? "warn" : "";
+      if (document.activeElement !== delay) delay.value = s.delay_s || 0;
+      var fl = r.fastest;
+      flText.textContent = fl ? "Fastest lap " + lapTime(fl.ms) + " · " + fl.driver + " (" + fl.entry + ")"
+                              : "No fastest lap yet.";
+      flClear.disabled = !fl;
+      var q = r.quali_overrides || {};
+      qList.textContent = Object.keys(q).length ? "Corrected: " + Object.keys(q).map(function (e) {
+        return e + " " + (q[e] === null ? "deleted" : lapTime(q[e]));
+      }).join(", ") : "";
       if (document.activeElement !== mode) mode.value = s.finish_mode || "laps";
       if (document.activeElement !== laps) laps.value = s.lap_count || "";
       laps.hidden = mode.value !== "laps";
@@ -255,6 +332,8 @@
       keepSelect(corrEntry, entries.map(function (e) { return [e, e]; }));
       multiRow.hidden = !multi;
       keepSelect(rejoinEntry, entries.map(function (e) { return [e, e]; }));
+      keepSelect(flEntry, entries.map(function (e) { return [e, e]; }));
+      keepSelect(qEntry, entries.map(function (e) { return [e, e]; }));
       var conns = [];
       rd.rows.forEach(function (r) {
         r.senders.forEach(function (s) { conns.push([r.entry + "\u0000" + s.conn, r.entry + ": " + s.name]); });
