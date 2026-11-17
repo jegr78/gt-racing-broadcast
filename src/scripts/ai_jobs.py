@@ -636,7 +636,10 @@ class Runner:
                 }
             return {"active": active, "busy": True}
         else:
-            lease.close()
+            try:
+                _remove_state(self.active_path)  # a crashed run's record; no job holds the lease
+            finally:
+                lease.close()
             return {"active": None, "busy": False}
 
     def cancel(self, job_id):
