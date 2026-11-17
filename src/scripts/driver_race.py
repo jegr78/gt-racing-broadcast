@@ -39,6 +39,8 @@ DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None, "delay_
 MAX_DELAY_S = 120
 FASTEST = "driver-race-fastest.json"
 SNAPSHOT_EVERY_S = 0.5
+MAX_LAP_MS = 3_600_000
+MAX_QUALI = 200             # qualifying corrections kept
 LINE_POINTS = 600
 MAX_LAPS = 999
 LINE_RETRY_S = 10.0       # a pick without a downloaded line is looked up again this often
@@ -186,11 +188,12 @@ def _viewer_entry(row, roster):
             "color": info.get("bgColor") or "", "text_color": info.get("textColor") or ""}
 
 
-def qualifying(connections, segment, roster, min_ms=0):
+def qualifying(connections, segment, roster, min_ms=0, overrides=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
     driver, team, color, text_color, best_ms, gap_ms}]; entries without a lap last.
     Only live senders count, and a best lap under `min_ms` (faster than the line
-    allows) is ignored."""
+    allows) is ignored. `overrides` {entry: ms or None} are Race Control's
+    corrections: a set time replaces GT7's, None deletes it."""
     best = {}
     for c in connections:
         if not c.get("live", True):
@@ -202,6 +205,8 @@ def qualifying(connections, segment, roster, min_ms=0):
         cur = best.get(c["entry"])
         if cur is None or (ms is not None and (cur[0] is None or ms < cur[0])):
             best[c["entry"]] = (ms, c.get("name") or "")
+    for entry, ms in (overrides or {}).items():
+        best[entry] = (ms, best.get(entry, (None, ""))[1])
     order = sorted(best.items(), key=lambda kv: (kv[1][0] is None, kv[1][0] or 0, kv[0]))
     pole = order[0][1][0] if order else None
     return [dict(_viewer_entry({"entry": e, "driver": name}, roster), pos=i + 1, best_ms=ms,
@@ -226,6 +231,17 @@ def _saved_actions(path):
         if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY:
             rejoins.append(entry)
     return corrections, rejoins
+
+
+def _saved_quali(path):
+    """{entry: best lap ms, or None for a deleted time} from the actions file."""
+    raw = _read_json(path).get("qualifying")
+    out = {}
+    for entry, ms in (raw.items() if isinstance(raw, dict) else ()):
+        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and (
+                ms is None or (type(ms) is int and 0 < ms < MAX_LAP_MS)) and len(out) < MAX_QUALI:
+            out[entry] = ms
+    return out
 
 
 def _entry_name(entry):
@@ -342,8 +358,10 @@ class Service:
                "track_name": pick.get("track") or None, "visible": self._settings()["visible"]}
         race = self._current()
         if out["mode"] == "qualifying":
-            out["qualifying"] = qualifying(ctx.get("connections") or [], ctx.get("segment"), roster,
-                                           min_ms=0 if race.length is None else int(race.min_lap_s() * 1000))
+            out["qualifying"] = qualifying(
+                ctx.get("connections") or [], ctx.get("segment"), roster,
+                min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
+                overrides=_saved_quali(_actions_path_for(self._path)))
             return out
         st = race.standings(self._clock())
         settings = self._settings()
@@ -450,6 +468,7 @@ class Service:
             out = race.standings(self._clock())
             pick_id = self._race_pick
         out.update(settings=read_settings(self._path), track=pick_id,
+                   quali_overrides=_saved_quali(_actions_path_for(self._path)),
                    league=read_league(self._league), last_action=self._last_action)
         return out
 
@@ -471,6 +490,25 @@ class Service:
         with self._lock:
             self._current().release(self._clock())
             self._log(who, "release")
+        return self.standings()
+
+    def set_quali(self, who, entry, ms=None, clear=False):
+        """Correct an entry's qualifying time: `ms` replaces GT7's best lap, None
+        deletes it, `clear` gives GT7's time back."""
+        entry = _entry_name(entry)
+        if not clear and ms is not None and (type(ms) is not int or not 0 < ms < MAX_LAP_MS):
+            raise ValueError("ms is a lap time in milliseconds, or null to delete it")
+
+        def update(doc):
+            done = doc.get("qualifying") if isinstance(doc.get("qualifying"), dict) else {}
+            if clear:
+                done.pop(entry, None)
+            elif entry in done or len(done) < MAX_QUALI:
+                done[entry] = ms
+            doc["qualifying"] = done
+        with self._lock:
+            self._save_actions(update)
+            self._log(who, "quali", entry=entry, **({"cleared": True} if clear else {"ms": ms}))
         return self.standings()
 
     def rejoin(self, who, entry, on):

@@ -330,6 +330,37 @@ def t_qualifying_ranks_the_running_segment_by_best_lap():
         ("B", "Ann", 90100), ("A", "Max", 90500)], f"impossible and quiet senders are ignored: {rows}"
 
 
+def t_race_control_corrects_a_qualifying_time():
+    conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500}},
+             {"entry": "B", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90100}}]
+    ctx = {"roster": ROSTER, "stint": "Q1", "remaining": None, "mode": "qualifying",
+           "segment": "Q1", "connections": conns}
+    svc, _clock, path = _dash_service(ctx)
+    svc.set_quali("rc:Anna", "B", None)                     # B's lap deleted for track limits
+    svc.tick()
+    rows = svc.dashboard()["qualifying"]
+    assert [(r["entry"], r["best_ms"]) for r in rows] == [("A", 90500), ("B", None)], rows
+    svc.set_quali("rc:Anna", "A", 91000)
+    svc.tick()
+    assert svc.dashboard()["qualifying"][0]["best_ms"] == 91000, "a set time replaces GT7's"
+    again, _c, _p = _dash_service(ctx, path)
+    again.tick()
+    assert [r["best_ms"] for r in again.dashboard()["qualifying"]] == [91000, None], "it survives a restart"
+    assert again.standings()["quali_overrides"] == {"A": 91000, "B": None}
+    again.set_quali("rc:Anna", "B", clear=True)
+    again.tick()
+    assert again.dashboard()["qualifying"][0]["entry"] == "B", "clearing gives GT7's time back"
+    for bad in ({"ms": 0}, {"ms": 10**8}, {"ms": "1:30"}, {"ms": True}):
+        try:
+            again.set_quali("rc:Anna", "A", **bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad} must be refused")
+    dr.clear_actions(os.path.dirname(path))
+    assert dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                      multi_lobby=lambda: False).standings()["quali_overrides"] == {}
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
