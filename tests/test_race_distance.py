@@ -146,7 +146,8 @@ def t_the_corrected_leader_takes_the_flag_first():
     assert _row(race, "B", t)["finished"] and not _row(race, "A", t)["finished"], \
         "the car the tower shows in front gets the chequered flag"
     t = _drive(race, [a, b], [50, 50], t, L / 50 + 2)
-    assert [r["entry"] for r in race.standings(t)["entries"]] == ["B", "A"]
+    assert [r["entry"] for r in race.standings(t)["entries"]] == ["B", "A"], \
+        "no car is classified with more laps than the winner took the flag on"
 
 
 def t_the_lap_count_follows_gt7s_counter_including_the_formation_lap():
