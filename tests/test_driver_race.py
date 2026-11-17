@@ -18,9 +18,9 @@ def _sample(t, along, lap, speed=50.0):
 def t_settings_validate_persist_and_fall_back():
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
     assert dr.read_settings(path) == {"formation": True, "finish_mode": "laps", "lap_count": None,
-                                      "delay_s": 0}
+                                      "delay_s": 0, "visible": False}
     saved = dr.write_settings(path, {"formation": False, "lap_count": 12})
-    assert saved == {"formation": False, "finish_mode": "laps", "lap_count": 12, "delay_s": 0} == dr.read_settings(path)
+    assert saved == {"formation": False, "finish_mode": "laps", "lap_count": 12, "delay_s": 0, "visible": False} == dr.read_settings(path)
     for bad in ({"formation": "no"}, {"finish_mode": "sprint"}, {"lap_count": 0},
                 {"lap_count": 2.5}, {"lap_count": True}):
         try:
@@ -255,6 +255,10 @@ def t_the_dashboard_payload_is_an_allowlist_with_roster_details():
     svc.tick()
     d = svc.dashboard()
     assert d["stint"] == "Stint 3" and d["remaining"] == "1:02:03" and d["mode"] == "race", d
+    assert d["visible"] is False and d["track"] == "good", "the dashboard starts off air"
+    svc.set_settings({"visible": True})
+    svc.tick()
+    assert svc.dashboard()["visible"] is True, "the director puts the dashboard on air"
     row = d["entries"][0]
     assert row["number"] == "1" and row["color"] == "#c00" and row["team"] == "Red Bulls", row
     flat = json.dumps(d)

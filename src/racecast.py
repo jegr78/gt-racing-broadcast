@@ -1000,13 +1000,15 @@ def _relay_runtime_args():
             + _overlay_relay_args(_active_overlay_dir()))
 
 RELAY_PORT = 8088
+OVERLAY_BUILDER_PAGES = ("hud", "intermission", "splitscreen", "drivers")
 STANDBY_SCENE = "Standby"   # canonical scene name in src/obs/GT_Racing_Endurance.json
 
 # The relay-served pages OBS renders as browser sources (panel is tablet-only).
 OBS_PAGE_PATHS = ("/hud", "/hud/override.css",
                   "/splitscreen", "/splitscreen/override.css",
                   "/splitscreen/hud", "/splitscreen/hud/override.css",
-                  "/intermission", "/intermission/override.css")
+                  "/intermission", "/intermission/override.css",
+                  "/drivers", "/drivers/override.css")
 
 
 def _fetch_relay_page(path):
@@ -8207,7 +8209,7 @@ def _active_profile_overlay_path(page):
     """(active, abs path to overlay/<page>.css) for the active profile, or
     (None, None) when no profile resolves or `page` is not an overlay page.
     Server-resolved; never a client path. Mirrors _active_profile_env_strict."""
-    if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
+    if page not in OVERLAY_BUILDER_PAGES or (page == "splitscreen" and _profile_is_solo()):
         return None, None
     active = _active_profile_name()
     if not active:
@@ -8267,7 +8269,7 @@ def _atomic_write_text(path, text):
 
 def _overlay_raw_html(page):
     """Text of the base overlay page (src/obs/<page>.html), or '' on error."""
-    if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
+    if page not in OVERLAY_BUILDER_PAGES or (page == "splitscreen" and _profile_is_solo()):
         return ""
     try:
         with open(resource_path(f"obs/{page}.html"), encoding="utf-8") as fh:
@@ -8287,7 +8289,7 @@ def audience_read_data():
             return {"ok": False, "error": "No active profile"}
         widgets = audience_widgets.Store(os.path.join(os.path.dirname(directory), "audience.json")).read()["widgets"]
         placements = {}
-        for page in ("hud", "intermission", "splitscreen"):
+        for page in ("hud", "intermission", "splitscreen"):   # audience widgets: not the dashboard
             path = os.path.join(directory, f"layout-{page}.json")
             if os.path.isfile(path):
                 with open(path, encoding="utf-8") as source:
@@ -8474,7 +8476,7 @@ def overlay_slots_data(page):
     whether the canvas should show the telemetry block the live HUD self-gates.
     {ok, page, slots, css, body, sample, flagPresets, telemetry} or {ok:false, error}."""
     try:
-        if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
+        if page not in OVERLAY_BUILDER_PAGES or (page == "splitscreen" and _profile_is_solo()):
             return {"ok": False, "error": "invalid page"}
         audience = audience_read_data()
         html = _overlay_base_html(page, audience)
@@ -8809,7 +8811,7 @@ def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None,
         return {"ok": False, "error": "Relay not responding; start the relay before Apply in OBS"}
     refresh = refresh or obs_ws.refresh_browser_inputs
     try:
-        if page == "hud":
+        if page in ("hud", "drivers"):
             _refresh_obs_pages()
             return {"ok": True, "page": page}
         if page == "splitscreen":

@@ -55,6 +55,22 @@ def _serve(solo=True, segments=()):
     return srv, srv.server_address[1], path, hub
 
 
+def t_the_dashboard_page_and_its_override_are_served_on_the_tailnet():
+    od = tempfile.mkdtemp()
+    with open(os.path.join(od, "drivers.css"), "w", encoding="utf-8") as fh:
+        fh.write("#drivers-tower{left:90px}")
+    srv = g._serve(drivers_path=os.path.join(ROOT, "src", "obs", "drivers.html"), overlay_dir=od)
+    port = srv.server_address[1]
+    try:
+        st, text, _h = _req(port, "/drivers")
+        assert st == 200 and 'id="drivers-tower"' in text and "/drivers/override.css" in text, (st, text[:80])
+        st, text, h = _req(port, "/drivers/override.css")
+        assert st == 200 and text == "#drivers-tower{left:90px}" and h["Content-Type"].startswith("text/css"), text
+        assert _req(port, "/console/drivers")[0] in (401, 403), "the overlay page is not funnelled"
+    finally:
+        srv.shutdown()
+
+
 def _register(port, invite, **body):
     return _req(port, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
                 {"Content-Type": "application/json"})

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Driver dashboard</title>
+<style>
+  :root {
+    --dd-bg: rgba(10, 13, 18, 0.86);
+    --dd-row: rgba(255, 255, 255, 0.04);
+    --dd-fg: #f2f4f7;
+    --dd-dim: #9aa3ad;
+    --dd-accent: #e10600;
+    --dd-purple: #b26bff;
+    --dd-font: "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  html, body {
+    margin: 0; padding: 0; width: 1920px; height: 1080px;
+    background: transparent; overflow: hidden; font-family: var(--dd-font); color: var(--dd-fg);
+  }
+  body[data-hidden] #drivers-header, body[data-hidden] #drivers-tower,
+  body[data-hidden] #drivers-fastest, body[data-hidden] #drivers-map { display: none !important; }
+  #drivers-header {
+    position: absolute; left: 48px; top: 64px; width: 420px; height: 64px; box-sizing: border-box;
+    padding: 8px 16px; background: var(--dd-bg); border-left: 6px solid var(--dd-accent);
+    display: flex; flex-direction: column; justify-content: center; font-size: 26px; font-weight: 800;
+  }
+  #dd-session { font-size: 14px; font-weight: 600; color: var(--dd-dim); letter-spacing: .08em;
+                text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #drivers-header.flag { border-left-color: #ff2a2a; }
+  #drivers-tower {
+    position: absolute; left: 48px; top: 136px; width: 420px; box-sizing: border-box;
+    background: var(--dd-bg); font-size: 20px; padding: 4px 0;
+  }
+  .dd-row { display: grid; grid-template-columns: 38px 52px 1fr 112px 40px; align-items: center;
+            height: 40px; padding: 0 10px; gap: 8px; }
+  .dd-row:nth-child(even) { background: var(--dd-row); }
+  .dd-pos { font-weight: 800; text-align: right; }
+  .dd-num { height: 28px; line-height: 28px; text-align: center; font-weight: 800; font-size: 16px;
+            border-radius: 4px; background: #39414d; color: #fff; overflow: hidden; }
+  .dd-name { min-width: 0; display: flex; flex-direction: column; line-height: 1.05; }
+  .dd-team { font-size: 12px; color: var(--dd-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dd-driver { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dd-val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .dd-val.fl { color: var(--dd-purple); }
+  .dd-pit { text-align: center; font-size: 15px; color: var(--dd-dim); font-variant-numeric: tabular-nums; }
+  .dd-row.box .dd-val { color: #ffd23f; }
+  .dd-row.off .dd-driver, .dd-row.off .dd-val { color: var(--dd-dim); }
+  #drivers-fastest {
+    position: absolute; left: 48px; top: 760px; width: 420px; height: 44px; box-sizing: border-box;
+    padding: 0 14px; background: var(--dd-bg); display: flex; align-items: center; gap: 12px; font-size: 18px;
+  }
+  #drivers-fastest b { background: var(--dd-purple); color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 14px; }
+  #dd-fl-time { margin-left: auto; color: var(--dd-purple); font-weight: 700; font-variant-numeric: tabular-nums; }
+  #drivers-fastest.none { visibility: hidden; }
+  #drivers-map { position: absolute; right: 48px; top: 64px; width: 420px; height: 420px; box-sizing: border-box;
+                 background: var(--dd-bg); padding: 16px; }
+  #drivers-map svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  #drivers-map .line { fill: none; stroke: #59626e; stroke-width: 6; stroke-linejoin: round; }
+  #drivers-map .dot text { font-size: 11px; font-weight: 800; text-anchor: middle; dominant-baseline: central; }
+</style>
+<link rel="stylesheet" href="/drivers/override.css">
+</head>
+<body>
+  <div id="drivers-header" data-edit="Lap and session" data-edit-kind="text">
+    <span id="dd-lap">LAP 7 / 20</span><span id="dd-session">Suzuka · Stint 2</span>
+  </div>
+  <div id="drivers-tower" data-edit="Timing tower" data-edit-kind="text"><div id="dd-rows">
+    <div class="dd-row"><span class="dd-pos">1</span><span class="dd-num" style="background:#c00000">7</span><span class="dd-name"><span class="dd-team">Team Redline</span><span class="dd-driver">BERG</span></span><span class="dd-val">Leader</span><span class="dd-pit">P1</span></div>
+    <div class="dd-row"><span class="dd-pos">2</span><span class="dd-num" style="background:#0050a0">12</span><span class="dd-name"><span class="dd-team">Blue Arrow</span><span class="dd-driver">LIND</span></span><span class="dd-val">+1.4</span><span class="dd-pit">P1</span></div>
+    <div class="dd-row"><span class="dd-pos">3</span><span class="dd-num" style="background:#2b8a3e">33</span><span class="dd-name"><span class="dd-team">Green Line</span><span class="dd-driver">KOVAC</span></span><span class="dd-val">+3.9</span><span class="dd-pit">P0</span></div>
+  </div></div>
+  <div id="drivers-fastest" data-edit="Fastest lap" data-edit-kind="text">
+    <b>FL</b><span id="dd-fl-who">BERG · Team Redline</span><span id="dd-fl-time">1:58.412</span>
+  </div>
+  <div id="drivers-map" data-edit="Track map" data-edit-kind="box"><svg id="dd-svg" viewBox="0 0 100 100"></svg></div>
+<script src="/overlay-fit.js" data-fit-live></script>
+<script>
+  "use strict";
+  const SVG = "http://www.w3.org/2000/svg";
+  const MAX_ROWS = 15;
+  const CYCLE_MS = 15000;       // interval, then last lap, then fuel
+  const rows = document.getElementById("dd-rows");
+  rows.textContent = "";
+  document.body.setAttribute("data-hidden", "");   // off air until the relay says otherwise
+  document.getElementById("drivers-fastest").classList.add("none");
+  let line = null, lineTrack = null, view = null;
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function lapTime(ms) {
+    if (typeof ms !== "number" || ms <= 0) return "";
+    const m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
+    return m + ":" + s.toFixed(3).padStart(6, "0");
+  }
+  function clock(sec) {
+    const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
+    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+  }
+  function surname(name) {
+    const parts = String(name || "").trim().split(/\s+/);
+    return (parts[parts.length - 1] || "").toUpperCase();
+  }
+  function safeColor(c, fallback) {
+    return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;
+  }
+  function column(e, i) {
+    if (e.status === "box") return "Box";
+    if (e.status === "no_data") return "No data";
+    if (e.status === "red_flag") return "Red flag";
+    if (e.finished) return "Finished";
+    const phase = Math.floor(Date.now() / CYCLE_MS) % 3;
+    if (phase === 1 && e.last_lap_ms) return lapTime(e.last_lap_ms);
+    if (phase === 2 && typeof e.fuel_l === "number") return e.fuel_l.toFixed(1) + " L";
+    if (i === 0) return "Leader";
+    if (e.lapped) return "+" + e.lapped + " L";
+    return typeof e.interval_s === "number" ? "+" + e.interval_s.toFixed(1) : "";
+  }
+  function row(e, i, value, pits, fl) {
+    const r = el("div", "dd-row" + (e.status === "box" ? " box" : "") +
+                       (e.status === "no_data" ? " off" : ""));
+    r.appendChild(el("span", "dd-pos", String(e.pos)));
+    const num = el("span", "dd-num", e.number || String(e.entry || "").slice(0, 3));
+    num.style.background = safeColor(e.color, "#39414d");
+    num.style.color = safeColor(e.text_color, "#fff");
+    r.appendChild(num);
+    const name = el("span", "dd-name");
+    name.appendChild(el("span", "dd-team", e.team || e.entry || ""));
+    name.appendChild(el("span", "dd-driver", surname(e.driver)));
+    r.appendChild(name);
+    r.appendChild(el("span", "dd-val" + (fl ? " fl" : ""), value));
+    r.appendChild(el("span", "dd-pit", pits));
+    return r;
+  }
+  function renderRace(d) {
+    const lap = d.lap || {};
+    document.getElementById("dd-lap").textContent =
+      typeof d.remaining === "number" ? clock(d.remaining)
+      : lap.leader ? "LAP " + lap.leader + (lap.count ? " / " + lap.count : "") : "";
+    const fl = d.fastest;
+    rows.replaceChildren(...(d.entries || []).slice(0, MAX_ROWS).map(function (e, i) {
+      return row(e, i, column(e, i), "P" + (e.pit_stops || 0),
+                 fl && fl.entry === e.entry && e.last_lap_ms === fl.ms && Math.floor(Date.now() / CYCLE_MS) % 3 === 1);
+    }));
+    const box = document.getElementById("drivers-fastest");
+    box.classList.toggle("none", !fl);
+    if (fl) {
+      document.getElementById("dd-fl-who").textContent = surname(fl.driver) + (fl.team ? " · " + fl.team : " · " + fl.entry);
+      document.getElementById("dd-fl-time").textContent = lapTime(fl.ms);
+    }
+    drawCars(d.entries || []);
+  }
+  function renderQualifying(d) {
+    document.getElementById("dd-lap").textContent = "QUALIFYING";
+    rows.replaceChildren(...(d.qualifying || []).slice(0, MAX_ROWS).map(function (e, i) {
+      return row(e, i, i === 0 ? lapTime(e.best_ms) : e.gap_ms === null ? "" : "+" + (e.gap_ms / 1000).toFixed(3), "");
+    }));
+    document.getElementById("drivers-fastest").classList.add("none");
+    drawCars([]);
+  }
+  function project(x, z) {
+    return [(x - view.x0) * view.k + view.dx, (z - view.z0) * view.k + view.dz];
+  }
+  function drawLine() {
+    const svg = document.getElementById("dd-svg");
+    svg.replaceChildren();
+    if (!line || !line.points || line.points.length < 2) { view = null; return; }
+    const xs = line.points.map(function (p) { return p[0]; }), zs = line.points.map(function (p) { return p[1]; });
+    const x0 = Math.min(...xs), z0 = Math.min(...zs), w = Math.max(...xs) - x0 || 1, h = Math.max(...zs) - z0 || 1;
+    const k = 92 / Math.max(w, h);
+    view = {x0: x0, z0: z0, k: k, dx: 4 + (92 - w * k) / 2, dz: 4 + (92 - h * k) / 2};
+    const path = document.createElementNS(SVG, "polyline");
+    path.setAttribute("class", "line");
+    path.setAttribute("vector-effect", "non-scaling-stroke");
+    path.setAttribute("points", line.points.map(function (p) { return project(p[0], p[1]).join(","); }).join(" ") +
+                      " " + project(line.points[0][0], line.points[0][1]).join(","));
+    svg.appendChild(path);
+    const cars = document.createElementNS(SVG, "g");
+    cars.id = "dd-cars";
+    svg.appendChild(cars);
+  }
+  function drawCars(entries) {
+    const g = document.getElementById("dd-cars");
+    if (!g || !view) return;
+    const placed = [], dots = [];
+    entries.filter(function (e) { return typeof e.x === "number" && typeof e.z === "number"; })
+      .forEach(function (e) {
+        let p = project(e.x, e.z), n = 0;
+        while (placed.some(function (q) { return Math.hypot(q[0] - p[0], q[1] - p[1]) < 3.2; }) && n < 6) {
+          p = [p[0] + 2.4, p[1] + 2.4]; n++;   // a car behind slides off the one ahead
+        }
+        placed.push(p);
+        dots.push([e, p]);
+      });
+    g.replaceChildren(...dots.reverse().map(function (item) {   // the car ahead is drawn last, on top
+      const e = item[0], p = item[1];
+      const dot = document.createElementNS(SVG, "g");
+      dot.setAttribute("class", "dot");
+      const c = document.createElementNS(SVG, "circle");
+      c.setAttribute("cx", p[0]); c.setAttribute("cy", p[1]); c.setAttribute("r", 2.8);
+      c.setAttribute("fill", safeColor(e.color, "#39414d"));
+      c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", 0.4);
+      const t = document.createElementNS(SVG, "text");
+      t.setAttribute("x", p[0]); t.setAttribute("y", p[1]);
+      t.setAttribute("fill", safeColor(e.text_color, "#fff"));
+      t.setAttribute("font-size", 2.6);
+      t.textContent = e.number || String(e.pos);
+      dot.appendChild(c); dot.appendChild(t);
+      return dot;
+    }));
+  }
+  async function loadLine(track) {
+    lineTrack = track;
+    line = null;
+    try {
+      const res = await fetch("/drivers/line", {cache: "no-store"});
+      if (res.ok) line = await res.json();
+    } catch (e) { /* the map stays empty until the next track change */ }
+    drawLine();
+  }
+  async function poll() {
+    try {
+      const res = await fetch("/drivers/dashboard", {cache: "no-store"});
+      if (res.ok) {
+        const d = await res.json();
+        document.body.toggleAttribute("data-hidden", d.visible !== true);
+        document.getElementById("drivers-header").classList.toggle("flag", !!d.red_flag);
+        document.getElementById("dd-session").textContent =
+          [d.track_name, d.stint, d.red_flag ? "Red flag" : ""].filter(Boolean).join(" · ");
+        if ((d.track || null) !== lineTrack) await loadLine(d.track || null);
+        if (d.mode === "qualifying") renderQualifying(d); else renderRace(d);
+      }
+    } catch (e) { /* transient; keep the last render */ }
+    setTimeout(poll, 1000);
+  }
+  poll();
+</script>
+</body>
+</html>

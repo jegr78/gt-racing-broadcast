@@ -34,7 +34,8 @@ MAX_REASON = 200
 MAX_ENTRY = 120
 MAX_CORRECTION_M = 100_000.0
 MAX_PIT_CORRECTION = 50
-DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0}
+DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0,
+            "visible": False}
 MAX_DELAY_S = 120
 FASTEST = "driver-race-fastest.json"
 SNAPSHOT_EVERY_S = 0.5
@@ -73,6 +74,10 @@ def validate(changes):
         if changes["finish_mode"] not in ("laps", "time"):
             raise ValueError("finish_mode is laps or time")
         out["finish_mode"] = changes["finish_mode"]
+    if "visible" in changes:
+        if not isinstance(changes["visible"], bool):
+            raise ValueError("visible is true or false")
+        out["visible"] = changes["visible"]
     if "delay_s" in changes:
         n = changes["delay_s"]
         if type(n) is not int or not 0 <= n <= MAX_DELAY_S:
@@ -331,9 +336,10 @@ class Service:
     def _viewer(self, ctx):
         """The dashboard payload: an allowlist, safe for viewers and the public page."""
         roster = ctx.get("roster") or {}
+        pick = self._pick() or {}
         out = {"v": 1, "mode": ctx.get("mode") or "race", "stint": ctx.get("stint"),
-               "remaining": ctx.get("remaining"), "track": self._race_pick
-               if isinstance(self._race_pick, str) else None}
+               "remaining": ctx.get("remaining"), "track": pick.get("id"),
+               "track_name": pick.get("track") or None, "visible": self._settings()["visible"]}
         race = self._current()
         if out["mode"] == "qualifying":
             out["qualifying"] = qualifying(ctx.get("connections") or [], ctx.get("segment"), roster,

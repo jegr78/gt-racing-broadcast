@@ -4115,7 +4115,8 @@ def t_obs_page_paths_include_overrides():
     assert m.OBS_PAGE_PATHS == ("/hud", "/hud/override.css",
                                 "/splitscreen", "/splitscreen/override.css",
                                 "/splitscreen/hud", "/splitscreen/hud/override.css",
-                                "/intermission", "/intermission/override.css")
+                                "/intermission", "/intermission/override.css",
+                                "/drivers", "/drivers/override.css")
 
 
 def t_obs_page_paths_relay_mirror_in_sync():
@@ -6793,7 +6794,7 @@ def t_driver_race_settings_go_to_the_relay_or_the_file():
     path = os.path.join(d, "driver-race.json")
     league = os.path.join(d, "profile", "driver-race.json")
     assert m.event_race_read_data(path=path, league_path=league)["settings"] == {
-        "formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0, "restart": "keep"}
+        "formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0, "visible": False, "restart": "keep"}
     off = m.event_race_write_data({"formation": False, "lap_count": 20}, alive=lambda: False, path=path, league_path=league)
     assert off["ok"] and off["applied"] == "file" and off["settings"]["lap_count"] == 20, off
     assert m.event_race_read_data(path=path, league_path=league)["settings"]["formation"] is False
