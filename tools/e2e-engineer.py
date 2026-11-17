@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
+import e2e_safety  # noqa: E402
 from engineer_ui_fixture import Fixture,gate
 from ai_ui_fixture import web_fixture
 import gt7_comparison
@@ -156,4 +157,8 @@ async def main():
     return None
 
 
-if __name__=='__main__':asyncio.run(main())
+if __name__=='__main__':
+    contained = e2e_safety.enter(__file__, sys.argv[1:])
+    if contained is not None:
+        raise SystemExit(contained)
+    asyncio.run(main())
