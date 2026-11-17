@@ -353,6 +353,22 @@ def t_feed_quality_get_form_not_funnelled():
     assert cp.min_capability(["feed", "A", "quality", "robust"], "GET") is None
     assert cp.min_capability(["feed", "B", "quality", "auto"], "GET") is None
 
+def t_driver_telemetry_controls_for_directors_and_race_control():
+    for path, method in ((["drivers", "race"], "GET"), (["drivers", "race", "red-flag"], "POST"),
+                         (["drivers", "readiness"], "GET"), (["drivers", "reassign"], "POST")):
+        assert cp.decide({"director"}, path, method) == cp.ALLOW, path
+        assert cp.decide({"race_control"}, path, method) == cp.FORBIDDEN, path
+        assert cp.decide({"race_control"}, ["race-control"] + path, method) == cp.ALLOW, path
+        assert cp.decide({"commentator"}, ["race-control"] + path, method) == cp.FORBIDDEN, path
+    for tailnet_only, method in ((["drivers", "data"], "GET"), (["drivers", "race", "reset"], "POST"),
+                                 (["drivers", "race"], "POST"), (["drivers", "readiness"], "POST")):
+        assert cp.decide({"producer", "director"}, tailnet_only, method) == cp.NOT_FOUND, tailnet_only
+        assert cp.decide({"producer", "race_control"}, ["race-control"] + tailnet_only, method) \
+            == cp.NOT_FOUND, tailnet_only
+    assert cp.decide({"race_control"}, ["race-control", "red-flag"], "POST") == cp.ALLOW
+    assert cp.decide({"director"}, ["race-control", "red-flag"], "POST") == cp.FORBIDDEN
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

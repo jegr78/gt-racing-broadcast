@@ -716,6 +716,8 @@ def should_failover(enabled, on_air_down, program_scene,
 AUTO_COVER_POLL_S = 5                     # how often the auto-cover tick evaluates the on-air feed
 AUTO_COVER_SETTLE_S = 12                  # source_state must persist this long before the cover raises
 STANDBY_COVER_SOURCE = "Standby Cover"    # the #378 cover source in the Stint scene
+RED_FLAG_BANNER = "Red Flag - Race Suspended"   # the HUD banner of the panel's RED FLAG
+RED_FLAG_MIN_S = 2.0                            # one Race Control red flag change per person
 _AUTO_COVER_FALSEY = {"0", "false", "no", "off"}
 
 
@@ -11922,6 +11924,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  event_documents_source=None, browser_hosts=(), track_pick=None,
                  telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
                  drive_page_path=None, sender_script_path=None, driver_segments=None,
+                 driver_desk_path=None,
                  driver_race_svc=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
@@ -11980,6 +11983,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Its own bucket: senders still holding codes of a regenerated invite retry once a
     # minute and must not lock console logins out of the shared one.
     _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
+    _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
@@ -13087,6 +13091,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 # which reads the request body before dispatch (authorized here).
                 if sub == ["race-control", "cues"] and method == "POST":
                     return ["race-control", "cues"]
+                # Driver telemetry controls (#1114): the Director Panel's /drivers/*
+                # routes, acted on with this person's identity.
+                if len(sub) >= 2 and sub[1] == "drivers":
+                    self._race_who = f"race_control:{subject}"
+                    return sub[1:]
+                # The full RED FLAG: banner, Standby Cover and the race's red flag mode.
+                if sub == ["race-control", "red-flag"] and method == "POST":
+                    self._race_who = f"race_control:{subject}"
+                    return ["race-control", "red-flag"]
                 return self._send({"error": "not found"}, 404)
             # Health-monitor dashboard (#health): a read-only page + ONE data
             # endpoint, any authenticated subject. Redacted by construction
@@ -13145,6 +13158,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return ["cockpit", "chat", "data"]
                 if sub == ["submit"]:
                     return ["cockpit", "submit"]
+                if sub and sub[0] == "drivers":
+                    self._race_who = f"director:{subject}"
                 # NB: /console/takeover/* is handled earlier (step-up-secret only,
                 # no token) and never reaches this role-gated branch.
                 return sub
@@ -13349,6 +13364,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return self._send({"ok": False, "error": "Cross-origin relay request refused."}, 403)
 
         def do_GET(self):
+            self._race_who = None    # set by _console_gate for one /console request
             # These loopback-only endpoints already enforce stricter provenance
             # checks and expose provider-specific error/protocol envelopes.
             if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
@@ -13357,6 +13373,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._refuse_browser_request()
             if urlparse(self.path).path == '/driver-radio/admin/coach':
                 return self._coach('GET', admin=True)
+            if urlparse(self.path).path in ("/driver-desk.js", "/console/driver-desk.js") \
+                    and driver_desk_path:
+                # Public static code shared by both desks (#1114); its data routes stay gated.
+                return self._send_file(driver_desk_path, "application/javascript; charset=utf-8")
             if urlparse(self.path).path in ("/driver-radio-ui.js", "/console/driver-radio-ui.js"):
                 # Public static code only; every data/control route remains authenticated.
                 return self._send_file(os.path.join(radio_page_dir, "driver-radio.js"), "application/javascript; charset=utf-8")
@@ -13959,8 +13979,24 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"invite": bool(invite), "connections": driver_hub.connections()},
                                       no_store=True)
                 if p == ["drivers", "race"] and driver_race_svc is not None:
-                    # Tailnet only: order, distances and gaps from driver telemetry (#1112).
+                    # Order, distances and gaps from driver telemetry (#1112).
                     return self._send(driver_race_svc.standings(), no_store=True)
+                if p == ["drivers", "readiness"] and driver_hub is not None:
+                    roster = hud_source.roster_names() if hud_source else []
+                    rows_now = schedule_rows(relay)
+                    idx = relay.on_air_row_idx()
+                    focus = [r[2] for r in rows_now[idx:idx + 2]] if not relay.solo else []
+                    return self._send({
+                        "multi_lobby": not relay.solo, "focus": focus,
+                        "rows": driver_ingest.readiness(
+                            roster, driver_segments() if driver_segments else [],
+                            driver_hub.connections(), not relay.solo)}, no_store=True)
+                if p == ["drivers", "invite"]:
+                    # The desks build the link from their own origin (#1114).
+                    invite = self._drive_invite()
+                    return self._send({"active": bool(invite),
+                                       "id": invite["id"] if invite else None}, no_store=True)
+
                 if p == ["telemetry", "probe"]:
                     # Tailnet only: the probe key and every sender's counters (#1110).
                     if telemetry_probe_obj is None:
@@ -14213,6 +14249,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.rfile.read(length)
 
         def do_POST(self):
+            self._race_who = None    # set by _console_gate for one /console request
             if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
                 return self._audience_admin(mutation=True, provider=urlparse(self.path).path.rsplit("/", 1)[1])
             if not self._browser_request_allowed("POST"):
@@ -14451,29 +14488,30 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p in (["event", "track"], ["race-control", "track"]):
                     return self._track_pick_post(body)
+                who = getattr(self, "_race_who", None) or "tailnet"
                 if p[:2] == ["drivers", "race"] and driver_race_svc is not None:
                     action = p[2] if len(p) == 3 else None
                     if action == "settings":
                         try:
                             return self._send({"ok": True,
-                                               "settings": driver_race_svc.set_settings(body, "tailnet")})
+                                               "settings": driver_race_svc.set_settings(body, who)})
                         except ValueError as exc:
                             return self._send({"ok": False, "error": str(exc)}, 400)
                     commands = {"final-lap": driver_race_svc.final_lap,
                                 "finish": driver_race_svc.finish, "reset": driver_race_svc.reset}
                     if action in commands:
-                        commands[action]("tailnet")
+                        commands[action](who)
                         return self._send({"ok": True, "state": driver_race_svc.standings()["state"]})
-                    # Race Control actions (#1113); the desks reach them with an identity in #1114.
+                    # Race Control actions (#1113), with the desk's identity (#1114).
                     svc, b = driver_race_svc, body
                     actions = {
-                        "red-flag": lambda: svc.red_flag("tailnet", b.get("mode")),
-                        "restart-mode": lambda: svc.set_restart_mode("tailnet", b.get("mode")),
-                        "release": lambda: svc.release("tailnet"),
-                        "rejoin": lambda: svc.rejoin("tailnet", b.get("entry"), b.get("on", True)),
-                        "correct": lambda: svc.correct("tailnet", b.get("entry"), b.get("metres", 0.0),
+                        "red-flag": lambda: svc.red_flag(who, b.get("mode")),
+                        "restart-mode": lambda: svc.set_restart_mode(who, b.get("mode")),
+                        "release": lambda: svc.release(who),
+                        "rejoin": lambda: svc.rejoin(who, b.get("entry"), b.get("on", True)),
+                        "correct": lambda: svc.correct(who, b.get("entry"), b.get("metres", 0.0),
                                                        b.get("pit_stops", 0), b.get("reason", "")),
-                        "change": lambda: svc.override_change("tailnet", b.get("entry"), b.get("conn")),
+                        "change": lambda: svc.override_change(who, b.get("entry"), b.get("conn")),
                     }
                     if action in actions:
                         try:
@@ -14482,7 +14520,54 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             return self._send({"ok": False, "error": str(exc)}, 400)
                     return self._send({"error": "not found"}, 404)
                 if p == ["drivers", "disconnect"] and driver_hub is not None:
-                    return self._send({"ok": driver_hub.disconnect(str(body.get("conn") or ""))})
+                    conn = str(body.get("conn") or "")
+                    done = driver_hub.disconnect(conn)
+                    if done and driver_race_svc is not None:
+                        driver_race_svc.log(who, "disconnect", conn=conn)
+                    return self._send({"ok": done})
+                if p == ["drivers", "reassign"] and driver_hub is not None:
+                    conn, entry = str(body.get("conn") or ""), body.get("entry")
+                    roster = hud_source.roster_names() if hud_source else []
+                    if not isinstance(entry, str) or not 0 < len(entry) <= driver_invite.MAX_ENTRY \
+                            or (roster and entry not in roster):
+                        return self._send({"ok": False, "error": "unknown entry"}, 400)
+                    if not driver_hub.reassign(conn, entry):
+                        return self._send({"ok": False, "error": "unknown sender"}, 400)
+                    if driver_race_svc is not None:
+                        driver_race_svc.log(who, "reassign", conn=conn, entry=entry)
+                    return self._send({"ok": True})
+                if p == ["race-control", "red-flag"]:
+                    # The full RED FLAG from Race Control (#1114): the Standby Cover, the
+                    # HUD banner and the race's red flag mode. Reached only under /console.
+                    on = body.get("on") is not False
+                    now = time.monotonic()
+                    with _red_flag_lock:
+                        if now - _red_flag_last.get(who, -RED_FLAG_MIN_S) < RED_FLAG_MIN_S:
+                            return self._send({"ok": False, "error": "one red flag change per 2 s"}, 429)
+                        _red_flag_last[who] = now
+                        # Lowering undoes only a red flag raised here: never an auto-cover
+                        # over a dead feed (#495) or the director's own cover and banner.
+                        owned = getattr(relay, "rc_red_flag_raised", False)
+                        relay.rc_red_flag_raised = on or False
+                    cover, note, banner = False, "obs unavailable", {"error": "not raised here"}
+                    if on or owned:
+                        if _obs_ws is not None:
+                            cover, note = relay._obs.set_scene_item_enabled(
+                                _obs_ws.graphic_scene(relay.solo), STANDBY_COVER_SOURCE, on)
+                        banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
+                                  if setup_ctl else {"error": "no Setup tab control"})
+                    race = None
+                    if driver_race_svc is not None:
+                        race = (driver_race_svc.red_flag(who) if on
+                                else driver_race_svc.log(who, "red_flag_cover_down"))
+                    LOG.warning("RED FLAG %s by %s (cover %s)", "raised" if on else "lowered",
+                                str(who).replace("\r", "").replace("\n", "")[:60],
+                                "ok" if cover else note)
+                    # The OBS note can name the WebSocket host: keep it in the relay log.
+                    return self._send({"ok": True, "on": on, "cover": cover,
+                                       "note": None if cover else ("cover not changed" if on or owned
+                                                                   else "not raised from this desk"),
+                                       "banner": banner.get("error") or "ok", "race": race})
                 if p == ["telemetry", "probe", "reset"]:
                     if telemetry_probe_obj is None:
                         return self._send({"enabled": False}, 404)
@@ -15844,6 +15929,9 @@ def main():
         if os.path.exists(cand):
             drive_page_path = os.path.abspath(cand)
             break
+    driver_desk_path = next((os.path.abspath(c) for c in (
+        os.path.join(here, "driver-desk.js"), os.path.join(here, "..", "driver-desk.js"),
+        os.path.join(here, "..", "console", "driver-desk.js")) if os.path.exists(c)), None)
 
     def driver_segments():
         """Stint and qualifying labels a driver can register for, in sheet order."""
@@ -15934,6 +16022,7 @@ def main():
         telemetry_probe_obj=probe,
         driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
+        driver_desk_path=driver_desk_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,

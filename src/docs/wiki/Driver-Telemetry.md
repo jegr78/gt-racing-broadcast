@@ -123,11 +123,10 @@ event setting.
   A **change override** makes a team's other sender the active one at once.
 
 Corrections and rejoin marks survive a relay restart. Every action is logged with who
-and when in `runtime/<profile>/driver-race-audit.jsonl`. The controls for these come
-to the Race Control desk and the Director Panel with the next release; until then the
-producer reaches them on the tailnet.
+and when in `runtime/<profile>/driver-race-audit.jsonl`. Race Control and the director
+use them from the Race Control desk ([Console](Console)) and the Director Panel
+([Director](Director#driver-telemetry)).
 
 The box detection and the lap counter in the pit lane are not yet confirmed against a
 recording of real pit stops. The race lives in the relay's memory: a relay restart
-starts it over. The producer reads the race on the tailnet at `/drivers/race`; the
-desks that show and control it come with the Race Control work.
+starts it over.

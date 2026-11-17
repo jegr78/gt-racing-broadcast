@@ -369,6 +369,15 @@ def t_a_change_needs_a_fresh_lobby_counter():
     assert _row(race, "A", t)["driver"] == "Max", "a car past lap 2 of its lobby takes over nobody"
 
 
+def t_a_reassigned_sender_counts_for_its_new_entry():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    t = _drive(race, [a], [50], 0.0, 5)
+    a.entry = "B"                                      # the producer corrected the registration
+    t = _drive(race, [a], [50], t, 1)
+    assert [r["entry"] for r in race.standings(t)["entries"]] == ["B"], race.standings(t)["entries"]
+
+
 def t_no_line_means_no_distance():
     race = rd.Race(None, formation=False)
     a = Car(race, "A", "a", 0)

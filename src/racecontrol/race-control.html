@@ -232,6 +232,10 @@
         <div id="trackNote" class="rcmsg warn" role="status"></div>
       </div>
     </div>
+    <div class="card" id="driverCard" data-tab="act" style="margin-top:12px;">
+      <h2>Driver telemetry</h2>
+      <div id="driverDesk"></div>
+    </div>
     <div class="card desk-only" style="margin-top:12px;"><h2>Race timer</h2><div id="timer"><div class="t">—</div></div></div>
     <div class="card" data-tab="chat" style="margin-top:12px;">
       <h2>Crew chat</h2>
@@ -660,5 +664,17 @@ pgmAudioInit("/cockpit/program-audio");
 <nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
      data-tabs='[["act","Act"],["graphics","Graphics"],["chat","Chat"],["program","Program"],["schedule","Schedule"]]'></nav>
 <!--__CREW_FRAME__-->
+<script>
+/* Driver telemetry controls (#1114), shared with the Director Panel; RED FLAG here is
+   the full one: banner, Standby Cover and the race's red flag mode. */
+(function () {
+  var s = document.createElement("script");
+  s.src = RC_API("/driver-desk.js");
+  s.onload = function () {
+    window.DriverDesk.mount(document.getElementById("driverDesk"), {base: "/race-control", fullRedFlag: true});
+  };
+  document.body.appendChild(s);
+})();
+</script>
 </body>
 </html>

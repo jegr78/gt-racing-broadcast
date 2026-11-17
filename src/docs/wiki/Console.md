@@ -71,6 +71,12 @@ other feed with **NEXT**, each with its feed letter. The **Track layout** card s
 event's GT7 layout and lets Race Control change it, for example when the card reports that
 the first complete lap matched another layout (see [Telemetry](Telemetry)).
 
+The **Driver telemetry** card has the same controls as the Director Panel's section
+([Director](Director#driver-telemetry)). Its `RED FLAG` is the full one: it raises the
+Standby Cover, sets the HUD banner *Red Flag - Race Suspended* and holds the race, and
+it says when the cover or the banner could not be set. **Restart released** lowers the
+cover and clears the banner again. Every action is logged with the person's name.
+
 ### On a phone
 
 The Commentator Cockpit and the Race Control desk use the same layout on a narrow screen
@@ -80,7 +86,7 @@ the top while you scroll. A tab bar at the bottom shows one part of the page at 
 | Page | Tabs |
 |---|---|
 | Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (stint plan, stream-link submission) |
-| Race Control | **Act** (note to commentator, flag graphic, track layout), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
+| Race Control | **Act** (note to commentator, flag graphic, track layout, driver telemetry), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
 
 The page remembers the last tab. On a wider screen both pages keep their multi-column
 layout.

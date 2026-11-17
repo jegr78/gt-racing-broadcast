@@ -299,6 +299,27 @@ lap matches another layout, the card says which one and the health pill turns ye
 pick the right layout here. The producer usually sets it before the event (see
 [Telemetry](Telemetry)).
 
+### Driver telemetry
+
+The **Setup** area's **Driver telemetry** section holds the race from the drivers' own
+telemetry ([driver guide](Driver-Telemetry)), with the same controls as the Race Control
+desk:
+
+- the invite link with **Copy**, and who made the last change and when
+- the finish mode and lap count, **Final lap** and **Finish**
+- **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
+  `RED FLAG` button holds the race as well when it raises the cover.
+- the race order with gaps, status, pit stops and corrections; a correction needs a
+  reason
+- in endurance, rejoin marks and a change override per team
+- readiness per entry (in endurance for the stint on air and the next one) and every
+  sender with **Move** (to another entry) and **Disconnect**
+
+Buttons that change the race for everyone (Final lap, Finish, the red flag, a change,
+a disconnect) ask for a second press within four seconds.
+
+![Director Panel: driver telemetry section](images/director-panel-drivers.png)
+
 ### Warning banners
 
 Ongoing problems show as banners directly under the header, they appear
