@@ -111,8 +111,10 @@ class Hub:
                     if first and len(self._hook_failed) < 4 * self._max:
                         self._hook_failed.add(conn)
                 if first:
-                    LOG.warning("driver race: a sample of %s failed (%s: %s); further failures "
-                                "of this connection are not logged", conn, type(exc).__name__, exc)
+                    # The connection id comes from a driver's code: no line breaks in the log.
+                    safe = str(conn).replace("\r", "").replace("\n", "")[:40]
+                    LOG.warning("driver race: a sample of %s failed (%s); further failures "
+                                "of this connection are not logged", safe, type(exc).__name__)
 
     def disconnect(self, conn):
         with self._lock:
