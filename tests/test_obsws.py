@@ -364,6 +364,8 @@ def _fake_obs_server(server_sock, password, state):
             state["set_collection"] = rdata["sceneCollectionName"]
             state["current_collection"] = rdata["sceneCollectionName"]
             resp = {}
+        elif rtype == "GetRecordStatus":
+            resp = {"outputActive": bool(state.get("record_active"))}
         elif rtype == "GetInputList":
             kind = rdata.get("inputKind")
             resp = {"inputs": [i for i in inputs
@@ -733,6 +735,17 @@ def t_set_scene_collection_noop_when_already_correct():
     assert "already" in note
     assert "set_collection" not in state
     srv.close()
+
+
+def t_set_scene_collection_never_switches_under_a_live_output():
+    for live in ("stream_active", "record_active"):
+        state = {"released": [], "current_collection": "Other",
+                 "collections": ["GT Racing Endurance", "Other"], live: True}
+        port, srv = _start_fake_obs(state)
+        ok, note = m.set_scene_collection(port=port, password="supersecret", timeout=5)
+        assert ok is False and "set_collection" not in state, \
+            f"a switch rebuilds every source, so it never runs while {live}: {note}"
+        srv.close()
 
 
 def t_set_scene_collection_refuses_when_absent():
