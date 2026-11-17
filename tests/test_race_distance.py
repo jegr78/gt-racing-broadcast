@@ -623,6 +623,15 @@ def t_one_sender_cannot_lift_the_start_bound_of_a_fresh_race():
     assert _row(race, "B", t)["distance_m"] is not None, "the honest cars start"
 
 
+def t_one_other_entry_cannot_vouch_alone_when_more_are_known():
+    race = rd.Race(TRACE, formation=False)
+    cars = [Car(race, "B", "b", 100), Car(race, "C", "c", 60),       # still on the grid
+            Car(race, "A", "a", 40 * L - 60), Car(race, "D", "d", 40 * L - 30)]
+    t = _drive(race, cars, [50] * 4, 0.0, 4)
+    assert _row(race, "A", t)["distance_m"] is None and _row(race, "D", t)["distance_m"] is None, \
+        "two entries out of four do not set the field's lap"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
