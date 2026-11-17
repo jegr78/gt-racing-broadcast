@@ -7971,7 +7971,7 @@ def t_ai_start_and_the_ui_service_turn_termination_into_cleanup():
             calls.append(("start", background))
             return {"ok": True}
     with mock.patch.object(ai_jobs, "interrupt_on_termination", lambda: calls.append("signals")), \
-            mock.patch.object(m, "_ai_controller", lambda: _Ctl()), \
+            mock.patch.object(m, "_ai_controller", _Ctl), \
             contextlib.redirect_stdout(io.StringIO()):
         m.telemetry_analyze_cmd(["rec", "--session", "1", "--start"])
     assert calls == ["signals", ("start", False)], "signals are routed before a foreground analysis starts"
