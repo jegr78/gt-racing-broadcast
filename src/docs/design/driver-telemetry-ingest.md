@@ -87,6 +87,12 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 `GET /drivers/race` returns `{state, track, settings, line_length_m, entries}`;
 `POST /drivers/race/settings` takes `formation`, `finish_mode` (`laps`/`time`) and
 `lap_count`; `POST /drivers/race/final-lap`, `/finish` and `/reset` act on the race.
+Race Control actions (#1113), each answering `{ok, race}` or 400 with `error`:
+`/red-flag {mode?}` (default: the profile's `restart`), `/restart-mode {mode}`,
+`/release`, `/rejoin {entry, on}`, `/correct {entry, metres, pit_stops, reason}` and
+`/change {entry, conn}`. The race adds `red_flag`, `restart_mode`, `league` and
+`last_action {ts, who, action}`; entries add `correction_m` and `rejoin`, and the
+status `red_flag` while an entry waits for its restart.
 `state` is `no_line`, `waiting`, `racing`, `final_lap`, `finishing` or `finished`;
 each entry carries `distance_m`, `laps`, `gap_s`, `interval_s`, `lapped`, `status`
 (`waiting`, `racing`, `box`, `no_data`), `finished`, `pit_stops`, `gt7_position`

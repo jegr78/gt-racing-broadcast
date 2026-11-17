@@ -70,8 +70,8 @@ it, after which every driver registers again.
 **Driver race** sets how the telemetry race order starts and finishes: **Formation
 lap** (distance starts on lap 2), and **Finish after laps** with the lap count or
 **Timed**, where Race Control or the director triggers Final lap
-([race order and gaps](Driver-Telemetry#race-order-and-gaps)). Same as `racecast event
-race`.
+([race order and gaps](Driver-Telemetry#race-order-and-gaps)), and the league's
+**Red flag** restart rule, saved in the profile. Same as `racecast event race`.
 
 #### System
 
