@@ -28,41 +28,56 @@ def t_invite_lifecycle_creates_regenerates_and_clears():
 
 def t_codes_carry_the_registration_and_die_with_their_invite():
     invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
-    code = di.issue(invite["id"], entry="OVO eSports #111", segment="Stint 2", name="Max")
-    reg = di.verify(invite["id"], code)
+    code = di.issue(invite, entry="OVO eSports #111", segment="Stint 2", name="Max")
+    reg = di.verify(invite, code)
     assert reg["entry"] == "OVO eSports #111" and reg["segment"] == "Stint 2" and reg["name"] == "Max", reg
     assert len(reg["conn"]) >= 8, reg
-    again = di.verify(invite["id"], di.issue(invite["id"], entry="OVO eSports #111", name="Max"))
+    again = di.verify(invite, di.issue(invite, entry="OVO eSports #111", name="Max"))
     assert again["conn"] != reg["conn"] and again["segment"] is None, "every registration is its own connection"
     other = di.create(os.path.join(tempfile.mkdtemp(), "j.json"))
-    assert di.verify(other["id"], code) is None, "a regenerated invite revokes every code"
+    assert di.verify(other, code) is None, "a regenerated invite revokes every code"
     head, _, sig = code.rpartition(".")
-    assert di.verify(invite["id"], head + "." + ("A" if sig[0] != "A" else "B") + sig[1:]) is None
+    assert di.verify(invite, head + "." + ("A" if sig[0] != "A" else "B") + sig[1:]) is None
     for bad in (None, "", "D1:", "D1:abc", "x" * 5000, code.replace("D1:", "D2:")):
-        assert di.verify(invite["id"], bad) is None, bad
+        assert di.verify(invite, bad) is None, bad
     assert di.verify(None, code) is None, "no invite, no code"
 
 
 def t_codes_never_pass_as_console_tokens():
     invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
-    code = di.issue(invite["id"], entry="E", name="N")
+    code = di.issue(invite, entry="E", name="N")
     assert code.startswith("D1:") and code.count(".") == 1, code
-    assert console_auth.verify_token(invite["id"], code) is None, \
+    assert console_auth.verify_token(invite["key"], code) is None and \
+        console_auth.verify_token(invite["id"], code) is None, \
         "a driver code must never authenticate a console page"
+
+
+def t_the_link_alone_cannot_mint_codes():
+    invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
+    assert invite["key"] != invite["id"]
+    payload = di._b64(b'{"e":"Any Team","s":null,"n":"Max","c":"abcdefghijkl"}')
+    forged = di.PREFIX + payload + "." + di._sign(invite["id"], payload)
+    assert di.verify(invite, forged) is None, "a code signed with the public link id must not pass"
+    signed_bad = di._b64(b'{"e":"E","s":null,"n":"Max; rm -rf ~","c":"abcdefghijkl"}')
+    assert di.verify(invite, di.PREFIX + signed_bad + "." + di._sign(invite["key"], signed_bad)) is None, \
+        "verify re-checks the fields even of a signed code"
+    with open(os.path.join(tempfile.mkdtemp(), "old.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"id": "' + "x" * 24 + '", "created": 1}')
+    assert di.current(fh.name) is None, "an invite file without a signing key is no invite"
 
 
 def t_names_and_entries_are_bounded():
     invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
     for bad in ("", "x" * 33, "Car #7", "a;rm -rf", "Jörg"):
         try:
-            di.issue(invite["id"], entry="E", name=bad)
+            di.issue(invite, entry="E", name=bad)
         except ValueError as exc:
             assert "name" in str(exc), exc
         else:
             raise AssertionError(f"{bad!r} must be refused: it lands in a shell command")
     for bad in ("", "x" * 121):
         try:
-            di.issue(invite["id"], entry=bad, name="N")
+            di.issue(invite, entry=bad, name="N")
         except ValueError:
             pass  # expected
         else:

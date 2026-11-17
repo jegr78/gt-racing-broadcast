@@ -81,6 +81,11 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         code, text, _h = _req(port, "/drivers/data")
         conns = json.loads(text)["connections"]
         assert [(c["entry"], c["name"], c["packets"]["received"]) for c in conns] == [("Team A #1", "Max", 2)], conns
+        ENTRIES.append("Team C #3")
+        late = json.loads(_register(port, invite, entry="Team C #3", name="Lea")[1])["code"]
+        ENTRIES.remove("Team C #3")                                   # the league dropped the entry
+        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": late})
+        assert code == 403 and "no longer in the league" in text, (code, text)
         driver_invite.create(path)                                    # the producer regenerates
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
         assert code == 403 and "register again" in text, (code, text)

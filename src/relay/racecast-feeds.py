@@ -14063,9 +14063,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if rest == ["ingest"]:
                 if method != "POST":
                     return self._drive_refuse(405, "POST only")
-                reg = driver_invite.verify(invite and invite["id"], self.headers.get("X-Driver-Code"))
+                reg = driver_invite.verify(invite, self.headers.get("X-Driver-Code"))
                 if reg is None:
                     return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
+                if hud_source and reg["entry"] not in hud_source.roster_names():
+                    return self._drive_refuse(403, "this entry is no longer in the league's list: register again")
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
                 except ValueError:
@@ -14121,7 +14123,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if not relay.solo and driver_segments and segment not in driver_segments():
                     return self._send({"error": "pick your stint or segment from the list"}, 400)
                 try:
-                    issued = driver_invite.issue(invite["id"], entry=body["entry"],
+                    issued = driver_invite.issue(invite, entry=body["entry"],
                                                  name=body.get("name"),
                                                  segment=None if relay.solo else segment)
                 except ValueError as exc:

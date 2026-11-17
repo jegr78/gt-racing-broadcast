@@ -5,7 +5,8 @@ producer regenerates it. The file lives in the profile's runtime directory and t
 relay reads it per request, so a change needs no relay restart.
 
 A driver code names one registration: entry, optional stint or qualifying segment,
-the driver's name and a random connection id. It is signed with the invite id, so a
+the driver's name and a random connection id. It is signed with a key that lives only
+in the invite file, never in the link, so a driver cannot mint codes, and a
 regenerated invite revokes every code. The `D1:` prefix and the single dot keep it
 from ever parsing as a console token. Stdlib only.
 """
@@ -33,20 +34,23 @@ def path_in(runtime_dir):
 
 
 def current(path):
-    """The invite {id, created} or None."""
+    """The invite {id, created, key} or None; `id` is the public link part, `key`
+    signs the codes and never leaves the machine."""
     try:
         with open(path, encoding="utf-8") as fh:
             doc = json.load(fh)
     except (OSError, ValueError):
         return None
-    if not isinstance(doc, dict) or not isinstance(doc.get("id"), str) or len(doc["id"]) < 20:
+    if not isinstance(doc, dict) or not all(isinstance(doc.get(k), str) and len(doc[k]) >= 20
+                                            for k in ("id", "key")):
         return None
-    return {"id": doc["id"], "created": doc.get("created")}
+    return {"id": doc["id"], "created": doc.get("created"), "key": doc["key"]}
 
 
 def create(path, now=None):
     """Write a new invite, replacing any earlier one, and return it."""
-    invite = {"id": secrets.token_urlsafe(18), "created": time.time() if now is None else now}
+    invite = {"id": secrets.token_urlsafe(18), "created": time.time() if now is None else now,
+              "key": secrets.token_urlsafe(32)}
     folder = os.path.dirname(os.path.abspath(path))
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=".driver-invite-", suffix=".tmp")
@@ -71,38 +75,48 @@ def _b64(raw):
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def _sign(invite_id, payload):
-    mac = hmac.new(invite_id.encode("utf-8"), payload.encode("ascii"), hashlib.sha256)
+def _sign(key, payload):
+    mac = hmac.new(key.encode("utf-8"), payload.encode("ascii"), hashlib.sha256)
     return _b64(mac.digest()[:16])
 
 
-def issue(invite_id, entry, name, segment=None):
-    """A signed code for one registration. Raises ValueError on a bad name or entry."""
+def _problem(entry, name, segment):
     if not isinstance(name, str) or not NAME.match(name):
-        raise ValueError("the name takes up to 32 ASCII letters, digits, spaces, _ . -")
+        return "the name takes up to 32 ASCII letters, digits, spaces, _ . -"
     if not isinstance(entry, str) or not entry.strip() or len(entry) > MAX_ENTRY:
-        raise ValueError("pick an entry")
+        return "pick an entry"
     if segment is not None and (not isinstance(segment, str) or len(segment) > MAX_ENTRY):
-        raise ValueError("pick a stint or segment")
+        return "pick a stint or segment"
+    return None
+
+
+def issue(invite, entry, name, segment=None):
+    """A signed code for one registration of `invite` (from `current`). Raises
+    ValueError on a bad name, entry or segment."""
+    problem = _problem(entry, name, segment)
+    if problem:
+        raise ValueError(problem)
     doc = {"e": entry, "s": segment, "n": name, "c": secrets.token_urlsafe(9)}
     payload = _b64(json.dumps(doc, separators=(",", ":")).encode("utf-8"))
-    return PREFIX + payload + "." + _sign(invite_id, payload)
+    return PREFIX + payload + "." + _sign(invite["key"], payload)
 
 
-def verify(invite_id, code):
+def verify(invite, code):
     """{entry, segment, name, conn} for a valid code of this invite, else None."""
-    if not invite_id or not isinstance(code, str) or len(code) > MAX_CODE:
+    if not invite or not isinstance(code, str) or len(code) > MAX_CODE:
         return None
     if not code.startswith(PREFIX) or code.count(".") != 1:
         return None
     payload, sig = code[len(PREFIX):].split(".")
     if not payload or not hmac.compare_digest(sig.encode("ascii", "replace"),
-                                              _sign(invite_id, payload).encode("ascii")):
+                                              _sign(invite["key"], payload).encode("ascii")):
         return None
     try:
         doc = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
     except (ValueError, TypeError):
         return None
-    if not isinstance(doc, dict) or not all(isinstance(doc.get(k), str) for k in "enc"):
+    if not isinstance(doc, dict) or _problem(doc.get("e"), doc.get("n"), doc.get("s")):
+        return None
+    if not isinstance(doc.get("c"), str) or not 8 <= len(doc["c"]) <= 32:
         return None
     return {"entry": doc["e"], "segment": doc.get("s"), "name": doc["n"], "conn": doc["c"]}

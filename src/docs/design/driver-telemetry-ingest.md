@@ -13,8 +13,11 @@ dashboard app, can implement it from this page. The product design lives in
   invite only opens the registration below.
 - **Driver code**: what registration returns, `D1:<payload>.<signature>`. The payload
   names the entry, the stint or qualifying segment (endurance only), the driver's name
-  and a random connection id. The relay signs it with the invite, so a new invite
-  revokes every code. A code never authenticates any other `/console` page.
+  and a random connection id. The relay signs it with a key that lives only in the
+  invite file on the producer's machine, never in the link, so the link alone cannot
+  mint codes and a new invite revokes every code. The ingest also refuses a code whose
+  entry is no longer in the `Configuration` tab. A code never authenticates any other
+  `/console` page.
 
 ## Registration
 
