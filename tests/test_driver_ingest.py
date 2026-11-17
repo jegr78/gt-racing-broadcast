@@ -127,6 +127,10 @@ def t_every_sample_reaches_the_race_dated_by_its_packet_id():
     assert got[0][0] == {"conn": "c1", "entry": "Team A #1", "segment": None, "name": "Max"}, got[0][0]
     ages = [round(clock.t - s["mono"], 3) for _r, s in got]
     assert ages == [round(11 / 60, 3), round(6 / 60, 3), 0.0], f"older packets are dated earlier: {ages}"
+    got.clear()
+    hub.ingest(_reg("c1", name="Max"), _batch(6, 1_000_001), None)     # a forged far-ahead id
+    age = clock.t - got[0][1]["mono"]
+    assert age <= tp.MAX_BATCH / tp.PACKET_HZ + 1e-9, f"back-dating stays within one batch: {age}"
 
 
 def t_a_failing_race_hook_never_fails_the_upload():

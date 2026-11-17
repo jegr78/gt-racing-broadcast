@@ -215,6 +215,14 @@ def t_implausible_samples_change_nothing():
         assert row["distance_m"] == before["distance_m"] and race.standings(t)["state"] == "racing", \
             f"{over} must be dropped: {row}"
     assert race._cars["b"].lap == b.lap(), "a dropped sample leaves the lap counter alone"
+    waiting = rd.Race(TRACE, formation=True)
+    c = Car(waiting, "C", "c", L - 30)
+    t = _drive(waiting, [c], [20], 0.0, 1)
+    x, z = _pos(c.along)
+    waiting.update("C", "c", "Driver", {"t": t - 1, "lap": c.lap(), "x": x, "z": z,
+                                        "speed_kmh": 1.0, "race_position": 9})
+    assert waiting._cars["c"].position is None and waiting._cars["c"].speed > 15, \
+        "a sample older than the car's last one changes nothing"
 
 
 def t_history_and_quiet_connections_stay_bounded():
