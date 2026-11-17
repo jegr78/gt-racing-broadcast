@@ -610,3 +610,15 @@ def delete_recording_analyses(profile_root, recording_id, recording_name=None):
             )
         if directory.exists():
             shutil.rmtree(directory)
+    # Runs of other recordings carry a full copy of a reference lap in their package.
+    for detail in base.glob("*/*/package/detail.json"):
+        try:
+            package = _read(detail, root, max_bytes=ai_package.MAX_DETAIL_BYTES)
+            refs = {p.get("recording_id") for p in package.get("reference_provenance") or []}
+        except (ReportError, AttributeError, TypeError):
+            continue
+        if identities & refs:
+            run_dir = detail.parent.parent
+            if run_dir.is_symlink() or not run_dir.resolve().is_relative_to(root):
+                raise ReportError("invalid_artifact", "Refusing redirected analysis deletion")
+            shutil.rmtree(run_dir)
