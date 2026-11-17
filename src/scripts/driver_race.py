@@ -143,6 +143,16 @@ def _last_audited(path):
     return {k: record[k] for k in ("ts", "who", "action")}
 
 
+def clear_actions(runtime_dir):
+    """Drop the corrections and rejoin marks (a fresh event, a race reset); the audit
+    log stays."""
+    path = os.path.join(runtime_dir, ACTIONS)
+    try:
+        atomic_replace.retry_windows_file_operation(lambda: os.remove(path))
+    except FileNotFoundError:
+        pass  # nothing recorded
+
+
 def _saved_actions(path):
     """(corrections {entry: (metres, pit stops)}, rejoin entries) from the actions file;
     anything malformed is skipped, never raised."""
@@ -362,7 +372,9 @@ class Service:
             self._log(who, "finish")
 
     def reset(self, who="tailnet"):
+        """Start the race over: its corrections and rejoin marks go with it."""
         with self._lock:
             self._log(who, "reset")
+            clear_actions(os.path.dirname(os.path.abspath(self._path)))
             self._final_lobby_laps = None
             self._race = self._build(self._pick()["id"] if self._pick() else None)

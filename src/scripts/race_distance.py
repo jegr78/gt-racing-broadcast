@@ -32,7 +32,8 @@ nearest the predicted distance decides.
   connection live. Loading and paused samples only keep it live. A car takes over
   only with a lobby counter of at most MAX_CHANGE_LAP.
 - Finish: single lobby when the leader completes `lap_count` laps of GT7's counter,
-  lap 1 (a formation lap) included, checked against its distance;
+  lap 1 (a formation lap) included, counted in race distance so a red flag restart
+  from the box keeps the count;
   endurance when the leader's car of the final lobby (it took over after the final
   stint switch) passes `lap_count` on that lobby's counter. `final_lap` ends the race
   at the leader's next crossing. Every other car finishes at its next crossing after
@@ -40,8 +41,9 @@ nearest the predicted distance decides.
 - Red flag (#1113): `red_flag` freezes every entry's distance. In the restart lobby
   (a new connection, or a counter that dropped) each car continues from its anchor
   when it leaves the box. `keep` anchors at the frozen distance, `neutralise`
-  anchors every car of a lap at that lap's best distance. `release` ends the mode;
-  an entry still waiting resumes all the same.
+  anchors every car of a lap at that lap's best distance. `release` ends the mode:
+  a car still in its old session counts on from where it is, one in a restart lobby
+  still resumes at its box exit.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
   window starts from the leader's distance when the window opened.
 - Corrections add metres and pit stops per entry; `override_change` makes a team's
@@ -169,7 +171,14 @@ class Race:
             self._red["mode"] = mode
 
     def release(self, now):
+        """End the red flag mode. An entry whose car is still in the session it raced in
+        (a mis-press, or a suspension the lobby drove through) counts on from where it
+        is; one waiting in a restart lobby resumes when it leaves the box."""
         self._red = None
+        for ent in self._entries.values():
+            car = self._cars.get(ent.active)
+            if ent.waiting and car is not None and not car.restart_ready and car.lap is not None:
+                car.counting, ent.waiting = True, False
 
     def rejoin(self, entry, on):
         ent = self._entries.get(entry)
@@ -392,6 +401,7 @@ class Race:
                 return
         if not active or ent.finished_at is not None or ent.held:
             return
+        before = ent.distance
         if not car.counting:
             lap0 = 2 if self.formation else 1
             if lap < lap0 or (self.multi_lobby and ent.changed) \
@@ -407,7 +417,14 @@ class Race:
             del ent.ts[:cut], ent.ds[:cut]
         if len(ent.ts) > MAX_HISTORY:
             del ent.ts[:len(ent.ts) - MAX_HISTORY], ent.ds[:len(ent.ds) - MAX_HISTORY]
-        if prev_lap is not None and lap > prev_lap:
+        # A single lobby counts laps in race distance: after a red flag restart from the
+        # box the restart lobby's line no longer sits on a whole lap of it.
+        if self.multi_lobby:
+            crossed = prev_lap is not None and lap > prev_lap
+        else:
+            crossed = before is not None and ent.distance is not None and \
+                math.floor(ent.distance / self.length) > math.floor(before / self.length)
+        if crossed:
             self._crossing(ent, car, t)
 
     def _box(self, car, t):
@@ -473,7 +490,7 @@ class Race:
             return
         if self.finish_mode == "laps" and self.lap_count:
             by_laps = (car.lap > self.lap_count and self._final_car(ent)) if self.multi_lobby \
-                else ent.distance >= (self.lap_count - car.lap0 + 1) * self.length - SNAP_M
+                else ent.distance >= (self.lap_count - (1 if self.formation else 0)) * self.length - SNAP_M
         else:
             by_laps = False
         by_flag = self._final_lap_at is not None and t > self._final_lap_at

@@ -504,6 +504,34 @@ def t_a_change_override_switches_the_team_now():
     assert not race.override_change("A", "nobody", t), "only a connection of the team"
 
 
+def t_a_release_in_the_same_lobby_drives_on_from_where_the_cars_are():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
+    t = _drive(race, [a, b], [50, 50], 0.0, 20)
+    race.red_flag(t, "keep")                                   # pressed by mistake
+    t = _drive(race, [a, b], [50, 50], t, 4)
+    race.release(t)
+    t = _drive(race, [a, b], [50, 50], t, 4)
+    for car, entry in ((a, "A"), (b, "B")):
+        row = _row(race, entry, t)
+        assert row["status"] == "racing" and abs(row["distance_m"] - (car.along + 15 - 15)) < 5, (row, car.along)
+
+
+def t_a_lap_count_finish_after_a_red_flag_restart_counts_the_whole_race():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    a = Car(race, "A", "a", L - 15)
+    t = _drive(race, [a], [50], 0.0, (L + 30) / 50)            # 1 lap and a bit
+    frozen = _row(race, "A", t)["distance_m"]
+    race.red_flag(t, "keep")
+    _new_lobby(a, L - 15)
+    t = _drive(race, [a], [None], t, 3)
+    a.box = False
+    t = _drive(race, [a], [50], t, (L - frozen + 2 * L) / 50 - 3)   # just short of 3 race laps
+    assert race.standings(t)["state"] == "racing", race.standings(t)["entries"][0]
+    t = _drive(race, [a], [50], t, L / 50 + 2)
+    assert _row(race, "A", t)["finished"], "3 laps of race distance finish it, whatever the restart lobby counts"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

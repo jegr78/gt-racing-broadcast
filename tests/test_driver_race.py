@@ -196,6 +196,22 @@ def t_actions_validate_their_input():
     assert not os.path.exists(dr.audit_path_for(path)), "a refused action logs nothing"
 
 
+def t_reset_and_a_fresh_event_drop_corrections_and_rejoins():
+    svc, _clock, path, _league = _ctl(multi=True)
+    svc.correct("rc:Anna", "A", metres=-250.0, reason="missed a cut")
+    svc.rejoin("rc:Anna", "B", True)
+    svc.reset("rc:Anna")
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -20, 0))
+    assert svc.standings()["entries"][0]["correction_m"] == 0.0, "a reset race starts without corrections"
+    svc.correct("rc:Anna", "A", metres=10.0, reason="x")
+    dr.clear_actions(os.path.dirname(path))
+    fresh = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                       multi_lobby=lambda: True, clock=lambda: 1.0)
+    fresh.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -20, 0))
+    assert fresh.standings()["entries"][0]["correction_m"] == 0.0, "the next event starts clean"
+    assert [r["action"] for r in _audit(path)][-2:] == ["reset", "correct"], "the audit log stays"
+
+
 def t_a_damaged_actions_file_never_breaks_the_race():
     svc, _clock, path, _league = _ctl()
     with open(os.path.join(os.path.dirname(path), dr.ACTIONS), "w", encoding="utf-8") as fh:
