@@ -35,6 +35,11 @@ def t_settings_validate_persist_and_fall_back():
     with open(path, "w", encoding="utf-8") as fh:
         fh.write('{"lap_count": "many"}')
     assert dr.read_settings(path) == dr.DEFAULTS, "a broken file keeps the defaults"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write('{"lap_count": "many", "visible": true, "formation": false}')
+    got = dr.read_settings(path)
+    assert got["visible"] is True and got["formation"] is False and got["lap_count"] is None, \
+        f"one bad value falls back alone, the others stay: {got}"
 
 
 def _service(pick, multi=False):

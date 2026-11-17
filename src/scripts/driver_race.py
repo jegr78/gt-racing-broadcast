@@ -59,10 +59,11 @@ def read_settings(path):
         doc = {}
     doc = doc if isinstance(doc, dict) else {}
     out = dict(DEFAULTS)
-    try:
-        out.update(validate(doc))
-    except ValueError:
-        pass  # a hand-edited bad file keeps the defaults
+    for key, value in doc.items():
+        try:
+            out.update(validate({key: value}))
+        except ValueError:
+            pass  # a hand-edited bad value keeps its default, the others stay
     return out
 
 
