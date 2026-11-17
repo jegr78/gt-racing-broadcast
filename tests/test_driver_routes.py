@@ -447,6 +447,11 @@ def t_race_control_lowers_only_a_cover_it_raised():
         assert obs.up, "once the director switched the cover, the desk no longer owns it"
         obs.up = False
         flag(True)
+        assert _req(port, "/obs/graphic/show/Standby%20Cover")[0] == 200
+        flag(False)
+        assert obs.up, "a Companion switch of the cover ends the desk's ownership too"
+        obs.up = False
+        flag(True)
         flag(False)
         assert not obs.up, "the desk lowers the cover it raised"
     finally:
