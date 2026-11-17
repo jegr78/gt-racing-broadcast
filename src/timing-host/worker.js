@@ -16,11 +16,13 @@ export function setPage(html) {
   PAGE = html;
 }
 
+const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+  "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
 function text(body, status, type = "text/plain; charset=utf-8") {
-  return new Response(body, {
-    status,
-    headers: { "content-type": type, "cache-control": "no-store" },
-  });
+  const headers = { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" };
+  if (type.startsWith("text/html")) headers["content-security-policy"] = PAGE_CSP;
+  return new Response(body, { status, headers });
 }
 
 const MIN_KEY = 16;

@@ -187,6 +187,8 @@ Deno.test("first publish makes the room live and fans out to every viewer", asyn
   const page = await worker.fetch(req(`/t/${LINK}`), env);
   eq(page.status, 200, "page served");
   assert((await page.text()).includes("Live timing"), "the viewer page");
+  const csp = page.headers.get("content-security-policy") || "";
+  assert(csp.includes("default-src 'none'") && csp.includes("connect-src 'self'"), `strict CSP: ${csp}`);
   const a = await viewer(env), b = await viewer(env);
   eq(a.ws.sent[0].t, "state", "a late viewer gets the last state at once");
   await publish(room, ws, state(2));

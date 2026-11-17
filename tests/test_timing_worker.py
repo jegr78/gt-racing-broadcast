@@ -13,7 +13,7 @@ def t_worker_deno_tests_pass():
         assert os.environ.get("RACECAST_REQUIRE_DENO") != "1", "deno is required here but missing"
         print("skip: deno not installed")
         return
-    r = subprocess.run([deno, "test", "--no-check", "--no-prompt", "tests/timing-host/"],
+    r = subprocess.run([deno, "test", "--no-check", "--no-prompt", "--allow-read=src", "tests/timing-host/"],
                        cwd=ROOT, capture_output=True, text=True, errors="replace", timeout=180,
                        env=dict(os.environ, NO_COLOR="1"))
     assert r.returncode == 0, f"deno tests failed:\n{r.stdout[-4000:]}\n{r.stderr[-2000:]}"
