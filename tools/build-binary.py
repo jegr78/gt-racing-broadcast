@@ -13,7 +13,7 @@ SRC = os.path.join(ROOT, "src")
 # Bundled data, laid out under _MEIPASS/src/ so every script's here-relative
 # path resolution (hud.html, assets/, OBS template) keeps working unchanged.
 DATA = ["relay", "scripts", "obs", "assets", "companion", "director", "cockpit", "console",
-        "racecontrol", "ui", "setup-assets.py"]
+        "racecontrol", "ui", "timing-host", "setup-assets.py"]
 # The operator docs the Control Center's Help page serves (racecast.DOCS_FILES),
 # and only these. The docs/wiki/ subtree stays on GitHub and Help links to it.
 DOC_FILES = ["docs/Broadcast_Setup_Guide.md", "docs/README_SETUP.md"]
