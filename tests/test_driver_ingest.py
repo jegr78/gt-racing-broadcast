@@ -152,6 +152,7 @@ def t_a_failing_race_hook_never_fails_the_upload():
     finally:
         logging.getLogger("racecast.relay").removeHandler(handler)
     assert len(seen) == 1 and "c1" in seen[0], f"one warning per connection, not one per sample: {seen}"
+    assert "bad sample" not in seen[0], "the exception text can carry client data: only its type is logged"
 
 
 def t_reset_drops_every_connection():
