@@ -184,16 +184,28 @@
     cars.id = "dd-cars";
     svg.appendChild(cars);
   }
+  const DOT_R = 2.8, CLEAR = 2 * DOT_R + 0.4;
+  // The nearest spot on rings around the car's own position that no dot ahead covers.
+  function freeSpot(p, placed) {
+    function free(q) { return placed.every(function (o) { return Math.hypot(o[0] - q[0], o[1] - q[1]) >= CLEAR; }); }
+    if (free(p)) return p;
+    for (let ring = 1; ring <= 4; ring++) {
+      const steps = 8 * ring;
+      for (let i = 0; i < steps; i++) {
+        const a = 2 * Math.PI * i / steps;
+        const q = [p[0] + Math.cos(a) * CLEAR * ring, p[1] + Math.sin(a) * CLEAR * ring];
+        if (free(q)) return q;
+      }
+    }
+    return p;
+  }
   function drawCars(entries) {
     const g = document.getElementById("dd-cars");
     if (!g || !view) return;
     const placed = [], dots = [];
     entries.filter(function (e) { return typeof e.x === "number" && typeof e.z === "number"; })
       .forEach(function (e) {
-        let p = project(e.x, e.z), n = 0;
-        while (placed.some(function (q) { return Math.hypot(q[0] - p[0], q[1] - p[1]) < 3.2; }) && n < 6) {
-          p = [p[0] + 2.4, p[1] + 2.4]; n++;   // a car behind slides off the one ahead
-        }
+        const p = freeSpot(project(e.x, e.z), placed);
         placed.push(p);
         dots.push([e, p]);
       });
@@ -202,14 +214,14 @@
       const dot = document.createElementNS(SVG, "g");
       dot.setAttribute("class", "dot");
       const c = document.createElementNS(SVG, "circle");
-      c.setAttribute("cx", p[0]); c.setAttribute("cy", p[1]); c.setAttribute("r", 2.8);
+      c.setAttribute("cx", p[0]); c.setAttribute("cy", p[1]); c.setAttribute("r", DOT_R);
       c.setAttribute("fill", safeColor(e.color, "#39414d"));
       c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", 0.4);
       const t = document.createElementNS(SVG, "text");
       t.setAttribute("x", p[0]); t.setAttribute("y", p[1]);
       t.setAttribute("fill", safeColor(e.text_color, "#fff"));
-      t.setAttribute("font-size", 2.6);
       t.textContent = e.number || String(e.pos);
+      t.setAttribute("font-size", t.textContent.length > 2 ? 2.0 : 2.6);
       dot.appendChild(c); dot.appendChild(t);
       return dot;
     }));

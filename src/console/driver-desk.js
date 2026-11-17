@@ -21,6 +21,8 @@
     ".dd button.alarm{border-color:#ff4d5e;color:#ff4d5e;font-weight:600}",
     ".dd button.armed{background:#ff4d5e;color:#fff}",
     ".dd input[type=number]{width:6.5em}",
+    ".dd input[type=text]{width:9em}.dd input[type=text].wide{width:13em}",
+    ".dd input[type=text].grow{width:auto;flex:1 1 12em}",
     ".dd table{width:100%;border-collapse:collapse}",
     ".dd th,.dd td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--edge,#2a2f37);vertical-align:middle}",
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
@@ -216,7 +218,8 @@
       act("/drivers/race/fastest", {}, "Fastest lap cleared");
     });
     var flEntry = el("select", {"aria-label": "Fastest lap entry"});
-    var flDriver = el("input", {type: "text", maxlength: "32", placeholder: "driver", "aria-label": "Fastest lap driver"});
+    var flDriver = el("input", {type: "text", maxlength: "32", placeholder: "driver", cls: "wide",
+                                "aria-label": "Fastest lap driver"});
     var flTime = el("input", {type: "text", placeholder: "1:58.412", "aria-label": "Fastest lap time", size: "9"});
     var flSet = button("Set fastest lap", "", null, async function () {
       var ms = parseLap(flTime.value);
