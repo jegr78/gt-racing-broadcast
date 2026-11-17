@@ -81,7 +81,7 @@ Ctrl+C ends inspection; never use broad `pkill` commands to stop test services.
   CI job** (`.github/workflows/ci.yml`, ubuntu) runs exactly this; the matrix `test` job
   already runs `tests/test_e2e.py` via `run-tests.py`.
 - **Solo coaching** (`--coach-only`, **CI-runnable on Linux, Windows and macOS**):
-  copies the shipped Solo profile into an owned temporary app home, clears inherited
+  copies the committed `solo-pov` profile into an owned temporary app home, clears inherited
   `RACECAST_*` configuration and uses a loopback OBS stand-in and synthetic replay.
   It uses no POSIX executable stubs. Signed HTTP exercises explicit Driver assignment,
   Start, replay exclusion, private owner history and stale-revision Stop through
@@ -119,7 +119,7 @@ views, the Director Panel, the cockpit and the Race Control desk (the two crew p
 390 px) against the synthetic run, which serves a Crew roster (`--crew-csv-url`) and runs
 `tools/obs-sim.py`. The Telemetry view (`cc-telemetry`) exists only for a solo POV profile,
 so a second Control Center serves it from its own app home in the temp dir: a copy of
-`src/` or the binary, the shipped `solo-pov` profile, a learned demo track and one indexed
+`src/` or the binary, the committed `solo-pov` profile, a learned demo track and one indexed
 `make-demo-recording.py` recording. Every other surface keeps the first one. `--keep`
 prints the second Control Center's URL.
 `tools/visual-probe.js` reads element facts in the page;
@@ -255,7 +255,7 @@ you:
   and the other has to move, or picture and sound drift apart, this was live
   once (the cut started at 4 s and the hit landed 3.5 s early).
 - **League kits never enter the repo.** `profiles/*` is gitignored bar the
-  example/demo profiles, so a real kit (with its poster crops and league logos)
+  committed `example`, `demo`, `solo-commentary` and `solo-pov` profiles, so a real kit (with its poster crops and league logos)
   stays machine-local and travels via `racecast profile export`. Licensed music
   is additionally gitignored; a missing track renders the scene silent instead
   of failing, so a kit still works for someone without the audio.
