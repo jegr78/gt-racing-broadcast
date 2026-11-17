@@ -60,6 +60,7 @@ def main():
         with patch.object(gate.m, "make_handler", side_effect=handler):
             relay = gate._serve()
         ctx = ui._ctx()
+        ctx['active_profile'] = cli.m._active_profile_name  # writes carry the league the page loaded
         ctx.update(
             version="dev build",
             profiles=lambda: {
