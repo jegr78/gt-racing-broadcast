@@ -518,8 +518,16 @@ class Service:
         if not self._enabled():
             return
         with self._lock:
-            self._current().update(reg["entry"], reg["conn"], reg["name"],
-                                   dict(sample, t=sample.get("mono", self._clock())))
+            race = self._current()
+            race.update(reg["entry"], reg["conn"], reg["name"],
+                        dict(sample, t=sample.get("mono", self._clock())))
+            used = race.take_used_rejoins()
+            if used:
+                def update(doc):
+                    doc["rejoin"] = sorted(set(doc.get("rejoin") or []) - set(used))
+                self._save_actions(update)
+                for entry in used:
+                    self._log("race", "rejoin_used", entry=entry)
 
     def standings(self):
         with self._lock:

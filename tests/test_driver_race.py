@@ -198,6 +198,19 @@ def t_actions_validate_their_input():
     assert not os.path.exists(dr.audit_path_for(path)), "a refused action logs nothing"
 
 
+def t_a_consumed_rejoin_does_not_come_back_after_a_restart():
+    svc, _clock, path, league = _ctl(multi=True)
+    svc.rejoin("rc:Anna", "B", True)
+    svc._current()._used_rejoins.append("B")                  # the team rejoined at the change
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -20, 0))
+    again = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                       multi_lobby=lambda: True, clock=lambda: 5.0, league_path=league)
+    again.update({"entry": "B", "conn": "b", "name": "Ann"}, _sample(0.1, -20, 0))
+    rows = {r["entry"]: r for r in again.standings()["entries"]}
+    assert rows["B"]["rejoin"] is False, "a used rejoin mark never lifts the team a second time"
+    assert _audit(path)[-1]["action"] == "rejoin_used"
+
+
 def t_reset_and_a_fresh_event_drop_corrections_and_rejoins():
     svc, _clock, path, _league = _ctl(multi=True)
     svc.correct("rc:Anna", "A", metres=-250.0, reason="missed a cut")

@@ -530,6 +530,8 @@ def t_a_rejoin_starts_the_team_at_the_leaders_distance():
     rb = _row(race, "B", t)
     assert rb["driver"] == "Ben" and abs(rb["distance_m"] - (start + 200)) < 25, (rb, start)
     assert abs(rb["gap_s"] - 10.0) < 0.5, f"the later departure is the deficit: {rb}"
+    assert race.take_used_rejoins() == ["B"] and race.take_used_rejoins() == [], \
+        "a consumed rejoin is reported once, so the service can drop the saved mark"
 
 
 def t_a_change_override_switches_the_team_now():

@@ -152,6 +152,7 @@ class Race:
         self._red = None            # {"at", "mode"} while the red flag mode runs
         self._restart_mode = "keep"
         self._preset = {}           # entry -> [metres, pit stops, rejoin] for entries not seen yet
+        self._used_rejoins = []     # entries whose rejoin mark a change consumed
         self.fastest = None         # {entry, driver, ms}
         self._window_leader = None  # the leader's distance when the change window opened
 
@@ -196,6 +197,11 @@ class Race:
             car = self._cars.get(ent.active)
             if ent.waiting and car is not None and not car.restart_ready and car.lap is not None:
                 car.counting, ent.waiting = True, False
+
+    def take_used_rejoins(self):
+        """The entries whose rejoin mark was consumed since the last call."""
+        used, self._used_rejoins = self._used_rejoins, []
+        return used
 
     def rejoin(self, entry, on):
         ent = self._entries.get(entry)
@@ -517,6 +523,7 @@ class Race:
             if self._start(ent, car, t, self._window_leader - ent.adjust, car.lap, car.s,
                            from_line=False):
                 ent.active, ent.rejoin = car.conn, False
+                self._used_rejoins.append(ent.entry)
                 self._changed(ent, t)
             return
         if car.conn == ent.active:
