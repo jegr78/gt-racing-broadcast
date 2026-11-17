@@ -35,7 +35,8 @@ MAX_ENTRY = 120
 MAX_CORRECTION_M = 100_000.0
 MAX_PIT_CORRECTION = 50
 DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0,
-            "visible": False}
+            "visible": False, "show_compound": True, "show_fuel": True}
+COMPOUNDS = ("RS", "RM", "RH", "I", "W")   # Racing Soft/Medium/Hard, Intermediate, Wet
 MAX_DELAY_S = 120
 FASTEST = "driver-race-fastest.json"
 SNAPSHOT_EVERY_S = 0.5
@@ -76,6 +77,11 @@ def validate(changes):
         if changes["finish_mode"] not in ("laps", "time"):
             raise ValueError("finish_mode is laps or time")
         out["finish_mode"] = changes["finish_mode"]
+    for key in ("show_compound", "show_fuel"):
+        if key in changes:
+            if not isinstance(changes[key], bool):
+                raise ValueError(f"{key} is true or false")
+            out[key] = changes[key]
     if "visible" in changes:
         if not isinstance(changes["visible"], bool):
             raise ValueError("visible is true or false")
@@ -233,6 +239,18 @@ def _saved_actions(path):
     return corrections, rejoins
 
 
+def _saved_compounds(path):
+    """{entry: {code, who, ts}} from the actions file; anything malformed is skipped."""
+    raw = _read_json(path).get("compounds")
+    out = {}
+    for entry, value in (raw.items() if isinstance(raw, dict) else ()):
+        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and isinstance(value, dict) \
+                and value.get("code") in COMPOUNDS and isinstance(value.get("who"), str) \
+                and isinstance(value.get("ts"), (int, float)) and len(out) < MAX_QUALI:
+            out[entry] = {"code": value["code"], "who": value["who"][:80], "ts": float(value["ts"])}
+    return out
+
+
 def _segment_key(segment):
     return segment if isinstance(segment, str) else ""
 
@@ -362,14 +380,18 @@ class Service:
                "remaining": ctx.get("remaining"), "track": pick.get("id"),
                "track_name": pick.get("track") or None, "visible": self._settings()["visible"]}
         race = self._current()
+        settings = self._settings()
+        out["show"] = {"compound": settings["show_compound"], "fuel": settings["show_fuel"]}
+        compounds = _saved_compounds(_actions_path_for(self._path))
         if out["mode"] == "qualifying":
             out["qualifying"] = qualifying(
                 ctx.get("connections") or [], ctx.get("segment"), roster,
                 min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
                 overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")))
+            for row in out["qualifying"]:
+                row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
             return out
         st = race.standings(self._clock())
-        settings = self._settings()
         rows = []
         for i, r in enumerate(st["entries"]):
             row = _viewer_entry(r, roster)
@@ -377,6 +399,7 @@ class Service:
                                           "status", "pit_stops", "last_lap_ms", "fuel_l",
                                           "finished", "x", "z")})
             row["pos"] = i + 1
+            row["compound"] = (compounds.get(r["entry"]) or {}).get("code")
             rows.append(row)
         lead_laps = rows[0]["laps"] if rows and st["entries"][0]["distance_m"] is not None else None
         fl = race.fastest
@@ -473,6 +496,7 @@ class Service:
             out = race.standings(self._clock())
             pick_id = self._race_pick
         out.update(settings=read_settings(self._path), track=pick_id,
+                   compounds=_saved_compounds(_actions_path_for(self._path)),
                    quali_overrides=_saved_quali(_actions_path_for(self._path),
                                                 self._context().get("segment")),
                    league=read_league(self._league), last_action=self._last_action)
@@ -496,6 +520,28 @@ class Service:
         with self._lock:
             self._current().release(self._clock())
             self._log(who, "release")
+        return self.standings()
+
+    def set_compound(self, who, entry, code):
+        """Set an entry's tyre compound (one of COMPOUNDS) or clear it with None. It
+        holds through driver changes; the last change wins and carries its author."""
+        entry = _entry_name(entry)
+        if code is not None and code not in COMPOUNDS:
+            raise ValueError("compound is one of " + ", ".join(COMPOUNDS) + " or null")
+        now = self._wall()
+
+        def update(doc):
+            done = doc.get("compounds") if isinstance(doc.get("compounds"), dict) else {}
+            if code is None:
+                done.pop(entry, None)
+            elif entry in done or len(done) < MAX_QUALI:
+                done[entry] = {"code": code, "who": str(who)[:80], "ts": now}
+            else:
+                raise ValueError(f"at most {MAX_QUALI} entries carry a compound")
+            doc["compounds"] = done
+        with self._lock:
+            self._save_actions(update)
+            self._log(who, "compound", entry=entry, code=code)
         return self.standings()
 
     def set_quali(self, who, entry, ms=None, clear=False):

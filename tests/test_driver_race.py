@@ -18,9 +18,11 @@ def _sample(t, along, lap, speed=50.0):
 def t_settings_validate_persist_and_fall_back():
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
     assert dr.read_settings(path) == {"formation": True, "finish_mode": "laps", "lap_count": None,
-                                      "delay_s": 0, "visible": False}
+                                      "delay_s": 0, "visible": False,
+                                      "show_compound": True, "show_fuel": True}
     saved = dr.write_settings(path, {"formation": False, "lap_count": 12})
-    assert saved == {"formation": False, "finish_mode": "laps", "lap_count": 12, "delay_s": 0, "visible": False} == dr.read_settings(path)
+    assert saved == {"formation": False, "finish_mode": "laps", "lap_count": 12, "delay_s": 0,
+                     "visible": False, "show_compound": True, "show_fuel": True} == dr.read_settings(path)
     for bad in ({"formation": "no"}, {"finish_mode": "sprint"}, {"lap_count": 0},
                 {"lap_count": 2.5}, {"lap_count": True}):
         try:
@@ -371,6 +373,43 @@ def t_race_control_corrects_a_qualifying_time():
     dr.clear_actions(os.path.dirname(path))
     assert dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
                       multi_lobby=lambda: False).standings()["quali_overrides"] == {}
+
+
+def t_the_crew_sets_a_tyre_compound_that_outlives_a_driver_change():
+    ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": None, "mode": "race"}
+    svc, clock, path = _dash_service(ctx)
+    _feed(svc, clock, "A", "a", -20.0, 2.0)
+    svc.set_compound("rc:Anna", "A", "RS")
+    clock[0] = 2.5
+    svc.set_compound("director:Ben", "A", "RM")                  # the later change wins
+    svc.tick()
+    row = svc.dashboard()["entries"][0]
+    assert row["compound"] == "RM", row
+    assert svc.standings()["compounds"]["A"]["who"] == "director:Ben", svc.standings()["compounds"]
+    _feed(svc, clock, "A", "a2", 100.0, 4.0)                     # another sender drives on
+    svc.tick()
+    assert svc.dashboard()["entries"][0]["compound"] == "RM", "a driver change keeps the tyres"
+    ctx.update(mode="qualifying", segment="Q1",
+               connections=[{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90000}}])
+    svc.tick()
+    assert svc.dashboard()["qualifying"][0]["compound"] == "RM", "qualifying shows it too"
+    svc.set_compound("rc:Anna", "A", None)
+    svc.tick()
+    assert svc.dashboard()["qualifying"][0]["compound"] is None, "no compound shows none"
+    for bad in ("XX", "rs", 3):
+        try:
+            svc.set_compound("rc:Anna", "A", bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} is no compound")
+    svc.set_settings({"show_compound": False, "show_fuel": False})
+    svc.tick()
+    assert svc.dashboard()["show"] == {"compound": False, "fuel": False}, svc.dashboard()["show"]
+    again, _c, _p = _dash_service(ctx, path)
+    svc.set_compound("rc:Anna", "A", "W")
+    assert again.standings()["compounds"]["A"]["code"] == "W", "it survives a restart"
+    dr.clear_actions(os.path.dirname(path))
+    assert again.standings()["compounds"] == {}, "the next event starts without compounds"
 
 
 if __name__ == "__main__":
