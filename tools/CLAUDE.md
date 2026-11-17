@@ -198,6 +198,19 @@ simulated PS5 cannot share a host on the default ports: both need UDP 33740 or
 sender's own upload code; `--status` adds the relay's counts to its JSON report and
 `--reset` clears the probe's counters first.
 
+## Driver replay (`tools/driver-replay.py`, #1115)
+
+Up to 15 simulated senders for a running relay: they register on the event's invite
+and post encrypted GT7 packets along the picked layout's line through the real ingest
+route, with lap times, best laps and fuel. `--gap` sets the start spacing (small values
+give a dense pack for the track map). Needs `racecast event invite --new` and the same
+`racecast event track ID`; screenshots of the dashboard, desks and cockpit use it with
+the demo profile. `tests/test_driver_replay.py` pins its packets to the GT7 layout.
+
+```bash
+python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4
+```
+
 ## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
 Two maintainer gates for a pass that is supposed to touch comments and prose only.
 Both compare the working tree against a base ref and are read-only.

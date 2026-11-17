@@ -72,7 +72,8 @@ event's GT7 layout and lets Race Control change it, for example when the card re
 the first complete lap matched another layout (see [Telemetry](Telemetry)).
 
 The **Driver telemetry** card has the same controls as the Director Panel's section
-([Director](Director#driver-telemetry)). Its `RED FLAG` is the full one: it raises the
+([Director](Director#driver-telemetry)), except the dashboard's on-air switch: putting it
+on air stays with the director. Its `RED FLAG` is the full one: it raises the
 Standby Cover, sets the HUD banner *Red Flag - Race Suspended* and holds the race, and
 it says when the cover or the banner could not be set. **Restart released** lowers the
 cover and clears the banner again. Every action is logged with the person's name.

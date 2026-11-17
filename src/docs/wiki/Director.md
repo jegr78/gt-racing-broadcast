@@ -312,6 +312,11 @@ desk:
 - the race order with gaps, status, pit stops and corrections; a correction needs a
   reason
 - in endurance, rejoin marks and a change override per team
+- the [driver dashboard](Driver-Telemetry#on-air-and-in-the-cockpit): **Show
+  dashboard** / **Hide dashboard** puts it on air (Director Panel only), the delay in
+  seconds, the fastest lap with **Clear fastest lap** and a form to set it, and
+  qualifying corrections per entry: **Set time**, **Delete time** (for example after a
+  track limits penalty) and **GT7 time** to undo the correction
 - readiness per entry (in endurance for the stint on air and the next one) and every
   sender with **Move** (to another entry) and **Disconnect**
 
