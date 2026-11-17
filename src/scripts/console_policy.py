@@ -25,7 +25,6 @@ PRODUCER = "producer"
 # two never collide.
 RACE_CONTROL = "race_control"
 RACE_ENGINEER = "race_engineer"
-DRIVER_RADIO = "driver_radio"
 ANY = "any"
 
 # Decision outcomes returned by decide().
@@ -132,13 +131,13 @@ def min_capability(segments, method="GET"):
     if p and p[0] == "substitution":            # /substitution/latest (GET) + /note (POST)
         return Requirement(DIRECTOR, False)
 
-    # Exact radio routes only. The relay additionally checks profile opt-in and
-    # explicit subject assignment; Crew roles never imply DRIVER_RADIO.
+    # Exact radio routes only. Any verified sign-in may use them; the relay then
+    # requires the profile's opt-in (driver_radio_access), no role grants them.
     if method == "GET" and p in (["driver-radio"], ["driver-radio", "messages-view"]):
-        return Requirement(DRIVER_RADIO, False)
+        return Requirement(ANY, False)
     if (method == "GET" and p in (["driver-radio", "access"], ["driver-radio", "setup"], ["driver-radio", "snapshot"], ["driver-radio", "messages"], ["driver-radio", "native"], ["driver-radio", "coach"])) or (
             method == "POST" and p in (["driver-radio", "setup"], ["driver-radio", "service"], ["driver-radio", "request"], ["driver-radio", "native"], ["driver-radio", "coach"])):
-        return Requirement(DRIVER_RADIO, False)
+        return Requirement(ANY, False)
 
     if method == "GET" and (p == ["race-engineer"] or len(p) == 2 and p[0] == "race-engineer" and p[1] in ("access", "snapshot", "history", "lap", "reference", "compare", "trace", "outline")):
         return Requirement(RACE_ENGINEER,False)

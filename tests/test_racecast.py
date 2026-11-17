@@ -7935,6 +7935,25 @@ def t_event_start_skips_the_late_collection_check_after_step_2b_reached_obs():
                      "refresh"], calls
 
 
+def t_report_send_from_the_ui_sends_only_a_generated_report():
+    from unittest import mock
+    d = tempfile.mkdtemp()
+    reports, outside = os.path.join(d, "reports"), os.path.join(d, "secret.txt")
+    os.makedirs(reports)
+    good = os.path.join(reports, "event.html")
+    for p in (good, outside):
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("x")
+    sent = []
+    with mock.patch.object(m, "_reports_dir", lambda: reports), \
+            mock.patch.object(m, "_send_report_core", lambda path, **kw: sent.append(path)):
+        for bad in (outside, os.path.join(reports, "..", "secret.txt"), os.path.join(reports, "nope.html")):
+            r = m.report_send_data(bad)
+            assert not r["ok"], (bad, r)
+        assert sent == [], "no file outside the reports dir reaches the league webhook"
+        assert m.report_send_data(good)["ok"] and sent == [good]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

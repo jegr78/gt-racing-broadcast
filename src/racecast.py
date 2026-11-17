@@ -1863,6 +1863,13 @@ def report_read_data(name):
 
 
 def report_send_data(path=None):
+    """Send a generated report (the Control Center's Send). Only an .html file in the
+    reports dir: the request body must not pick any local file for the league webhook."""
+    if path is not None:
+        reports = os.path.realpath(_reports_dir())
+        real = os.path.realpath(path)
+        if os.path.dirname(real) != reports or not real.endswith(".html") or not os.path.isfile(real):
+            return {"ok": False, "error": "only a generated report from the reports folder can be sent"}
     try:
         _send_report_core(path or _latest_report())
         return {"ok": True}

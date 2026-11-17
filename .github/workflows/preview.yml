@@ -5,13 +5,11 @@ name: Preview
 # `preview-*` pre-release with public download URLs. preview-* tags never match
 # v*, so release.yml and release-please are never triggered by a preview.
 #
-# SECURITY (review #8): the `labeled` trigger runs PR-HEAD code (checkout +
-# build) with a write token (contents/pull-requests: write). This is safe ONLY
-# because the repo is collaborator-gated: a fork PR cannot add a label, and the
-# default `pull_request` token for fork PRs is read-only. The `preview` label is
-# therefore a code-exec-with-write-token grant: it MUST only be addable by
-# trusted maintainers. Do not loosen branch/label permissions for outside
-# contributors, and review the diff before applying the label to any PR.
+# SECURITY: the jobs that run PR-HEAD code (meta, build) hold a read-only token
+# and keep no credentials in .git/config. Only publish and comment write, and
+# neither checks out or runs the PR's code: publish takes the built assets as
+# workflow artifacts. The `preview` label still starts a build of the PR's
+# code, so only trusted maintainers may add it after reviewing the diff.
 on:
   pull_request:
     types: [labeled, synchronize]
@@ -22,8 +20,7 @@ on:
         default: main
 
 permissions:
-  contents: write          # create/upload the pre-release
-  pull-requests: write     # the download-links PR comment
+  contents: read           # each writing job widens its own token
 
 # Per preview target (PR number, or the dispatched ref). The group must use
 # parse-time expressions only -- it cannot reference the meta job's computed tag.
@@ -44,6 +41,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       contains(github.event.pull_request.labels.*.name, 'preview')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read     # the open release-please PR's title
     outputs:
       tag: ${{ steps.id.outputs.tag }}
       version: ${{ steps.id.outputs.version }}
@@ -54,7 +54,8 @@ jobs:
         with:
           # PR: build the PR head commit. Dispatch: build the chosen ref.
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.pull_request.head.sha }}
-          fetch-depth: 0          # tags needed for the next-minor version fallback
+          fetch-depth: 0          # tags and history: version fallback and changelog range
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.12"
@@ -80,17 +81,6 @@ jobs:
             --latest-tag "$LATEST_TAG" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
-  release:
-    needs: meta
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          ref: ${{ needs.meta.outputs.sha }}
-          fetch-depth: 0          # full history so the changelog range resolves
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
-        with:
-          python-version: "3.12"
       - name: Build the changelog notes for this preview
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -109,39 +99,16 @@ jobs:
             git log --format=%s -n 30 > commits.txt
           fi
           python tools/preview_meta.py notes \
-            --sha "${{ needs.meta.outputs.sha }}" < commits.txt > notes.md
-      - name: (Re)create the rolling pre-release for this preview tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.meta.outputs.tag }}
-          SHA: ${{ needs.meta.outputs.sha }}
-          TITLE: ${{ needs.meta.outputs.title }}
-        run: |
-          # Rolling: a preview tag is reused across builds. GitHub orders the
-          # releases list by created_at = the *tagged commit's* date (not the
-          # build/publish time), and `gh release create` IGNORES --target when the
-          # tag already exists -- so a reused tag stays pinned to the commit it was
-          # FIRST created on, freezing created_at at an old date and sinking the
-          # preview among old releases. So move the tag to THIS build's commit
-          # ourselves (force the ref), then recreate the release on it -- now
-          # created_at tracks the fresh commit and the preview sorts to the top.
-          gh release delete "$TAG" --yes || true
-          if gh api "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1; then
-            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
-              -f sha="$SHA" -F force=true >/dev/null      # re-point the existing tag
-          else
-            gh api --method POST "repos/$GH_REPO/git/refs" \
-              -f ref="refs/tags/$TAG" -f sha="$SHA" >/dev/null   # first build: create it
-          fi
-          # The tag already points at $SHA, so --target is unnecessary here.
-          gh release create "$TAG" \
-            --prerelease \
-            --title "$TITLE" \
-            --notes-file notes.md
+            --sha "$(git rev-parse HEAD)" < commits.txt > notes.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: preview-notes
+          path: notes.md
 
   build:
-    needs: [meta, release]
+    needs: meta
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -179,6 +146,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ needs.meta.outputs.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.12"
@@ -200,22 +168,75 @@ jobs:
             *.tar.gz) tar czf "../${{ matrix.asset }}" "${{ matrix.binary }}" "${{ matrix.binary_ui }}" .env.example LICENSE ;;
             *)        echo "Unknown asset format: ${{ matrix.asset }}"; exit 1 ;;
           esac
-      - name: Upload the asset to the pre-release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ needs.meta.outputs.tag }}" "${{ matrix.asset }}" --clobber
-      - name: Upload the driver sender program (Windows, macOS)
+      - name: Add the driver sender program (Windows, macOS)
         if: matrix.sender_asset
+        run: cp "${{ matrix.sender }}" "${{ matrix.sender_asset }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: preview-${{ matrix.os }}
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.sender_asset }}
+          if-no-files-found: error
+
+  # Publishes what the builds produced; it never checks out or runs the PR's code.
+  publish:
+    needs: [meta, build]
+    if: ${{ !cancelled() && needs.meta.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # the tag and the pre-release
+      actions: read            # gh run download of this run's artifacts
+    steps:
+      - name: Fetch this run's assets and notes
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run download "$GITHUB_RUN_ID" --dir artifacts
+      - name: (Re)create the rolling pre-release for this preview tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          SHA: ${{ needs.meta.outputs.sha }}
+          TITLE: ${{ needs.meta.outputs.title }}
         run: |
-          cp "${{ matrix.sender }}" "${{ matrix.sender_asset }}"
-          gh release upload "${{ needs.meta.outputs.tag }}" "${{ matrix.sender_asset }}" --clobber
+          # Rolling: a preview tag is reused across builds. GitHub orders the
+          # releases list by created_at = the *tagged commit's* date (not the
+          # build/publish time), and `gh release create` IGNORES --target when the
+          # tag already exists -- so a reused tag stays pinned to the commit it was
+          # FIRST created on, freezing created_at at an old date and sinking the
+          # preview among old releases. So move the tag to THIS build's commit
+          # ourselves (force the ref), then recreate the release on it -- now
+          # created_at tracks the fresh commit and the preview sorts to the top.
+          gh release delete "$TAG" --yes || true
+          if gh api "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
+              -f sha="$SHA" -F force=true >/dev/null      # re-point the existing tag
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$SHA" >/dev/null   # first build: create it
+          fi
+          # The tag already points at $SHA, so --target is unnecessary here.
+          gh release create "$TAG" \
+            --prerelease \
+            --title "$TITLE" \
+            --notes-file artifacts/preview-notes/notes.md
+      - name: Upload the assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          find artifacts -path 'artifacts/preview-notes' -prune -o -type f -print0 \
+            | xargs -0 -r gh release upload "$TAG" --clobber
 
   comment:
-    needs: [meta, build]
+    needs: [meta, publish]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write     # the download-links comment
     steps:
       - name: Post/refresh the download-links comment
         env:
