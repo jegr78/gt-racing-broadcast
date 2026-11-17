@@ -11364,9 +11364,11 @@ class Relay:
                       if self._stream_started_ts is not None else None)
             self._stream_started_ts = None
         LOG.info(stream_event_log_line(started, kbps=kbps, uptime_s=uptime))
+        with self._health_webhook_lock:
+            planned_end = self._event_ending
         self._discord_post(
             notify.obs_stream_discord_payload(started, self.producer_name,
-                                              self._event_title()),
+                                              self._event_title(), ping=not planned_end),
             "obs-stream")
         if self.health_store is not None:
             try:

@@ -176,7 +176,7 @@ start/stop up against the metrics.
 | **Stream stop** | OBS stopped streaming (the broadcast went off air). |
 
 The same three events are also pushed to the league's **Discord** webhook (if
-configured): a takeover and a stream stop carry an `@here` ping; a stream start is a
+configured): a takeover and an unplanned stream stop carry an `@here` ping; a stream start is a
 quiet informational post. Every post footer names the producer, so the crew can see at
 a glance which host raised it. Events ride along with the health history on
 [producer handover](#export-import-and-producer-handover), so the incoming producer's
@@ -184,8 +184,8 @@ monitor shows the takeover marker too.
 
 Ending the final broadcast Part deliberately stops health-alert pings before
 OBS stops. The relay keeps recording health and stream-stop events while the
-post-event report and service teardown finish. The regular stream-stop post
-still appears. The relay posts it as soon as OBS confirms the stop, so it comes
+post-event report and service teardown finish. The stream-stop post still
+appears, without the `@here` ping, since the crew asked for this end. The relay posts it as soon as OBS confirms the stop, so it comes
 before the report. The `racecast event stop` that ending the final Part starts
 writes its output to `event-stop.log`, listed with the relay logs in the Control
 Center. A refused stop leaves health alerts enabled, and an unexpected

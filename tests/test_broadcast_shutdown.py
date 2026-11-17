@@ -110,7 +110,7 @@ def t_final_end_keeps_stop_marker_and_report_without_late_health_pings():
         relay._send_health_webhook("red", ["OBS is not streaming. Broadcast is off air"], "green")
         relay._send_health_webhook("green", [], "red")  # A stale recovery must not page either.
         assert [kind for kind, _ in posts] == ["obs-stream"], posts
-        assert posts[0][1]["content"] == "@here", "Keep the regular stream-stop announcement"
+        assert "content" not in posts[0][1], "the deliberate final end posts the stop without @here"
         assert teardown == ["report+teardown"]
         assert parts.get()["live"] is False
         events = relay.health_store.events(0, 1e12)
@@ -174,6 +174,14 @@ def t_failed_final_stop_restores_alarm_and_does_not_consume_the_transition():
         assert parts.get()["live"] is True and not teardown
 
 
+def t_an_unexpected_stream_stop_still_pings_here():
+    with _event() as (relay, obs, posts, teardown, parts, port):
+        relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
+        _probe(relay, False)
+        stops = [payload for kind, payload in posts if kind == "obs-stream"]
+        assert len(stops) == 1 and stops[0]["content"] == "@here", posts
+
+
 def t_rejected_end_and_unexpected_stream_loss_still_page():
     with _event() as (relay, obs, posts, teardown, parts, port):
         code, _ = _post(port, "parts/end", {"intent": "wrong confirmation"})
@@ -211,6 +219,7 @@ def t_nonfinal_part_keeps_event_health_alerts_enabled():
         assert code == 200 and not reply.get("final") and not teardown
         relay._send_health_webhook("red", ["Feed A down"], "green")
         assert [kind for kind, _ in posts] == ["obs-stream", "health"]
+        assert posts[0][1]["content"] == "@here", "only the final end drops the stop ping"
         assert parts.get()["index"] == 2
 
 

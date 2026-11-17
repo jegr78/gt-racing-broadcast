@@ -56,6 +56,12 @@ def t_obs_stream_stopped_pings_here_off_air():
     assert e["color"] == n.COLOR_STREAM_STOP
 
 
+def t_a_planned_stop_is_announced_without_a_ping():
+    p = n.obs_stream_discord_payload(False, "Bob", ping=False)
+    assert "content" not in p and "allowed_mentions" not in p, "a deliberate end pages nobody"
+    assert "stop" in _embed(p)["title"].lower()
+
+
 def t_no_footer_when_neither_title_nor_producer():
     p = n.obs_stream_discord_payload(True, "")
     e = _embed(p)

@@ -52,9 +52,9 @@ def takeover_discord_payload(producer, from_producer, stint, source, event_title
                     ping=True, event_title=event_title, producer=producer)
 
 
-def obs_stream_discord_payload(started, producer, event_title=""):
+def obs_stream_discord_payload(started, producer, event_title="", ping=True):
     """Announce an OBS stream start, informational and unpinged, or a stop, which
-    is off air and pings `@here`."""
+    is off air and pings `@here` unless `ping` is False (a deliberate final end)."""
     if started:
         return _payload("▶️ OBS stream started",
                         "OBS has started streaming, so the broadcast is live.",
@@ -62,7 +62,7 @@ def obs_stream_discord_payload(started, producer, event_title=""):
                         event_title=event_title, producer=producer)
     return _payload("⏹️ OBS stream stopped",
                     "OBS has stopped streaming, so the broadcast is off air.",
-                    COLOR_STREAM_STOP, ping=True,
+                    COLOR_STREAM_STOP, ping=ping,
                     event_title=event_title, producer=producer)
 
 
