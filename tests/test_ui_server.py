@@ -1458,6 +1458,27 @@ def t_profile_env_post_passes_entries():
         httpd.shutdown()
 
 
+def t_profile_writes_refuse_a_league_switched_since_the_tab_loaded():
+    seen = []
+    ctx = _ctx()
+    ctx["active_profile"] = lambda: "beta"
+    ctx["profile_env_write"] = lambda entries: seen.append("env") or {"ok": True}
+    ctx["overlay_layout_write"] = lambda page, layout: seen.append("layout") or {"ok": True}
+    ctx["overlay_apply"] = lambda page: seen.append("apply") or {"ok": True}
+    httpd, port = _serve(ctx)
+    try:
+        for path, body in (("/api/profile/env", {"entries": []}),
+                           ("/api/overlay/layout", {"page": "hud", "layout": {}}),
+                           ("/api/overlay/apply", {"page": "hud"})):
+            code, text = _post_json(port, path, dict(body, expectedProfile="alpha"))
+            assert code == 409 and "league changed" in json.loads(text)["error"], (path, code, text)
+            assert _post_json(port, path, body)[0] == 409, "a write without the tab's league is refused"
+            assert _post_json(port, path, dict(body, expectedProfile="beta"))[0] == 200, path
+        assert seen == ["env", "layout", "apply"], "only the matching league is written"
+    finally:
+        httpd.shutdown()
+
+
 def t_overlay_get_route_wraps_provider():
     seen = []
     ctx = _ctx()

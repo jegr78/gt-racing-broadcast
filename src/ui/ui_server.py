@@ -1222,6 +1222,9 @@ def make_handler(ctx):
                 if body is None:
                     return self._json({"ok": False, "error": self._body_error},
                                       code=400)
+                if (body.get("expectedProfile") or None) != (ctx.get("active_profile", lambda: None)() or None):
+                    return self._json({"ok": False, "error": "Active league changed. Reload and try again"},
+                                      code=409)
                 try:
                     result = ctx["profile_env_write"](body.get("entries") or [])
                 except Exception as exc:
@@ -1325,6 +1328,9 @@ def make_handler(ctx):
                 body = self._body_json()
                 if body is None:
                     return self._json({"ok": False, "error": self._body_error}, code=400)
+                if (body.get("expectedProfile") or None) != (ctx.get("active_profile", lambda: None)() or None):
+                    return self._json({"ok": False, "error": "Active league changed. Reload and try again"},
+                                      code=409)
                 try:
                     result = ctx["overlay_apply"](body.get("page"))
                 except Exception as exc:
@@ -1335,6 +1341,9 @@ def make_handler(ctx):
                 if body is None:
                     return self._json({"ok": False, "error": self._body_error},
                                       code=400)
+                if (body.get("expectedProfile") or None) != (ctx.get("active_profile", lambda: None)() or None):
+                    return self._json({"ok": False, "error": "Active league changed. Reload and try again"},
+                                      code=409)
                 try:
                     result = ctx["overlay_layout_write"](body.get("page"),
                                                          body.get("layout"))

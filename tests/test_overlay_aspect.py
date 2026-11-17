@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Aspect settings are persisted editor metadata, never generated CSS."""
+import json
 import math
 from pathlib import Path
 import sys
@@ -60,6 +61,30 @@ def t_layout_round_trip_retains_aspect_choice_and_rejects_bad_metadata_atomicall
                 denied = m.overlay_layout_write_data('hud', {'slots': {'webcam': bad}})
                 assert not denied['ok'], denied
                 assert path.read_bytes() == before
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
+
+def t_font_names_that_could_leave_a_css_string_are_refused_and_dropped():
+    m = cli.m
+    bad = 'x"}</style><img src=x onerror=alert(1)>'
+    for name in [bad, 'a\\b', 'a;b', '', 'x' * 65]:
+        assert not ob.font_name_ok(name), name
+    for name in ['Inter', 'Titillium Web', 'Oswald-Bold', 'font_1.2']:
+        assert ob.font_name_ok(name), name
+    with tempfile.TemporaryDirectory() as td, patch.dict('os.environ', {'RACECAST_PROFILE': 'demo'}):
+        original = cli._mk_active_profile(td)
+        try:
+            for layout in [{'bodyFont': bad}, {'slots': {'webcam': {'fontFamily': bad}}}]:
+                assert not m.overlay_layout_write_data('hud', layout)['ok'], layout
+            path = Path(td) / 'profiles/demo/overlay/layout-hud.json'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({'page': 'hud', 'bodyFont': bad,
+                                        'slots': {'webcam': {'fontFamily': bad, 'width': 400}}}))
+            read = m.overlay_layout_read_data('hud')['layout']
+            assert 'bodyFont' not in read and read['slots']['webcam'] == {'width': 400}, \
+                'an imported layout never hands an unsafe font name to the builder'
         finally:
             m._env_base, m._runtime_base_dir = original
 

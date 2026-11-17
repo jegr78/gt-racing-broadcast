@@ -8618,6 +8618,8 @@ def overlay_layout_read_data(page):
         if os.path.exists(lpath):
             with open(lpath, encoding="utf-8") as fh:
                 layout = json.load(fh)
+            if isinstance(layout, dict):
+                layout = ob.drop_unsafe_fonts(layout)
             result = {"ok": True, "page": page, "active": active,
                       "layout": layout, "migrated": False}
         else:
@@ -8673,6 +8675,8 @@ def _validate_layout(layout, page):
         return False, "customCss must be a string"
     if any(not ob.valid_aspect_settings(slot) for slot in layout.get("slots", {}).values()):
         return False, "aspect ratio must contain two positive finite numbers; lockAspect must be a boolean"
+    if ob.drop_unsafe_fonts(layout) != layout:
+        return False, "font names may hold only letters, digits, spaces, dots, dashes and underscores"
     return True, None
 
 

@@ -181,6 +181,26 @@ def google_font_filename(name):
 # since the curated GOOGLE_FONTS is only the UI quick-pick. With the fixed
 # googleapis host and the gstatic-only woff2 check it keeps the fetch SSRF-safe.
 GOOGLE_FONT_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9 ]{0,48}[A-Za-z0-9])?$")
+# A layout font name (library stem or Google family): nothing that can leave a CSS string.
+LAYOUT_FONT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
+
+
+def font_name_ok(name):
+    """True for a font name a layout may reference in bodyFont or a slot fontFamily."""
+    return isinstance(name, str) and bool(LAYOUT_FONT_RE.match(name))
+
+
+def drop_unsafe_fonts(layout):
+    """The layout without a bodyFont or slot fontFamily that font_name_ok refuses."""
+    if "bodyFont" in layout and not font_name_ok(layout["bodyFont"]):
+        layout = {k: v for k, v in layout.items() if k != "bodyFont"}
+    slots = layout.get("slots")
+    if isinstance(slots, dict):
+        layout = dict(layout, slots={sid: ({k: v for k, v in ov.items() if k != "fontFamily"}
+                                           if isinstance(ov, dict) and "fontFamily" in ov
+                                           and not font_name_ok(ov["fontFamily"]) else ov)
+                                     for sid, ov in slots.items()})
+    return layout
 
 
 def is_google_font_name(name):
