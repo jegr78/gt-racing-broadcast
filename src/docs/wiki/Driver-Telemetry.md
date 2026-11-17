@@ -163,6 +163,27 @@ It never carries connection ids, corrections or who made them.
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every
   column at once.
 
+### Public live timing
+
+Viewers and team mates can follow the race in a browser without the stream. Each event
+gets a public timing link, separate from the drivers' invite: `racecast event start`
+creates it and `racecast event stop` ends it. The Control Center's Home view shows it
+under **Public timing** with **Copy** and **New link**, and both desks show it
+next to the invite. From the command line, `racecast event timing` prints it and
+`--new` replaces it; the old link then stops working.
+
+The page needs no login and shows timing only: order, number and colour, driver and
+team, gaps, last lap, pit stops, the fastest lap, the remaining time, and compound and
+fuel as the display switches set them. In qualifying it shows the ranking. It has the
+same delay as the broadcast dashboard. Readers can switch columns on and off, and an
+activity list notes new fastest laps, red flags and the chequered flag.
+
+![The public live timing page on a phone](images/public-timing.png)
+
+All viewers together share one request cap (`RACECAST_TIMING_MAX_RPS` in the machine
+`.env`, default 40 requests per second, about 80 viewers); above it the page waits a
+few seconds and tries again.
+
 ### Red flag, rejoin and corrections
 
 - **Red flag** freezes every entry's distance. In the restart lobby each car

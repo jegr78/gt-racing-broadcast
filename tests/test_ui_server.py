@@ -157,6 +157,8 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                 else {"ok": False, "error": "lap_count is 1 to 999, or none"}),
             "event_invite": lambda new=False: {"ok": True, "active": True, "renewed": new,
                                                "funnel": "https://h/console/drive?i=x", "tailnet": None},
+            "event_timing": lambda new=False: {"ok": True, "active": True, "renewed": new,
+                                               "funnel": "https://h/console/timing?l=x", "tailnet": None},
             "gt7_forward_write": lambda targets: (
                 {"ok": True, "value": targets} if "!" not in (targets or "")
                 else {"ok": False, "error": "x!: use HOST:PORT"}),
@@ -4359,6 +4361,19 @@ def t_api_event_invite_reads_and_renews():
         code, body = _post_json(port, "/api/event-invite", {"new": True})
         assert code == 200 and json.loads(body)["renewed"] is True, body
         code, body = _post_json(port, "/api/event-invite", {"new": "yes"})
+        assert json.loads(body)["renewed"] is False, "only a literal true renews the link"
+    finally:
+        httpd.shutdown()
+
+
+def t_api_event_timing_reads_and_renews():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _get(port, "/api/event-timing")
+        assert code == 200 and json.loads(body)["renewed"] is False, body
+        code, body = _post_json(port, "/api/event-timing", {"new": True})
+        assert code == 200 and json.loads(body)["renewed"] is True, body
+        code, body = _post_json(port, "/api/event-timing", {"new": "yes"})
         assert json.loads(body)["renewed"] is False, "only a literal true renews the link"
     finally:
         httpd.shutdown()

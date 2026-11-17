@@ -414,6 +414,34 @@ def t_the_crew_sets_a_tyre_compound_that_outlives_a_driver_change():
     assert again.standings()["compounds"] == {}, "the next event starts without compounds"
 
 
+def t_the_public_view_is_timing_only_and_follows_the_switches():
+    snap = {"v": 1, "mode": "race", "stint": "Stint 2", "remaining": 600, "track": "good",
+            "track_name": "Suzuka", "visible": False, "show": {"compound": False, "fuel": True},
+            "state": "racing", "red_flag": False, "lap": {"leader": 3, "count": 10},
+            "fastest": {"entry": "A", "driver": "Max", "team": "", "ms": 61000},
+            "entries": [{"pos": 1, "entry": "A", "number": "1", "driver": "Max", "team": "",
+                         "color": "#c00", "text_color": "#fff", "laps": 2, "stint_laps": 2,
+                         "gap_s": 0, "interval_s": None, "lapped": 0, "status": "racing",
+                         "pit_stops": 0, "last_lap_ms": 61000, "fuel_l": 40.0, "finished": False,
+                         "x": 1.0, "z": 2.0, "compound": "RS"}]}
+    pub = dr.public_view(snap)
+    row = pub["entries"][0]
+    assert "compound" not in row and row["fuel_l"] == 40.0, "the switches decide compound and fuel"
+    assert "x" not in row and "z" not in row and "visible" not in pub and "track" not in pub, pub
+    assert pub["fastest"] == {"entry": "A", "driver": "Max", "team": "", "ms": 61000}
+    snap["show"] = {"compound": True, "fuel": False}
+    row = dr.public_view(snap)["entries"][0]
+    assert row["compound"] == "RS" and "fuel_l" not in row, row
+    quali = dr.public_view({"v": 1, "mode": "qualifying", "show": {"compound": True, "fuel": True},
+                            "qualifying": [{"pos": 1, "entry": "A", "number": "1", "driver": "Max",
+                                            "team": "", "color": "", "text_color": "", "best_ms": 90000,
+                                            "gap_ms": 0, "compound": None, "conn": "leak"}]})
+    assert quali["qualifying"][0] == {"pos": 1, "entry": "A", "number": "1", "driver": "Max", "team": "",
+                                      "color": "", "text_color": "", "best_ms": 90000, "gap_ms": 0,
+                                      "compound": None}, quali
+    assert dr.public_view(None) == {"v": 1, "mode": "race", "entries": []}
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

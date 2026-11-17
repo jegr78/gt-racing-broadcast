@@ -6835,8 +6835,19 @@ def t_driver_invite_follows_the_event_and_regenerates():
     assert m.event_invite_data(path=path, links=links)["funnel"] != first["funnel"], "a new event, a new link"
     renewed = m.event_invite_data(new=True, path=path, links=links)
     assert renewed["active"] and renewed["funnel"] != first["funnel"]
+    timing = os.path.join(d, "timing-link.json")
+    tlinks = lambda i: {"funnel": f"https://h/console/timing?l={i}", "tailnet": "t"}  # noqa: E731
+    pub = m.event_timing_data(path=timing, links=tlinks)
+    assert pub["active"] and pub["funnel"].startswith("https://h/console/timing?l="), pub
+    assert pub["funnel"].split("l=")[1] not in m.event_invite_data(path=path, links=links)["funnel"], \
+        "the public link is not the drivers' invite"
+    m._start_driver_invite(False, path=path)
+    assert m.event_timing_data(path=timing, links=tlinks)["funnel"] == pub["funnel"], "a takeover keeps it"
+    renewed = m.event_timing_data(new=True, path=timing, links=tlinks)
+    assert renewed["funnel"] != pub["funnel"], "the producer replaces it"
     m._stop_driver_invite(path=path)
     assert m.event_invite_data(path=path, links=links)["active"] is False, "event stop ends the link"
+    assert m.event_timing_data(path=timing, links=tlinks)["active"] is False, "and the timing link"
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):

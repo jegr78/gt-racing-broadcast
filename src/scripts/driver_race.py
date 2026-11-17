@@ -194,6 +194,36 @@ def _viewer_entry(row, roster):
             "color": info.get("bgColor") or "", "text_color": info.get("textColor") or ""}
 
 
+_PUBLIC_TOP = ("v", "mode", "stint", "remaining", "track_name", "state", "red_flag", "lap", "show")
+_PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color", "laps",
+               "stint_laps", "gap_s", "interval_s", "lapped", "status", "pit_stops",
+               "last_lap_ms", "finished", "best_ms", "gap_ms")
+
+
+def public_view(snap):
+    """The public live timing page's data (#1128): a dashboard snapshot cut to an
+    allowlist, with compound and fuel only where the display switches show them."""
+    if not snap:
+        return {"v": 1, "mode": "race", "entries": []}
+    show = snap.get("show") or {}
+    keep = _PUBLIC_ROW + (("compound",) if show.get("compound", True) else ()) \
+        + (("fuel_l",) if show.get("fuel", True) else ())
+
+    def rows(items):
+        return [{k: r[k] for k in keep if k in r} for r in items or ()]
+    out = {k: snap[k] for k in _PUBLIC_TOP if k in snap}
+    fl = snap.get("fastest")
+    if fl:
+        out["fastest"] = {k: fl.get(k) for k in ("entry", "driver", "team", "ms")}
+    elif "fastest" in snap:
+        out["fastest"] = None
+    if "qualifying" in snap:
+        out["qualifying"] = rows(snap["qualifying"])
+    else:
+        out["entries"] = rows(snap.get("entries"))
+    return out
+
+
 def qualifying(connections, segment, roster, min_ms=0, overrides=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
     driver, team, color, text_color, best_ms, gap_ms}]; entries without a lap last.

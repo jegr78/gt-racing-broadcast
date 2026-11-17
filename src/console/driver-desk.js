@@ -137,6 +137,12 @@
       (navigator.clipboard ? navigator.clipboard.writeText(state.invite) : Promise.reject())
         .then(function () { say("Invite link copied"); }, function () { say("Copy it by hand", true); });
     });
+    var timingText = el("span", {cls: "mono grow", text: "-"});
+    var timingCopy = button("Copy", "", null, function () {
+      if (!state.timing) return;
+      (navigator.clipboard ? navigator.clipboard.writeText(state.timing) : Promise.reject())
+        .then(function () { say("Timing link copied"); }, function () { say("Copy it by hand", true); });
+    });
     var lastChange = el("div", {cls: "muted"});
 
     // -- race controls ------------------------------------------------------------
@@ -295,6 +301,7 @@
 
     root.replaceChildren(el("div", {cls: "dd"}, [
       el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
+      el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
       lastChange,
       el("div", {cls: "row"}, [mode, laps, finalLap, finish]),
       el("div", {cls: "row"}, [redFlag, restart, release]),
@@ -443,6 +450,11 @@
       state.invite = d.active ? location.origin + "/console/drive?i=" + encodeURIComponent(d.id) : null;
       inviteText.textContent = state.invite || "No invite: it starts with the event.";
       copyBtn.disabled = !state.invite;
+      var t = await call("/drivers/timing-link", undefined, true);
+      if (!t) return;
+      state.timing = t.active ? location.origin + "/console/timing?l=" + encodeURIComponent(t.id) : null;
+      timingText.textContent = state.timing || "No timing link: it starts with the event.";
+      timingCopy.disabled = !state.timing;
     }
     refresh(); refreshInvite();
     setInterval(refresh, 2000);

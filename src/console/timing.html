@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Live timing</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0d10; --panel: #14171c; --edge: #232830; --ink: #e8eaed;
+          --muted: #9aa0a6; --accent: #e10600; --purple: #c49bff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; }
+  header { padding: 14px 16px 10px; background: var(--panel); border-bottom: 3px solid var(--accent); }
+  header > div { max-width: 1100px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: .02em; }
+  #session { margin-top: 4px; color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  #session .flag { color: #ff6b6b; font-weight: 800; }
+  main { padding: 12px 16px 24px; max-width: 1100px; margin: 0 auto; }
+  .cols { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .cols label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted);
+                border: 1px solid var(--edge); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .cols input { margin: 0; }
+  .wrap { overflow-x: auto; border: 1px solid var(--edge); border-radius: 10px; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 8px 8px; white-space: nowrap; }
+  td { padding: 7px 8px; border-top: 1px solid var(--edge); white-space: nowrap; }
+  td.pos { font-weight: 800; text-align: right; width: 2.5em; }
+  td.num span { display: inline-block; min-width: 30px; text-align: center; border-radius: 4px; padding: 1px 5px;
+                font-weight: 800; background: #39414d; color: #fff; }
+  td.drv { white-space: normal; min-width: 120px; }
+  td.drv small { display: block; color: var(--muted); font-size: 12px; }
+  tr.box td { color: #ffd361; }
+  tr.off td { color: var(--muted); }
+  .fl { color: var(--purple); font-weight: 700; }
+  .tyre { font-weight: 800; }
+  .tyre.RS { color: #ff5a4f; } .tyre.RM { color: #ffd23f; } .tyre.RH { color: #f2f4f7; }
+  .tyre.I { color: #4fdc74; } .tyre.W { color: #4aa8ff; }
+  [data-col][hidden] { display: none; }
+  #fastest { margin: 12px 0 0; font-size: 14px; }
+  #feed { margin-top: 18px; }
+  #feed h2 { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  #feed div { font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--edge); }
+  #feed time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+  #state { color: var(--muted); font-size: 13px; padding: 14px; text-align: center; }
+  @media (max-width: 600px) { main { padding: 10px 8px 20px; } td, th { padding: 6px 5px; } body { font-size: 14px; }
+                              td.drv { min-width: 100px; } }
+</style>
+</head>
+<body>
+<header><div>
+  <h1>Live timing</h1>
+  <div id="session"></div>
+</div></header>
+<main>
+  <div class="cols" id="cols"></div>
+  <div class="wrap"><table id="timing"><thead></thead><tbody></tbody></table>
+    <div id="state">Waiting for timing data…</div></div>
+  <div id="fastest"></div>
+  <section id="feed" hidden><h2>Activity</h2><div id="events"></div></section>
+</main>
+<script>
+  "use strict";
+  // Race columns the reader can switch; compound and fuel also follow the event's switches.
+  const RACE = [["pos", "Pos"], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["laps", "Laps"],
+                ["gap", "Gap"], ["int", "Int."], ["last", "Last"], ["fuel", "Fuel"], ["pits", "Pits"]];
+  const QUALI = [["pos", "Pos"], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["best", "Best"], ["gap", "Gap"]];
+  const OPTIONAL = [["tyre", "Tyre"], ["laps", "Laps"], ["gap", "Gap"], ["int", "Int."], ["last", "Last"],
+                    ["fuel", "Fuel"], ["pits", "Pits"]];
+  const STATUS = {box: "Box", no_data: "No data", red_flag: "Red flag"};
+  const DATA = location.pathname.replace(/\/?$/, "/data") + location.search;
+  // A phone starts without laps, interval and fuel; the switches bring them back.
+  let hidden = new Set(window.matchMedia("(max-width: 600px)").matches ? ["laps", "int", "fuel"] : []);
+  try {
+    const saved = localStorage.getItem("timing-hidden");
+    if (saved !== null) hidden = new Set(JSON.parse(saved));
+  } catch (e) { /* defaults */ }
+  let last = null;
+  const $ = (id) => document.getElementById(id);
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = String(text);
+    return n;
+  }
+  function lapTime(ms) {
+    if (typeof ms !== "number" || ms <= 0) return "";
+    const m = Math.floor(ms / 60000), s = (ms % 60000) / 1000;
+    return m + ":" + s.toFixed(3).padStart(6, "0");
+  }
+  function clock(sec) {
+    const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
+    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+  }
+  function hex(c) { return /^#[0-9a-fA-F]{3,8}$/.test(c || "") ? c : ""; }
+
+  function switches() {
+    const box = $("cols");
+    box.replaceChildren(...OPTIONAL.map(function (c) {
+      const input = el("input");
+      input.type = "checkbox";
+      input.checked = !hidden.has(c[0]);
+      input.addEventListener("change", function () {
+        if (input.checked) hidden.delete(c[0]); else hidden.add(c[0]);
+        try { localStorage.setItem("timing-hidden", JSON.stringify(Array.from(hidden))); } catch (e) { /* session only */ }
+        if (last) render(last);
+      });
+      const label = el("label");
+      label.append(input, el("span", "", c[1]));
+      return label;
+    }));
+  }
+
+  function cell(key, value, cls) {
+    const td = el("td", cls);
+    td.dataset.col = key;
+    if (value instanceof Node) td.appendChild(value); else td.textContent = value === undefined || value === null ? "" : String(value);
+    return td;
+  }
+  function numCell(e) {
+    const s = el("span", "", e.number || String(e.entry || "").slice(0, 3));
+    if (hex(e.color)) s.style.background = hex(e.color);
+    if (hex(e.text_color)) s.style.color = hex(e.text_color);
+    return cell("num", s, "num");
+  }
+  function driverCell(e) {
+    const d = el("div", "", e.driver || "");
+    d.appendChild(el("small", "", e.team || e.entry || ""));
+    return cell("drv", d, "drv");
+  }
+  function tyreCell(e) {
+    const code = ["RS", "RM", "RH", "I", "W"].indexOf(e.compound) >= 0 ? e.compound : "";
+    return cell("tyre", el("span", "tyre" + (code ? " " + code : ""), code));
+  }
+
+  function render(d) {
+    last = d;
+    const quali = d.mode === "qualifying";
+    const show = d.show || {};
+    const allowed = function (key) {
+      if (key === "tyre" && show.compound === false) return false;
+      if (key === "fuel" && show.fuel === false) return false;
+      return !hidden.has(key);
+    };
+    const cols = (quali ? QUALI : RACE).filter(function (c) { return allowed(c[0]); });
+    const parts = [];
+    if (quali) parts.push("Qualifying");
+    else if (d.lap && d.lap.leader) parts.push("Lap " + d.lap.leader + (d.lap.count ? " / " + d.lap.count : ""));
+    if (typeof d.remaining === "number") parts.push(clock(d.remaining) + " left");
+    if (d.track_name) parts.push(d.track_name);
+    if (d.stint) parts.push(d.stint);
+    $("session").replaceChildren(...parts.map(function (p) { return el("span", "", p); }));
+    if (d.red_flag) $("session").appendChild(el("span", "flag", "RED FLAG"));
+    $("timing").tHead.replaceChildren(el("tr"));
+    cols.forEach(function (c) { $("timing").tHead.rows[0].appendChild(el("th", "", c[1])); });
+    const rows = quali ? (d.qualifying || []) : (d.entries || []);
+    const fl = d.fastest;
+    $("timing").tBodies[0].replaceChildren(...rows.map(function (e, i) {
+      const tr = el("tr", e.status === "box" ? "box" : e.status === "no_data" ? "off" : "");
+      const all = {
+        pos: cell("pos", e.pos, "pos"), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
+        laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
+        gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
+                  : STATUS[e.status] || (e.finished ? "Finished" : i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
+                  : typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "")),
+        int: cell("int", i && typeof e.interval_s === "number" ? "+" + e.interval_s.toFixed(1) : ""),
+        last: cell("last", lapTime(e.last_lap_ms),
+                   fl && fl.entry === e.entry && fl.ms === e.last_lap_ms ? "fl" : ""),
+        fuel: cell("fuel", typeof e.fuel_l === "number" ? e.fuel_l.toFixed(1) + " L" : ""),
+        best: cell("best", lapTime(e.best_ms), i === 0 ? "fl" : ""),
+      };
+      cols.forEach(function (c) { tr.appendChild(all[c[0]]); });
+      return tr;
+    }));
+    $("state").hidden = rows.length > 0;
+    $("fastest").replaceChildren();
+    if (fl && !quali) {
+      $("fastest").append(el("span", "fl", "Fastest lap " + lapTime(fl.ms)),
+                          document.createTextNode(" · " + fl.driver + " (" + (fl.team || fl.entry) + ")"));
+    }
+  }
+
+  // Activity: what changed between two polls, newest on top.
+  let seen = null;
+  function note(text) {
+    const row = el("div");
+    const t = el("time", "", new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}));
+    row.append(t, document.createTextNode(text));
+    $("events").prepend(row);
+    while ($("events").children.length > 30) $("events").lastChild.remove();
+    $("feed").hidden = false;
+  }
+  function activity(d) {
+    const now = {fl: d.fastest ? d.fastest.entry + "|" + d.fastest.ms : "", red: !!d.red_flag,
+                 done: (d.entries || []).filter(function (e) { return e.finished; }).length};
+    if (seen) {
+      if (now.fl && now.fl !== seen.fl) note("Fastest lap " + lapTime(d.fastest.ms) + ": " + d.fastest.driver);
+      if (now.red && !seen.red) note("Red flag");
+      if (!now.red && seen.red) note("Restart");
+      if (now.done && !seen.done) note("Chequered flag");
+    }
+    seen = now;
+  }
+
+  async function poll() {
+    let wait = 2000;
+    try {
+      const res = await fetch(DATA, {cache: "no-store"});
+      if (res.status === 429) wait = 5000;
+      else if (res.status === 403) { $("state").hidden = false; $("state").textContent = "This timing link has ended."; return; }
+      else if (res.ok) { const d = await res.json(); render(d); activity(d); }
+    } catch (e) { wait = 5000; }
+    setTimeout(poll, wait);
+  }
+  switches();
+  poll();
+</script>
+</body>
+</html>

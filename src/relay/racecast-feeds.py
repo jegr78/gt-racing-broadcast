@@ -202,6 +202,7 @@ import gt7_tracks      # GT7 track recognition from lap positions (#787)
 import gt7_track_pick  # the event's picked GT7 layout (#1129)
 import telemetry_probe  # the driver telemetry probe ingest (#1110)
 import driver_invite    # event invite link and driver codes (#1111)
+import timing_link      # the event's public live timing link (#1128)
 import driver_ingest    # driver telemetry connections behind the invite (#1111)
 import driver_race      # race distance, gaps and finish from driver telemetry (#1112)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
@@ -718,6 +719,17 @@ AUTO_COVER_SETTLE_S = 12                  # source_state must persist this long 
 STANDBY_COVER_SOURCE = "Standby Cover"    # the #378 cover source in the Stint scene
 RED_FLAG_BANNER = "Red Flag - Race Suspended"   # the HUD banner of the panel's RED FLAG
 RED_FLAG_MIN_S = 2.0                            # one Race Control red flag change per person
+
+
+def _timing_max_rps(raw):
+    """RACECAST_TIMING_MAX_RPS: public timing data requests per second, all viewers together."""
+    try:
+        return max(1, min(1000, int(raw)))
+    except (TypeError, ValueError):
+        return 40                               # a 2 s poll: about 80 viewers
+
+
+TIMING_MAX_RPS = _timing_max_rps(os.environ.get("RACECAST_TIMING_MAX_RPS"))
 _AUTO_COVER_FALSEY = {"0", "false", "no", "off"}
 
 
@@ -11936,7 +11948,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
                  drive_page_path=None, sender_script_path=None, driver_segments=None,
                  driver_desk_path=None,
-                 driver_race_svc=None):
+                 driver_race_svc=None, timing_link_path=None, timing_page_path=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -11996,6 +12008,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
     _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
+    _timing_cache = timing_link.Cache(timing_link_path) if timing_link_path else None
+    # Public timing (#1128): one cap for all viewers together, so a crowd cannot eat the
+    # producer's upload; the page backs off on 429.
+    _timing_rl = console_auth.RateLimiter(limit=TIMING_MAX_RPS * 10, window_s=10)
+    _timing_body = [None, b""]          # (snapshot, its public JSON) shared by every viewer
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
     # Every open crew page polls the take view; one OBS read serves them all for a
@@ -12861,6 +12878,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             # credential here, never a console token, and they reach nothing else.
             if sub[:1] == ["drive"]:
                 return self._drive(sub[1:], method)
+            # Public live timing (#1128): the event's timing link is the credential; it
+            # reaches the delayed timing data and nothing else.
+            if sub[:1] == ["timing"]:
+                return self._timing(sub[1:], method)
             # Producer-to-producer takeover pull (#216 Phase 7): authorized by the
             # shared per-league step-up secret ALONE. Producer B holds the league
             # CONSOLE_SECRET (it signs every token). NOT a per-person commentator
@@ -13344,7 +13365,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             p = tuple(x for x in urlparse(self.path).path.split("/") if x)
             if method == "GET":
                 if p[:1] == ("console",):
-                    if p[1:] in _CONSOLE_PAGE_GETS or p[1:] in (("login",), ("oauth", "callback")):
+                    if p[1:] in _CONSOLE_PAGE_GETS or p[1:] in (("login",), ("oauth", "callback"), ("timing",)):
                         return True
                 elif p and (p in _CONSOLE_PAGE_GETS or p in (("hud",), ("hud", "preview"),
                                                      ("splitscreen",), ("splitscreen", "hud"), ("intermission",),
@@ -14021,6 +14042,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     invite = self._drive_invite()
                     return self._send({"active": bool(invite),
                                        "id": invite["id"] if invite else None}, no_store=True)
+                if p == ["drivers", "timing-link"]:
+                    link = _timing_cache.get() if _timing_cache else None
+                    return self._send({"active": bool(link), "id": link["id"] if link else None},
+                                      no_store=True)
 
                 if p == ["telemetry", "probe"]:
                     # Tailnet only: the probe key and every sender's counters (#1110).
@@ -14143,6 +14168,38 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if status in (401, 403) and not _drive_authfail_rl.allow(client):
                 status, message = 429, "too many attempts"
             self._send({"error": message}, status)
+            return None
+
+        def _timing(self, rest, method):
+            link = _timing_cache.get() if _timing_cache else None
+            presented = (parse_qs(urlparse(self.path).query).get("l") or [""])[0]
+            if method != "GET" or rest not in ([], ["data"]):
+                self._send({"error": "not found"}, 404)
+                return None
+            if not link or not hmac.compare_digest(presented.encode("utf-8", "replace"),
+                                                   link["id"].encode("utf-8")):
+                return self._drive_refuse(403, "this timing link is not valid (any more)")
+            if rest == []:
+                if not timing_page_path:
+                    return self._send({"error": "page not found"}, 404)
+                return self._send_page(timing_page_path, "/console")
+            if not _timing_rl.allow("all"):
+                self.send_response(429)
+                self.send_header("Retry-After", "5")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            snap = driver_race_svc.dashboard() if driver_race_svc is not None else None
+            if _timing_body[0] is not snap or not _timing_body[1]:
+                _timing_body[:] = [snap, json.dumps(driver_race.public_view(snap), separators=(",", ":"),
+                                                    ensure_ascii=False).encode("utf-8")]
+            body = _timing_body[1]
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
             return None
 
         def _drive(self, rest, method):
@@ -15997,6 +16054,9 @@ def main():
     driver_desk_path = next((os.path.abspath(c) for c in (
         os.path.join(here, "driver-desk.js"), os.path.join(here, "..", "driver-desk.js"),
         os.path.join(here, "..", "console", "driver-desk.js")) if os.path.exists(c)), None)
+    timing_page_path = next((os.path.abspath(c) for c in (
+        os.path.join(here, "timing.html"), os.path.join(here, "..", "timing.html"),
+        os.path.join(here, "..", "console", "timing.html")) if os.path.exists(c)), None)
 
     def driver_segments():
         """Stint and qualifying labels a driver can register for, in sheet order."""
@@ -16089,6 +16149,7 @@ def main():
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
         driver_desk_path=driver_desk_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
+        timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

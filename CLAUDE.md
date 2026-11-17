@@ -221,12 +221,15 @@ Security boundaries that apply everywhere:
   (the redacted takeover status is an allowlist, not a blocklist).
 - Everything under `/console` is authenticated server-side: a per-person token signed
   with the league `CONSOLE_SECRET`, or Discord OAuth when configured. The takeover
-  endpoints additionally require the step-up `X-Console-Secret` header. Two exceptions
+  endpoints additionally require the step-up `X-Console-Secret` header. Three exceptions
   take no console identity and reach nothing else: the driver telemetry routes under
   `/console/drive` (#1111), authorized by the event's invite link and the driver codes it
   signs (`driver_invite`), and the maintainer probe ingest `/console/probe/ingest`, off
-  unless `RACECAST_TELEMETRY_PROBE=1`, with a random per-relay-start key in `X-Probe-Key`.
-  Both only accept encrypted GT7 packets and count them.
+  unless `RACECAST_TELEMETRY_PROBE=1`, with a random per-relay-start key in `X-Probe-Key`;
+  both only accept encrypted GT7 packets and count them. The third is the public live
+  timing page `/console/timing` and its `/data` (#1128), authorized by the event's
+  separate timing link (`timing_link`): GET only, the delayed timing allowlist
+  (`driver_race.public_view`), one request cap for all viewers.
 - The `race_control` role reaches exactly one program change: the full `RED FLAG`
   (`POST /console/race-control/red-flag`, #1114) raises the Standby Cover, sets the HUD
   banner and holds the driver race. No step-up; it is logged with the person's identity.
