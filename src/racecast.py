@@ -2576,6 +2576,7 @@ def _frozen_child_env():
         os.makedirs(bundle_dir, exist_ok=True)
     except OSError:
         return env  # unwritable install dir; keep the OS default, don't fail
+    sv.prune_bundle_dirs(bundle_dir)
     return sv.daemon_bundle_env(env, bundle_dir)
 
 
