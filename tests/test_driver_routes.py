@@ -773,13 +773,15 @@ def t_internal_dashboard_routes_ignore_the_timing_budget():
 class _FakePublisher:
     def __init__(self, connected=True):
         self.connected, self.reloads, self.fns = connected, 0, None
+        self.quota_low = False
 
     def make(self, **fns):
         self.fns = fns
         return self
 
     def status(self):
-        return {"configured": True, "connected": self.connected, "viewers": 4}
+        return {"configured": True, "connected": self.connected, "viewers": 4,
+                "quota_low": self.quota_low}
 
     def host_url(self):
         return "https://racecast-timing-demo.example.workers.dev"
@@ -849,6 +851,17 @@ def t_funnel_data_stays_when_funnel_served_or_host_down():
             assert "moved_to" not in data, (served, connected, data)
         finally:
             srv.shutdown()
+
+
+def t_funnel_data_stays_when_the_host_quota_is_nearly_used():
+    pub = _FakePublisher()
+    pub.quota_low = True
+    srv, port, _lp, link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
+    try:
+        data = json.loads(_req(port, f"/console/timing/data?l={link}")[1])
+        assert "moved_to" not in data, "Cloudflare stops serving soon: Funnel viewers must stay"
+    finally:
+        srv.shutdown()
 
 
 def t_no_funnel_no_fallback_and_no_funnel_url():

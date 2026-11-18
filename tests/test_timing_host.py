@@ -75,6 +75,16 @@ def t_read_settings_needs_url_and_key():
         assert th.read_settings("") is None
 
 
+
+def t_profile_env_parser_matches_the_cli():
+    import config
+    text = ('# league\n\nTIMING_HOST_URL = "https://h.example.workers.dev"\n'
+            "TIMING_HOST_PUBLISH_KEY='abc=def'\nODD=\"half\n"
+            "MIXED=\"'both'\"\nexport NAME=x\nNOVALUE\nEMPTY=\n")
+    assert th._parse_env(text) == config.parse_env_text(text), \
+        "the relay must read profile.env exactly like the CLI that writes and resolves it"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

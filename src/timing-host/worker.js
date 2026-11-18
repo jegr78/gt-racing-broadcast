@@ -77,6 +77,7 @@ export class TimingRoom {
     this.loaded = false;
     this.phase = null; // null (unknown) | "live" | "ended"
     this.state = null;
+    this.stateAt = null;
     this.moved = null;
     this.day = null;
     this.requestsToday = 0;
@@ -92,6 +93,7 @@ export class TimingRoom {
     const s = this.ctx.storage;
     this.phase = (await s.get("phase")) ?? null;
     this.state = (await s.get("state")) ?? null;
+    this.stateAt = (await s.get("state_at")) ?? null;
     this.moved = (await s.get("moved")) ?? null;
     this.day = (await s.get("day")) ?? null;
     this.requestsToday = (await s.get("requests_today")) ?? 0;
@@ -144,19 +146,36 @@ export class TimingRoom {
     const pair = new WebSocketPair();
     const ws = pair[1];
     this.ctx.acceptWebSocket(ws, ["viewer"]);
-    if (this.state) ws.send(this.state);
+    if (this.state) ws.send(this.replay());
     if (this.moved) ws.send(JSON.stringify({ t: "moved", to: this.moved }));
     if (this.publishers().length === 0) ws.send(JSON.stringify({ t: "publisher", up: false }));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
-  // Viewer page loads and socket upgrades since 00:00 UTC; stored with the state.
-  countRequest() {
+  // The last state with its age as of now: age_s was the age when the relay sent it.
+  replay() {
+    if (typeof this.stateAt !== "number") return this.state;
+    try {
+      const msg = JSON.parse(this.state);
+      const age = typeof msg.age_s === "number" ? msg.age_s : 0;
+      msg.age_s = Math.round((age + Math.max(0, this.now() - this.stateAt) / 1000) * 10) / 10;
+      return JSON.stringify(msg);
+    } catch (_e) {
+      return this.state;
+    }
+  }
+
+  rollDay() {
     const day = utcDay(this.now());
     if (day !== this.day) {
       this.day = day;
       this.requestsToday = 0;
     }
+  }
+
+  // Viewer page loads and socket upgrades since 00:00 UTC; stored with the state.
+  countRequest() {
+    this.rollDay();
     this.requestsToday++;
   }
 
@@ -186,15 +205,20 @@ export class TimingRoom {
   async onState(ws, raw, msg) {
     const now = this.now();
     this.state = raw;
+    this.stateAt = now;
+    this.rollDay();
     if (this.phase !== "live") {
       this.phase = "live";
       await this.ctx.storage.put("phase", "live");
     }
     if (now - this.lastPersist >= PERSIST_EVERY_MS) {
       this.lastPersist = now;
-      await this.ctx.storage.put("state", raw);
-      await this.ctx.storage.put("day", this.day);
-      await this.ctx.storage.put("requests_today", this.requestsToday);
+      await this.ctx.storage.put({
+        state: raw,
+        state_at: now,
+        day: this.day,
+        requests_today: this.requestsToday,
+      });
     }
     this.broadcast(raw);
     ws.send(JSON.stringify({
@@ -228,6 +252,7 @@ export class TimingRoom {
     for (const ws of this.viewers()) ws.close(1000, "this timing link has ended");
     this.phase = "ended";
     this.state = null;
+    this.stateAt = null;
     this.moved = null;
     await this.ctx.storage.deleteAll();
     await this.ctx.storage.put("phase", "ended");

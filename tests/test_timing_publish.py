@@ -41,21 +41,35 @@ class _Conn:
 
 class _Log:
     def __init__(self):
-        self.warnings = []
+        self.warnings, self.infos = [], []
 
     def warning(self, msg, *a):
         self.warnings.append(msg % a if a else msg)
 
-    def info(self, *a):
-        pass
+    def info(self, msg, *a):
+        self.infos.append(msg % a if a else msg)
+
+
+class _AckingConn(_Conn):
+    """Acks every state it receives, like the room."""
+
+    def __init__(self, url, acks):
+        super().__init__(url, [])
+
+    def send_text(self, text):
+        super().send_text(text)
+        frame = json.loads(text)
+        if frame["t"] == "state":
+            self._acks.append(json.dumps({"t": "ack", "seq": frame["seq"], "viewers": 1,
+                                          "requests_today": 2}))
 
 
 SETTINGS = th.Settings("https://h.example.workers.dev", "key")
 
 
 class _Rig:
-    def __init__(self, settings=SETTINGS, fail=None):
-        self.clock, self.log = _Clock(), _Log()
+    def __init__(self, settings=SETTINGS, fail=None, conn=_Conn):
+        self.clock, self.log, self.conn_cls = _Clock(), _Log(), conn
         self.settings, self.link, self.served = settings, LINK_A, "hosted"
         self.conns, self.fail, self.acks = [], fail, []
         self.pub = tp.Publisher(lambda: self.settings, lambda: self.link,
@@ -67,7 +81,7 @@ class _Rig:
         if self.fail:
             raise OSError(self.fail)
         assert headers == {"Authorization": "Bearer key"}, headers
-        c = _Conn(url, self.acks)
+        c = self.conn_cls(url, self.acks)
         self.conns.append(c)
         return c
 
@@ -243,6 +257,179 @@ def t_body_failure_skips_the_tick():
     r.pub._body_fn = lambda: (_ for _ in ()).throw(RuntimeError("no snapshot"))
     r.step()
     assert r.states(r.conns[0]) == [] and not r.conns[0].closed
+
+
+def _replaced(timeout):
+    raise ConnectionError("closed by the peer: replaced by a newer publisher")
+
+
+def t_a_stable_connection_after_a_replacement_recovers():
+    r = _Rig(conn=_AckingConn)
+    r.step()
+    r.conns[-1].recv_text = _replaced
+    r.step(2.0)
+    r.step(tp.BACKOFF_MAX_S)
+    assert len(r.conns) == 2 and not r.conns[-1].closed, "reconnected"
+    for _ in range(40):
+        r.step(2.0)
+    assert r.pub._backoff == 0.0, "a connection that held clears the replacement backoff"
+    assert r.log.infos == ["timing host: connected"], r.log.infos
+    r.fail = "host down"
+
+    def gone(timeout):
+        raise ConnectionError("connection closed")
+    r.conns[-1].recv_text = gone
+    assert r.step(2.0) == tp.BACKOFF_MIN_S, "a later failure starts the backoff from the bottom"
+    assert any("closed" in w for w in r.log.warnings[1:]), r.log.warnings
+
+
+def t_two_relays_with_acks_still_duel_quietly():
+    r = _Rig(conn=_AckingConn)
+    r.step()
+    for _ in range(4):
+        for _ in range(int(tp.BACKOFF_MAX_S / 2)):
+            r.step(2.0)
+        r.conns[-1].recv_text = _replaced
+        r.step(2.0)
+        r.step(tp.BACKOFF_MAX_S)
+    assert len(r.log.warnings) == 1 and r.log.infos == [], (r.log.warnings, r.log.infos)
+    assert r.pub._backoff == tp.BACKOFF_MAX_S
+
+
+def t_link_change_while_disconnected_ends_the_old_room():
+    r = _Rig()
+    r.step()
+    r.conns[0].closed = True
+    r.step(2.0)                       # the send fails: disconnected, backing off
+    r.link = LINK_B
+    r.step(2.0)
+    old = [c for c in r.conns[1:] if c.url.endswith(f"/t/{LINK_A}/publish?v=1")]
+    assert old and old[0].sent == [{"t": "end"}] and old[0].closed, \
+        [(c.url, c.sent) for c in r.conns]
+
+
+def t_link_cleared_while_disconnected_ends_the_old_room_once():
+    r = _Rig()
+    r.step()
+    r.conns[0].closed = True
+    r.step(2.0)
+    r.link = None
+    r.step(2.0)
+    r.step(2.0)
+    ends = [c for c in r.conns[1:] if c.sent == [{"t": "end"}]]
+    assert len(ends) == 1 and ends[0].url.endswith(f"/t/{LINK_A}/publish?v=1"), \
+        [(c.url, c.sent) for c in r.conns]
+    assert r.pub.status()["room"] is False
+
+
+def t_the_room_stays_owed_while_its_end_is_on_the_way():
+    r = _Rig()
+    r.step()
+    r.conns[0].closed = True
+    r.step(2.0)
+    r.link = None
+    seen = []
+    connect = r.pub._connect
+
+    def watching(url, headers, timeout):
+        seen.append(r.pub.status()["room"])
+        return connect(url, headers, timeout=timeout)
+    r.pub._connect = watching
+    r.step(2.0)
+    assert seen == [True], "event stop waits on status()['room'] until the end went out"
+    assert r.pub.status()["room"] is False
+
+
+def t_an_unreachable_old_room_is_tried_once():
+    r = _Rig()
+    r.step()
+    r.conns[0].closed = True
+    r.step(2.0)
+    r.link = None
+    r.fail = "host down"
+    r.step(2.0)
+    r.step(2.0)
+    r.fail = None
+    r.step(2.0)
+    assert len(r.conns) == 1, "one bounded attempt; the room ends itself after 30 min"
+    assert r.pub.status()["room"] is False
+
+
+def t_status_shows_an_open_room():
+    r = _Rig()
+    r.step()
+    assert r.pub.status()["room"] is True
+    r.link = None
+    r.step(2.0)
+    assert r.pub.status()["room"] is False
+
+
+
+def _ack(requests):
+    return json.dumps({"t": "ack", "seq": 1, "viewers": 3, "requests_today": requests})
+
+
+def _near_quota(r):
+    r.acks.append(_ack(tp.QUOTA_GUARD_REQUESTS))
+    r.step()
+    r.step(2.0)
+
+
+def t_a_nearly_used_quota_moves_hosted_viewers_to_funnel_once():
+    r = _Rig()
+    _near_quota(r)
+    for _ in range(3):
+        r.step(2.0)
+    st = r.pub.status()
+    assert st["quota_low"] is True, st
+    moved = [f for f in r.conns[0].sent if f["t"] == "moved"]
+    assert moved == [{"t": "moved", "to": None}, {"t": "moved", "to": FALLBACK}], moved
+    quota = [w for w in r.log.warnings if "quota" in w]
+    assert quota == ["timing host: daily request quota nearly used, viewers stay on Funnel"], \
+        r.log.warnings
+
+
+def t_the_quota_estimate_counts_the_relays_messages():
+    r = _Rig()
+    r.acks.append(_ack(tp.QUOTA_GUARD_REQUESTS - 1))
+    r.step()
+    for _ in range(20):
+        r.step(2.0)
+    assert r.pub.status()["quota_low"] is True, "requests_today plus messages / 20"
+
+
+def t_a_nearly_used_quota_without_funnel_moves_nobody():
+    r = _Rig()
+    r.pub._fallback_fn = lambda: None
+    _near_quota(r)
+    assert r.pub.status()["quota_low"] is True
+    assert not [f for f in r.conns[0].sent if f["t"] == "moved" and f["to"]], \
+        "never move viewers to a Funnel that is off"
+
+
+def t_the_quota_guard_resets_on_a_new_day():
+    r = _Rig()
+    _near_quota(r)
+    r.step(86400.0)
+    st = r.pub.status()
+    assert st["quota_low"] is False, st
+    assert r.conns[-1].sent and {"t": "moved", "to": None} in r.conns[-1].sent[-3:], \
+        "the hosted link is served again"
+
+
+def t_the_quota_guard_holds_across_a_renewed_link():
+    r = _Rig()
+    _near_quota(r)
+    r.link = LINK_B
+    r.step(2.0)
+    r.acks.append(_ack(5))
+    r.step(2.0)
+    st = r.pub.status()
+    assert st["quota_low"] is True, "the quota is per account: a new room does not free it"
+    assert st["requests_today"] == tp.QUOTA_GUARD_REQUESTS + 5, st
+    assert {"t": "moved", "to": FALLBACK} in r.conns[-1].sent, "the new room's viewers go to Funnel too"
+    r.step(86400.0)
+    assert r.pub.status()["quota_low"] is False, "only a new UTC day starts the count again"
 
 
 if __name__ == "__main__":

@@ -17,6 +17,14 @@ BACKOFF_MIN_S = 2.0
 BACKOFF_MAX_S = 30.0
 SOCKET_TIMEOUT_S = 5.0
 RECV_POLL_S = 0.05
+# A connection that held this long after a replacement is no duel: two relays replace
+# each other every BACKOFF_MAX_S.
+STABLE_S = 2 * BACKOFF_MAX_S
+# Workers Free serves 100,000 requests a day per account; past it the hosted page is a
+# Cloudflare error page with no fallback, so viewers stay on Funnel from 90 % on.
+QUOTA_REQUESTS = 100000
+QUOTA_GUARD_REQUESTS = int(QUOTA_REQUESTS * 0.9)
+QUOTA_LOW = "daily request quota nearly used, viewers stay on Funnel"
 
 LOG = logging.getLogger("racecast.timing_publish")
 
@@ -52,6 +60,8 @@ class Publisher:
         self._reload = True
         self._conn = None
         self._conn_link = None
+        self._room = None               # the link this publisher last opened: it owes it an end
+        self._opened_at = None
         self._seq = 0
         self._last_sent = None
         self._last_ack = None
@@ -61,9 +71,11 @@ class Publisher:
         self._last_error = None
         self._logged_error = None
         self._viewers = 0
-        self._requests_today = 0
+        self._requests_today = 0        # the current room's count, from its acks
+        self._requests_base = 0         # rooms this publisher left today; the quota is per account
         self._msgs_today = 0
         self._day = None
+        self._quota_low = False
 
     def reload(self):
         """Re-read the host settings on the next step and run it now."""
@@ -82,8 +94,9 @@ class Publisher:
                     "connected": self._conn is not None,
                     "last_ack_age_s": None if self._conn is None or self._last_ack is None
                     else round(now - self._last_ack, 1),
-                    "viewers": self._viewers, "requests_today": self._requests_today,
-                    "msgs_today": self._msgs_today, "last_error": self._last_error}
+                    "viewers": self._viewers, "requests_today": self._requests_base + self._requests_today,
+                    "msgs_today": self._msgs_today, "last_error": self._last_error,
+                    "room": self._room is not None, "quota_low": self._quota_low}
 
     def run(self, stop):
         while not stop.is_set():
@@ -102,14 +115,16 @@ class Publisher:
             settings = self._settings_fn()
             if settings != self._settings:
                 self._close()
+                self._room = None       # a room on another host, or the event's room kept
             with self._lock:
                 self._settings = settings
         if self._settings is None:
             return TICK_S
+        self._roll_day()
         link = self._link_fn()
-        if self._conn is not None and self._conn_link != link:
-            self._send(timing_host.end_frame())
-            self._close()
+        if self._room is not None and self._room != link:
+            self._end_room(self._room)
+        self._check_quota()
         if link is None:
             return TICK_S
         now = self._clock()
@@ -140,7 +155,7 @@ class Publisher:
             self._fail(_explain(e) or f"cannot reach the timing host: {e}", now)
             return False
         with self._lock:
-            self._conn, self._conn_link = conn, link
+            self._conn, self._conn_link, self._room, self._opened_at = conn, link, link, now
             self._last_ack, self._last_sent, self._moved = now, None, None
             replaced = self._logged_error == REPLACED
             self._backoff = BACKOFF_MAX_S if replaced else 0.0
@@ -149,6 +164,45 @@ class Publisher:
             self._log.info("timing host: connected")
             self._logged_error = None
         return True
+
+    def _end_room(self, link):
+        """Send `end` to a room this publisher left: on the open socket, else with one
+        bounded connection of its own. A room left without it ends itself after 30 min."""
+        with self._lock:
+            self._requests_base += self._requests_today
+            self._requests_today = 0    # the next room starts its own count
+        if self._conn is not None and self._conn_link == link:
+            if self._send(timing_host.end_frame()):
+                self._close()
+                self._room = None
+                return
+        self._close()
+        try:
+            self._end_over_own_connection(link)
+        finally:
+            self._room = None           # only now: event stop waits on it before the relay stops
+
+    def _end_over_own_connection(self, link):
+        try:
+            conn = self._connect(timing_host.publish_url(self._settings.url, link),
+                                 {"Authorization": f"Bearer {self._settings.key}"},
+                                 timeout=SOCKET_TIMEOUT_S)
+        except (OSError, ValueError) as e:
+            if "410" not in str(e):
+                self._log.warning("timing host: the old timing link was not ended (%s); "
+                                  "the host ends it after 30 minutes", e)
+            return
+        try:
+            conn.send_text(timing_host.end_frame())
+            self._count()
+        except (OSError, ConnectionError) as e:
+            self._log.warning("timing host: the old timing link was not ended (%s); "
+                              "the host ends it after 30 minutes", e)
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass  # already gone
 
     def _fail(self, message, now):
         self._backoff = BACKOFF_MAX_S if message == REPLACED else \
@@ -163,12 +217,32 @@ class Publisher:
             self._logged_error = message
             self._log.warning("timing host: %s", message)
 
-    def _count(self):
+    def _roll_day(self):
+        """A new UTC day starts both counts; the next ack brings the room's own."""
         day = int(self._wall() // 86400)
         with self._lock:
             if day != self._day:
                 self._day, self._msgs_today = day, 0
+                self._requests_today = self._requests_base = 0
+
+    def _count(self):
+        self._roll_day()
+        with self._lock:
             self._msgs_today += 1
+
+    def _check_quota(self):
+        """The Control Center's estimate (requests today plus messages / 20) against the guard."""
+        with self._lock:
+            used = self._requests_base + self._requests_today + self._msgs_today / 20
+            low = used >= QUOTA_GUARD_REQUESTS
+            changed, self._quota_low = low != self._quota_low, low
+        if changed and low:
+            self._log.warning("timing host: %s", QUOTA_LOW)
+        elif changed:
+            self._log.info("timing host: request estimate below the quota guard again")
+
+    def quota_low(self):
+        return self._quota_low
 
     def _send(self, text):
         if self._conn is None:
@@ -183,7 +257,7 @@ class Publisher:
         return True
 
     def _send_moved(self):
-        served = self._served_fn()
+        served = "funnel" if self._quota_low else self._served_fn()
         if served == self._moved:
             return
         # Also on every fresh connection: the room may still hold a redirect from before.
@@ -215,9 +289,14 @@ class Publisher:
                 return
             ack = timing_host.parse_host_frame(text)
             if ack is not None:
+                now = self._clock()
                 with self._lock:
-                    self._last_ack = self._clock()
+                    self._last_ack = now
                     self._viewers, self._requests_today = ack["viewers"], ack["requests_today"]
+                if self._logged_error == REPLACED and now - self._opened_at >= STABLE_S:
+                    self._backoff = 0.0
+                    self._logged_error = None
+                    self._log.info("timing host: connected")
 
     def _close(self):
         conn = self._conn

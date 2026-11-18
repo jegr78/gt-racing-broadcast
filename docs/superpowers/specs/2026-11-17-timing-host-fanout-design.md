@@ -110,8 +110,9 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
 - Relay to host, text frames of JSON:
   - `{"t": "state", "seq": n, "age_s": a, "data": <public_view body>, "fallback": "<funnel url or
     null>"}` once per tick (2 s), the same bytes `timing_feed.TickBody` already builds; `age_s` is
-    the body's age at send time (today's `X-Data-Age`). The room stamps its receive time, so a
-    viewer always gets the true age.
+    the body's age at send time (today's `X-Data-Age`). The room stamps its receive time
+    (stored with the state as `state_at`) and adds the time since then when it replays the last
+    state to a viewer who connects later, so a viewer always gets the true age.
   - `{"t": "end"}` on `event stop` and on link renewal (to the old link's room).
 - Host to relay: `{"t": "ack", "seq": n, "viewers": k}` at least every 5 states. No ack for 15 s
   counts as a dead connection: the publisher closes and reconnects.
@@ -122,7 +123,10 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
 - Host to viewers, besides `state` and `end`: `{"t": "publisher", "up": bool}` when the publisher
   socket closes or returns, and `{"t": "moved", "to": url}` forwarded from the relay.
 - The ack also carries `requests_today`: viewer page loads plus socket upgrades this room served
-  since 00:00 UTC (each viewer costs two Worker requests). The room stores it with the state.
+  since 00:00 UTC (each viewer costs two Worker requests). The room stores it with the state and
+  starts a new day on the first request or state after midnight. It counts one room; the
+  publisher adds the counts of the rooms it left today, so a renewed link does not start the
+  estimate at 0 (a relay restart does).
 - Room states: unknown (no publish yet), live, ended.
   - Unknown: the page and the socket answer 404 "unknown timing link". A room only becomes live
     with its first publish.
@@ -150,15 +154,33 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
   the Worker it opens the WebSocket, renders each `state`, and keeps the local countdown and the
   data-age display it has now.
 - Fallback (user decision (b)) is for a failing host, not a missing publisher. The page redirects
-  with `location.replace(fallback)` when its socket to the host cannot be re-established after 3
-  attempts with backoff. Silence on an open socket never redirects: when the relay machine loses
+  with `location.replace(fallback)` when 3 attempts after the drop of its socket failed and at
+  least 12 s passed since the drop; the drop itself is not a failed attempt, and a state on a new
+  socket resets the count. Silence on an open socket never redirects: when the relay machine loses
   power or network, the room learns it late (no close frame), and Funnel runs on that machine too.
   A `publisher: false` message, or 20 s without a state, shows "relay reconnecting" with the
   stale-data age. The relay sends a `fallback` only while Funnel serves `/console` (checked at most
-  once a minute in the background); without one the page keeps retrying. Fallback URLs must be
-  https. The Funnel page never redirects back (`from=host`).
+  once a minute in the background); without one the page keeps retrying with backoff from 1 s to
+  8 s. After 6 failed attempts it says "timing link unavailable" and retries every 2 minutes; 30
+  minutes after the drop it stops (a refused socket, 404 or 410, is a billed Worker request).
+  Fallback URLs must be https.
+- The redirect names its reason: `from=host` for the automatic fallback, `from=moved` for the
+  producer's switch to Funnel. The Funnel page follows `moved_to` at once for a plain visit, after
+  10 s for `from=moved` (the room may still hold the old move for a moment) and after 60 s for
+  `from=host`, so a flaky host cannot bounce viewers back and forth. `moved_to` appears only while
+  the host is served and its publisher is connected.
 - Known limit: when the daily request quota is exhausted, Cloudflare does not serve the page at all
-  (error 1027). The redirect then reaches only viewers already connected.
+  (error 1027), and no fallback script runs on its error page. The relay guards against it with
+  its own estimate (`requests_today` of the current room, plus the last counts of the rooms it
+  left the same UTC day, plus its messages today / 20, the number the Control Center and the
+  desks show): from 90 % of the 100,000 free requests (`QUOTA_GUARD_REQUESTS`) the
+  Funnel data carries no `moved_to`, and the publisher sends `moved` toward the Funnel URL so
+  hosted viewers leave before the hard stop (only while a Funnel URL exists). It reports
+  `quota_low` in its status, the Control Center Home row and the desks show "quota nearly used:
+  viewers stay on Funnel", and it logs "daily request quota nearly used, viewers stay on Funnel"
+  once. Only a new UTC day lifts it; a renewed link keeps it, since the quota is per account. The
+  estimate is a lower bound: it misses other Workers on the account and, after a relay restart,
+  the requests of the day before the restart, so the guard can still come too late.
 
 ### Relay publisher
 
@@ -168,11 +190,16 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
   `profile.env` (the relay's standalone `load_dotenv` copy; `racecast` passes the profile.env path
   at relay start). A host set up mid-event is used at once. It reads the current link through `timing_link.Cache` each tick, so
   `event stop` and `event timing --new` take effect without a relay restart (send `end` to the old
-  room, connect to the new one).
+  room, connect to the new one). Both nudge the publisher right after the link changes, and
+  `event stop` waits a bounded moment (6 s) until the publisher left the old room before it stops
+  the relay. A publisher that is disconnected when the link changes sends `end` over one bounded
+  connection of its own; if that fails, the room's 30 minute orphan alarm ends it.
+- After another relay replaced it on the same link, the publisher keeps the 30 s backoff until a
+  new connection held for 60 s, then clears it and logs the recovery.
 - WebSocket client from the stdlib: reuse `obs_ws` framing (`encode_frame`, `decode_frame`,
   handshake helpers, client masking), wrapped in `ssl` with certificate verification. Every socket
   operation has a timeout. Reconnect with capped exponential backoff.
-- Its status (`connected`, `last_ack_age_s`, `viewers`, `last_error`) is exposed on
+- Its status (`connected`, `last_ack_age_s`, `viewers`, `last_error`, `room`) is exposed on
   `/drivers/timing-link` and to the Control Center.
 
 ### Choosing and switching the path

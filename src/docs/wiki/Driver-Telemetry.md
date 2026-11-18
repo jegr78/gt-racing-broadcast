@@ -218,21 +218,29 @@ Set it up once per league:
    again after a racecast update; `racecast timing-host status` (**Check**) says when
    the code is out of date.
 
+![Control Center. Profile view: the Public timing host section with Check and Deploy](images/cc-profile-timing-host.png)
+
 With a host, both pages run side by side. The Home row and the desks show the link to
 hand out (hosted by default) with the number of viewers on the host, and the other link
 below it. `racecast event timing --serve funnel` (or **Serve Funnel** in the Home row)
 switches to the Funnel link and moves the viewers on the hosted page there; it needs
 Funnel switched on (`racecast funnel on`). `--serve hosted` moves the Funnel viewers to
-the host. If the host itself becomes unreachable, its viewers move to the Funnel page
-on their own, as long as Funnel is on. If the relay restarts or its machine drops off,
-they stay on the hosted page and see "relay reconnecting".
+the host. Switching back to `hosted` brings the moved viewers back. If the host itself
+becomes unreachable, its viewers move to the Funnel page on their own after about 12 s,
+as long as Funnel is on, and return a minute later once the host serves again. If the
+relay restarts or its machine drops off, they stay on the hosted page and see "relay
+reconnecting". A hosted page that cannot reach its link for a while says "timing link
+unavailable" and stops trying after 30 minutes.
 
 The free plan allows 100,000 requests a day per Cloudflare account (reset at 00:00
 UTC). Each viewer costs two (the page and its live connection); the relay's updates cost
-about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The Home row shows
-an estimate of today's use; it does not count other Workers on the same account, so use
-one Cloudflare account per league. Above the limit Cloudflare stops serving the hosted
-page; switch to Funnel before that.
+about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The Home row and
+the desks show an estimate of today's use. It includes earlier timing links of the same day,
+but starts again at 0 after a relay restart, and it does not count other Workers on the same
+account, so use one Cloudflare account per league. Above the limit Cloudflare stops serving
+the hosted page. From about 90 % of the limit by that estimate the relay keeps Funnel viewers
+on Funnel and moves the hosted viewers there (when Funnel is on); the Home row and the desks
+then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lifts it.
 
 ### Red flag, rejoin and corrections
 

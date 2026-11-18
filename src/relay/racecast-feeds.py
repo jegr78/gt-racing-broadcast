@@ -12137,8 +12137,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         view = driver_race.public_view(
             driver_race_svc.dashboard() if driver_race_svc is not None else None)
         hosted = _timing_hosted_url()
-        # Funnel viewers move to the host only while it is the served path and live.
-        if hosted and _timing_served() == "hosted" and _timing_pub[0].status().get("connected"):
+        # Funnel viewers move to the host only while it is the served path, live, and not
+        # about to hit its daily request quota.
+        status = _timing_pub[0].status() if hosted else {}
+        if hosted and _timing_served() == "hosted" and status.get("connected") \
+                and not status.get("quota_low"):
             view = dict(view, moved_to=hosted)
         return view
     _timing_body = timing_feed.TickBody(_timing_public)

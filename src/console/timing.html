@@ -67,22 +67,46 @@
       const m = /^\/t\/([A-Za-z0-9_-]{16,64})\/?$/.exec(pathname);
       return m ? m[1] : null;
     },
+    FALLBACK_AFTER: 3,          // failed reconnects (the drop itself is not one)
+    FALLBACK_MIN_S: 12,         // since the drop
+    UNAVAILABLE_AFTER: 6,
+    UNAVAILABLE_RETRY_MS: 120000,
+    GIVE_UP_S: 1800,
+    RETURN_AFTER_S: 60,         // on the Funnel page after an automatic fallback
+    MOVED_RETURN_AFTER_S: 10,   // after a deliberate move; outlasts a room's stale redirect
     // Leave the hosted page only when the host itself is unreachable. Silence on an open
     // socket means the relay went quiet, and Funnel runs on that same relay.
+    // s: {failedReconnects, sinceDropS, publisherUp, fallback}
     fallbackDecision: function (s) {
       if (!s.fallback || s.publisherUp === false) return "stay";
-      return s.failedReconnects >= 3 ? "redirect" : "stay";
+      return s.failedReconnects >= this.FALLBACK_AFTER && s.sinceDropS >= this.FALLBACK_MIN_S
+        ? "redirect" : "stay";
+    },
+    // Milliseconds until the next socket attempt, or null to stop retrying.
+    reconnectDelayMs: function (s) {
+      if (s.sinceDropS >= this.GIVE_UP_S) return null;
+      if (this.unavailable(s)) return this.UNAVAILABLE_RETRY_MS;
+      return Math.max(1000, Math.min(8000, 1000 * Math.pow(2, s.failedReconnects - 1)));
+    },
+    unavailable: function (s) {
+      return s.failedReconnects >= this.UNAVAILABLE_AFTER || s.sinceDropS >= this.GIVE_UP_S;
     },
     fallbackUrl: function (url) {
       return typeof url === "string" && /^https:\/\//.test(url) ? url : null;
     },
-    fallbackTarget: function (url) {
-      return url + (url.indexOf("?") >= 0 ? "&" : "?") + "from=host";
+    // reason: "host" (the host failed) or "moved" (the producer switched to Funnel).
+    fallbackTarget: function (url, reason) {
+      return url + (url.indexOf("?") >= 0 ? "&" : "?") + "from=" + (reason === "moved" ? "moved" : "host");
     },
-    funnelMove: function (data, search) {
+    // The Funnel data names the hosted link only while the host is served and its publisher
+    // is connected; a viewer who fell back waits a while so a flaky host cannot ping-pong it.
+    funnelMove: function (data, search, sinceLoadS) {
       const to = data && data.moved_to;
       if (typeof to !== "string" || !/^https:\/\//.test(to)) return null;
-      return /(^|[?&])from=host(&|$)/.test(search || "") ? null : to;
+      const from = /(?:^|[?&])from=(host|moved)(?:&|$)/.exec(search || "");
+      if (!from) return to;
+      const dwell = from[1] === "host" ? this.RETURN_AFTER_S : this.MOVED_RETURN_AFTER_S;
+      return sinceLoadS >= dwell ? to : null;
     }
   };
 </script>
@@ -99,7 +123,8 @@
   const STATUS = {box: "Box", no_data: "No data", red_flag: "Red flag"};
   const DATA = location.pathname.replace(/\/?$/, "/data") + location.search;
   // Hosted page state: the WebSocket to the host and what it last said.
-  let sock = null, failed = 0, publisherUp = true, fallback = null, ended = false;
+  let sock = null, failed = 0, live = false, droppedAt = Date.now(), publisherUp = true, fallback = null, ended = false;
+  const loadedAt = Date.now();
   // A phone starts without laps, interval and fuel; the switches bring them back.
   let hidden = new Set(window.matchMedia("(max-width: 600px)").matches ? ["laps", "int", "fuel"] : []);
   try {
@@ -266,20 +291,29 @@
     $("state").hidden = false;
     $("state").textContent = "This timing link has ended.";
   }
+  function socketState() {
+    return {failedReconnects: failed, sinceDropS: (Date.now() - droppedAt) / 1000,
+            publisherUp: publisherUp, fallback: fallback};
+  }
   function maybeFallBack() {
-    if (LOGIC.fallbackDecision({failedReconnects: failed,
-                                publisherUp: publisherUp, fallback: fallback}) === "redirect") {
+    if (LOGIC.fallbackDecision(socketState()) === "redirect") {
       ended = true;
-      location.replace(LOGIC.fallbackTarget(fallback));
+      location.replace(LOGIC.fallbackTarget(fallback, "host"));
     }
+  }
+  function showUnavailable(stopped) {
+    $("state").hidden = false;
+    $("state").textContent = stopped ? "Timing link unavailable. Reload the page to try again."
+                                     : "Timing link unavailable. Retrying every few minutes.";
   }
   function connect() {
     sock = new WebSocket(location.href.replace(/^http/, "ws").replace(/[?#].*$/, "").replace(/\/?$/, "/ws"));
-    sock.onopen = function () { failed = 0; };
     sock.onmessage = function (ev) {
       let m;
       try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.t === "state") {
+        if (!live && failed >= LOGIC.UNAVAILABLE_AFTER) $("state").textContent = "Waiting for timing data…";
+        live = true; failed = 0;
         publisherUp = true;
         fallback = LOGIC.fallbackUrl(m.fallback);
         got = Date.now();
@@ -289,19 +323,29 @@
         publisherUp = m.up === true;
       } else if (m.t === "moved" && typeof m.to === "string" && /^https:\/\//.test(m.to)) {
         ended = true;
-        location.replace(LOGIC.fallbackTarget(m.to));
+        location.replace(LOGIC.fallbackTarget(m.to, "moved"));
       } else if (m.t === "end") {
         showEnded();
       }
     };
     sock.onclose = function () {
       if (ended) return;
-      failed++;
+      // Losing a working socket starts the count; only attempts after it fail.
+      if (live) { live = false; failed = 0; droppedAt = Date.now(); } else failed++;
       maybeFallBack();
-      if (!ended) setTimeout(connect, Math.min(8000, 1000 * Math.pow(2, failed - 1)));
+      if (ended) return;
+      const wait = LOGIC.reconnectDelayMs(socketState());
+      if (wait === null) { ended = true; showUnavailable(true); return; }
+      if (LOGIC.unavailable(socketState())) showUnavailable(false);
+      setTimeout(connect, wait);
     };
   }
 
+  function followMove(d) {
+    const move = LOGIC.funnelMove(d, location.search, (Date.now() - loadedAt) / 1000);
+    if (move) location.replace(move);
+    return !!move;
+  }
   async function poll() {
     let wait = 2000;
     try {
@@ -310,14 +354,17 @@
       if (pace >= 2) { interval = pace; wait = pace * 1000; }
       if (res.status === 429 && !(pace >= 2)) wait = 5000;
       else if (res.status === 403) { showEnded(); return; }
-      else if (res.status === 304) { got = Date.now(); dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0; if (last) render(last); }
+      else if (res.status === 304) {
+        got = Date.now(); dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0;
+        if (last && followMove(last)) return;   // the dwell can end while the data stands still
+        if (last) render(last);
+      }
       else if (res.ok) {
         const d = await res.json();
         etag = res.headers.get("ETag");
         got = Date.now();
         dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0;
-        const move = LOGIC.funnelMove(d, location.search);
-        if (move) { location.replace(move); return; }
+        if (followMove(d)) return;
         render(d); activity(d);
       }
     } catch (e) { wait = 5000; }

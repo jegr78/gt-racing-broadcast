@@ -52,11 +52,23 @@ def t_interval_is_minimum_when_idle():
 
 def t_interval_grows_with_viewers():
     clock = _Clock()
-    b = tf.Budget(1000, clock=clock, window_s=10.0)
+    b = tf.Budget(1000, clock=clock, window_s=10.0, rng=lambda: 0.5)
     for i in range(5000):
         clock.t = 1000.0 + i * 0.002
         b.served(700, 2.0)
     assert b.interval() == 6.0, f"1000 viewers x 700 B on 1000 kbit/s: {b.interval()}"
+
+
+def t_handed_out_intervals_spread_around_the_need():
+    clock, r = _Clock(), [0.0]
+    b = tf.Budget(1000, clock=clock, window_s=10.0, rng=lambda: r[0])
+    for i in range(5000):
+        clock.t = 1000.0 + i * 0.002
+        b.served(700, 2.0)
+    low = b.interval()
+    r[0] = 1.0
+    high = b.interval()
+    assert (low, high) == (3.0, 8.5), f"a crowd that came together must not come back together: {low}, {high}"
 
 
 def t_interval_clamps_and_recovers():
@@ -123,13 +135,13 @@ def t_the_body_reports_its_age():
     clock.t += 1.5
     assert body.age() == 1.5, body.age()
 
-def _obeying_crowd(viewers, seconds, kbps=1000, nbytes=950):
+def _obeying_crowd(viewers, seconds, kbps=1000, nbytes=950, arrive_s=30, skip=12):
     """Clients that poll again after the interval they were handed; returns kbit/s per 10 s."""
     import heapq, random
     rnd = random.Random(7)
     clock = _Clock()
-    b = tf.Budget(kbps, clock=clock)
-    due = [(clock.t + rnd.uniform(0, 30), i) for i in range(viewers)]
+    b = tf.Budget(kbps, clock=clock, rng=rnd.random)
+    due = [(clock.t + rnd.uniform(0, arrive_s), i) for i in range(viewers)]
     heapq.heapify(due)
     end, buckets = clock.t + seconds, {}
     while due and due[0][0] < end:
@@ -139,7 +151,7 @@ def _obeying_crowd(viewers, seconds, kbps=1000, nbytes=950):
         k = int((clock.t - 1000.0) // 10)
         buckets[k] = buckets.get(k, 0) + nbytes
         heapq.heappush(due, (clock.t + interval + rnd.uniform(-0.5, 0.5), i))
-    return [v * 8 / 1000 / 10 for k, v in sorted(buckets.items()) if k >= 12]
+    return [v * 8 / 1000 / 10 for k, v in sorted(buckets.items()) if k >= skip]
 
 
 def t_an_obeying_crowd_stays_near_the_budget():
@@ -148,6 +160,17 @@ def t_an_obeying_crowd_stays_near_the_budget():
         need = min(1000, viewers * 950 * 8 / 1000 / tf.MIN_INTERVAL_S)
         assert max(rates) < need * 1.3 and min(rates) > need * 0.6, \
             f"{viewers} viewers swing between {min(rates):.0f} and {max(rates):.0f} kbit/s"
+
+
+
+def t_a_crowd_arriving_at_once_stays_near_the_budget():
+    for viewers in (2000, 3000):
+        rates = _obeying_crowd(viewers, 60, arrive_s=3, skip=0)
+        mean = sum(rates) / len(rates)
+        assert mean < 1000 * 1.3, f"{viewers} viewers arriving within 3 s average {mean:.0f} kbit/s in the first minute"
+        rates = _obeying_crowd(viewers, 400, arrive_s=3)
+        assert max(rates) < 1000 * 1.3 and min(rates) > 1000 * 0.6, \
+            f"{viewers} viewers that arrived at once swing between {min(rates):.0f} and {max(rates):.0f} kbit/s"
 
 
 if __name__ == "__main__":

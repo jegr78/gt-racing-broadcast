@@ -69,16 +69,14 @@ def parse_host_frame(text):
 
 
 def _parse_env(text):
+    """config.parse_env_text's rules; the relay may not import config.py."""
     out = {}
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
-        key, _, value = line.partition("=")
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        out[key.strip()] = value
+        key, value = line.split("=", 1)
+        out[key.strip()] = value.strip().strip('"').strip("'")
     return out
 
 

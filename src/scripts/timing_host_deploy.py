@@ -75,7 +75,9 @@ def _request(method, url, body=None, headers=None):
 
 
 class _CfError(Exception):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def _cf(request, token, method, path, body=None, ctype="application/json"):
@@ -91,7 +93,7 @@ def _cf(request, token, method, path, body=None, ctype="application/json"):
     if not isinstance(doc, dict) or not doc.get("success"):
         errors = (doc or {}).get("errors") if isinstance(doc, dict) else None
         text = "; ".join(str(e.get("message")) for e in errors or [] if isinstance(e, dict))
-        raise _CfError(f"Cloudflare answered {status}: {text or 'no details'}")
+        raise _CfError(f"Cloudflare answered {status}: {text or 'no details'}", status)
     return doc.get("result")
 
 
@@ -99,9 +101,9 @@ def _subdomain(request, account_id, token):
     try:
         result = _cf(request, token, "GET", f"/{account_id}/workers/subdomain")
     except _CfError as e:
-        if AUTH_HELP in str(e):
-            raise
-        raise _CfError(SUBDOMAIN_HELP) from e
+        if e.status == 404:       # the account has no workers.dev subdomain yet
+            raise _CfError(SUBDOMAIN_HELP) from e
+        raise
     sub = (result or {}).get("subdomain") or ""
     if not sub:
         raise _CfError(SUBDOMAIN_HELP)

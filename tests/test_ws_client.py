@@ -171,6 +171,54 @@ def t_ws_client_refuses_other_schemes():
     raise AssertionError("only ws:// and wss:// are accepted")
 
 
+
+class _FakeSock:
+    def __init__(self, addr):
+        self.addr, self.timeout = addr, None
+
+    def settimeout(self, t):
+        self.timeout = t
+
+
+def _fake_open(addrs, outcomes):
+    """ws_client._open_socket with a fake resolver and connect; outcomes per address."""
+    tried = []
+
+    def create(addr, timeout):
+        tried.append((addr, timeout))
+        err = outcomes.get(addr[0])
+        if err:
+            raise err
+        return _FakeSock(addr)
+    sock = ws_client._open_socket("h.example", 443, 6.0, resolve=lambda h, p, t: addrs,
+                                  create=create)
+    return sock, tried
+
+
+def t_ws_client_falls_back_to_the_next_address():
+    v6, v4 = ("2001:db8::1", 443), ("192.0.2.1", 443)
+    sock, tried = _fake_open([v6, v4], {"2001:db8::1": TimeoutError("timed out")})
+    assert sock.addr == v4, "a dead IPv6 address falls back to IPv4"
+    assert [a for a, _ in tried] == [v6, v4], tried
+    assert tried[0][1] <= 3.0, "the first address must leave time for the next"
+    assert sock.timeout == 6.0, "the connected socket gets the caller's timeout back"
+
+
+def t_ws_client_raises_the_last_error_when_every_address_fails():
+    try:
+        _fake_open([("2001:db8::1", 443), ("192.0.2.1", 443)],
+                   {"2001:db8::1": TimeoutError("v6"), "192.0.2.1": ConnectionRefusedError("v4")})
+    except ConnectionRefusedError as e:
+        assert "v4" in str(e)
+        return
+    raise AssertionError("every address failed: the last error must surface")
+
+
+def t_ws_client_resolve_returns_every_address():
+    addrs = ws_client._resolve("127.0.0.1", 80, 2.0)
+    assert addrs == [("127.0.0.1", 80)], addrs
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
