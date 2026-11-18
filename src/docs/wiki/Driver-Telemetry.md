@@ -223,9 +223,10 @@ unavailable" and stops trying after 30 minutes.
 
 The free plan allows 100,000 requests a day per Cloudflare account (reset at 00:00
 UTC). Each viewer costs two (the page and its live connection); the relay's updates cost
-about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The Home row shows
-an estimate of today's use; it does not count other Workers on the same account, so use
-one Cloudflare account per league. Above the limit Cloudflare stops serving the hosted
+about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The Home row and
+the desks show an estimate of today's use. It covers the current timing link only: a renewed
+link starts again at 0 although the quota is per account. It does not count other Workers on
+the same account either, so use one Cloudflare account per league. Above the limit Cloudflare stops serving the hosted
 page; switch to Funnel before that.
 
 ### Red flag, rejoin and corrections

@@ -1433,7 +1433,7 @@ async function fetchEventTiming(regenerate) {
   if (!h) state = 'host status: relay not running';
   else if (!h.connected) state = 'host not reachable' + (h.last_error ? ': ' + h.last_error : '');
   else state = h.viewers + ' viewers, about ' + Math.round((h.requests_today || 0) + (h.msgs_today || 0) / 20)
-               + ' of 100000 requests today';
+               + ' of 100000 requests today on this link';
   $('evt-timing-host').textContent = state + ' · ' + other;
   $('evt-timing-serve').textContent = d.served === 'hosted' ? 'Serve Funnel' : 'Serve hosted';
   $('evt-timing-serve').onclick = async () => {
