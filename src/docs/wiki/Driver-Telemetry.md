@@ -92,12 +92,17 @@ and says so. Changing the layout mid-event starts the race over.
   full lap or more down shows `+N L`.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
   while its sender has been quiet for five seconds; the entry keeps its place.
-- **Pit stops** count every box stop the car drives out of.
+- **Pit stops** count every box stop the car drives out of. The count is an estimate:
+  the relay sees a stop as standing off the racing line, so a car beached beside the
+  track or stopped there under a red flag counts as a pit stop too. The desks' `Pits`
+  column says so on hover; correct a wrong count with the pit stop correction.
 - **Finish after laps**: the leader finishes on completing the lap count on GT7's
   lap counter, lap 1 included, so a formation lap counts as in the lobby's own
   setting; every other car at its next crossing of the line. **Timed**: Race Control or
   the director triggers **Final lap**, and the race ends at the leader's next crossing.
-  The race timer never ends a race. **Finish** freezes the order at once.
+  The race timer never ends a race. **Finish** freezes the order at once. After the
+  leader's flag the order is laps first, then who completed them first, so a lapped
+  car that takes the flag stays behind a car on the lead lap that is still running.
 
 In an endurance race each stint switch on air opens a window for driver changes. When
 the team's car stands in the box and the next driver's car then leaves the box of the
@@ -106,7 +111,7 @@ for the next stint does the same with one sender. Lap 1 of the new lobby before 
 never counts. The lap count applies to the final lobby only and counts that lobby's
 laps on GT7's counter, from the car that took over after the last stint switch: the
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
-event setting.
+event setting. A lap count set while the final stint is already on air applies at once.
 
 ### Dashboard
 
@@ -115,7 +120,8 @@ Commentator Cockpit and later the public live timing page: order, entry number a
 colour, driver, the `Cup Team` from the [Configuration tab](Sheet-Template), gaps, status,
 pit stops, race laps (in endurance also the laps of the current stint lobby), the last
 completed lap time, fuel, each car's position for the track map, the leader's lap
-against the lap count, the remaining time of the race timer and the fastest race lap.
+against the lap count (in endurance the final lobby's lap, once the final lobby's car
+counts; never past the count after the flag), the remaining time of the race timer and the fastest race lap.
 It never carries connection ids, corrections or who made them.
 
 - **Lap times** are timed by the relay between two crossings of the line and taken
@@ -128,10 +134,12 @@ It never carries connection ids, corrections or who made them.
   (`POST /drivers/race/fastest`).
 - **Delay**: the event setting holds the dashboard, and the stint it shows, back by up to
   120 seconds to match the commentator feed on air. Race Control and the director keep
-  the live race.
+  the live race. **Show dashboard**, **Hide dashboard** and the display switches act at
+  once, never after the delay.
 - **Qualifying**: in qualifying mode the dashboard ranks the running segment by GT7's
-  best lap of its live senders, with the gap to the fastest; a best lap faster than the
-  line allows is ignored.
+  best lap, with the gap to the fastest. A lap set while the sender was live stays on
+  the tower when the sender closes or loses its connection, until the relay restarts;
+  a best lap faster than the line allows is ignored.
 
 ### On air and in the cockpit
 
@@ -156,8 +164,9 @@ It never carries connection ids, corrections or who made them.
   on the dashboard for every entry; name and number always show. The cockpit always
   shows both.
 - **Corrections** from both desks: clear or set the fastest lap, and set or delete an
-  entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart
-  and end with the race reset or the next `event start`.
+  entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart.
+  A race reset clears the fastest lap; qualifying times and tyre compounds stay until
+  the next `event start`.
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every

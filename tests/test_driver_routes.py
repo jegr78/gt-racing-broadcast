@@ -366,8 +366,10 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     calls, relay, stop = [], Relay(), threading.Event()
 
     class Svc:
-        def stint_switch(self, final_laps=None, window=True):
+        def stint_switch(self, final_laps=None, window=True, final_row=None):
             calls.append(final_laps if window else ("start", final_laps))
+            rows_seen.append(final_row)
+    rows_seen = []
     worker = threading.Thread(target=g.m.stint_switch_watch,
                               args=(relay, Svc(), stop, lambda: 9, 0.01), daemon=True)
     seen = threading.Event()
@@ -396,6 +398,20 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     stop.set()
     worker.join(2)
     assert calls == [("start", 24)], f"a relay start on the last row passes its laps once: {calls}"
+    calls.clear()
+    rows_seen.clear()
+    Source.final_laps = lambda self: None
+    stop = threading.Event()
+    worker = threading.Thread(target=g.m.stint_switch_watch,
+                              args=(relay, Svc(), stop, lambda: None, 0.01), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 2
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stop.set()
+    worker.join(2)
+    assert calls == [("start", None)] and rows_seen == [True], \
+        f"the last row on air is passed without a count, so a later count reaches it: {calls} {rows_seen}"
 
 
 def t_both_desks_act_with_their_identity():
@@ -527,6 +543,10 @@ def t_race_control_lowers_only_a_cover_it_raised():
         flag(True)
         flag(False)
         assert not obs.up, "the desk lowers the cover it raised"
+        flag(True)
+        flag(True)
+        flag(False)
+        assert not obs.up, "a second raise over the desk's own cover keeps the desk's claim"
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()
@@ -769,6 +789,18 @@ class _FakePublisher:
 
 
 FUNNEL_HOST = "relay.example.ts.net"
+
+
+def t_the_invite_offers_the_funnel_base_when_funnel_serves_the_console():
+    for host, base in ((FUNNEL_HOST, f"https://{FUNNEL_HOST}"), (None, None)):
+        srv, port, path, _hub = _serve(funnel_host=lambda h=host: h)
+        try:
+            invite = driver_invite.create(path)["id"]
+            d = json.loads(_req(port, "/drivers/invite")[1])
+            assert d["id"] == invite and d["base"] == base, \
+                f"drivers need the public Funnel address, not the desk's tailnet origin: {d}"
+        finally:
+            srv.shutdown()
 
 
 def t_timing_link_route_reports_host():

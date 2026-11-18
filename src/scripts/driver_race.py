@@ -168,8 +168,8 @@ def _last_audited(path):
 
 
 def clear_actions(runtime_dir):
-    """Drop the corrections, rejoin marks and fastest lap (a fresh event, a race reset);
-    the audit log stays."""
+    """A fresh event: drop every action (corrections, rejoin marks, tyre compounds,
+    qualifying corrections) and the fastest lap; the audit log stays."""
     for name in (ACTIONS, FASTEST):
         path = os.path.join(runtime_dir, name)
         try:
@@ -226,13 +226,15 @@ def public_view(snap):
     return out
 
 
-def qualifying(connections, segment, roster, min_ms=0, overrides=None):
+def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
     driver, team, color, text_color, best_ms, gap_ms}]; entries without a lap last.
     Only live senders count, and a best lap under `min_ms` (faster than the line
     allows) is ignored. `overrides` {entry: ms or None} are Race Control's
-    corrections: a set time replaces GT7's, None deletes it."""
-    best = {}
+    corrections: a set time replaces GT7's, None deletes it. `seen` {entry: (ms,
+    name)} carries the bests of earlier calls and is updated in place, so a lap stays
+    ranked after its sender goes quiet."""
+    best = seen if seen is not None else {}
     for c in connections:
         if not c.get("live", True):
             continue
@@ -241,8 +243,12 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None):
         ms = (c.get("latest") or {}).get("best_ms")
         ms = ms if type(ms) is int and ms > max(0, min_ms) else None
         cur = best.get(c["entry"])
+        if cur is None and len(best) >= MAX_QUALI:
+            continue
         if cur is None or (ms is not None and (cur[0] is None or ms < cur[0])):
             best[c["entry"]] = (ms, c.get("name") or "")
+    best = {e: (ms if ms is None or ms > max(0, min_ms) else None, name)
+            for e, (ms, name) in best.items()}
     for entry, ms in (overrides or {}).items():
         best[entry] = (ms, best.get(entry, (None, ""))[1])
     order = sorted(best.items(), key=lambda kv: (kv[1][0] is None, kv[1][0] or 0, kv[0]))
@@ -339,6 +345,8 @@ class Service:
         self._race_pick = object()
         self._line_tried = None
         self._final_lobby_laps = None
+        self._final_on_air = False  # endurance: the last schedule row is on air
+        self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver)}
 
     def _current(self):
         pick = self._pick()
@@ -359,7 +367,7 @@ class Service:
         race = race_distance.Race(
             trace, formation=s["formation"], multi_lobby=multi, finish_mode=s["finish_mode"],
             lap_count=None if multi else s["lap_count"])
-        if multi and self._final_lobby_laps is not None:
+        if multi and self._final_on_air:
             race.final_lobby(self._final_lobby_laps, self._clock())
         corrections, rejoins = _saved_actions(_actions_path_for(self._path))
         for entry, (metres, pits) in corrections.items():
@@ -422,7 +430,8 @@ class Service:
             out["qualifying"] = qualifying(
                 ctx.get("connections") or [], ctx.get("segment"), roster,
                 min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
-                overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")))
+                overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
+                seen=self._quali_seen.setdefault((pick.get("id"), _segment_key(ctx.get("segment"))), {}))
             for row in out["qualifying"]:
                 row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
             return out
@@ -436,12 +445,9 @@ class Service:
             row["pos"] = i + 1
             row["compound"] = (compounds.get(r["entry"]) or {}).get("code")
             rows.append(row)
-        lead_laps = rows[0]["laps"] if rows and st["entries"][0]["distance_m"] is not None else None
         fl = race.fastest
         out.update({
-            "state": st["state"], "red_flag": st["red_flag"] is not None,
-            "lap": {"leader": None if lead_laps is None else lead_laps + (2 if race.formation else 1),
-                    "count": race.lap_count if settings["finish_mode"] == "laps" else None},
+            "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
             "fastest": None if fl is None else dict(
                 fl, team=(roster.get(fl["entry"]) or {}).get("cupTeam") or ""),
             "entries": rows})
@@ -482,8 +488,9 @@ class Service:
 
     def dashboard(self):
         """The newest snapshot at least the delay setting old; the oldest one while the
-        delay has not passed yet."""
-        delay = self._settings()["delay_s"]
+        delay has not passed yet. The display settings are the current ones."""
+        settings = self._settings()
+        delay = settings["delay_s"]
         with self._lock:
             if not self._snapshots:
                 return None
@@ -494,7 +501,8 @@ class Service:
                     chosen = snap
                 else:
                     break
-            return chosen
+        return dict(chosen, visible=settings["visible"], delay_s=delay,
+                    show={"compound": settings["show_compound"], "fuel": settings["show_fuel"]})
 
     def log(self, who, action, **fields):
         """Audit an action taken outside the race (a disconnect, a cover change)."""
@@ -653,7 +661,8 @@ class Service:
         with self._lock:
             done = self._current().override_change(entry, conn, self._clock())
             if not done:
-                raise ValueError("that connection is not a sender of this entry")
+                raise ValueError("that connection is not a sender of this entry, "
+                                 "or no finish line is known for it yet")
             self._log(who, "change", entry=entry, conn=conn)
         return self.standings()
 
@@ -667,18 +676,22 @@ class Service:
             race.finish_mode = saved["finish_mode"]
             if not race.multi_lobby:
                 race.lap_count = saved["lap_count"]
+            elif self._final_on_air and "lap_count" in changes:
+                self._final_lobby_laps = race.lap_count = saved["lap_count"]
         return saved
 
-    def stint_switch(self, final_laps=None, window=True):
+    def stint_switch(self, final_laps=None, window=True, final_row=None):
         """The broadcast switched stints: open the change window (unless `window` is
-        False, a relay start that finds the last row on air); `final_laps` is the lap
-        count of the final stint lobby when the last row is on air."""
+        False, a relay start that finds the last row on air). `final_row` (default:
+        `final_laps` given) says the last row is on air; `final_laps` is its lobby's lap
+        count, None until a count is set."""
+        final_row = final_laps is not None if final_row is None else final_row
         with self._lock:
             race = self._current()
             if window:
                 race.open_change_window(self._clock())
-            if final_laps is not None and race.multi_lobby:
-                self._final_lobby_laps = final_laps
+            if final_row and race.multi_lobby:
+                self._final_on_air, self._final_lobby_laps = True, final_laps
                 race.final_lobby(final_laps, self._clock())
 
     def final_lap(self, who="tailnet"):
@@ -692,9 +705,17 @@ class Service:
             self._log(who, "finish")
 
     def reset(self, who="tailnet"):
-        """Start the race over: its corrections and rejoin marks go with it."""
+        """Start the race over: its corrections, rejoin marks and fastest lap go with it;
+        tyre compounds and qualifying corrections stay."""
+        def drop_race(doc):
+            doc.pop("corrections", None)
+            doc.pop("rejoin", None)
         with self._lock:
             self._log(who, "reset")
-            clear_actions(os.path.dirname(os.path.abspath(self._path)))
-            self._final_lobby_laps = None
+            self._save_actions(drop_race)
+            try:
+                atomic_replace.retry_windows_file_operation(lambda: os.remove(self._fastest_path()))
+            except FileNotFoundError:
+                pass  # no fastest lap recorded
+            self._final_lobby_laps, self._final_on_air = None, False
             self._race = self._build(self._pick()["id"] if self._pick() else None)

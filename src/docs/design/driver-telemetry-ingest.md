@@ -105,7 +105,11 @@ track, state, red_flag, lap {leader, count}, fastest {entry, driver, team, ms}, 
 interval_s, lapped, status, pit_stops, last_lap_ms, fuel_l, finished, x, z}]}`, in
 qualifying `qualifying [{pos, entry, number, driver, team, color, text_color, best_ms,
 gap_ms}]` instead. `GET /drivers/line` returns the picked layout's line `{track,
-length_m, points [[x, z]]}`. The settings take `delay_s` (0 to 120). `POST /drivers/race/fastest` with no `entry`
+length_m, points [[x, z]]}`. `lap.leader` is the leader's running race lap; in
+endurance, once the final lobby's car leads and a lap count is set, it is that lobby's
+GT7 counter with `count`, and it never passes `count` after the flag. `visible`,
+`delay_s` and `show` are always the current settings, never delayed. The settings take
+`delay_s` (0 to 120). `POST /drivers/race/fastest` with no `entry`
 clears the fastest lap, with `{entry, driver, ms}` sets it. `POST /drivers/race/quali
 {entry, ms}` sets a roster entry's time in the running qualifying segment, `ms: null` deletes it, `clear: true` gives
 GT7's time back; `GET /drivers/race` lists them as `quali_overrides`. `POST

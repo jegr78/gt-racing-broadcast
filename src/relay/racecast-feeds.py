@@ -14193,10 +14193,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             roster, driver_segments() if driver_segments else [],
                             driver_hub.connections(), not relay.solo)}, no_store=True)
                 if p == ["drivers", "invite"]:
-                    # The desks build the link from their own origin (#1114).
+                    # `base` is the public Funnel address; without it the desks use their origin.
                     invite = self._drive_invite()
+                    host = _funnel_host()
                     return self._send({"active": bool(invite),
-                                       "id": invite["id"] if invite else None}, no_store=True)
+                                       "id": invite["id"] if invite else None,
+                                       "base": f"https://{host}" if host else None}, no_store=True)
                 if p == ["drivers", "timing-link"]:
                     link = _timing_cache.get() if _timing_cache else None
                     pub = _timing_pub[0]
@@ -14864,8 +14866,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     cover, note = True, None
                                 elif state is not None:
                                     cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
-                                relay.rc_red_flag_raised = bool(on and cover and not was_up) or (
-                                    not on and not cover)
+                                # A second raise keeps the claim; a failed lower keeps it too.
+                                relay.rc_red_flag_raised = (
+                                    bool(owned or (cover and not was_up)) if on else not cover)
                             banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
                                       if setup_ctl else {"error": "no Setup tab control"})
                     race = None
@@ -15312,11 +15315,11 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
             rows = relay.race_source.get_rows() if relay.race_source else []
             switched = last is not None and idx != last
             if (switched or last is None) and relay.mode == "race":
-                final = None
-                if rows and idx == len(rows) - 1:
+                final, last_row = None, bool(rows) and idx == len(rows) - 1
+                if last_row:
                     final = relay.race_source.final_laps() or settings_laps()
-                if switched or final:
-                    race_svc.stint_switch(final_laps=final, window=switched)
+                if switched or last_row:
+                    race_svc.stint_switch(final_laps=final, window=switched, final_row=last_row)
                     LOG.info("driver race: %s row %d%s", "stint switch to" if switched
                              else "on air at start:", idx + 1,
                              f", final lobby over {final} laps" if final else "")
