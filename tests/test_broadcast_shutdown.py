@@ -188,6 +188,19 @@ def t_obs_still_reporting_active_after_a_stop_is_no_restart():
             f"once OBS read stopped, a live sample is a real restart: {titles}"
 
 
+def t_a_restart_after_a_stop_obs_already_reported_is_announced():
+    with _event() as (relay, obs, posts, teardown, parts, port):
+        relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
+        def stop(on):
+            _probe(relay, False)          # OBS reads stopped before the request returns
+        obs.effect = stop
+        relay._set_obs_stream(False)
+        _probe(relay, True)
+        titles = [payload["embeds"][0]["title"] for kind, payload in posts if kind == "obs-stream"]
+        assert len(titles) == 2 and "started" in titles[1], \
+            f"a probe already saw the stop, so a live sample is a real restart: {titles}"
+
+
 def t_a_stop_that_never_lands_counts_again_after_the_settle_window():
     with _event() as (relay, obs, posts, teardown, parts, port):
         relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None

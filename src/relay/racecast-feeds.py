@@ -11297,7 +11297,7 @@ class Relay:
         now = time.time()
         with self._obs_lock:
             self._stream_stop_mono = time.monotonic()
-            self._stream_stop_settling = True
+            self._stream_stop_settling = self._stream_active_prev is not False   # not yet read stopped
             if self._stream_active_prev is not True:
                 return None
             self._stream_active_prev = False
