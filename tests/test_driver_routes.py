@@ -1224,6 +1224,52 @@ def t_an_unauthenticated_snapshot_visit_with_oauth_gets_the_launcher():
         srv.shutdown()
 
 
+def _console_src(name):
+    with open(os.path.join(ROOT, "src", "console", name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def t_the_desk_never_waits_for_the_recording_before_the_race_table():
+    desk = _console_src("driver-desk.js")
+    body = desk[desk.index("async function refresh()"):desk.index("async function refreshInvite()")]
+    assert "await call(\"/drivers/race/recording\"" not in body, "a slow recording call delays the race table"
+    assert body.index("call(\"/drivers/race\"") < body.index("await"), \
+        "the race fetch starts before the desk awaits anything"
+
+
+def t_the_desk_links_the_whole_recording():
+    desk = _console_src("driver-desk.js")
+    assert "Browse recording" in desk and 'href("/drivers/snapshot")' in desk, \
+        "the slider over the whole recording is reachable from the desk"
+
+
+def t_the_desk_lapped_gap_breaks_after_the_dot():
+    desk = _console_src("driver-desk.js")
+    assert '"\\u00a0L" + (typeof e.gap_time_s === "number" ? "\\u00a0\\u00b7 " + secs(e.gap_time_s)' in desk, \
+        "+1 L, NBSP, dot, plain space, time"
+
+
+def t_the_desk_pills_do_not_wrap_inside():
+    desk = _console_src("driver-desk.js")
+    assert ".dd .race .pill{white-space:normal}" not in desk, "a pill keeps its words on one line"
+
+
+def t_the_desk_forgets_suspicions_when_the_status_fails():
+    desk = _console_src("driver-desk.js")
+    fn = desk[desk.index("function renderRecording(rec)"):]
+    assert fn.index("suspected = Object.create(null)") < fn.index("if (!rec) return"), \
+        "a failed status poll leaves no stale Suspected DC marks"
+
+
+def t_the_desk_swallows_a_refused_audio_resume():
+    assert "audio.resume().catch(function () {})" in _console_src("driver-desk.js")
+
+
+def t_the_snapshot_slider_follows_a_running_recording():
+    page = _console_src("race-snapshot.html")
+    assert "setInterval(loadSpan, 10000)" in page, "the span refreshes every 10 s"
+
+
 def _audit_of(srv):
     import json as _json
     with open(driver_race.audit_path_for(srv.race_svc._path), encoding="utf-8") as fh:

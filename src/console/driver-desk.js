@@ -32,7 +32,7 @@
     ".dd td.num{font-family:var(--mono,ui-monospace,monospace);text-align:right;white-space:nowrap}",
     ".dd .tbl{overflow-x:auto}",
     ".dd td.num.lap{white-space:normal}",
-    ".dd .race th,.dd .race td{padding:4px}.dd .race .pill{white-space:normal}",
+    ".dd .race th,.dd .race td{padding:4px}.dd .race .pills{display:flex;flex-wrap:wrap;gap:3px}",
     ".dd .pill{display:inline-block;white-space:nowrap;border-radius:9px;padding:1px 7px;font-size:11px;border:1px solid var(--edge,#2a2f37)}",
     ".dd .pill.ok{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd .pill.bad{border-color:#ff4d5e;color:#ff4d5e}",
@@ -220,6 +220,9 @@
     });
     var recCsv = el("a", {cls: "btn", text: "Download CSV", href: href("/drivers/race/recording/csv"),
                           download: "race-recording.csv"});
+    // Without a time the page opens at the end of the recording, with the slider over all of it.
+    var recBrowse = el("a", {cls: "btn", text: "Browse recording", href: href("/drivers/snapshot"),
+                             target: "_blank", rel: "noopener"});
     var recWarn = el("div", {cls: "msg err", role: "alert", hidden: ""});
     var evTitle = el("h3", {text: "Events (0)"});
     var evBody = el("tbody");
@@ -233,7 +236,10 @@
     function wakeAudio() {
       var AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
-      try { audio = audio || new AC(); if (audio.state === "suspended") audio.resume(); } catch (e) { audio = null; }
+      try {
+        audio = audio || new AC();
+        if (audio.state === "suspended") audio.resume().catch(function () {});
+      } catch (e) { audio = null; }
     }
     soundBox.addEventListener("change", function () {
       saveSound(soundBox.checked);
@@ -276,7 +282,10 @@
         el("div", {cls: "row", style: "margin-top:4px"}, [offset, showBtn])])]);
       return evRows[id] = {tr: tr, who: who, what: what, confirm: confirm, dismiss: dismiss, ev: ev};
     }
+    // Returns true when the set of suspected entries changed, so the race table re-marks them.
     function renderRecording(rec) {
+      var before = Object.keys(suspected).sort().join("\n");
+      suspected = Object.create(null);
       var running = !!(rec && rec.running);
       recDot.className = "rec" + (running ? " on" : "");
       recText.textContent = !rec ? "Recording unavailable." : running
@@ -285,15 +294,15 @@
       recStart.hidden = running;
       recStart.disabled = !rec;
       recStop.hidden = !running;
-      recCsv.hidden = !(rec && rec.span);
-      if (!rec) return;   // keep the last events on screen; the stale note covers a dead relay
+      recCsv.hidden = recBrowse.hidden = !(rec && rec.span);
+      // Keep the last events on screen; the stale note covers a dead relay.
+      if (!rec) return before !== "";
       var lost = (rec.dropped || 0) + (rec.failed || 0);
       recWarn.hidden = !lost;
       recWarn.textContent = lost ? "The recording has gaps: " + (rec.dropped || 0) + " samples dropped, " +
         (rec.failed || 0) + " writes failed." : "";
       var events = rec.events || [];
       var open = 0, fresh = false;
-      suspected = Object.create(null);
       var ids = events.map(function (ev) {
         var r = evRows[ev.id] || evRow(ev);
         r.ev = ev;
@@ -324,6 +333,7 @@
         if (evBody.children[i] !== tr) evBody.insertBefore(tr, evBody.children[i] || null);
       });
       while (evBody.children.length > rows.length) evBody.removeChild(evBody.lastChild);
+      return Object.keys(suspected).sort().join("\n") !== before;
     }
 
     // -- correction / rejoin / change form ------------------------------------------
@@ -458,7 +468,7 @@
       el("div", {cls: "row"}, [redFlag, restart, release]),
       redBanner,
       el("h3", {text: "Race"}),
-      el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv]),
+      el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
       recWarn, raceNote, raceTable,
       el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
       multiRow,
@@ -522,18 +532,18 @@
       var rows = (r.entries || []).map(function (e, i) {
         var st = STATUS[e.status] || [e.status, ""];
         // No-break spaces: a narrow desk wraps only between the lap count and the time.
-        var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? " \u00b7\u00a0" + secs(e.gap_time_s) : "")
+        var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
                            : (i ? secs(e.gap_s) : "");
         var cells = [el("td", {cls: "num", text: String(i + 1)}),
           el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted", text: e.driver})]),
           el("td", {cls: "num", text: String(e.laps)}),
           el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}), el("td", {cls: "num", text: secs(e.interval_time_s)}),
-          el("td", {}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
+          el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
                         st[0] ? el("span", {cls: "pill " + st[1], text: st[0]}) : null,
                         e.finished ? el("span", {cls: "pill ok", text: "Finished"}) : null,
                         e.rejoin ? el("span", {cls: "pill amb", text: "Rejoin"}) : null,
                         e.position_mismatch ? el("span", {cls: "pill amb", text: "GT7 P" + e.gt7_position,
-                                                           title: "GT7's position disagrees with the distance order"}) : null]),
+                                                           title: "GT7's position disagrees with the distance order"}) : null])]),
           el("td", {cls: "num", text: String(e.pit_stops), title: PIT_HINT}),
           el("td", {cls: "num", text: e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""})];
         return el("tr", {}, cells);
@@ -609,12 +619,13 @@
       [raceTable, evTable, readyTable, sendTable].forEach(function (t) { t.classList.toggle("stale", stale); });
     }
     async function refresh() {
-      // The recording first, so the race table marks this poll's suspicions.
-      var rec = await call("/drivers/race/recording", undefined, true);
-      renderRecording(rec);
-      var r = await call("/drivers/race", undefined, true);
+      // Both start at once; a slow recording call never holds back the race table.
+      var raceCall = call("/drivers/race", undefined, true);
+      var recCall = call("/drivers/race/recording", undefined, true);
+      var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
+      if (renderRecording(await recCall) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
       if (rd) renderSenders(rd);
     }

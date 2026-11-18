@@ -113,7 +113,7 @@
     var rows = (s.rows || []).map(function (e) {
       var tr = el("tr");
       var st = STATUS[e.status] || [String(e.status || ""), ""];
-      var gap = e.lapped ? "+" + e.lapped + " L" + (typeof e.gap_time_s === "number" ? " · " + secs(e.gap_time_s) : "")
+      var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
                          : (e.pos > 1 ? secs(e.gap_time_s) : "");
       var entry = el("td");
       entry.append(el("div", "", e.entry), el("div", "muted", e.driver || ""));
@@ -154,8 +154,8 @@
     timer = setTimeout(function () { show(v); }, 150);
   });
 
-  (async function start() {
-    var raw = parseFloat(new URLSearchParams(location.search).get("time"));
+  // A running recording grows: the slider's range follows it, the chosen time stays.
+  async function loadSpan() {
     var st = await get("./race/recording");
     var span = st.data && st.data.span;
     if (span) {
@@ -165,6 +165,14 @@
       $("from").textContent = clock(span[0]);
       $("to").textContent = clock(span[1]);
     }
+    return {status: st.status, span: span};
+  }
+
+  (async function start() {
+    var raw = parseFloat(new URLSearchParams(location.search).get("time"));
+    var st = await loadSpan();
+    setInterval(loadSpan, 10000);
+    var span = st.span;
     var t = isFinite(raw) ? raw : (span ? span[1] : NaN);
     if (!isFinite(t)) return say(st.status && st.status !== 200 ? failure(st.status) : "No recording yet.",
                                  st.status !== 200 && st.status !== 404);
