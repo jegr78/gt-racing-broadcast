@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The driver telemetry routes under /console/drive and on the tailnet (#1111).
 Run: python3 tests/test_driver_routes.py"""
-import gzip, json, os, struct, sys, tempfile, time, urllib.error, urllib.request
+import gzip, json, os, struct, sys, tempfile, threading, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -66,9 +66,9 @@ def _serve(solo=True, segments=(), clock=None, **extra):
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo)
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
+    extra.setdefault("sender_script_path", os.path.join(ROOT, "src", "relay", "racecast-sender.py"))
     srv = g._serve(solo=solo, hud_source=_Hud(), driver_hub=hub, driver_invite_path=path,
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
-                   sender_script_path=os.path.join(ROOT, "src", "relay", "racecast-sender.py"),
                    driver_segments=lambda: list(segments), driver_race_svc=race,
                    driver_desk_path=os.path.join(ROOT, "src", "console", "driver-desk.js"), **extra)
     srv.race_svc = race
@@ -170,9 +170,9 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         batch = tp.encode_batch([_wire(1), _wire(2)])
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
         assert code == 200 and json.loads(text) == {"ok": True, "v": 1, "rate_hz": 20, "accepted": 2}, text
-        other = json.loads(_register(port, invite, entry="Team A #1", name="Ann")[1])["code"]
-        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": other})
-        assert code == 409 and "already has a sender" in text, (code, text)
+        code, text, _h = _register(port, invite, entry="Team A #1", name="Ann")
+        assert code == 409 and "already has its live senders" in text, \
+            ("a full entry refuses the registration, so the invite page shows it", code, text)
         code, text, _h = _req(port, "/drivers/data")
         conns = json.loads(text)["connections"]
         assert [(c["entry"], c["name"], c["packets"]["received"]) for c in conns] == [("Team A #1", "Max", 2)], conns
@@ -231,6 +231,46 @@ def t_driver_credentials_reach_nothing_else():
                             {"X-Driver-Code": "D1:forged.sig"})
         assert code == 403, code
         assert _req(port, "/console/drive/ingest", b"RCT1", {"X-Driver-Code": issued}, method="GET")[0] in (403, 405)
+    finally:
+        srv.shutdown()
+
+
+def t_a_non_ascii_driver_code_is_refused_like_any_bad_code():
+    srv, port, path, _hub = _serve()
+    try:
+        driver_invite.create(path)
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]),
+                              {"X-Driver-Code": "D1:\u00e9.abc"})
+        assert code == 403 and "register again" in text, (code, text)
+    finally:
+        srv.shutdown()
+
+
+def t_a_missing_sender_script_never_names_a_server_path():
+    srv, port, path, _hub = _serve(sender_script_path=os.path.join(tempfile.mkdtemp(), "gone.py"))
+    try:
+        invite = driver_invite.create(path)["id"]
+        code, text, _h = _req(port, f"/console/drive/sender.py?i={invite}")
+        assert code == 404 and "looked_for" not in text and "gone.py" not in text, \
+            ("a Funnel-reachable 404 must not leak the producer's path", code, text)
+    finally:
+        srv.shutdown()
+
+
+def t_a_reassigned_sender_keeps_uploading_after_its_typo_entry_leaves():
+    srv, port, path, hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        ENTRIES.append("Team Typo")
+        try:
+            issued = json.loads(_register(port, invite, entry="Team Typo", name="Max")[1])["code"]
+            _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
+            assert hub.reassign(hub.connections()[0]["conn"], "Team B #2")
+        finally:
+            ENTRIES.remove("Team Typo")
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(2)]),
+                              {"X-Driver-Code": issued})
+        assert code == 200, ("the roster check must use the reassigned entry", code, text)
     finally:
         srv.shutdown()
 
@@ -326,8 +366,10 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     calls, relay, stop = [], Relay(), threading.Event()
 
     class Svc:
-        def stint_switch(self, final_laps=None, window=True):
+        def stint_switch(self, final_laps=None, window=True, final_row=None):
             calls.append(final_laps if window else ("start", final_laps))
+            rows_seen.append(final_row)
+    rows_seen = []
     worker = threading.Thread(target=g.m.stint_switch_watch,
                               args=(relay, Svc(), stop, lambda: 9, 0.01), daemon=True)
     seen = threading.Event()
@@ -356,6 +398,20 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     stop.set()
     worker.join(2)
     assert calls == [("start", 24)], f"a relay start on the last row passes its laps once: {calls}"
+    calls.clear()
+    rows_seen.clear()
+    Source.final_laps = lambda self: None
+    stop = threading.Event()
+    worker = threading.Thread(target=g.m.stint_switch_watch,
+                              args=(relay, Svc(), stop, lambda: None, 0.01), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 2
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stop.set()
+    worker.join(2)
+    assert calls == [("start", None)] and rows_seen == [True], \
+        f"the last row on air is passed without a count, so a later count reaches it: {calls} {rows_seen}"
 
 
 def t_both_desks_act_with_their_identity():
@@ -487,6 +543,10 @@ def t_race_control_lowers_only_a_cover_it_raised():
         flag(True)
         flag(False)
         assert not obs.up, "the desk lowers the cover it raised"
+        flag(True)
+        flag(True)
+        flag(False)
+        assert not obs.up, "a second raise over the desk's own cover keeps the desk's claim"
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()
@@ -733,6 +793,18 @@ class _FakePublisher:
 FUNNEL_HOST = "relay.example.ts.net"
 
 
+def t_the_invite_offers_the_funnel_base_when_funnel_serves_the_console():
+    for host, base in ((FUNNEL_HOST, f"https://{FUNNEL_HOST}"), (None, None)):
+        srv, port, path, _hub = _serve(funnel_host=lambda h=host: h)
+        try:
+            invite = driver_invite.create(path)["id"]
+            d = json.loads(_req(port, "/drivers/invite")[1])
+            assert d["id"] == invite and d["base"] == base, \
+                f"drivers need the public Funnel address, not the desk's tailnet origin: {d}"
+        finally:
+            srv.shutdown()
+
+
 def t_timing_link_route_reports_host():
     pub = _FakePublisher()
     srv, port, _lp, link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
@@ -823,6 +895,59 @@ def t_funnel_watch_reports_the_host_only_while_funnel_serves():
         assert len(calls) == n, "the cache answers; no tailscale call per request"
     finally:
         ts.detect_magicdns_name, ts.funnel_on = saved
+
+
+def t_funnel_watch_learns_the_magicdns_name_without_funnel():
+    ts = g.m.tailscale
+    saved = (ts.detect_magicdns_name, ts.funnel_on)
+    try:
+        ts.detect_magicdns_name = lambda *a, **k: FUNNEL_HOST
+        ts.funnel_on = lambda *a, **k: False
+        get = g.m._funnel_watch()
+        assert get.magicdns() is None, "the first call answers from the empty cache"
+        _wait_for(lambda: get.magicdns() is not None)
+        assert get.magicdns() == FUNNEL_HOST and get() is None, (get.magicdns(), get())
+    finally:
+        ts.detect_magicdns_name, ts.funnel_on = saved
+
+
+def t_a_polling_funnel_watch_learns_a_late_name_without_requests():
+    ts = g.m.tailscale
+    saved = (ts.detect_magicdns_name, ts.funnel_on)
+    calls, stop = [], threading.Event()
+    try:
+        ts.detect_magicdns_name = lambda *a, **k: calls.append(1) or (FUNNEL_HOST if len(calls) > 2 else None)
+        ts.funnel_on = lambda *a, **k: False
+        get = g.m._funnel_watch(max_age_s=0.05, poll=stop)
+        _wait_for(lambda: len(calls) > 3)
+        assert get.magicdns() == FUNNEL_HOST, \
+            ("the watch refreshes by itself, so the first request after Tailscale comes up finds the name", calls)
+    finally:
+        stop.set()
+        time.sleep(0.2)                       # let the poll thread see the stop before the restore
+        ts.detect_magicdns_name, ts.funnel_on = saved
+
+
+def t_a_magicdns_name_learned_after_start_is_a_browser_host():
+    known = {"name": None}
+
+    def funnel_host():
+        return None
+    funnel_host.magicdns = lambda: known["name"]
+    srv, port, path, _hub = _serve(funnel_host=funnel_host)
+    try:
+        issued = json.loads(_register(port, driver_invite.create(path)["id"],
+                                      entry="Team A #1", name="Max")[1])["code"]
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]),
+                              {"X-Driver-Code": issued, "Host": FUNNEL_HOST})
+        assert code == 200, ("a sender authenticates by header, so the Host check never blocks it", code, text)
+        assert _req(port, "/drivers/data", headers={"Host": FUNNEL_HOST})[0] == 403, \
+            "an unknown name stays refused"
+        known["name"] = FUNNEL_HOST           # Tailscale came up after the relay started
+        code, text, _h = _req(port, "/drivers/data", headers={"Host": FUNNEL_HOST})
+        assert code == 200, ("the late MagicDNS name must be accepted without a restart", code, text)
+    finally:
+        srv.shutdown()
 
 
 def t_timing_host_reload_is_tailnet_only():

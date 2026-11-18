@@ -94,6 +94,8 @@
     var staleNote = el("div", {cls: "msg err", role: "alert"});
     staleNote.hidden = true;
     var STALE_POLLS = 3;
+    var PIT_HINT = "Estimated: a stop counts when the car stands off the racing line, so a beached car " +
+      "or a red flag stop beside the track counts too. Correct it with the pit correction.";
     function say(text, err) { msg.textContent = text || ""; msg.className = "msg" + (err ? " err" : ""); }
 
     async function call(path, body, quiet) {
@@ -187,7 +189,7 @@
     var raceBody = el("tbody");
     var raceTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
       "Pos", "Entry", "Laps", "Gap", "Int.", "Status", "Pits", "Corr."].map(function (h) {
-        return el("th", {text: h}); }))]), raceBody])]);
+        return el("th", h === "Pits" ? {text: h, title: PIT_HINT} : {text: h}); }))]), raceBody])]);
     var raceNote = el("div", {cls: "muted"});
 
     // -- correction / rejoin / change form ------------------------------------------
@@ -295,6 +297,15 @@
       if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No entries yet."})])];
       tyreBody.replaceChildren.apply(tyreBody, rows);
     }
+    // Roster rows too: in qualifying the race has no entries.
+    var tyreSrc = {roster: [], race: [], compounds: {}};
+    function syncTyres() {
+      var known = tyreSrc.roster.slice();
+      tyreSrc.race.concat(Object.keys(tyreSrc.compounds)).forEach(function (e) {
+        if (known.indexOf(e) < 0) known.push(e);
+      });
+      renderTyres(known, tyreSrc.compounds);
+    }
 
     // -- readiness and senders -------------------------------------------------------
     var readyHead = el("tr");
@@ -342,9 +353,9 @@
       if (document.activeElement !== delay) delay.value = s.delay_s || 0;
       showTyre.box.checked = s.show_compound !== false;
       showFuel.box.checked = s.show_fuel !== false;
-      var known = (r.entries || []).map(function (e) { return e.entry; });
-      Object.keys(r.compounds || {}).forEach(function (e) { if (known.indexOf(e) < 0) known.push(e); });
-      renderTyres(known, r.compounds || {});
+      tyreSrc.race = (r.entries || []).map(function (e) { return e.entry; });
+      tyreSrc.compounds = r.compounds || {};
+      syncTyres();
       var fl = r.fastest;
       flText.textContent = fl ? "Fastest lap " + lapTime(fl.ms) + " · " + fl.driver + " (" + fl.entry + ")"
                               : "No fastest lap yet.";
@@ -381,7 +392,7 @@
                         e.rejoin ? el("span", {cls: "pill amb", text: "Rejoin"}) : null,
                         e.position_mismatch ? el("span", {cls: "pill amb", text: "GT7 P" + e.gt7_position,
                                                            title: "GT7's position disagrees with the distance order"}) : null]),
-          el("td", {cls: "num", text: String(e.pit_stops)}),
+          el("td", {cls: "num", text: String(e.pit_stops), title: PIT_HINT}),
           el("td", {cls: "num", text: e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""})];
         return el("tr", {}, cells);
       });
@@ -392,6 +403,8 @@
     function renderSenders(rd) {
       var multi = !!rd.multi_lobby;
       var entries = Array.from(new Set(rd.rows.map(function (r) { return r.entry; })));
+      tyreSrc.roster = entries;
+      syncTyres();
       keepSelect(corrEntry, entries.map(function (e) { return [e, e]; }));
       multiRow.hidden = !multi;
       keepSelect(rejoinEntry, entries.map(function (e) { return [e, e]; }));
@@ -463,12 +476,13 @@
     async function refreshInvite() {
       var d = await call("/drivers/invite", undefined, true);
       if (!d) return;
-      state.invite = d.active ? location.origin + "/console/drive?i=" + encodeURIComponent(d.id) : null;
+      // Drivers reach the relay through the Funnel; the desk's own origin may be the tailnet.
+      state.invite = d.active ? (d.base || location.origin) + "/console/drive?i=" + encodeURIComponent(d.id) : null;
       inviteText.textContent = state.invite || "No invite: it starts with the event.";
       copyBtn.disabled = !state.invite;
       var t = await call("/drivers/timing-link", undefined, true);
       if (!t) return;
-      var funnel = t.active ? location.origin + "/console/timing?l=" + encodeURIComponent(t.id) : null;
+      var funnel = t.active ? (t.funnel_url || location.origin + "/console/timing?l=" + encodeURIComponent(t.id)) : null;
       state.timing = t.active && t.served === "hosted" && t.hosted_url ? t.hosted_url : funnel;
       var note = "";
       if (t.active && t.hosted_url) {   // the league's timing host (#1161)

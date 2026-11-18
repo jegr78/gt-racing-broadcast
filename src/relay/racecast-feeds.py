@@ -9276,6 +9276,7 @@ class Feed:
 
 
 OBS_PROBE_INTERVAL_S = 5.0   # min seconds between background OBS reachability probes
+STREAM_STOP_SETTLE_S = 60.0  # OBS reports the output active for a while after StopStream
 
 
 def should_probe_obs(last_ts, running, now, interval):
@@ -9481,6 +9482,7 @@ class Relay:
                                           # (off-air alarm only fires after this)
         self._stream_active_prev = None   # last bool stream_active, for start/stop events (#317)
         self._stream_stop_mono = None     # monotonic time of the last confirmed stop
+        self._stream_stop_settling = False  # a probe has not read the stop yet
         self._stream_started_ts = None    # when OBS last went live, for the stop-line uptime
         # POV is a THIRD, independent feed, not part of the A/B index. Starts
         # paused (off) until the Director calls /pov/reload.
@@ -11277,6 +11279,8 @@ class Relay:
                 if ok and on:
                     with self._health_webhook_lock:
                         self._event_ending = False
+                    with self._obs_lock:
+                        self._stream_stop_settling = False
                 if ok and not on:
                     stopped_at = self._claim_stream_stop()
             finally:
@@ -11293,6 +11297,7 @@ class Relay:
         now = time.time()
         with self._obs_lock:
             self._stream_stop_mono = time.monotonic()
+            self._stream_stop_settling = self._stream_active_prev is not False   # not yet read stopped
             if self._stream_active_prev is not True:
                 return None
             self._stream_active_prev = False
@@ -11327,9 +11332,13 @@ class Relay:
                 redacted["stream_kbps"] = kbps
                 self.obs_stats = redacted
                 active = stats.get("stream_active")    # True / False / None
+                if active is False:
+                    self._stream_stop_settling = False
                 if (active and self._stream_stop_mono is not None
-                        and sampled < self._stream_stop_mono):
-                    active = None                      # sampled before a confirmed stop
+                        and (sampled < self._stream_stop_mono
+                             or (self._stream_stop_settling
+                                 and sampled - self._stream_stop_mono < STREAM_STOP_SETTLE_S))):
+                    active = None                      # before, or still winding down from, a confirmed stop
                 prev = self._stream_active_prev
                 if active is not None:                 # ignore unreachable blips
                     self._stream_active_prev = active
@@ -11963,11 +11972,13 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
 MAX_POST_BODY = 65536
 
 
-def _funnel_watch(max_age_s=60.0):
+def _funnel_watch(max_age_s=60.0, poll=None):
     """A getter for this machine's MagicDNS name while Funnel serves /console, else
-    None. It answers from a cache and refreshes in the background at most once a
-    minute, so a request never waits on the tailscale CLI."""
-    state = {"host": None, "at": None, "busy": False}
+    None; its `magicdns()` returns the name whether Funnel serves or not. Both answer
+    from a cache refreshed in the background at most once a minute, so a request never
+    waits on the tailscale CLI. With `poll` (a stop Event) a thread also refreshes it
+    without requests, so a name that appears late is known before anyone asks."""
+    state = {"host": None, "name": None, "at": None, "busy": False}
     lock = threading.Lock()
 
     def refresh():
@@ -11975,17 +11986,27 @@ def _funnel_watch(max_age_s=60.0):
             name = tailscale.detect_magicdns_name()
             host = name if name and tailscale.funnel_on("/console") else None
         except Exception:
-            host = None
+            name = host = None
         with lock:
-            state.update(host=host, at=time.monotonic(), busy=False)
+            state.update(host=host, name=name or state["name"], at=time.monotonic(), busy=False)
 
-    def get():
+    def cached(key):
         with lock:
             stale = state["at"] is None or time.monotonic() - state["at"] > max_age_s
             if stale and not state["busy"]:
                 state["busy"] = True
                 threading.Thread(target=refresh, name="funnel-watch", daemon=True).start()
-            return state["host"]
+            return state[key]
+
+    def get():
+        return cached("host")
+    get.magicdns = lambda: cached("name")
+    if poll is not None:
+        def keep_fresh():
+            while not poll.is_set():
+                cached("name")
+                poll.wait(max_age_s / 2)
+        threading.Thread(target=keep_fresh, name="funnel-watch-poll", daemon=True).start()
     return get
 
 
@@ -12100,6 +12121,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         return timing_link.served(timing_link_path) or "hosted"
 
     _funnel_host = funnel_host if callable(funnel_host) else (lambda: funnel_host)
+    _late_magicdns = getattr(funnel_host, "magicdns", None)   # Tailscale may come up after start
 
     def _timing_funnel_url():
         """The Funnel page URL, only while Funnel serves /console (else None)."""
@@ -12196,6 +12218,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             try:
                 with open(path, "rb") as fh: body = fh.read()
             except OSError:
+                if urlparse(self.path).path.startswith("/console"):   # Funnel-reachable: no paths
+                    return self._send({"error": "file not found"}, 404)
                 return self._send({"error": "file not found", "looked_for": path}, 404)
             self.send_response(200)
             self.send_header("Content-Type", ctype)
@@ -13273,7 +13297,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     cookie_token=self._cockpit_token(), cookie_path="/console")
                     return None
                 if sub == ["health-monitor", "data"] and method == "GET":
-                    self._send(self._health_monitor_payload())
+                    self._send(self._health_monitor_payload(console=True))
                     return None
                 if len(sub) == 3 and sub[:2] == ["health-monitor", "assets"]:
                     return sub        # served by the root asset route
@@ -13374,9 +13398,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 to, frm = now, now - _HEALTH_CONST.LIVE_WINDOW_S
             return frm, to, maxn, now
 
-        def _health_current(self):
+        def _health_current(self, console=False):
             """Allowlist of the live health fields, NEVER the feed/pov stream URLs
-            that relay.status() carries (redaction boundary)."""
+            that relay.status() carries (redaction boundary). `console` also drops
+            the OBS note, which can name the WebSocket host."""
             full = relay.status()
             feeds = {}
             for k, v in (full.get("feeds") or {}).items():
@@ -13389,19 +13414,21 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                             "down": pov.get("down"), "shown": pov.get("shown"),
                                             "quality": getattr(relay.pov, "quality", None)}
             return {"health": full.get("health"), "feeds": feeds, "pov": pov_red,
-                    "obs": full.get("obs"), "source": full.get("source"),
+                    "obs": ({"reachable": (full.get("obs") or {}).get("reachable")} if console
+                            else full.get("obs")),
+                    "source": full.get("source"),
                     "cookies_health": full.get("cookies_health"),
                     "mode": full.get("mode"), "live": full.get("live"),
                     "timer": timer_store.summary() if timer_store else None,
                     "event_title": event_store.get() if event_store else ""}
 
-        def _health_monitor_payload(self):
+        def _health_monitor_payload(self, console=False):
             if relay.health_store is None:
                 return {"error": "health monitor disabled"}
             frm, to, maxn, now = self._health_query_window()
             store = relay.health_store
             return {"now": now, "from": frm, "to": to,
-                    "current": self._health_current(),
+                    "current": self._health_current(console),
                     "bands": store.bands(frm, to),
                     "incidents": store.incidents(frm, to),
                     "events": store.events(frm, to),   # discrete markers (#317)
@@ -13497,6 +13524,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                      ("splitscreen",), ("splitscreen", "hud"), ("intermission",),
                                                      ("drivers",))):
                     return True
+            # Senders authenticate by a custom header a cross-site page cannot set.
+            if method == "POST" and p in (("console", "drive", "ingest"), ("console", "probe", "ingest")):
+                return True
             if not intermission_live.allow_control_origin(self.headers):
                 return False
             if not self.headers.get("Host"):
@@ -13507,6 +13537,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if not name or host.username is not None or host.password is not None or host.path or host.query or host.fragment:
                     return False
                 if name in browser_names:
+                    return True
+                late = _late_magicdns() if _late_magicdns else None
+                if late and name in (late.lower().rstrip("."), late.split(".", 1)[0].lower()):
                     return True
                 ipaddress.ip_address(name)
                 return True  # Literal addresses cannot be redirected by DNS rebinding.
@@ -14163,10 +14196,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             roster, driver_segments() if driver_segments else [],
                             driver_hub.connections(), not relay.solo)}, no_store=True)
                 if p == ["drivers", "invite"]:
-                    # The desks build the link from their own origin (#1114).
+                    # `base` is the public Funnel address; without it the desks use their origin.
                     invite = self._drive_invite()
+                    host = _funnel_host()
                     return self._send({"active": bool(invite),
-                                       "id": invite["id"] if invite else None}, no_store=True)
+                                       "id": invite["id"] if invite else None,
+                                       "base": f"https://{host}" if host else None}, no_store=True)
                 if p == ["drivers", "timing-link"]:
                     link = _timing_cache.get() if _timing_cache else None
                     pub = _timing_pub[0]
@@ -14388,7 +14423,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if reg is None:
                     return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
                 roster = hud_source.roster_names() if hud_source else []
-                if roster and reg["entry"] not in roster:   # an unread roster blocks nobody
+                if roster and hub.entry_for(reg["conn"], reg["entry"]) not in roster:   # an unread roster blocks nobody
                     return self._drive_refuse(403, "this entry is no longer in the league's list: register again")
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
@@ -14448,6 +14483,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "pick your stint or segment from the list"}, 400)
                 if not segments:
                     segment = None   # a league without stint labels registers by entry only
+                if hub.entry_full(body["entry"]):
+                    return self._send({"error": "this entry already has its live senders: "
+                                       "ask the producer or try again once one stops"}, 409)
                 try:
                     issued = driver_invite.issue(invite, entry=body["entry"],
                                                  name=body.get("name"), segment=segment)
@@ -14831,8 +14869,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     cover, note = True, None
                                 elif state is not None:
                                     cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
-                                relay.rc_red_flag_raised = bool(on and cover and not was_up) or (
-                                    not on and not cover)
+                                # A second raise keeps the claim; a failed lower keeps it too.
+                                relay.rc_red_flag_raised = (
+                                    bool(owned or (cover and not was_up)) if on else not cover)
                             banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
                                       if setup_ctl else {"error": "no Setup tab control"})
                     race = None
@@ -15279,11 +15318,11 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
             rows = relay.race_source.get_rows() if relay.race_source else []
             switched = last is not None and idx != last
             if (switched or last is None) and relay.mode == "race":
-                final = None
-                if rows and idx == len(rows) - 1:
+                final, last_row = None, bool(rows) and idx == len(rows) - 1
+                if last_row:
                     final = relay.race_source.final_laps() or settings_laps()
-                if switched or final:
-                    race_svc.stint_switch(final_laps=final, window=switched)
+                if switched or last_row:
+                    race_svc.stint_switch(final_laps=final, window=switched, final_row=last_row)
                     LOG.info("driver race: %s row %d%s", "stint switch to" if switched
                              else "on air at start:", idx + 1,
                              f", final lobby over {final} laps" if final else "")
@@ -16232,7 +16271,9 @@ def main():
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
         multi_lobby=lambda: not relay.solo)
-    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update)
+    _hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))
+    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update,
+                                   invite_id=lambda: (_hub_invite.get() or {}).get("id"))
     threading.Thread(target=dashboard_ticks, daemon=True,
                      args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
@@ -16344,7 +16385,7 @@ def main():
         driver_desk_path=driver_desk_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
-        timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(),
+        timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(poll=stop_evt),
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

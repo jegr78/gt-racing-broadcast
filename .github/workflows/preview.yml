@@ -209,6 +209,8 @@ jobs:
           # preview among old releases. So move the tag to THIS build's commit
           # ourselves (force the ref), then recreate the release on it -- now
           # created_at tracks the fresh commit and the preview sorts to the top.
+          # The tag comes from PR-head code, so never let it name a real release.
+          case "$TAG" in preview-*) ;; *) echo "refusing tag $TAG"; exit 1 ;; esac
           gh release delete "$TAG" --yes || true
           if gh api "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1; then
             gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
@@ -258,6 +260,8 @@ jobs:
           - **macOS:** $BASE/racecast-macos.tar.gz
           - **Linux (x86-64):** $BASE/racecast-linux.tar.gz
           - **Linux (ARM64):** $BASE/racecast-linux-arm64.tar.gz
+
+          Driver telemetry sender: [Windows]($BASE/racecast-sender-windows.exe) · [macOS]($BASE/racecast-sender-macos)
 
           Rebuilt automatically on every push to this PR. \`racecast --version\` prints \`$VERSION\`.
           EOF

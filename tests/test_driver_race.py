@@ -89,6 +89,24 @@ def t_settings_apply_live_and_the_final_stint_brings_its_lap_count():
         "a relay start on the last row brings its lap count without a change window"
 
 
+def t_a_lap_count_entered_after_the_final_switch_reaches_the_final_lobby():
+    team, clock = _service([{"id": "good"}], multi=True)
+    clock[0] = 100.0
+    team.stint_switch(final_laps=None, final_row=True)      # no Laps cell, no event setting
+    assert team._race.lap_count is None and team._race._final_at == 100.0
+    clock[0] = 160.0
+    team.set_settings({"lap_count": 12})
+    assert team._race.lap_count == 12, "the count entered now applies to the final lobby on air"
+    assert team._race._final_at == 100.0, "the cars that took over since the switch stay final cars"
+    team.set_settings({"delay_s": 5})
+    assert team._race.lap_count == 12, "another setting leaves the count alone"
+    team._race = None
+    assert team._current().lap_count == 12, "a rebuilt race keeps it"
+    early, _c = _service([{"id": "good"}], multi=True)
+    early.set_settings({"lap_count": 12})
+    assert early._race.lap_count is None, "before the final lobby the count waits"
+
+
 def t_qualifying_mode_feeds_no_race():
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
     dr.write_settings(path, {"formation": False})
@@ -232,6 +250,26 @@ def t_reset_and_a_fresh_event_drop_corrections_and_rejoins():
     assert [r["action"] for r in _audit(path)][-2:] == ["reset", "correct"], "the audit log stays"
 
 
+def t_a_race_reset_keeps_tyre_compounds_and_qualifying_corrections():
+    ctx = {"roster": ROSTER, "stint": "Q1", "remaining": None, "mode": "race", "segment": "Q1"}
+    svc, _clock, path = _dash_service(ctx)
+    svc.set_compound("rc:Anna", "A", "RS")
+    svc.set_quali("rc:Anna", "B", 90000)
+    svc.correct("rc:Anna", "A", metres=10.0, reason="x")
+    svc.rejoin("rc:Anna", "B", True)
+    svc.set_fastest("rc:Anna", "A", "Max", 61000)
+    svc.reset("rc:Anna")
+    st = svc.standings()
+    assert st["compounds"]["A"]["code"] == "RS" and st["quali_overrides"] == {"B": 90000}, \
+        f"a race reset is no new event: tyres and qualifying stay: {st['compounds']} {st['quali_overrides']}"
+    doc = dr._read_json(dr._actions_path_for(path))
+    assert "corrections" not in doc and "rejoin" not in doc, doc
+    assert st["fastest"] is None and not os.path.exists(svc._fastest_path()), "the fastest lap goes"
+    dr.clear_actions(os.path.dirname(path))
+    st = svc.standings()
+    assert st["compounds"] == {} and st["quali_overrides"] == {}, "a fresh event clears everything"
+
+
 def t_a_damaged_actions_file_never_breaks_the_race():
     svc, _clock, path, _league = _ctl()
     with open(os.path.join(os.path.dirname(path), dr.ACTIONS), "w", encoding="utf-8") as fh:
@@ -322,6 +360,23 @@ def t_the_delay_holds_the_dashboard_back():
     assert dr.read_settings(svc._path)["delay_s"] == 5
 
 
+def t_the_display_switches_skip_the_delay():
+    ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": None, "mode": "race"}
+    svc, clock, _path = _dash_service(ctx)
+    svc.set_settings({"delay_s": 60})
+    _feed(svc, clock, "A", "a", -20.0, 1.0)
+    svc.tick()
+    clock[0] = 2.0
+    svc.set_settings({"visible": True, "show_compound": False, "show_fuel": False})
+    svc.tick()
+    d = svc.dashboard()
+    assert d["visible"] is True and d["show"] == {"compound": False, "fuel": False}, \
+        f"Hide/Show and the display switches apply at once, not after the delay: {d}"
+    pub = dr.public_view(d)
+    assert "fuel_l" not in pub["entries"][0] and "compound" not in pub["entries"][0], pub
+    assert svc._snapshots[0][1]["visible"] is False, "the delayed snapshot itself stays untouched"
+
+
 def t_the_fastest_lap_survives_a_relay_restart_and_carries_the_team():
     ctx = {"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"}
     svc, clock, path = _dash_service(ctx)
@@ -364,6 +419,24 @@ def t_qualifying_ranks_the_running_segment_by_best_lap():
     rows = dr.qualifying(forged, "Q1", ROSTER, min_ms=30000)
     assert [(r["entry"], r["driver"], r["best_ms"]) for r in rows][:2] == [
         ("B", "Ann", 90100), ("A", "Max", 90500)], f"impossible and quiet senders are ignored: {rows}"
+
+
+def t_a_qualifying_time_stays_when_its_sender_goes_quiet():
+    conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500}},
+             {"entry": "B", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90100}}]
+    ctx = {"roster": ROSTER, "stint": "Q1", "remaining": None, "mode": "qualifying",
+           "segment": "Q1", "connections": conns}
+    svc, _clock, _path = _dash_service(ctx)
+    svc.tick()
+    conns[1]["live"] = False                                # Ann closed the sender
+    conns[0]["latest"] = {"best_ms": -1}                    # Max's new GT7 session
+    svc.tick()
+    rows = svc.dashboard()["qualifying"]
+    assert [(r["entry"], r["driver"], r["best_ms"]) for r in rows] == [
+        ("B", "Ann", 90100), ("A", "Max", 90500)], f"a set lap stays on the tower: {rows}"
+    ctx["segment"] = "Q2"
+    svc.tick()
+    assert svc.dashboard()["qualifying"] == [], "another segment starts its own ranking"
 
 
 def t_race_control_corrects_a_qualifying_time():

@@ -22,7 +22,7 @@ STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 13
+INDEX_VERSION = 14
 MAX_WHEEL_EVENTS = 100        # stored per lap; the lock-up and wheelspin counts cover all
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
@@ -350,6 +350,8 @@ class _Replay:
         self.raw_seek = []
         self.start, self.dropped, self.point = None, 0, None
         self.last_pid, self.lap_lost = None, 0    # packet ids missing from the open lap
+        self.drop_credit = 0     # recorder drops whose id gap has not been read yet
+        self.unclaimed = 0       # ids missing since the last meta record
         self.slip = gt7_telemetry.SlipEvents()
         if point is not None:
             self.eng.restore(point["eng"])
@@ -364,6 +366,7 @@ class _Replay:
             self.raw_seek = [tuple(p) for p in point.get("raw_seek", [])]
             self.start, self.dropped = point["offset"], point["dropped"]
             self.last_pid, self.lap_lost = point["last_pid"], point["lap_lost"]
+            self.drop_credit, self.unclaimed = point["drop_credit"], point["unclaimed"]
             self.slip.restore(point["slip"])
             self.point = {k: v for k, v in point.items()
                           if k not in ("raw_laps", "started", "check")}
@@ -371,12 +374,16 @@ class _Replay:
 
     def run(self, rec):
         rec.dropped = self.dropped
+        seen_dropped, seen_meta = rec.dropped, rec.meta_records
         marked = len(self.laps)
         for wall_ts, _kind, plain in rec.packets(self.start):
+            if rec.meta_records != seen_meta:
+                self._recorder_dropped(max(0, rec.dropped - seen_dropped))
+                seen_dropped, seen_meta = rec.dropped, rec.meta_records
             relative = wall_ts - (self.first if self.first is not None else wall_ts)
             if math.isfinite(relative) and (not self.raw_seek or relative >= self.raw_seek[-1][0] + 2):
                 self.raw_seek.append((relative, rec.record_start))
-            self._count_lost(gt7_packet_stats.packet_id(plain))
+            self._count_lost(gt7_packet_stats.packet_id(plain), wall_ts)
             self._feed(wall_ts, gt7_telemetry.parse_packet(plain))
             if len(self.laps) > marked and self.times.settled():
                 marked = len(self.laps)
@@ -387,15 +394,33 @@ class _Replay:
                     "first": self.first, "raw_seek": list(self.raw_seek),
                     "last": self.last, "dropped": rec.dropped,
                     "last_pid": self.last_pid, "lap_lost": self.lap_lost,
+                    "drop_credit": self.drop_credit, "unclaimed": self.unclaimed,
                     "slip": self.slip.state()}
+        if rec.meta_records != seen_meta:
+            self._recorder_dropped(max(0, rec.dropped - seen_dropped))
         self.dropped = rec.dropped
 
-    def _count_lost(self, pid):
-        """Gaps in the packet ids belong to the lap they fall into; a new stream starts over."""
+    def _recorder_dropped(self, n):
+        """The recorder queue dropped `n` packets: they are not network loss. Their id gap
+        may precede this meta record in the file or follow it."""
+        late = min(n, self.unclaimed, self.lap_lost)
+        self.lap_lost -= late
+        self.drop_credit += n - late
+        self.unclaimed = 0
+
+    def _count_lost(self, pid, wall_ts):
+        """Gaps in the packet ids belong to the lap they fall into; a new stream, also one
+        after STREAM_IDLE_S of silence, starts over."""
         if pid is None:
             return
+        if self.last is not None and wall_ts - self.last >= gt7_packet_stats.STREAM_IDLE_S:
+            self.last_pid, self.drop_credit = None, 0
         last = self.last_pid
-        self.lap_lost += gt7_packet_stats.gap(last, pid)
+        missing = gt7_packet_stats.gap(last, pid)
+        credited = min(missing, self.drop_credit)
+        self.drop_credit -= credited
+        self.lap_lost += missing - credited
+        self.unclaimed += missing - credited
         if last is None or pid > last or pid < last - gt7_packet_stats.REORDER_WINDOW:
             self.last_pid = pid
 

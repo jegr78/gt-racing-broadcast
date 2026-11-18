@@ -305,7 +305,9 @@ The **Setup** area's **Driver telemetry** section holds the race from the driver
 telemetry ([driver guide](Driver-Telemetry)), with the same controls as the Race Control
 desk:
 
-- the invite link with **Copy**, and who made the last change and when
+- the invite link with **Copy** (on the public Funnel address while Funnel serves the
+  console, even when you opened the panel over the tailnet), and who made the last
+  change and when
 - the finish mode and lap count, **Final lap** and **Finish**
 - **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
   `RED FLAG` button holds the race as well when it raises the cover.
@@ -320,7 +322,8 @@ desk:
 - the tyre compound per entry and the dashboard's **Show compound** / **Show fuel**
   switches
 - readiness per entry (in endurance for the stint on air and the next one) and every
-  sender with **Move** (to another entry) and **Disconnect**
+  sender with **Move** (to another entry; moving it back resumes the team with its
+  distance and corrections) and **Disconnect**
 
 Buttons that change the race for everyone (Final lap, Finish, the red flag, a change,
 a disconnect) ask for a second press within four seconds.

@@ -35,7 +35,8 @@ endurance; `segments` then lists the stint and qualifying labels of the `Schedul
 `POST /console/drive/register?i=<invite>` with
 `{"entry": "...", "segment": "...", "name": "..."}` returns `{"ok": true, "v": 1,
 "code": "D1:..."}`. The name takes up to 32 ASCII letters, digits, spaces, `_ . -`,
-because it ends up in a command line. `GET /console/drive/sender.py?i=<invite>`
+because it ends up in a command line. While the entry already has its live senders,
+registration answers 409 and the invite page shows the reason. `GET /console/drive/sender.py?i=<invite>`
 serves the sender script of the running relay.
 
 ## Ingest
@@ -72,13 +73,16 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 - One live sender per entry in a single-lobby race, two per team in endurance (the
   driver on track and the one waiting in the next lobby). A connection is live while
   its batches arrive; after 20 s without one its slot is free.
-- A second registration for a full entry is refused, not swapped in. A sender that
+- A second registration for a full entry is refused (409 at `register`, and at
+  `ingest` for a code issued before the entry filled up), not swapped in. A sender that
   restarts with its own code is the same connection. While the console sends nothing, a
   client keeps its slot with an empty batch (`RCT1` alone) at least every 20 s; the
   sender script sends one every 5 s.
 - A league without stint labels registers by entry alone, in endurance too.
 - The producer sees every connection on the tailnet (`GET /drivers/data`) and
-  disconnects one with `POST /drivers/disconnect {"conn": "..."}`.
+  disconnects one with `POST /drivers/disconnect {"conn": "..."}`. A connection quiet
+  for 10 minutes leaves that list, the readiness rows and the dashboard; it comes back
+  as a new sender if it posts again, still under the entry the producer reassigned it to. A new invite drops every connection.
 
 ## Race
 
@@ -101,7 +105,11 @@ track, state, red_flag, lap {leader, count}, fastest {entry, driver, team, ms}, 
 interval_s, lapped, status, pit_stops, last_lap_ms, fuel_l, finished, x, z}]}`, in
 qualifying `qualifying [{pos, entry, number, driver, team, color, text_color, best_ms,
 gap_ms}]` instead. `GET /drivers/line` returns the picked layout's line `{track,
-length_m, points [[x, z]]}`. The settings take `delay_s` (0 to 120). `POST /drivers/race/fastest` with no `entry`
+length_m, points [[x, z]]}`. `lap.leader` is the leader's running race lap; in
+endurance, once the final lobby's car leads and a lap count is set, it is that lobby's
+GT7 counter with `count`, and it never passes `count` after the flag. `visible`,
+`delay_s` and `show` are always the current settings, never delayed. The settings take
+`delay_s` (0 to 120). `POST /drivers/race/fastest` with no `entry`
 clears the fastest lap, with `{entry, driver, ms}` sets it. `POST /drivers/race/quali
 {entry, ms}` sets a roster entry's time in the running qualifying segment, `ms: null` deletes it, `clear: true` gives
 GT7's time back; `GET /drivers/race` lists them as `quali_overrides`. `POST
