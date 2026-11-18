@@ -367,6 +367,19 @@ def t_resolve_config_discord_voice_url_blank_when_absent():
         assert rc.discord_voice_url == ""
 
 
+def t_timing_host_keys_resolve():
+    with tempfile.TemporaryDirectory() as td:
+        root = _mkroot(td)
+        _mkprofile(root, "demo",
+                   "NAME=Demo\nSHEET_ID=abc\nTIMING_HOST_ACCOUNT_ID=acc\n"
+                   "TIMING_HOST_API_TOKEN=tok\nTIMING_HOST_PUBLISH_KEY=key\n"
+                   "TIMING_HOST_URL=https://racecast-timing-demo.example.workers.dev\n")
+        rc = m.resolve_config(root, override="demo", environ={})
+        assert (rc.timing_host_account_id, rc.timing_host_api_token, rc.timing_host_publish_key,
+                rc.timing_host_url) == ("acc", "tok", "key",
+                                        "https://racecast-timing-demo.example.workers.dev")
+
+
 def t_resolve_config_graphics_take():
     with tempfile.TemporaryDirectory() as td:
         root = _mkroot(td)

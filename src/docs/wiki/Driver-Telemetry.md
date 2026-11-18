@@ -187,6 +187,44 @@ default budget that holds roughly 4000 viewers; beyond them the page stays at 30
 the upload grows again. Race
 Control, the desks and the stream overlay never slow down for it.
 
+### Hosted live timing (optional)
+
+A league can hand the public page to a Cloudflare Worker on the free Workers plan.
+The relay then sends one update every 2 s over a single connection, and Cloudflare
+serves every viewer, so the viewer count no longer costs upload. Without a timing host
+everything stays as above.
+
+Set it up once per league:
+
+1. Create a Cloudflare account and set its workers.dev subdomain once: **Workers &
+   Pages**, **Account details**, **Subdomain**.
+2. Create an API token under **My Profile**, **API Tokens**, **Create Token**, **Start
+   from scratch**, **Account policy**, with **Workers Scripts: Edit** and **Account
+   Settings: Read**.
+3. Put the account id and the token into the league profile as
+   `TIMING_HOST_ACCOUNT_ID` and `TIMING_HOST_API_TOKEN` (Profile view or
+   `profile.env`). Treat the token like a password; it travels with `profile export`.
+4. Run `racecast timing-host deploy`, or **Deploy** under **Public timing host** in the
+   Profile view. It fills in `TIMING_HOST_URL` and `TIMING_HOST_PUBLISH_KEY`. Deploy
+   again after a racecast update; `racecast timing-host status` (**Check**) says when
+   the code is out of date.
+
+With a host, both pages run side by side. The Home row and the desks show the link to
+hand out (hosted by default) with the number of viewers on the host, and the other link
+below it. `racecast event timing --serve funnel` (or **Serve Funnel** in the Home row)
+switches to the Funnel link and moves the viewers on the hosted page there; it needs
+Funnel switched on (`racecast funnel on`). `--serve hosted` moves the Funnel viewers to
+the host. If the host itself becomes unreachable, its viewers move to the Funnel page
+on their own, as long as Funnel is on. If the relay restarts or its machine drops off,
+they stay on the hosted page and see "relay reconnecting".
+
+The free plan allows 100,000 requests a day per Cloudflare account (reset at 00:00
+UTC). Each viewer costs two (the page and its live connection); the relay's updates cost
+about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The Home row shows
+an estimate of today's use; it does not count other Workers on the same account, so use
+one Cloudflare account per league. Above the limit Cloudflare stops serving the hosted
+page; switch to Funnel before that.
+
 ### Red flag, rejoin and corrections
 
 - **Red flag** freezes every entry's distance. In the restart lobby each car

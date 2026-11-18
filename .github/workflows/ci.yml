@@ -70,7 +70,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Set up deno (timing host Worker tests)
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed  # v2.0.5
+        with:
+          deno-version: v2.8.3
+
       - name: Run test suite (stdlib, each file is a runnable script)
+        env:
+          RACECAST_REQUIRE_DENO: "1"
         run: python tools/run-tests.py
 
       - name: Install native browser for builder verification

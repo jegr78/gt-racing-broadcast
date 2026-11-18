@@ -71,6 +71,7 @@ OPS = {
     "telemetry-record-stop": ["telemetry", "record", "stop"],
     "telemetry-record-status": ["telemetry", "record", "status"],
     "gt7-data-update": ["gt7-data", "update"],
+    "timing-host-deploy": ["timing-host", "deploy"],
     "radio-provision": ["radio", "provision"],
     "radio-kokoro-install": ["radio", "provision", "--kokoro"],
     "radio-kokoro-smoke": ["radio", "smoke", "--kokoro"],

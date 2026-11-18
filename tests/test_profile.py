@@ -261,6 +261,17 @@ def t_format_profile_show_masks_push_url():
     assert "(active)" in out
 
 
+def t_profile_show_masks_timing_secrets():
+    cfg_obj = m.cfg.ResolvedConfig(
+        profile="demo", name="Demo", sheet_id="S", timing_host_api_token="TOKENSECRET1",
+        timing_host_publish_key="KEYSECRET22", timing_host_url="https://h.example.workers.dev",
+        profile_dir="/p/profiles/demo", runtime_dir="/p/runtime/demo")
+    out = m.format_profile_show(cfg_obj, active="demo")
+    assert "TOKENSECRET1" not in out and "KEYSECRET22" not in out, out
+    line = next(ln for ln in out.splitlines() if ln.startswith("timing_host:"))
+    assert line.split()[1] == "https://h.example.workers.dev", "the host URL is public and shown"
+
+
 def t_parse_export_defaults():
     o = m.parse_profile_args(["export", "iro-gtec"])
     assert o["verb"] == "export" and o["name"] == "iro-gtec"

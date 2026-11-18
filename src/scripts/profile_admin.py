@@ -254,6 +254,13 @@ def _solo_profile_env_text(display, template):
         "# OPTIONAL: per-console secret. Auto-provisioned on first relay start;\n"
         "# travels with `profile export`. Leave blank. Treat it like a password.\n"
         "CONSOLE_SECRET=\n"
+        "\n# OPTIONAL: public live timing through a Cloudflare Worker (Workers Free).\n"
+        "# Account id and an API token with Workers Scripts Edit; `racecast timing-host\n"
+        "# deploy` fills in the URL and the publish key. Treat the token like a password.\n"
+        "TIMING_HOST_ACCOUNT_ID=\n"
+        "TIMING_HOST_API_TOKEN=\n"
+        "TIMING_HOST_PUBLISH_KEY=\n"
+        "TIMING_HOST_URL=\n"
     )
     return head + pov + tail
 
@@ -342,6 +349,8 @@ def format_profile_show(rcfg, active):
         f"intro_url:      {rcfg.intro_url or '(unset)'}",
         f"outro_url:      {rcfg.outro_url or '(unset)'}",
         f"logo:           {rcfg.logo_path or '(none)'}",
+        f"timing_host:    {rcfg.timing_host_url or '(unset)'}"
+        f"{' (token set)' if rcfg.timing_host_api_token else ''}",
         f"profile_dir:    {rcfg.profile_dir}",
         f"runtime_dir:    {rcfg.runtime_dir}",
     ])

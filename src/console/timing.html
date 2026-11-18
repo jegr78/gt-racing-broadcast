@@ -59,8 +59,37 @@
   <div id="fastest"></div>
   <section id="feed" hidden><h2>Activity</h2><div id="events"></div></section>
 </main>
+<script id="timing-logic">
+  "use strict";
+  // Transport decisions for the hosted page and the Funnel page (#1161); pure, tested by deno.
+  window.TimingLogic = {
+    hostedLink: function (pathname) {
+      const m = /^\/t\/([A-Za-z0-9_-]{16,64})\/?$/.exec(pathname);
+      return m ? m[1] : null;
+    },
+    // Leave the hosted page only when the host itself is unreachable. Silence on an open
+    // socket means the relay went quiet, and Funnel runs on that same relay.
+    fallbackDecision: function (s) {
+      if (!s.fallback || s.publisherUp === false) return "stay";
+      return s.failedReconnects >= 3 ? "redirect" : "stay";
+    },
+    fallbackUrl: function (url) {
+      return typeof url === "string" && /^https:\/\//.test(url) ? url : null;
+    },
+    fallbackTarget: function (url) {
+      return url + (url.indexOf("?") >= 0 ? "&" : "?") + "from=host";
+    },
+    funnelMove: function (data, search) {
+      const to = data && data.moved_to;
+      if (typeof to !== "string" || !/^https:\/\//.test(to)) return null;
+      return /(^|[?&])from=host(&|$)/.test(search || "") ? null : to;
+    }
+  };
+</script>
 <script>
   "use strict";
+  const LOGIC = window.TimingLogic;
+  const HOSTED = LOGIC.hostedLink(location.pathname);
   // Race columns the reader can switch; compound and fuel also follow the event's switches.
   const RACE = [["pos", "Pos"], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["laps", "Laps"],
                 ["gap", "Gap"], ["int", "Int."], ["last", "Last"], ["fuel", "Fuel"], ["pits", "Pits"]];
@@ -69,6 +98,8 @@
                     ["fuel", "Fuel"], ["pits", "Pits"]];
   const STATUS = {box: "Box", no_data: "No data", red_flag: "Red flag"};
   const DATA = location.pathname.replace(/\/?$/, "/data") + location.search;
+  // Hosted page state: the WebSocket to the host and what it last said.
+  let sock = null, failed = 0, publisherUp = true, fallback = null, ended = false;
   // A phone starts without laps, interval and fuel; the switches bring them back.
   let hidden = new Set(window.matchMedia("(max-width: 600px)").matches ? ["laps", "int", "fuel"] : []);
   try {
@@ -223,9 +254,52 @@
     if (ageEl && got) {
       const age = Math.round(since + dataAge);
       const delay = last && last.delay_s > 0 ? " · " + last.delay_s + " s delay" : "";
-      ageEl.textContent = "updated " + age + " s ago" + delay;
-      ageEl.className = age > 3 * interval + 2 ? "stale" : "";
+      const quiet = !publisherUp || (HOSTED && age > 20);
+      ageEl.textContent = (quiet ? "relay reconnecting · " : "") + "updated " + age + " s ago" + delay;
+      ageEl.className = quiet || age > 3 * interval + 2 ? "stale" : "";
     }
+    if (HOSTED && !ended) maybeFallBack();
+  }
+
+  function showEnded() {
+    ended = true;
+    $("state").hidden = false;
+    $("state").textContent = "This timing link has ended.";
+  }
+  function maybeFallBack() {
+    if (LOGIC.fallbackDecision({failedReconnects: failed,
+                                publisherUp: publisherUp, fallback: fallback}) === "redirect") {
+      ended = true;
+      location.replace(LOGIC.fallbackTarget(fallback));
+    }
+  }
+  function connect() {
+    sock = new WebSocket(location.href.replace(/^http/, "ws").replace(/[?#].*$/, "").replace(/\/?$/, "/ws"));
+    sock.onopen = function () { failed = 0; };
+    sock.onmessage = function (ev) {
+      let m;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === "state") {
+        publisherUp = true;
+        fallback = LOGIC.fallbackUrl(m.fallback);
+        got = Date.now();
+        dataAge = typeof m.age_s === "number" ? m.age_s : 0;
+        render(m.data); activity(m.data);
+      } else if (m.t === "publisher") {
+        publisherUp = m.up === true;
+      } else if (m.t === "moved" && typeof m.to === "string" && /^https:\/\//.test(m.to)) {
+        ended = true;
+        location.replace(LOGIC.fallbackTarget(m.to));
+      } else if (m.t === "end") {
+        showEnded();
+      }
+    };
+    sock.onclose = function () {
+      if (ended) return;
+      failed++;
+      maybeFallBack();
+      if (!ended) setTimeout(connect, Math.min(8000, 1000 * Math.pow(2, failed - 1)));
+    };
   }
 
   async function poll() {
@@ -235,13 +309,15 @@
       const pace = parseFloat(res.headers.get("X-Poll-After"));
       if (pace >= 2) { interval = pace; wait = pace * 1000; }
       if (res.status === 429 && !(pace >= 2)) wait = 5000;
-      else if (res.status === 403) { $("state").hidden = false; $("state").textContent = "This timing link has ended."; return; }
+      else if (res.status === 403) { showEnded(); return; }
       else if (res.status === 304) { got = Date.now(); dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0; if (last) render(last); }
       else if (res.ok) {
         const d = await res.json();
         etag = res.headers.get("ETag");
         got = Date.now();
         dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0;
+        const move = LOGIC.funnelMove(d, location.search);
+        if (move) { location.replace(move); return; }
         render(d); activity(d);
       }
     } catch (e) { wait = 5000; }
@@ -249,7 +325,7 @@
   }
   switches();
   setInterval(tick, 1000);
-  poll();
+  if (HOSTED) connect(); else poll();
 </script>
 </body>
 </html>

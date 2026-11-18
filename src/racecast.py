@@ -14,7 +14,7 @@
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
   racecast event track [ID|--clear|--list]  # the event's GT7 track layout: map and corner names from the first metre
   racecast event invite [--new]             # driver telemetry invite link (event start creates it, stop ends it)
-  racecast event timing [--new]             # public live timing link (event start creates it, stop ends it)
+  racecast event timing [--new] [--serve hosted|funnel]  # public live timing link (event start creates it, stop ends it)
   racecast event race [--formation on|off] [--laps N|--time] [--restart keep|neutralise]  # driver telemetry race
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
@@ -38,6 +38,7 @@
   racecast telemetry index   # build the missing lap indexes (the Control Center runs it for lap comparison)
   racecast telemetry shifts <name> --lap N [--session N]   # offline shift references and recorded phases
   racecast telemetry shift-update CAR_ID   # explicitly update the local external reference for one vehicle
+  racecast timing-host deploy | status   # the league's public timing host (Cloudflare Worker): deploy or update it, or check it
   racecast gt7-data  update | status   # GT7 car names + track recognition data (updates are explicit by default; a running relay picks up new files within a minute)
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
   racecast discord   join | leave | status   # drive the desktop Discord client into/out of the league's voice channel
@@ -271,6 +272,11 @@ def _profile_env_pairs(rc):
              ("RACECAST_DISCORD_CLIENT_ID", rc.discord_client_id),
              ("RACECAST_DISCORD_CLIENT_SECRET", rc.discord_client_secret),
              ("RACECAST_DISCORD_VOICE_URL", rc.discord_voice_url),
+             # The token and the publish key stay in profile.env; only the URL is shown.
+             ("RACECAST_TIMING_HOST_URL", rc.timing_host_url),
+             # the relay re-reads the timing host keys from here without a restart
+             ("RACECAST_PROFILE_ENV_FILE",
+              os.path.join(rc.profile_dir, "profile.env") if rc.profile_dir else ""),
              ("RACECAST_EVENT_TITLE", rc.event_title),
              ("RACECAST_GRAPHICS_TAKE", rc.graphics_take),
              ("RACECAST_TELEMETRY_RECORD", rc.telemetry_record),
@@ -1057,6 +1063,7 @@ SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHE
 TELEMETRY_VERBS = ("ui", "replay", "import", "record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
 RADIO_VERBS = ("smoke", "provision")
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
+TIMING_HOST_VERBS = ("deploy", "status")   # the league's public timing host (#1161)
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
 
@@ -1134,6 +1141,11 @@ def route(argv):
         if verb not in GT7DATA_VERBS:
             raise ValueError(f"usage: racecast gt7-data {{{'|'.join(GT7DATA_VERBS)}}}")
         return {"kind": "service", "command": "gt7-data", "verb": verb, "rest": rest[1:]}
+    if cmd == "timing-host":
+        verb = rest[0] if rest else None
+        if verb not in TIMING_HOST_VERBS:
+            raise ValueError(f"usage: racecast timing-host {{{'|'.join(TIMING_HOST_VERBS)}}}")
+        return {"kind": "service", "command": "timing-host", "verb": verb, "rest": rest[1:]}
     if cmd == "app":
         verb = rest[0] if rest else None
         if verb not in APP_VERBS:
@@ -5046,6 +5058,112 @@ def gt7_data_update_data():
     return {"ok": _gt7_files_ok(res["files"]), "changed": res["changed"], "files": res["files"]}
 
 
+def _timing_host_sources():
+    """(worker.js bytes, timing page text) from the checkout, the package or the binary."""
+    worker = resource_path("timing-host/worker.js")
+    page = next((p for p in (resource_path("console/timing.html"), resource_path("timing.html"))
+                 if os.path.exists(p)), None)
+    if page is None or not os.path.exists(worker):
+        raise FileNotFoundError("this install lacks the timing host files (timing-host/worker.js, "
+                                "timing.html): reinstall or update racecast")
+    with open(worker, "rb") as fh:
+        worker_src = fh.read()
+    with open(page, encoding="utf-8") as fh:
+        return worker_src, fh.read()
+
+
+def timing_host_deploy_data(deploy_fn=None, env=None, nudge=None):
+    """Deploy or update the active league's timing host (#1161) and store its URL and
+    publish key in profile.env. {ok, url} or {ok: False, error}. Seams: `deploy_fn`,
+    `env` (profile name, profile.env path), `nudge`."""
+    import secrets as _secrets
+    import timing_host_deploy
+    active, path = env or _active_profile_env_strict()
+    if not active:
+        return {"ok": False, "error": "no active profile: create or select one first"}
+    values = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            values = parse_env_text(fh.read())
+    account, token = values.get("TIMING_HOST_ACCOUNT_ID", ""), values.get("TIMING_HOST_API_TOKEN", "")
+    if not account or not token:
+        return {"ok": False, "error": "Set TIMING_HOST_ACCOUNT_ID and TIMING_HOST_API_TOKEN in the "
+                                      "league profile first (Profile view or profile.env)."}
+    key = values.get("TIMING_HOST_PUBLISH_KEY", "")
+    if len(key) < timing_host_deploy.MIN_KEY:
+        key = _secrets.token_urlsafe(32)
+        written = _set_env_key(path, "TIMING_HOST_PUBLISH_KEY", key)
+        if not written.get("ok"):
+            return {"ok": False, "error": written.get("error") or "could not store the publish key"}
+    try:
+        worker_src, page_src = _timing_host_sources()
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    r = (deploy_fn or timing_host_deploy.deploy)(account, token, active, worker_src, page_src, key)
+    if not r.get("ok"):
+        return r
+    written = _set_env_key(path, "TIMING_HOST_URL", r["url"])
+    if not written.get("ok"):
+        return {"ok": False, "error": written.get("error") or "could not store the host URL"}
+    (nudge or _nudge_relay_timing_host)()
+    return {"ok": True, "url": r["url"]}
+
+
+def timing_host_status_data(status_fn=None, env=None):
+    """The active league's timing host as Cloudflare and the relay see it. Never raises."""
+    import timing_host_deploy
+    try:
+        active, path = env or _active_profile_env_strict()
+        if not active:
+            return {"ok": False, "error": "no active profile: create or select one first"}
+        values = {}
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                values = parse_env_text(fh.read())
+        worker_src, page_src = _timing_host_sources()
+        r = (status_fn or timing_host_deploy.status)(
+            values.get("TIMING_HOST_ACCOUNT_ID", ""), values.get("TIMING_HOST_API_TOKEN", ""),
+            active, worker_src, page_src)
+        live = _relay_timing_link()
+        return dict(r, relay=(live or {}).get("host"))
+    except Exception as exc:
+        return {"ok": False, "error": f"could not check the timing host: {type(exc).__name__}"}
+
+
+def timing_host_deploy_cmd(rest):
+    """racecast timing-host deploy: upload or update the league's Worker."""
+    if rest:
+        sys.exit("usage: racecast timing-host deploy")
+    r = timing_host_deploy_data()
+    if not r["ok"]:
+        sys.exit(f"racecast: {r['error']}")
+    print(f"Timing host deployed: {r['url']}")
+    print("A running relay publishes to it now; `racecast event timing` shows the hosted link.")
+
+
+def timing_host_status_cmd(rest):
+    """racecast timing-host status: is the Worker deployed and current, is the relay connected."""
+    if rest:
+        sys.exit("usage: racecast timing-host status")
+    r = timing_host_status_data()
+    if not r["ok"]:
+        sys.exit(f"racecast: {r['error']}")
+    if not r.get("configured", True):
+        print("No timing host: set TIMING_HOST_ACCOUNT_ID and TIMING_HOST_API_TOKEN in the profile.")
+        return
+    if not r["deployed"]:
+        print("Not deployed yet: run `racecast timing-host deploy`.")
+        return
+    print(f"Timing host: {r['url']}")
+    print("  code:  " + ("current" if r["up_to_date"] else "update needed: run `racecast timing-host deploy`"))
+    relay = r.get("relay")
+    if relay is None:
+        print("  relay: not running")
+    else:
+        print("  relay: " + (f"connected, {relay.get('viewers', 0)} viewers" if relay.get("connected")
+                             else f"not connected ({relay.get('last_error') or 'starting'})"))
+
+
 def gt7_data_status_data():
     """Source, age and row count of each GT7 data file; never raises."""
     try:
@@ -5951,6 +6069,8 @@ def _start_driver_invite(fresh, path=None):
     if fresh or driver_invite.current(path) is None:
         driver_invite.create(path)
     timing = timing_link.path_in(runtime)
+    if fresh:
+        timing_link.clear(timing)       # a new event also starts on the default served path
     if fresh or timing_link.current(timing) is None:
         timing_link.create(timing)
 
@@ -5972,34 +6092,88 @@ def _timing_links(link_id, magic=None, host=None):
             "tailnet": f"http://{host}:{RELAY_PORT}/console/timing?l={link_id}" if host else None}
 
 
-def event_timing_data(new=False, path=None, links=None):
-    """The event's public live timing link (#1128): {ok, active, funnel, tailnet,
-    created}. `new` replaces it, so the old link stops working. `path` and `links`
-    are test seams."""
+def timing_link_mod():
     import timing_link
+    return timing_link
+
+
+def _relay_timing_link():
+    """The running relay's /drivers/timing-link (served path, hosted link, host status)."""
+    try:
+        return _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/timing-link", timeout=2)
+    except Exception:
+        return None
+
+
+def _nudge_relay_timing_host():
+    """Let a running relay's timing host publisher act on a change now (best effort)."""
+    try:
+        _relay_post_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/timing-host/reload", {}, timeout=2)
+    except Exception:
+        pass  # no relay running: it reads the files at start
+
+
+def event_timing_data(new=False, serve=None, path=None, links=None, relay=None, nudge=None,
+                      funnel_on=None):
+    """The event's public live timing link (#1128): {ok, active, funnel, tailnet, created,
+    served, hosted, host}. `new` replaces it, so the old link stops working. `serve`
+    (hosted|funnel, #1161) picks the link the producer hands out. `path`, `links`,
+    `relay`, `nudge` and `funnel_on` are test seams."""
+    import timing_host
+    timing_link = timing_link_mod()
     path = path or timing_link.path_in(_runtime_dir())
     link = timing_link.current(path)
-    if new and link is None:
+    if (new or serve) and link is None:
         return {"ok": False, "error": "No event is running: Start event creates the timing link"}
+    if serve is not None and serve not in timing_link.PATHS:
+        return {"ok": False, "error": f"serve must be one of {', '.join(timing_link.PATHS)}"}
     if new:
         link = timing_link.create(path)
     if link is None:
         return {"ok": True, "active": False}
-    return dict({"ok": True, "active": True, "created": link["created"]},
-                **(links or _timing_links)(link["id"]))
+    urls = (links or _timing_links)(link["id"])
+    live = (relay or _relay_timing_link)()
+    if serve == "funnel":
+        # The running relay's view wins: it is the one that would send viewers there.
+        if live:
+            serving = bool(live.get("funnel_url"))
+        else:
+            import tailscale
+            serving = bool(urls.get("funnel")) and (funnel_on or (lambda: tailscale.funnel_on("/console")))()
+        if not serving:
+            return {"ok": False, "error": "Funnel is not serving /console: turn Funnel on first "
+                                          "(racecast funnel on), then switch."}
+    if serve is not None:
+        timing_link.set_served(path, serve)
+        (nudge or _nudge_relay_timing_host)()
+        live = (relay or _relay_timing_link)() if live else None
+    if live:
+        served, hosted, host = live.get("served"), live.get("hosted_url"), live.get("host")
+    else:
+        host_url = os.environ.get("RACECAST_TIMING_HOST_URL", "")
+        hosted = timing_host.viewer_url(host_url, link["id"]) if host_url else None
+        served = (timing_link.served(path) or "hosted") if hosted else "funnel"
+        host = None
+    return dict({"ok": True, "active": True, "created": link["created"], "served": served,
+                 "hosted": hosted, "host": host}, **urls)
 
 
 def event_timing_cmd(rest):
-    """racecast event timing [--new]: show the public live timing link, or replace it."""
+    """racecast event timing [--new] [--serve hosted|funnel]: show the public live timing
+    link, replace it, or pick the link to hand out."""
     import argparse
     parser = argparse.ArgumentParser(
         prog="racecast event timing",
         description="Show the event's public live timing link (no login, timing data only). "
-                    "--new replaces it while an event runs: the old link stops working.")
+                    "--new replaces it while an event runs: the old link stops working. "
+                    "--serve picks the link to hand out when the league has a timing host; "
+                    "viewers on the other page are moved over.")
     parser.add_argument("--new", action="store_true", help="regenerate the timing link")
+    parser.add_argument("--serve", choices=("hosted", "funnel"),
+                        help="hand out the timing host link or the Funnel link")
     args = parser.parse_args(rest)
     _apply_active_profile_env()
-    d = event_timing_data(new=args.new)
+    d = event_timing_data(new=args.new, serve=args.serve)
     if not d["ok"]:
         print(d["error"])
         sys.exit(1)
@@ -6008,7 +6182,15 @@ def event_timing_cmd(rest):
         return
     print("New public timing link (the old one no longer works):" if args.new
           else "Public timing link:")
-    print(f"  funnel:  {d['funnel'] or 'unknown (is Tailscale up with MagicDNS?)'}\n"
+    funnel = d["funnel"] or "unknown (is Tailscale up with MagicDNS?)"
+    if d.get("hosted"):
+        print(f"  hand out ({d['served']}): {d['hosted'] if d['served'] == 'hosted' else funnel}")
+        print(f"  hosted:  {d['hosted']}")
+        host = d.get("host") or {}
+        if host:
+            state = "connected" if host.get("connected") else (host.get("last_error") or "not connected")
+            print(f"  host:    {state}, {host.get('viewers', 0)} viewers")
+    print(f"  funnel:  {funnel}\n"
           f"  tailnet: {d['tailnet'] or 'unknown (is Tailscale up?)'}")
 
 
@@ -7054,6 +7236,7 @@ DISPATCH = {
     ("telemetry", "shifts"): telemetry_shifts_cmd,
     ("telemetry", "shift-update"): telemetry_shift_update_cmd,
     ("gt7-data", "update"): gt7_data_update_cmd, ("gt7-data", "status"): gt7_data_status_cmd,
+    ("timing-host", "deploy"): timing_host_deploy_cmd, ("timing-host", "status"): timing_host_status_cmd,
     ("app", "launch"): app_launch_cmd, ("app", "quit"): app_quit_cmd,
 }
 
@@ -7900,14 +8083,26 @@ def profile_env_entries_data():
         return {"ok": False, "error": f"could not read profile.env: {exc}"}
 
 
-def profile_env_write_data(entries):
+def _timing_host_values(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return {k: v for k, v in parse_env_text(fh.read()).items() if k.startswith("TIMING_HOST_")}
+
+
+def profile_env_write_data(entries, nudge=None):
     """Persist the Profile editor entries to the active profile's profile.env
     (validate + comment-preserving merge, atomic). {ok,path} or {ok:false,error}.
-    Server resolves the path from the active profile, never a client value."""
+    Server resolves the path from the active profile, never a client value. A changed
+    timing host key reaches a running relay at once (`nudge` is a test seam)."""
     active, path = _active_profile_env_strict()
     if not active:
         return {"ok": False, "error": "no active profile: create or select one first"}
-    return _write_env_file(path, entries)
+    before = _timing_host_values(path)
+    result = _write_env_file(path, entries)
+    if result.get("ok") and _timing_host_values(path) != before:
+        (nudge or _nudge_relay_timing_host)()
+    return result
 
 
 def _machine_env_value(name):
@@ -10058,6 +10253,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "machine_font_delete": machine_font_delete_data,
         "fonts_restore": restore_bundled_fonts_data,
         "gt7_data_status": gt7_data_status_data,
+        "timing_host_status": timing_host_status_data,
         "backup_list": backup_list_data,
         "backup_create": backup_create_data,
         "backup_restore": backup_restore_data,

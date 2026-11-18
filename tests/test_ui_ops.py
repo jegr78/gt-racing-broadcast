@@ -164,6 +164,7 @@ def t_ops_registry_shape():
 
 def t_long_control_center_reads_run_as_jobs():
     assert ui_ops.OPS["gt7-data-update"] == ["gt7-data", "update"]
+    assert ui_ops.OPS["timing-host-deploy"] == ["timing-host", "deploy"]
     assert ui_ops.OPS["telemetry-index"] == ["telemetry", "index"]
     assert ui_ops.OPS.get("report-generate") == ["report", "generate"], \
         "a report builds lap indexes, so it runs as a job"

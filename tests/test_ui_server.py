@@ -157,7 +157,8 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                 else {"ok": False, "error": "lap_count is 1 to 999, or none"}),
             "event_invite": lambda new=False: {"ok": True, "active": True, "renewed": new,
                                                "funnel": "https://h/console/drive?i=x", "tailnet": None},
-            "event_timing": lambda new=False: {"ok": True, "active": True, "renewed": new,
+            "event_timing": lambda new=False, serve=None: {"ok": True, "active": True, "renewed": new,
+                                                           "serve": serve,
                                                "funnel": "https://h/console/timing?l=x", "tailnet": None},
             "gt7_forward_write": lambda targets: (
                 {"ok": True, "value": targets} if "!" not in (targets or "")
@@ -210,6 +211,8 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "machine_font_delete": lambda name: {"ok": True, "removed": name},
             "fonts_restore": lambda force: {"ok": True, "library": [], "profiles": {}},
             "gt7_data_status": lambda: {"ok": True, "checked": None, "files": {}},
+            "timing_host_status": lambda: {"ok": True, "deployed": True, "up_to_date": False,
+                                           "url": "https://x.example.workers.dev", "relay": None},
             "overlay_font_upload": lambda name, data: {"ok": bool(name),
                                                        "name": name,
                                                        "_len": len(data)},
@@ -1694,6 +1697,32 @@ def t_fonts_restore_route_passes_only_a_literal_true_force():
         assert code == 200 and json.loads(body)["profiles"] == {"demo": ["Oswald.woff2"]}
         _post_json(port, "/api/fonts/restore", {"force": "yes"})
         assert seen == [True, False], seen
+    finally:
+        httpd.shutdown()
+
+
+def t_api_event_timing_serve_failure_names_the_switch():
+    ctx = _ctx()
+
+    def broken(new=False, serve=None):
+        raise OSError("disk")
+    ctx["event_timing"] = broken
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/event-timing", {"serve": "funnel"})
+        assert code == 500 and "switch" in json.loads(body)["error"], body
+    finally:
+        httpd.shutdown()
+
+
+def t_api_timing_host_routes():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _get(port, "/api/timing-host")
+        d = json.loads(body)
+        assert code == 200 and d["deployed"] and d["up_to_date"] is False, body
+        code, _b = _post_json(port, "/api/timing-host", {})
+        assert code == 404, "deploy runs as the timing-host-deploy job, not in a request thread"
     finally:
         httpd.shutdown()
 
@@ -4399,6 +4428,9 @@ def t_api_event_invite_reads_and_renews():
         assert code == 200 and json.loads(body)["renewed"] is True, body
         code, body = _post_json(port, "/api/event-invite", {"new": "yes"})
         assert json.loads(body)["renewed"] is False, "only a literal true renews the link"
+        code, body = _post_json(port, "/api/event-timing", {"serve": "funnel"})
+        d = json.loads(body)
+        assert code == 200 and d["serve"] == "funnel" and d["renewed"] is False, body
     finally:
         httpd.shutdown()
 
@@ -4412,6 +4444,9 @@ def t_api_event_timing_reads_and_renews():
         assert code == 200 and json.loads(body)["renewed"] is True, body
         code, body = _post_json(port, "/api/event-timing", {"new": "yes"})
         assert json.loads(body)["renewed"] is False, "only a literal true renews the link"
+        code, body = _post_json(port, "/api/event-timing", {"serve": "funnel"})
+        d = json.loads(body)
+        assert code == 200 and d["serve"] == "funnel" and d["renewed"] is False, body
     finally:
         httpd.shutdown()
 

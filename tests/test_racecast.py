@@ -3052,6 +3052,18 @@ def t_profile_env_vars_includes_graphics_take():
     assert m._profile_env_vars(rc)["RACECAST_GRAPHICS_TAKE"] == "direct"
 
 
+def t_timing_host_keys_injected():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               timing_host_account_id="acc", timing_host_api_token="tok",
+                               timing_host_publish_key="key", timing_host_url="https://h",
+                               profile_dir=os.path.join("p", "profiles", "demo"))
+    out = m._profile_env_vars(rc)
+    assert out["RACECAST_TIMING_HOST_URL"] == "https://h", out
+    for secret in ("acc", "tok", "key"):
+        assert secret not in out.values(), f"no child process inherits the Cloudflare credentials: {secret}"
+    assert out["RACECAST_PROFILE_ENV_FILE"] == os.path.join("p", "profiles", "demo", "profile.env")
+
+
 def t_profile_env_vars_includes_telemetry_record():
     rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
                                telemetry_record="1")
@@ -6546,7 +6558,9 @@ def t_profile_env_vars_includes_kind():
         discord_webhook_url = ""; obs_collection = ""; console_secret = ""
         discord_client_id = ""; discord_client_secret = ""; discord_voice_url = ""
         event_title = ""; graphics_take = ""; name = "Solo League"; logo_path = ""; kind = "solo"
-        template = ""; telemetry_record = ""
+        template = ""; telemetry_record = ""; profile_dir = ""
+        timing_host_account_id = timing_host_api_token = timing_host_publish_key = ""
+        timing_host_url = ""
     env = m._profile_env_vars(_RC())
     assert env["RACECAST_KIND"] == "solo"
     assert env["RACECAST_SHEET_ID"] == "abc"
@@ -6873,6 +6887,181 @@ def t_driver_invite_follows_the_event_and_regenerates():
         refused = fn(new=True, path=p, links=ln)
         assert not refused["ok"] and "Start event" in refused["error"], refused
         assert fn(path=p, links=ln)["active"] is False, "no link opens between events"
+
+
+def _timing_rig():
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "timing-link.json")
+    link = m.timing_link_mod().create(path)["id"]
+    tlinks = lambda i: {"funnel": f"https://h/console/timing?l={i}", "tailnet": "t"}  # noqa: E731
+    return path, link, tlinks
+
+
+def t_event_timing_reports_hosted_link_and_default_path():
+    path, link, tlinks = _timing_rig()
+    saved = os.environ.get("RACECAST_TIMING_HOST_URL")
+    os.environ["RACECAST_TIMING_HOST_URL"] = "https://racecast-timing-demo.example.workers.dev"
+    try:
+        d = m.event_timing_data(path=path, links=tlinks, relay=lambda: None)
+        assert d["hosted"] == f"https://racecast-timing-demo.example.workers.dev/t/{link}", d
+        assert d["served"] == "hosted" and d["host"] is None, d
+        os.environ["RACECAST_TIMING_HOST_URL"] = ""
+        d = m.event_timing_data(path=path, links=tlinks, relay=lambda: None)
+        assert d["hosted"] is None and d["served"] == "funnel", "without a host only Funnel exists"
+    finally:
+        if saved is None:
+            os.environ.pop("RACECAST_TIMING_HOST_URL", None)
+        else:
+            os.environ["RACECAST_TIMING_HOST_URL"] = saved
+
+
+def t_event_timing_prefers_the_running_relay():
+    path, link, tlinks = _timing_rig()
+    live = {"served": "funnel", "hosted_url": "https://x/t/" + link, "host": {"viewers": 9}}
+    d = m.event_timing_data(path=path, links=tlinks, relay=lambda: live)
+    assert (d["served"], d["hosted"], d["host"]) == ("funnel", live["hosted_url"], {"viewers": 9}), d
+
+
+def t_serve_switch_stores_and_nudges_the_relay():
+    path, _link, tlinks = _timing_rig()
+    nudged = []
+    d = m.event_timing_data(serve="funnel", path=path, links=tlinks, relay=lambda: None,
+                            nudge=lambda: nudged.append(1), funnel_on=lambda: True)
+    assert d["ok"] and m.timing_link_mod().served(path) == "funnel" and nudged == [1], d
+
+
+def t_serve_funnel_refused_without_funnel_host():
+    path, _link, _t = _timing_rig()
+    d = m.event_timing_data(serve="funnel", path=path,
+                            links=lambda i: {"funnel": None, "tailnet": "t"}, relay=lambda: None,
+                            nudge=lambda: None)
+    assert not d["ok"] and "Funnel" in d["error"], d
+    assert m.timing_link_mod().served(path) is None, "a refused switch changes nothing"
+
+
+def t_serve_funnel_refused_while_funnel_is_off():
+    path, _link, tlinks = _timing_rig()
+    d = m.event_timing_data(serve="funnel", path=path, links=tlinks, relay=lambda: None,
+                            nudge=lambda: None, funnel_on=lambda: False)
+    assert not d["ok"] and "Funnel" in d["error"], d
+    live = {"served": "hosted", "hosted_url": "https://x/t/y", "host": {}, "funnel_url": None}
+    d = m.event_timing_data(serve="funnel", path=path, links=tlinks, relay=lambda: live,
+                            nudge=lambda: None, funnel_on=lambda: True)
+    assert not d["ok"], "the running relay's view of Funnel wins"
+    assert m.timing_link_mod().served(path) is None
+
+
+def t_serve_rejects_unknown_path_and_needs_an_event():
+    path, _link, tlinks = _timing_rig()
+    assert not m.event_timing_data(serve="cdn", path=path, links=tlinks, relay=lambda: None,
+                                   nudge=lambda: None)["ok"]
+    m.timing_link_mod().clear(path)
+    d = m.event_timing_data(serve="hosted", path=path, links=tlinks, relay=lambda: None,
+                            nudge=lambda: None)
+    assert not d["ok"] and "Start event" in d["error"], d
+
+
+def t_fresh_event_resets_the_served_path():
+    d = tempfile.mkdtemp()
+    invite = os.path.join(d, "driver-invite.json")
+    timing = os.path.join(d, "timing-link.json")
+    m._start_driver_invite(True, path=invite)
+    m.timing_link_mod().set_served(timing, "funnel")
+    m._start_driver_invite(False, path=invite)
+    assert m.timing_link_mod().served(timing) == "funnel", "a takeover keeps the choice"
+    m._start_driver_invite(True, path=invite)
+    assert m.timing_link_mod().served(timing) is None, "a new event starts on the default"
+
+
+def t_timing_host_parse():
+    assert m.route(["timing-host", "deploy"]) == \
+        {"kind": "service", "command": "timing-host", "verb": "deploy", "rest": []}
+    assert ("timing-host", "status") in m.DISPATCH
+    try:
+        m.route(["timing-host", "bogus"])
+    except ValueError:
+        return
+    raise AssertionError("unknown verbs are refused")
+
+
+def _host_profile(body):
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "profile.env")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(body)
+    return path
+
+
+def _read_env(path):
+    with open(path, encoding="utf-8") as fh:
+        return m.parse_env_text(fh.read())
+
+
+def t_cli_deploy_writes_url_and_generates_key_once():
+    path = _host_profile("NAME=Demo\nTIMING_HOST_ACCOUNT_ID=acc\nTIMING_HOST_API_TOKEN=tok\n")
+    calls, nudged = [], []
+
+    def fake(account, token, profile, worker, page, key, request=None):
+        calls.append((account, token, profile, key))
+        return {"ok": True, "url": "https://racecast-timing-demo.sub.workers.dev"}
+    r = m.timing_host_deploy_data(deploy_fn=fake, env=("demo", path), nudge=lambda: nudged.append(1))
+    env = _read_env(path)
+    assert r["ok"] and env["TIMING_HOST_URL"] == "https://racecast-timing-demo.sub.workers.dev", (r, env)
+    key = env["TIMING_HOST_PUBLISH_KEY"]
+    assert len(key) >= 32 and calls[0] == ("acc", "tok", "demo", key), calls
+    assert env["NAME"] == "Demo", "other keys stay"
+    m.timing_host_deploy_data(deploy_fn=fake, env=("demo", path), nudge=lambda: nudged.append(1))
+    assert _read_env(path)["TIMING_HOST_PUBLISH_KEY"] == key and calls[1][3] == key, "the key is kept"
+    assert nudged == [1, 1], "a running relay picks the host up at once"
+
+
+def t_cli_deploy_failure_keeps_url_unset():
+    path = _host_profile("TIMING_HOST_ACCOUNT_ID=acc\nTIMING_HOST_API_TOKEN=tok\n")
+    r = m.timing_host_deploy_data(deploy_fn=lambda *a, **k: {"ok": False, "error": "nope"},
+                                  env=("demo", path), nudge=lambda: None)
+    assert not r["ok"] and "TIMING_HOST_URL" not in _read_env(path), r
+
+
+def t_cli_deploy_needs_account_and_token():
+    path = _host_profile("NAME=Demo\n")
+    r = m.timing_host_deploy_data(deploy_fn=lambda *a, **k: {"ok": True, "url": "x"},
+                                  env=("demo", path), nudge=lambda: None)
+    assert not r["ok"] and "TIMING_HOST_ACCOUNT_ID" in r["error"], r
+    assert "TIMING_HOST_PUBLISH_KEY" not in _read_env(path), "nothing is written without a host"
+
+
+def t_profile_save_touching_the_host_nudges_the_relay():
+    path = _host_profile("NAME=Demo\nTIMING_HOST_URL=https://h\nTIMING_HOST_PUBLISH_KEY=" + "k" * 32 + "\n")
+    nudged = []
+    saved = m._active_profile_env_strict
+    m._active_profile_env_strict = lambda: ("demo", path)
+    try:
+        m.profile_env_write_data([{"key": "NAME", "value": "Demo 2"},
+                                  {"key": "TIMING_HOST_URL", "value": "https://h"},
+                                  {"key": "TIMING_HOST_PUBLISH_KEY", "value": "k" * 32}],
+                                 nudge=lambda: nudged.append(1))
+        assert nudged == [], "an unrelated edit leaves the publisher alone"
+        m.profile_env_write_data([{"key": "NAME", "value": "Demo 2"}], nudge=lambda: nudged.append(1))
+        assert nudged == [1], "removing the host stops publishing without a relay restart"
+    finally:
+        m._active_profile_env_strict = saved
+
+
+def t_deploy_without_shipped_sources_is_a_clear_error():
+    path = _host_profile("TIMING_HOST_ACCOUNT_ID=acc\nTIMING_HOST_API_TOKEN=tok\n")
+    saved = m.resource_path
+    m.resource_path = lambda rel: os.path.join(tempfile.mkdtemp(), rel)
+    try:
+        r = m.timing_host_deploy_data(deploy_fn=lambda *a, **k: {"ok": True, "url": "x"},
+                                      env=("demo", path), nudge=lambda: None)
+    finally:
+        m.resource_path = saved
+    assert not r["ok"] and "timing" in r["error"], r
+
+
+def t_timing_host_sources_exist():
+    worker, page = m._timing_host_sources()
+    assert b"TimingRoom" in worker and "timing-logic" in page
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):

@@ -237,6 +237,10 @@ Security boundaries that apply everywhere:
   Every other program control stays director-gated, including putting the driver
   dashboard on air. Race data the desks maintain (corrections, tyre compound, the
   dashboard's compound and fuel columns) is not a program change.
+- The optional league timing host (#1161) is the relay's one outbound fan-out: it sends
+  only the delayed public timing body (`driver_race.public_view`) to the league's own
+  Cloudflare Worker over an authenticated WebSocket. Nothing new is funnelled, and the
+  host never reaches back into the relay.
 - No destructive HTTP endpoint for chat or cues: clear/import/pull stay producer-only CLI
   actions. A commentator's stream-link submission is own-rows-only and lands as pending,
   never auto-published.

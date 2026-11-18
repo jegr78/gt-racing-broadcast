@@ -734,6 +734,8 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"could not read profile .env: {exc}"},
                                       code=500)
+            if path == "/api/timing-host":
+                return self._json(ctx["timing_host_status"]())
             if path == "/api/gt7-data":
                 try:
                     return self._json(ctx["gt7_data_status"]())
@@ -1117,6 +1119,12 @@ def make_handler(ctx):
                 body = self._body_json()
                 if body is None:
                     return self._json({"ok": False, "error": self._body_error}, code=400)
+                try:
+                    if body.get("serve") is not None:
+                        return self._json(ctx["event_timing"](serve=str(body["serve"])))
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not switch the timing link: {exc}"},
+                                      code=500)
                 try:
                     return self._json(ctx["event_timing"](new=body.get("new") is True))
                 except Exception as exc:
