@@ -411,7 +411,7 @@ class Race:
             car.restart_ready = ent.waiting                # it joined the restart lobby
         if resumed is not None and resumed[0] == conn and resumed[1][0]:
             car.counting = True                            # moved back: its own laps go on
-            _c, car.anchor, car.lap0, car.f0, car.line = resumed[1]
+            _, car.anchor, car.lap0, car.f0, car.line = resumed[1]
         if sample.get("loading") or sample.get("paused") or self._line is None \
                 or x is None or lap is None:
             car.t = t
@@ -651,7 +651,7 @@ class Race:
         def key(e):
             dist = self._shown(e) if e.distance is not None else -math.inf
             if self._finishing_at is None:
-                return (0, -dist)
+                return (0, -dist, 0.0, 0.0, "")
             if e is winner:
                 return (-1, 0, 0.0, 0.0, "")
             laps = min(math.floor(dist / self.length), cap) if self.length and e.distance is not None else -1
