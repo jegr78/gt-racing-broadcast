@@ -618,7 +618,6 @@ def _cold_copy(part, d, version):
 
 
 def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
-    import json
     with tempfile.TemporaryDirectory() as d:
         src = write_circle_recording(os.path.join(d, "src"))
         size = os.path.getsize(src)
@@ -674,7 +673,6 @@ def t_resume_state_covers_every_engine_attribute():
     attrs = set(vars(tm.TelemetryEngine()))
     assert attrs == set(tm.TelemetryEngine.RESUMED_ATTRS) | hud_only | wiring, \
         f"classify new engine attributes as resumed or HUD-only: {attrs ^ (set(tm.TelemetryEngine.RESUMED_ATTRS) | hud_only | wiring)}"
-    import json
     eng = tm.TelemetryEngine()
     for k in range(600):
         eng.update(tm.parse_packet(_pkt(1 + k // 200, 50.0, 2 * math.pi * (k % 200) / 200)),
