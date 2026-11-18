@@ -11972,11 +11972,12 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
 MAX_POST_BODY = 65536
 
 
-def _funnel_watch(max_age_s=60.0):
+def _funnel_watch(max_age_s=60.0, poll=None):
     """A getter for this machine's MagicDNS name while Funnel serves /console, else
     None; its `magicdns()` returns the name whether Funnel serves or not. Both answer
     from a cache refreshed in the background at most once a minute, so a request never
-    waits on the tailscale CLI."""
+    waits on the tailscale CLI. With `poll` (a stop Event) a thread also refreshes it
+    without requests, so a name that appears late is known before anyone asks."""
     state = {"host": None, "name": None, "at": None, "busy": False}
     lock = threading.Lock()
 
@@ -12000,6 +12001,12 @@ def _funnel_watch(max_age_s=60.0):
     def get():
         return cached("host")
     get.magicdns = lambda: cached("name")
+    if poll is not None:
+        def keep_fresh():
+            while not poll.is_set():
+                cached("name")
+                poll.wait(max_age_s / 2)
+        threading.Thread(target=keep_fresh, name="funnel-watch-poll", daemon=True).start()
     return get
 
 
@@ -16372,7 +16379,7 @@ def main():
         driver_desk_path=driver_desk_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
-        timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(),
+        timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(poll=stop_evt),
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,

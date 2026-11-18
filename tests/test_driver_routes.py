@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The driver telemetry routes under /console/drive and on the tailnet (#1111).
 Run: python3 tests/test_driver_routes.py"""
-import gzip, json, os, struct, sys, tempfile, time, urllib.error, urllib.request
+import gzip, json, os, struct, sys, tempfile, threading, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -863,6 +863,23 @@ def t_funnel_watch_learns_the_magicdns_name_without_funnel():
         _wait_for(lambda: get.magicdns() is not None)
         assert get.magicdns() == FUNNEL_HOST and get() is None, (get.magicdns(), get())
     finally:
+        ts.detect_magicdns_name, ts.funnel_on = saved
+
+
+def t_a_polling_funnel_watch_learns_a_late_name_without_requests():
+    ts = g.m.tailscale
+    saved = (ts.detect_magicdns_name, ts.funnel_on)
+    calls, stop = [], threading.Event()
+    try:
+        ts.detect_magicdns_name = lambda *a, **k: calls.append(1) or (FUNNEL_HOST if len(calls) > 2 else None)
+        ts.funnel_on = lambda *a, **k: False
+        get = g.m._funnel_watch(max_age_s=0.05, poll=stop)
+        _wait_for(lambda: len(calls) > 3)
+        assert get.magicdns() == FUNNEL_HOST, \
+            ("the watch refreshes by itself, so the first request after Tailscale comes up finds the name", calls)
+    finally:
+        stop.set()
+        time.sleep(0.2)                       # let the poll thread see the stop before the restore
         ts.detect_magicdns_name, ts.funnel_on = saved
 
 
