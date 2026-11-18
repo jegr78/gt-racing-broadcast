@@ -12214,6 +12214,58 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if no_store:
                 self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
+        def _recording_get(self, sub):
+            """The race recording reads: status, a sample at a wall time, the CSV export."""
+            svc = driver_race_svc
+            try:
+                if sub is None:
+                    return self._send(svc.recording_status(), no_store=True)
+                if sub == "at":
+                    raw = parse_qs(urlparse(self.path).query).get("t", [""])[0]
+                    try:
+                        t = float(raw)
+                    except ValueError:
+                        t = math.nan
+                    if not math.isfinite(t):
+                        return self._send({"error": "t must be a finite number"}, 400)
+                    sample = svc.recording_at(t)
+                    return self._send(sample or {"error": "no recording"}, 200 if sample else 404,
+                                      no_store=True)
+                if sub == "csv":
+                    out = io.StringIO()
+                    csv.writer(out).writerows(svc.recording_csv())
+                    body = out.getvalue().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Disposition", 'attachment; filename="race-recording.csv"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers(); self.wfile.write(body)
+                    return None
+            except RuntimeError:
+                return self._send({"error": "recording unavailable"}, 503)
+            return self._send({"error": "not found"}, 404)
+
+        def _recording_post(self, sub, body, who):
+            """Start or stop the race recording, or confirm or dismiss a disconnect event."""
+            svc = driver_race_svc
+            try:
+                if sub is None:
+                    action = body.get("action")
+                    if action not in ("start", "stop"):
+                        return self._send({"ok": False, "error": "action must be start or stop"}, 400)
+                    out = svc.recording_start(who) if action == "start" else svc.recording_stop(who)
+                    return self._send({"ok": True, "recording": out})
+                if sub == "event":
+                    ev = svc.recording_decide(who, body.get("id"), body.get("decision"))
+                    return self._send({"ok": True, "event": ev})
+            except KeyError:
+                return self._send({"ok": False, "error": "unknown event"}, 404)
+            except ValueError as exc:
+                return self._send({"ok": False, "error": str(exc)}, 400)
+            except RuntimeError:
+                return self._send({"ok": False, "error": "recording unavailable"}, 503)
+            return self._send({"error": "not found"}, 404)
         def _send_file(self, path, ctype):
             try:
                 with open(path, "rb") as fh: body = fh.read()
@@ -12955,8 +13007,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return bool(console_secret)
         def _cockpit_token(self):
             """The presented token: query ?t= first (link load), else the cookie."""
-            qs = parse_qs(urlparse(self.path).query)
-            if qs.get("t"):
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            # ?t= is the sample time on the recording lookup, so only the cookie authenticates it.
+            if qs.get("t") and not parsed.path.endswith("/race/recording/at"):
                 return qs["t"][0]
             return console_auth.parse_cookie_token(self.headers.get("Cookie"))
         def _console_subject(self):
@@ -14175,6 +14229,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     invite = self._drive_invite()
                     return self._send({"invite": bool(invite), "connections": driver_hub.connections()},
                                       no_store=True)
+                if p[:3] == ["drivers", "race", "recording"] and len(p) <= 4 \
+                        and driver_race_svc is not None:
+                    return self._recording_get(p[3] if len(p) == 4 else None)
                 if p == ["drivers", "race"] and driver_race_svc is not None:
                     # Order, distances and gaps from driver telemetry (#1112).
                     return self._send(driver_race_svc.standings(), no_store=True)
@@ -14799,6 +14856,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                "settings": driver_race_svc.set_settings(body, who)})
                         except ValueError as exc:
                             return self._send({"ok": False, "error": str(exc)}, 400)
+                    if action == "recording" or p[2:] == ["recording", "event"]:
+                        return self._recording_post(p[3] if len(p) == 4 else None, body, who)
                     commands = {"final-lap": driver_race_svc.final_lap,
                                 "finish": driver_race_svc.finish, "reset": driver_race_svc.reset}
                     if action in commands:

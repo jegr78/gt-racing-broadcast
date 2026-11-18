@@ -369,6 +369,20 @@ def t_driver_telemetry_controls_for_directors_and_race_control():
     assert cp.decide({"director"}, ["race-control", "red-flag"], "POST") == cp.FORBIDDEN
 
 
+def t_recording_routes_are_desk_routes():
+    for path, method in ((["drivers", "race", "recording"], "GET"),
+                         (["drivers", "race", "recording", "at"], "GET"),
+                         (["drivers", "race", "recording", "csv"], "GET"),
+                         (["drivers", "race", "recording"], "POST"),
+                         (["drivers", "race", "recording", "event"], "POST")):
+        assert cp.decide({"director"}, path, method) == cp.ALLOW, path
+        assert cp.decide({"race_control"}, ["race-control"] + path, method) == cp.ALLOW, path
+        assert cp.decide({"commentator"}, path, method) == cp.FORBIDDEN, path
+        assert cp.decide({"commentator"}, ["race-control"] + path, method) == cp.FORBIDDEN, path
+    assert cp.decide({"director"}, ["drivers", "race", "recording", "event"], "GET") == cp.NOT_FOUND
+    assert cp.decide({"director"}, ["drivers", "race", "recording", "at"], "POST") == cp.NOT_FOUND
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

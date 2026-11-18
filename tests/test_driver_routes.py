@@ -58,12 +58,13 @@ def _timing_server(**extra):
     return srv, port, link_path, timing_link.create(link_path)["id"], hub
 
 
-def _serve(solo=True, segments=(), clock=None, **extra):
+def _serve(solo=True, segments=(), clock=None, recording_dir=None, **extra):
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
-                               trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo)
+                               trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo,
+                               recording_dir=recording_dir)
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
     extra.setdefault("sender_script_path", os.path.join(ROOT, "src", "relay", "racecast-sender.py"))
@@ -991,6 +992,60 @@ def t_internal_dashboard_routes_ignore_a_dead_host():
             assert _req_raw(port, f"/console/timing/data?l={link}")[0] == 200
     finally:
         stop.set()
+        srv.shutdown()
+
+
+def t_recording_routes_serve_both_desks_and_refuse_a_commentator():
+    import csv as _csv, io as _io, json as _json
+    hdr = {"Content-Type": "application/json"}
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp())
+    try:
+        for token, prefix in ((g._tok("bob"), "/console/drivers"),
+                              (g._tok("dave"), "/console/race-control/drivers")):
+            def url(tail, token=token, prefix=prefix):
+                return f"{prefix}/race/recording{tail}" + ("&" if "?" in tail else "?") + f"t={token}"
+            st, text, _h = _req(port, url(""))
+            assert st == 200 and "running" in _json.loads(text), (st, text)
+            st, text, _h = _req(port, url(""), _json.dumps({"action": "start"}).encode(), hdr)
+            assert st == 200 and _json.loads(text)["recording"]["running"], text
+            st, text, _h = _req(port, url(""), _json.dumps({"action": "stop"}).encode(), hdr)
+            assert st == 200 and not _json.loads(text)["recording"]["running"], text
+            assert _req(port, url(""), _json.dumps({"action": "bogus"}).encode(), hdr)[0] == 400
+            cookie = {"Cookie": f"rc_console={token}"}   # ?t= is the time here, the token rides the cookie
+            at = f"{prefix}/race/recording/at"
+            assert _req(port, f"{at}?t=100", headers=cookie)[0] == 404, "an empty recording has no sample"
+            assert _req(port, f"{at}?t=nan", headers=cookie)[0] == 400
+            assert _req(port, f"{at}?t=inf", headers=cookie)[0] == 400
+            assert _req(port, at, headers=cookie)[0] == 400
+            st, text, h = _req(port, url("/csv"))
+            assert st == 200 and h["Content-Type"].startswith("text/csv"), (st, h)
+            assert "race-recording.csv" in h["Content-Disposition"], h
+            assert next(_csv.reader(_io.StringIO(text)))[0] == "time_utc", text
+            ev = _json.dumps({"id": 999, "decision": "confirm"}).encode()
+            assert _req(port, url("/event"), ev, hdr)[0] == 404, "unknown event id"
+            bad = _json.dumps({"id": "x", "decision": "confirm"}).encode()
+            assert _req(port, url("/event"), bad, hdr)[0] == 400
+        for prefix in ("/console/drivers", "/console/race-control/drivers"):
+            alice = g._tok("alice")
+            for tail, data in (("", None), ("/at?t=1", None), ("/csv", None),
+                               ("", b'{"action":"start"}'), ("/event", b'{"id":1,"decision":"confirm"}')):
+                head = {"Cookie": f"rc_console={alice}", **(hdr if data else {})}
+                assert _req(port, f"{prefix}/race/recording{tail}", data, head)[0] == 403, (prefix, tail)
+    finally:
+        srv.shutdown()
+
+
+def t_recording_routes_answer_503_without_a_recording_dir():
+    srv, port, _p, _hub = _serve()
+    try:
+        director = g._tok("bob")
+        assert _req(port, f"/console/drivers/race/recording?t={director}")[0] == 503
+        assert _req(port, f"/console/drivers/race/recording/csv?t={director}")[0] == 503
+        assert _req(port, "/console/drivers/race/recording/at?t=1", headers={"Cookie": f"rc_console={director}"})[0] == 503
+        st, _t, _h = _req(port, f"/console/drivers/race/recording?t={director}", b'{"action":"start"}',
+                          {"Content-Type": "application/json"})
+        assert st == 503
+    finally:
         srv.shutdown()
 
 
