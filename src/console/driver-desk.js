@@ -463,12 +463,13 @@
     async function refreshInvite() {
       var d = await call("/drivers/invite", undefined, true);
       if (!d) return;
-      state.invite = d.active ? location.origin + "/console/drive?i=" + encodeURIComponent(d.id) : null;
+      // Drivers reach the relay through the Funnel; the desk's own origin may be the tailnet.
+      state.invite = d.active ? (d.base || location.origin) + "/console/drive?i=" + encodeURIComponent(d.id) : null;
       inviteText.textContent = state.invite || "No invite: it starts with the event.";
       copyBtn.disabled = !state.invite;
       var t = await call("/drivers/timing-link", undefined, true);
       if (!t) return;
-      var funnel = t.active ? location.origin + "/console/timing?l=" + encodeURIComponent(t.id) : null;
+      var funnel = t.active ? (t.funnel_url || location.origin + "/console/timing?l=" + encodeURIComponent(t.id)) : null;
       state.timing = t.active && t.served === "hosted" && t.hosted_url ? t.hosted_url : funnel;
       var note = "";
       if (t.active && t.hosted_url) {   // the league's timing host (#1161)

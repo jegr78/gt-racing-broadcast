@@ -14160,10 +14160,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             roster, driver_segments() if driver_segments else [],
                             driver_hub.connections(), not relay.solo)}, no_store=True)
                 if p == ["drivers", "invite"]:
-                    # The desks build the link from their own origin (#1114).
+                    # `base` is the public Funnel address; without it the desks use their origin.
                     invite = self._drive_invite()
+                    host = _funnel_host()
                     return self._send({"active": bool(invite),
-                                       "id": invite["id"] if invite else None}, no_store=True)
+                                       "id": invite["id"] if invite else None,
+                                       "base": f"https://{host}" if host else None}, no_store=True)
                 if p == ["drivers", "timing-link"]:
                     link = _timing_cache.get() if _timing_cache else None
                     pub = _timing_pub[0]

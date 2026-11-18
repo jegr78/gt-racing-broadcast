@@ -751,6 +751,18 @@ class _FakePublisher:
 FUNNEL_HOST = "relay.example.ts.net"
 
 
+def t_the_invite_offers_the_funnel_base_when_funnel_serves_the_console():
+    for host, base in ((FUNNEL_HOST, f"https://{FUNNEL_HOST}"), (None, None)):
+        srv, port, path, _hub = _serve(funnel_host=lambda h=host: h)
+        try:
+            invite = driver_invite.create(path)["id"]
+            d = json.loads(_req(port, "/drivers/invite")[1])
+            assert d["id"] == invite and d["base"] == base, \
+                f"drivers need the public Funnel address, not the desk's tailnet origin: {d}"
+        finally:
+            srv.shutdown()
+
+
 def t_timing_link_route_reports_host():
     pub = _FakePublisher()
     srv, port, _lp, link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
