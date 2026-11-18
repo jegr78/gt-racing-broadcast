@@ -13272,7 +13272,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     cookie_token=self._cockpit_token(), cookie_path="/console")
                     return None
                 if sub == ["health-monitor", "data"] and method == "GET":
-                    self._send(self._health_monitor_payload())
+                    self._send(self._health_monitor_payload(console=True))
                     return None
                 if len(sub) == 3 and sub[:2] == ["health-monitor", "assets"]:
                     return sub        # served by the root asset route
@@ -13373,9 +13373,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 to, frm = now, now - _HEALTH_CONST.LIVE_WINDOW_S
             return frm, to, maxn, now
 
-        def _health_current(self):
+        def _health_current(self, console=False):
             """Allowlist of the live health fields, NEVER the feed/pov stream URLs
-            that relay.status() carries (redaction boundary)."""
+            that relay.status() carries (redaction boundary). `console` also drops
+            the OBS note, which can name the WebSocket host."""
             full = relay.status()
             feeds = {}
             for k, v in (full.get("feeds") or {}).items():
@@ -13388,19 +13389,21 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                             "down": pov.get("down"), "shown": pov.get("shown"),
                                             "quality": getattr(relay.pov, "quality", None)}
             return {"health": full.get("health"), "feeds": feeds, "pov": pov_red,
-                    "obs": full.get("obs"), "source": full.get("source"),
+                    "obs": ({"reachable": (full.get("obs") or {}).get("reachable")} if console
+                            else full.get("obs")),
+                    "source": full.get("source"),
                     "cookies_health": full.get("cookies_health"),
                     "mode": full.get("mode"), "live": full.get("live"),
                     "timer": timer_store.summary() if timer_store else None,
                     "event_title": event_store.get() if event_store else ""}
 
-        def _health_monitor_payload(self):
+        def _health_monitor_payload(self, console=False):
             if relay.health_store is None:
                 return {"error": "health monitor disabled"}
             frm, to, maxn, now = self._health_query_window()
             store = relay.health_store
             return {"now": now, "from": frm, "to": to,
-                    "current": self._health_current(),
+                    "current": self._health_current(console),
                     "bands": store.bands(frm, to),
                     "incidents": store.incidents(frm, to),
                     "events": store.events(frm, to),   # discrete markers (#317)

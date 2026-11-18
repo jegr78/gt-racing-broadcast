@@ -78,6 +78,7 @@ def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None,
         flag_graphic_store=flag_graphic_store,
         track_pick=track_pick, telemetry_probe_obj=telemetry_probe_obj, **extra)
     srv = m.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    srv.relay = relay
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
@@ -1033,6 +1034,21 @@ def t_console_health_monitor_data_shape_and_redaction():
             assert key in blob, key
         serialised = json.dumps(blob)
         assert "youtu" not in serialised and "watch?v=" not in serialised   # redaction
+    finally:
+        srv.shutdown()
+
+
+def t_console_health_monitor_never_shows_the_obs_note():
+    srv = _serve(); port = srv.server_address[1]
+    srv.relay.obs_reachable, srv.relay.obs_note = False, "ConnectionRefusedError: obs-host.example:4455"
+    try:
+        for who in ("alice", "dave", "bob"):
+            code, body = _get(port, "/console/health-monitor/data", _tok(who))
+            assert code == 200, (who, code)
+            assert json.loads(body)["current"]["obs"] == {"reachable": False}, \
+                ("the Funnel health data must not name the WebSocket host", who, body)
+        code, body = _get(port, "/health-monitor/data")
+        assert "note" in json.loads(body)["current"]["obs"], "the tailnet view keeps the note"
     finally:
         srv.shutdown()
 
