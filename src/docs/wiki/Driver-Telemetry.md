@@ -128,7 +128,8 @@ It never carries connection ids, corrections or who made them.
   (`POST /drivers/race/fastest`).
 - **Delay**: the event setting holds the dashboard, and the stint it shows, back by up to
   120 seconds to match the commentator feed on air. Race Control and the director keep
-  the live race.
+  the live race. **Show dashboard**, **Hide dashboard** and the display switches act at
+  once, never after the delay.
 - **Qualifying**: in qualifying mode the dashboard ranks the running segment by GT7's
   best lap of its live senders, with the gap to the fastest; a best lap faster than the
   line allows is ignored.

@@ -482,8 +482,9 @@ class Service:
 
     def dashboard(self):
         """The newest snapshot at least the delay setting old; the oldest one while the
-        delay has not passed yet."""
-        delay = self._settings()["delay_s"]
+        delay has not passed yet. The display settings are the current ones."""
+        settings = self._settings()
+        delay = settings["delay_s"]
         with self._lock:
             if not self._snapshots:
                 return None
@@ -494,7 +495,8 @@ class Service:
                     chosen = snap
                 else:
                     break
-            return chosen
+        return dict(chosen, visible=settings["visible"], delay_s=delay,
+                    show={"compound": settings["show_compound"], "fuel": settings["show_fuel"]})
 
     def log(self, who, action, **fields):
         """Audit an action taken outside the race (a disconnect, a cover change)."""

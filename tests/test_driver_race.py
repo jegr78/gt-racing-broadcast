@@ -322,6 +322,23 @@ def t_the_delay_holds_the_dashboard_back():
     assert dr.read_settings(svc._path)["delay_s"] == 5
 
 
+def t_the_display_switches_skip_the_delay():
+    ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": None, "mode": "race"}
+    svc, clock, _path = _dash_service(ctx)
+    svc.set_settings({"delay_s": 60})
+    _feed(svc, clock, "A", "a", -20.0, 1.0)
+    svc.tick()
+    clock[0] = 2.0
+    svc.set_settings({"visible": True, "show_compound": False, "show_fuel": False})
+    svc.tick()
+    d = svc.dashboard()
+    assert d["visible"] is True and d["show"] == {"compound": False, "fuel": False}, \
+        f"Hide/Show and the display switches apply at once, not after the delay: {d}"
+    pub = dr.public_view(d)
+    assert "fuel_l" not in pub["entries"][0] and "compound" not in pub["entries"][0], pub
+    assert svc._snapshots[0][1]["visible"] is False, "the delayed snapshot itself stays untouched"
+
+
 def t_the_fastest_lap_survives_a_relay_restart_and_carries_the_team():
     ctx = {"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"}
     svc, clock, path = _dash_service(ctx)
