@@ -422,6 +422,23 @@ def t_a_reassigned_sender_counts_for_its_new_entry():
     assert [r["entry"] for r in race.standings(t)["entries"]] == ["B"], race.standings(t)["entries"]
 
 
+def t_moving_a_teams_only_car_away_and_back_keeps_the_team():
+    for multi in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi)
+        a = Car(race, "A", "a", L - 15)
+        t = _drive(race, [a], [50], 0.0, 30)
+        race.correct("A", 500.0, pit_stops=1)
+        a.entry = "X"                                      # moved to the wrong entry by mistake
+        t = _drive(race, [a], [50], t, 2)
+        race.correct("A", 20.0)                            # Race Control corrects it meanwhile
+        a.entry = "A"
+        t = _drive(race, [a], [50], t, 2)
+        row = _row(race, "A", t)
+        assert row["correction_m"] == 520.0 and row["pit_stops"] == 1, (multi, row)
+        assert abs(row["distance_m"] - (a.along + 520.0)) < 5, \
+            f"the team counts on from its own laps: {multi} {row} {a.along}"
+
+
 def t_no_line_means_no_distance():
     race = rd.Race(None, formation=False)
     a = Car(race, "A", "a", 0)

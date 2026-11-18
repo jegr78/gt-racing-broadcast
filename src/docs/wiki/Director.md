@@ -320,7 +320,8 @@ desk:
 - the tyre compound per entry and the dashboard's **Show compound** / **Show fuel**
   switches
 - readiness per entry (in endurance for the stint on air and the next one) and every
-  sender with **Move** (to another entry) and **Disconnect**
+  sender with **Move** (to another entry; moving it back resumes the team with its
+  distance and corrections) and **Disconnect**
 
 Buttons that change the race for everyone (Final lap, Finish, the red flag, a change,
 a disconnect) ask for a second press within four seconds.
