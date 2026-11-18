@@ -272,17 +272,20 @@ use them from the Race Control desk ([Console](Console)) and the Director Panel
 The relay records the live race for Race Control to review after the fact.
 
 - **Recording** runs in race mode only. It starts when the first car starts counting and
-  stops at the finish; the director and Race Control can start and stop it by hand. It
+  stops at the finish; a later race in the same event starts it again. The director and
+  Race Control can start and stop it by hand; in qualifying the desk refuses a start. It
   stores one sample per second of the live, undelayed standings in one SQLite file per
   event, `runtime/<profile>/race-recording-<UTC stamp>.sqlite`, named by the pointer
   `race-recording.json`. A fresh `event start` with the relay stopped begins a new file.
   An `event start` on an already running relay continues the current recording, like the
   invite. A relay restart resumes the recording. The desk's **Download CSV** exports it
-  with spreadsheet formulas neutralised. A recording error never stops the race or the
+  with spreadsheet formulas neutralised, and **Browse recording** opens the frozen
+  standings page at the end of the recording. A recording error never stops the race or the
   fastest-lap save; the desk warns when samples were dropped.
-- **Disconnect events** open when a car that counts sends no data for five seconds. The
-  event is dated by the car's last packet. There is none for a car in the box during the
-  driver change window, none under a red flag and none for a car that took the flag.
+- **Disconnect events** open while the recording runs, when a car with a distance sends
+  no data for five seconds. The event is dated by the car's last packet. There is none for
+  a car in the box during the driver change window, none under a red flag, none for a car
+  still waiting for its red flag restart and none for a car that took the flag.
   States: **suspected**, **dropout** (data came back), **confirmed** and **dismissed**.
   The director or Race Control confirms or dismisses an event on the desk; the decision
   is logged in `driver-race-audit.jsonl`. A desk can play a sound on a new suspicion
@@ -290,7 +293,8 @@ The relay records the live race for Race Control to review after the fact.
   that stays with Race Control.
 - **Show standings** opens the frozen standings page for a moment: 5, 10, 15, 20 or 30
   seconds before the event's last packet (default 10). Its slider covers the whole
-  recording. The page needs a director or Race Control login.
+  recording, and it follows a recording that still runs. It opens through the console,
+  for the director and Race Control.
 
 The box detection and the lap counter in the pit lane are not yet confirmed against a
 recording of real pit stops. The race lives in the relay's memory: a relay restart

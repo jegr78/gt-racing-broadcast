@@ -78,7 +78,7 @@ the leader.
 - Rate: one sample per second, taken from the live (undelayed) standings, never from the
   delayed dashboard snapshot.
 - Content per sample: wall-clock time and, per row, every field the desk's race table
-  shows: position, entry, team, driver, lap, `gap_time_s`, `interval_time_s`, `lapped`,
+  shows: position, entry (the team), driver, lap, `gap_time_s`, `interval_time_s`, `lapped`,
   status, tyre compound, pit stops, distance correction, rejoin mark, GT7 position and the
   mismatch flag. Race-level fields: red flag state, finishing state.
 - Storage: one SQLite file per event under `runtime/<profile>/` (stdlib `sqlite3`, as in
