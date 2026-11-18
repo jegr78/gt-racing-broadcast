@@ -169,9 +169,15 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
   `from=host`, so a flaky host cannot bounce viewers back and forth. `moved_to` appears only while
   the host is served and its publisher is connected.
 - Known limit: when the daily request quota is exhausted, Cloudflare does not serve the page at all
-  (error 1027). The redirect then reaches only viewers already connected.
-  The publisher's socket can stay up meanwhile, so `moved_to` still sends returning Funnel viewers
-  to the host after their dwell; the producer switches to Funnel before the quota runs out.
+  (error 1027), and no fallback script runs on its error page. The relay guards against it with
+  its own estimate (`requests_today` from the last ack plus its messages today / 20, the number
+  the Control Center shows): from 90 % of the 100,000 free requests (`QUOTA_GUARD_REQUESTS`) the
+  Funnel data carries no `moved_to`, and the publisher sends `moved` toward the Funnel URL so
+  hosted viewers leave before the hard stop (only while a Funnel URL exists). It reports
+  `quota_low` in its status and logs "daily request quota nearly used, viewers stay on Funnel"
+  once. A new UTC day or a renewed link (a new room with its own count) lifts it. The estimate is
+  a lower bound: it misses other Workers on the account and requests of an earlier link the same
+  day, so the guard can still come too late.
 
 ### Relay publisher
 

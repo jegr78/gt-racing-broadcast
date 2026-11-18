@@ -229,7 +229,10 @@ about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day.
 the desks show an estimate of today's use. It covers the current timing link only: a renewed
 link starts again at 0 although the quota is per account. It does not count other Workers on
 the same account either, so use one Cloudflare account per league. Above the limit Cloudflare stops serving the hosted
-page; switch to Funnel before that.
+page. From about 90 % of the limit by that estimate the relay keeps Funnel viewers on
+Funnel and moves the hosted viewers there (when Funnel is on); a new UTC day or a renewed
+link lifts it. Other Workers on the account are not in the estimate, so watch it yourself
+too.
 
 ### Red flag, rejoin and corrections
 

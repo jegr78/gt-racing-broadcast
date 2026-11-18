@@ -364,6 +364,67 @@ def t_status_shows_an_open_room():
     assert r.pub.status()["room"] is False
 
 
+
+def _ack(requests):
+    return json.dumps({"t": "ack", "seq": 1, "viewers": 3, "requests_today": requests})
+
+
+def _near_quota(r):
+    r.acks.append(_ack(tp.QUOTA_GUARD_REQUESTS))
+    r.step()
+    r.step(2.0)
+
+
+def t_a_nearly_used_quota_moves_hosted_viewers_to_funnel_once():
+    r = _Rig()
+    _near_quota(r)
+    for _ in range(3):
+        r.step(2.0)
+    st = r.pub.status()
+    assert st["quota_low"] is True, st
+    moved = [f for f in r.conns[0].sent if f["t"] == "moved"]
+    assert moved == [{"t": "moved", "to": None}, {"t": "moved", "to": FALLBACK}], moved
+    quota = [w for w in r.log.warnings if "quota" in w]
+    assert quota == ["timing host: daily request quota nearly used, viewers stay on Funnel"], \
+        r.log.warnings
+
+
+def t_the_quota_estimate_counts_the_relays_messages():
+    r = _Rig()
+    r.acks.append(_ack(tp.QUOTA_GUARD_REQUESTS - 1))
+    r.step()
+    for _ in range(20):
+        r.step(2.0)
+    assert r.pub.status()["quota_low"] is True, "requests_today plus messages / 20"
+
+
+def t_a_nearly_used_quota_without_funnel_moves_nobody():
+    r = _Rig()
+    r.pub._fallback_fn = lambda: None
+    _near_quota(r)
+    assert r.pub.status()["quota_low"] is True
+    assert not [f for f in r.conns[0].sent if f["t"] == "moved" and f["to"]], \
+        "never move viewers to a Funnel that is off"
+
+
+def t_the_quota_guard_resets_on_a_new_day():
+    r = _Rig()
+    _near_quota(r)
+    r.step(86400.0)
+    st = r.pub.status()
+    assert st["quota_low"] is False, st
+    assert r.conns[-1].sent and {"t": "moved", "to": None} in r.conns[-1].sent[-3:], \
+        "the hosted link is served again"
+
+
+def t_the_quota_guard_resets_with_a_renewed_link():
+    r = _Rig()
+    _near_quota(r)
+    r.link = LINK_B
+    r.step(2.0)
+    assert r.pub.status()["quota_low"] is False, "a new room starts its own count"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
