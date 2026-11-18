@@ -445,12 +445,9 @@ class Service:
             row["pos"] = i + 1
             row["compound"] = (compounds.get(r["entry"]) or {}).get("code")
             rows.append(row)
-        lead_laps = rows[0]["laps"] if rows and st["entries"][0]["distance_m"] is not None else None
         fl = race.fastest
         out.update({
-            "state": st["state"], "red_flag": st["red_flag"] is not None,
-            "lap": {"leader": None if lead_laps is None else lead_laps + (2 if race.formation else 1),
-                    "count": race.lap_count if settings["finish_mode"] == "laps" else None},
+            "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
             "fastest": None if fl is None else dict(
                 fl, team=(roster.get(fl["entry"]) or {}).get("cupTeam") or ""),
             "entries": rows})

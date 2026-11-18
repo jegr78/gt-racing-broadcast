@@ -692,7 +692,27 @@ class Race:
                 "position_mismatch": e.entry in mismatch})
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
-                "restart_mode": self._restart_mode, "fastest": self.fastest, "entries": rows}
+                "restart_mode": self._restart_mode, "fastest": self.fastest,
+                "lap": self._lap_display(ents), "entries": rows}
+
+    def _lap_display(self, ordered):
+        """{leader, count}: the leader's running lap against the lap count. In endurance
+        the count belongs to the final lobby, so it shows only with that lobby's car and
+        its lobby counter; never a lap past the count once the flag is out."""
+        count = self.lap_count if self.finish_mode == "laps" else None
+        lead = ordered[0] if ordered and ordered[0].distance is not None else None
+        if lead is None:
+            return {"leader": None, "count": count}
+        car = self._cars.get(lead.active)
+        if self.multi_lobby and self._final_car(lead) and car is not None and car.lap is not None:
+            leader = car.lap
+        else:
+            leader = max(0, math.floor(self._shown(lead) / self.length)) + (2 if self.formation else 1)
+            if self.multi_lobby:
+                count = None
+        if count and self._finishing_at is not None:
+            leader = min(leader, count)
+        return {"leader": leader, "count": count}
 
     def _mismatches(self, ordered):
         """Entries whose GT7 positions contradict the distance order (single lobby only)."""

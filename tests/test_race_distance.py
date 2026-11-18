@@ -369,6 +369,34 @@ def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
     assert race.standings(t)["state"] in ("finishing", "finished") and _row(race, "A", t)["finished"]
 
 
+def t_the_lap_display_follows_the_lobby_that_counts_and_stops_at_the_count():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 3 * L / 50)
+    race.open_change_window(t)
+    race.final_lobby(2, t)
+    t = _drive(race, [old, rival], [50, 40], t, L / 50 + 2)
+    assert race.standings(t)["lap"] == {"leader": 5, "count": None}, \
+        f"before the final lobby's car counts, race laps show without the count: {race.standings(t)['lap']}"
+    old.box = True
+    t = _drive(race, [old, rival], [None, 40], t, 3)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [new, rival], [40, 40], t, 2)
+    new.box = True
+    t = _drive(race, [new, rival], [None, 40], t, 3)
+    new.box = False
+    t = _drive(race, [new, rival], [50, 40], t, 20)
+    assert race.standings(t)["lap"] == {"leader": 1, "count": 2}, race.standings(t)["lap"]
+    t = _drive(race, [new, rival], [50, 40], t, (2 * L) / 50 + 2)
+    assert race.standings(t)["lap"] == {"leader": 2, "count": 2}, \
+        f"the final lobby's lap, never past the count: {race.standings(t)['lap']}"
+    single = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
+    a = Car(single, "A", "a", L - 15)
+    t = _drive(single, [a], [50], 0.0, (3 * L + 15) / 50 + 1)
+    assert _row(single, "A", t)["finished"] and single.standings(t)["lap"] == {"leader": 3, "count": 3}, \
+        single.standings(t)["lap"]
+
+
 def t_one_sender_cannot_move_the_line_or_jump_the_field():
     race = rd.Race(TRACE, formation=False)
     x0, z0 = _pos(L / 2)

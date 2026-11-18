@@ -117,7 +117,8 @@ Commentator Cockpit and later the public live timing page: order, entry number a
 colour, driver, the `Cup Team` from the [Configuration tab](Sheet-Template), gaps, status,
 pit stops, race laps (in endurance also the laps of the current stint lobby), the last
 completed lap time, fuel, each car's position for the track map, the leader's lap
-against the lap count, the remaining time of the race timer and the fastest race lap.
+against the lap count (in endurance the final lobby's lap, once the final lobby's car
+counts; never past the count after the flag), the remaining time of the race timer and the fastest race lap.
 It never carries connection ids, corrections or who made them.
 
 - **Lap times** are timed by the relay between two crossings of the line and taken
