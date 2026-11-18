@@ -92,7 +92,10 @@ and says so. Changing the layout mid-event starts the race over.
   full lap or more down shows `+N L`.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
   while its sender has been quiet for five seconds; the entry keeps its place.
-- **Pit stops** count every box stop the car drives out of.
+- **Pit stops** count every box stop the car drives out of. The count is an estimate:
+  the relay sees a stop as standing off the racing line, so a car beached beside the
+  track or stopped there under a red flag counts as a pit stop too. The desks' `Pits`
+  column says so on hover; correct a wrong count with the pit stop correction.
 - **Finish after laps**: the leader finishes on completing the lap count on GT7's
   lap counter, lap 1 included, so a formation lap counts as in the lobby's own
   setting; every other car at its next crossing of the line. **Timed**: Race Control or
