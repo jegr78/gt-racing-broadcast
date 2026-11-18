@@ -153,6 +153,20 @@ def t_status_without_deploy():
     assert st["ok"] and not st["deployed"] and st["url"] is None, st
 
 
+
+class _SubdomainFails(_Api):
+    def __call__(self, method, url, body=None, headers=None):
+        if url.endswith("/workers/subdomain"):
+            self.calls.append((method, url, body, headers or {}))
+            return 500, {"success": False, "errors": [{"code": 10013, "message": "internal error"}]}
+        return super().__call__(method, url, body, headers)
+
+
+def t_other_subdomain_errors_pass_cloudflare_through():
+    r = _deploy(_SubdomainFails())
+    assert not r["ok"] and "internal error" in r["error"] and "Workers & Pages" not in r["error"], r
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
