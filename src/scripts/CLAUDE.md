@@ -97,7 +97,10 @@ the script dir or the project root (marker: `.git`/`.env.example`), never an unr
 parent; real environment variables take precedence. These deliberately do NOT import
 `config.py` (the relay stays dependency-light), but the canonical loader for everything
 else is `src/scripts/config.py`. Keep the five `load_dotenv` copies in sync if you
-touch one.
+touch one. A sixth copy of the line parser is `timing_host._parse_env`, which the relay uses to
+re-read the league's `profile.env` for the timing host keys; it follows
+`config.parse_env_text` and `tests/test_timing_host.py`
+(`t_profile_env_parser_matches_the_cli`) pins the two to the same result.
 
 ## Unified `racecast` CLI (`src/racecast.py`)
 `src/racecast.py` is the single shipped entrypoint for operators. It resolves the
