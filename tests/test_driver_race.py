@@ -558,6 +558,57 @@ def t_public_view_has_no_exact_gaps():
     assert row["gap_s"] == 1.0 and not {"gap_time_s", "interval_time_s", "quiet_s", "in_box"} & set(row), row
 
 
+def _recording_service(enabled=lambda: True):
+    d = tempfile.mkdtemp()
+    wall = [1000.0]
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     enabled=enabled, wall=lambda: wall[0], recording_dir=d)
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
+    return svc, wall, d
+
+
+def _flush(svc):
+    svc._recorder()._writer.flush()
+
+
+def t_tick_records_in_race_mode_only():
+    mode = ["race"]
+    svc, wall, _d = _recording_service(enabled=lambda: mode[0] == "race")
+    svc.recording_start("pit")
+    svc.tick()
+    _flush(svc)
+    assert svc.recording_status()["span"] is not None, "race mode: tick records a sample"
+    mode[0] = "qualifying"
+    wall[0] += 5
+    svc.tick()
+    _flush(svc)
+    span = svc.recording_status()["span"]
+    assert span[0] == span[1] == 1000.0, f"qualifying mode records nothing: {span}"
+    assert svc.recording_at(1000.0)["rows"][0]["entry"] == "A"
+    assert next(svc.recording_csv())[0] == "time_utc"
+
+
+def t_recording_start_is_audited():
+    svc, _wall, d = _recording_service()
+    svc.recording_start("Anna")
+    svc.recording_stop("Ben")
+    svc._recorder()._events[1] = {"id": 1, "entry": "A", "state": "suspected"}
+    svc._recorder()._store.add_event({"id": 1, "entry": "A", "state": "suspected"})
+    svc.recording_decide("Cy", "1", "confirm")
+    svc.recording_decide("Cy", 1, "dismiss")
+    try:
+        svc.recording_decide("Cy", "x", "confirm")
+        raise AssertionError("a bad id must raise")
+    except ValueError:
+        pass
+    with open(dr.audit_path_for(os.path.join(d, "driver-race.json")), encoding="utf-8") as fh:
+        recs = [json.loads(line) for line in fh]
+    got = [(r["who"], r["action"]) for r in recs]
+    assert got == [("Anna", "recording_start"), ("Ben", "recording_stop"),
+                   ("Cy", "dc_confirm"), ("Cy", "dc_dismiss")], got
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

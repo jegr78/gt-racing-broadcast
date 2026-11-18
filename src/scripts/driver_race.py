@@ -25,6 +25,7 @@ import time
 
 import atomic_replace
 import race_distance
+import race_recording
 
 FILENAME = "driver-race.json"
 ACTIONS = "driver-race-actions.json"
@@ -322,11 +323,12 @@ class Service:
     """Thread-safe holder of the live race."""
 
     def __init__(self, settings_path, pick, trace_for, multi_lobby, clock=time.monotonic,
-                 enabled=lambda: True, league_path=None, wall=time.time, context=None):
+                 enabled=lambda: True, league_path=None, wall=time.time, context=None, recording_dir=None):
         """`enabled()` False (the relay in qualifying mode) ignores samples.
         `league_path` holds the profile's restart default; `wall` dates the audit log.
         `context()` gives the dashboard {roster, stint, remaining, mode, segment,
-        connections}; every key optional."""
+        connections}; every key optional. `recording_dir` holds the per-event
+        race recording, opened on first use."""
         self._path = settings_path
         self._pick, self._trace_for = pick, trace_for
         self._multi_lobby = multi_lobby
@@ -341,6 +343,9 @@ class Service:
         self._last_action = _last_audited(audit_path_for(settings_path))
         self._enabled = enabled
         self._lock = threading.Lock()
+        self._recording_dir = recording_dir
+        self._rec_lock = threading.Lock()
+        self._rec = None
         self._race = None
         self._race_pick = object()
         self._line_tried = None
@@ -484,7 +489,51 @@ class Service:
         with self._lock:
             snap = self._viewer(ctx)
             self._snapshots.append((self._clock(), snap))
+            recording = self._recording_dir and self._enabled()
+            standings = self._current().standings(self._clock()) if recording else None
+        if recording:
+            self._recorder().observe(
+                standings, _saved_compounds(_actions_path_for(self._path)), self._wall())
         self.save_fastest()
+
+    def _recorder(self):
+        with self._rec_lock:
+            if self._rec is None:
+                store = race_recording.open_current(self._recording_dir, self._wall())
+                self._rec = race_recording.Recorder(
+                    store, race_recording.Writer(store), self._wall)
+            return self._rec
+
+    def recording_status(self):
+        return self._recorder().status()
+
+    def recording_start(self, who):
+        out = self._recorder().start(who)
+        self.log(who, "recording_start")
+        return out
+
+    def recording_stop(self, who):
+        out = self._recorder().stop(who)
+        self.log(who, "recording_stop")
+        return out
+
+    def recording_decide(self, who, event_id, decision):
+        """Confirm or dismiss a disconnect event; ValueError for a bad id or decision."""
+        if isinstance(event_id, bool):
+            raise ValueError("event id must be a number")
+        try:
+            event_id = int(event_id)
+        except (TypeError, ValueError):
+            raise ValueError("event id must be a number") from None
+        ev = self._recorder().decide(who, event_id, decision)
+        self.log(who, "dc_" + decision, event=event_id, entry=ev.get("entry"))
+        return ev
+
+    def recording_at(self, t_wall):
+        return self._recorder()._store.sample_at(t_wall)
+
+    def recording_csv(self):
+        return self._recorder()._store.csv_rows()
 
     def dashboard(self):
         """The newest snapshot at least the delay setting old; the oldest one while the

@@ -16270,7 +16270,7 @@ def main():
                      if args.overlay_dir else None),
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
-        multi_lobby=lambda: not relay.solo)
+        multi_lobby=lambda: not relay.solo, recording_dir=runtime)
     _hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))
     driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update,
                                    invite_id=lambda: (_hub_invite.get() or {}).get("id"))
