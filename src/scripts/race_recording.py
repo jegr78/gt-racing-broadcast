@@ -263,6 +263,7 @@ class Recorder:
             return self._status_head()
 
     def observe(self, standings, compounds, now_wall):
+        """`compounds` is {entry: code} or a callable giving it, read only when a sample is due."""
         with self._lock:
             state = standings.get("state")
             if state in COUNTING_STATES and not self._auto_done:
@@ -277,7 +278,7 @@ class Recorder:
                 return
             if self._last_sample is None or now_wall - self._last_sample >= SAMPLE_EVERY_S:
                 self._last_sample = now_wall
-                doc = _sample(standings, compounds or {})
+                doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {})
                 self._writer.put(lambda s: s.add_sample(now_wall, doc))
             self._detect(standings, now_wall)
 
@@ -330,6 +331,12 @@ class Recorder:
             self._update(ev, {"state": DECISIONS[decision], "decided_by": who,
                               "decided_at": self._wall()})
             return dict(ev)
+
+    def sample_at(self, t_wall):
+        return self._store.sample_at(t_wall)
+
+    def csv_rows(self):
+        return self._store.csv_rows()
 
     def _status_head(self):
         return {"running": self._running, "started_by": self._started_by,

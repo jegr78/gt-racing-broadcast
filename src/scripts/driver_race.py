@@ -18,7 +18,9 @@ in the profile (`profiles/<name>/driver-race.json`, `restart`: `keep` or
 import collections
 import json
 import math
+import logging
 import os
+import sqlite3
 import tempfile
 import threading
 import time
@@ -319,6 +321,9 @@ def _mode(mode):
     return mode
 
 
+RECORDING_RETRY_S = 30.0
+
+
 class Service:
     """Thread-safe holder of the live race."""
 
@@ -346,6 +351,8 @@ class Service:
         self._recording_dir = recording_dir
         self._rec_lock = threading.Lock()
         self._rec = None
+        self._rec_retry = 0.0
+        self._rec_failing = False
         self._race = None
         self._race_pick = object()
         self._line_tried = None
@@ -492,11 +499,30 @@ class Service:
             recording = self._recording_dir and self._enabled()
             standings = self._current().standings(self._clock()) if recording else None
         if recording:
-            self._recorder().observe(
-                standings, _saved_compounds(_actions_path_for(self._path)), self._wall())
+            self._observe(standings)
         self.save_fastest()
 
+    def _observe(self, standings):
+        """Feed the recorder; a recording failure is logged once and never stops the tick."""
+        try:
+            now = self._clock()
+            if self._rec is None and now < self._rec_retry:
+                return
+            self._recorder().observe(standings, self._compound_codes, self._wall())
+            self._rec_failing = False
+        except (OSError, sqlite3.Error) as e:
+            self._rec_retry = self._clock() + RECORDING_RETRY_S
+            if not self._rec_failing:
+                self._rec_failing = True
+                logging.getLogger(__name__).warning("race recording unavailable: %s", e)
+
+    def _compound_codes(self):
+        saved = _saved_compounds(_actions_path_for(self._path))
+        return {e: v.get("code") for e, v in saved.items() if isinstance(v, dict)}
+
     def _recorder(self):
+        if not self._recording_dir:
+            raise RuntimeError("recording unavailable")
         with self._rec_lock:
             if self._rec is None:
                 store = race_recording.open_current(self._recording_dir, self._wall())
@@ -509,12 +535,12 @@ class Service:
 
     def recording_start(self, who):
         out = self._recorder().start(who)
-        self.log(who, "recording_start")
+        self._audit(who, "recording_start")
         return out
 
     def recording_stop(self, who):
         out = self._recorder().stop(who)
-        self.log(who, "recording_stop")
+        self._audit(who, "recording_stop")
         return out
 
     def recording_decide(self, who, event_id, decision):
@@ -526,14 +552,18 @@ class Service:
         except (TypeError, ValueError):
             raise ValueError("event id must be a number") from None
         ev = self._recorder().decide(who, event_id, decision)
-        self.log(who, "dc_" + decision, event=event_id, entry=ev.get("entry"))
+        self._audit(who, "dc_" + decision, event=event_id, entry=ev.get("entry"))
         return ev
 
+    def _audit(self, who, action, **fields):
+        with self._lock:
+            self._log(who, action, **fields)
+
     def recording_at(self, t_wall):
-        return self._recorder()._store.sample_at(t_wall)
+        return self._recorder().sample_at(t_wall)
 
     def recording_csv(self):
-        return self._recorder()._store.csv_rows()
+        return self._recorder().csv_rows()
 
     def dashboard(self):
         """The newest snapshot at least the delay setting old; the oldest one while the

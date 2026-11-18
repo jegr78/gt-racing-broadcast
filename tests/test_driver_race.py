@@ -609,6 +609,55 @@ def t_recording_start_is_audited():
                    ("Cy", "dc_confirm"), ("Cy", "dc_dismiss")], got
 
 
+def t_the_recording_carries_the_compound_code():
+    svc, wall, _d = _recording_service()
+    svc.set_compound("pit", "A", "RS")
+    svc.recording_start("pit")
+    svc.tick()
+    _flush(svc)
+    assert svc.recording_at(1000.0)["rows"][0]["compound"] == "RS", svc.recording_at(1000.0)
+
+
+def t_a_failing_recording_does_not_stop_the_fastest_lap_save():
+    d = tempfile.mkdtemp()
+    blocker = os.path.join(d, "file")
+    open(blocker, "w").close()
+    wall = [1000.0]
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     wall=lambda: wall[0], recording_dir=os.path.join(blocker, "sub"))
+    svc.set_fastest("pit", "A", "Max", 90000)
+    svc.tick()
+    assert os.path.exists(svc._fastest_path()), "the fastest lap is saved although recording failed"
+    opened = []
+    real = dr.race_recording.open_current
+    dr.race_recording.open_current = lambda *a: opened.append(1) or real(*a)
+    try:
+        svc.tick()
+        assert not opened, "a failed open is not retried within the backoff"
+        wall[0] += dr.RECORDING_RETRY_S + 1
+        svc.tick()
+        assert opened, "it retries after the backoff"
+    finally:
+        dr.race_recording.open_current = real
+
+
+def t_recording_without_a_directory_and_unknown_events_raise():
+    svc = dr.Service(os.path.join(tempfile.mkdtemp(), "driver-race.json"), pick=lambda: None,
+                     trace_for=lambda i: None, multi_lobby=lambda: False)
+    try:
+        svc.recording_status()
+        raise AssertionError("no recording_dir must raise")
+    except RuntimeError as e:
+        assert "unavailable" in str(e)
+    svc, _wall, _d = _recording_service()
+    try:
+        svc.recording_decide("Cy", "99", "confirm")
+        raise AssertionError("an unknown id must raise")
+    except KeyError:
+        pass  # the route maps this to 404
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
