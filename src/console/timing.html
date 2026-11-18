@@ -341,6 +341,11 @@
     };
   }
 
+  function followMove(d) {
+    const move = LOGIC.funnelMove(d, location.search, (Date.now() - loadedAt) / 1000);
+    if (move) location.replace(move);
+    return !!move;
+  }
   async function poll() {
     let wait = 2000;
     try {
@@ -349,14 +354,17 @@
       if (pace >= 2) { interval = pace; wait = pace * 1000; }
       if (res.status === 429 && !(pace >= 2)) wait = 5000;
       else if (res.status === 403) { showEnded(); return; }
-      else if (res.status === 304) { got = Date.now(); dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0; if (last) render(last); }
+      else if (res.status === 304) {
+        got = Date.now(); dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0;
+        if (last && followMove(last)) return;   // the dwell can end while the data stands still
+        if (last) render(last);
+      }
       else if (res.ok) {
         const d = await res.json();
         etag = res.headers.get("ETag");
         got = Date.now();
         dataAge = parseFloat(res.headers.get("X-Data-Age")) || 0;
-        const move = LOGIC.funnelMove(d, location.search, (Date.now() - loadedAt) / 1000);
-        if (move) { location.replace(move); return; }
+        if (followMove(d)) return;
         render(d); activity(d);
       }
     } catch (e) { wait = 5000; }
