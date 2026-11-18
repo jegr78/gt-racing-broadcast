@@ -14,7 +14,8 @@ OP_TEXT, OP_CLOSE, OP_PING, OP_PONG = 0x1, 0x8, 0x9, 0xA
 
 
 def _resolve(host, port, timeout):
-    """(address, port) with the DNS lookup bounded too; create_connection's timeout is not."""
+    """Every (address, port), in resolver order, with the DNS lookup bounded too;
+    create_connection's timeout is not."""
     found, failed = [], []
 
     def lookup():
@@ -29,7 +30,33 @@ def _resolve(host, port, timeout):
         raise failed[0]
     if not found:
         raise TimeoutError(f"resolving {host} timed out")
-    return found[0][0][4][:2]
+    addrs = []
+    for info in found[0]:
+        addr = info[4][:2]
+        if addr not in addrs:
+            addrs.append(addr)
+    return addrs
+
+
+def _open_socket(host, port, timeout, resolve=_resolve, create=socket.create_connection):
+    """A TCP connection to the first address that answers, all within `timeout`.
+    Each address gets an equal share of the time left, so a dead IPv6 route leaves
+    room for IPv4."""
+    deadline = time.monotonic() + timeout
+    addrs = resolve(host, port, timeout)
+    last = None
+    for i, addr in enumerate(addrs):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        try:
+            sock = create(addr, timeout=left / (len(addrs) - i))
+        except OSError as e:
+            last = e
+            continue
+        sock.settimeout(timeout)
+        return sock
+    raise last or TimeoutError(f"connecting to {host} timed out")
 
 
 class WsClient:
@@ -48,7 +75,7 @@ class WsClient:
         tls = parts.scheme == "wss"
         port = parts.port or (443 if tls else 80)
         path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-        sock = socket.create_connection(_resolve(parts.hostname, port, timeout), timeout=timeout)
+        sock = _open_socket(parts.hostname, port, timeout)
         try:
             if tls:
                 ctx = ssl_context or ssl.create_default_context()
