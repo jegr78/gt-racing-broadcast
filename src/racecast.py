@@ -6113,6 +6113,23 @@ def _nudge_relay_timing_host():
         pass  # no relay running: it reads the files at start
 
 
+TIMING_END_WAIT_S = 6.0   # covers the publisher's own bounded connect to an old room
+
+
+def _wait_timing_host_end(relay=None, sleep=time.sleep, clock=time.monotonic):
+    """After the timing link was cleared: give a running relay's publisher a bounded
+    moment to send `end` to the host before the relay stops."""
+    relay = relay or _relay_timing_link
+    deadline = clock() + TIMING_END_WAIT_S
+    while True:
+        host = (relay() or {}).get("host") or {}
+        if not (host.get("configured") and host.get("room")):
+            return
+        if clock() >= deadline:
+            return
+        sleep(0.2)
+
+
 def event_timing_data(new=False, serve=None, path=None, links=None, relay=None, nudge=None,
                       funnel_on=None):
     """The event's public live timing link (#1128): {ok, active, funnel, tailnet, created,
@@ -6129,6 +6146,7 @@ def event_timing_data(new=False, serve=None, path=None, links=None, relay=None, 
         return {"ok": False, "error": f"serve must be one of {', '.join(timing_link.PATHS)}"}
     if new:
         link = timing_link.create(path)
+        (nudge or _nudge_relay_timing_host)()     # the publisher ends the old room now
     if link is None:
         return {"ok": True, "active": False}
     urls = (links or _timing_links)(link["id"])
@@ -6840,6 +6858,7 @@ def event_stop(rest):
         _stop_driver_invite()          # the invite link dies with the event
     except OSError as exc:
         print(f"driver invite: not removed ({exc}).")
+    _nudge_relay_timing_host()         # the timing host's room ends with it
     if not _relay_is_alive():
         print("Event already stopped: nothing to do "
               "(the last-part auto-stop already ran the report + teardown; the "
@@ -6873,6 +6892,7 @@ def event_stop(rest):
               else f"companion: stop failed (exit {exc.code}).")
     if glob.glob(os.path.join(_streams_static_dir(), "feed_*.pid")):
         streams_stop([])
+    _wait_timing_host_end()
     relay_stop([])
     print("OBS/Discord/Tailscale keep running: quit them manually if needed.")
 

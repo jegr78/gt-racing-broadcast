@@ -17,6 +17,9 @@ BACKOFF_MIN_S = 2.0
 BACKOFF_MAX_S = 30.0
 SOCKET_TIMEOUT_S = 5.0
 RECV_POLL_S = 0.05
+# A connection that held this long after a replacement is no duel: two relays replace
+# each other every BACKOFF_MAX_S.
+STABLE_S = 2 * BACKOFF_MAX_S
 
 LOG = logging.getLogger("racecast.timing_publish")
 
@@ -52,6 +55,8 @@ class Publisher:
         self._reload = True
         self._conn = None
         self._conn_link = None
+        self._room = None               # the link this publisher last opened: it owes it an end
+        self._opened_at = None
         self._seq = 0
         self._last_sent = None
         self._last_ack = None
@@ -83,7 +88,8 @@ class Publisher:
                     "last_ack_age_s": None if self._conn is None or self._last_ack is None
                     else round(now - self._last_ack, 1),
                     "viewers": self._viewers, "requests_today": self._requests_today,
-                    "msgs_today": self._msgs_today, "last_error": self._last_error}
+                    "msgs_today": self._msgs_today, "last_error": self._last_error,
+                    "room": self._room is not None}
 
     def run(self, stop):
         while not stop.is_set():
@@ -102,14 +108,14 @@ class Publisher:
             settings = self._settings_fn()
             if settings != self._settings:
                 self._close()
+                self._room = None       # a room on another host, or the event's room kept
             with self._lock:
                 self._settings = settings
         if self._settings is None:
             return TICK_S
         link = self._link_fn()
-        if self._conn is not None and self._conn_link != link:
-            self._send(timing_host.end_frame())
-            self._close()
+        if self._room is not None and self._room != link:
+            self._end_room(self._room)
         if link is None:
             return TICK_S
         now = self._clock()
@@ -140,7 +146,7 @@ class Publisher:
             self._fail(_explain(e) or f"cannot reach the timing host: {e}", now)
             return False
         with self._lock:
-            self._conn, self._conn_link = conn, link
+            self._conn, self._conn_link, self._room, self._opened_at = conn, link, link, now
             self._last_ack, self._last_sent, self._moved = now, None, None
             replaced = self._logged_error == REPLACED
             self._backoff = BACKOFF_MAX_S if replaced else 0.0
@@ -149,6 +155,37 @@ class Publisher:
             self._log.info("timing host: connected")
             self._logged_error = None
         return True
+
+    def _end_room(self, link):
+        """Send `end` to a room this publisher left: on the open socket, else with one
+        bounded connection of its own. A room left without it ends itself after 30 min."""
+        if self._conn is not None and self._conn_link == link:
+            if self._send(timing_host.end_frame()):
+                self._close()
+                self._room = None
+                return
+        self._close()
+        self._room = None
+        try:
+            conn = self._connect(timing_host.publish_url(self._settings.url, link),
+                                 {"Authorization": f"Bearer {self._settings.key}"},
+                                 timeout=SOCKET_TIMEOUT_S)
+        except (OSError, ValueError) as e:
+            if "410" not in str(e):
+                self._log.warning("timing host: the old timing link was not ended (%s); "
+                                  "the host ends it after 30 minutes", e)
+            return
+        try:
+            conn.send_text(timing_host.end_frame())
+            self._count()
+        except (OSError, ConnectionError) as e:
+            self._log.warning("timing host: the old timing link was not ended (%s); "
+                              "the host ends it after 30 minutes", e)
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass  # already gone
 
     def _fail(self, message, now):
         self._backoff = BACKOFF_MAX_S if message == REPLACED else \
@@ -215,9 +252,14 @@ class Publisher:
                 return
             ack = timing_host.parse_host_frame(text)
             if ack is not None:
+                now = self._clock()
                 with self._lock:
-                    self._last_ack = self._clock()
+                    self._last_ack = now
                     self._viewers, self._requests_today = ack["viewers"], ack["requests_today"]
+                if self._logged_error == REPLACED and now - self._opened_at >= STABLE_S:
+                    self._backoff = 0.0
+                    self._logged_error = None
+                    self._log.info("timing host: connected")
 
     def _close(self):
         conn = self._conn

@@ -6930,6 +6930,71 @@ def t_serve_switch_stores_and_nudges_the_relay():
     assert d["ok"] and m.timing_link_mod().served(path) == "funnel" and nudged == [1], d
 
 
+def t_renewing_the_timing_link_nudges_the_relay():
+    path, _link, tlinks = _timing_rig()
+    nudged = []
+    d = m.event_timing_data(new=True, path=path, links=tlinks, relay=lambda: None,
+                            nudge=lambda: nudged.append(1))
+    assert d["ok"] and nudged == [1], "the publisher ends the old room at once"
+
+
+class _FakeTime:
+    def __init__(self):
+        self.t = 0.0
+
+    def clock(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+def t_timing_host_end_waits_until_the_room_is_left():
+    answers = [{"host": {"configured": True, "room": True}}] * 3 + [
+        {"host": {"configured": True, "room": False}}]
+    calls, ft = [], _FakeTime()
+
+    def relay():
+        calls.append(1)
+        return answers[min(len(calls) - 1, len(answers) - 1)]
+    m._wait_timing_host_end(relay=relay, sleep=ft.sleep, clock=ft.clock)
+    assert len(calls) == 4, calls
+
+
+def t_timing_host_end_wait_is_bounded_and_skips_without_a_room():
+    ft = _FakeTime()
+    m._wait_timing_host_end(relay=lambda: {"host": {"configured": True, "room": True}},
+                            sleep=ft.sleep, clock=ft.clock)
+    assert ft.t <= m.TIMING_END_WAIT_S + 0.5, ft.t
+    for live in (None, {"host": None}, {"host": {"configured": False, "room": True}}):
+        ft = _FakeTime()
+        m._wait_timing_host_end(relay=lambda live=live: live, sleep=ft.sleep, clock=ft.clock)
+        assert ft.t == 0.0, live
+
+
+def t_event_stop_ends_the_hosted_room_before_the_relay_stops():
+    calls = []
+    saved = (m.relay_stop, m.companion_stop, m.streams_stop, m._streams_static_dir,
+             m._relay_is_alive, m._stop_driver_invite, m._nudge_relay_timing_host,
+             m._wait_timing_host_end, m._discord_autoleave)
+    try:
+        m._stop_driver_invite = lambda: calls.append("clear")
+        m._nudge_relay_timing_host = lambda: calls.append("nudge")
+        m._wait_timing_host_end = lambda: calls.append("wait")
+        m.relay_stop = lambda a: calls.append("relay_stop")
+        m.companion_stop = lambda a: None
+        m.streams_stop = lambda a: None
+        m._streams_static_dir = lambda: "/nonexistent-streams-dir"
+        m._relay_is_alive = lambda: True
+        m._discord_autoleave = lambda: None
+        m.event_stop(["--no-report"])
+        assert calls == ["clear", "nudge", "wait", "relay_stop"], calls
+    finally:
+        (m.relay_stop, m.companion_stop, m.streams_stop, m._streams_static_dir,
+         m._relay_is_alive, m._stop_driver_invite, m._nudge_relay_timing_host,
+         m._wait_timing_host_end, m._discord_autoleave) = saved
+
+
 def t_serve_funnel_refused_without_funnel_host():
     path, _link, _t = _timing_rig()
     d = m.event_timing_data(serve="funnel", path=path,

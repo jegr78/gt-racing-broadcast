@@ -181,11 +181,16 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
   `profile.env` (the relay's standalone `load_dotenv` copy; `racecast` passes the profile.env path
   at relay start). A host set up mid-event is used at once. It reads the current link through `timing_link.Cache` each tick, so
   `event stop` and `event timing --new` take effect without a relay restart (send `end` to the old
-  room, connect to the new one).
+  room, connect to the new one). Both nudge the publisher right after the link changes, and
+  `event stop` waits a bounded moment (6 s) until the publisher left the old room before it stops
+  the relay. A publisher that is disconnected when the link changes sends `end` over one bounded
+  connection of its own; if that fails, the room's 30 minute orphan alarm ends it.
+- After another relay replaced it on the same link, the publisher keeps the 30 s backoff until a
+  new connection held for 60 s, then clears it and logs the recovery.
 - WebSocket client from the stdlib: reuse `obs_ws` framing (`encode_frame`, `decode_frame`,
   handshake helpers, client masking), wrapped in `ssl` with certificate verification. Every socket
   operation has a timeout. Reconnect with capped exponential backoff.
-- Its status (`connected`, `last_ack_age_s`, `viewers`, `last_error`) is exposed on
+- Its status (`connected`, `last_ack_age_s`, `viewers`, `last_error`, `room`) is exposed on
   `/drivers/timing-link` and to the Control Center.
 
 ### Choosing and switching the path
