@@ -150,15 +150,25 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
   the Worker it opens the WebSocket, renders each `state`, and keeps the local countdown and the
   data-age display it has now.
 - Fallback (user decision (b)) is for a failing host, not a missing publisher. The page redirects
-  with `location.replace(fallback)` when its socket to the host cannot be re-established after 3
-  attempts with backoff. Silence on an open socket never redirects: when the relay machine loses
+  with `location.replace(fallback)` when 3 attempts after the drop of its socket failed and at
+  least 12 s passed since the drop; the drop itself is not a failed attempt, and a state on a new
+  socket resets the count. Silence on an open socket never redirects: when the relay machine loses
   power or network, the room learns it late (no close frame), and Funnel runs on that machine too.
   A `publisher: false` message, or 20 s without a state, shows "relay reconnecting" with the
   stale-data age. The relay sends a `fallback` only while Funnel serves `/console` (checked at most
-  once a minute in the background); without one the page keeps retrying. Fallback URLs must be
-  https. The Funnel page never redirects back (`from=host`).
+  once a minute in the background); without one the page keeps retrying with backoff from 1 s to
+  8 s. After 6 failed attempts it says "timing link unavailable" and retries every 2 minutes; 30
+  minutes after the drop it stops (a refused socket, 404 or 410, is a billed Worker request).
+  Fallback URLs must be https.
+- The redirect names its reason: `from=host` for the automatic fallback, `from=moved` for the
+  producer's switch to Funnel. The Funnel page follows `moved_to` at once for a plain visit, after
+  10 s for `from=moved` (the room may still hold the old move for a moment) and after 60 s for
+  `from=host`, so a flaky host cannot bounce viewers back and forth. `moved_to` appears only while
+  the host is served and its publisher is connected.
 - Known limit: when the daily request quota is exhausted, Cloudflare does not serve the page at all
   (error 1027). The redirect then reaches only viewers already connected.
+  The publisher's socket can stay up meanwhile, so `moved_to` still sends returning Funnel viewers
+  to the host after their dwell; the producer switches to Funnel before the quota runs out.
 
 ### Relay publisher
 

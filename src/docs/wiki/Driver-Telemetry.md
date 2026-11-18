@@ -214,9 +214,12 @@ hand out (hosted by default) with the number of viewers on the host, and the oth
 below it. `racecast event timing --serve funnel` (or **Serve Funnel** in the Home row)
 switches to the Funnel link and moves the viewers on the hosted page there; it needs
 Funnel switched on (`racecast funnel on`). `--serve hosted` moves the Funnel viewers to
-the host. If the host itself becomes unreachable, its viewers move to the Funnel page
-on their own, as long as Funnel is on. If the relay restarts or its machine drops off,
-they stay on the hosted page and see "relay reconnecting".
+the host. Switching back to `hosted` brings the moved viewers back. If the host itself
+becomes unreachable, its viewers move to the Funnel page on their own after about 12 s,
+as long as Funnel is on, and return a minute later once the host serves again. If the
+relay restarts or its machine drops off, they stay on the hosted page and see "relay
+reconnecting". A hosted page that cannot reach its link for a while says "timing link
+unavailable" and stops trying after 30 minutes.
 
 The free plan allows 100,000 requests a day per Cloudflare account (reset at 00:00
 UTC). Each viewer costs two (the page and its live connection); the relay's updates cost
