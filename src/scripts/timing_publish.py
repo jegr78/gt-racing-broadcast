@@ -71,7 +71,8 @@ class Publisher:
         self._last_error = None
         self._logged_error = None
         self._viewers = 0
-        self._requests_today = 0
+        self._requests_today = 0        # the current room's count, from its acks
+        self._requests_base = 0         # rooms this publisher left today; the quota is per account
         self._msgs_today = 0
         self._day = None
         self._quota_low = False
@@ -93,7 +94,7 @@ class Publisher:
                     "connected": self._conn is not None,
                     "last_ack_age_s": None if self._conn is None or self._last_ack is None
                     else round(now - self._last_ack, 1),
-                    "viewers": self._viewers, "requests_today": self._requests_today,
+                    "viewers": self._viewers, "requests_today": self._requests_base + self._requests_today,
                     "msgs_today": self._msgs_today, "last_error": self._last_error,
                     "room": self._room is not None, "quota_low": self._quota_low}
 
@@ -168,6 +169,7 @@ class Publisher:
         """Send `end` to a room this publisher left: on the open socket, else with one
         bounded connection of its own. A room left without it ends itself after 30 min."""
         with self._lock:
+            self._requests_base += self._requests_today
             self._requests_today = 0    # the next room starts its own count
         if self._conn is not None and self._conn_link == link:
             if self._send(timing_host.end_frame()):
@@ -220,7 +222,8 @@ class Publisher:
         day = int(self._wall() // 86400)
         with self._lock:
             if day != self._day:
-                self._day, self._msgs_today, self._requests_today = day, 0, 0
+                self._day, self._msgs_today = day, 0
+                self._requests_today = self._requests_base = 0
 
     def _count(self):
         self._roll_day()
@@ -230,7 +233,8 @@ class Publisher:
     def _check_quota(self):
         """The Control Center's estimate (requests today plus messages / 20) against the guard."""
         with self._lock:
-            low = self._requests_today + self._msgs_today / 20 >= QUOTA_GUARD_REQUESTS
+            used = self._requests_base + self._requests_today + self._msgs_today / 20
+            low = used >= QUOTA_GUARD_REQUESTS
             changed, self._quota_low = low != self._quota_low, low
         if changed and low:
             self._log.warning("timing host: %s", QUOTA_LOW)

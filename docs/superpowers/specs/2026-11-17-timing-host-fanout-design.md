@@ -124,8 +124,9 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
   socket closes or returns, and `{"t": "moved", "to": url}` forwarded from the relay.
 - The ack also carries `requests_today`: viewer page loads plus socket upgrades this room served
   since 00:00 UTC (each viewer costs two Worker requests). The room stores it with the state and
-  starts a new day on the first request or state after midnight. It counts one room, so a renewed
-  link starts at 0; the Control Center label says the estimate covers this link.
+  starts a new day on the first request or state after midnight. It counts one room; the
+  publisher adds the counts of the rooms it left today, so a renewed link does not start the
+  estimate at 0 (a relay restart does).
 - Room states: unknown (no publish yet), live, ended.
   - Unknown: the page and the socket answer 404 "unknown timing link". A room only becomes live
     with its first publish.
@@ -170,14 +171,16 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
   the host is served and its publisher is connected.
 - Known limit: when the daily request quota is exhausted, Cloudflare does not serve the page at all
   (error 1027), and no fallback script runs on its error page. The relay guards against it with
-  its own estimate (`requests_today` from the last ack plus its messages today / 20, the number
-  the Control Center shows): from 90 % of the 100,000 free requests (`QUOTA_GUARD_REQUESTS`) the
+  its own estimate (`requests_today` of the current room, plus the last counts of the rooms it
+  left the same UTC day, plus its messages today / 20, the number the Control Center and the
+  desks show): from 90 % of the 100,000 free requests (`QUOTA_GUARD_REQUESTS`) the
   Funnel data carries no `moved_to`, and the publisher sends `moved` toward the Funnel URL so
   hosted viewers leave before the hard stop (only while a Funnel URL exists). It reports
-  `quota_low` in its status and logs "daily request quota nearly used, viewers stay on Funnel"
-  once. A new UTC day or a renewed link (a new room with its own count) lifts it. The estimate is
-  a lower bound: it misses other Workers on the account and requests of an earlier link the same
-  day, so the guard can still come too late.
+  `quota_low` in its status, the Control Center Home row and the desks show "quota nearly used:
+  viewers stay on Funnel", and it logs "daily request quota nearly used, viewers stay on Funnel"
+  once. Only a new UTC day lifts it; a renewed link keeps it, since the quota is per account. The
+  estimate is a lower bound: it misses other Workers on the account and, after a relay restart,
+  the requests of the day before the restart, so the guard can still come too late.
 
 ### Relay publisher
 

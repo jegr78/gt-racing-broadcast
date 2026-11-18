@@ -417,12 +417,19 @@ def t_the_quota_guard_resets_on_a_new_day():
         "the hosted link is served again"
 
 
-def t_the_quota_guard_resets_with_a_renewed_link():
+def t_the_quota_guard_holds_across_a_renewed_link():
     r = _Rig()
     _near_quota(r)
     r.link = LINK_B
     r.step(2.0)
-    assert r.pub.status()["quota_low"] is False, "a new room starts its own count"
+    r.acks.append(_ack(5))
+    r.step(2.0)
+    st = r.pub.status()
+    assert st["quota_low"] is True, "the quota is per account: a new room does not free it"
+    assert st["requests_today"] == tp.QUOTA_GUARD_REQUESTS + 5, st
+    assert {"t": "moved", "to": FALLBACK} in r.conns[-1].sent, "the new room's viewers go to Funnel too"
+    r.step(86400.0)
+    assert r.pub.status()["quota_low"] is False, "only a new UTC day starts the count again"
 
 
 if __name__ == "__main__":
