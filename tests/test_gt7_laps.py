@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """GT7 lap index: sector math, traces, the cache and the comparison pool.
 Run: python3 tests/test_gt7_laps.py"""
-import contextlib, math, os, struct, sys, tempfile
+import contextlib, json, math, os, struct, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import gt7_laps as gl
+import gt7_packet_stats
 import gt7_recording
 import gt7_telemetry as tm
 
@@ -79,12 +80,13 @@ def _pkt(lap, speed, angle, last_ms=-1, pid=0, slip=(1.0, 1.0, 1.0, 1.0), brake=
 
 
 def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_000_000.0,
-                           n=400, ns=None, lost=(), slip=None):
+                           n=400, ns=None, lost=(), slip=None, pause=None):
     """One lap per entry of lap_secs around the circle, `n` packets each (or ns[i] for
     lap i); lap 1 is the engine's partial first lap. From the 6th packet of a lap GT7's
     last_ms reports the previous timed lap; 10 packets of one more lap close the last one.
     Packets are numbered from 1; the numbers in `lost` never reach the recording.
-    `slip(lap, k)` returns (per-wheel slip, brake byte) for packet k of a lap, or None."""
+    `slip(lap, k)` returns (per-wheel slip, brake byte) for packet k of a lap, or None.
+    `pause` maps a packet number to seconds of silence before it."""
     w = gt7_recording.RecordingWriter(rec_dir, "Solo", "dev", flush_s=0.05, queue_max=0)
     t, last_ms, pid = t0, -1, 0
     for li, secs in enumerate(list(lap_secs) + [lap_secs[-1]]):
@@ -94,6 +96,7 @@ def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_
             if li >= 2 and k == 5:
                 last_ms = round(lap_secs[li - 1] * 1000)
             pid += 1
+            t += (pause or {}).get(pid, 0.0)
             extra = slip(li + 1, k) if slip else None
             if pid not in lost:
                 w.put(t, "~", _pkt(li + 1, speed, 2 * math.pi * k / n, last_ms, pid,
@@ -466,6 +469,40 @@ def t_the_index_flags_laps_that_lost_packets():
         assert (_lap(idx, 3)["status"], _lap(idx, 3)["pace_eligible"]) == \
             (_lap(clean, 3)["status"], _lap(clean, 3)["pace_eligible"]), "a lost packet flags the lap, it does not reject it"
         assert "packets lost" not in " ".join(_lap(idx, 2)["reasons"])
+
+
+def _with_meta_after(path, after_pid, meta):
+    """Rewrite the recording with a meta record right after packet `after_pid`."""
+    rec = gt7_recording.Recording(path)
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    out, prev = [raw[:rec._offset]], rec._offset
+    for wall_ts, _kind, plain in rec.packets():
+        out.append(raw[prev:rec.pos])
+        prev = rec.pos
+        if gt7_packet_stats.packet_id(plain) == after_pid:
+            out.append(gt7_recording._encode(wall_ts, gt7_recording._META, json.dumps(meta).encode()))
+    out.append(raw[prev:])
+    with open(path, "wb") as fh:
+        fh.write(b"".join(out))
+
+
+def t_recorder_queue_drops_are_not_network_loss():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d, lost=set(range(900, 905)))
+        _with_meta_after(path, 910, {"dropped": 5})
+        lap3 = _lap(_index(path), 3)
+        assert lap3["packets_lost"] == 0, \
+            f"ids the recorder queue dropped (meta 'dropped') must not count as lost: {lap3['packets_lost']}"
+
+
+def t_a_silent_stretch_starts_a_new_count():
+    with tempfile.TemporaryDirectory() as d:
+        pause = {900: gt7_packet_stats.STREAM_IDLE_S + 1}
+        idx = _index(write_circle_recording(d, lost=set(range(895, 900)), pause=pause))
+        assert _lap(idx, 3)["packets_lost"] == 0, \
+            ("ids missing across STREAM_IDLE_S of silence are a paused console, not loss",
+             _lap(idx, 3)["packets_lost"])
 
 
 def _slips(lap, k):

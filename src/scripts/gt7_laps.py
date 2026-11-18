@@ -22,7 +22,7 @@ STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 13
+INDEX_VERSION = 14
 MAX_WHEEL_EVENTS = 100        # stored per lap; the lock-up and wheelspin counts cover all
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
@@ -371,12 +371,16 @@ class _Replay:
 
     def run(self, rec):
         rec.dropped = self.dropped
+        seen_dropped = rec.dropped
         marked = len(self.laps)
         for wall_ts, _kind, plain in rec.packets(self.start):
+            if rec.dropped > seen_dropped:          # the recorder queue lost these, not the network
+                self.lap_lost = max(0, self.lap_lost - (rec.dropped - seen_dropped))
+                seen_dropped = rec.dropped
             relative = wall_ts - (self.first if self.first is not None else wall_ts)
             if math.isfinite(relative) and (not self.raw_seek or relative >= self.raw_seek[-1][0] + 2):
                 self.raw_seek.append((relative, rec.record_start))
-            self._count_lost(gt7_packet_stats.packet_id(plain))
+            self._count_lost(gt7_packet_stats.packet_id(plain), wall_ts)
             self._feed(wall_ts, gt7_telemetry.parse_packet(plain))
             if len(self.laps) > marked and self.times.settled():
                 marked = len(self.laps)
@@ -390,10 +394,13 @@ class _Replay:
                     "slip": self.slip.state()}
         self.dropped = rec.dropped
 
-    def _count_lost(self, pid):
-        """Gaps in the packet ids belong to the lap they fall into; a new stream starts over."""
+    def _count_lost(self, pid, wall_ts):
+        """Gaps in the packet ids belong to the lap they fall into; a new stream, also one
+        after STREAM_IDLE_S of silence, starts over."""
         if pid is None:
             return
+        if self.last is not None and wall_ts - self.last >= gt7_packet_stats.STREAM_IDLE_S:
+            self.last_pid = None
         last = self.last_pid
         self.lap_lost += gt7_packet_stats.gap(last, pid)
         if last is None or pid > last or pid < last - gt7_packet_stats.REORDER_WINDOW:
