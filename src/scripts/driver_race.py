@@ -17,8 +17,8 @@ in the profile (`profiles/<name>/driver-race.json`, `restart`: `keep` or
 """
 import collections
 import json
-import math
 import logging
+import math
 import os
 import sqlite3
 import tempfile
@@ -322,6 +322,11 @@ def _mode(mode):
 
 
 RECORDING_RETRY_S = 30.0
+_STORE_ERRORS = (OSError, sqlite3.Error)
+
+
+class NotRaceMode(Exception):
+    """A manual recording start while the relay is not in race mode."""
 
 
 class Service:
@@ -333,7 +338,7 @@ class Service:
         `league_path` holds the profile's restart default; `wall` dates the audit log.
         `context()` gives the dashboard {roster, stint, remaining, mode, segment,
         connections}; every key optional. `recording_dir` holds the per-event
-        race recording, opened on first use."""
+        race recording, opened here in race mode, else by the first race-mode tick."""
         self._path = settings_path
         self._pick, self._trace_for = pick, trace_for
         self._multi_lobby = multi_lobby
@@ -359,6 +364,8 @@ class Service:
         self._final_lobby_laps = None
         self._final_on_air = False  # endurance: the last schedule row is on air
         self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver)}
+        if recording_dir and enabled():
+            self._guarded(self._recorder)
 
     def _current(self):
         pick = self._pick()
@@ -503,55 +510,94 @@ class Service:
         self.save_fastest()
 
     def _observe(self, standings):
-        """Feed the recorder; a recording failure is logged once and never stops the tick."""
+        """Feed the recorder; a recording failure never stops the tick."""
+        if self._rec is None and self._clock() < self._rec_retry:
+            return
+        self._guarded(lambda: self._recorder().observe(
+            standings, self._compound_codes, self._wall()))
+
+    def _guarded(self, fn):
+        """Run fn; any failure is logged once and backs off RECORDING_RETRY_S."""
         try:
-            now = self._clock()
-            if self._rec is None and now < self._rec_retry:
-                return
-            self._recorder().observe(standings, self._compound_codes, self._wall())
+            fn()
             self._rec_failing = False
-        except (OSError, sqlite3.Error) as e:
+        except Exception as e:
             self._rec_retry = self._clock() + RECORDING_RETRY_S
             if not self._rec_failing:
                 self._rec_failing = True
-                logging.getLogger(__name__).warning("race recording unavailable: %s", e)
+                logging.getLogger(__name__).warning("race recording unavailable: %s", e.__cause__ or e)
 
     def _compound_codes(self):
         saved = _saved_compounds(_actions_path_for(self._path))
         return {e: v.get("code") for e, v in saved.items() if isinstance(v, dict)}
 
     def _recorder(self):
+        """The open recorder, opening it when needed; RuntimeError when that fails."""
         if not self._recording_dir:
             raise RuntimeError("recording unavailable")
         with self._rec_lock:
             if self._rec is None:
-                store = race_recording.open_current(self._recording_dir, self._wall())
-                self._rec = race_recording.Recorder(
-                    store, race_recording.Writer(store), self._wall)
+                try:
+                    store = race_recording.open_current(self._recording_dir, self._wall())
+                    self._rec = race_recording.Recorder(
+                        store, race_recording.Writer(store), self._wall)
+                except _STORE_ERRORS as e:
+                    raise RuntimeError("recording unavailable") from e
             return self._rec
 
+    def _open_recorder(self):
+        """The recorder for a read: None while none is open (never opens one here);
+        RuntimeError while opening it fails."""
+        if not self._recording_dir:
+            raise RuntimeError("recording unavailable")
+        if self._rec is None and self._rec_failing:
+            raise RuntimeError("recording unavailable")
+        return self._rec
+
+    def _acting_recorder(self):
+        """The recorder for an action: opened in race mode, else only when already open."""
+        rec = self._open_recorder()
+        if rec is None and self._enabled():
+            rec = self._recorder()
+        return rec
+
     def recording_status(self):
-        return self._recorder().status()
+        rec = self._open_recorder()
+        if rec is None:
+            return {"running": False, "available": True, "started_by": None,
+                    "started_at": None, "span": None, "events": [], "dropped": 0, "failed": 0}
+        return rec.status()
 
     def recording_start(self, who):
+        """Start by hand; NotRaceMode outside race mode."""
+        if not self._recording_dir:
+            raise RuntimeError("recording unavailable")
+        if not self._enabled():
+            raise NotRaceMode("recording runs in race mode only")
         out = self._recorder().start(who)
         self._audit(who, "recording_start")
         return out
 
     def recording_stop(self, who):
-        out = self._recorder().stop(who)
+        rec = self._acting_recorder()
+        out = rec.stop(who) if rec else {"running": False, "started_by": None, "started_at": None}
         self._audit(who, "recording_stop")
         return out
 
     def recording_decide(self, who, event_id, decision):
         """Confirm or dismiss a disconnect event; ValueError for a bad id or decision."""
-        if isinstance(event_id, bool):
-            raise ValueError("event id must be a number")
+        if isinstance(event_id, bool) or (isinstance(event_id, float) and not event_id.is_integer()):
+            raise ValueError("event id must be a whole number")
         try:
             event_id = int(event_id)
-        except (TypeError, ValueError):
-            raise ValueError("event id must be a number") from None
-        ev = self._recorder().decide(who, event_id, decision)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("event id must be a whole number") from None
+        if not isinstance(decision, str):
+            raise ValueError("decision must be confirm or dismiss")
+        rec = self._acting_recorder()
+        if rec is None:
+            raise KeyError(event_id)
+        ev = rec.decide(who, event_id, decision)
         self._audit(who, "dc_" + decision, event=event_id, entry=ev.get("entry"))
         return ev
 
@@ -560,10 +606,19 @@ class Service:
             self._log(who, action, **fields)
 
     def recording_at(self, t_wall):
-        return self._recorder().sample_at(t_wall)
+        rec = self._open_recorder()
+        try:
+            return rec.sample_at(t_wall) if rec else None
+        except _STORE_ERRORS as e:
+            raise RuntimeError("recording unavailable") from e
 
     def recording_csv(self):
-        return self._recorder().csv_rows()
+        """The whole CSV as a list of rows (read here, so a store error is a RuntimeError)."""
+        rec = self._open_recorder()
+        try:
+            return list(rec.csv_rows()) if rec else [list(race_recording.CSV_HEADER)]
+        except _STORE_ERRORS as e:
+            raise RuntimeError("recording unavailable") from e
 
     def dashboard(self):
         """The newest snapshot at least the delay setting old; the oldest one while the

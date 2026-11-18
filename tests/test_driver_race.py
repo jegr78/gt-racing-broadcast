@@ -586,7 +586,7 @@ def t_tick_records_in_race_mode_only():
     span = svc.recording_status()["span"]
     assert span[0] == span[1] == 1000.0, f"qualifying mode records nothing: {span}"
     assert svc.recording_at(1000.0)["rows"][0]["entry"] == "A"
-    assert next(svc.recording_csv())[0] == "time_utc"
+    assert svc.recording_csv()[0][0] == "time_utc"
 
 
 def t_recording_start_is_audited():
@@ -656,6 +656,97 @@ def t_recording_without_a_directory_and_unknown_events_raise():
         raise AssertionError("an unknown id must raise")
     except KeyError:
         pass  # the route maps this to 404
+
+
+def t_a_qualifying_relay_neither_records_nor_creates_a_file():
+    d = tempfile.mkdtemp()
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False,
+                     enabled=lambda: False, recording_dir=d)
+    st = svc.recording_status()
+    assert st["running"] is False and st["available"] is True, st
+    assert st["span"] is None and st["events"] == [], st
+    try:
+        svc.recording_start("pit")
+        raise AssertionError("a manual start in qualifying must be refused")
+    except dr.NotRaceMode:
+        pass
+    svc.tick()
+    assert not [f for f in os.listdir(d) if f.startswith("race-recording")], os.listdir(d)
+
+
+def t_the_store_opens_when_the_service_is_built():
+    d = tempfile.mkdtemp()
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, recording_dir=d)
+    assert svc._rec is not None, "race mode opens the recording off the tick path"
+
+
+def _failing_service():
+    d = tempfile.mkdtemp()
+    blocker = os.path.join(d, "file")
+    open(blocker, "w").close()
+    wall = [1000.0]
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     wall=lambda: wall[0], recording_dir=os.path.join(blocker, "sub"))
+    return svc
+
+
+def t_store_errors_turn_into_recording_unavailable():
+    svc = _failing_service()
+    for call in (svc.recording_status, lambda: svc.recording_start("pit"),
+                 lambda: svc.recording_at(1.0), svc.recording_csv):
+        try:
+            call()
+            raise AssertionError("an unopenable recording must raise RuntimeError")
+        except RuntimeError as e:
+            assert "unavailable" in str(e), e
+    svc, _wall, _d = _recording_service()
+    rec = svc._recorder()
+
+    class _Broken:
+        def sample_at(self, t):
+            raise dr.sqlite3.OperationalError("disk I/O error")
+
+        def csv_rows(self):
+            yield ["time_utc"]
+            raise dr.sqlite3.OperationalError("disk I/O error")
+    rec._store = _Broken()
+    for call in (lambda: svc.recording_at(1.0), svc.recording_csv):
+        try:
+            call()
+            raise AssertionError("a store error must raise RuntimeError")
+        except RuntimeError as e:
+            assert "unavailable" in str(e), e
+
+
+def t_recording_decide_rejects_bad_types():
+    svc, _wall, _d = _recording_service()
+    for event_id, decision in ((1, []), (1, None), (1.5, "confirm"), (float("inf"), "confirm"),
+                               (float("nan"), "confirm"), ([1], "confirm")):
+        try:
+            svc.recording_decide("Cy", event_id, decision)
+            raise AssertionError(f"{event_id!r}/{decision!r} accepted")
+        except ValueError:
+            pass  # the route maps this to 400
+    try:
+        svc.recording_decide("Cy", 1.0, "confirm")
+        raise AssertionError("an unknown integral float id must reach the lookup")
+    except KeyError:
+        pass
+
+
+def t_any_recorder_error_keeps_the_fastest_lap_save():
+    svc, wall, _d = _recording_service()
+
+    class _Boom:
+        def observe(self, *a):
+            raise TypeError("corrupt meta")
+    svc._rec = _Boom()
+    svc.set_fastest("pit", "A", "Max", 90000)
+    svc.tick()
+    assert os.path.exists(svc._fastest_path()), "a recorder bug never skips save_fastest"
 
 
 if __name__ == "__main__":

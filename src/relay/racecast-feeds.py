@@ -12264,6 +12264,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._send({"ok": False, "error": "unknown event"}, 404)
             except ValueError as exc:
                 return self._send({"ok": False, "error": str(exc)}, 400)
+            except driver_race.NotRaceMode as exc:
+                return self._send({"ok": False, "error": str(exc)}, 409)
             except RuntimeError:
                 return self._send({"ok": False, "error": "recording unavailable"}, 503)
             return self._send({"error": "not found"}, 404)
@@ -14235,7 +14237,21 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # The frozen standings page; its relative fetches work under every prefix.
                     if not race_snapshot_page_path:
                         return self._send({"error": "page not found"}, 404)
-                    return self._send_page(race_snapshot_page_path, "")
+                    url = urlparse(self.path)
+                    if url.path.endswith("/"):
+                        # Relative fetches need the path without the slash; rebuilt from
+                        # its segments so the Location never turns scheme-relative.
+                        clean = "/" + "/".join(x for x in url.path.split("/") if x)
+                        self.send_response(302)
+                        self.send_header("Location", clean + ("?" + url.query if url.query else ""))
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return None
+                    # Only a token the console gate verified becomes the cookie.
+                    via_console = bool(getattr(self, "_race_who", None))
+                    return self._send_page(race_snapshot_page_path, "",
+                                           cookie_token=self._cockpit_token() if via_console else None,
+                                           cookie_path="/console")
                 if p == ["drivers", "race"] and driver_race_svc is not None:
                     # Order, distances and gaps from driver telemetry (#1112).
                     return self._send(driver_race_svc.standings(), no_store=True)

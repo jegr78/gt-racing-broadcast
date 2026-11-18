@@ -58,13 +58,13 @@ def _timing_server(**extra):
     return srv, port, link_path, timing_link.create(link_path)["id"], hub
 
 
-def _serve(solo=True, segments=(), clock=None, recording_dir=None, **extra):
+def _serve(solo=True, segments=(), clock=None, recording_dir=None, enabled=lambda: True, **extra):
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo,
-                               recording_dir=recording_dir)
+                               enabled=enabled, recording_dir=recording_dir)
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
     extra.setdefault("sender_script_path", os.path.join(ROOT, "src", "relay", "racecast-sender.py"))
@@ -1102,6 +1102,126 @@ def t_snapshot_links_use_time_never_the_token_parameter():
         assert "snapshot?t=" not in text and "at?t=" not in text, f"t is the console token ({name})"
     assert "innerHTML" not in page, "server strings go in through textContent"
     assert "./race/recording" in page, "relative fetches work under both desk prefixes"
+
+
+def _raw_get(port, path):
+    """One GET without following redirects: (status, headers)."""
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        c.request("GET", path)
+        r = c.getresponse()
+        r.read()
+        return r.status, dict(r.getheaders())
+    finally:
+        c.close()
+
+
+def t_recording_routes_answer_503_when_the_store_cannot_open():
+    d = tempfile.mkdtemp()
+    blocker = os.path.join(d, "file")
+    open(blocker, "w").close()
+    srv, port, _p, _hub = _serve(recording_dir=os.path.join(blocker, "sub"))
+    try:
+        director = g._tok("bob")
+        for tail in ("", "/csv", "/at?time=1"):
+            sep = "&" if "?" in tail else "?"
+            st, text, _h = _req(port, f"/console/drivers/race/recording{tail}{sep}t={director}")
+            assert st == 503 and "unavailable" in text, (tail, st, text)
+        st, _t, _h = _req(port, f"/console/drivers/race/recording?t={director}", b'{"action":"start"}',
+                          {"Content-Type": "application/json"})
+        assert st == 503, st
+    finally:
+        srv.shutdown()
+
+
+def t_recording_event_rejects_bad_types_with_400():
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp())
+    try:
+        url = f"/console/drivers/race/recording/event?t={g._tok('bob')}"
+        for body in (b'{"id":1,"decision":[]}', b'{"id":1.5,"decision":"confirm"}',
+                     b'{"id":1e999,"decision":"confirm"}', b'{"id":[1],"decision":"confirm"}'):
+            st, text, _h = _req(port, url, body, {"Content-Type": "application/json"})
+            assert st == 400, (body, st, text)
+    finally:
+        srv.shutdown()
+
+
+def t_a_manual_start_outside_race_mode_is_refused():
+    import json as _json
+    d = tempfile.mkdtemp()
+    srv, port, _p, _hub = _serve(recording_dir=d, enabled=lambda: False)
+    try:
+        url = f"/console/race-control/drivers/race/recording?t={g._tok('dave')}"
+        st, text, _h = _req(port, url)
+        assert st == 200 and _json.loads(text)["running"] is False, (st, text)
+        st, text, _h = _req(port, url, b'{"action":"start"}', {"Content-Type": "application/json"})
+        assert st == 409 and _json.loads(text)["error"] == "recording runs in race mode only", (st, text)
+        assert not [f for f in os.listdir(d) if f.startswith("race-recording")], os.listdir(d)
+    finally:
+        srv.shutdown()
+
+
+def t_recording_routes_refuse_the_other_desks_role():
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp())
+    try:
+        hdr = {"Content-Type": "application/json"}
+        for token, prefix in ((g._tok("bob"), "/console/race-control/drivers"),
+                              (g._tok("dave"), "/console/drivers")):
+            for tail, data in (("/race/recording", None), ("/race/recording/csv", None),
+                               ("/race/recording/at?time=1", None), ("/snapshot", None),
+                               ("/race/recording", b'{"action":"start"}'),
+                               ("/race/recording/event", b'{"id":1,"decision":"confirm"}')):
+                head = {"Cookie": f"rc_console={token}", **(hdr if data else {})}
+                st = _req(port, f"{prefix}{tail}", data, head)[0]
+                assert st == 403, f"a director reaches only /console/drivers, Race Control only " \
+                                  f"/console/race-control/drivers: {prefix}{tail} gave {st}"
+    finally:
+        srv.shutdown()
+
+
+def t_the_snapshot_page_sets_the_console_cookie_only_through_the_console():
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp())
+    try:
+        dave = g._tok("dave")
+        st, _t, h = _req(port, f"/console/race-control/drivers/snapshot?t={dave}&time=5")
+        cookie = h.get("Set-Cookie", "")
+        assert st == 200 and "rc_console=" in cookie and "Path=/console" in cookie, h
+        st, _t, h = _req(port, "/drivers/snapshot?t=junk&time=5")
+        assert st == 200 and "Set-Cookie" not in h, "an unverified ?t= never becomes a cookie"
+    finally:
+        srv.shutdown()
+
+
+def t_a_trailing_slash_on_the_snapshot_page_redirects():
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp())
+    try:
+        dave = g._tok("dave")
+        st, h = _raw_get(port, f"/console/race-control/drivers/snapshot/?t={dave}&time=5")
+        assert st == 302 and h["Location"] == f"/console/race-control/drivers/snapshot?t={dave}&time=5", (st, h)
+        st, h = _raw_get(port, "//drivers/snapshot/?time=5")
+        assert st == 302 and h["Location"] == "/drivers/snapshot?time=5", (st, h)
+        st, h = _raw_get(port, "/drivers/snapshot?time=5")
+        assert st == 200, st
+    finally:
+        srv.shutdown()
+
+
+def t_an_unauthenticated_snapshot_visit_with_oauth_gets_the_launcher():
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp(),
+                                 discord_client_id="cid", discord_client_secret="secret")
+    try:
+        for path in ("/console/race-control/drivers/snapshot?time=5", "/console/drivers/snapshot"):
+            st, text, h = _req(port, path)
+            assert st == 200 and "<title>Race snapshot</title>" not in text, (path, st)
+            assert "Set-Cookie" not in h or "rc_console=" not in h["Set-Cookie"], h
+            with open(os.path.join(ROOT, "src", "console", "console.html"), encoding="utf-8") as fh:
+                title = fh.read().split("<title>", 1)[1].split("</title>", 1)[0]
+            assert f"<title>{title}</title>" in text, f"{path} serves the launcher"
+        st, _t, _h = _req(port, "/console/race-control/drivers/race/recording/at?time=5")
+        assert st == 401, "the data stays behind the login"
+    finally:
+        srv.shutdown()
 
 
 def _audit_of(srv):

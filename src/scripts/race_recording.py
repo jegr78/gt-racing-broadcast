@@ -386,6 +386,7 @@ class Recorder:
     def status(self):
         with self._lock:
             out = self._status_head()
+            out["available"] = True
             out["events"] = [dict(self._events[i]) for i in sorted(self._events, reverse=True)]
             out["span"] = self._span
         out["dropped"] = self._writer.dropped
