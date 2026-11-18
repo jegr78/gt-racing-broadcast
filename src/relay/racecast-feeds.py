@@ -9276,6 +9276,7 @@ class Feed:
 
 
 OBS_PROBE_INTERVAL_S = 5.0   # min seconds between background OBS reachability probes
+STREAM_STOP_SETTLE_S = 60.0  # OBS reports the output active for a while after StopStream
 
 
 def should_probe_obs(last_ts, running, now, interval):
@@ -9481,6 +9482,7 @@ class Relay:
                                           # (off-air alarm only fires after this)
         self._stream_active_prev = None   # last bool stream_active, for start/stop events (#317)
         self._stream_stop_mono = None     # monotonic time of the last confirmed stop
+        self._stream_stop_settling = False  # a probe has not read the stop yet
         self._stream_started_ts = None    # when OBS last went live, for the stop-line uptime
         # POV is a THIRD, independent feed, not part of the A/B index. Starts
         # paused (off) until the Director calls /pov/reload.
@@ -11277,6 +11279,8 @@ class Relay:
                 if ok and on:
                     with self._health_webhook_lock:
                         self._event_ending = False
+                    with self._obs_lock:
+                        self._stream_stop_settling = False
                 if ok and not on:
                     stopped_at = self._claim_stream_stop()
             finally:
@@ -11293,6 +11297,7 @@ class Relay:
         now = time.time()
         with self._obs_lock:
             self._stream_stop_mono = time.monotonic()
+            self._stream_stop_settling = True
             if self._stream_active_prev is not True:
                 return None
             self._stream_active_prev = False
@@ -11327,9 +11332,13 @@ class Relay:
                 redacted["stream_kbps"] = kbps
                 self.obs_stats = redacted
                 active = stats.get("stream_active")    # True / False / None
+                if active is False:
+                    self._stream_stop_settling = False
                 if (active and self._stream_stop_mono is not None
-                        and sampled < self._stream_stop_mono):
-                    active = None                      # sampled before a confirmed stop
+                        and (sampled < self._stream_stop_mono
+                             or (self._stream_stop_settling
+                                 and sampled - self._stream_stop_mono < STREAM_STOP_SETTLE_S))):
+                    active = None                      # before, or still winding down from, a confirmed stop
                 prev = self._stream_active_prev
                 if active is not None:                 # ignore unreachable blips
                     self._stream_active_prev = active
