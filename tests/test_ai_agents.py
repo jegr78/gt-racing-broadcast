@@ -95,6 +95,18 @@ def t_probes_never_hand_league_secrets_to_the_provider_cli():
         assert seen and all(e.get('PATH') == '/usr/bin' for e in seen), seen
         assert not any(k.startswith('RACECAST_') for e in seen for k in e), \
             'a probe runs with the same allowlisted environment as the analysis'
+    seen, fake = [], Fake('codex')
+
+    def models_run(argv, **kw):
+        seen.append((argv, kw['env']))
+        if 'models' in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'models': [{'slug': 'm'}]}), '')
+        return fake(argv, **kw)
+    env = {'PATH': '/usr/bin', 'RACECAST_CONSOLE_SECRET': 's1'}
+    assert a.Adapter(config('codex'), which=lambda n: '/fake/' + n).discover_models(run=models_run, env=env) == ['m']
+    assert any('models' in argv for argv, _ in seen), seen
+    assert not any('RACECAST_CONSOLE_SECRET' in e for _, e in seen), \
+        'the model catalogue probe must not receive league secrets either'
 
 
 def t_invocation_and_guards():

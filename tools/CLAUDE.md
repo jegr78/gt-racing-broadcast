@@ -52,7 +52,9 @@ against a ref. Its tags are `preview-*` (never `v*`), so it never triggers
 `release.yml` or release-please; `preview-cleanup.yml` deletes a PR's pre-release
 on close. The jobs that run the PR's code (`meta`, `build`) hold a read-only token
 and keep no credentials; `publish` creates the tag and pre-release from the run's
-artifacts without checking out the PR, and `comment` only writes the PR comment.
+artifacts without checking out the PR and refuses any tag outside `preview-*`, since
+the tag name comes from PR-head code. `comment` only writes the PR comment, which also
+links the driver sender assets.
 
 ## End-to-end / regression harness (`tools/e2e.py` + `tools/e2e_checks.py`)
 The integration **outer loop** (issue #199): it stands up the relay + Control Center

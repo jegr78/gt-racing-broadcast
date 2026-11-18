@@ -43,6 +43,16 @@ def t_codes_carry_the_registration_and_die_with_their_invite():
     assert di.verify(None, code) is None, "no invite, no code"
 
 
+def t_non_ascii_codes_are_refused_not_raised():
+    invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
+    for bad in ("D1:\u00e9.abc", "D1:abc.\u00e9", "D1:\u00ff\u00fe.x"):
+        try:
+            got = di.verify(invite, bad)
+        except UnicodeError as exc:
+            raise AssertionError(f"{bad!r} must be refused, not raise {exc!r}") from None
+        assert got is None, bad
+
+
 def t_codes_never_pass_as_console_tokens():
     invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
     code = di.issue(invite, entry="E", name="N")

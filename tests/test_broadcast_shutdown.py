@@ -87,6 +87,14 @@ def _post(port, path, body):
         return response.status, json.loads(response.read())
 
 
+def _spawned(teardown):
+    """The handler answers before it spawns `event stop`, so wait for the spawn."""
+    deadline = time.monotonic() + 5
+    while not teardown and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return teardown
+
+
 def _probe(relay, active):
     relay._obs.get_health_stats = lambda: (True, {"stream_active": active}, "")
     relay._run_obs_probe()
@@ -111,7 +119,7 @@ def t_final_end_keeps_stop_marker_and_report_without_late_health_pings():
         relay._send_health_webhook("green", [], "red")  # A stale recovery must not page either.
         assert [kind for kind, _ in posts] == ["obs-stream"], posts
         assert "content" not in posts[0][1], "the deliberate final end posts the stop without @here"
-        assert teardown == ["report+teardown"]
+        assert _spawned(teardown) == ["report+teardown"]
         assert parts.get()["live"] is False
         events = relay.health_store.events(0, 1e12)
         assert [event["type"] for event in events] == ["obs_stream_stop", "part_end"]
@@ -135,6 +143,7 @@ def t_a_confirmed_stop_is_announced_once_before_the_report_runs():
         release.set()
         probe.join(5)
         assert code == 200 and reply["final"] is True, (code, reply)
+        _spawned(teardown)
         assert teardown == [["obs-stream"]], \
             f"the stop post precedes the report instead of waiting for a probe: {teardown}"
         _probe(relay, False)
@@ -149,6 +158,7 @@ def t_a_wall_clock_step_back_after_a_stop_does_not_hide_a_restart():
         relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
         relay._obs.get_health_stats = lambda: (True, {"stream_active": True}, "")
         relay._set_obs_stream(False)
+        _probe(relay, False)
         real = m.time.time
         m.time.time = lambda: real() - 3600
         try:
@@ -158,6 +168,49 @@ def t_a_wall_clock_step_back_after_a_stop_does_not_hide_a_restart():
         titles = [payload["embeds"][0]["title"] for kind, payload in posts if kind == "obs-stream"]
         assert len(titles) == 2 and "started" in titles[1], \
             f"a live sample after the stop counts even if the wall clock stepped back: {titles}"
+
+
+def t_obs_still_reporting_active_after_a_stop_is_no_restart():
+    with _event() as (relay, obs, posts, teardown, parts, port):
+        relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
+        relay._set_obs_stream(False)
+        for _ in range(5):                     # OBS keeps outputActive while it winds down
+            _probe(relay, True)
+        titles = [payload["embeds"][0]["title"] for kind, payload in posts if kind == "obs-stream"]
+        assert len(titles) == 1 and "stopped" in titles[0], \
+            f"a lingering active flag after a confirmed stop must not post a start/stop pair: {titles}"
+        types_ = [event["type"] for event in relay.health_store.events(0, 1e12)]
+        assert types_ == ["obs_stream_stop"], types_
+        _probe(relay, False)
+        _probe(relay, True)
+        titles = [payload["embeds"][0]["title"] for kind, payload in posts if kind == "obs-stream"]
+        assert len(titles) == 2 and "started" in titles[1], \
+            f"once OBS read stopped, a live sample is a real restart: {titles}"
+
+
+def t_a_restart_after_a_stop_obs_already_reported_is_announced():
+    with _event() as (relay, obs, posts, teardown, parts, port):
+        relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
+        def stop(on):
+            _probe(relay, False)          # OBS reads stopped before the request returns
+        obs.effect = stop
+        relay._set_obs_stream(False)
+        _probe(relay, True)
+        titles = [payload["embeds"][0]["title"] for kind, payload in posts if kind == "obs-stream"]
+        assert len(titles) == 2 and "started" in titles[1], \
+            f"a probe already saw the stop, so a live sample is a real restart: {titles}"
+
+
+def t_a_stop_that_never_lands_counts_again_after_the_settle_window():
+    with _event() as (relay, obs, posts, teardown, parts, port):
+        relay._maybe_check_mic = relay._maybe_remute_mixed_mic = lambda now: None
+        relay._set_obs_stream(False)
+        _probe(relay, True)
+        relay._stream_stop_mono -= m.STREAM_STOP_SETTLE_S + 1
+        _probe(relay, True)
+        titles = [payload["embeds"][0]["title"] for kind, payload in posts if kind == "obs-stream"]
+        assert len(titles) == 2 and "started" in titles[1], \
+            f"after the settle window an active OBS is live again: {titles}"
 
 
 def t_failed_final_stop_restores_alarm_and_does_not_consume_the_transition():
@@ -211,7 +264,7 @@ def t_qualifying_end_also_finishes_health_notifications():
         code, reply = _post(port, "parts/end", {"intent": "END PART Q"})
         assert code == 200 and reply["final"] is True
         _off_air(relay)
-        assert [kind for kind, _ in posts] == ["obs-stream"] and teardown == ["report+teardown"]
+        assert [kind for kind, _ in posts] == ["obs-stream"] and _spawned(teardown) == ["report+teardown"]
 
 
 def t_nonfinal_part_keeps_event_health_alerts_enabled():

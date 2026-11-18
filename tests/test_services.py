@@ -300,10 +300,24 @@ def t_stale_windows_bundles_are_pruned_and_a_live_one_is_kept():
             if os.path.basename(src) == "_MEI222":       # a running relay holds its DLL
                 raise PermissionError("in use")
             real(src, dst)
+        for name in ("_MEI111", "_MEI222"):
+            os.utime(os.path.join(d, name), (1000, 1000))
         assert sv.prune_bundle_dirs(d, os_name="posix") == 0, "POSIX bootloaders clean up themselves"
         assert sv.prune_bundle_dirs(d, os_name="nt", rename=rename) == 2, "the stale and the set-aside bundle go, the live one stays"
         assert sorted(os.listdir(d)) == ["_MEI222", "logs"], os.listdir(d)
         assert os.path.exists(os.path.join(d, "_MEI222", "lib", "python3.dll")), "a live bundle stays whole"
+
+
+def t_a_bundle_still_being_extracted_is_left_alone():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "_MEI444", "lib"))
+        os.makedirs(os.path.join(d, "_MEI555"))
+        os.utime(os.path.join(d, "_MEI555"), (1000, 1000))
+        now = os.path.getmtime(os.path.join(d, "_MEI444")) + 30
+        assert sv.prune_bundle_dirs(d, os_name="nt", now=now) == 1
+        assert sorted(os.listdir(d)) == ["_MEI444"], \
+            "a sibling job's fresh _MEI dir holds no handles between files and must survive"
 
 
 def t_daemon_bundle_env_sets_both_windows_vars():

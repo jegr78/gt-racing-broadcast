@@ -65,6 +65,8 @@ Loaded when working under `src/ui/`.
   completeness, trace coverage, roles, pace eligibility and historical reference status.
   Version 12 adds `packets_lost` per lap, counted from gaps in the recorded GT7 packet ids.
   Version 13 adds `wheel_events`, `lockups` and `wheelspins` per lap (wiki Telemetry).
+  Version 14 restarts the id-gap count after `STREAM_IDLE_S` of silence and subtracts
+  the packets the recorder queue dropped (the meta records' `dropped`) from `packets_lost`.
   Known-layout completeness is checked against original driven coverage and the
   first projected station before trace normalization. Incomplete captures cannot
   become pace or historical references; usable laps determine historical improvements.
