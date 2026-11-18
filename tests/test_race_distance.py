@@ -811,6 +811,36 @@ def t_standings_report_the_change_window():
     assert race.standings(t + rd.CHANGE_WINDOW_S + 1)["change_window"] is False
 
 
+def t_rows_mark_entries_waiting_for_their_restart():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
+    t = _drive(race, [a, b], [50, 50], 0.0, 40)
+    assert not _row(race, "A", t)["waiting"], "a racing car waits for nothing"
+    race.red_flag(t, "keep")
+    for car in (a, b):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b], [None, None], t, 3)
+    race.release(t)
+    assert race.standings(t)["red_flag"] is None
+    assert _row(race, "A", t)["waiting"] and _row(race, "B", t)["waiting"], \
+        "after the release the cars in the restart lobby still wait for their restart"
+    a.box = False
+    t = _drive(race, [a, b], [40, None], t, 5)
+    assert not _row(race, "A", t)["waiting"], "A restarted"
+    assert _row(race, "B", t)["waiting"], "B still stands in the box"
+
+
+def t_a_quiet_car_ahead_gives_no_exact_gap():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [30, 30], 0.0, 3)
+    t = _drive(race, [b], [2], t, rd.NO_DATA_S + 1)
+    row = _row(race, "B", t)
+    assert row["gap_time_s"] is None and row["interval_time_s"] is None, \
+        f"the quiet leader's stale history gives no exact time: {row}"
+    assert row["gap_s"] is not None, f"gap_s keeps its meaning: {row}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

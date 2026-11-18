@@ -635,15 +635,18 @@ class Race:
             return laps, None
         return 0, self._time_behind(ahead, ent)
 
-    def _time_behind(self, ahead, ent):
+    def _time_behind(self, ahead, ent, now=None):
         """Seconds `ent` is behind `ahead` by distance history, also when lapped; None
-        without a running time (red flag) or history for that distance."""
+        without a running time (red flag) or history for that distance, and with `now`
+        also while `ahead` is quiet (its history is stale)."""
         if ahead.distance is None or ent.distance is None:
             return None
         if ent.finished_at is not None and ahead.finished_at is not None:
             return ent.finished_at - ahead.finished_at
         if ent.waiting or ahead.waiting:
             return None                            # no running time while a red flag holds them
+        if now is not None and self._quiet(ahead, now):
+            return None
         reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
         return None if reached is None else max(0.0, self._cars[ent.active].t - reached)
 
@@ -676,8 +679,8 @@ class Race:
             if e.distance is not None and not quiet:
                 lapped, gap = self._behind(ents[0], e) if i else (0, 0)
                 interval = self._behind(ents[i - 1], e)[1] if i else None
-                gap_time = self._time_behind(ents[0], e) if i else 0.0
-                interval_time = self._time_behind(ents[i - 1], e) if i else None
+                gap_time = self._time_behind(ents[0], e, now) if i else 0.0
+                interval_time = self._time_behind(ents[i - 1], e, now) if i else None
             shown = self._shown(e)
             rows.append({
                 "entry": e.entry, "driver": car.name, "conn": e.active,
@@ -694,6 +697,7 @@ class Race:
                           "waiting" if e.distance is None else
                           "red_flag" if e.waiting else "racing",
                 "finished": e.finished_at is not None,
+                "waiting": e.waiting,
                 "pit_stops": max(0, e.pit_stops + e.pit_adjust),
                 "correction_m": round(e.adjust, 1),
                 "last_lap_ms": e.last_lap_ms, "stint_laps": e.stint_laps,
