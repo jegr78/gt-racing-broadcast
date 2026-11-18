@@ -475,8 +475,9 @@
         var h = t.host || {};
         note = t.served === "hosted" ? " (hosted, " : " (Funnel; hosted page also live, ";
         note += h.connected ? h.viewers + " viewers on the host, about " +
-          Math.round((h.requests_today || 0) + (h.msgs_today || 0) / 20) + " of 100000 requests today on this link)"
-          : "host not reachable)";
+          Math.round((h.requests_today || 0) + (h.msgs_today || 0) / 20) + " of 100000 requests today"
+          : "host not reachable";
+        note += (h.quota_low ? "; quota nearly used: viewers stay on Funnel" : "") + ")";
       }
       timingText.textContent = state.timing ? state.timing + note : "No timing link: it starts with the event.";
       timingCopy.disabled = !state.timing;
