@@ -232,6 +232,26 @@ def t_reset_and_a_fresh_event_drop_corrections_and_rejoins():
     assert [r["action"] for r in _audit(path)][-2:] == ["reset", "correct"], "the audit log stays"
 
 
+def t_a_race_reset_keeps_tyre_compounds_and_qualifying_corrections():
+    ctx = {"roster": ROSTER, "stint": "Q1", "remaining": None, "mode": "race", "segment": "Q1"}
+    svc, _clock, path = _dash_service(ctx)
+    svc.set_compound("rc:Anna", "A", "RS")
+    svc.set_quali("rc:Anna", "B", 90000)
+    svc.correct("rc:Anna", "A", metres=10.0, reason="x")
+    svc.rejoin("rc:Anna", "B", True)
+    svc.set_fastest("rc:Anna", "A", "Max", 61000)
+    svc.reset("rc:Anna")
+    st = svc.standings()
+    assert st["compounds"]["A"]["code"] == "RS" and st["quali_overrides"] == {"B": 90000}, \
+        f"a race reset is no new event: tyres and qualifying stay: {st['compounds']} {st['quali_overrides']}"
+    doc = dr._read_json(dr._actions_path_for(path))
+    assert "corrections" not in doc and "rejoin" not in doc, doc
+    assert st["fastest"] is None and not os.path.exists(svc._fastest_path()), "the fastest lap goes"
+    dr.clear_actions(os.path.dirname(path))
+    st = svc.standings()
+    assert st["compounds"] == {} and st["quali_overrides"] == {}, "a fresh event clears everything"
+
+
 def t_a_damaged_actions_file_never_breaks_the_race():
     svc, _clock, path, _league = _ctl()
     with open(os.path.join(os.path.dirname(path), dr.ACTIONS), "w", encoding="utf-8") as fh:

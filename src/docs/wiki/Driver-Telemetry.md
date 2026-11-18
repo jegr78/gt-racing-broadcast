@@ -159,8 +159,9 @@ It never carries connection ids, corrections or who made them.
   on the dashboard for every entry; name and number always show. The cockpit always
   shows both.
 - **Corrections** from both desks: clear or set the fastest lap, and set or delete an
-  entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart
-  and end with the race reset or the next `event start`.
+  entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart.
+  A race reset clears the fastest lap; qualifying times and tyre compounds stay until
+  the next `event start`.
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every

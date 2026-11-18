@@ -168,8 +168,8 @@ def _last_audited(path):
 
 
 def clear_actions(runtime_dir):
-    """Drop the corrections, rejoin marks and fastest lap (a fresh event, a race reset);
-    the audit log stays."""
+    """A fresh event: drop every action (corrections, rejoin marks, tyre compounds,
+    qualifying corrections) and the fastest lap; the audit log stays."""
     for name in (ACTIONS, FASTEST):
         path = os.path.join(runtime_dir, name)
         try:
@@ -695,9 +695,17 @@ class Service:
             self._log(who, "finish")
 
     def reset(self, who="tailnet"):
-        """Start the race over: its corrections and rejoin marks go with it."""
+        """Start the race over: its corrections, rejoin marks and fastest lap go with it;
+        tyre compounds and qualifying corrections stay."""
+        def drop_race(doc):
+            doc.pop("corrections", None)
+            doc.pop("rejoin", None)
         with self._lock:
             self._log(who, "reset")
-            clear_actions(os.path.dirname(os.path.abspath(self._path)))
+            self._save_actions(drop_race)
+            try:
+                atomic_replace.retry_windows_file_operation(lambda: os.remove(self._fastest_path()))
+            except FileNotFoundError:
+                pass  # no fastest lap recorded
             self._final_lobby_laps = None
             self._race = self._build(self._pick()["id"] if self._pick() else None)
