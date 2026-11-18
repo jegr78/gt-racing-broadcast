@@ -487,6 +487,10 @@ def t_race_control_lowers_only_a_cover_it_raised():
         flag(True)
         flag(False)
         assert not obs.up, "the desk lowers the cover it raised"
+        flag(True)
+        flag(True)
+        flag(False)
+        assert not obs.up, "a second raise over the desk's own cover keeps the desk's claim"
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()

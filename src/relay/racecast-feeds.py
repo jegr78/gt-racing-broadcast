@@ -14828,8 +14828,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     cover, note = True, None
                                 elif state is not None:
                                     cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
-                                relay.rc_red_flag_raised = bool(on and cover and not was_up) or (
-                                    not on and not cover)
+                                # A second raise keeps the claim; a failed lower keeps it too.
+                                relay.rc_red_flag_raised = (
+                                    bool(owned or (cover and not was_up)) if on else not cover)
                             banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
                                       if setup_ctl else {"error": "no Setup tab control"})
                     race = None
