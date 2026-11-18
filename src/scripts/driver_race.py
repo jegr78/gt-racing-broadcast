@@ -655,7 +655,8 @@ class Service:
         with self._lock:
             done = self._current().override_change(entry, conn, self._clock())
             if not done:
-                raise ValueError("that connection is not a sender of this entry")
+                raise ValueError("that connection is not a sender of this entry, "
+                                 "or no finish line is known for it yet")
             self._log(who, "change", entry=entry, conn=conn)
         return self.standings()
 

@@ -570,6 +570,21 @@ def t_a_change_override_switches_the_team_now():
     assert not race.override_change("A", "nobody", t), "only a connection of the team"
 
 
+def t_a_change_override_without_a_known_line_changes_nothing():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old = Car(race, "A", "a1", L - 15, "Max")
+    t = _drive(race, [old], [50], 0.0, 20)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    new.along = -L / 2                                    # mid-lap, no crossing of its own yet
+    t = _drive(race, [old, new], [50, 40], t, 2)
+    before = _row(race, "A", t)["distance_m"]
+    assert not race.override_change("A", "a2", t), "no line station for the new car: refused"
+    t = _drive(race, [old, new], [50, 40], t, 2)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Max" and abs(row["distance_m"] - (before + 100)) < 10, \
+        f"the old car keeps counting after a refused override: {row} {before}"
+
+
 def t_a_release_in_the_same_lobby_drives_on_from_where_the_cars_are():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)

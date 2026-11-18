@@ -224,16 +224,18 @@ class Race:
             ent.pit_adjust += pit_stops
 
     def override_change(self, entry, conn, now):
-        """Make `conn` the team's active connection now, from the current distance."""
+        """Make `conn` the team's active connection now, from the current distance;
+        False (nothing changed) when it is no car of the team or no line is known for it."""
         ent, car = self._entries.get(entry), self._cars.get(conn)
         if ent is None or car is None or car.entry != entry or car.s is None \
                 or ent.distance is None:
+            return False
+        if not self._start(ent, car, now, ent.distance, car.lap, car.s, from_line=False):
             return False
         old = self._cars.get(ent.active)
         if old is not None and old is not car:
             old.counting = False
         ent.active = conn
-        self._start(ent, car, now, ent.distance, car.lap, car.s, from_line=False)
         ent.changed, ent.change_anchor, ent.held, ent.relobby = True, None, False, False
         return True
 
