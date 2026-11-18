@@ -62,8 +62,12 @@ class Hub:
         with self._lock:
             changed = current != self._bound_invite
             self._bound_invite = current
+            if changed:     # in the same lock, so no new code's first batch lands before the clear
+                gone = list(self._conns)
+                self._clear()
         if changed:
-            self.reset()
+            for conn in gone:
+                self._counts.forget(conn)
 
     def _forget_quiet(self, now):
         """Drop connections quiet for FORGET_S. A reassignment outlives the sweep, since
@@ -183,12 +187,15 @@ class Hub:
         self._counts.forget(conn)
         return True
 
+    def _clear(self):
+        self._conns.clear()
+        self._dropped.clear()
+        self._reassigned.clear()
+        self._hook_failed.clear()
+
     def reset(self):
         with self._lock:
-            self._conns.clear()
-            self._dropped.clear()
-            self._reassigned.clear()
-            self._hook_failed.clear()
+            self._clear()
         self._counts.reset()
 
     def connections(self):

@@ -248,6 +248,29 @@ def t_a_new_invite_resets_the_hub():
     assert [c["conn"] for c in hub.connections()] == ["c3"]
 
 
+def t_a_new_codes_first_batch_survives_the_invite_switch():
+    import threading
+    current = {"id": "inv1"}
+    hub = ing.Hub(multi_lobby=lambda: False, clock=_Clock(), invite_id=lambda: current["id"])
+    hub.ingest(_reg("old"), _batch(1), None)
+    inner, fired = threading.RLock(), []
+
+    class RacingLock:                     # another thread's batch lands on the first release
+        def __enter__(self):              # after the hub saw the new invite
+            inner.acquire()
+
+        def __exit__(self, *exc):
+            inner.release()
+            if hub._bound_invite == "inv2" and not fired:
+                fired.append(1)
+                hub.ingest(_reg("new", entry="Team B #2"), _batch(1), None)
+    hub._lock = RacingLock()
+    current["id"] = "inv2"
+    conns = [c["conn"] for c in hub.connections()]
+    assert fired and conns == ["new"], \
+        ("a code of the new invite must survive the switch that clears the old senders", conns)
+
+
 def t_a_full_entry_is_reported_before_registration():
     hub, clock = _hub()
     assert not hub.entry_full("Team A #1")
