@@ -93,6 +93,14 @@ def t_the_dashboard_page_and_its_override_are_served_on_the_tailnet():
         srv.shutdown()
 
 
+def t_tower_gap_column_reads_the_leader_gap():
+    with open(os.path.join(ROOT, "src", "obs", "drivers.html"), encoding="utf-8") as fh:
+        src = fh.read()
+    col = src[src.index("function column("):src.index("function row(")]
+    assert "e.gap_s" in col, "the tower column shows the gap to the leader"
+    assert "e.interval_s" not in col, "the tower column no longer shows the interval"
+
+
 def t_the_public_timing_link_reaches_timing_data_and_nothing_else():
     d = tempfile.mkdtemp()
     link_path = os.path.join(d, "timing-link.json")

@@ -130,7 +130,7 @@
     if (phase === 2 && typeof e.fuel_l === "number") return e.fuel_l.toFixed(1) + " L";
     if (i === 0) return "Leader";
     if (e.lapped) return "+" + e.lapped + " L";
-    return typeof e.interval_s === "number" ? "+" + e.interval_s.toFixed(1) : "";
+    return typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "";
   }
   function row(e, i, value, pits, fl) {
     const r = el("div", "dd-row" + (e.status === "box" ? " box" : "") +
