@@ -339,7 +339,8 @@ class Service:
         `league_path` holds the profile's restart default; `wall` dates the audit log.
         `context()` gives the dashboard {roster, stint, remaining, mode, segment,
         connections}; every key optional. `recording_dir` holds the per-event
-        race recording, opened by open_recording() or the first race-mode tick."""
+        race recording; nothing opens it before open_recording(), which the relay
+        calls once it owns its control port."""
         self._path = settings_path
         self._pick, self._trace_for = pick, trace_for
         self._multi_lobby = multi_lobby
@@ -359,6 +360,7 @@ class Service:
         self._rec = None
         self._rec_retry = 0.0
         self._rec_failing = False
+        self._rec_allowed = False   # set by open_recording()
         self._race = None
         self._race_pick = object()
         self._line_tried = None
@@ -510,12 +512,13 @@ class Service:
 
     def open_recording(self):
         """Open the recording off the tick path, in race mode only; a failure backs off."""
+        self._rec_allowed = True
         if self._recording_dir and self._enabled():
             self._guarded(self._recorder)
 
     def _observe(self, standings):
         """Feed the recorder; a recording failure never stops the tick."""
-        if self._rec is None and self._clock() < self._rec_retry:
+        if self._rec is None and (not self._rec_allowed or self._clock() < self._rec_retry):
             return
         self._guarded(lambda: self._recorder().observe(
             standings, self._compound_codes, self._wall()))
@@ -537,7 +540,7 @@ class Service:
 
     def _recorder(self):
         """The open recorder, opening it when needed; RuntimeError when that fails."""
-        if not self._recording_dir:
+        if not self._recording_dir or not self._rec_allowed:
             raise RuntimeError("recording unavailable")
         with self._rec_lock:
             if self._rec is None:

@@ -565,6 +565,7 @@ def _recording_service(enabled=lambda: True):
                      trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
                      enabled=enabled, wall=lambda: wall[0], recording_dir=d)
     svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
+    svc.open_recording()
     return svc, wall, d
 
 
@@ -626,6 +627,7 @@ def t_a_failing_recording_does_not_stop_the_fastest_lap_save():
     svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
                      trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
                      wall=lambda: wall[0], recording_dir=os.path.join(blocker, "sub"))
+    svc.open_recording()
     svc.set_fastest("pit", "A", "Max", 90000)
     svc.tick()
     assert os.path.exists(svc._fastest_path()), "the fastest lap is saved although recording failed"
@@ -675,21 +677,31 @@ def t_a_qualifying_relay_neither_records_nor_creates_a_file():
     assert not [f for f in os.listdir(d) if f.startswith("race-recording")], os.listdir(d)
 
 
-def t_open_recording_opens_off_the_tick_path_after_the_bind():
+def t_nothing_opens_a_recording_before_open_recording():
     d = tempfile.mkdtemp()
+    wall = [1000.0]
     svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
-                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, recording_dir=d)
-    assert svc._rec is None, "building the service touches no recording (a losing start may build it)"
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     wall=lambda: wall[0], recording_dir=d)
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
+
+    def files():
+        return [f for f in os.listdir(d) if f.startswith("race-recording")]
+    svc.tick()
+    st = svc.recording_status()
+    assert st["running"] is False and st["span"] is None, st
+    for act in (lambda: svc.recording_start("pit"), lambda: svc.recording_stop("pit")):
+        try:
+            act()
+        except RuntimeError:
+            pass  # the route answers 503 until the relay owns its port
+    assert files() == [], f"a relay that may still lose its port touches no recording: {files()}"
     svc.open_recording()
-    assert svc._rec is not None, "race mode opens the recording off the tick path"
+    assert "race-recording.json" in files() and len(files()) > 1, files()
     q = dr.Service(os.path.join(d, "q.json"), pick=lambda: None, trace_for=lambda i: None,
                    multi_lobby=lambda: False, enabled=lambda: False, recording_dir=tempfile.mkdtemp())
     q.open_recording()
     assert q._rec is None, "qualifying opens nothing"
-    with open(os.path.join(os.path.dirname(HERE), "src", "relay", "racecast-feeds.py"), encoding="utf-8") as fh:
-        relay = fh.read()
-    assert relay.index("race_svc.open_recording()") > relay.index("Could not bind the control server"), \
-        "only a relay that owns the control port opens the recording"
 
 
 def _failing_service():

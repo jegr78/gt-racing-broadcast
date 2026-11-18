@@ -1271,6 +1271,15 @@ def t_the_snapshot_slider_follows_a_running_recording():
     assert "setInterval(loadSpan, 10000)" in page, "the span refreshes every 10 s"
 
 
+def t_the_snapshot_page_shows_the_first_sample_a_later_span_brings():
+    page = _console_src("race-snapshot.html")
+    fn = page[page.index("async function loadSpan()"):page.index("(async function start()")]
+    assert "if (!shown)" in fn and "show(" in fn, \
+        "a page opened before any sample shows one once the span appears"
+    show = page[page.index("async function show(t)"):page.index("var timer = null;")]
+    assert "shown = true" in show, "only a rendered sample counts as shown"
+
+
 def _audit_of(srv):
     import json as _json
     with open(driver_race.audit_path_for(srv.race_svc._path), encoding="utf-8") as fh:

@@ -144,6 +144,7 @@
     if (!r.data) { $("rows").replaceChildren(); return say(failure(r.status), r.status !== 404); }
     say(Math.abs(r.data.t - t) > 2 ? "Nearest sample to " + clock(t) + "." : "");
     render(r.data);
+    shown = true;
   }
 
   var timer = null;
@@ -154,7 +155,11 @@
     timer = setTimeout(function () { show(v); }, 150);
   });
 
+  var shown = false;                  // true once a sample is on screen
+  var wanted = parseFloat(new URLSearchParams(location.search).get("time"));
+
   // A running recording grows: the slider's range follows it, the chosen time stays.
+  // The first span also brings the first sample to a page opened before there was one.
   async function loadSpan() {
     var st = await get("./race/recording");
     var span = st.data && st.data.span;
@@ -164,20 +169,20 @@
       slider.disabled = false;
       $("from").textContent = clock(span[0]);
       $("to").textContent = clock(span[1]);
+      if (!shown) {
+        var t = isFinite(wanted) ? wanted : span[1];
+        slider.value = String(Math.round(t));
+        await show(t);
+      }
     }
     return {status: st.status, span: span};
   }
 
   (async function start() {
-    var raw = parseFloat(new URLSearchParams(location.search).get("time"));
     var st = await loadSpan();
     setInterval(loadSpan, 10000);
-    var span = st.span;
-    var t = isFinite(raw) ? raw : (span ? span[1] : NaN);
-    if (!isFinite(t)) return say(st.status && st.status !== 200 ? failure(st.status) : "No recording yet.",
-                                 st.status !== 200 && st.status !== 404);
-    slider.value = String(Math.round(t));
-    show(t);
+    if (!st.span) say(st.status && st.status !== 200 ? failure(st.status) : "No recording yet.",
+                      st.status !== 200 && st.status !== 404);
   })();
 })();
 </script>
