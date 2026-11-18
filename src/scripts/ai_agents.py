@@ -298,6 +298,7 @@ class Invocation:
 
 
 def _probe_command(argv, run, env):
+    """Run one provider probe with the allowlisted analysis environment."""
     completed = run(
         argv,
         stdin=subprocess.DEVNULL,
@@ -306,7 +307,7 @@ def _probe_command(argv, run, env):
         encoding="utf-8",
         errors="replace",
         timeout=10,
-        env=env,
+        env=execution_env(env),
         creationflags=0x08000000 if os.name == "nt" else 0,
     )
     return completed.returncode, (completed.stdout or completed.stderr).strip()
@@ -372,7 +373,6 @@ class Adapter:
                 status="auth_conflict",
                 guidance="Remove API/gateway authentication overrides from the Racecast process environment; log in with the provider subscription CLI.",
             )
-        env = execution_env(env)
         try:
             code, version = _probe_command([self.executable, "--version"], run, env)
             if code or not re.search(r"\d+\.\d+\.\d+", version):
