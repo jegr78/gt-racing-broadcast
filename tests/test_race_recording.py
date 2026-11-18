@@ -389,6 +389,7 @@ def t_finished_car_raises_nothing():
         finally:
             h.close()
 
+
 def t_red_flag_raises_nothing():
     with tempfile.TemporaryDirectory() as d:
         h = _Rec(d)
@@ -544,6 +545,162 @@ def t_writer_stop_ends_the_thread_with_a_full_queue():
     w._thread.join(10)
     assert not w._thread.is_alive(), "the writer thread must end although the queue was full"
     assert w.put(job) is False, "a stopped writer takes no jobs"
+
+
+def _count_samples(h):
+    h.flush()
+    return sum(1 for _ in h.store.csv_rows()) - 1
+
+
+def t_half_second_ticks_give_exactly_one_sample_per_second():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            jitter = (0.0, 0.02, -0.02, 0.01)
+            for i in range(20):                     # 10 s of ticks that wander around 0.5 s
+                h.rec.observe(_st(), {}, 100.0 + 0.5 * i + jitter[i % 4])
+            assert _count_samples(h) == 10, "one car: 10 samples in 10 s, got %d" % _count_samples(h)
+        finally:
+            h.close()
+
+
+def t_sampling_resyncs_after_the_clock_jumps():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st(), {}, 1000.0)
+            h.rec.observe(_st(), {}, 900.0)        # the wall clock went back
+            h.rec.observe(_st(), {}, 900.5)
+            h.rec.observe(_st(), {}, 901.0)
+            assert _count_samples(h) == 3, "back jump: sample at once, then each second: %d" % _count_samples(h)
+            h.rec.observe(_st(), {}, 2000.0)       # and far ahead
+            h.rec.observe(_st(), {}, 2000.5)
+            h.rec.observe(_st(), {}, 2001.0)
+            assert _count_samples(h) == 5, "no burst of catch-up samples: %d" % _count_samples(h)
+        finally:
+            h.close()
+
+
+def t_status_span_never_waits_for_the_store_lock():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st(), {}, 100.0)
+            h.rec.observe(_st(), {}, 101.0)
+            h.flush()
+            got = []
+            with h.store._lock:                    # the writer holds it through a commit
+                t = threading.Thread(target=lambda: got.append(h.rec.status()), daemon=True)
+                t.start()
+                t.join(2)
+                assert got, "status() blocked on the store lock"
+            assert tuple(got[0]["span"]) == (100.0, 101.0), got[0]
+        finally:
+            h.close()
+
+
+def t_span_survives_a_reopen():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st(), {}, 100.0)
+            rec2 = h.reopen()
+            assert tuple(rec2.status()["span"]) == (100.0, 100.0), rec2.status()
+            rec2.observe(_st(), {}, 105.0)
+            assert tuple(rec2.status()["span"]) == (100.0, 105.0), rec2.status()
+        finally:
+            h.close()
+
+
+def t_release_with_cars_still_waiting_raises_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            rows = [_srow("1", quiet_s=9.0, waiting=True), _srow("2", quiet_s=9.0, waiting=True)]
+            h.rec.observe(_st(rows=rows), {}, 1000.0)
+            assert _events(h) == [], "cars parked for the restart are no disconnects"
+            rows = [_srow("1", quiet_s=9.0, waiting=False), _srow("2", quiet_s=9.0, waiting=True)]
+            h.rec.observe(_st(rows=rows), {}, 1001.0)
+            assert [e["entry"] for e in _events(h)] == ["1"], _events(h)
+        finally:
+            h.close()
+
+
+def t_auto_start_rearms_after_an_auto_stop():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st("racing"), {}, 100.0)
+            h.rec.observe(_st("finished"), {}, 101.0)
+            assert h.rec.status()["running"] is False
+            h.rec.observe(_st("waiting"), {}, 200.0)
+            h.rec.observe(_st("racing"), {}, 201.0)
+            st = h.rec.status()
+            assert st["running"] is True and st["started_by"] == "auto", "a second race records too: %r" % st
+        finally:
+            h.close()
+
+
+def t_auto_start_rearm_survives_a_restart():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st("racing"), {}, 100.0)
+            h.rec.observe(_st("finished"), {}, 101.0)
+            rec2 = h.reopen()
+            rec2.observe(_st("racing"), {}, 201.0)
+            assert rec2.status()["running"] is True, "the re-armed auto start is stored"
+        finally:
+            h.close()
+
+
+def t_a_restart_in_a_finished_race_keeps_a_manual_recording():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st("racing"), {}, 100.0)
+            h.rec.observe(_st("finished"), {}, 101.0)
+            h.rec.start("rc")
+            rec2 = h.reopen()
+            rec2.observe(_st("finished"), {}, 200.0)
+            assert rec2.status()["running"] is True, "the first observe after a restart is a baseline"
+        finally:
+            h.close()
+
+
+def t_dropout_time_ends_when_data_returns_while_stopped():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st(rows=[_srow("7", quiet_s=6.0)]), {}, 1000.0)
+            h.rec.stop("rc")
+            h.rec.observe(_st(rows=[_srow("7", quiet_s=0.2)]), {}, 1010.0)
+            h.rec.start("rc")
+            h.rec.observe(_st(rows=[_srow("7", quiet_s=0.2)]), {}, 1100.0)
+            ev = _events(h)[0]
+            assert ev["state"] == "dropout" and ev["dropout_s"] == 16.0, ev
+            h.rec.stop("rc")
+            h.rec.observe(_st(rows=[_srow("8", quiet_s=9.0)]), {}, 1200.0)
+            assert len(_events(h)) == 1, "no new suspicion while stopped"
+        finally:
+            h.close()
+
+
+def t_decide_rejects_a_decision_that_is_no_string():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st(rows=[_srow("7", quiet_s=6.0)]), {}, 1000.0)
+            eid = _events(h)[0]["id"]
+            for bad in ([], {}, 1):
+                try:
+                    h.rec.decide("rc", eid, bad)
+                except ValueError:
+                    pass  # expected
+                else:
+                    raise AssertionError("decision %r accepted" % (bad,))
+        finally:
+            h.close()
 
 
 if __name__ == "__main__":

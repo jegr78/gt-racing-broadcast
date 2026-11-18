@@ -248,9 +248,10 @@ class Recorder:
         self._started_by = store.meta("started_by")
         started_at = store.meta("started_at")
         self._started_at = float(started_at) if started_at else None
-        self._auto_done = store.meta("auto_started") is not None
+        self._auto_done = store.meta("auto_started") == "1"
+        self._span = store.span()
         self._last_sample = None
-        self._last_state = None
+        self._last_state = None   # None until the first observe, which is a baseline
         self._events = {e["id"]: e for e in store.events()}
         self._next_id = max(self._events, default=0) + 1
         # The event of each entry whose silence has not ended yet.
@@ -296,19 +297,33 @@ class Recorder:
                 self._meta("auto_started", "1")
                 if not self._running:
                     self._begin("auto", now_wall)
-            if state == "finished" and self._last_state != "finished" and self._running:
+            if (state == "finished" and self._last_state not in (None, "finished")
+                    and self._running):
                 self._end()
+                self._auto_done = False          # the next race starts recording again
+                self._meta("auto_started", "0")
             self._last_state = state
-            if not self._running:
-                return
-            if self._last_sample is None or now_wall - self._last_sample >= SAMPLE_EVERY_S:
-                self._last_sample = now_wall
+            if self._running and self._sample_due(now_wall):
                 doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {})
-                self._writer.put(lambda s: s.add_sample(now_wall, doc))
+                if self._writer.put(lambda s: s.add_sample(now_wall, doc)):
+                    lo, hi = self._span or (now_wall, now_wall)
+                    self._span = (min(lo, now_wall), max(hi, now_wall))
             self._detect(standings, now_wall)
 
+    def _sample_due(self, now):
+        """Keep a one-second grid; a clock that went back or jumped ahead starts a new one."""
+        last = self._last_sample
+        if last is None or now < last or now - last > 2 * SAMPLE_EVERY_S:
+            self._last_sample = now
+            return True
+        if now - last >= SAMPLE_EVERY_S:
+            self._last_sample = last + SAMPLE_EVERY_S
+            return True
+        return False
+
     def _detect(self, standings, now):
-        quiet_allowed = standings.get("red_flag") is None
+        """Close silences whose data came back; only a running recording opens new ones."""
+        may_suspect = self._running and standings.get("red_flag") is None
         window = bool(standings.get("change_window"))
         for row in standings.get("entries") or []:
             entry, quiet = row.get("entry"), row.get("quiet_s")
@@ -319,8 +334,9 @@ class Recorder:
                 if quiet <= NO_DATA_S:
                     self._returned(eid, entry, now)
                 continue
-            if (quiet > NO_DATA_S and quiet_allowed and row.get("distance_m") is not None
-                    and not row.get("finished") and not (row.get("in_box") and window)):
+            if (quiet > NO_DATA_S and may_suspect and row.get("distance_m") is not None
+                    and not row.get("finished") and not row.get("waiting")
+                    and not (row.get("in_box") and window)):
                 self._suspect(row, quiet, now)
 
     def _suspect(self, row, quiet, now):
@@ -347,7 +363,7 @@ class Recorder:
 
     def decide(self, who, event_id, decision):
         """Confirm or dismiss an event; ValueError for a bad decision, KeyError for an unknown id."""
-        if decision not in DECISIONS:
+        if not isinstance(decision, str) or decision not in DECISIONS:
             raise ValueError("decision must be confirm or dismiss")
         with self._lock:
             ev = self._events.get(event_id)
@@ -371,7 +387,7 @@ class Recorder:
         with self._lock:
             out = self._status_head()
             out["events"] = [dict(self._events[i]) for i in sorted(self._events, reverse=True)]
-        out["span"] = self._store.span()
+            out["span"] = self._span
         out["dropped"] = self._writer.dropped
         out["failed"] = self._writer.failed
         return out
