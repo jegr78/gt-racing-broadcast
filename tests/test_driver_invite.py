@@ -49,7 +49,7 @@ def t_non_ascii_codes_are_refused_not_raised():
         try:
             got = di.verify(invite, bad)
         except UnicodeError as exc:
-            raise AssertionError(f"{bad!r} must be refused, not raise {exc!r}")
+            raise AssertionError(f"{bad!r} must be refused, not raise {exc!r}") from None
         assert got is None, bad
 
 
