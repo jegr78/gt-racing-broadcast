@@ -10,11 +10,19 @@ import sqlite3
 import threading
 
 import atomic_replace
+from race_distance import NO_DATA_S
 
 POINTER = "race-recording.json"
 CSV_HEADER = ["time_utc", "pos", "entry", "driver", "laps", "gap_time_s",
               "interval_time_s", "lapped", "status", "compound", "pit_stops",
               "correction_m", "rejoin", "gt7_position"]
+SAMPLE_EVERY_S = 1.0
+COUNTING_STATES = ("racing", "final_lap", "finishing")
+SAMPLE_FIELDS = ("entry", "driver", "laps", "gap_time_s", "interval_time_s", "lapped",
+                 "status", "finished", "pit_stops", "correction_m", "rejoin",
+                 "gt7_position", "position_mismatch")
+DECISIONS = {"confirm": "confirmed", "dismiss": "dismissed"}
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (t REAL PRIMARY KEY, doc TEXT NOT NULL);
@@ -28,7 +36,7 @@ def rotate(runtime_dir):
     try:
         os.remove(os.path.join(runtime_dir, POINTER))
     except FileNotFoundError:
-        pass
+        pass  # no current recording
 
 
 def _read_pointer(runtime_dir):
@@ -97,9 +105,10 @@ class Store:
         return None if lo is None else (lo, hi)
 
     def add_event(self, ev):
+        """Insert ev and return its row id; an "id" key in ev picks the id."""
         with self._lock:
-            cur = self._conn.execute("INSERT INTO events (doc) VALUES (?)",
-                                     (json.dumps(ev),))
+            cur = self._conn.execute("INSERT INTO events (id, doc) VALUES (?,?)",
+                                     (ev.get("id"), json.dumps(ev)))
             self._conn.commit()
             return cur.lastrowid
 
@@ -140,11 +149,18 @@ class Store:
             stamp = datetime.datetime.fromtimestamp(t, datetime.timezone.utc)
             when = stamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             for r in json.loads(raw).get("rows") or []:
-                yield [when] + [r.get(c) for c in CSV_HEADER[1:]]
+                yield [when] + [_cell(r.get(c)) for c in CSV_HEADER[1:]]
 
     def close(self):
         with self._lock:
             self._conn.close()
+
+
+def _cell(v):
+    """Prefix text a spreadsheet would run as a formula; names come from driver machines."""
+    if isinstance(v, str) and v.startswith(_FORMULA_LEAD):
+        return "'" + v
+    return v
 
 
 class Writer:
@@ -191,3 +207,149 @@ class Writer:
         except queue.Full:
             return
         self._thread.join(timeout=5.0)
+
+
+class Recorder:
+    """Turns live standings into one sample per second and disconnect events.
+
+    `wall` is a clock callable for manual actions. Called from the tick thread and
+    from request threads; every store write goes through the Writer."""
+
+    def __init__(self, store, writer, wall):
+        self._store = store
+        self._writer = writer
+        self._lock = threading.Lock()
+        self._running = store.meta("running") == "1"
+        self._started_by = store.meta("started_by")
+        started_at = store.meta("started_at")
+        self._started_at = float(started_at) if started_at else None
+        self._auto_done = store.meta("auto_started") is not None
+        self._last_sample = None
+        self._last_state = None
+        self._events = {e["id"]: e for e in store.events()}
+        self._next_id = max(self._events, default=0) + 1
+        # The event of each entry whose silence has not ended yet.
+        self._silent = {e.get("entry"): e["id"] for e in self._events.values()
+                        if e.get("returned") is None}
+        self._wall = wall
+
+    def _meta(self, key, value):
+        self._writer.put(lambda s: s.set_meta(key, value))
+
+    def _begin(self, who, now):
+        self._running = True
+        self._started_by = who
+        self._started_at = now
+        self._meta("running", "1")
+        self._meta("started_by", who)
+        self._meta("started_at", repr(now))
+
+    def _end(self):
+        self._running = False
+        self._meta("running", "0")
+
+    def start(self, who):
+        """Start recording by hand; a recording that already runs keeps its starter."""
+        with self._lock:
+            if not self._running:
+                self._begin(who, self._wall())
+            return self._status_head()
+
+    def stop(self, who):
+        with self._lock:
+            if self._running:
+                self._end()
+                self._meta("stopped_by", who)
+            return self._status_head()
+
+    def observe(self, standings, compounds, now_wall):
+        with self._lock:
+            state = standings.get("state")
+            if state in COUNTING_STATES and not self._auto_done:
+                self._auto_done = True
+                self._meta("auto_started", "1")
+                if not self._running:
+                    self._begin("auto", now_wall)
+            if state == "finished" and self._last_state != "finished" and self._running:
+                self._end()
+            self._last_state = state
+            if not self._running:
+                return
+            if self._last_sample is None or now_wall - self._last_sample >= SAMPLE_EVERY_S:
+                self._last_sample = now_wall
+                doc = _sample(standings, compounds or {})
+                self._writer.put(lambda s: s.add_sample(now_wall, doc))
+            self._detect(standings, now_wall)
+
+    def _detect(self, standings, now):
+        quiet_allowed = standings.get("red_flag") is None
+        window = bool(standings.get("change_window"))
+        for row in standings.get("entries") or []:
+            entry, quiet = row.get("entry"), row.get("quiet_s")
+            if quiet is None:
+                continue
+            eid = self._silent.get(entry)
+            if eid is not None:
+                if quiet <= NO_DATA_S:
+                    self._returned(eid, entry, now)
+                continue
+            if (quiet > NO_DATA_S and quiet_allowed and row.get("distance_m") is not None
+                    and not (row.get("in_box") and window)):
+                self._suspect(row, quiet, now)
+
+    def _suspect(self, row, quiet, now):
+        ev = {"id": self._next_id, "entry": row.get("entry"), "driver": row.get("driver"),
+              "state": "suspected", "last_packet": round(now - quiet, 3), "opened": now,
+              "returned": None, "dropout_s": None, "decided_by": None, "decided_at": None}
+        self._next_id += 1
+        self._events[ev["id"]] = ev
+        self._silent[ev["entry"]] = ev["id"]
+        snapshot = dict(ev)
+        self._writer.put(lambda s: s.add_event(snapshot))
+
+    def _returned(self, eid, entry, now):
+        del self._silent[entry]
+        ev = self._events[eid]
+        fields = {"returned": now, "dropout_s": round(now - ev["last_packet"], 3)}
+        if ev["state"] == "suspected":
+            fields["state"] = "dropout"
+        self._update(ev, fields)
+
+    def _update(self, ev, fields):
+        ev.update(fields)
+        self._writer.put(lambda s: s.update_event(ev["id"], **fields))
+
+    def decide(self, who, event_id, decision):
+        """Confirm or dismiss an event; ValueError for a bad decision, KeyError for an unknown id."""
+        if decision not in DECISIONS:
+            raise ValueError("decision must be confirm or dismiss")
+        with self._lock:
+            ev = self._events.get(event_id)
+            if ev is None:
+                raise KeyError(event_id)
+            self._update(ev, {"state": DECISIONS[decision], "decided_by": who,
+                              "decided_at": self._wall()})
+            return dict(ev)
+
+    def _status_head(self):
+        return {"running": self._running, "started_by": self._started_by,
+                "started_at": self._started_at}
+
+    def status(self):
+        with self._lock:
+            out = self._status_head()
+            out["events"] = [dict(self._events[i]) for i in sorted(self._events, reverse=True)]
+        out["span"] = self._store.span()
+        out["dropped"] = self._writer.dropped
+        out["failed"] = self._writer.failed
+        return out
+
+
+def _sample(standings, compounds):
+    rows = []
+    for i, r in enumerate(standings.get("entries") or []):
+        row = {"pos": i + 1, **{k: r.get(k) for k in SAMPLE_FIELDS}}
+        row["compound"] = compounds.get(r.get("entry"))
+        rows.append(row)
+    return {"state": standings.get("state"), "red_flag": standings.get("red_flag"),
+            "rows": rows}
