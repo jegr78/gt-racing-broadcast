@@ -397,6 +397,25 @@ def t_the_lap_display_follows_the_lobby_that_counts_and_stops_at_the_count():
         single.standings(t)["lap"]
 
 
+def t_a_timed_endurance_keeps_race_laps_on_the_display_in_the_final_lobby():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 3 * L / 50)
+    race.open_change_window(t)
+    race.final_lobby(None, t)
+    old.box = True
+    t = _drive(race, [old, rival], [None, 5], t, 3)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [new, rival], [40, 5], t, 2)                     # lap 1 of the final lobby
+    new.box = True
+    t = _drive(race, [new, rival], [None, 5], t, 3)
+    new.box = False
+    t = _drive(race, [new, rival], [50, 5], t, 10)
+    assert _row(race, "A", t)["driver"] == "Lea" and race.standings(t)["entries"][0]["entry"] == "A"
+    lap = race.standings(t)["lap"]
+    assert lap["count"] is None and lap["leader"] >= 4, f"without a count the race laps stay: {lap}"
+
+
 def t_one_sender_cannot_move_the_line_or_jump_the_field():
     race = rd.Race(TRACE, formation=False)
     x0, z0 = _pos(L / 2)

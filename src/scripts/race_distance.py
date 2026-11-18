@@ -651,7 +651,7 @@ class Race:
         def key(e):
             dist = self._shown(e) if e.distance is not None else -math.inf
             if self._finishing_at is None:
-                return (0, -dist, e.entry)
+                return (0, -dist)
             if e is winner:
                 return (-1, 0, 0.0, 0.0, "")
             laps = min(math.floor(dist / self.length), cap) if self.length and e.distance is not None else -1
@@ -704,7 +704,7 @@ class Race:
         if lead is None:
             return {"leader": None, "count": count}
         car = self._cars.get(lead.active)
-        if self.multi_lobby and self._final_car(lead) and car is not None and car.lap is not None:
+        if self.multi_lobby and count and self._final_car(lead) and car is not None and car.lap is not None:
             leader = car.lap
         else:
             leader = max(0, math.floor(self._shown(lead) / self.length)) + (2 if self.formation else 1)
