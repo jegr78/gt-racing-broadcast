@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GT7 lap index: sector math, traces, the cache and the comparison pool.
 Run: python3 tests/test_gt7_laps.py"""
-import contextlib, json, math, os, struct, sys, tempfile
+import contextlib, json, math, os, struct, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -80,14 +80,36 @@ def _pkt(lap, speed, angle, last_ms=-1, pid=0, slip=(1.0, 1.0, 1.0, 1.0), brake=
 
 
 def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_000_000.0,
-                           n=400, ns=None, lost=(), slip=None, pause=None):
+                           n=400, ns=None, lost=(), slip=None, pause=None, stall=None):
     """One lap per entry of lap_secs around the circle, `n` packets each (or ns[i] for
     lap i); lap 1 is the engine's partial first lap. From the 6th packet of a lap GT7's
     last_ms reports the previous timed lap; 10 packets of one more lap close the last one.
     Packets are numbered from 1; the numbers in `lost` never reach the recording.
     `slip(lap, k)` returns (per-wheel slip, brake byte) for packet k of a lap, or None.
-    `pause` maps a packet number to seconds of silence before it."""
-    w = gt7_recording.RecordingWriter(rec_dir, "Solo", "dev", flush_s=0.05, queue_max=0)
+    `pause` maps a packet number to seconds of silence before it. `stall=(pid, d)` blocks the
+    real writer on packet pid until its queue is full and `d` more packets were dropped."""
+    queue_max = 100 if stall else 0
+    w = gt7_recording.RecordingWriter(rec_dir, "Solo", "dev", flush_s=0.05, queue_max=queue_max)
+    gate, entered, put = threading.Event(), threading.Event(), w.put
+    if stall:
+        real_write = w._write
+
+        def write(fh, data):
+            if not gate.is_set() and len(data) >= 11 + 0x74 and struct.unpack_from("<i", data, 11 + 0x70)[0] == stall[0]:
+                entered.set()
+                gate.wait(10)
+            real_write(fh, data)
+        w._write = write
+
+        def put(wall_ts, kind, plain):
+            while (gate.is_set() or not entered.is_set()) and w._q.qsize() > queue_max // 2:
+                time.sleep(0.001)                  # drops only during the stall
+            w.put(wall_ts, kind, plain)
+            if not gate.is_set() and w.dropped >= stall[1]:
+                time.sleep(0.1)                    # past flush_s: the meta lands before the backlog
+                gate.set()
+                while not w._q.empty():
+                    time.sleep(0.005)
     t, last_ms, pid = t0, -1, 0
     for li, secs in enumerate(list(lap_secs) + [lap_secs[-1]]):
         n = ns[li] if ns and li < len(ns) else n
@@ -99,8 +121,10 @@ def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_
             t += (pause or {}).get(pid, 0.0)
             extra = slip(li + 1, k) if slip else None
             if pid not in lost:
-                w.put(t, "~", _pkt(li + 1, speed, 2 * math.pi * k / n, last_ms, pid,
+                put(t, "~", _pkt(li + 1, speed, 2 * math.pi * k / n, last_ms, pid,
                                    *(extra or ())))
+            if stall and pid == stall[0]:
+                assert entered.wait(10), "the writer must block on the stall packet"
             t += dt
     w.close()
     return w.path
@@ -494,6 +518,14 @@ def t_recorder_queue_drops_are_not_network_loss():
         lap3 = _lap(_index(path), 3)
         assert lap3["packets_lost"] == 0, \
             f"ids the recorder queue dropped (meta 'dropped') must not count as lost: {lap3['packets_lost']}"
+
+
+def t_real_recorder_drops_are_not_network_loss():
+    with tempfile.TemporaryDirectory() as d:
+        idx = _index(write_circle_recording(d, stall=(500, 7)))
+        assert [lap["packets_lost"] for lap in idx["laps"]] == [0] * len(idx["laps"]), \
+            ("the writer records its drop before the backlog, so the gap follows the meta record",
+             [(lap["lap"], lap["packets_lost"]) for lap in idx["laps"]])
 
 
 def t_a_silent_stretch_starts_a_new_count():
