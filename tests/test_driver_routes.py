@@ -1011,12 +1011,11 @@ def t_recording_routes_serve_both_desks_and_refuse_a_commentator():
             st, text, _h = _req(port, url(""), _json.dumps({"action": "stop"}).encode(), hdr)
             assert st == 200 and not _json.loads(text)["recording"]["running"], text
             assert _req(port, url(""), _json.dumps({"action": "bogus"}).encode(), hdr)[0] == 400
-            cookie = {"Cookie": f"rc_console={token}"}   # ?t= is the time here, the token rides the cookie
-            at = f"{prefix}/race/recording/at"
-            assert _req(port, f"{at}?t=100", headers=cookie)[0] == 404, "an empty recording has no sample"
-            assert _req(port, f"{at}?t=nan", headers=cookie)[0] == 400
-            assert _req(port, f"{at}?t=inf", headers=cookie)[0] == 400
-            assert _req(port, at, headers=cookie)[0] == 400
+            at = f"{prefix}/race/recording/at?t={token}"
+            assert _req(port, f"{at}&time=100")[0] == 404, "an empty recording has no sample"
+            assert _req(port, f"{at}&time=nan")[0] == 400
+            assert _req(port, f"{at}&time=inf")[0] == 400
+            assert _req(port, at)[0] == 400
             st, text, h = _req(port, url("/csv"))
             assert st == 200 and h["Content-Type"].startswith("text/csv"), (st, h)
             assert "race-recording.csv" in h["Content-Disposition"], h
@@ -1027,7 +1026,7 @@ def t_recording_routes_serve_both_desks_and_refuse_a_commentator():
             assert _req(port, url("/event"), bad, hdr)[0] == 400
         for prefix in ("/console/drivers", "/console/race-control/drivers"):
             alice = g._tok("alice")
-            for tail, data in (("", None), ("/at?t=1", None), ("/csv", None),
+            for tail, data in (("", None), ("/at?time=1", None), ("/csv", None),
                                ("", b'{"action":"start"}'), ("/event", b'{"id":1,"decision":"confirm"}')):
                 head = {"Cookie": f"rc_console={alice}", **(hdr if data else {})}
                 assert _req(port, f"{prefix}/race/recording{tail}", data, head)[0] == 403, (prefix, tail)
@@ -1041,10 +1040,25 @@ def t_recording_routes_answer_503_without_a_recording_dir():
         director = g._tok("bob")
         assert _req(port, f"/console/drivers/race/recording?t={director}")[0] == 503
         assert _req(port, f"/console/drivers/race/recording/csv?t={director}")[0] == 503
-        assert _req(port, "/console/drivers/race/recording/at?t=1", headers={"Cookie": f"rc_console={director}"})[0] == 503
+        assert _req(port, f"/console/drivers/race/recording/at?t={director}&time=1")[0] == 503
         st, _t, _h = _req(port, f"/console/drivers/race/recording?t={director}", b'{"action":"start"}',
                           {"Content-Type": "application/json"})
         assert st == 503
+    finally:
+        srv.shutdown()
+
+
+def t_recording_at_authenticates_with_t_and_reads_time():
+    import json as _json
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp())
+    try:
+        director = g._tok("bob")
+        _req(port, f"/console/drivers/race/recording?t={director}", b'{"action":"start"}',
+             {"Content-Type": "application/json"})
+        srv.race_svc.tick()
+        now = time.time()
+        st, text, _h = _req(port, f"/console/drivers/race/recording/at?t={director}&time={now}")
+        assert st == 200 and "rows" in _json.loads(text), (st, text)
     finally:
         srv.shutdown()
 

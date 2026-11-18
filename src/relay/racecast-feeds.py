@@ -12221,13 +12221,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if sub is None:
                     return self._send(svc.recording_status(), no_store=True)
                 if sub == "at":
-                    raw = parse_qs(urlparse(self.path).query).get("t", [""])[0]
+                    raw = parse_qs(urlparse(self.path).query).get("time", [""])[0]
                     try:
                         t = float(raw)
                     except ValueError:
                         t = math.nan
                     if not math.isfinite(t):
-                        return self._send({"error": "t must be a finite number"}, 400)
+                        return self._send({"error": "time must be a finite number"}, 400)
                     sample = svc.recording_at(t)
                     return self._send(sample or {"error": "no recording"}, 200 if sample else 404,
                                       no_store=True)
@@ -13007,10 +13007,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return bool(console_secret)
         def _cockpit_token(self):
             """The presented token: query ?t= first (link load), else the cookie."""
-            parsed = urlparse(self.path)
-            qs = parse_qs(parsed.query)
-            # ?t= is the sample time on the recording lookup, so only the cookie authenticates it.
-            if qs.get("t") and not parsed.path.endswith("/race/recording/at"):
+            qs = parse_qs(urlparse(self.path).query)
+            if qs.get("t"):
                 return qs["t"][0]
             return console_auth.parse_cookie_token(self.headers.get("Cookie"))
         def _console_subject(self):
