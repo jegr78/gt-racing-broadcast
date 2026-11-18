@@ -16497,6 +16497,7 @@ def main():
 
     relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
     relay.keep_awake.start()
+    race_svc.open_recording()   # the port is ours, so the recording file is too
     radio_service.start()
     if coach_service is not None:coach_service.start()
     radio_enricher.start()

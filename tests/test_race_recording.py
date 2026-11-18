@@ -513,7 +513,7 @@ def t_writer_counts_failures_and_logs_the_first_once():
     class _H(logging.Handler):
         def emit(self, record):
             seen.append(record.getMessage())
-    log = logging.getLogger("race_recording")
+    log = logging.getLogger("racecast.relay")
     h = _H()
     log.addHandler(h)
     w = rr.Writer(_Failing(), maxsize=8)

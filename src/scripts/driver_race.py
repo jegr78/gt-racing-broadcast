@@ -321,6 +321,7 @@ def _mode(mode):
     return mode
 
 
+LOG = logging.getLogger("racecast.relay")   # the relay attaches its log file to this logger
 RECORDING_RETRY_S = 30.0
 _STORE_ERRORS = (OSError, sqlite3.Error)
 
@@ -338,7 +339,7 @@ class Service:
         `league_path` holds the profile's restart default; `wall` dates the audit log.
         `context()` gives the dashboard {roster, stint, remaining, mode, segment,
         connections}; every key optional. `recording_dir` holds the per-event
-        race recording, opened here in race mode, else by the first race-mode tick."""
+        race recording, opened by open_recording() or the first race-mode tick."""
         self._path = settings_path
         self._pick, self._trace_for = pick, trace_for
         self._multi_lobby = multi_lobby
@@ -364,8 +365,6 @@ class Service:
         self._final_lobby_laps = None
         self._final_on_air = False  # endurance: the last schedule row is on air
         self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver)}
-        if recording_dir and enabled():
-            self._guarded(self._recorder)
 
     def _current(self):
         pick = self._pick()
@@ -509,6 +508,11 @@ class Service:
             self._observe(standings)
         self.save_fastest()
 
+    def open_recording(self):
+        """Open the recording off the tick path, in race mode only; a failure backs off."""
+        if self._recording_dir and self._enabled():
+            self._guarded(self._recorder)
+
     def _observe(self, standings):
         """Feed the recorder; a recording failure never stops the tick."""
         if self._rec is None and self._clock() < self._rec_retry:
@@ -525,7 +529,7 @@ class Service:
             self._rec_retry = self._clock() + RECORDING_RETRY_S
             if not self._rec_failing:
                 self._rec_failing = True
-                logging.getLogger(__name__).warning("race recording unavailable: %s", e.__cause__ or e)
+                LOG.warning("race recording unavailable: %s", e.__cause__ or e)
 
     def _compound_codes(self):
         saved = _saved_compounds(_actions_path_for(self._path))

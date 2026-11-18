@@ -65,6 +65,7 @@ def _serve(solo=True, segments=(), clock=None, recording_dir=None, enabled=lambd
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo,
                                enabled=enabled, recording_dir=recording_dir)
+    race.open_recording()
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
     extra.setdefault("sender_script_path", os.path.join(ROOT, "src", "relay", "racecast-sender.py"))

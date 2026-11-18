@@ -26,7 +26,7 @@ SAMPLE_FIELDS = ("entry", "driver", "laps", "gap_time_s", "interval_time_s", "la
                  "gt7_position", "position_mismatch")
 DECISIONS = {"confirm": "confirmed", "dismiss": "dismissed"}
 _FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
-_log = logging.getLogger("race_recording")
+_log = logging.getLogger("racecast.relay")   # the relay attaches its log file to this logger
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (t REAL PRIMARY KEY, doc TEXT NOT NULL);

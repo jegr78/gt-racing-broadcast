@@ -675,11 +675,21 @@ def t_a_qualifying_relay_neither_records_nor_creates_a_file():
     assert not [f for f in os.listdir(d) if f.startswith("race-recording")], os.listdir(d)
 
 
-def t_the_store_opens_when_the_service_is_built():
+def t_open_recording_opens_off_the_tick_path_after_the_bind():
     d = tempfile.mkdtemp()
     svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
                      trace_for=lambda i: TRACE, multi_lobby=lambda: False, recording_dir=d)
+    assert svc._rec is None, "building the service touches no recording (a losing start may build it)"
+    svc.open_recording()
     assert svc._rec is not None, "race mode opens the recording off the tick path"
+    q = dr.Service(os.path.join(d, "q.json"), pick=lambda: None, trace_for=lambda i: None,
+                   multi_lobby=lambda: False, enabled=lambda: False, recording_dir=tempfile.mkdtemp())
+    q.open_recording()
+    assert q._rec is None, "qualifying opens nothing"
+    with open(os.path.join(os.path.dirname(HERE), "src", "relay", "racecast-feeds.py"), encoding="utf-8") as fh:
+        relay = fh.read()
+    assert relay.index("race_svc.open_recording()") > relay.index("Could not bind the control server"), \
+        "only a relay that owns the control port opens the recording"
 
 
 def _failing_service():
@@ -690,6 +700,7 @@ def _failing_service():
     svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
                      trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
                      wall=lambda: wall[0], recording_dir=os.path.join(blocker, "sub"))
+    svc.open_recording()
     return svc
 
 
@@ -747,6 +758,23 @@ def t_any_recorder_error_keeps_the_fastest_lap_save():
     svc.set_fastest("pit", "A", "Max", 90000)
     svc.tick()
     assert os.path.exists(svc._fastest_path()), "a recorder bug never skips save_fastest"
+
+
+def t_a_recording_failure_reaches_the_relay_log():
+    import logging
+    seen = []
+
+    class _H(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+    log = logging.getLogger("racecast.relay")
+    h = _H()
+    log.addHandler(h)
+    try:
+        _failing_service()
+    finally:
+        log.removeHandler(h)
+    assert any("race recording unavailable" in m for m in seen), seen
 
 
 if __name__ == "__main__":
