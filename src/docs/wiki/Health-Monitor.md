@@ -185,8 +185,11 @@ monitor shows the takeover marker too.
 Ending the final broadcast Part deliberately stops health-alert pings before
 OBS stops. The relay keeps recording health and stream-stop events while the
 post-event report and service teardown finish. The stream-stop post still
-appears, without the `@here` ping, since the crew asked for this end. The relay posts it as soon as OBS confirms the stop, so it comes
-before the report. The `racecast event stop` that ending the final Part starts
+appears, without the `@here` ping, since the crew asked for this end. The relay posts it as soon as OBS accepts the stop request, so it comes
+before the report. OBS can keep reporting its output as active for a while after
+that, longer with a stream delay. The relay ignores that until OBS reports the
+stream stopped or 60 seconds pass, so the winding-down output never posts a second
+"stream started" and "stream stopped" pair. The `racecast event stop` that ending the final Part starts
 writes its output to `event-stop.log`, listed with the relay logs in the Control
 Center. A refused stop leaves health alerts enabled, and an unexpected
 stream loss during the event still raises CRITICAL. A successful explicit stream

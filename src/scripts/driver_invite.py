@@ -123,7 +123,7 @@ def issue(invite, entry, name, segment=None):
 
 def verify(invite, code):
     """{entry, segment, name, conn} for a valid code of this invite, else None."""
-    if not invite or not isinstance(code, str) or len(code) > MAX_CODE:
+    if not invite or not isinstance(code, str) or len(code) > MAX_CODE or not code.isascii():
         return None
     if not code.startswith(PREFIX) or code.count(".") != 1:
         return None

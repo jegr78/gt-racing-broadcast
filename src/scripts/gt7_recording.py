@@ -295,6 +295,7 @@ class Recording:
     def __init__(self, path):
         self.path = path
         self.dropped = 0
+        self.meta_records = 0      # meta records read so far
         self.packet_stats = None   # the newest packet counters a meta record carried
         try:
             with open(path, "rb") as fh:
@@ -335,6 +336,7 @@ class Recording:
                     return
                 self.pos += _REC.size + n
                 if kind == _META:
+                    self.meta_records += 1
                     try:
                         meta = json.loads(payload.decode("utf-8"))
                         self.dropped = int(meta["dropped"])

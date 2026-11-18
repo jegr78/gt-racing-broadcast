@@ -105,6 +105,27 @@ def t_plain_scalars_have_no_bare_colon():
                            + "; ".join(offenders))
 
 
+def _preview_step(name):
+    with open(os.path.join(WF_DIR, "preview.yml"), encoding="utf-8") as fh:
+        text = fh.read()
+    start = text.index("- name: " + name)
+    end = text.find("\n      - name: ", start + 1)
+    return text[start:end if end > 0 else len(text)]
+
+
+def t_preview_publish_only_touches_preview_tags():
+    step = _preview_step("(Re)create the rolling pre-release")
+    guard = step.find('case "$TAG" in preview-*)')
+    assert guard >= 0, "the publish step must refuse a tag outside preview-*"
+    assert guard < step.index("gh release delete"), "the guard must run before any delete"
+
+
+def t_preview_comment_lists_the_sender_assets():
+    step = _preview_step("Post/refresh the download-links comment")
+    for asset in ("racecast-sender-windows.exe", "racecast-sender-macos"):
+        assert asset in step, f"the PR comment must link {asset}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -168,7 +168,9 @@ all stays **Telemetry stale**. `/telemetry/data` and the relay `/status` carry t
 packet number jumps back, jumps ahead by more than ten seconds of packets, or packets return
 after five seconds of silence) starts a new count. Recordings keep the counters, and the lap
 index notes `N packets lost` on every lap that missed packets, so a gap in a trace can be told
-apart from a driving gap. Such a lap still counts.
+apart from a driving gap. Such a lap still counts. The lap index uses the same five-second
+silence rule, and packets the recorder itself had to drop on a busy machine do not count
+as lost.
 
 A browser
 connection interruption keeps selection and zoom while it retries. A relay restart, and a
