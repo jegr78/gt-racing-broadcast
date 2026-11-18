@@ -252,6 +252,7 @@
         o.start(t0); o.stop(t0 + 0.25);
       } catch (e) { /* no audio device */ }
     }
+    var evEmpty = el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No disconnects."})]);
     var evRows = Object.create(null);   // keyed by event id: an open offset choice survives the poll
     var evSeen = null;                  // ids seen so far; null until the first poll seeds it
     var suspected = Object.create(null);
@@ -316,13 +317,13 @@
       ids.forEach(function (id) { evSeen[id] = true; });
       if (fresh) beep();
       evTitle.textContent = "Events (" + open + ")";
-      var order = ids.join(",");
-      if (evBody.dataset.order !== order && !evBody.contains(document.activeElement)) {
-        evBody.dataset.order = order;
-        var rows = ids.map(function (id) { return evRows[id].tr; });
-        if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No disconnects."})])];
-        evBody.replaceChildren.apply(evBody, rows);
-      }
+      // Rows stay in place and only new ones are inserted, so a focused control keeps its focus.
+      var rows = ids.map(function (id) { return evRows[id].tr; });
+      if (!rows.length) rows = [evEmpty];
+      rows.forEach(function (tr, i) {
+        if (evBody.children[i] !== tr) evBody.insertBefore(tr, evBody.children[i] || null);
+      });
+      while (evBody.children.length > rows.length) evBody.removeChild(evBody.lastChild);
     }
 
     // -- correction / rejoin / change form ------------------------------------------
