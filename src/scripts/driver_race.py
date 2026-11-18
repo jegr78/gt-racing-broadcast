@@ -226,13 +226,15 @@ def public_view(snap):
     return out
 
 
-def qualifying(connections, segment, roster, min_ms=0, overrides=None):
+def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
     driver, team, color, text_color, best_ms, gap_ms}]; entries without a lap last.
     Only live senders count, and a best lap under `min_ms` (faster than the line
     allows) is ignored. `overrides` {entry: ms or None} are Race Control's
-    corrections: a set time replaces GT7's, None deletes it."""
-    best = {}
+    corrections: a set time replaces GT7's, None deletes it. `seen` {entry: (ms,
+    name)} carries the bests of earlier calls and is updated in place, so a lap stays
+    ranked after its sender goes quiet."""
+    best = seen if seen is not None else {}
     for c in connections:
         if not c.get("live", True):
             continue
@@ -241,8 +243,12 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None):
         ms = (c.get("latest") or {}).get("best_ms")
         ms = ms if type(ms) is int and ms > max(0, min_ms) else None
         cur = best.get(c["entry"])
+        if cur is None and len(best) >= MAX_QUALI:
+            continue
         if cur is None or (ms is not None and (cur[0] is None or ms < cur[0])):
             best[c["entry"]] = (ms, c.get("name") or "")
+    best = {e: (ms if ms is None or ms > max(0, min_ms) else None, name)
+            for e, (ms, name) in best.items()}
     for entry, ms in (overrides or {}).items():
         best[entry] = (ms, best.get(entry, (None, ""))[1])
     order = sorted(best.items(), key=lambda kv: (kv[1][0] is None, kv[1][0] or 0, kv[0]))
@@ -339,6 +345,7 @@ class Service:
         self._race_pick = object()
         self._line_tried = None
         self._final_lobby_laps = None
+        self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver)}
 
     def _current(self):
         pick = self._pick()
@@ -422,7 +429,8 @@ class Service:
             out["qualifying"] = qualifying(
                 ctx.get("connections") or [], ctx.get("segment"), roster,
                 min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
-                overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")))
+                overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
+                seen=self._quali_seen.setdefault((pick.get("id"), _segment_key(ctx.get("segment"))), {}))
             for row in out["qualifying"]:
                 row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
             return out

@@ -133,8 +133,9 @@ It never carries connection ids, corrections or who made them.
   the live race. **Show dashboard**, **Hide dashboard** and the display switches act at
   once, never after the delay.
 - **Qualifying**: in qualifying mode the dashboard ranks the running segment by GT7's
-  best lap of its live senders, with the gap to the fastest; a best lap faster than the
-  line allows is ignored.
+  best lap, with the gap to the fastest. A lap set while the sender was live stays on
+  the tower when the sender closes or loses its connection, until the relay restarts;
+  a best lap faster than the line allows is ignored.
 
 ### On air and in the cockpit
 

@@ -403,6 +403,24 @@ def t_qualifying_ranks_the_running_segment_by_best_lap():
         ("B", "Ann", 90100), ("A", "Max", 90500)], f"impossible and quiet senders are ignored: {rows}"
 
 
+def t_a_qualifying_time_stays_when_its_sender_goes_quiet():
+    conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500}},
+             {"entry": "B", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90100}}]
+    ctx = {"roster": ROSTER, "stint": "Q1", "remaining": None, "mode": "qualifying",
+           "segment": "Q1", "connections": conns}
+    svc, _clock, _path = _dash_service(ctx)
+    svc.tick()
+    conns[1]["live"] = False                                # Ann closed the sender
+    conns[0]["latest"] = {"best_ms": -1}                    # Max's new GT7 session
+    svc.tick()
+    rows = svc.dashboard()["qualifying"]
+    assert [(r["entry"], r["driver"], r["best_ms"]) for r in rows] == [
+        ("B", "Ann", 90100), ("A", "Max", 90500)], f"a set lap stays on the tower: {rows}"
+    ctx["segment"] = "Q2"
+    svc.tick()
+    assert svc.dashboard()["qualifying"] == [], "another segment starts its own ranking"
+
+
 def t_race_control_corrects_a_qualifying_time():
     conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500}},
              {"entry": "B", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90100}}]
