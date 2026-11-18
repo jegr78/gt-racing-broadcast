@@ -150,6 +150,28 @@ def t_the_corrected_leader_takes_the_flag_first():
         "no car is classified with more laps than the winner took the flag on"
 
 
+def t_a_lapped_car_taking_the_flag_stays_behind_a_lead_lap_car_still_running():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 6), Car(race, "C", "c", L - 100)
+    t = _drive(race, [a, b, c], [60, 29.5, 50], 0.0, 110)    # A wins, B (lapped) crosses next
+    assert _row(race, "A", t)["finished"] and _row(race, "B", t)["finished"], race.standings(t)
+    assert not _row(race, "C", t)["finished"] and _row(race, "C", t)["laps"] == _row(race, "B", t)["laps"]
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order == ["A", "C", "B"], f"C reached that lap long before B took the flag: {order}"
+
+
+def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
+    t = _drive(race, [a, b], [50, 50], 0.0, 20)
+    ea, eb = race._entries["A"], race._entries["B"]
+    ea.distance, eb.distance = L + 900.0, L + 850.0          # the final lobby's line sits mid-lap
+    ea.finished_at = race._finishing_at = t
+    eb.ts, eb.ds = [t - 30, t - 10, t - 1], [L - 100.0, L + 10.0, eb.distance]
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order == ["A", "B"], f"the car that took the flag first is the winner: {order}"
+
+
 def t_the_lap_count_follows_gt7s_counter_including_the_formation_lap():
     race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)
@@ -347,6 +369,53 @@ def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
     assert race.standings(t)["state"] in ("finishing", "finished") and _row(race, "A", t)["finished"]
 
 
+def t_the_lap_display_follows_the_lobby_that_counts_and_stops_at_the_count():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 3 * L / 50)
+    race.open_change_window(t)
+    race.final_lobby(2, t)
+    t = _drive(race, [old, rival], [50, 40], t, L / 50 + 2)
+    assert race.standings(t)["lap"] == {"leader": 5, "count": None}, \
+        f"before the final lobby's car counts, race laps show without the count: {race.standings(t)['lap']}"
+    old.box = True
+    t = _drive(race, [old, rival], [None, 40], t, 3)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [new, rival], [40, 40], t, 2)
+    new.box = True
+    t = _drive(race, [new, rival], [None, 40], t, 3)
+    new.box = False
+    t = _drive(race, [new, rival], [50, 40], t, 20)
+    assert race.standings(t)["lap"] == {"leader": 1, "count": 2}, race.standings(t)["lap"]
+    t = _drive(race, [new, rival], [50, 40], t, (2 * L) / 50 + 2)
+    assert race.standings(t)["lap"] == {"leader": 2, "count": 2}, \
+        f"the final lobby's lap, never past the count: {race.standings(t)['lap']}"
+    single = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
+    a = Car(single, "A", "a", L - 15)
+    t = _drive(single, [a], [50], 0.0, (3 * L + 15) / 50 + 1)
+    assert _row(single, "A", t)["finished"] and single.standings(t)["lap"] == {"leader": 3, "count": 3}, \
+        single.standings(t)["lap"]
+
+
+def t_a_timed_endurance_keeps_race_laps_on_the_display_in_the_final_lobby():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 3 * L / 50)
+    race.open_change_window(t)
+    race.final_lobby(None, t)
+    old.box = True
+    t = _drive(race, [old, rival], [None, 5], t, 3)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [new, rival], [40, 5], t, 2)                     # lap 1 of the final lobby
+    new.box = True
+    t = _drive(race, [new, rival], [None, 5], t, 3)
+    new.box = False
+    t = _drive(race, [new, rival], [50, 5], t, 10)
+    assert _row(race, "A", t)["driver"] == "Lea" and race.standings(t)["entries"][0]["entry"] == "A"
+    lap = race.standings(t)["lap"]
+    assert lap["count"] is None and lap["leader"] >= 4, f"without a count the race laps stay: {lap}"
+
+
 def t_one_sender_cannot_move_the_line_or_jump_the_field():
     race = rd.Race(TRACE, formation=False)
     x0, z0 = _pos(L / 2)
@@ -398,6 +467,23 @@ def t_a_reassigned_sender_counts_for_its_new_entry():
     a.entry = "B"                                      # the producer corrected the registration
     t = _drive(race, [a], [50], t, 1)
     assert [r["entry"] for r in race.standings(t)["entries"]] == ["B"], race.standings(t)["entries"]
+
+
+def t_moving_a_teams_only_car_away_and_back_keeps_the_team():
+    for multi in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi)
+        a = Car(race, "A", "a", L - 15)
+        t = _drive(race, [a], [50], 0.0, 30)
+        race.correct("A", 500.0, pit_stops=1)
+        a.entry = "X"                                      # moved to the wrong entry by mistake
+        t = _drive(race, [a], [50], t, 2)
+        race.correct("A", 20.0)                            # Race Control corrects it meanwhile
+        a.entry = "A"
+        t = _drive(race, [a], [50], t, 2)
+        row = _row(race, "A", t)
+        assert row["correction_m"] == 520.0 and row["pit_stops"] == 1, (multi, row)
+        assert abs(row["distance_m"] - (a.along + 520.0)) < 5, \
+            f"the team counts on from its own laps: {multi} {row} {a.along}"
 
 
 def t_no_line_means_no_distance():
@@ -546,6 +632,21 @@ def t_a_change_override_switches_the_team_now():
     row = _row(race, "A", t)
     assert row["driver"] == "Lea" and abs(row["distance_m"] - (before + 200)) < 25, (row, before)
     assert not race.override_change("A", "nobody", t), "only a connection of the team"
+
+
+def t_a_change_override_without_a_known_line_changes_nothing():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old = Car(race, "A", "a1", L - 15, "Max")
+    t = _drive(race, [old], [50], 0.0, 20)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    new.along = -L / 2                                    # mid-lap, no crossing of its own yet
+    t = _drive(race, [old, new], [50, 40], t, 2)
+    before = _row(race, "A", t)["distance_m"]
+    assert not race.override_change("A", "a2", t), "no line station for the new car: refused"
+    t = _drive(race, [old, new], [50, 40], t, 2)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Max" and abs(row["distance_m"] - (before + 100)) < 10, \
+        f"the old car keeps counting after a refused override: {row} {before}"
 
 
 def t_a_release_in_the_same_lobby_drives_on_from_where_the_cars_are():
