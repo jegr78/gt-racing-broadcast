@@ -12193,6 +12193,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             try:
                 with open(path, "rb") as fh: body = fh.read()
             except OSError:
+                if urlparse(self.path).path.startswith("/console"):   # Funnel-reachable: no paths
+                    return self._send({"error": "file not found"}, 404)
                 return self._send({"error": "file not found", "looked_for": path}, 404)
             self.send_response(200)
             self.send_header("Content-Type", ctype)
@@ -14385,7 +14387,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if reg is None:
                     return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
                 roster = hud_source.roster_names() if hud_source else []
-                if roster and reg["entry"] not in roster:   # an unread roster blocks nobody
+                if roster and hub.entry_for(reg["conn"], reg["entry"]) not in roster:   # an unread roster blocks nobody
                     return self._drive_refuse(403, "this entry is no longer in the league's list: register again")
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
@@ -14445,6 +14447,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "pick your stint or segment from the list"}, 400)
                 if not segments:
                     segment = None   # a league without stint labels registers by entry only
+                if hub.entry_full(body["entry"]):
+                    return self._send({"error": "this entry already has its live senders: "
+                                       "ask the producer or try again once one stops"}, 409)
                 try:
                     issued = driver_invite.issue(invite, entry=body["entry"],
                                                  name=body.get("name"), segment=segment)
@@ -16229,7 +16234,9 @@ def main():
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
         multi_lobby=lambda: not relay.solo)
-    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update)
+    _hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))
+    driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update,
+                                   invite_id=lambda: (_hub_invite.get() or {}).get("id"))
     threading.Thread(target=dashboard_ticks, daemon=True,
                      args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(

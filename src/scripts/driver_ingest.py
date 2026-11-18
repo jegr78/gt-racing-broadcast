@@ -20,6 +20,7 @@ LOG = logging.getLogger("racecast.relay")
 CONTRACT = 1
 RATE_HZ = 20
 LIVE_S = 20.0         # a connection without a batch for this long frees its entry slot
+FORGET_S = 600.0      # ... and after this long it leaves the lists entirely
 MAX_CONNECTIONS = 48
 
 
@@ -33,10 +34,11 @@ class Hub:
     """Connections keyed by the code's connection id. Thread-safe."""
 
     def __init__(self, multi_lobby, clock=time.monotonic, wall=time.time, rate_hz=RATE_HZ,
-                 max_connections=MAX_CONNECTIONS, on_sample=None):
+                 max_connections=MAX_CONNECTIONS, on_sample=None, invite_id=None):
         """`on_sample(reg, sample)` receives every decoded sample with its connection's
         {conn, entry, segment, name}, outside every lock; `sample["mono"]` is the
-        receive time on `clock`."""
+        receive time on `clock`. `invite_id()` returns the current invite's id; the hub
+        resets when it changes, since a new invite revokes every code."""
         self._multi_lobby = multi_lobby
         self._clock = clock
         self.rate_hz = rate_hz
@@ -47,15 +49,37 @@ class Hub:
                                              on_sample=self._sample if on_sample else None)
         self._lock = threading.Lock()
         self._conns = {}        # conn -> {entry, segment, name, last}
-        self._dropped = set()
+        self._dropped = {}         # conn -> None, oldest first
         self._hook_failed = set()
         self._reassigned = {}      # conn -> entry the producer moved it to
+        self._invite_id = invite_id
+        self._bound_invite = invite_id() if invite_id else None
+
+    def _follow_invite(self):
+        if self._invite_id is None:
+            return
+        current = self._invite_id()
+        with self._lock:
+            changed = current != self._bound_invite
+            self._bound_invite = current
+        if changed:
+            self.reset()
+
+    def _forget_quiet(self, now):
+        """Drop connections quiet for FORGET_S with their side state. Caller holds the lock."""
+        gone = [c for c, m in self._conns.items() if now - m["last"] >= FORGET_S]
+        for conn in gone:
+            del self._conns[conn]
+            self._reassigned.pop(conn, None)
+            self._hook_failed.discard(conn)
+        return gone
 
     def _live(self, now):
         return {c: m for c, m in self._conns.items() if now - m["last"] < LIVE_S}
 
     def ingest(self, reg, body, sender_stats):
         conn = reg["conn"]
+        self._follow_invite()
         now = self._clock()
         try:
             packets = telemetry_probe.decode_batch(body)    # cheap; refuse junk before a slot
@@ -63,6 +87,7 @@ class Hub:
             raise IngestError(str(exc), exc.status) from None
         del packets
         with self._lock:
+            forgotten = self._forget_quiet(now)
             if conn in self._dropped:
                 raise IngestError("disconnected by the producer: register again on the invite page", 410)
             entry = self._reassigned.get(conn, reg["entry"])
@@ -85,6 +110,8 @@ class Hub:
             held = self._conns.get(conn)
             self._conns[conn] = {"entry": entry, "segment": reg.get("segment"),
                                  "name": reg["name"], "last": now}
+        for stale in forgotten:
+            self._counts.forget(stale)
         try:
             reply = self._counts.ingest(conn, body, sender_stats)
         except telemetry_probe.ProbeError as exc:
@@ -118,6 +145,19 @@ class Hub:
                     LOG.warning("driver race: a sample of %s failed (%s); further failures "
                                 "of this connection are not logged", safe, type(exc).__name__)
 
+    def entry_for(self, conn, entry):
+        """The entry `conn` counts for: the producer's reassignment, else `entry`."""
+        with self._lock:
+            return self._reassigned.get(conn, entry)
+
+    def entry_full(self, entry):
+        """True while `entry` already has as many live senders as the race allows."""
+        self._follow_invite()
+        now = self._clock()
+        allowed = 2 if self._multi_lobby() else 1
+        with self._lock:
+            return sum(1 for m in self._live(now).values() if m["entry"] == entry) >= allowed
+
     def reassign(self, conn, entry):
         """Count a known sender for `entry` from now on (a producer's correction of a
         wrong registration). It keeps its slot even when `entry` already has one."""
@@ -133,7 +173,10 @@ class Hub:
             if conn not in self._conns:
                 return False
             del self._conns[conn]
-            self._dropped.add(conn)
+            self._reassigned.pop(conn, None)
+            self._dropped[conn] = None
+            while len(self._dropped) > 4 * self._max:
+                del self._dropped[next(iter(self._dropped))]
         self._counts.forget(conn)
         return True
 
@@ -142,10 +185,16 @@ class Hub:
             self._conns.clear()
             self._dropped.clear()
             self._reassigned.clear()
+            self._hook_failed.clear()
         self._counts.reset()
 
     def connections(self):
+        self._follow_invite()
         now = self._clock()
+        with self._lock:
+            forgotten = self._forget_quiet(now)
+        for stale in forgotten:
+            self._counts.forget(stale)
         senders = self._counts.snapshot()["senders"]
         with self._lock:
             conns = dict(self._conns)

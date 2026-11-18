@@ -196,6 +196,67 @@ def t_reset_drops_every_connection():
     hub.ingest(_reg("c2", name="Ann"), _batch(1), None)
 
 
+
+def t_long_quiet_connections_are_forgotten_with_their_side_state():
+    hub, clock = _hub()
+    hub.ingest(_reg("old"), _batch(1), None)
+    hub.reassign("old", "Team B #2")
+    hub.ingest(_reg("new", entry="Team C #3"), _batch(1), None)
+    clock.t += ing.FORGET_S - 1
+    hub.ingest(_reg("new", entry="Team C #3"), _batch(2), None)
+    assert {c["conn"] for c in hub.connections()} == {"old", "new"}, "a recent sender stays listed"
+    clock.t += 2
+    assert [c["conn"] for c in hub.connections()] == ["new"], \
+        "a sender quiet for FORGET_S leaves the list, the dashboard and readiness"
+    assert "old" not in hub._reassigned, "a forgotten connection takes its reassignment along"
+
+
+def t_disconnect_records_are_bounded():
+    hub = ing.Hub(multi_lobby=lambda: False, clock=_Clock(), max_connections=2)
+    for i in range(20):
+        hub.ingest(_reg(f"c{i}", entry=f"E{i}"), _batch(1), None)
+        hub.disconnect(f"c{i}")
+    assert len(hub._dropped) <= 4 * 2, f"disconnect records must not grow without bound: {len(hub._dropped)}"
+    _refused(lambda: hub.ingest(_reg("c19", entry="E19"), _batch(2), None), 410, "disconnected")
+
+
+def t_a_new_invite_resets_the_hub():
+    current = {"id": "inv1"}
+    hub = ing.Hub(multi_lobby=lambda: False, clock=_Clock(), invite_id=lambda: current["id"])
+    hub.ingest(_reg("c1"), _batch(1), None)
+    hub.disconnect("c1")
+    hub.ingest(_reg("c2", entry="Team B #2"), _batch(1), None)
+    assert [c["conn"] for c in hub.connections()] == ["c2"]
+    current["id"] = "inv2"
+    assert hub.connections() == [], "a regenerated invite revokes every code, so its senders go too"
+    assert not hub._dropped, "and so do the old disconnect records"
+    hub.ingest(_reg("c3"), _batch(1), None)
+    assert [c["conn"] for c in hub.connections()] == ["c3"]
+
+
+def t_a_full_entry_is_reported_before_registration():
+    hub, clock = _hub()
+    assert not hub.entry_full("Team A #1")
+    hub.ingest(_reg("c1"), _batch(1), None)
+    assert hub.entry_full("Team A #1") and not hub.entry_full("Team B #2")
+    clock.t += ing.LIVE_S + 1
+    assert not hub.entry_full("Team A #1"), "a quiet sender frees the entry"
+    team, _clock = _hub(multi_lobby=True)
+    team.ingest(_reg("d1"), _batch(1), None)
+    assert not team.entry_full("Team A #1"), "endurance allows a second sender per team"
+    team.ingest(_reg("d2", name="Ann"), _batch(1), None)
+    assert team.entry_full("Team A #1")
+
+
+def t_entry_for_follows_a_reassignment():
+    hub, _clock = _hub()
+    hub.ingest(_reg("c1"), _batch(1), None)
+    assert hub.entry_for("c1", "Team A #1") == "Team A #1"
+    hub.reassign("c1", "Team B #2")
+    assert hub.entry_for("c1", "Team A #1") == "Team B #2"
+    assert hub.entry_for("unknown", "Team A #1") == "Team A #1"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

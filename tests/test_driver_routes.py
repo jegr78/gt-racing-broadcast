@@ -66,9 +66,9 @@ def _serve(solo=True, segments=(), clock=None, **extra):
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo)
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
+    extra.setdefault("sender_script_path", os.path.join(ROOT, "src", "relay", "racecast-sender.py"))
     srv = g._serve(solo=solo, hud_source=_Hud(), driver_hub=hub, driver_invite_path=path,
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
-                   sender_script_path=os.path.join(ROOT, "src", "relay", "racecast-sender.py"),
                    driver_segments=lambda: list(segments), driver_race_svc=race,
                    driver_desk_path=os.path.join(ROOT, "src", "console", "driver-desk.js"), **extra)
     srv.race_svc = race
@@ -170,9 +170,9 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         batch = tp.encode_batch([_wire(1), _wire(2)])
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
         assert code == 200 and json.loads(text) == {"ok": True, "v": 1, "rate_hz": 20, "accepted": 2}, text
-        other = json.loads(_register(port, invite, entry="Team A #1", name="Ann")[1])["code"]
-        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": other})
-        assert code == 409 and "already has a sender" in text, (code, text)
+        code, text, _h = _register(port, invite, entry="Team A #1", name="Ann")
+        assert code == 409 and "already has its live senders" in text, \
+            ("a full entry refuses the registration, so the invite page shows it", code, text)
         code, text, _h = _req(port, "/drivers/data")
         conns = json.loads(text)["connections"]
         assert [(c["entry"], c["name"], c["packets"]["received"]) for c in conns] == [("Team A #1", "Max", 2)], conns
@@ -231,6 +231,46 @@ def t_driver_credentials_reach_nothing_else():
                             {"X-Driver-Code": "D1:forged.sig"})
         assert code == 403, code
         assert _req(port, "/console/drive/ingest", b"RCT1", {"X-Driver-Code": issued}, method="GET")[0] in (403, 405)
+    finally:
+        srv.shutdown()
+
+
+def t_a_non_ascii_driver_code_is_refused_like_any_bad_code():
+    srv, port, path, _hub = _serve()
+    try:
+        driver_invite.create(path)
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]),
+                              {"X-Driver-Code": "D1:\u00e9.abc"})
+        assert code == 403 and "register again" in text, (code, text)
+    finally:
+        srv.shutdown()
+
+
+def t_a_missing_sender_script_never_names_a_server_path():
+    srv, port, path, _hub = _serve(sender_script_path=os.path.join(tempfile.mkdtemp(), "gone.py"))
+    try:
+        invite = driver_invite.create(path)["id"]
+        code, text, _h = _req(port, f"/console/drive/sender.py?i={invite}")
+        assert code == 404 and "looked_for" not in text and "gone.py" not in text, \
+            ("a Funnel-reachable 404 must not leak the producer's path", code, text)
+    finally:
+        srv.shutdown()
+
+
+def t_a_reassigned_sender_keeps_uploading_after_its_typo_entry_leaves():
+    srv, port, path, hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        ENTRIES.append("Team Typo")
+        try:
+            issued = json.loads(_register(port, invite, entry="Team Typo", name="Max")[1])["code"]
+            _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
+            assert hub.reassign(hub.connections()[0]["conn"], "Team B #2")
+        finally:
+            ENTRIES.remove("Team Typo")
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(2)]),
+                              {"X-Driver-Code": issued})
+        assert code == 200, ("the roster check must use the reassigned entry", code, text)
     finally:
         srv.shutdown()
 
