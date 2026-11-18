@@ -165,7 +165,12 @@ class Publisher:
                 self._room = None
                 return
         self._close()
-        self._room = None
+        try:
+            self._end_over_own_connection(link)
+        finally:
+            self._room = None           # only now: event stop waits on it before the relay stops
+
+    def _end_over_own_connection(self, link):
         try:
             conn = self._connect(timing_host.publish_url(self._settings.url, link),
                                  {"Authorization": f"Bearer {self._settings.key}"},

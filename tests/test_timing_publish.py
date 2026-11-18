@@ -322,6 +322,24 @@ def t_link_cleared_while_disconnected_ends_the_old_room_once():
     assert r.pub.status()["room"] is False
 
 
+def t_the_room_stays_owed_while_its_end_is_on_the_way():
+    r = _Rig()
+    r.step()
+    r.conns[0].closed = True
+    r.step(2.0)
+    r.link = None
+    seen = []
+    connect = r.pub._connect
+
+    def watching(url, headers, timeout):
+        seen.append(r.pub.status()["room"])
+        return connect(url, headers, timeout=timeout)
+    r.pub._connect = watching
+    r.step(2.0)
+    assert seen == [True], "event stop waits on status()['room'] until the end went out"
+    assert r.pub.status()["room"] is False
+
+
 def t_an_unreachable_old_room_is_tried_once():
     r = _Rig()
     r.step()
