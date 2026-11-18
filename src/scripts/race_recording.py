@@ -4,6 +4,7 @@ Stdlib only. A pointer file names the current recording; `rotate` clears it so t
 next `open_current` starts a fresh file. Samples are one JSON document per second."""
 import datetime
 import json
+import logging
 import os
 import queue
 import sqlite3
@@ -13,9 +14,11 @@ import atomic_replace
 from race_distance import NO_DATA_S
 
 POINTER = "race-recording.json"
-CSV_HEADER = ["time_utc", "pos", "entry", "driver", "laps", "gap_time_s",
-              "interval_time_s", "lapped", "status", "compound", "pit_stops",
-              "correction_m", "rejoin", "gt7_position"]
+_SAMPLE_COLUMNS = ["state", "red_flag"]
+_ROW_COLUMNS = ["pos", "entry", "driver", "laps", "gap_time_s", "interval_time_s", "lapped",
+                "status", "finished", "compound", "pit_stops", "correction_m", "rejoin",
+                "gt7_position", "position_mismatch"]
+CSV_HEADER = ["time_utc"] + _SAMPLE_COLUMNS + _ROW_COLUMNS
 SAMPLE_EVERY_S = 1.0
 COUNTING_STATES = ("racing", "final_lap", "finishing")
 SAMPLE_FIELDS = ("entry", "driver", "laps", "gap_time_s", "interval_time_s", "lapped",
@@ -23,6 +26,7 @@ SAMPLE_FIELDS = ("entry", "driver", "laps", "gap_time_s", "interval_time_s", "la
                  "gt7_position", "position_mismatch")
 DECISIONS = {"confirm": "confirmed", "dismiss": "dismissed"}
 _FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+_log = logging.getLogger("race_recording")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (t REAL PRIMARY KEY, doc TEXT NOT NULL);
@@ -56,7 +60,11 @@ def open_current(runtime_dir, wall):
     name = _read_pointer(runtime_dir)
     if name is None:
         stamp = datetime.datetime.fromtimestamp(wall, datetime.timezone.utc)
-        name = "race-recording-%s.sqlite" % stamp.strftime("%Y%m%d-%H%M%S")
+        stem = "race-recording-%s" % stamp.strftime("%Y%m%d-%H%M%S")
+        name, n = stem + ".sqlite", 1
+        while os.path.exists(os.path.join(runtime_dir, name)):
+            n += 1
+            name = "%s-%d.sqlite" % (stem, n)
         tmp = os.path.join(runtime_dir, POINTER + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"file": name}, f)
@@ -70,7 +78,6 @@ class Store:
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(path, check_same_thread=False, timeout=5.0)
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -148,12 +155,22 @@ class Store:
         for t, raw in samples:
             stamp = datetime.datetime.fromtimestamp(t, datetime.timezone.utc)
             when = stamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-            for r in json.loads(raw).get("rows") or []:
-                yield [when] + [_cell(r.get(c)) for c in CSV_HEADER[1:]]
+            doc = json.loads(raw)
+            head = [when, _cell(doc.get("state")), _red_flag_cell(doc.get("red_flag"))]
+            for r in doc.get("rows") or []:
+                yield head + [_cell(r.get(c)) for c in _ROW_COLUMNS]
 
     def close(self):
         with self._lock:
             self._conn.close()
+
+
+def _red_flag_cell(red):
+    """The red flag mode, "on" for a flag without one, empty without a flag."""
+    if not red:
+        return ""
+    mode = red.get("mode") if isinstance(red, dict) else None
+    return _cell(mode) if isinstance(mode, str) and mode else "on"
 
 
 def _cell(v):
@@ -165,29 +182,35 @@ def _cell(v):
 
 class Writer:
     """Daemon thread that runs queued jobs `fn(store)` in order. put() never blocks:
-    a full queue drops the job and counts it in `dropped`."""
+    a full queue drops the job and counts it in `dropped`. The first failed job is
+    logged, every one counts in `failed`."""
 
     def __init__(self, store, maxsize=120):
         self.store = store
         self.dropped = 0
         self.failed = 0
         self._q = queue.Queue(maxsize)
+        self._stopping = threading.Event()
         self._thread = threading.Thread(target=self._run, name="race-recording", daemon=True)
         self._thread.start()
 
     def _run(self):
-        while True:
+        while not self._stopping.is_set():
             fn = self._q.get()
             try:
                 if fn is None:
                     return
                 fn(self.store)
-            except Exception:
+            except Exception as e:
                 self.failed += 1
+                if self.failed == 1:
+                    _log.warning("race recording write failed: %s", e)
             finally:
                 self._q.task_done()
 
     def put(self, fn):
+        if self._stopping.is_set():
+            return False
         try:
             self._q.put_nowait(fn)
             return True
@@ -202,10 +225,12 @@ class Writer:
         return done.wait(timeout)
 
     def stop(self):
+        """End the thread after its current job; queued jobs are dropped."""
+        self._stopping.set()
         try:
-            self._q.put(None, timeout=2.0)
+            self._q.put_nowait(None)   # wakes a thread waiting on an empty queue
         except queue.Full:
-            return
+            pass  # the thread is busy and sees the flag after this job
         self._thread.join(timeout=5.0)
 
 

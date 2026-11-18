@@ -99,11 +99,41 @@ def t_csv_has_header_and_one_row_per_car():
             rows = list(s.csv_rows())
         finally:
             s.close()
-        assert rows[0][:3] == ["time_utc", "pos", "entry"], rows[0]
-        assert len(rows[0]) == 14
+        head = rows[0]
+        assert head[:4] == ["time_utc", "state", "red_flag", "pos"], head
+        for col in ("finished", "position_mismatch"):
+            assert col in head, f"{col} is a CSV column: {head}"
         assert len(rows) == 5, rows
         assert rows[1][0].startswith("2023-11-14T22:13:20"), rows[1][0]
-        assert rows[1][2] == "1" and rows[2][2] == "2"
+        entry = head.index("entry")
+        assert rows[1][entry] == "1" and rows[2][entry] == "2"
+        assert rows[1][1] == "racing" and rows[1][2] == "", rows[1]
+
+
+def t_csv_red_flag_column_is_short():
+    with tempfile.TemporaryDirectory() as d:
+        s = rr.open_current(d, 1.0)
+        try:
+            for t, red in ((1, {"at": 5.0, "mode": "keep"}), (2, {"at": 5.0}), (3, None), (4, False)):
+                doc = _doc("1")
+                doc["red_flag"] = red
+                s.add_sample(t, doc)
+            got = [r[2] for r in list(s.csv_rows())[1:]]
+        finally:
+            s.close()
+        assert got == ["keep", "on", "", ""], got
+
+
+def t_csv_with_a_carless_sample_is_the_header_only():
+    with tempfile.TemporaryDirectory() as d:
+        s = rr.open_current(d, 1.0)
+        try:
+            s.add_sample(1, {"state": "waiting", "red_flag": None, "rows": []})
+            s.add_sample(2, {"state": "waiting", "red_flag": None})
+            rows = list(s.csv_rows())
+        finally:
+            s.close()
+        assert rows == [rr.CSV_HEADER], rows
 
 
 class _Blocking:
@@ -153,10 +183,11 @@ def t_csv_neutralises_formula_cells():
             row = list(s.csv_rows())[1]
         finally:
             s.close()
-        assert row[2] == "'+1" and row[3] == "'=HYPERLINK(\"x\")", row
-        assert row[8] == "'@a", row
-        assert row[9] == "'-x" and row[12] == "'\tx", row
-        assert row[5] == -1.5, "numbers stay numbers: %r" % (row[5],)
+        col = {name: row[i] for i, name in enumerate(rr.CSV_HEADER)}
+        assert col["entry"] == "'+1" and col["driver"] == "'=HYPERLINK(\"x\")", row
+        assert col["status"] == "'@a", row
+        assert col["compound"] == "'-x" and col["rejoin"] == "'\tx", row
+        assert col["gap_time_s"] == -1.5, "numbers stay numbers: %r" % (col["gap_time_s"],)
 
 
 def _srow(entry, quiet_s=0.5, distance_m=100.0, in_box=False, **kw):
@@ -430,6 +461,89 @@ def t_status_reports_writer_counters():
             assert st["dropped"] == 0 and st["failed"] == 0 and st["span"] is None, st
         finally:
             h.close()
+
+
+def t_an_existing_file_name_gets_a_suffix():
+    with tempfile.TemporaryDirectory() as d:
+        a = rr.open_current(d, 1000.0)
+        a.close()
+        rr.rotate(d)
+        b = rr.open_current(d, 1000.0)
+        try:
+            assert b.path != a.path, "the same second must not reopen the old recording"
+            assert b.path.endswith("-2.sqlite"), b.path
+        finally:
+            b.close()
+
+
+def t_a_corrupt_or_foreign_pointer_starts_a_new_file():
+    with tempfile.TemporaryDirectory() as d:
+        for text in ("not json", '{"file": "../elsewhere.sqlite"}', '["x"]', '{"file": 3}'):
+            with open(os.path.join(d, rr.POINTER), "w", encoding="utf-8") as fh:
+                fh.write(text)
+            s = rr.open_current(d, 1000.0)
+            try:
+                assert os.path.dirname(s.path) == d and s.path.endswith(".sqlite"), (text, s.path)
+                assert ".." not in s.path, s.path
+            finally:
+                s.close()
+            rr.rotate(d)
+
+
+def t_update_event_on_a_missing_id_changes_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        s = rr.open_current(d, 1.0)
+        try:
+            s.update_event(42, state="confirmed")
+            assert s.events() == []
+        finally:
+            s.close()
+
+
+class _Failing:
+    def add_sample(self, t, doc):
+        raise OSError("disk full")
+
+
+def t_writer_counts_failures_and_logs_the_first_once():
+    import logging
+    seen = []
+
+    class _H(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+    log = logging.getLogger("race_recording")
+    h = _H()
+    log.addHandler(h)
+    w = rr.Writer(_Failing(), maxsize=8)
+    try:
+        for _ in range(3):
+            w.put(lambda s: s.add_sample(0, {}))
+        assert w.flush(5)
+        assert w.failed == 3, w.failed
+        assert len(seen) == 1 and "disk full" in seen[0], seen
+    finally:
+        log.removeHandler(h)
+        w.stop()
+
+
+def t_writer_stop_ends_the_thread_with_a_full_queue():
+    store = _Blocking()
+    w = rr.Writer(store, maxsize=2)
+    job = lambda s: s.add_sample(0, {})  # noqa: E731
+    w.put(job)
+    assert store.started.wait(5)
+    w.put(job)
+    w.put(job)
+    stopper = threading.Thread(target=w.stop, daemon=True)
+    stopper.start()
+    stopper.join(2.5)              # longer than any wait for a free queue slot
+    store.gate.set()
+    stopper.join(10)
+    assert not stopper.is_alive(), "stop() returned"
+    w._thread.join(10)
+    assert not w._thread.is_alive(), "the writer thread must end although the queue was full"
+    assert w.put(job) is False, "a stopped writer takes no jobs"
 
 
 if __name__ == "__main__":
