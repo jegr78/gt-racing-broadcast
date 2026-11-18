@@ -84,7 +84,7 @@ FIT_ALIASES = ("teamNameMax", "teamNameMin")
 # A structured value must never close the rule or inject extra CSS; the only
 # verbatim path is customCss. Reject anything carrying CSS-structural characters,
 # and quotes or backslashes, which would open a string that swallows the rule.
-_UNSAFE_VALUE = re.compile(r"[;{}<>\"\\]|/\*|\*/")
+_UNSAFE_VALUE = re.compile(r"[;{}<>\"'\\]|/\*|\*/")
 
 # Sample content for the same-origin builder canvas, so the operator positions
 # slots against realistic text. Each team is four slots (#136): number, name and
