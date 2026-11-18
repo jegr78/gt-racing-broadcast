@@ -52,6 +52,7 @@ class WsClient:
         try:
             if tls:
                 ctx = ssl_context or ssl.create_default_context()
+                ctx.minimum_version = ssl.TLSVersion.TLSv1_2
                 sock = ctx.wrap_socket(sock, server_hostname=parts.hostname)
             key = base64.b64encode(os.urandom(16)).decode()
             host_header = parts.hostname if port == (443 if tls else 80) else None

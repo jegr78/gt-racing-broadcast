@@ -268,7 +268,8 @@ def t_profile_show_masks_timing_secrets():
         profile_dir="/p/profiles/demo", runtime_dir="/p/runtime/demo")
     out = m.format_profile_show(cfg_obj, active="demo")
     assert "TOKENSECRET1" not in out and "KEYSECRET22" not in out, out
-    assert "https://h.example.workers.dev" in out, "the host URL is public and shown"
+    line = next(ln for ln in out.splitlines() if ln.startswith("timing_host:"))
+    assert line.split()[1] == "https://h.example.workers.dev", "the host URL is public and shown"
 
 
 def t_parse_export_defaults():

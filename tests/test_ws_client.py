@@ -145,6 +145,24 @@ def t_ws_client_unknown_host_is_an_oserror():
     raise AssertionError("an unresolvable host fails")
 
 
+def t_wss_requires_tls_1_2():
+    import ssl
+    seen = []
+
+    class _Ctx:
+        minimum_version = None
+
+        def wrap_socket(self, sock, server_hostname):
+            seen.append(self.minimum_version)
+            raise OSError("stop after the TLS setup")
+    srv = _EchoServer(echo=False)
+    try:
+        ws_client.WsClient.connect(f"wss://127.0.0.1:{srv.port}/", {}, timeout=2, ssl_context=_Ctx())
+    except OSError:
+        pass  # the fake context stops the connect on purpose
+    assert seen == [ssl.TLSVersion.TLSv1_2], seen
+
+
 def t_ws_client_refuses_other_schemes():
     try:
         ws_client.WsClient.connect("http://127.0.0.1:1/", {}, timeout=1)

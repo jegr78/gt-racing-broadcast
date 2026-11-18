@@ -78,3 +78,11 @@ paths = ['''src/scripts/smoketest\.py''']
 regexes = [
   '''kimne78kx3ncx6brgo4mv6wki5h1ko''',
 ]
+
+# The timing host Worker tests (#1161) use an obviously fake publish key against a
+# stubbed Durable Object; the real key is generated per league by `timing-host deploy`.
+[[allowlists]]
+description = "Fake publish-key fixture in the timing host Worker tests"
+condition = "AND"
+paths = ['''tests/timing-host/worker_test\.js''']
+regexes = ['''publish-key-1(-long-enough)?''']
