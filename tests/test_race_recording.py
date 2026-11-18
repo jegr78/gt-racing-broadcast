@@ -348,6 +348,16 @@ def t_box_in_change_window_raises_nothing_but_track_does():
             h.close()
 
 
+def t_finished_car_raises_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            rows = [_srow("1", quiet_s=9.0, finished=True), _srow("2", quiet_s=9.0)]
+            h.rec.observe(_st("finishing", rows), {}, 1000.0)
+            assert [e["entry"] for e in _events(h)] == ["2"], _events(h)
+        finally:
+            h.close()
+
 def t_red_flag_raises_nothing():
     with tempfile.TemporaryDirectory() as d:
         h = _Rec(d)

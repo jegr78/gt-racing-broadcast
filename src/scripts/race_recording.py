@@ -294,7 +294,7 @@ class Recorder:
                     self._returned(eid, entry, now)
                 continue
             if (quiet > NO_DATA_S and quiet_allowed and row.get("distance_m") is not None
-                    and not (row.get("in_box") and window)):
+                    and not row.get("finished") and not (row.get("in_box") and window)):
                 self._suspect(row, quiet, now)
 
     def _suspect(self, row, quiet, now):
