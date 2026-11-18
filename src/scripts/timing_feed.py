@@ -132,11 +132,14 @@ class Budget:
 
     def interval(self):
         with self._lock:
-            self._prune(self._clock())
+            now = self._clock()
+            self._prune(now)
             if not self._served:
                 return MIN_INTERVAL_S
-            # A viewer polling every I seconds shows up window / I times per window.
-            viewers = self._intervals / self._window_s
+            # A viewer polling every I seconds shows up span / I times in the span the
+            # samples cover; a crowd that just arrived covers less than the window.
+            span = min(self._window_s, max(MIN_INTERVAL_S, now - self._served[0][0]))
+            viewers = self._intervals / span
             mean_bytes = self._bytes / len(self._served)
             need = viewers * mean_bytes / self._bytes_per_s
         need = math.ceil(need * 2) / 2
