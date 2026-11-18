@@ -633,13 +633,19 @@ class Race:
         laps = math.floor((self._shown(ahead) - self._shown(ent)) / self.length)
         if laps >= 1:
             return laps, None
-        car = self._cars[ent.active]
+        return 0, self._time_behind(ahead, ent)
+
+    def _time_behind(self, ahead, ent):
+        """Seconds `ent` is behind `ahead` by distance history, also when lapped; None
+        without a running time (red flag) or history for that distance."""
+        if ahead.distance is None or ent.distance is None:
+            return None
         if ent.finished_at is not None and ahead.finished_at is not None:
-            return 0, ent.finished_at - ahead.finished_at
+            return ent.finished_at - ahead.finished_at
         if ent.waiting or ahead.waiting:
-            return 0, None                         # no running time while a red flag holds them
+            return None                            # no running time while a red flag holds them
         reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
-        return 0, (None if reached is None else max(0.0, car.t - reached))
+        return None if reached is None else max(0.0, self._cars[ent.active].t - reached)
 
     def standings(self, now):
         ents = list(self._entries.values())
@@ -666,10 +672,12 @@ class Race:
         for i, e in enumerate(ents):
             car = self._cars[e.active]
             quiet = self._quiet(e, now)
-            lapped = gap = interval = None
+            lapped = gap = interval = gap_time = interval_time = None
             if e.distance is not None and not quiet:
                 lapped, gap = self._behind(ents[0], e) if i else (0, 0)
                 interval = self._behind(ents[i - 1], e)[1] if i else None
+                gap_time = self._time_behind(ents[0], e) if i else 0.0
+                interval_time = self._time_behind(ents[i - 1], e) if i else None
             shown = self._shown(e)
             rows.append({
                 "entry": e.entry, "driver": car.name, "conn": e.active,
@@ -677,6 +685,10 @@ class Race:
                 "laps": max(0, math.floor(shown / self.length)) if shown is not None else 0,
                 "gap_s": None if lapped else (None if gap is None else round(gap, 2)),
                 "interval_s": None if interval is None else round(interval, 2),
+                "gap_time_s": None if gap_time is None else round(gap_time, 2),
+                "interval_time_s": None if interval_time is None else round(interval_time, 2),
+                "quiet_s": None if car.t is None else round(max(0.0, now - car.t), 1),
+                "in_box": bool(car.in_box),
                 "lapped": lapped or 0,
                 "status": "no_data" if quiet else "box" if car.in_box else
                           "waiting" if e.distance is None else
@@ -692,7 +704,9 @@ class Race:
                 "position_mismatch": e.entry in mismatch})
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
-                "restart_mode": self._restart_mode, "fastest": self.fastest,
+                "restart_mode": self._restart_mode,
+                "change_window": self._window_until is not None and now <= self._window_until,
+                "fastest": self.fastest,
                 "lap": self._lap_display(ents), "entries": rows}
 
     def _lap_display(self, ordered):

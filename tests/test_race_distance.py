@@ -768,6 +768,49 @@ def t_one_other_entry_cannot_vouch_alone_when_more_are_known():
         "two entries out of four do not set the field's lap"
 
 
+def t_lapped_car_keeps_an_exact_time_to_the_leader():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 6)
+    t = _drive(race, [a, b], [60, 30], 0.0, L / 30 * 1.2)
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert rb["lapped"] == 1 and rb["gap_s"] is None, rb
+    expected = (ra["distance_m"] - rb["distance_m"]) / 60
+    assert expected > L / 60, expected
+    assert abs(rb["gap_time_s"] - expected) < 0.5, (rb["gap_time_s"], expected)
+    assert rb["interval_time_s"] == rb["gap_time_s"], rb
+
+
+def t_leader_has_zero_gap_time_and_no_interval():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [30, 30], 0.0, 3)
+    row = _row(race, "A", t)
+    assert row["gap_time_s"] == 0.0 and row["interval_time_s"] is None, row
+
+
+def t_quiet_car_reports_its_silence_and_box():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [30, 30], 0.0, 3)
+    b.box = True
+    t = _drive(race, [a, b], [30, None], t, 6)
+    t = _drive(race, [a], [30], t, rd.NO_DATA_S + 1)
+    row = _row(race, "B", t)
+    assert row["status"] == "no_data" and row["quiet_s"] >= 6.0, row
+    assert row["in_box"] is True and row["gap_time_s"] is None, row
+    assert _row(race, "A", t)["quiet_s"] < 1.0
+
+
+def t_standings_report_the_change_window():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    a = Car(race, "A", "a", L - 15)
+    t = _drive(race, [a], [30], 0.0, 2)
+    assert race.standings(t)["change_window"] is False
+    race.open_change_window(t)
+    assert race.standings(t)["change_window"] is True
+    assert race.standings(t + rd.CHANGE_WINDOW_S + 1)["change_window"] is False
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

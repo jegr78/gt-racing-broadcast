@@ -550,6 +550,14 @@ def t_the_public_view_is_timing_only_and_follows_the_switches():
     assert dr.public_view(None) == {"v": 1, "mode": "race", "entries": []}
 
 
+def t_public_view_has_no_exact_gaps():
+    snap = {"v": 1, "mode": "race", "show": {"compound": True, "fuel": True},
+            "entries": [{"entry": "A", "gap_s": 1.0, "gap_time_s": 61.0, "interval_time_s": 61.0,
+                         "quiet_s": 0.2, "in_box": False}]}
+    row = dr.public_view(snap)["entries"][0]
+    assert row["gap_s"] == 1.0 and not {"gap_time_s", "interval_time_s", "quiet_s", "in_box"} & set(row), row
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
