@@ -209,6 +209,8 @@ Set it up once per league:
    again after a racecast update; `racecast timing-host status` (**Check**) says when
    the code is out of date.
 
+![Control Center. Profile view: the Public timing host section with Check and Deploy](images/cc-profile-timing-host.png)
+
 With a host, both pages run side by side. The Home row and the desks show the link to
 hand out (hosted by default) with the number of viewers on the host, and the other link
 below it. `racecast event timing --serve funnel` (or **Serve Funnel** in the Home row)
