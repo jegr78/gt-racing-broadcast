@@ -59,7 +59,8 @@ class FakeStorage {
   }
   put(k, v) {
     this.puts++;
-    this.data.set(k, v);
+    if (typeof k === "object") for (const [key, val] of Object.entries(k)) this.data.set(key, val);
+    else this.data.set(k, v);
     return Promise.resolve();
   }
   delete(k) {
@@ -364,4 +365,45 @@ Deno.test("a woken room answers a new viewer from storage", async () => {
   env.rooms.set(LINK, fresh);
   const v = await viewer(env);
   eq(v.ws.sent[0].t, "state", "state from storage");
+});
+
+Deno.test("a late viewer gets the state's age as of now, also from storage", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  let t = Date.now();
+  room.now = () => t;
+  await publish(room, ws, state(1));
+  t += 40_000;
+  const v = await viewer(env);
+  eq(v.ws.sent[0].age_s, 40.5, "send-time age plus the time since the room got it");
+  const fresh = new TimingRoom(room.ctx, env);
+  fresh.now = () => t;
+  env.rooms.set(LINK, fresh);
+  const w = await viewer(env);
+  eq(w.ws.sent[0].age_s, 40.5, "the receive time is stored with the state");
+});
+
+Deno.test("a stored state without a receive time replays as stored", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  room.ctx.storage.data.delete("state_at");
+  const fresh = new TimingRoom(room.ctx, env);
+  env.rooms.set(LINK, fresh);
+  const v = await viewer(env);
+  eq(v.ws.sent[0].age_s, 0.5, "no NaN from an older room");
+});
+
+Deno.test("the ack starts a new day's count at 00:00 UTC without a viewer request", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  let t = 3 * DAY + 23 * 60 * MIN;
+  room.now = () => t;
+  await publish(room, ws, state(1));
+  await viewer(env);
+  await publish(room, ws, state(2));
+  eq(ws.sent.at(-1).requests_today, 1, "one socket today");
+  t = 4 * DAY + MIN;
+  await publish(room, ws, state(3));
+  eq(ws.sent.at(-1).requests_today, 0, "a new UTC day");
 });

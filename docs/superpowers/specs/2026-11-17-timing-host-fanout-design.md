@@ -110,8 +110,9 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
 - Relay to host, text frames of JSON:
   - `{"t": "state", "seq": n, "age_s": a, "data": <public_view body>, "fallback": "<funnel url or
     null>"}` once per tick (2 s), the same bytes `timing_feed.TickBody` already builds; `age_s` is
-    the body's age at send time (today's `X-Data-Age`). The room stamps its receive time, so a
-    viewer always gets the true age.
+    the body's age at send time (today's `X-Data-Age`). The room stamps its receive time
+    (stored with the state as `state_at`) and adds the time since then when it replays the last
+    state to a viewer who connects later, so a viewer always gets the true age.
   - `{"t": "end"}` on `event stop` and on link renewal (to the old link's room).
 - Host to relay: `{"t": "ack", "seq": n, "viewers": k}` at least every 5 states. No ack for 15 s
   counts as a dead connection: the publisher closes and reconnects.
@@ -122,7 +123,9 @@ feeds. A failed or slow host never blocks a relay thread that serves anything el
 - Host to viewers, besides `state` and `end`: `{"t": "publisher", "up": bool}` when the publisher
   socket closes or returns, and `{"t": "moved", "to": url}` forwarded from the relay.
 - The ack also carries `requests_today`: viewer page loads plus socket upgrades this room served
-  since 00:00 UTC (each viewer costs two Worker requests). The room stores it with the state.
+  since 00:00 UTC (each viewer costs two Worker requests). The room stores it with the state and
+  starts a new day on the first request or state after midnight. It counts one room, so a renewed
+  link starts at 0; the Control Center label says the estimate covers this link.
 - Room states: unknown (no publish yet), live, ended.
   - Unknown: the page and the socket answer 404 "unknown timing link". A room only becomes live
     with its first publish.
