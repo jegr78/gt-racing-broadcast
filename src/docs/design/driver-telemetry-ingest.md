@@ -82,7 +82,7 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 - The producer sees every connection on the tailnet (`GET /drivers/data`) and
   disconnects one with `POST /drivers/disconnect {"conn": "..."}`. A connection quiet
   for 10 minutes leaves that list, the readiness rows and the dashboard; it comes back
-  as a new sender if it posts again. A new invite drops every connection.
+  as a new sender if it posts again, still under the entry the producer reassigned it to. A new invite drops every connection.
 
 ## Race
 

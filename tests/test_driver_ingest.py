@@ -208,7 +208,21 @@ def t_long_quiet_connections_are_forgotten_with_their_side_state():
     clock.t += 2
     assert [c["conn"] for c in hub.connections()] == ["new"], \
         "a sender quiet for FORGET_S leaves the list, the dashboard and readiness"
-    assert "old" not in hub._reassigned, "a forgotten connection takes its reassignment along"
+    hub.ingest(_reg("old"), _batch(3), None)
+    back = [c for c in hub.connections() if c["conn"] == "old"]
+    assert back and back[0]["entry"] == "Team B #2", \
+        ("a sender coming back after the sweep must keep the producer's correction", back)
+
+
+def t_reassignment_records_are_bounded():
+    clock = _Clock()
+    hub = ing.Hub(multi_lobby=lambda: False, clock=clock, max_connections=2)
+    for i in range(20):
+        hub.ingest(_reg(f"c{i}", entry=f"E{i}"), _batch(1), None)
+        hub.reassign(f"c{i}", f"F{i}")
+        clock.t += ing.FORGET_S + 1
+        hub.connections()
+    assert len(hub._reassigned) <= 4 * 2, f"reassignments must not grow without bound: {len(hub._reassigned)}"
 
 
 def t_disconnect_records_are_bounded():

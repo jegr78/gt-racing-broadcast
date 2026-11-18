@@ -66,11 +66,11 @@ class Hub:
             self.reset()
 
     def _forget_quiet(self, now):
-        """Drop connections quiet for FORGET_S with their side state. Caller holds the lock."""
+        """Drop connections quiet for FORGET_S. A reassignment outlives the sweep, since
+        the sender's code still names the old entry. Caller holds the lock."""
         gone = [c for c, m in self._conns.items() if now - m["last"] >= FORGET_S]
         for conn in gone:
             del self._conns[conn]
-            self._reassigned.pop(conn, None)
             self._hook_failed.discard(conn)
         return gone
 
@@ -164,7 +164,10 @@ class Hub:
         with self._lock:
             if conn not in self._conns or conn in self._dropped:
                 return False
+            self._reassigned.pop(conn, None)          # re-insert as the newest
             self._reassigned[conn] = entry
+            while len(self._reassigned) > 4 * self._max:
+                del self._reassigned[next(iter(self._reassigned))]
             self._conns[conn]["entry"] = entry
             return True
 
