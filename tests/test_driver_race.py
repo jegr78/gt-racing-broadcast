@@ -89,6 +89,24 @@ def t_settings_apply_live_and_the_final_stint_brings_its_lap_count():
         "a relay start on the last row brings its lap count without a change window"
 
 
+def t_a_lap_count_entered_after_the_final_switch_reaches_the_final_lobby():
+    team, clock = _service([{"id": "good"}], multi=True)
+    clock[0] = 100.0
+    team.stint_switch(final_laps=None, final_row=True)      # no Laps cell, no event setting
+    assert team._race.lap_count is None and team._race._final_at == 100.0
+    clock[0] = 160.0
+    team.set_settings({"lap_count": 12})
+    assert team._race.lap_count == 12, "the count entered now applies to the final lobby on air"
+    assert team._race._final_at == 100.0, "the cars that took over since the switch stay final cars"
+    team.set_settings({"delay_s": 5})
+    assert team._race.lap_count == 12, "another setting leaves the count alone"
+    team._race = None
+    assert team._current().lap_count == 12, "a rebuilt race keeps it"
+    early, _c = _service([{"id": "good"}], multi=True)
+    early.set_settings({"lap_count": 12})
+    assert early._race.lap_count is None, "before the final lobby the count waits"
+
+
 def t_qualifying_mode_feeds_no_race():
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
     dr.write_settings(path, {"formation": False})

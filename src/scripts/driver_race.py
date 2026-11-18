@@ -345,6 +345,7 @@ class Service:
         self._race_pick = object()
         self._line_tried = None
         self._final_lobby_laps = None
+        self._final_on_air = False  # endurance: the last schedule row is on air
         self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver)}
 
     def _current(self):
@@ -366,7 +367,7 @@ class Service:
         race = race_distance.Race(
             trace, formation=s["formation"], multi_lobby=multi, finish_mode=s["finish_mode"],
             lap_count=None if multi else s["lap_count"])
-        if multi and self._final_lobby_laps is not None:
+        if multi and self._final_on_air:
             race.final_lobby(self._final_lobby_laps, self._clock())
         corrections, rejoins = _saved_actions(_actions_path_for(self._path))
         for entry, (metres, pits) in corrections.items():
@@ -678,18 +679,22 @@ class Service:
             race.finish_mode = saved["finish_mode"]
             if not race.multi_lobby:
                 race.lap_count = saved["lap_count"]
+            elif self._final_on_air and "lap_count" in changes:
+                self._final_lobby_laps = race.lap_count = saved["lap_count"]
         return saved
 
-    def stint_switch(self, final_laps=None, window=True):
+    def stint_switch(self, final_laps=None, window=True, final_row=None):
         """The broadcast switched stints: open the change window (unless `window` is
-        False, a relay start that finds the last row on air); `final_laps` is the lap
-        count of the final stint lobby when the last row is on air."""
+        False, a relay start that finds the last row on air). `final_row` (default:
+        `final_laps` given) says the last row is on air; `final_laps` is its lobby's lap
+        count, None until a count is set."""
+        final_row = final_laps is not None if final_row is None else final_row
         with self._lock:
             race = self._current()
             if window:
                 race.open_change_window(self._clock())
-            if final_laps is not None and race.multi_lobby:
-                self._final_lobby_laps = final_laps
+            if final_row and race.multi_lobby:
+                self._final_on_air, self._final_lobby_laps = True, final_laps
                 race.final_lobby(final_laps, self._clock())
 
     def final_lap(self, who="tailnet"):
@@ -715,5 +720,5 @@ class Service:
                 atomic_replace.retry_windows_file_operation(lambda: os.remove(self._fastest_path()))
             except FileNotFoundError:
                 pass  # no fastest lap recorded
-            self._final_lobby_laps = None
+            self._final_lobby_laps, self._final_on_air = None, False
             self._race = self._build(self._pick()["id"] if self._pick() else None)

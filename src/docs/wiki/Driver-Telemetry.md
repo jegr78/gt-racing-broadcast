@@ -108,7 +108,7 @@ for the next stint does the same with one sender. Lap 1 of the new lobby before 
 never counts. The lap count applies to the final lobby only and counts that lobby's
 laps on GT7's counter, from the car that took over after the last stint switch: the
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
-event setting.
+event setting. A lap count set while the final stint is already on air applies at once.
 
 ### Dashboard
 
