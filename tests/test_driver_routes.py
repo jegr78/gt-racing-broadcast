@@ -68,6 +68,7 @@ def _serve(solo=True, segments=(), clock=None, recording_dir=None, **extra):
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
     extra.setdefault("sender_script_path", os.path.join(ROOT, "src", "relay", "racecast-sender.py"))
+    extra.setdefault("race_snapshot_page_path", os.path.join(ROOT, "src", "console", "race-snapshot.html"))
     srv = g._serve(solo=solo, hud_source=_Hud(), driver_hub=hub, driver_invite_path=path,
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
                    driver_segments=lambda: list(segments), driver_race_svc=race,
@@ -1061,6 +1062,38 @@ def t_recording_at_authenticates_with_t_and_reads_time():
         assert st == 200 and "rows" in _json.loads(text), (st, text)
     finally:
         srv.shutdown()
+
+
+def t_snapshot_page_is_served_to_both_desks():
+    srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp())
+    try:
+        for token, prefix in ((g._tok("bob"), "/console/drivers"),
+                              (g._tok("dave"), "/console/race-control/drivers")):
+            st, text, h = _req(port, f"{prefix}/snapshot?t={token}&time=100")
+            assert st == 200 and "<title>Race snapshot</title>" in text, (prefix, st)
+            assert h["Cache-Control"] == "no-store", h
+        st, text, _h = _req(port, "/drivers/snapshot?time=100")
+        assert st == 200 and "<title>Race snapshot</title>" in text, "the tailnet panel opens it too"
+        cross = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+        st, _t, _h = _req(port, f"/console/race-control/drivers/snapshot?t={g._tok('dave')}", headers=cross)
+        assert st == 200, "a snapshot link posted in the crew chat opens"
+        alice = g._tok("alice")
+        for prefix in ("/console/drivers", "/console/race-control/drivers"):
+            assert _req(port, f"{prefix}/snapshot?t={alice}")[0] == 403, prefix
+    finally:
+        srv.shutdown()
+
+
+def t_snapshot_links_use_time_never_the_token_parameter():
+    import pathlib
+    console = pathlib.Path(ROOT, "src", "console")
+    page = (console / "race-snapshot.html").read_text(encoding="utf-8")
+    desk = (console / "driver-desk.js").read_text(encoding="utf-8")
+    for name, text in (("page", page), ("desk", desk)):
+        assert "?time=" in text, f"the {name} names the sample time as time"
+        assert "snapshot?t=" not in text and "at?t=" not in text, f"t is the console token ({name})"
+    assert "innerHTML" not in page, "server strings go in through textContent"
+    assert "./race/recording" in page, "relative fetches work under both desk prefixes"
 
 
 def _audit_of(srv):

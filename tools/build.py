@@ -125,6 +125,7 @@ def main():
     cp("console/event-info.html", "event-info.html")
     cp("console/drive.html", "drive.html")             # driver telemetry invite page (#1111)
     cp("console/driver-desk.js", "driver-desk.js")     # driver telemetry desk controls (#1114)
+    cp("console/race-snapshot.html", "race-snapshot.html")  # frozen standings from the race recording
     cp("console/crew-frame.html", "crew-frame.html")   # cockpit/race-control tab bar (#745)
     cp("setup-assets.py", "setup-assets.py")
     cp("racecast.py", "racecast.py")
@@ -244,6 +245,7 @@ def main():
         "splitscreen page shipped": os.path.isfile(os.path.join(PKG, "splitscreen.html")),
         "cockpit page shipped": os.path.isfile(os.path.join(PKG, "cockpit.html")),
         "race-control page shipped": os.path.isfile(os.path.join(PKG, "race-control.html")),
+        "race snapshot page shipped": os.path.isfile(os.path.join(PKG, "race-snapshot.html")),
         "race engineer page shipped": os.path.isfile(os.path.join(PKG, "race-engineer.html")),
         "console launcher shipped": os.path.isfile(os.path.join(PKG, "console.html")),
         "console buttons page shipped": os.path.isfile(os.path.join(PKG, "buttons.html")),

@@ -11964,7 +11964,8 @@ def engineer_page_for(console_page):
 
 _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
                                 ("health-monitor",), ("race-control",), ("race-engineer",), ("driver-radio",),
-                                ("driver-radio", "messages-view"), ("buttons",)})
+                                ("driver-radio", "messages-view"), ("buttons",),
+                                ("drivers", "snapshot"), ("race-control", "drivers", "snapshot")})
 
 
 # The largest request body the control server reads (a parsed POST, or one drained
@@ -12041,7 +12042,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  event_documents_source=None, browser_hosts=(), track_pick=None,
                  telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
                  drive_page_path=None, sender_script_path=None, driver_segments=None,
-                 driver_desk_path=None,
+                 driver_desk_path=None, race_snapshot_page_path=None,
                  driver_race_svc=None, timing_link_path=None, timing_page_path=None,
                  timing_publisher=None, funnel_host=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
@@ -14230,6 +14231,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p[:3] == ["drivers", "race", "recording"] and len(p) <= 4 \
                         and driver_race_svc is not None:
                     return self._recording_get(p[3] if len(p) == 4 else None)
+                if p == ["drivers", "snapshot"]:
+                    # The frozen standings page; its relative fetches work under every prefix.
+                    if not race_snapshot_page_path:
+                        return self._send({"error": "page not found"}, 404)
+                    return self._send_page(race_snapshot_page_path, "")
                 if p == ["drivers", "race"] and driver_race_svc is not None:
                     # Order, distances and gaps from driver telemetry (#1112).
                     return self._send(driver_race_svc.standings(), no_store=True)
@@ -16346,6 +16352,9 @@ def main():
     driver_desk_path = next((os.path.abspath(c) for c in (
         os.path.join(here, "driver-desk.js"), os.path.join(here, "..", "driver-desk.js"),
         os.path.join(here, "..", "console", "driver-desk.js")) if os.path.exists(c)), None)
+    race_snapshot_page_path = next((os.path.abspath(c) for c in (
+        os.path.join(here, "race-snapshot.html"), os.path.join(here, "..", "race-snapshot.html"),
+        os.path.join(here, "..", "console", "race-snapshot.html")) if os.path.exists(c)), None)
     timing_page_path = next((os.path.abspath(c) for c in (
         os.path.join(here, "timing.html"), os.path.join(here, "..", "timing.html"),
         os.path.join(here, "..", "console", "timing.html")) if os.path.exists(c)), None)
@@ -16439,7 +16448,7 @@ def main():
         telemetry_probe_obj=probe,
         driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
-        driver_desk_path=driver_desk_path,
+        driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
         timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(poll=stop_evt),

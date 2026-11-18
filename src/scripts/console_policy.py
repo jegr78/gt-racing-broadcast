@@ -39,7 +39,7 @@ Requirement = collections.namedtuple("Requirement", ("capability", "step_up"))
 # The driver telemetry desk routes (#1114), reached as /console/drivers/* by directors
 # and /console/race-control/drivers/* by Race Control. /drivers/data and the race
 # reset stay on the tailnet.
-_DRIVER_DESK_GET = {("race",), ("readiness",), ("invite",), ("timing-link",),
+_DRIVER_DESK_GET = {("race",), ("readiness",), ("invite",), ("timing-link",), ("snapshot",),
                     ("race", "recording"), ("race", "recording", "at"), ("race", "recording", "csv")}
 _DRIVER_DESK_POST = {("reassign",), ("disconnect",), ("race", "recording"),
                      ("race", "recording", "event")} | {

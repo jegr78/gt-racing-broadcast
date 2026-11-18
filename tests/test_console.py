@@ -374,13 +374,15 @@ def t_recording_routes_are_desk_routes():
                          (["drivers", "race", "recording", "at"], "GET"),
                          (["drivers", "race", "recording", "csv"], "GET"),
                          (["drivers", "race", "recording"], "POST"),
-                         (["drivers", "race", "recording", "event"], "POST")):
+                         (["drivers", "race", "recording", "event"], "POST"),
+                         (["drivers", "snapshot"], "GET")):
         assert cp.decide({"director"}, path, method) == cp.ALLOW, path
         assert cp.decide({"race_control"}, ["race-control"] + path, method) == cp.ALLOW, path
         assert cp.decide({"commentator"}, path, method) == cp.FORBIDDEN, path
         assert cp.decide({"commentator"}, ["race-control"] + path, method) == cp.FORBIDDEN, path
     assert cp.decide({"director"}, ["drivers", "race", "recording", "event"], "GET") == cp.NOT_FOUND
     assert cp.decide({"director"}, ["drivers", "race", "recording", "at"], "POST") == cp.NOT_FOUND
+    assert cp.decide({"director"}, ["drivers", "snapshot"], "POST") == cp.NOT_FOUND
 
 
 if __name__ == "__main__":
