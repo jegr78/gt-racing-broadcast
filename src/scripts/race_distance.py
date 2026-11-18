@@ -38,6 +38,8 @@ nearest the predicted distance decides.
   stint switch) passes `lap_count` on that lobby's counter. `final_lap` ends the race
   at the leader's next crossing. Every other car finishes at its next crossing after
   the leader; `finish` freezes everything at once. The race timer never ends a race.
+  From the winner's flag on the order is laps, then who reached that lap count first,
+  so a lapped car taking the flag stays behind a lead-lap car still running.
 - Red flag (#1113): `red_flag` freezes every entry's distance. In the restart lobby
   (a new connection, or a counter that dropped) each car continues from its anchor
   when it leaves the box. `keep` anchors at the frozen distance, `neutralise`
@@ -632,10 +634,17 @@ class Race:
         cap = math.floor(self._shown(winner) / self.length) if winner and self.length else math.inf
 
         def key(e):
-            done = e.finished_at is not None and self._finishing_at is not None
             dist = self._shown(e) if e.distance is not None else -math.inf
-            laps = math.floor(dist / self.length) if self.length and e.distance is not None else -1
-            return (0, -min(laps, cap), e.finished_at) if done else (1, -dist, 0)
+            if self._finishing_at is None:
+                return (0, -dist, e.entry)
+            if e is winner:
+                return (-1, 0, 0.0, 0.0, "")
+            laps = min(math.floor(dist / self.length), cap) if self.length and e.distance is not None else -1
+            # Whoever reached that lap count first is ahead, finished or still running.
+            reached = self._time_at(e, laps * self.length - e.adjust) if laps >= 0 else None
+            if reached is None:
+                reached = e.finished_at if e.finished_at is not None else math.inf
+            return (0, -laps, reached, -dist, e.entry)
         ents.sort(key=key)
         mismatch = self._mismatches(ents)
         rows = []

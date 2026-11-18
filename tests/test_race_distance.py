@@ -150,6 +150,28 @@ def t_the_corrected_leader_takes_the_flag_first():
         "no car is classified with more laps than the winner took the flag on"
 
 
+def t_a_lapped_car_taking_the_flag_stays_behind_a_lead_lap_car_still_running():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 6), Car(race, "C", "c", L - 100)
+    t = _drive(race, [a, b, c], [60, 29.5, 50], 0.0, 110)    # A wins, B (lapped) crosses next
+    assert _row(race, "A", t)["finished"] and _row(race, "B", t)["finished"], race.standings(t)
+    assert not _row(race, "C", t)["finished"] and _row(race, "C", t)["laps"] == _row(race, "B", t)["laps"]
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order == ["A", "C", "B"], f"C reached that lap long before B took the flag: {order}"
+
+
+def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
+    t = _drive(race, [a, b], [50, 50], 0.0, 20)
+    ea, eb = race._entries["A"], race._entries["B"]
+    ea.distance, eb.distance = L + 900.0, L + 850.0          # the final lobby's line sits mid-lap
+    ea.finished_at = race._finishing_at = t
+    eb.ts, eb.ds = [t - 30, t - 10, t - 1], [L - 100.0, L + 10.0, eb.distance]
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order == ["A", "B"], f"the car that took the flag first is the winner: {order}"
+
+
 def t_the_lap_count_follows_gt7s_counter_including_the_formation_lap():
     race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)

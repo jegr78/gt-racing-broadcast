@@ -97,7 +97,9 @@ and says so. Changing the layout mid-event starts the race over.
   lap counter, lap 1 included, so a formation lap counts as in the lobby's own
   setting; every other car at its next crossing of the line. **Timed**: Race Control or
   the director triggers **Final lap**, and the race ends at the leader's next crossing.
-  The race timer never ends a race. **Finish** freezes the order at once.
+  The race timer never ends a race. **Finish** freezes the order at once. After the
+  leader's flag the order is laps first, then who completed them first, so a lapped
+  car that takes the flag stays behind a car on the lead lap that is still running.
 
 In an endurance race each stint switch on air opens a window for driver changes. When
 the team's car stands in the box and the next driver's car then leaves the box of the
