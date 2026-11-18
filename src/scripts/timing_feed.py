@@ -10,6 +10,7 @@ import gzip
 import hashlib
 import json
 import math
+import random
 import threading
 import time
 
@@ -106,10 +107,10 @@ class Budget:
     """Poll interval that keeps all viewers within `kbps` of upload, up to the crowd that
     MAX_INTERVAL_S still covers; beyond it the upload grows with the viewers again."""
 
-    def __init__(self, kbps, clock=time.monotonic, window_s=2 * MAX_INTERVAL_S):
+    def __init__(self, kbps, clock=time.monotonic, window_s=2 * MAX_INTERVAL_S, rng=random.random):
         # A window shorter than the longest interval misses slow viewers and oscillates.
         self._bytes_per_s = kbps * 125
-        self._clock, self._window_s = clock, window_s
+        self._clock, self._window_s, self._rng = clock, window_s, rng
         self._lock = threading.Lock()
         self._served = collections.deque()      # (at, nbytes, interval_s)
         self._bytes = self._intervals = 0.0
@@ -142,5 +143,10 @@ class Budget:
             viewers = self._intervals / span
             mean_bytes = self._bytes / len(self._served)
             need = viewers * mean_bytes / self._bytes_per_s
+        if MIN_INTERVAL_S < need < MAX_INTERVAL_S:
+            # Viewers who arrived together would keep coming back together: spread each next
+            # poll around the need, inside the limits so none pile up at the ceiling.
+            spread = min(need / 2, need - MIN_INTERVAL_S, MAX_INTERVAL_S - need)
+            need += spread * (2 * self._rng() - 1)
         need = math.ceil(need * 2) / 2
         return max(MIN_INTERVAL_S, min(MAX_INTERVAL_S, need))

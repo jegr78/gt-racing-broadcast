@@ -52,11 +52,23 @@ def t_interval_is_minimum_when_idle():
 
 def t_interval_grows_with_viewers():
     clock = _Clock()
-    b = tf.Budget(1000, clock=clock, window_s=10.0)
+    b = tf.Budget(1000, clock=clock, window_s=10.0, rng=lambda: 0.5)
     for i in range(5000):
         clock.t = 1000.0 + i * 0.002
         b.served(700, 2.0)
     assert b.interval() == 6.0, f"1000 viewers x 700 B on 1000 kbit/s: {b.interval()}"
+
+
+def t_handed_out_intervals_spread_around_the_need():
+    clock, r = _Clock(), [0.0]
+    b = tf.Budget(1000, clock=clock, window_s=10.0, rng=lambda: r[0])
+    for i in range(5000):
+        clock.t = 1000.0 + i * 0.002
+        b.served(700, 2.0)
+    low = b.interval()
+    r[0] = 1.0
+    high = b.interval()
+    assert (low, high) == (3.0, 8.5), f"a crowd that came together must not come back together: {low}, {high}"
 
 
 def t_interval_clamps_and_recovers():
@@ -128,7 +140,7 @@ def _obeying_crowd(viewers, seconds, kbps=1000, nbytes=950, arrive_s=30, skip=12
     import heapq, random
     rnd = random.Random(7)
     clock = _Clock()
-    b = tf.Budget(kbps, clock=clock)
+    b = tf.Budget(kbps, clock=clock, rng=rnd.random)
     due = [(clock.t + rnd.uniform(0, arrive_s), i) for i in range(viewers)]
     heapq.heapify(due)
     end, buckets = clock.t + seconds, {}
@@ -156,6 +168,9 @@ def t_a_crowd_arriving_at_once_stays_near_the_budget():
         rates = _obeying_crowd(viewers, 60, arrive_s=3, skip=0)
         mean = sum(rates) / len(rates)
         assert mean < 1000 * 1.3, f"{viewers} viewers arriving within 3 s average {mean:.0f} kbit/s in the first minute"
+        rates = _obeying_crowd(viewers, 400, arrive_s=3)
+        assert max(rates) < 1000 * 1.3 and min(rates) > 1000 * 0.6, \
+            f"{viewers} viewers that arrived at once swing between {min(rates):.0f} and {max(rates):.0f} kbit/s"
 
 
 if __name__ == "__main__":
