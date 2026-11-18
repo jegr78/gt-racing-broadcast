@@ -11965,9 +11965,10 @@ MAX_POST_BODY = 65536
 
 def _funnel_watch(max_age_s=60.0):
     """A getter for this machine's MagicDNS name while Funnel serves /console, else
-    None. It answers from a cache and refreshes in the background at most once a
-    minute, so a request never waits on the tailscale CLI."""
-    state = {"host": None, "at": None, "busy": False}
+    None; its `magicdns()` returns the name whether Funnel serves or not. Both answer
+    from a cache refreshed in the background at most once a minute, so a request never
+    waits on the tailscale CLI."""
+    state = {"host": None, "name": None, "at": None, "busy": False}
     lock = threading.Lock()
 
     def refresh():
@@ -11975,17 +11976,21 @@ def _funnel_watch(max_age_s=60.0):
             name = tailscale.detect_magicdns_name()
             host = name if name and tailscale.funnel_on("/console") else None
         except Exception:
-            host = None
+            name = host = None
         with lock:
-            state.update(host=host, at=time.monotonic(), busy=False)
+            state.update(host=host, name=name or state["name"], at=time.monotonic(), busy=False)
 
-    def get():
+    def cached(key):
         with lock:
             stale = state["at"] is None or time.monotonic() - state["at"] > max_age_s
             if stale and not state["busy"]:
                 state["busy"] = True
                 threading.Thread(target=refresh, name="funnel-watch", daemon=True).start()
-            return state["host"]
+            return state[key]
+
+    def get():
+        return cached("host")
+    get.magicdns = lambda: cached("name")
     return get
 
 
@@ -12100,6 +12105,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         return timing_link.served(timing_link_path) or "hosted"
 
     _funnel_host = funnel_host if callable(funnel_host) else (lambda: funnel_host)
+    _late_magicdns = getattr(funnel_host, "magicdns", None)   # Tailscale may come up after start
 
     def _timing_funnel_url():
         """The Funnel page URL, only while Funnel serves /console (else None)."""
@@ -13499,6 +13505,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                      ("splitscreen",), ("splitscreen", "hud"), ("intermission",),
                                                      ("drivers",))):
                     return True
+            # Senders authenticate by a custom header a cross-site page cannot set.
+            if method == "POST" and p in (("console", "drive", "ingest"), ("console", "probe", "ingest")):
+                return True
             if not intermission_live.allow_control_origin(self.headers):
                 return False
             if not self.headers.get("Host"):
@@ -13509,6 +13518,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if not name or host.username is not None or host.password is not None or host.path or host.query or host.fragment:
                     return False
                 if name in browser_names:
+                    return True
+                late = _late_magicdns() if _late_magicdns else None
+                if late and name in (late.lower().rstrip("."), late.split(".", 1)[0].lower()):
                     return True
                 ipaddress.ip_address(name)
                 return True  # Literal addresses cannot be redirected by DNS rebinding.

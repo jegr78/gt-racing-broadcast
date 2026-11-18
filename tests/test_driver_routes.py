@@ -852,6 +852,42 @@ def t_funnel_watch_reports_the_host_only_while_funnel_serves():
         ts.detect_magicdns_name, ts.funnel_on = saved
 
 
+def t_funnel_watch_learns_the_magicdns_name_without_funnel():
+    ts = g.m.tailscale
+    saved = (ts.detect_magicdns_name, ts.funnel_on)
+    try:
+        ts.detect_magicdns_name = lambda *a, **k: FUNNEL_HOST
+        ts.funnel_on = lambda *a, **k: False
+        get = g.m._funnel_watch()
+        assert get.magicdns() is None, "the first call answers from the empty cache"
+        _wait_for(lambda: get.magicdns() is not None)
+        assert get.magicdns() == FUNNEL_HOST and get() is None, (get.magicdns(), get())
+    finally:
+        ts.detect_magicdns_name, ts.funnel_on = saved
+
+
+def t_a_magicdns_name_learned_after_start_is_a_browser_host():
+    known = {"name": None}
+
+    def funnel_host():
+        return None
+    funnel_host.magicdns = lambda: known["name"]
+    srv, port, path, _hub = _serve(funnel_host=funnel_host)
+    try:
+        issued = json.loads(_register(port, driver_invite.create(path)["id"],
+                                      entry="Team A #1", name="Max")[1])["code"]
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]),
+                              {"X-Driver-Code": issued, "Host": FUNNEL_HOST})
+        assert code == 200, ("a sender authenticates by header, so the Host check never blocks it", code, text)
+        assert _req(port, "/drivers/data", headers={"Host": FUNNEL_HOST})[0] == 403, \
+            "an unknown name stays refused"
+        known["name"] = FUNNEL_HOST           # Tailscale came up after the relay started
+        code, text, _h = _req(port, "/drivers/data", headers={"Host": FUNNEL_HOST})
+        assert code == 200, ("the late MagicDNS name must be accepted without a restart", code, text)
+    finally:
+        srv.shutdown()
+
+
 def t_timing_host_reload_is_tailnet_only():
     pub = _FakePublisher()
     srv, port, _lp, _link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST)
