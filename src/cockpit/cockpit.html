@@ -865,7 +865,7 @@ function timingLogo(e) {
   span.appendChild(img);
   return {cls: 'logo', node: span};
 }
-const TIMING_STATUS = {box: 'Box', no_data: 'No data', dc: 'DC', red_flag: 'Red flag'};
+const TIMING_STATUS = {box: 'Box', no_data: 'No data', dc: 'DC', red_flag: 'Red flag', no_sender: 'No data', retired: 'DNF'};
 // An estimated position: the gap Race Control set, marked EST.
 function timingEst(text) {
   const s = document.createElement('span');

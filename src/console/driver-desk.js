@@ -2,7 +2,7 @@
    (#1114, #1115). DriverDesk.mount(el, {base, fullRedFlag, dashboardToggle}) polls the
    relay and renders: the invite link, the race with its finish and red flag controls,
    the race recording with its disconnect events, corrections, estimates for quiet
-   cars, rejoin and change overrides, the dashboard's delay, fastest lap and
+   cars, retirements (DNF), driver names for entries without a sender, rejoin and change overrides, the dashboard's delay, fastest lap and
    qualifying corrections (plus its on-air switch with dashboardToggle), and the
    senders with readiness, reassign and disconnect. `base` prefixes every route: "/race-control" on the desk (its fetch
    shim adds /console), "" on the panel. Every text goes in through textContent. */
@@ -69,7 +69,8 @@
   }
   function secs(v) { return typeof v !== "number" ? "" : (v < 60 ? v.toFixed(1) : Math.floor(v / 60) + ":" + (v % 60).toFixed(1).padStart(4, "0")); }
   var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"], dc: ["DC", "bad"],
-                est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
+                est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"],
+                no_sender: ["No sender", ""], retired: ["DNF", "bad"]};
   var ACTIONS = {correct: "correction", final_lap: "Final lap", finish: "Finish", reset: "reset",
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
@@ -77,7 +78,8 @@
                  fastest: "fastest lap", quali: "qualifying time", compound: "tyre compound",
                  recording_start: "recording start", recording_stop: "recording stop",
                  dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed",
-                 estimate: "estimate", estimate_end: "estimate ended"};
+                 estimate: "estimate", estimate_end: "estimate ended", retire: "retirement",
+                 driver_name: "driver name"};
   var EVENT_STATES = {suspected: ["Suspected DC", "bad"], dropout: ["Dropout", "amb"],
                       confirmed: ["Confirmed DC", "bad"], dismissed: ["Dismissed", ""]};
   var OFFSETS = [5, 10, 15, 20, 30];
@@ -378,6 +380,22 @@
       act("/drivers/race/estimate", {entry: estEntry.value, clear: true}, "Estimate cleared");
     });
     var estList = el("div", {cls: "muted"});
+    var retEntry = el("select", {"aria-label": "Entry to retire"});
+    var retOn = button("Retire (DNF)", "alarm", "retire", function () {
+      act("/drivers/race/retire", {entry: retEntry.value, on: true}, "Retired: " + retEntry.value);
+    });
+    var retOff = button("Undo DNF", "", null, function () {
+      act("/drivers/race/retire", {entry: retEntry.value, on: false}, "Retirement undone");
+    });
+    var nameEntry = el("select", {"aria-label": "Entry without a sender"});
+    var nameText = el("input", {type: "text", maxlength: "40", placeholder: "driver name", cls: "wide",
+                                "aria-label": "Driver name for an entry without a sender"});
+    var nameSet = button("Set driver", "", null, async function () {
+      var d = await act("/drivers/race/driver-name", {entry: nameEntry.value, name: nameText.value.trim()},
+                        nameText.value.trim() ? "Driver named" : "Driver name removed");
+      if (d) nameText.value = "";
+    });
+    var nameList = el("div", {cls: "muted"});
     var multiRow = el("div", {cls: "row", hidden: ""});
     var rejoinEntry = el("select", {"aria-label": "Team to rejoin"});
     var rejoinOn = button("Mark rejoin", "", null, function () {
@@ -505,6 +523,9 @@
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry,
                                el("span", {cls: "muted", text: "behind"}), estRef, estSec, estSet, estClear]),
       estList,
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Retire"}), retEntry, retOn, retOff]),
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "No sender: driver"}), nameEntry, nameText, nameSet]),
+      nameList,
       multiRow,
       evTitle,
       el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
@@ -563,6 +584,10 @@
       raceNote.textContent = {no_line: "No distance: pick a track layout with a downloaded racing line.",
         waiting: "Waiting for the start.", final_lap: "Final lap.", finishing: "Finishing.",
         finished: "Finished."}[r.state] || "";
+      var names = r.driver_names || {};
+      nameList.textContent = Object.keys(names).length ? "Named: " + Object.keys(names).map(function (e) {
+        return e + " " + names[e];
+      }).join(", ") : "";
       var est = (r.entries || []).filter(function (e) { return e.estimate; });
       estList.textContent = est.length ? "Estimated: " + est.map(function (e) {
         return e.entry + " " + e.estimate.seconds + " s behind " + e.estimate.ref +
@@ -603,6 +628,8 @@
       keepSelect(corrEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(estEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(estRef, entries.map(function (e) { return [e, e]; }));
+      keepSelect(retEntry, entries.map(function (e) { return [e, e]; }));
+      keepSelect(nameEntry, entries.map(function (e) { return [e, e]; }));
       multiRow.hidden = !multi;
       keepSelect(rejoinEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(flEntry, entries.map(function (e) { return [e, e]; }));

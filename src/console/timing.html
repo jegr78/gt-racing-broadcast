@@ -35,6 +35,7 @@
   td.drv small { display: block; color: var(--muted); font-size: 12px; }
   tr.box td { color: var(--warn); }
   tr.off td { color: var(--muted); }
+  tr.dnf td[data-col="gap"] { color: var(--accent); font-weight: 700; }
   .est { display: inline-block; margin-left: 5px; padding: 0 5px; border: 1px solid var(--warn); border-radius: 4px;
          color: var(--warn); font-size: 11px; font-weight: 700; line-height: 1.45; vertical-align: 1px; }
   .fl { color: var(--purple); font-weight: 700; }
@@ -157,7 +158,7 @@
   const QUALI = [["pos", "Pos"], ["brand", ""], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["best", "Best"], ["gap", "Gap"]];
   const OPTIONAL = [["brand", "Brand"], ["tyre", "Tyre"], ["laps", "Laps"], ["gap", "Gap"], ["int", "Int."], ["last", "Last"],
                     ["fuel", "Fuel"], ["pits", "Pits"]];
-  const STATUS = {box: "Box", no_data: "No data", dc: "DC", red_flag: "Red flag"};
+  const STATUS = {box: "Box", no_data: "No data", dc: "DC", red_flag: "Red flag", no_sender: "No data", retired: "DNF"};
   const DATA = location.pathname.replace(/\/?$/, "/data") + location.search;
   // Hosted page state: the WebSocket to the host and what it last said.
   let sock = null, failed = 0, live = false, droppedAt = Date.now(), publisherUp = true, fallback = null, ended = false;
@@ -288,7 +289,8 @@
     const fl = d.fastest;
     $("timing").tBodies[0].replaceChildren(...rows.map(function (e, i) {
       const done = e.finished && e.status !== "est";
-      const tr = el("tr", done ? "" : e.status === "box" ? "box" : e.status === "no_data" || e.status === "dc" ? "off" : "");
+      const tr = el("tr", done ? "" : e.status === "box" ? "box" : e.status === "retired" ? "off dnf"
+                    : ["no_data", "dc", "no_sender"].indexOf(e.status) >= 0 ? "off" : "");
       const all = {
         pos: cell("pos", e.pos, "pos"), brand: brandCell(e), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
         laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),

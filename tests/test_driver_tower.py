@@ -352,6 +352,42 @@ def t_estimated_rows_keep_their_gap_and_tag():
     assert got == ["+1.4", "+1.4"], f"an estimate never cycles: {got}"
 
 
+def t_a_car_without_a_sender_reads_no_data_and_a_retired_car_dnf():
+    got = _tower(f"""
+      showFuel = true; showTyre = true;
+      return ["no_sender", "retired"].map(function (s) {{
+        const e = Object.assign({{}}, {json.dumps(CAR)}, {{status: s, pos: 5}});
+        laps[e.entry] = {{ms: e.last_lap_ms, until: Date.now() + 9999}};
+        const value = column(e, 4);
+        const r = row(e, 4, value, "P0");
+        return {{value: value, row: r.className, fuel: text(fuelCell(e)),
+                 tyre: flat(r).filter(c => /dd-tyre/.test(c.className)).map(c => c.textContent)}};
+      }});""")
+    if got is None:
+        return
+    nosender, dnf = got
+    assert nosender["value"] == "No data" and "off" in nosender["row"], f"no sender, no gap: {nosender}"
+    assert dnf["value"] == "DNF" and "dnf" in dnf["row"], f"a retired car reads DNF: {dnf}"
+    assert nosender["fuel"] == "" and dnf["fuel"] == "", f"neither shows fuel: {got}"
+    assert dnf["tyre"] == [""], f"a retired car shows no compound: {dnf}"
+
+
+def t_the_public_page_and_the_cockpit_name_no_data_and_dnf():
+    with open(TIMING, encoding="utf-8") as fh:
+        page = fh.read()
+    with open(os.path.join(ROOT, "src", "cockpit", "cockpit.html"), encoding="utf-8") as fh:
+        cockpit = fh.read()
+    for name, src in (("timing", page), ("cockpit", cockpit)):
+        status = re.search(r"STATUS = \{([^}]*)\}", src).group(1)
+        assert re.search(r"no_sender: ['\"]No data['\"]", status) and re.search(r"retired: ['\"]DNF['\"]", status), \
+            f"{name}: {status}"
+    for rel in (("console", "driver-desk.js"), ("console", "race-snapshot.html")):
+        with open(os.path.join(ROOT, "src", *rel), encoding="utf-8") as fh:
+            src = fh.read()
+        status = src[src.index("var STATUS = {"):src.index("};", src.index("var STATUS = {"))]
+        assert 'no_sender: ["No sender"' in status and 'retired: ["DNF"' in status, f"{rel[-1]}: {status}"
+
+
 def t_the_public_page_flags_a_finished_row_with_its_gap():
     with open(TIMING, encoding="utf-8") as fh:
         page = fh.read()

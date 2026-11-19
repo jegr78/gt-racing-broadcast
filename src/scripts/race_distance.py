@@ -929,7 +929,7 @@ class Race:
                 "pit_stops": max(0, e.pit_stops + e.pit_adjust),
                 "correction_m": round(e.adjust, 1),
                 "last_lap_ms": e.last_lap_ms, "stint_laps": e.stint_laps,
-                "fuel_l": None if car.fuel is None else round(car.fuel, 1),
+                "fuel_l": None if car.fuel is None or retired else round(car.fuel, 1),
                 **dict(zip(("x", "z"), (None, None) if retired else
                            self._est_xy(e) if self._estimated(e) and quiet
                            else (car.x, car.z), strict=True)),

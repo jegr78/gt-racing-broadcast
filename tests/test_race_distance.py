@@ -1178,7 +1178,7 @@ def t_a_retired_car_sits_below_every_running_car_and_stops_counting():
     ra = _row(race, "A", t)
     assert _order(race, t) == ["B", "C", "D", "X", "A"], _order(race, t)
     assert ra["status"] == "retired" and ra["distance_m"] == held, ra
-    assert ra["gap_s"] is None and ra["interval_s"] is None and ra["x"] is None, ra
+    assert ra["gap_s"] is None and ra["interval_s"] is None and ra["x"] is None and ra["fuel_l"] is None, ra
     assert _row(race, "B", t)["gap_s"] == 0, "the next car leads"
 
 
