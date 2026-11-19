@@ -36,6 +36,8 @@ replay check after the event stays the decision; this feature only prioritises i
 The relay already accepts two senders per team in endurance (`driver_ingest.Hub`). Each
 driver registers for their entry and stint segment through the invite link and gets a
 code. During the change both run at once: A's sender from lobby N, B's from lobby N+1.
+T_stop is taken only from a sender registered for segment N, T_service only from one
+registered for segment N+1.
 The relay dates every sample on its own clock (packet id within the batch), so both
 moments lie on one time axis although the drivers sit at different machines.
 
@@ -44,18 +46,19 @@ in the box, B starts the sender before the stint switch.
 
 ## The two moments
 
-Both are taken per team from the samples of the change window (`CHANGE_WINDOW_S` after
-the stint switch).
+Both are taken per team from the race itself, not from the broadcast. The change window
+opens when the director puts the next stint on air, which can come after the swap; a
+moment before it would be lost, so the window is not used here.
 
 - **T_stop (A):** the first moment A's car stands in the box once A's lobby counter has
   reached `Laps - 1` of A's schedule row: off the racing line by more than
   `BOX_LATERAL_M` and below 1 km/h for at least 1 s. A box stop before that lap is a
   normal pit stop, not the handover. A row without a `Laps` cell falls back to the first
-  box stop in the change window, and the hint says so. GT7's auto drive takes the car
+  box stop after the change window opened, and the hint says so. GT7's auto drive takes the car
   from the pit entry to the box; its length depends on the track, so the pit entry is not
   used.
-- **T_service (B):** the first sign of the crew's work on B's parked car, whichever comes
-  first:
+- **T_service (B):** the first sign of the crew's work on B's car after it parked in the
+  box at the end of lap 1 of lobby N+1, whichever comes first:
   - `fuel`: fuel rises by more than `FUEL_RISE_L` (refuelling started),
   - `tyres`: the tyre temperatures jump to fresh tyres (to be confirmed, see below),
   - `departure`: the car leaves the box (the service is over; a lower bound only).
@@ -75,7 +78,23 @@ with team, both drivers, both moments, the difference, the signal kind and the t
 States `suspected`, `confirmed`, `dismissed`; decisions go to `driver-race-audit.jsonl`.
 Every change, early or not, is written to the race recording and its CSV, so the
 post-event check starts from a list. Nothing reaches OBS, the public timing page or the
-teams automatically.
+teams automatically (`driver_race.public_view` carries no handover field, pinned by a
+test).
+
+## Trust in the data
+
+The hint is built from data the drivers' machines send. GT7 packets can be forged, a
+sender decides when it uploads, and anyone holding the invite link can register for a
+free slot. A team could hide an early handover (B holds back its uploads), and a
+stranger could fake one against another team (an early fuel rise on a free slot). So:
+
+- The hint names both connections (driver name, segment), so Race Control sees whose
+  data it rests on.
+- A hint only prioritises the replay check. Race Control still checks every change; an
+  unflagged change is not cleared by the absence of a hint.
+- `handover_tolerance_s` is finite, not negative and capped; anything else is refused.
+- Fuel and tyre temperatures pass the same plausibility check as every other sample
+  (finite, in range, in time order) before they can set a moment.
 
 ## Accuracy
 
