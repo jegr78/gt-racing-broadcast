@@ -875,10 +875,10 @@ def t_a_quiet_car_ahead_gives_no_exact_gap():
 
 
 
-def _quiet_c(seconds=1.0):
+def _quiet_c(seconds=1.0, **kw):
     """A, B, C and D at 40 m/s, C one second behind B; C's sender stops and Race
     Control puts it `seconds` behind B."""
-    race = rd.Race(TRACE, formation=False)
+    race = rd.Race(TRACE, formation=False, **kw)
     a, b, c, d = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90), ("D", 170)))
     t = _drive(race, [a, b, c, d], [40, 40, 40, 40], 0.0, 5)
     t = _drive(race, [a, b, d], [40, 40, 40], t, rd.NO_DATA_S + 1)
@@ -957,6 +957,45 @@ def t_an_estimate_holds_under_a_red_flag_and_after_the_flag():
         raise AssertionError("no estimate is set after the flag")
     except ValueError:
         pass  # expected
+
+
+
+def t_an_estimate_ends_when_the_car_returns_on_another_connection():
+    race, (a, b, c, d), t = _quiet_c()
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 5)
+    race.red_flag(t, "keep")
+    c2 = Car(race, "C", "c2", L - 15)
+    for car in (a, b, d, c2):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b, d, c2], [None] * 4, t, 3)
+    for car in (a, b, d, c2):
+        car.box = False
+    t = _drive(race, [a, b, d, c2], [40] * 4, t, 5)
+    race.release(t)
+    rc = _row(race, "C", t)
+    assert rc["status"] == "racing" and rc["estimate"] is None, rc
+    assert race.take_ended_estimates() == ["C"], "the returning car ends the estimate"
+    t = _drive(race, [a, b, d], [40] * 3, t, rd.NO_DATA_S + 1)
+    assert _row(race, "C", t)["status"] == "no_data", "an ended estimate does not come back"
+
+
+def t_an_estimated_car_keeps_its_place_when_the_winner_takes_the_flag():
+    race, (a, b, c, d), t = _quiet_c(finish_mode="laps", lap_count=2)
+    while _row(race, "A", t)["finished"] is False:
+        t = _drive(race, [a, b, d], [40, 40, 40], t, 0.1)
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order == ["A", "B", "C", "D"], f"C stays between B and D after A's flag: {order}"
+
+
+def t_an_estimate_that_reaches_before_the_history_is_refused():
+    race, (a, b, c, d), t = _quiet_c()
+    race.clear_estimate("C")
+    try:
+        race.estimate("C", "B", 3000.0, t)
+        raise AssertionError("an estimate with no distance to show must be refused")
+    except ValueError:
+        pass  # expected
+    assert _row(race, "C", t)["estimate"] is None
 
 
 def t_an_estimate_needs_two_cars_and_a_reference_with_data():

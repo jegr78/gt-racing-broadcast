@@ -281,6 +281,9 @@ class Race:
             raise ValueError("no estimate after the flag")
         self._est[entry] = {"ref": ref, "seconds": float(seconds), "held": None, "on": False}
         self._advance(now)
+        if self._quiet(ent, now) and not self._est[entry]["on"]:
+            del self._est[entry]
+            raise ValueError("the reference has no distance that far back")
 
     def clear_estimate(self, entry):
         """Remove an entry's estimate; False when it had none."""
@@ -294,8 +297,12 @@ class Race:
     def _advance(self, now):
         """Move each estimate of a quiet car with its reference; it holds under a red
         flag, after the flag and while the reference is quiet or waiting to restart."""
-        for entry, est in self._est.items():
+        for entry, est in list(self._est.items()):
             ent, ref = self._entries.get(entry), self._entries.get(est["ref"])
+            if ent is not None and est["held"] is not None and not self._quiet(ent, now):
+                del self._est[entry]                   # its data returned, on any connection
+                self._ended_est.append(entry)
+                continue
             if ent is None or not self._quiet(ent, now):
                 est["on"] = False
                 continue
@@ -779,6 +786,11 @@ class Race:
             laps = min(math.floor(dist / self.length), cap) if self.length and shown is not None else -1
             # Whoever reached that lap count first is ahead, finished or still running.
             reached = self._time_at(e, laps * self.length - e.adjust) if laps >= 0 else None
+            est = self._est.get(e.entry) if self._estimated(e) else None
+            ref = self._entries.get(est["ref"]) if est else None
+            if ref is not None and laps >= 0:
+                at = self._time_at(ref, laps * self.length - ref.adjust)
+                reached = None if at is None else at + est["seconds"]
             if reached is None:
                 reached = e.finished_at if e.finished_at is not None else math.inf
             return (0, -laps, reached, -dist, e.entry)
