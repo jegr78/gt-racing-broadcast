@@ -611,6 +611,75 @@ def t_a_confirmed_disconnect_reads_dc_on_the_dashboard_until_data_returns():
     svc.tick()
     assert svc.dashboard()["entries"][0]["status"] != "dc", "a returned car is no longer a DC"
 
+def _two_cars(svc, wall, until, quiet_b=False):
+    """C ahead of B at 50 m/s until `until`; B sends nothing with quiet_b."""
+    while wall[0] < until:
+        wall[0] = round(wall[0] + 0.1, 3)
+        t = wall[0] - 1000.0
+        for entry, along in (("C", 50 * t - 25), ("B", 50 * t - 125)):
+            if entry == "B" and quiet_b:
+                continue
+            svc.update({"entry": entry, "conn": entry.lower(), "name": "Max " + entry},
+                       _sample(wall[0], along, max(0, int(along // L) + 1)))
+
+
+def t_an_estimated_car_reads_est_everywhere_and_is_audited():
+    svc, wall, d = _recording_service()
+    svc.set_settings({"formation": False})
+    svc.recording_start("pit")
+    _two_cars(svc, wall, 1010.0)
+    _two_cars(svc, wall, 1010.0 + dr.race_distance.NO_DATA_S + 1, quiet_b=True)
+    rec = svc._recorder()
+    rec._events[9] = {"id": 9, "entry": "B", "state": "confirmed"}
+    rec._silent["B"] = 9
+    race = svc.estimate("rc:Cy", "B", "C", 2.0)
+    row = race["entries"][1]
+    assert row["entry"] == "B" and row["status"] == "est" and row["gap_s"] == 2.0, row
+    assert row["estimate"] == {"ref": "C", "seconds": 2.0}, "the desks see the estimate"
+    svc.tick()
+    dash = svc.dashboard()["entries"][1]
+    assert dash["status"] == "est" and dash["gap_s"] == 2.0, f"EST wins over DC on the tower: {dash}"
+    assert "estimate" not in dash, "viewers never see the reference"
+    assert dr.public_view(svc.dashboard())["entries"][1]["status"] == "est"
+    _flush(svc)
+    sample = svc.recording_at(wall[0])["rows"][1]
+    assert sample["status"] == "est" and sample["gap_time_s"] is not None, sample
+    svc.estimate("rc:Cy", "B", clear=True)
+    assert svc.standings()["entries"][1]["status"] == "dc", "a cleared estimate shows the DC again"
+    svc.estimate("director:Bo", "B", "C", 1.5)
+    del rec._silent["B"]
+    _two_cars(svc, wall, wall[0] + 1)
+    assert svc.standings()["entries"][1]["estimate"] is None, "returning data ends the estimate"
+    got = [(r["who"], r["action"], r.get("entry"), r.get("ref"), r.get("seconds"), r.get("cleared"))
+           for r in _audit(os.path.join(d, "driver-race.json")) if r["action"].startswith("estimate")]
+    assert got == [("rc:Cy", "estimate", "B", "C", 2.0, None), ("rc:Cy", "estimate", "B", None, None, True),
+                   ("director:Bo", "estimate", "B", "C", 1.5, None),
+                   ("race", "estimate_end", "B", None, None, None)], got
+
+
+def t_an_estimate_validates_its_input():
+    svc, clock, path, _league = _ctl()
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
+    svc.update({"entry": "B", "conn": "b", "name": "Ann"}, _sample(0.1, -50, 0))
+    for call in (lambda: svc.estimate("rc:A", "B", "A", -1),
+                 lambda: svc.estimate("rc:A", "B", "A", float("inf")),
+                 lambda: svc.estimate("rc:A", "B", "A", float("nan")),
+                 lambda: svc.estimate("rc:A", "B", "A", True),
+                 lambda: svc.estimate("rc:A", "B", "A", "5"),
+                 lambda: svc.estimate("rc:A", "B", "A", dr.MAX_ESTIMATE_S + 1),
+                 lambda: svc.estimate("rc:A", "B", "B", 1.0),
+                 lambda: svc.estimate("rc:A", "B", "", 1.0),
+                 lambda: svc.estimate("rc:A", "Nobody", "A", 1.0),
+                 lambda: svc.estimate("rc:A", "B", clear=True)):
+        try:
+            call()
+        except ValueError:
+            pass  # expected
+        else:
+            raise AssertionError("an invalid estimate must be refused")
+    assert not os.path.exists(dr.audit_path_for(path)), "a refused estimate logs nothing"
+
+
 def t_recording_start_is_audited():
     svc, _wall, d = _recording_service()
     svc.recording_start("Anna")

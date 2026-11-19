@@ -1,8 +1,8 @@
 /* Driver telemetry controls shared by the Race Control desk and the Director Panel
    (#1114, #1115). DriverDesk.mount(el, {base, fullRedFlag, dashboardToggle}) polls the
    relay and renders: the invite link, the race with its finish and red flag controls,
-   the race recording with its disconnect events, corrections, rejoin and change
-   overrides, the dashboard's delay, fastest lap and
+   the race recording with its disconnect events, corrections, estimates for quiet
+   cars, rejoin and change overrides, the dashboard's delay, fastest lap and
    qualifying corrections (plus its on-air switch with dashboardToggle), and the
    senders with readiness, reassign and disconnect. `base` prefixes every route: "/race-control" on the desk (its fetch
    shim adds /console), "" on the panel. Every text goes in through textContent. */
@@ -67,14 +67,15 @@
   }
   function secs(v) { return typeof v !== "number" ? "" : (v < 60 ? v.toFixed(1) : Math.floor(v / 60) + ":" + (v % 60).toFixed(1).padStart(4, "0")); }
   var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"], dc: ["DC", "bad"],
-                waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
+                est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
   var ACTIONS = {correct: "correction", final_lap: "Final lap", finish: "Finish", reset: "reset",
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
                  reassign: "reassign", disconnect: "disconnect", red_flag_cover_down: "cover down",
                  fastest: "fastest lap", quali: "qualifying time", compound: "tyre compound",
                  recording_start: "recording start", recording_stop: "recording stop",
-                 dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed"};
+                 dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed",
+                 estimate: "estimate", estimate_end: "estimate ended"};
   var EVENT_STATES = {suspected: ["Suspected DC", "bad"], dropout: ["Dropout", "amb"],
                       confirmed: ["Confirmed DC", "bad"], dismissed: ["Dismissed", ""]};
   var OFFSETS = [5, 10, 15, 20, 30];
@@ -347,6 +348,21 @@
                         pit_stops: isFinite(p) ? p : 0, reason: corrWhy.value}, "Correction applied");
       if (d) { corrM.value = ""; corrPit.value = ""; corrWhy.value = ""; }
     });
+    var estEntry = el("select", {"aria-label": "Quiet entry to estimate"});
+    var estRef = el("select", {"aria-label": "Reference entry"});
+    var estSec = el("input", {type: "number", min: "0", step: "0.1", placeholder: "seconds",
+                              "aria-label": "Seconds behind the reference"});
+    var estSet = button("Set estimate", "", null, async function () {
+      var n = parseFloat(estSec.value);
+      if (!isFinite(n) || n < 0) return say("Seconds behind as a number, 0 or more", true);
+      var d = await act("/drivers/race/estimate", {entry: estEntry.value, ref: estRef.value, seconds: n},
+                        "Estimate set");
+      if (d) estSec.value = "";
+    });
+    var estClear = button("Clear estimate", "", null, function () {
+      act("/drivers/race/estimate", {entry: estEntry.value, clear: true}, "Estimate cleared");
+    });
+    var estList = el("div", {cls: "muted"});
     var multiRow = el("div", {cls: "row", hidden: ""});
     var rejoinEntry = el("select", {"aria-label": "Team to rejoin"});
     var rejoinOn = button("Mark rejoin", "", null, function () {
@@ -471,6 +487,9 @@
       el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
       recWarn, raceNote, raceTable,
       el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry,
+                               el("span", {cls: "muted", text: "behind"}), estRef, estSec, estSet, estClear]),
+      estList,
       multiRow,
       evTitle,
       el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
@@ -529,8 +548,17 @@
       raceNote.textContent = {no_line: "No distance: pick a track layout with a downloaded racing line.",
         waiting: "Waiting for the start.", final_lap: "Final lap.", finishing: "Finishing.",
         finished: "Finished."}[r.state] || "";
+      var est = (r.entries || []).filter(function (e) { return e.estimate; });
+      estList.textContent = est.length ? "Estimated: " + est.map(function (e) {
+        return e.entry + " " + e.estimate.seconds + " s behind " + e.estimate.ref +
+          (e.status === "est" ? "" : " (waiting for its data to stop)");
+      }).join(", ") : "";
       var rows = (r.entries || []).map(function (e, i) {
         var st = STATUS[e.status] || [e.status, ""];
+        var stPill = {cls: "pill " + st[1], text: st[0]};
+        if (e.status === "est" && e.estimate) {
+          stPill.title = "Estimated " + e.estimate.seconds + " s behind " + e.estimate.ref + " until its data returns";
+        }
         // No-break spaces: a narrow desk wraps only between the lap count and the time.
         var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
                            : (i ? secs(e.gap_s) : "");
@@ -539,7 +567,7 @@
           el("td", {cls: "num", text: String(e.laps)}),
           el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}), el("td", {cls: "num", text: secs(e.interval_time_s)}),
           el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
-                        st[0] ? el("span", {cls: "pill " + st[1], text: st[0]}) : null,
+                        st[0] ? el("span", stPill) : null,
                         e.finished ? el("span", {cls: "pill ok", text: "Finished"}) : null,
                         e.rejoin ? el("span", {cls: "pill amb", text: "Rejoin"}) : null,
                         e.position_mismatch ? el("span", {cls: "pill amb", text: "GT7 P" + e.gt7_position,
@@ -558,6 +586,8 @@
       tyreSrc.roster = entries;
       syncTyres();
       keepSelect(corrEntry, entries.map(function (e) { return [e, e]; }));
+      keepSelect(estEntry, entries.map(function (e) { return [e, e]; }));
+      keepSelect(estRef, entries.map(function (e) { return [e, e]; }));
       multiRow.hidden = !multi;
       keepSelect(rejoinEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(flEntry, entries.map(function (e) { return [e, e]; }));

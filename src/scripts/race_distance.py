@@ -56,6 +56,9 @@ nearest the predicted distance decides.
   fastest lap.
 - Corrections add metres and pit stops per entry; `override_change` makes a team's
   connection active at once, continuing from the current distance.
+- Estimate: Race Control puts a quiet car S seconds behind a reference car. While it
+  stays quiet it shows the reference's distance S seconds ago, frozen under a red flag
+  (its restart anchor) and after the flag; its next data ends the estimate.
 """
 import bisect
 import math
@@ -108,15 +111,29 @@ class _Car:
         self.last_ms = None        # the last last_ms seen
 
 
-def _interpolate(ts, ds, d):
-    """The time at distance d in one history; None outside it."""
-    if not ds or d < ds[0] or d > ds[-1]:
+def _interpolate(values, keys, k):
+    """The value at key k in one history (time at a distance, or the reverse); None
+    outside it."""
+    if not keys or k < keys[0] or k > keys[-1]:
         return None
-    i = bisect.bisect_left(ds, d)
-    if i == 0 or ds[i] == d:
-        return ts[i]
-    d0, d1, t0, t1 = ds[i - 1], ds[i], ts[i - 1], ts[i]
-    return t0 + (t1 - t0) * (d - d0) / (d1 - d0) if d1 > d0 else t1
+    i = bisect.bisect_left(keys, k)
+    if i == 0 or keys[i] == k:
+        return values[i]
+    k0, k1, v0, v1 = keys[i - 1], keys[i], values[i - 1], values[i]
+    return v0 + (v1 - v0) * (k - k0) / (k1 - k0) if k1 > k0 else v1
+
+
+def _across(values, keys, cvalues, ckeys, k):
+    """The value at key k over the coarse and the fine history and the step between
+    them; None outside both."""
+    if keys and k >= keys[0]:
+        return _interpolate(values, keys, k)
+    if not ckeys or k < ckeys[0]:
+        return None
+    if k <= ckeys[-1] or not keys:
+        return _interpolate(cvalues, ckeys, k)
+    k0, k1, v0, v1 = ckeys[-1], keys[0], cvalues[-1], values[0]
+    return v0 + (v1 - v0) * (k - k0) / (k1 - k0) if k1 > k0 else v1
 
 
 class _Entry:
@@ -176,6 +193,8 @@ class Race:
         self._used_rejoins = []     # entries whose rejoin mark a change consumed
         self.fastest = None         # {entry, driver, ms}
         self._window_leader = None  # the leader's distance when the change window opened
+        self._est = {}              # entry -> {ref, seconds, held, on}
+        self._ended_est = []        # entries whose estimate their returning data ended
 
     # -- commands ------------------------------------------------------------------
     def open_change_window(self, now):
@@ -188,13 +207,17 @@ class Race:
 
     def red_flag(self, now, mode):
         """Freeze every entry; each continues from its anchor in the restart lobby."""
+        self._advance(now)
         self._red = {"at": now, "mode": mode}
         self._restart_mode = mode
         for ent in self._entries.values():
             if ent.waiting:
                 continue                           # a second red flag keeps the first anchor
             ent.frozen = None
-            if ent.distance is not None and ent.finished_at is None:
+            est = self._est.get(ent.entry)
+            if est is not None and est["on"] and ent.finished_at is None:
+                ent.frozen, ent.waiting = est["held"] - ent.adjust, True
+            elif ent.distance is not None and ent.finished_at is None:
                 ent.frozen, ent.waiting = ent.distance, True
             car = self._cars.get(ent.active)
             if car is not None:
@@ -242,6 +265,48 @@ class Race:
             ent.adjust += metres
             ent.pit_adjust += pit_stops
 
+    def estimate(self, entry, ref, seconds, now):
+        """Show the quiet `entry` `seconds` behind `ref` until its data returns; setting
+        it again replaces it. ValueError when it cannot apply."""
+        ent, other = self._entries.get(entry), self._entries.get(ref)
+        if entry == ref:
+            raise ValueError("an entry cannot follow itself")
+        if ent is None:
+            raise ValueError("that entry has no car in the race")
+        if other is None or other.distance is None or self._quiet(other, now):
+            raise ValueError("the reference needs a car with data")
+        if self._red is not None:
+            raise ValueError("no estimate under a red flag")
+        if self._finished or ent.finished_at is not None or other.finished_at is not None:
+            raise ValueError("no estimate after the flag")
+        self._est[entry] = {"ref": ref, "seconds": float(seconds), "held": None, "on": False}
+        self._advance(now)
+
+    def clear_estimate(self, entry):
+        """Remove an entry's estimate; False when it had none."""
+        return self._est.pop(entry, None) is not None
+
+    def take_ended_estimates(self):
+        """The entries whose estimate their returning data ended since the last call."""
+        ended, self._ended_est = self._ended_est, []
+        return ended
+
+    def _advance(self, now):
+        """Move each estimate of a quiet car with its reference; it holds under a red
+        flag, after the flag and while the reference is quiet or waiting to restart."""
+        for entry, est in self._est.items():
+            ent, ref = self._entries.get(entry), self._entries.get(est["ref"])
+            if ent is None or not self._quiet(ent, now):
+                est["on"] = False
+                continue
+            if ref is not None and ref.distance is not None and self._red is None \
+                    and not self._finished and ent.finished_at is None \
+                    and ref.finished_at is None and not ref.waiting and not self._quiet(ref, now):
+                d = self._distance_at(ref, now - est["seconds"])
+                if d is not None:
+                    est["held"] = d + ref.adjust
+            est["on"] = est["held"] is not None
+
     def override_change(self, entry, conn, now):
         """Make `conn` the team's active connection now, from the current distance;
         False (nothing changed) when it is no car of the team or no line is known for it."""
@@ -278,6 +343,7 @@ class Race:
             self._final_lap_at = now
 
     def finish(self, now):
+        self._advance(now)
         for ent in self._entries.values():
             if ent.finished_at is None:
                 ent.finished_at = now
@@ -425,6 +491,9 @@ class Race:
             car = self._cars[conn] = _Car(conn, name)
             car.entry = entry
             car.restart_ready = ent.waiting                # it joined the restart lobby
+        if entry in self._est and conn == ent.active and (car.t is None or t - car.t > NO_DATA_S):
+            del self._est[entry]                           # the car is back: its own distance
+            self._ended_est.append(entry)
         if resumed is not None and resumed[0] == conn and resumed[1][0]:
             car.counting = True                            # moved back: its own laps go on
             _, car.anchor, car.lap0, car.f0, car.line = resumed[1]
@@ -607,7 +676,14 @@ class Race:
             self._finished = len(self._entries) == 1
 
     def _shown(self, ent):
+        est = self._est.get(ent.entry)
+        if est is not None and est["on"]:
+            return est["held"]
         return None if ent.distance is None else ent.distance + ent.adjust
+
+    def _estimated(self, ent):
+        est = self._est.get(ent.entry)
+        return est is not None and est["on"]
 
     def _quiet(self, ent, now):
         car = self._cars.get(ent.active)
@@ -645,14 +721,16 @@ class Race:
     @staticmethod
     def _time_at(ent, d):
         """When `ent` reached distance d, interpolated; None outside its history."""
-        if ent.ds and d >= ent.ds[0]:
-            return _interpolate(ent.ts, ent.ds, d)
-        if not ent.cds or d < ent.cds[0]:
-            return None
-        if d <= ent.cds[-1] or not ent.ds:
-            return _interpolate(ent.cts, ent.cds, d)
-        d0, d1, t0, t1 = ent.cds[-1], ent.ds[0], ent.cts[-1], ent.ts[0]
-        return t0 + (t1 - t0) * (d - d0) / (d1 - d0) if d1 > d0 else t1
+        return _across(ent.ts, ent.ds, ent.cts, ent.cds, d)
+
+    @staticmethod
+    def _distance_at(ent, t):
+        """`ent`'s distance at time t, interpolated; its last one after its history,
+        None before it."""
+        last = ent.ts[-1] if ent.ts else (ent.cts[-1] if ent.cts else None)
+        if last is not None and t >= last:
+            return ent.ds[-1] if ent.ds else ent.cds[-1]
+        return _across(ent.ds, ent.ts, ent.cds, ent.cts, t)
 
     def _behind(self, ahead, ent):
         """(laps behind, seconds behind) of `ent` relative to `ahead`."""
@@ -683,6 +761,7 @@ class Race:
         return None if reached is None else max(0.0, self._cars[ent.active].t - reached)
 
     def standings(self, now):
+        self._advance(now)
         ents = list(self._entries.values())
         winner = next((e for e in ents if self._finishing_at is not None
                        and e.finished_at == self._finishing_at and e.distance is not None), None)
@@ -690,12 +769,14 @@ class Race:
         cap = math.floor(self._shown(winner) / self.length) if winner and self.length else math.inf
 
         def key(e):
-            dist = self._shown(e) if e.distance is not None else -math.inf
+            shown = self._shown(e)
+            dist = shown if shown is not None else -math.inf
             if self._finishing_at is None:
-                return (0, -dist, 0.0, 0.0, "")
+                # An estimate never passes its reference on a tie.
+                return (0, -dist, 1.0 if self._estimated(e) else 0.0, 0.0, "")
             if e is winner:
                 return (-1, 0, 0.0, 0.0, "")
-            laps = min(math.floor(dist / self.length), cap) if self.length and e.distance is not None else -1
+            laps = min(math.floor(dist / self.length), cap) if self.length and shown is not None else -1
             # Whoever reached that lap count first is ahead, finished or still running.
             reached = self._time_at(e, laps * self.length - e.adjust) if laps >= 0 else None
             if reached is None:
@@ -714,6 +795,7 @@ class Race:
                 gap_time = self._time_behind(ents[0], e, now) if i else 0.0
                 interval_time = self._time_behind(ents[i - 1], e, now) if i else None
             shown = self._shown(e)
+            est = self._est.get(e.entry)
             rows.append({
                 "entry": e.entry, "driver": car.name, "conn": e.active,
                 "distance_m": None if shown is None else round(shown, 1),
@@ -725,7 +807,8 @@ class Race:
                 "quiet_s": None if car.t is None else round(max(0.0, now - car.t), 1),
                 "in_box": bool(car.in_box),
                 "lapped": lapped or 0,
-                "status": "no_data" if quiet else "box" if car.in_box else
+                "status": ("est" if self._estimated(e) else "no_data") if quiet else
+                          "box" if car.in_box else
                           "waiting" if e.distance is None else
                           "red_flag" if e.waiting else "racing",
                 "finished": e.finished_at is not None,
@@ -737,13 +820,37 @@ class Race:
                 "x": car.x, "z": car.z,
                 "rejoin": e.rejoin,
                 "gt7_position": car.position,
-                "position_mismatch": e.entry in mismatch})
+                "position_mismatch": e.entry in mismatch,
+                "estimate": None if est is None else {"ref": est["ref"], "seconds": est["seconds"]}})
+        self._estimate_gaps(ents, rows)
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
                 "restart_mode": self._restart_mode,
                 "change_window": self._window_until is not None and now <= self._window_until,
                 "fastest": self.fastest,
                 "lap": self._lap_display(ents), "entries": rows}
+
+    def _estimate_gaps(self, ents, rows):
+        """An estimated car's gaps are its reference's plus the seconds; the intervals
+        next to it follow from the gaps."""
+        by_entry = {r["entry"]: r for r in rows}
+        lead = self._shown(ents[0]) if ents else None
+        for i, (e, row) in enumerate(zip(ents, rows, strict=True)):
+            if self._estimated(e):
+                est = self._est[e.entry]
+                ref = by_entry.get(est["ref"]) or {}
+                lapped = math.floor((lead - est["held"]) / self.length) if i and lead is not None else 0
+                gap = None if lapped or ref.get("gap_s") is None else ref["gap_s"] + est["seconds"]
+                gap_time = None if ref.get("gap_time_s") is None else ref["gap_time_s"] + est["seconds"]
+                row.update(lapped=max(0, lapped), gap_s=None if gap is None else round(gap, 2),
+                           gap_time_s=None if gap_time is None else round(gap_time, 2))
+            elif not (i and self._estimated(ents[i - 1])):
+                continue
+            if i:
+                prev = rows[i - 1]
+                for key, by in (("interval_s", "gap_s"), ("interval_time_s", "gap_time_s")):
+                    a, b = row[by], prev[by]
+                    row[key] = None if a is None or b is None else round(max(0.0, a - b), 2)
 
     def _lap_display(self, ordered):
         """{leader, count}: the leader's running lap against the lap count. In endurance

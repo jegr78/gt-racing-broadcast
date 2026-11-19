@@ -8,7 +8,8 @@ that puts the last schedule row on air. A changed layout pick starts a new race,
 because distances along another line mean nothing.
 
 Race Control actions (#1113): red flag, restart mode and release, rejoin marks,
-corrections and change overrides. Corrections and rejoin marks persist in
+corrections, change overrides and estimates for quiet cars (in memory only).
+Corrections and rejoin marks persist in
 `driver-race-actions.json` next to the settings and come back after a relay
 restart; every action appends a line with identity and time to
 `driver-race-audit.jsonl`. The red flag restart default is a league rule and lives
@@ -37,6 +38,7 @@ MAX_REASON = 200
 MAX_ENTRY = 120
 MAX_CORRECTION_M = 100_000.0
 MAX_PIT_CORRECTION = 50
+MAX_ESTIMATE_S = 3600.0
 DEFAULTS = {"formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0,
             "visible": False, "show_compound": True, "show_fuel": True}
 COMPOUNDS = ("RS", "RM", "RH", "I", "W")   # Racing Soft/Medium/Hard, Intermediate, Wet
@@ -691,6 +693,8 @@ class Service:
                 self._save_actions(update)
                 for entry in used:
                     self._log("race", "rejoin_used", entry=entry)
+            for entry in race.take_ended_estimates():
+                self._log("race", "estimate_end", entry=entry)
 
     def standings(self):
         with self._lock:
@@ -806,6 +810,26 @@ class Service:
             self._current().correct(entry, metres, pit_stops)
             self._log(who, "correct", entry=entry, metres=metres, pit_stops=pit_stops,
                       reason=reason.strip())
+        return self.standings()
+
+    def estimate(self, who, entry, ref=None, seconds=None, clear=False):
+        """Show the quiet `entry` `seconds` behind `ref` until its data returns, or
+        `clear` it. Not persisted: a relay restart drops it."""
+        entry = _entry_name(entry)
+        if clear:
+            with self._lock:
+                if not self._current().clear_estimate(entry):
+                    raise ValueError("that entry has no estimate")
+                self._log(who, "estimate", entry=entry, cleared=True)
+            return self.standings()
+        ref = _entry_name(ref)
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) \
+                or not math.isfinite(seconds) or not 0 <= seconds <= MAX_ESTIMATE_S:
+            raise ValueError(f"seconds is a number from 0 to {int(MAX_ESTIMATE_S)}")
+        seconds = float(seconds)
+        with self._lock:
+            self._current().estimate(entry, ref, seconds, self._clock())
+            self._log(who, "estimate", entry=entry, ref=ref, seconds=seconds)
         return self.standings()
 
     def override_change(self, who, entry, conn):

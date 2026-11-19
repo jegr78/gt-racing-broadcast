@@ -95,7 +95,8 @@ and says so. Changing the layout mid-event starts the race over.
   while its sender has been quiet for five seconds; the entry keeps its place. Once Race
   Control confirms the silence as a disconnect, every screen shows **DC** instead (desks,
   tower, cockpit, public timing page, the recording and its frozen standings), until the
-  car sends data again.
+  car sends data again. A car Race Control placed with an **estimate** shows **EST**
+  instead of either (see below).
 - **Pit stops** count every box stop the car drives out of. The count is an estimate:
   the relay sees a stop as standing off the racing line, so a car beached beside the
   track or stopped there under a red flag counts as a pit stop too. The desks' `Pits`
@@ -263,6 +264,17 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   its deficit.
 - **Corrections** add or remove metres and pit stops per entry, always with a reason.
   A **change override** makes a team's other sender the active one at once.
+- **Estimate** keeps a car without data in the order: pick the quiet entry, the car it
+  runs behind and the seconds, then **Set estimate**. While the car stays quiet it
+  shows where the reference car was that many seconds ago, its gap is the reference's
+  gap plus the seconds, and every screen marks it **EST** (desks, tower, cockpit,
+  public timing page, the recording and its CSV). The reference must send data. Set it
+  again to change it, **Clear estimate** removes it, and the estimate ends by itself
+  when the car sends data again; the car then continues from its real distance. An
+  estimate set on a car that still sends data waits until it goes quiet. It holds still
+  under a red flag (the restart anchor is the estimated distance) and after the car or
+  its reference took the flag, and an estimated car never takes the flag by itself.
+  Estimates are not saved: a relay restart drops them.
 
 Corrections and rejoin marks survive a relay restart; a race reset and the next
 `event start` drop them. Every action is logged with who

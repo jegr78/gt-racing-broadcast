@@ -874,6 +874,121 @@ def t_a_quiet_car_ahead_gives_no_exact_gap():
     assert row["gap_s"] is not None, f"gap_s keeps its meaning: {row}"
 
 
+
+def _quiet_c(seconds=1.0):
+    """A, B, C and D at 40 m/s, C one second behind B; C's sender stops and Race
+    Control puts it `seconds` behind B."""
+    race = rd.Race(TRACE, formation=False)
+    a, b, c, d = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90), ("D", 170)))
+    t = _drive(race, [a, b, c, d], [40, 40, 40, 40], 0.0, 5)
+    t = _drive(race, [a, b, d], [40, 40, 40], t, rd.NO_DATA_S + 1)
+    race.estimate("C", "B", seconds, t)
+    return race, (a, b, c, d), t
+
+
+def t_an_estimate_moves_a_quiet_car_with_its_reference():
+    race, (a, b, c, d), t = _quiet_c()
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 30)
+    rb, rc = _row(race, "B", t), _row(race, "C", t)
+    assert rc["status"] == "est", rc
+    assert abs(rc["distance_m"] - (rb["distance_m"] - 40)) < 3, \
+        f"C is where B was a second ago: {rc['distance_m']} vs {rb['distance_m']}"
+    assert [r["entry"] for r in race.standings(t)["entries"]] == ["A", "B", "C", "D"], \
+        "the quiet car keeps its place ahead of D"
+    assert abs(rc["gap_s"] - (rb["gap_s"] + 1.0)) < 0.02, (rb["gap_s"], rc["gap_s"])
+    assert abs(rc["gap_time_s"] - (rb["gap_time_s"] + 1.0)) < 0.02, (rb, rc)
+    assert abs(rc["interval_s"] - 1.0) < 0.02 and abs(rc["interval_time_s"] - 1.0) < 0.02, rc
+    rd_ = _row(race, "D", t)
+    assert abs(rd_["interval_time_s"] - (rd_["gap_time_s"] - rc["gap_time_s"])) < 0.02, \
+        f"the car behind takes its interval from the gaps: {rd_}"
+    assert rc["estimate"] == {"ref": "B", "seconds": 1.0}, rc["estimate"]
+
+
+def t_an_estimate_ends_when_the_car_sends_again():
+    race, (a, b, c, d), t = _quiet_c()
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 10)
+    assert _row(race, "C", t)["status"] == "est"
+    c.along = b.along - 300                               # it really fell back
+    t = _drive(race, [a, b, c, d], [40, 40, 40, 40], t, 2)
+    rc = _row(race, "C", t)
+    assert rc["status"] == "racing" and rc["estimate"] is None, rc
+    assert race.take_ended_estimates() == ["C"] and race.take_ended_estimates() == []
+    assert [r["entry"] for r in race.standings(t)["entries"]] == ["A", "B", "D", "C"], \
+        "C continues from its real distance"
+    t = _drive(race, [a, b, d], [40, 40, 40], t, rd.NO_DATA_S + 1)
+    assert _row(race, "C", t)["status"] == "no_data", "an ended estimate does not come back"
+
+
+def t_an_estimate_on_a_live_car_waits_until_it_goes_quiet():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, 5)
+    race.estimate("B", "A", 2.0, t)
+    t = _drive(race, [a, b], [40, 40], t, 5)
+    assert _row(race, "B", t)["status"] == "racing", "a car with data shows its own distance"
+    t = _drive(race, [a], [40], t, rd.NO_DATA_S + 1)
+    rb, ra = _row(race, "B", t), _row(race, "A", t)
+    assert rb["status"] == "est" and abs(rb["distance_m"] - (ra["distance_m"] - 80)) < 4, (ra, rb)
+    assert rb["gap_s"] == 2.0, rb
+
+
+def t_an_estimate_holds_under_a_red_flag_and_after_the_flag():
+    race, (a, b, c, d), t = _quiet_c()
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 5)
+    race.red_flag(t, "keep")
+    held = _row(race, "C", t)["distance_m"]
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 10)
+    rc = _row(race, "C", t)
+    assert rc["distance_m"] == held and rc["status"] == "est", f"no movement under a red flag: {held} {rc}"
+    assert abs(race._entries["C"].frozen - held) < 0.5, "the restart anchor is the estimate"
+    try:
+        race.estimate("C", "A", 1.0, t)
+        raise AssertionError("no estimate is set under a red flag")
+    except ValueError:
+        pass  # expected
+    race2, (a, b, c, d), t = _quiet_c()
+    t = _drive(race2, [a, b, d], [40, 40, 40], t, 5)
+    race2.finish(t)
+    held = _row(race2, "C", t)["distance_m"]
+    t = _drive(race2, [a, b, d], [40, 40, 40], t, 10)
+    assert _row(race2, "C", t)["distance_m"] == held, "no movement after the flag"
+    try:
+        race2.estimate("C", "B", 1.0, t)
+        raise AssertionError("no estimate is set after the flag")
+    except ValueError:
+        pass  # expected
+
+
+def t_an_estimate_needs_two_cars_and_a_reference_with_data():
+    race, (a, b, c, d), t = _quiet_c()
+    for args in (("C", "C", 1.0), ("C", "Nobody", 1.0), ("Nobody", "B", 1.0)):
+        try:
+            race.estimate(*args, t)
+        except ValueError:
+            continue
+        raise AssertionError(f"{args} must be refused")
+    t = _drive(race, [a, b], [40, 40], t, rd.NO_DATA_S + 1)
+    try:
+        race.estimate("C", "D", 1.0, t)
+        raise AssertionError("a quiet reference must be refused")
+    except ValueError:
+        pass  # expected
+    assert race.clear_estimate("C") is True and race.clear_estimate("C") is False
+    assert _row(race, "C", t)["status"] == "no_data", "a cleared estimate leaves the car without data"
+
+
+def t_an_estimate_reads_the_coarse_history_too():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, rd.HISTORY_S + 200)
+    t = _drive(race, [a], [40], t, rd.NO_DATA_S + 1)
+    race.estimate("B", "A", rd.HISTORY_S + 100, t)
+    ent = race._entries["A"]
+    assert ent.ts[0] > t - rd.HISTORY_S - 100, "the lookup reaches back past the fine history"
+    rb, ra = _row(race, "B", t), _row(race, "A", t)
+    assert abs(rb["distance_m"] - (ra["distance_m"] - 40 * (rd.HISTORY_S + 100))) < 45, (ra, rb)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

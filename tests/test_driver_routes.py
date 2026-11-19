@@ -64,7 +64,8 @@ def _serve(solo=True, segments=(), clock=None, recording_dir=None, enabled=lambd
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo,
-                               enabled=enabled, recording_dir=recording_dir)
+                               enabled=enabled, recording_dir=recording_dir,
+                               **({"clock": clock} if clock else {}))
     race.open_recording()
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
@@ -353,6 +354,47 @@ def t_ingested_telemetry_becomes_the_race_order_on_the_tailnet():
             code, text, _h = _req(port, f"/drivers/race/{action}", b"{}", {"Content-Type": "application/json"})
             assert code == 200 and json.loads(text)["state"] == state, (action, code, text)
         assert _req(port, "/console/drivers/race")[0] in (401, 403, 404), "the race controls stay on the tailnet"
+    finally:
+        srv.shutdown()
+
+
+def t_both_desks_set_and_clear_an_estimate_and_bad_input_is_refused():
+    sim = [100.0]
+    srv, port, path, _hub = _serve(clock=lambda: sim[0])
+    hdr = {"Content-Type": "application/json"}
+    try:
+        invite = driver_invite.create(path)["id"]
+        _req(port, "/drivers/race/settings", json.dumps({"formation": False}).encode(), hdr)
+        codes = {e: json.loads(_register(port, invite, entry=e, name="N")[1])["code"] for e in ENTRIES}
+        for i in range(0, 600, 6):
+            sim[0] = 100.0 + i / 60
+            for entry, behind in ((ENTRIES[0], 20.0), (ENTRIES[1], 60.0)):
+                along = 50.0 * i / 60 - behind
+                _req(port, "/console/drive/ingest",
+                     tp.encode_batch([_wire_at(i + 6, along, 1 if along >= 0 else 0)]),
+                     {"X-Driver-Code": codes[entry]})
+        rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
+        body = json.dumps({"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": 1.5}).encode()
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/estimate?t={rc}", body, hdr)
+        race = json.loads(text)["race"] if st == 200 else {}
+        assert st == 200 and race["last_action"]["who"] == "race_control:dave", (st, text[:300])
+        assert race["entries"][1]["estimate"] == {"ref": ENTRIES[0], "seconds": 1.5}, race["entries"][1]
+        st, text, _h = _req(port, f"/console/drivers/race/estimate?t={director}",
+                            json.dumps({"entry": ENTRIES[1], "clear": True}).encode(), hdr)
+        assert st == 200 and json.loads(text)["race"]["entries"][1]["estimate"] is None, (st, text[:300])
+        assert _req(port, f"/console/drivers/race/estimate?t={alice}", body, hdr)[0] == 403, \
+            "a commentator never sets an estimate"
+        for bad in ({"entry": "Invented Team", "ref": ENTRIES[0], "seconds": 1},
+                    {"entry": ENTRIES[1], "ref": "Invented Team", "seconds": 1},
+                    {"entry": ENTRIES[1], "ref": ENTRIES[1], "seconds": 1},
+                    {"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": -1},
+                    {"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": "1"}):
+            st, text, _h = _req(port, f"/console/race-control/drivers/race/estimate?t={rc}",
+                                json.dumps(bad).encode(), hdr)
+            assert st == 400, (bad, st, text)
+        raw = ('{"entry": "%s", "ref": "%s", "seconds": Infinity}' % (ENTRIES[1], ENTRIES[0])).encode()
+        st, text, _h = _req(port, "/drivers/race/estimate", raw, hdr)
+        assert st == 400, f"a non-finite estimate is refused: {st} {text}"
     finally:
         srv.shutdown()
 
