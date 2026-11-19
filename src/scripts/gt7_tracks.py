@@ -6,6 +6,7 @@ signatures.json (plus learned rows for layouts without one): length within 3 %,
 inside the bounding box, close to the line, and the driving direction separates a
 layout from its reverse.
 """
+import bisect
 import json
 import math
 import os
@@ -47,6 +48,15 @@ class _Line:
         self.grid = {}
         for i, (x, z) in enumerate(self.pts):
             self.grid.setdefault((int(x // GRID_M), int(z // GRID_M)), []).append(i)
+
+    def point_at(self, station):
+        """(x, z) at a station along the closed line."""
+        st = station % self.length
+        i = bisect.bisect_right(self.cum, st)
+        (x0, z0) = self.pts[i - 1]
+        (x1, z1), c1 = (self.pts[i], self.cum[i]) if i < len(self.pts) else (self.pts[0], self.length)
+        f = (st - self.cum[i - 1]) / (c1 - self.cum[i - 1]) if c1 > self.cum[i - 1] else 0.0
+        return x0 + (x1 - x0) * f, z0 + (z1 - z0) * f
 
     def _nearest_index(self, x, z):
         """Index of the closest vertex, via the grid (not a scan of the whole path)."""

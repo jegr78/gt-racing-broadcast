@@ -886,6 +886,15 @@ def _quiet_c(seconds=1.0, **kw):
     return race, (a, b, c, d), t
 
 
+
+def t_an_estimated_car_moves_on_the_map_with_its_reference():
+    race, (a, b, c, d), t = _quiet_c()
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 30)
+    rc = _row(race, "C", t)
+    x, z = _pos(b.along - 40)                              # where B was a second ago
+    assert math.hypot(rc["x"] - x, rc["z"] - z) < 5, \
+        f"C's map dot follows B: {(rc['x'], rc['z'])} vs {(x, z)}"
+
 def t_an_estimate_moves_a_quiet_car_with_its_reference():
     race, (a, b, c, d), t = _quiet_c()
     t = _drive(race, [a, b, d], [40, 40, 40], t, 30)

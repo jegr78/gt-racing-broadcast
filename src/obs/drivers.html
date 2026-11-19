@@ -242,6 +242,10 @@
       c.setAttribute("cx", p[0]); c.setAttribute("cy", p[1]); c.setAttribute("r", DOT_R);
       c.setAttribute("fill", safeColor(e.color, "#39414d"));
       c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", 0.4);
+      if (e.status === "est") {   // an estimated position: amber dashed ring, as the tower's EST tag
+        c.setAttribute("stroke", "#ffb454"); c.setAttribute("stroke-width", 0.8);
+        c.setAttribute("stroke-dasharray", "1 0.7");
+      }
       const t = document.createElementNS(SVG, "text");
       t.setAttribute("x", p[0]); t.setAttribute("y", p[1]);
       t.setAttribute("fill", safeColor(e.text_color, "#fff"));
