@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the per-profile overlay CSS/font helpers.
 Run: python3 tests/test_overlay.py"""
-import importlib.util, os, re, sys, tempfile
+import importlib.util, os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -1316,6 +1316,21 @@ def _cc_fn(src, name):
     body = src[src.index("function " + name):]
     return body[:body.index("\n}\n")]
 
+
+
+def t_cc_canvas_maps_root_rules_of_the_custom_css_to_its_host():
+    src = _cc_src()
+    node = shutil.which("node")
+    if node:
+        out = subprocess.run([node, "-"], input=_cc_fn(src, "ovShadowCss") + "\n}\n" +
+                             "console.log(ovShadowCss(':root { --dd-accent: #0ff; } html, body { color: red; }'))",
+                             capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             check=True, timeout=30).stdout.strip()
+        assert out == ":host { --dd-accent: #0ff; } :host { color: red; }", \
+            f"a :root variable in the custom CSS must reach the canvas host: {out}"
+    for fn in ("ovBuildCanvas", "ovCustomCssChanged"):
+        assert "ovShadowCss($('overlayCss').value)" in _cc_fn(src, fn), \
+            f"{fn} must pass the custom CSS through ovShadowCss"
 
 def t_cc_canvas_cascades_like_the_live_overlay():
     # Live, override.css is the slot rules followed by customCss (last wins). The
