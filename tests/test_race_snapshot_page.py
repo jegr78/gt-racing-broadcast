@@ -52,27 +52,37 @@ def _render(sample):
     return json.loads(out.stdout)
 
 
-def _row(entry, pos, cls=None, class_pos=None):
-    r = {"pos": pos, "entry": entry, "driver": "Driver " + entry, "laps": 5, "status": "racing"}
+def _row(entry, pos, cls=None, class_pos=None, **kw):
+    r = {"pos": pos, "entry": entry, "driver": "Driver " + entry, "laps": 5, "status": "racing",
+         "gap_time_s": 99.0, "interval_time_s": 98.0}
     if cls is not None:
-        r.update({"class": cls, "class_pos": class_pos})
+        r.update({"class": cls, "class_pos": class_pos, "class_gap_s": None, "class_interval_s": None,
+                  "class_lapped": 0})
+    r.update(kw)
     return r
 
 
 def t_two_classes_group_under_coloured_headers():
     got = _render({"t": 100, "state": "racing",
-                   "rows": [_row("A", 1, "GT3", 1), _row("B", 2, "GT4", 1), _row("C", 3, "GT3", 2),
-                            _row("D", 4, "", 1)],
+                   "rows": [_row("A", 1, "GT3", 1), _row("B", 2, "GT4", 1),
+                            _row("C", 3, "GT3", 2, class_gap_s=4.5, class_interval_s=4.5),
+                            _row("D", 4, "GT3", 3, class_gap_s=None, class_lapped=2),
+                            _row("E", 5, "", 1)],
                    "classes": [{"name": "GT3", "color": "#ff0000", "lap": 5, "laps": 30},
                                {"name": "GT4", "color": "#00ff00", "lap": 4, "laps": None}]})
     if got is None:
         return
     kinds = [r["cls"] for r in got]
-    assert kinds == ["cls", "", "", "cls", "", "cls", ""], kinds
+    assert kinds == ["cls", "", "", "", "cls", "", "cls", ""], kinds
     assert got[0]["cells"] == ["GT3|LAP 5 / 30"] and got[0]["colors"] == ["#ff0000"], got[0]
-    assert got[3]["cells"] == ["GT4|LAP 4"], got[3]
-    assert got[5]["cells"][0].startswith("Unclassed"), got[5]
-    assert [r["cells"][0] for r in got if not r["cls"]] == ["1", "2", "1", "1"], "class_pos is shown"
+    assert got[4]["cells"] == ["GT4|LAP 4"], got[4]
+    assert got[6]["cells"][0].startswith("Unclassed"), got[6]
+    assert [r["cells"][0] for r in got if not r["cls"]] == ["1", "2", "3", "1", "1"], "class_pos is shown"
+    gap = lambda i: (got[i]["cells"][3], got[i]["cells"][4])
+    assert gap(1) == ("", ""), "class leader reads like the overall leader: %r" % (gap(1),)
+    assert gap(2) == ("4.5", "4.5"), "class gap, not the overall 99.0: %r" % (gap(2),)
+    assert gap(3)[0] == "+2\u00a0L", "lapped reads +n L: %r" % (gap(3),)
+    assert gap(5) == ("", ""), gap(5)
     assert "|C|" in got[2]["cells"][1], "C is GT3's second car"
 
 

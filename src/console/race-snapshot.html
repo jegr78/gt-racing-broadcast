@@ -160,8 +160,12 @@
     function build(e, grouped) {
       var tr = el("tr");
       var st = STATUS[e.status] || [String(e.status || ""), ""];
-      var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
-                         : (e.pos > 1 ? secs(e.gap_time_s) : "");
+      var lapped = grouped ? e.class_lapped : e.lapped;
+      var first = grouped ? e.class_pos <= 1 : e.pos <= 1;
+      var gapS = grouped ? e.class_gap_s : e.gap_time_s;
+      var gap = lapped ? "+" + lapped + "\u00a0L" + (!grouped && typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
+                       : (first ? "" : secs(gapS));
+      var interval = first ? "" : secs(grouped ? e.class_interval_s : e.interval_time_s);
       var entry = el("td");
       entry.append(el("div", "", e.entry), el("div", "muted", fitName(e.driver, NAME_MAX)));
       var status = el("td");
@@ -170,7 +174,7 @@
       if (e.rejoin) status.append(el("span", "pill amb", "Rejoin"));
       if (e.position_mismatch) status.append(el("span", "pill amb", "GT7 P" + e.gt7_position));
       tr.append(el("td", "num", String(grouped ? e.class_pos : e.pos)), entry, el("td", "num", e.laps == null ? "" : String(e.laps)),
-                el("td", "num", gap), el("td", "num", e.pos > 1 ? secs(e.interval_time_s) : ""), status,
+                el("td", "num", gap), el("td", "num", interval), status,
                 el("td", "num", e.pit_stops == null ? "" : String(e.pit_stops)),
                 el("td", "num", e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""),
                 el("td", "mono", e.compound || ""));
