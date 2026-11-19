@@ -5,7 +5,6 @@ under node when it is installed (skipped otherwise).
 Run: python3 tests/test_driver_tower.py"""
 import json
 import os
-import re
 import shutil
 import subprocess
 
@@ -39,7 +38,8 @@ function text(n) { return flat(n).map(c => c.textContent).join(""); }
 def _script(path):
     with open(path, encoding="utf-8") as fh:
         html = fh.read()
-    return re.findall(r"<script>([\s\S]*?)</script>", html)[-1]
+    i = html.rindex("<script>") + len("<script>")
+    return html[i:html.index("</script>", i)]
 
 
 def _run(js):
