@@ -80,21 +80,23 @@ teams automatically.
 ## Accuracy
 
 Each moment carries the sample spacing (about 0.1 s) plus the difference in upload delay
-of the two senders, which batch their packets. That difference is not measured yet; the
-design assumes it stays below 1 s. The hint shows the tolerance it was judged with, and
+of the two senders, which batch their packets. The lobbies' own clocks play no part: the
+relay dates both senders on its clock. The delay is not measured yet; the design assumes
+the difference stays below 1 s. The hint shows the tolerance it was judged with, and
 the desk says that the replay decides.
 
 ## Before building
 
-One measurement on a real driver change with two PS5s and two senders:
+Measured with one PS5, both roles one after the other (issue #1185):
 
-1. B's samples during the service: fuel with and without refuelling, tyre temperatures
-   with and without a tyre change (does a change show as a step, and how large), and the
-   flags.
-2. A's samples from pit entry to standstill: is the standstill clear, and does it sit
-   beyond `BOX_LATERAL_M` (the box detection is still unconfirmed, #1110).
-3. The offset between the two senders' timestamps against a common reference, for
-   example both lobbies' replays or a screen recording with both consoles in view.
+1. Standstill (role A): the box stop after lap `Laps - 1`. Is the standstill clear, and
+   does the car stand beyond `BOX_LATERAL_M` (the box detection is still unconfirmed,
+   #1110)?
+2. Service (role B): refuelling only, a tyre change only, both, and neither. What changes
+   first: fuel, tyre temperatures (a step, how large), flags, position?
+3. The sender's upload delay from console packet to relay arrival. Both moments are
+   dated on the relay's clock, so the spread of this delay bounds the error of the
+   comparison between two senders.
 
 The thresholds above are placeholders until this measurement replaces them.
 
