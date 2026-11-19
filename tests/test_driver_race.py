@@ -1161,6 +1161,164 @@ def t_a_reference_retirement_ends_the_estimate_in_the_audit():
     assert [(r["who"], r["entry"], r["reason"]) for r in ends] == [("rc:Anna", "X", "reference_retired")], ends
 
 
+
+CLASS_ROSTER = {"A": {"number": "1", "cupTeam": "Red Bulls", "carClass": "H", "classColor": "#c00"},
+                "B": {"number": "2", "carClass": "G", "classColor": "#0c0"},
+                "C": {"number": "3", "carClass": "G", "classColor": ""}}
+
+
+def _class_service(path=None):
+    ctx = {"roster": {k: dict(v) for k, v in CLASS_ROSTER.items()}, "stint": None, "remaining": None,
+           "mode": "race"}
+    svc, clock, path = _dash_service(ctx, path)
+    along = {"A": -20.0, "B": -60.0, "C": -100.0}
+    while clock[0] < 6.0:
+        clock[0] = round(clock[0] + 0.1, 3)
+        for entry in along:
+            along[entry] += 5.0
+            svc.update({"entry": entry, "conn": entry.lower(), "name": "Max " + entry},
+                       _sample(clock[0], along[entry], max(0, int(along[entry] // L) + 1)))
+    return svc, clock, path, ctx
+
+
+def t_the_dashboard_carries_classes_in_order():
+    svc, _clock, _path, _ctx = _class_service()
+    svc._current().fastest_by_class = {"G": {"entry": "C", "driver": "Max C", "ms": 63000}}
+    svc.set_settings({"finish_mode": "laps", "lap_count": 10})
+    svc.tick()
+    d = svc.dashboard()
+    assert [c["name"] for c in d["classes"]] == ["H", "G"], d["classes"]
+    assert [c["color"] for c in d["classes"]] == ["#c00", "#0c0"], \
+        f"a class takes the first colour set for it: {d['classes']}"
+    rows = _rows(d)
+    assert [(rows[e]["class"], rows[e]["class_pos"]) for e in "ABC"] == [("H", 1), ("G", 1), ("G", 2)], rows
+    assert rows["C"]["class_color"] == "#0c0", f"a row shows its class colour: {rows['C']}"
+    assert rows["C"]["class_gap_s"] is not None and rows["B"]["class_gap_s"] == 0, rows
+    g = d["classes"][1]
+    assert g["lap"] == rows["B"]["laps"] and g["laps"] is None, g
+    assert d["classes"][0]["laps"] == 10, f"the leader's class runs the race lap count: {d['classes'][0]}"
+    assert g["fastest"] == {"entry": "C", "driver": "Max C", "team": "", "ms": 63000}, g
+    assert d["classes"][0]["fastest"] is None, d["classes"][0]
+
+
+def t_a_class_change_in_the_roster_reaches_the_next_tick():
+    svc, _clock, _path, ctx = _class_service()
+    svc.tick()
+    ctx["roster"]["B"]["carClass"] = "H"
+    svc.tick()
+    rows = _rows(svc._snapshots[-1][1])
+    assert (rows["B"]["class"], rows["B"]["class_pos"]) == ("H", 2), rows["B"]
+    assert (rows["C"]["class"], rows["C"]["class_pos"]) == ("G", 1), rows["C"]
+
+
+def t_a_rebuilt_race_knows_the_classes_before_its_first_lap():
+    svc, _clock, _path, _ctx = _class_service()
+    svc.tick()
+    svc._race = None
+    svc.update({"entry": "A", "conn": "a", "name": "Max A"}, _sample(9.0, 10.0, 1))
+    assert svc._current()._classes == {"A": "H", "B": "G", "C": "G"}, \
+        f"a lap timed before the next tick is filed under its class: {svc._current()._classes}"
+
+
+def t_the_public_view_keeps_the_class_fields():
+    svc, _clock, _path, _ctx = _class_service()
+    svc._current().fastest_by_class = {"H": {"entry": "A", "driver": "Max A", "ms": 61000}}
+    svc.tick()
+    d = svc.dashboard()
+    d["classes"][0]["secret"] = "x"
+    d["classes"][0]["fastest"]["conn"] = "leak"
+    d["entries"][0]["class_secret"] = "x"
+    pub = dr.public_view(d)
+    for key in ("class", "class_color", "class_pos", "class_gap_s", "class_interval_s", "class_lapped"):
+        assert key in pub["entries"][0], f"{key} reaches the public page: {pub['entries'][0]}"
+    assert "class_secret" not in pub["entries"][0], pub["entries"][0]
+    assert pub["classes"][0] == {"name": "H", "color": "#c00", "lap": d["classes"][0]["lap"],
+                                 "laps": d["classes"][0]["laps"],
+                                 "fastest": {"entry": "A", "driver": "Max A", "team": "Red Bulls",
+                                             "ms": 61000}}, pub["classes"][0]
+    assert pub["classes"][1]["fastest"] is None, pub["classes"][1]
+
+
+def t_a_single_class_payload_is_unchanged():
+    svc, _clock, _path, ctx = _class_service()
+    for info in ctx["roster"].values():
+        info["carClass"] = "G"
+    ctx["roster"]["C"]["carClass"] = ""
+    svc.tick()
+    d = svc.dashboard()
+    assert d["classes"] == [], d["classes"]
+    assert all(r.get("class_pos") is None and r.get("class_color") is None for r in d["entries"]), d["entries"]
+    plain, plain_clock, _p = _dash_service({"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"})
+    _feed(plain, plain_clock, "A", "a", -20.0, 6.0)
+    plain.tick()
+    assert set(d["entries"][0]) == set(plain.dashboard()["entries"][0]), \
+        "one class adds no row fields to the payload"
+    pub = dr.public_view(d)
+    assert "classes" not in pub and not any(k.startswith("class") for r in pub["entries"] for k in r), pub
+
+
+def t_class_fastest_laps_survive_a_restart():
+    svc, _clock, path, ctx = _class_service()
+    race = svc._current()
+    race.fastest = {"entry": "A", "driver": "Max A", "ms": 61000}
+    race.fastest_by_class = {"H": dict(race.fastest), "G": {"entry": "C", "driver": "Max C", "ms": 63000}}
+    svc.save_fastest()
+    race.fastest_by_class["G"] = {"entry": "B", "driver": "Max B", "ms": 62500}
+    svc.save_fastest()
+    again, _c, _p = _dash_service(ctx, path)
+    assert again._current().fastest_by_class == {
+        "H": {"entry": "A", "driver": "Max A", "ms": 61000},
+        "G": {"entry": "B", "driver": "Max B", "ms": 62500}}, \
+        f"a new class lap is saved even when the overall lap stays: {again._current().fastest_by_class}"
+    again.set_fastest("rc:Anna")
+    voided, _c, _p = _dash_service(ctx, path)
+    assert voided._current().fastest is None and voided._current().fastest_by_class == {
+        "G": {"entry": "B", "driver": "Max B", "ms": 62500}}, \
+        f"voiding the overall lap keeps the other class laps: {voided._current().fastest_by_class}"
+    moved = dr.Service(path, pick=lambda: {"id": "other"}, trace_for=lambda _i: TRACE,
+                       multi_lobby=lambda: False, clock=lambda: 0.0, context=lambda: ctx)
+    assert moved._current().fastest_by_class == {}, "class laps on another layout are not this race's"
+
+
+def t_a_damaged_class_lap_is_not_loaded():
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "fastest.json")
+        by_class = {"G": {"entry": "B", "driver": "Max B", "ms": 62000},
+                    "H": {"entry": "A", "driver": "Ann\u202e", "ms": 61000},
+                    "x" * 25: {"entry": "C", "driver": "Max C", "ms": 61000},
+                    "": {"entry": "C", "driver": "Max C", "ms": -1}}
+        with open(f, "w", encoding="utf-8") as fh:
+            json.dump({"track": "t", "by_class": by_class}, fh)
+        assert dr._saved_fastest_by_class(f, "t") == {"G": {"entry": "B", "driver": "Max B", "ms": 62000}}, \
+            "only valid class laps load, without an overall lap"
+        assert dr._saved_fastest_by_class(f, "u") == {}, "another layout loads none"
+
+
+def t_a_hand_set_fastest_lap_moves_between_classes():
+    svc, _clock, path, ctx = _class_service()
+    svc.tick()
+    race = svc._current()
+    race.fastest = {"entry": "B", "driver": "Max B", "ms": 60000}
+    race.fastest_by_class = {"G": dict(race.fastest), "H": {"entry": "A", "driver": "Max A", "ms": 62000}}
+    svc.set_fastest("rc:Anna", "A", "Max A", 61000)
+    assert svc._current().fastest_by_class == {"H": {"entry": "A", "driver": "Max A", "ms": 61000}}, \
+        f"the replaced lap leaves its class, the set lap is its class's: {svc._current().fastest_by_class}"
+    again, _c, _p = _dash_service(ctx, path)
+    assert again._current().fastest_by_class == svc._current().fastest_by_class, "the hand-set lap is saved"
+
+
+def t_class_fastest_laps_show_the_driver_name_override():
+    svc, _clock, path, _ctx = _class_service()
+    svc.set_driver_name("director:Bo", "C", "Kim Berg", driver="Max C")
+    race = svc._current()
+    race.fastest_by_class = {"G": {"entry": "C", "driver": "Max C", "ms": 63000}}
+    svc.tick()
+    g = [c for c in svc.dashboard()["classes"] if c["name"] == "G"][0]
+    assert g["fastest"]["driver"] == "Kim Berg", g
+    assert dr._read_json(svc._fastest_path())["by_class"]["G"]["driver"] == "Max C", \
+        "the file keeps the registered name"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
