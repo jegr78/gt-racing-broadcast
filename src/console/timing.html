@@ -114,13 +114,13 @@
   "use strict";
   const LOGIC = window.TimingLogic;
   const HOSTED = LOGIC.hostedLink(location.pathname);
-  // Race columns the reader can switch; compound and fuel also follow the event's switches.
+  // Race columns the reader can switch.
   const RACE = [["pos", "Pos"], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["laps", "Laps"],
                 ["gap", "Gap"], ["int", "Int."], ["last", "Last"], ["fuel", "Fuel"], ["pits", "Pits"]];
   const QUALI = [["pos", "Pos"], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["best", "Best"], ["gap", "Gap"]];
   const OPTIONAL = [["tyre", "Tyre"], ["laps", "Laps"], ["gap", "Gap"], ["int", "Int."], ["last", "Last"],
                     ["fuel", "Fuel"], ["pits", "Pits"]];
-  const STATUS = {box: "Box", no_data: "No data", red_flag: "Red flag"};
+  const STATUS = {box: "Box", no_data: "No data", dc: "DC", red_flag: "Red flag"};
   const DATA = location.pathname.replace(/\/?$/, "/data") + location.search;
   // Hosted page state: the WebSocket to the host and what it last said.
   let sock = null, failed = 0, live = false, droppedAt = Date.now(), publisherUp = true, fallback = null, ended = false;
@@ -195,12 +195,7 @@
   function render(d) {
     last = d;
     const quali = d.mode === "qualifying";
-    const show = d.show || {};
-    const allowed = function (key) {
-      if (key === "tyre" && show.compound === false) return false;
-      if (key === "fuel" && show.fuel === false) return false;
-      return !hidden.has(key);
-    };
+    const allowed = function (key) { return !hidden.has(key); };
     const cols = (quali ? QUALI : RACE).filter(function (c) { return allowed(c[0]); });
     const parts = [];
     if (quali) parts.push("Qualifying");
@@ -221,7 +216,7 @@
     const rows = quali ? (d.qualifying || []) : (d.entries || []);
     const fl = d.fastest;
     $("timing").tBodies[0].replaceChildren(...rows.map(function (e, i) {
-      const tr = el("tr", e.status === "box" ? "box" : e.status === "no_data" ? "off" : "");
+      const tr = el("tr", e.status === "box" ? "box" : e.status === "no_data" || e.status === "dc" ? "off" : "");
       const all = {
         pos: cell("pos", e.pos, "pos"), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
         laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),

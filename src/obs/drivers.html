@@ -123,6 +123,7 @@
   function column(e, i) {
     if (e.status === "box") return "Box";
     if (e.status === "no_data") return "No data";
+    if (e.status === "dc") return "DC";
     if (e.status === "red_flag") return "Red flag";
     if (e.finished) return "Finished";
     const phase = Math.floor(Date.now() / CYCLE_MS) % (showFuel ? 3 : 2);
@@ -134,7 +135,7 @@
   }
   function row(e, i, value, pits, fl) {
     const r = el("div", "dd-row" + (e.status === "box" ? " box" : "") +
-                       (e.status === "no_data" ? " off" : ""));
+                       (e.status === "no_data" || e.status === "dc" ? " off" : ""));
     r.appendChild(el("span", "dd-pos", String(e.pos)));
     const num = el("span", "dd-num", e.number || String(e.entry || "").slice(0, 3));
     num.style.background = safeColor(e.color, "#39414d");

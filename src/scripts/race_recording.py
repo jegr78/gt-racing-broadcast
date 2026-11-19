@@ -373,6 +373,11 @@ class Recorder:
                               "decided_at": self._wall()})
             return dict(ev)
 
+    def confirmed_silent(self):
+        """Entries still quiet whose silence Race Control confirmed as a disconnect."""
+        with self._lock:
+            return {e for e, i in self._silent.items() if self._events[i]["state"] == "confirmed"}
+
     def sample_at(self, t_wall):
         return self._store.sample_at(t_wall)
 

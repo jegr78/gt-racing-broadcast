@@ -373,7 +373,8 @@ def t_the_display_switches_skip_the_delay():
     assert d["visible"] is True and d["show"] == {"compound": False, "fuel": False}, \
         f"Hide/Show and the display switches apply at once, not after the delay: {d}"
     pub = dr.public_view(d)
-    assert "fuel_l" not in pub["entries"][0] and "compound" not in pub["entries"][0], pub
+    assert "fuel_l" in pub["entries"][0] and "compound" in pub["entries"][0], \
+        f"the switches are for OBS only, the public page keeps every column: {pub}"
     assert svc._snapshots[0][1]["visible"] is False, "the delayed snapshot itself stays untouched"
 
 
@@ -522,7 +523,7 @@ def t_the_crew_sets_a_tyre_compound_that_outlives_a_driver_change():
     assert again.standings()["compounds"] == {}, "the next event starts without compounds"
 
 
-def t_the_public_view_is_timing_only_and_follows_the_switches():
+def t_the_public_view_is_timing_only_and_ignores_the_obs_switches():
     snap = {"v": 1, "mode": "race", "stint": "Stint 2", "remaining": 600, "track": "good",
             "track_name": "Suzuka", "visible": False, "show": {"compound": False, "fuel": True},
             "state": "racing", "red_flag": False, "lap": {"leader": 3, "count": 10},
@@ -534,12 +535,10 @@ def t_the_public_view_is_timing_only_and_follows_the_switches():
                          "x": 1.0, "z": 2.0, "compound": "RS"}]}
     pub = dr.public_view(snap)
     row = pub["entries"][0]
-    assert "compound" not in row and row["fuel_l"] == 40.0, "the switches decide compound and fuel"
+    assert row["compound"] == "RS" and row["fuel_l"] == 40.0, "the OBS switches never hide public columns"
     assert "x" not in row and "z" not in row and "visible" not in pub and "track" not in pub, pub
+    assert "show" not in pub, "the public page gets no OBS switches to follow"
     assert pub["fastest"] == {"entry": "A", "driver": "Max", "team": "", "ms": 61000}
-    snap["show"] = {"compound": True, "fuel": False}
-    row = dr.public_view(snap)["entries"][0]
-    assert row["compound"] == "RS" and "fuel_l" not in row, row
     quali = dr.public_view({"v": 1, "mode": "qualifying", "show": {"compound": True, "fuel": True},
                             "qualifying": [{"pos": 1, "entry": "A", "number": "1", "driver": "Max",
                                             "team": "", "color": "", "text_color": "", "best_ms": 90000,
@@ -589,6 +588,25 @@ def t_tick_records_in_race_mode_only():
     assert svc.recording_at(1000.0)["rows"][0]["entry"] == "A"
     assert svc.recording_csv()[0][0] == "time_utc"
 
+
+
+def t_a_confirmed_disconnect_reads_dc_on_the_dashboard_until_data_returns():
+    svc, wall, _d = _recording_service()
+    svc.recording_start("pit")
+    rec = svc._recorder()
+    rec._events[1] = {"id": 1, "entry": "A", "state": "suspected"}
+    rec._silent["A"] = 1
+    svc.tick()
+    assert svc.dashboard()["entries"][0]["status"] == "no_data", "a suspicion alone is still No data"
+    svc.recording_decide("Cy", 1, "confirm")
+    wall[0] += 1
+    svc.tick()
+    assert svc.dashboard()["entries"][0]["status"] == "dc", svc.dashboard()["entries"][0]
+    assert dr.public_view(svc.dashboard())["entries"][0]["status"] == "dc", "the public page names it too"
+    del rec._silent["A"]
+    wall[0] += 1
+    svc.tick()
+    assert svc.dashboard()["entries"][0]["status"] != "dc", "a returned car is no longer a DC"
 
 def t_recording_start_is_audited():
     svc, _wall, d = _recording_service()
