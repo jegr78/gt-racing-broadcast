@@ -63,18 +63,28 @@ CAR = {"pos": 2, "entry": "Team B #2", "number": "2", "driver": "Ann Lind", "tea
        "finished": False, "compound": "RM", "pit_stops": 1}
 
 
-def t_the_value_column_cycles_gap_and_last_lap_only():
+def t_the_value_column_cycles_gap_interval_and_last_lap():
     got = _tower(f"""
-      const e = {json.dumps(CAR)};
+      const e = Object.assign({json.dumps(CAR)}, {{interval_s: 0.52}});
       return [0, 1, 2, 3].map(function (k) {{
         Date.now = () => k * CYCLE_MS + 1;
         showFuel = true;
-        return column(e, 1);
+        return [column(e, 1), column(e, 0), phaseLabel()];
       }});""")
     if got is None:
         return
-    assert got == ["+1.4", "1:58.412", "+1.4", "1:58.412"], \
-        f"two phases, gap then last lap, fuel never in the value column: {got}"
+    assert [g[0] for g in got] == ["+1.4", "+0.5", "1:58.412", "+1.4"], \
+        f"three phases, gap to the leader, interval to the car ahead, last lap: {got}"
+    assert [g[1] for g in got[:2]] == ["Leader", "Leader"], f"the leader reads Leader in both gap phases: {got}"
+    assert [g[2] for g in got] == ["GAP", "INT", "LAST LAP", "GAP"], f"the header names the phase: {got}"
+
+
+def t_a_lapped_car_without_an_interval_reads_its_laps():
+    got = _tower(f"""
+      Date.now = () => CYCLE_MS + 1;
+      return column(Object.assign({json.dumps(CAR)}, {{lapped: 1, interval_s: null}}), 5);""")
+    if got is not None:
+        assert got == "+1 L", f"the interval phase falls back to the lap count: {got}"
 
 
 def t_fuel_reads_whole_percent_and_turns_amber_at_ten():

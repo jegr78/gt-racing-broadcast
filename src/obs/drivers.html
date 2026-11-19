@@ -29,6 +29,8 @@
   }
   #dd-session { font-size: 14px; font-weight: 600; color: var(--dd-dim); letter-spacing: .08em;
                 text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #dd-phase { position: absolute; right: 16px; top: 12px; font-size: 12px; font-weight: 700;
+              color: var(--dd-dim); letter-spacing: .08em; }
   #drivers-header.flag { border-left-color: #ff2a2a; }
   #drivers-tower {
     position: absolute; left: 48px; top: 136px; width: 460px; box-sizing: border-box;
@@ -91,7 +93,7 @@
 </head>
 <body>
   <div id="drivers-header" data-edit="Lap and session" data-edit-kind="text">
-    <span id="dd-lap">LAP 7 / 20</span><span id="dd-session">Suzuka · Stint 2</span>
+    <span id="dd-lap">LAP 7 / 20</span><span id="dd-session">Suzuka · Stint 2</span><span id="dd-phase">GAP</span>
   </div>
   <div id="drivers-tower" data-edit="Timing tower" data-edit-kind="text"><div id="dd-rows">
     <div class="dd-row"><span class="dd-pos">1</span><span class="dd-num" style="background:#c00000">7</span><span class="dd-name"><span class="dd-team">Team Redline</span><span class="dd-driver">BERG</span></span><span class="dd-tyre RM">RM</span><span class="dd-fuel"><span class="dd-fuel-bar"><i style="height:56%"></i></span><span>56%</span></span><span class="dd-val">Leader</span><span class="dd-pit">P1</span></div>
@@ -107,7 +109,7 @@
   "use strict";
   const SVG = "http://www.w3.org/2000/svg";
   const MAX_ROWS = 15;
-  const CYCLE_MS = 15000;       // gap, then last lap
+  const CYCLE_MS = 15000;       // gap to the leader, interval, last lap
   const rows = document.getElementById("dd-rows");
   rows.textContent = "";
   document.body.setAttribute("data-hidden", "");   // off air until the relay says otherwise
@@ -137,7 +139,9 @@
     return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;
   }
   let showFuel = true, showTyre = true;
-  function phase() { return Math.floor(Date.now() / CYCLE_MS) % 2; }
+  const PHASES = ["GAP", "INT", "LAST LAP"];
+  function phase() { return Math.floor(Date.now() / CYCLE_MS) % PHASES.length; }
+  function phaseLabel() { return PHASES[phase()]; }
   function gapText(e, i) {
     if (i === 0) return "Leader";
     if (e.lapped) return "+" + e.lapped + " L";
@@ -172,7 +176,11 @@
       if (e.lapped) return "+" + e.lapped + " L";
       return typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(e.gap_s < 100 ? 1 : 0) : "";
     }
-    if (phase() === 1 && e.last_lap_ms) return lapTime(e.last_lap_ms);
+    if (phase() === 2 && e.last_lap_ms) return lapTime(e.last_lap_ms);
+    if (phase() === 1 && i > 0) {
+      if (typeof e.interval_s === "number") return "+" + e.interval_s.toFixed(1);
+      if (e.lapped) return "+" + e.lapped + " L";
+    }
     return gapText(e, i);
   }
   function row(e, i, value, pits, fl) {
@@ -215,8 +223,9 @@
     rows.replaceChildren(...(d.entries || []).slice(0, MAX_ROWS).map(function (e, i) {
       return row(e, i, column(e, i), "P" + (e.pit_stops || 0),
                  fl && e.status !== "est" && fl.entry === e.entry && e.last_lap_ms === fl.ms &&
-                 !e.finished && phase() === 1);
+                 !e.finished && phase() === 2);
     }));
+    document.getElementById("dd-phase").textContent = phaseLabel();
     const box = document.getElementById("drivers-fastest");
     box.classList.toggle("none", !fl);
     if (fl) {
@@ -228,6 +237,7 @@
   }
   function renderQualifying(d) {
     document.getElementById("dd-lap").textContent = "QUALIFYING";
+    document.getElementById("dd-phase").textContent = "";
     rows.replaceChildren(...(d.qualifying || []).slice(0, MAX_ROWS).map(function (e, i) {
       return row(e, i, i === 0 ? lapTime(e.best_ms) : e.gap_ms === null ? "" : "+" + (e.gap_ms / 1000).toFixed(3), "");
     }));
