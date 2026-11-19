@@ -352,6 +352,42 @@ def t_estimated_rows_keep_their_gap_and_tag():
     assert got == ["+1.4", "+1.4"], f"an estimate never cycles: {got}"
 
 
+def t_a_car_without_a_sender_reads_no_data_and_a_retired_car_dnf():
+    got = _tower(f"""
+      showFuel = true; showTyre = true;
+      return ["no_sender", "retired"].map(function (s) {{
+        const e = Object.assign({{}}, {json.dumps(CAR)}, {{status: s, pos: 5}});
+        laps[e.entry] = {{ms: e.last_lap_ms, until: Date.now() + 9999}};
+        const value = column(e, 4);
+        const r = row(e, 4, value, "P0");
+        return {{value: value, row: r.className, fuel: text(fuelCell(e)),
+                 tyre: flat(r).filter(c => /dd-tyre/.test(c.className)).map(c => c.textContent)}};
+      }});""")
+    if got is None:
+        return
+    nosender, dnf = got
+    assert nosender["value"] == "No data" and "off" in nosender["row"], f"no sender, no gap: {nosender}"
+    assert dnf["value"] == "DNF" and "dnf" in dnf["row"], f"a retired car reads DNF: {dnf}"
+    assert nosender["fuel"] == "" and dnf["fuel"] == "", f"neither shows fuel: {got}"
+    assert dnf["tyre"] == [""], f"a retired car shows no compound: {dnf}"
+
+
+def t_the_public_page_and_the_cockpit_name_no_data_and_dnf():
+    with open(TIMING, encoding="utf-8") as fh:
+        page = fh.read()
+    with open(os.path.join(ROOT, "src", "cockpit", "cockpit.html"), encoding="utf-8") as fh:
+        cockpit = fh.read()
+    for name, src in (("timing", page), ("cockpit", cockpit)):
+        status = re.search(r"STATUS = \{([^}]*)\}", src).group(1)
+        assert re.search(r"no_sender: ['\"]No data['\"]", status) and re.search(r"retired: ['\"]DNF['\"]", status), \
+            f"{name}: {status}"
+    for rel in (("console", "driver-desk.js"), ("console", "race-snapshot.html")):
+        with open(os.path.join(ROOT, "src", *rel), encoding="utf-8") as fh:
+            src = fh.read()
+        status = src[src.index("var STATUS = {"):src.index("};", src.index("var STATUS = {"))]
+        assert 'no_sender: ["No sender"' in status and 'retired: ["DNF"' in status, f"{rel[-1]}: {status}"
+
+
 def t_the_public_page_flags_a_finished_row_with_its_gap():
     with open(TIMING, encoding="utf-8") as fh:
         page = fh.read()
@@ -361,6 +397,69 @@ def t_the_public_page_flags_a_finished_row_with_its_gap():
     gap = page[page.index("gap: cell(\"gap\""):page.index("int: cell(")]
     assert gap.index("e.finished ? finishedGap") < gap.index("STATUS[e.status]"), \
         "a finish is final: the flag and gap stay when the car parks or leaves"
+
+
+def _function(path, name):
+    """The source of one top-level JS function in a page or script, by brace matching."""
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    start = src.index("function " + name + "(")
+    depth, i = 0, src.index("{", start)
+    while True:
+        depth += {"{": 1, "}": -1}.get(src[i], 0)
+        i += 1
+        if depth == 0:
+            return src[start:i]
+
+
+NAME_PAGES = [os.path.join(ROOT, "src", *rel) for rel in (
+    ("console", "timing.html"), ("console", "race-snapshot.html"), ("console", "driver-desk.js"),
+    ("cockpit", "cockpit.html"))]
+
+
+def t_every_page_shortens_a_long_name_the_same_way():
+    cases = [["Lena Hart", 14], ["Alexander Fitzgerald", 14], ["Alexander Fitzgerald-Smithson", 14],
+             ["xX_SpeedDemon_Xx", 14], ["Anna Maria Schmidt", 16], ["", 14], ["Ann", 3]]
+    want = ["Lena Hart", "A. Fitzgerald", "A. Fitzgerald\u2026", "xX_SpeedDemon\u2026", "A. Maria Schmidt", "", "Ann"]
+    for path in NAME_PAGES:
+        got = _run(_function(path, "fitName") + "\n;console.log(JSON.stringify("
+                   + json.dumps(cases) + ".map(c => fitName(c[0], c[1]))));")
+        if got is None:
+            return
+        assert got == want, f"{os.path.basename(path)}: {got}"
+
+
+def t_the_tower_shows_the_surname_and_leaves_the_cut_to_css():
+    got = _tower("""return [surname("Lena Hart"), surname("Alexander Fitzgerald-Smithson"),
+                            surname("xX_SpeedDemon_Xx")];""")
+    if got is None:
+        return
+    assert got == ["HART", "FITZGERALD-SMITHSON", "XX_SPEEDDEMON_XX"], got
+    with open(TOWER, encoding="utf-8") as fh:
+        css = fh.read()
+    assert re.search(r"\.dd-driver \{[^}]*text-overflow: ellipsis", css), "the column cuts what does not fit"
+
+
+def t_the_interval_phase_falls_back_to_the_gap():
+    got = _tower(f"""
+      Date.now = () => CYCLE_MS + 1;
+      const e = Object.assign({{}}, {json.dumps(CAR)}, {{interval_s: null, gap_s: 3.24}});
+      return [phaseLabel(), column(e, 1)];""")
+    if got is None:
+        return
+    assert got == ["INT", "+3.2"], f"a running car without an interval shows its gap: {got}"
+
+
+def t_the_pages_show_names_through_the_rule():
+    for path, uses in ((NAME_PAGES[0], ("fitName(e.driver", "fitName(fl.driver")),
+                       (NAME_PAGES[1], ("fitName(e.driver",)),
+                       (NAME_PAGES[2], ("fitName(e.driver", "fitName(fl.driver", "fitName(ev.driver",
+                                        "fitName(s.name")),
+                       (NAME_PAGES[3], ("fitName(e.driver", "fitName(fl.driver"))):
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        for use in uses:
+            assert use in src, f"{os.path.basename(path)} shows names through fitName: {use}"
 
 
 if __name__ == "__main__":

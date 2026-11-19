@@ -25,7 +25,8 @@ import atomic_replace
 FILENAME = "driver-invite.json"
 PREFIX = "D1:"
 MAX_CODE = 1024
-NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # it ends up in a shell command line
+NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,24}\Z")   # it ends up in a shell command line
+KNOWN_NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # names registered before the 24 character cap
 MAX_ENTRY = 120
 
 
@@ -100,9 +101,9 @@ def _sign(key, payload):
     return _b64(mac.digest()[:16])
 
 
-def _problem(entry, name, segment):
-    if not isinstance(name, str) or not NAME.match(name):
-        return "the name takes up to 32 ASCII letters, digits, spaces, _ . -"
+def _problem(entry, name, segment, rule=NAME):
+    if not isinstance(name, str) or not rule.match(name):
+        return "the name takes up to 24 ASCII letters, digits, spaces, _ . -"
     if not isinstance(entry, str) or not entry.strip() or len(entry) > MAX_ENTRY:
         return "pick an entry"
     if segment is not None and (not isinstance(segment, str) or len(segment) > MAX_ENTRY):
@@ -135,7 +136,7 @@ def verify(invite, code):
         doc = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
     except (ValueError, TypeError):
         return None
-    if not isinstance(doc, dict) or _problem(doc.get("e"), doc.get("n"), doc.get("s")):
+    if not isinstance(doc, dict) or _problem(doc.get("e"), doc.get("n"), doc.get("s"), KNOWN_NAME):
         return None
     if not isinstance(doc.get("c"), str) or not 8 <= len(doc["c"]) <= 32:
         return None

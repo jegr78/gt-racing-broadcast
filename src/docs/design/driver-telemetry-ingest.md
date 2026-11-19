@@ -34,8 +34,9 @@ endurance; `segments` then lists the stint and qualifying labels of the `Schedul
 
 `POST /console/drive/register?i=<invite>` with
 `{"entry": "...", "segment": "...", "name": "..."}` returns `{"ok": true, "v": 1,
-"code": "D1:..."}`. The name takes up to 32 ASCII letters, digits, spaces, `_ . -`,
-because it ends up in a command line. While the entry already has its live senders,
+"code": "D1:..."}`. The name takes up to 24 ASCII letters, digits, spaces, `_ . -`,
+because it ends up in a command line (PSN Online IDs have at most 16); codes issued
+under the earlier 32 character rule stay valid. While the entry already has its live senders,
 registration answers 409 and the invite page shows the reason. `GET /console/drive/sender.py?i=<invite>`
 serves the sender script of the running relay.
 

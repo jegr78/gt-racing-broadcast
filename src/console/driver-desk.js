@@ -2,7 +2,7 @@
    (#1114, #1115). DriverDesk.mount(el, {base, fullRedFlag, dashboardToggle}) polls the
    relay and renders: the invite link, the race with its finish and red flag controls,
    the race recording with its disconnect events, corrections, estimates for quiet
-   cars, rejoin and change overrides, the dashboard's delay, fastest lap and
+   cars, retirements (DNF), shown driver names, rejoin and change overrides, the dashboard's delay, fastest lap and
    qualifying corrections (plus its on-air switch with dashboardToggle), and the
    senders with readiness, reassign and disconnect. `base` prefixes every route: "/race-control" on the desk (its fetch
    shim adds /console), "" on the panel. Every text goes in through textContent. */
@@ -14,6 +14,7 @@
     ".dd .grow{flex:1 1 auto;min-width:0}",
     ".dd .mono{font-family:var(--mono,ui-monospace,monospace);font-size:12px;overflow-wrap:anywhere}",
     ".dd .muted{color:var(--muted,#9aa0a6)}",
+    ".dd .nowrap{white-space:nowrap}",
     ".dd button,.dd select,.dd input{background:var(--panel-2,#1b1f25);color:var(--ink,#e8eaed);border:1px solid var(--edge,#2a2f37);",
     "border-radius:6px;padding:5px 9px;font:inherit}",
     ".dd button{cursor:pointer}.dd button:hover{border-color:var(--ink,#e8eaed)}",
@@ -68,8 +69,22 @@
     return o;
   }
   function secs(v) { return typeof v !== "number" ? "" : (v < 60 ? v.toFixed(1) : Math.floor(v / 60) + ":" + (v % 60).toFixed(1).padStart(4, "0")); }
+  // The whole name if it fits; else the first name as an initial; else cut with an ellipsis.
+  function fitName(name, max) {
+    var s = String(name || "").trim();
+    if (s.length <= max) return s;
+    var parts = s.split(/\s+/);
+    if (parts.length > 1) {
+      s = parts[0].charAt(0) + ". " + parts.slice(1).join(" ");
+      if (s.length <= max) return s;
+    }
+    return s.slice(0, max - 1) + "\u2026";
+  }
+  var NAME_MAX = 10;       // the race table's driver line
+  var NAME_LIST_MAX = 16;  // events, readiness, senders and the fastest lap
   var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"], dc: ["DC", "bad"],
-                est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
+                est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"],
+                no_sender: ["No sender", ""], retired: ["DNF", "bad"]};
   var ACTIONS = {correct: "correction", final_lap: "Final lap", finish: "Finish", reset: "reset",
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
@@ -77,7 +92,8 @@
                  fastest: "fastest lap", quali: "qualifying time", compound: "tyre compound",
                  recording_start: "recording start", recording_stop: "recording stop",
                  dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed",
-                 estimate: "estimate", estimate_end: "estimate ended"};
+                 estimate: "estimate", estimate_end: "estimate ended", retire: "retirement",
+                 driver_name: "driver name"};
   var EVENT_STATES = {suspected: ["Suspected DC", "bad"], dropout: ["Dropout", "amb"],
                       confirmed: ["Confirmed DC", "bad"], dismissed: ["Dismissed", ""]};
   var OFFSETS = [5, 10, 15, 20, 30];
@@ -331,7 +347,7 @@
         var st = EVENT_STATES[ev.state] || [String(ev.state), ""];
         var label = ev.state === "dropout" && typeof ev.dropout_s === "number"
           ? "Dropout, " + Math.round(ev.dropout_s) + " s" : st[0];
-        r.who.replaceChildren(el("div", {text: ev.entry}), el("div", {cls: "muted", text: ev.driver || ""}));
+        r.who.replaceChildren(el("div", {text: ev.entry}), el("div", {cls: "muted", text: fitName(ev.driver, NAME_LIST_MAX)}));
         r.what.replaceChildren.apply(r.what, [el("span", {cls: "pill " + st[1], text: label}),
           el("div", {cls: "muted", text: "Last packet " + new Date(ev.last_packet * 1000).toLocaleTimeString()}),
           ev.decided_by ? el("div", {cls: "muted", text: "by " + ev.decided_by}) : null].filter(Boolean));
@@ -378,6 +394,44 @@
       act("/drivers/race/estimate", {entry: estEntry.value, clear: true}, "Estimate cleared");
     });
     var estList = el("div", {cls: "muted"});
+    var retEntry = el("select", {"aria-label": "Entry to retire"});
+    var retOn = button("Retire (DNF)", "alarm", "retire", function () {
+      act("/drivers/race/retire", {entry: retEntry.value, on: true}, "Retired: " + retEntry.value);
+    });
+    var retOff = button("Undo DNF", "", null, function () {
+      act("/drivers/race/retire", {entry: retEntry.value, on: false}, "Retirement undone");
+    });
+    // Shown names: one override per entry and registered driver ("" = no sender).
+    var nameSrc = {race: [], ready: [], overrides: []};
+    var nameEntry = el("select", {"aria-label": "Entry whose driver name to change"});
+    var nameDriver = el("select", {"aria-label": "Driver whose name to change"});
+    var nameText = el("input", {type: "text", maxlength: "24", placeholder: "shown name", cls: "wide",
+                                "aria-label": "Shown driver name"});
+    function nameDrivers() {
+      var entry = nameEntry.value, out = [];
+      function add(d) { if (out.indexOf(d) < 0) out.push(d); }
+      nameSrc.race.forEach(function (e) { if (e.entry === entry) add(e.driver_registered || ""); });
+      nameSrc.ready.forEach(function (r) {
+        if (r.entry === entry) r.senders.forEach(function (s) { add(s.name); });
+      });
+      nameSrc.overrides.forEach(function (o) { if (o.entry === entry) add(o.driver); });
+      if (!out.length) add("");
+      return out.map(function (d) { return [d, d || "(no sender)"]; });
+    }
+    nameEntry.addEventListener("change", function () {
+      nameDriver.replaceChildren.apply(nameDriver, nameDrivers().map(function (i) { return opt(i[0], i[1]); }));
+    });
+    function setName(name) {
+      return act("/drivers/race/driver-name", {entry: nameEntry.value, driver: nameDriver.value, name: name},
+                 name ? "Name set" : "Name cleared");
+    }
+    var nameSet = button("Set name", "", null, async function () {
+      var name = nameText.value.trim();
+      if (!/^[A-Za-z0-9 _.\-]{1,24}$/.test(name)) return say("Name: 1 to 24 letters, digits, spaces, _ . or -", true);
+      if (await setName(name)) nameText.value = "";
+    });
+    var nameClear = button("Clear name", "", null, function () { setName(""); });
+    var nameList = el("div", {cls: "muted"});
     var multiRow = el("div", {cls: "row", hidden: ""});
     var rejoinEntry = el("select", {"aria-label": "Team to rejoin"});
     var rejoinOn = button("Mark rejoin", "", null, function () {
@@ -410,7 +464,7 @@
       act("/drivers/race/fastest", {}, "Fastest lap cleared");
     });
     var flEntry = el("select", {"aria-label": "Fastest lap entry"});
-    var flDriver = el("input", {type: "text", maxlength: "32", placeholder: "driver", cls: "wide",
+    var flDriver = el("input", {type: "text", maxlength: "24", placeholder: "driver", cls: "wide",
                                 "aria-label": "Fastest lap driver"});
     var flTime = el("input", {type: "text", placeholder: "1:58.412", "aria-label": "Fastest lap time", size: "9"});
     var flSet = button("Set fastest lap", "", null, async function () {
@@ -505,6 +559,10 @@
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry,
                                el("span", {cls: "muted", text: "behind"}), estRef, estSec, estSet, estClear]),
       estList,
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Retire"}), retEntry, retOn, retOff]),
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Driver name"}), nameEntry, nameDriver, nameText,
+                               nameSet, nameClear]),
+      nameList,
       multiRow,
       evTitle,
       el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
@@ -540,7 +598,7 @@
       tyreSrc.compounds = r.compounds || {};
       syncTyres();
       var fl = r.fastest;
-      flText.textContent = fl ? "Fastest lap " + lapTime(fl.ms) + " · " + fl.driver + " (" + fl.entry + ")"
+      flText.textContent = fl ? "Fastest lap " + lapTime(fl.ms) + " · " + fitName(fl.driver, NAME_LIST_MAX) + " (" + fl.entry + ")"
                               : "No fastest lap yet.";
       flClear.disabled = !fl;
       var q = r.quali_overrides || {};
@@ -563,6 +621,12 @@
       raceNote.textContent = {no_line: "No distance: pick a track layout with a downloaded racing line.",
         waiting: "Waiting for the start.", final_lap: "Final lap.", finishing: "Finishing.",
         finished: "Finished."}[r.state] || "";
+      nameSrc.race = r.entries || [];
+      nameSrc.overrides = r.driver_overrides || [];
+      keepSelect(nameDriver, nameDrivers());
+      nameList.textContent = nameSrc.overrides.length ? "Name overrides: " + nameSrc.overrides.map(function (o) {
+        return o.entry + " " + (o.driver || "(no sender)") + " \u2192 " + o.name;
+      }).join(", ") : "";
       var est = (r.entries || []).filter(function (e) { return e.estimate; });
       estList.textContent = est.length ? "Estimated: " + est.map(function (e) {
         return e.entry + " " + e.estimate.seconds + " s behind " + e.estimate.ref +
@@ -578,7 +642,9 @@
         var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
                            : (i ? secs(e.gap_s) : "");
         var cells = [el("td", {cls: "num", text: String(i + 1)}), logoCell(e),
-          el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted", text: e.driver})]),
+          el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted nowrap", text: fitName(e.driver, NAME_MAX),
+            title: e.driver + (e.driver_registered && e.driver !== e.driver_registered ? " (registered as " +
+                               e.driver_registered + ")" : "")})]),
           el("td", {cls: "num", text: String(e.laps)}),
           el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}), el("td", {cls: "num", text: secs(e.interval_time_s)}),
           el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
@@ -603,6 +669,10 @@
       keepSelect(corrEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(estEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(estRef, entries.map(function (e) { return [e, e]; }));
+      keepSelect(retEntry, entries.map(function (e) { return [e, e]; }));
+      keepSelect(nameEntry, entries.map(function (e) { return [e, e]; }));
+      nameSrc.ready = rd.rows;
+      keepSelect(nameDriver, nameDrivers());
       multiRow.hidden = !multi;
       keepSelect(rejoinEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(flEntry, entries.map(function (e) { return [e, e]; }));
@@ -625,7 +695,7 @@
           var r = byKey[e + "\u0000" + f];
           var live = r ? r.senders.filter(function (x) { return x.live; }) : [];
           return el("td", {}, [el("span", {cls: "pill " + (live.length ? "ok" : (r && r.senders.length ? "amb" : "bad")),
-            text: live.length ? live.map(function (x) { return x.name; }).join(", ")
+            text: live.length ? live.map(function (x) { return fitName(x.name, NAME_LIST_MAX); }).join(", ")
                   : (r && r.senders.length ? "quiet" : "no sender")})]);
         })));
       });
@@ -639,7 +709,7 @@
           var to = el("select", {"aria-label": "Move " + s.name + " to another entry"},
                       entries.filter(function (e) { return e !== r.entry; }).map(function (e) { return opt(e, e); }));
           rows.push(el("tr", {}, [
-            el("td", {}, [el("div", {text: s.name}), el("span", {cls: "pill " + (s.live ? "ok" : "bad"),
+            el("td", {}, [el("div", {text: fitName(s.name, NAME_LIST_MAX), title: s.name}), el("span", {cls: "pill " + (s.live ? "ok" : "bad"),
                                                                  text: s.live ? "live" : "quiet"})]),
             el("td", {}, [el("div", {text: r.entry}), el("div", {cls: "muted", text: r.segment || ""})]),
             el("td", {}, [el("div", {cls: "row"}, [to, button("Move", "", null, function () {

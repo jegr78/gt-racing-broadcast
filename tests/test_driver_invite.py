@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The event invite link and the driver codes it issues (#1111).
 Run: python3 tests/test_driver_invite.py"""
-import os, sys, tempfile
+import json, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src", "scripts"))
@@ -90,7 +90,7 @@ def t_the_cache_follows_create_and_clear():
 
 def t_names_and_entries_are_bounded():
     invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
-    for bad in ("", "x" * 33, "Car #7", "a;rm -rf", "Jörg"):
+    for bad in ("", "x" * 25, "Car #7", "a;rm -rf", "Jörg"):
         try:
             di.issue(invite, entry="E", name=bad)
         except ValueError as exc:
@@ -104,6 +104,16 @@ def t_names_and_entries_are_bounded():
             pass  # expected
         else:
             raise AssertionError(f"entry {bad!r} must be refused")
+
+
+def t_a_name_registered_before_the_cap_still_verifies():
+    invite = di.create(os.path.join(tempfile.mkdtemp(), "i.json"))
+    assert di.verify(invite, di.issue(invite, entry="E", name="x" * 24))["name"] == "x" * 24
+    doc = {"e": "E", "s": None, "n": "Alexander Fitzgerald-Smith", "c": "abcdefghij"}
+    payload = di._b64(json.dumps(doc, separators=(",", ":")).encode("utf-8"))
+    old = di.PREFIX + payload + "." + di._sign(invite["key"], payload)
+    reg = di.verify(invite, old)
+    assert reg is not None and reg["name"] == "Alexander Fitzgerald-Smith", "a code issued with 32 characters stays valid"
 
 
 if __name__ == "__main__":
