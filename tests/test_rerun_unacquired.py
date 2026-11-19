@@ -10,8 +10,8 @@ rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
 UNACQUIRED = 'The job was not acquired by Runner of type hosted even after multiple attempts'
 
 
-def job(ident, conclusion, steps=0, runner=''):
-    return dict(id=ident, conclusion=conclusion, steps=[{}]*steps, runner_name=runner)
+def job(ident, conclusion, steps=0, runner='', name='test (macos-latest, 3.12)'):
+    return dict(id=ident, name=name, conclusion=conclusion, steps=[{}]*steps, runner_name=runner)
 
 
 def t_reruns_when_every_failed_job_never_got_a_runner():
@@ -29,6 +29,14 @@ def t_never_reruns_a_real_failure():
     assert rr.should_rerun(1, [job(2, 'cancelled')], {}) == []
     # A run cancelled by a person or a newer push has no failed job with that message.
     assert rr.should_rerun(1, [job(1, 'success', 8, 'r')], {}) == []
+
+
+def t_the_ci_ok_aggregator_follows_the_jobs_it_needs():
+    ok = job(9, 'failure', 3, 'GitHub Actions 2', name='ci-ok')
+    assert rr.should_rerun(1, [job(2, 'cancelled'), ok], {2: [UNACQUIRED], 9: []}) == [2], \
+        "an unacquired macOS job is rerun although ci-ok failed because of it"
+    assert rr.should_rerun(1, [job(4, 'failure', 6, 'r'), ok], {4: [], 9: []}) == []
+    assert rr.should_rerun(1, [ok], {9: []}) == [], "ci-ok alone failing is a real failure"
 
 
 def t_retries_are_bounded():
