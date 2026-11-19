@@ -66,7 +66,7 @@
     return o;
   }
   function secs(v) { return typeof v !== "number" ? "" : (v < 60 ? v.toFixed(1) : Math.floor(v / 60) + ":" + (v % 60).toFixed(1).padStart(4, "0")); }
-  var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"],
+  var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"], dc: ["DC", "bad"],
                 waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
   var ACTIONS = {correct: "correction", final_lap: "Final lap", finish: "Finish", reset: "reset",
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",

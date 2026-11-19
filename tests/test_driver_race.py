@@ -603,6 +603,9 @@ def t_a_confirmed_disconnect_reads_dc_on_the_dashboard_until_data_returns():
     svc.tick()
     assert svc.dashboard()["entries"][0]["status"] == "dc", svc.dashboard()["entries"][0]
     assert dr.public_view(svc.dashboard())["entries"][0]["status"] == "dc", "the public page names it too"
+    assert svc.standings()["entries"][0]["status"] == "dc", "the desks name it too"
+    _flush(svc)
+    assert svc.recording_at(wall[0])["rows"][0]["status"] == "dc", "the recording keeps DC for the snapshot and CSV"
     del rec._silent["A"]
     wall[0] += 1
     svc.tick()
