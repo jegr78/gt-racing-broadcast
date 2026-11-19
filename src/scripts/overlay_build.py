@@ -88,7 +88,7 @@ _UNSAFE_VALUE = re.compile(r"[;{}<>\"'\\]|/\*|\*/")
 # A value that uses var() must be exactly one reference to a custom property, with
 # at most a hex, keyword or rgb()/rgba() fallback.
 _VAR_VALUE = re.compile(r"var\(\s*--[A-Za-z0-9_-]+\s*(?:,\s*(?:#[0-9A-Fa-f]{3,8}|[A-Za-z]+"
-                        r"|rgba?\(\s*[0-9.%\s,/]+\))\s*)?\)")
+                        r"|rgba?\([0-9.%\s,/]+\))\s*)?\)")
 
 # Sample content for the same-origin builder canvas, so the operator positions
 # slots against realistic text. Each team is four slots (#136): number, name and

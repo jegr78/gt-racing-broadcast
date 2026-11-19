@@ -1627,6 +1627,14 @@ def t_ob_builder_pages_report_their_variable_colours():
         assert not any(slots(name).values()), f"{name} declares no slot colour through a variable"
 
 
+
+def t_ob_a_long_variable_value_is_refused_fast():
+    import time
+    start = time.monotonic()
+    got = ob._safe_value("var(--a, rgb(" + " " * 32000 + "x")
+    took = time.monotonic() - start
+    assert got is None and took < 0.1, f"a 32k value is refused at once, not after {took:.2f} s"
+
 def t_ob_compile_keeps_a_variable_reference_colour():
     slots = [{"id": "x", "label": "X", "props": list(ob.KIND_TEXT)}]
     good = {"background": "var(--dd-bg)", "color": "var(--fg, #fff)",
