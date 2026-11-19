@@ -847,7 +847,7 @@ function timingDriver(e) {
   d.appendChild(small);
   return {cls: 'drv', node: d};
 }
-const TIMING_STATUS = {box: 'Box', no_data: 'No data', red_flag: 'Red flag'};
+const TIMING_STATUS = {box: 'Box', no_data: 'No data', dc: 'DC', red_flag: 'Red flag'};
 function timingTyre(e) {
   const s = document.createElement('span');
   const code = ['RS', 'RM', 'RH', 'I', 'W'].indexOf(e.compound) >= 0 ? e.compound : '';

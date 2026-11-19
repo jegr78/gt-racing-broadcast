@@ -453,7 +453,6 @@ class Service:
                 row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
             return out
         st = race.standings(self._clock())
-        dc = self._confirmed_dc()
         rows = []
         for i, r in enumerate(st["entries"]):
             row = _viewer_entry(r, roster)
@@ -462,9 +461,8 @@ class Service:
                                           "finished", "x", "z")})
             row["pos"] = i + 1
             row["compound"] = (compounds.get(r["entry"]) or {}).get("code")
-            if row["status"] == "no_data" and r["entry"] in dc:
-                row["status"] = "dc"
             rows.append(row)
+        self._mark_dc(rows)
         fl = race.fastest
         out.update({
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
@@ -473,12 +471,16 @@ class Service:
             "entries": rows})
         return out
 
-    def _confirmed_dc(self):
-        """Entries shown as DC; a recorder failure only costs the label, never the tick."""
+    def _mark_dc(self, rows):
+        """A quiet car whose disconnect Race Control confirmed reads "dc" instead of
+        "no_data". A recorder failure only costs the label, never the tick."""
         try:
-            return self._rec.confirmed_silent() if self._rec is not None else set()
+            dc = self._rec.confirmed_silent() if self._rec is not None else set()
         except Exception:
-            return set()
+            return
+        for row in rows:
+            if row.get("status") == "no_data" and row.get("entry") in dc:
+                row["status"] = "dc"
 
     def line(self):
         """The picked layout's line for the track map, at most LINE_POINTS points;
@@ -514,6 +516,7 @@ class Service:
             recording = self._recording_dir and self._enabled()
             standings = self._current().standings(self._clock()) if recording else None
         if recording:
+            self._mark_dc(standings["entries"])
             self._observe(standings)
         self.save_fastest()
 
@@ -694,6 +697,7 @@ class Service:
             race = self._current()
             out = race.standings(self._clock())
             pick_id = self._race_pick
+        self._mark_dc(out["entries"])
         out.update(settings=read_settings(self._path), track=pick_id,
                    compounds=_saved_compounds(_actions_path_for(self._path)),
                    quali_overrides=_saved_quali(_actions_path_for(self._path),
