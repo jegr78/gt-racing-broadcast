@@ -106,6 +106,18 @@ def t_a_racing_row_carries_tyre_and_fuel_columns():
     assert not any("dd-flag" in c for c in got["cls"]), f"no flag before the finish: {got}"
 
 
+
+def t_the_builder_sample_rows_have_the_live_columns():
+    with open(TOWER, encoding="utf-8") as fh:
+        html = fh.read()
+    sample = html[html.index('<div id="dd-rows">'):html.index('<div id="drivers-fastest"')]
+    rows = sample.split('<div class="dd-row">')[1:]
+    assert len(rows) == 3, len(rows)
+    for r in rows:
+        order = [r.find(f'class="{c}') for c in ("dd-tyre", "dd-fuel", "dd-val", "dd-pit")]
+        assert -1 not in order and order == sorted(order), \
+            f"each sample row the builder draws has tyre, fuel, value and stops like a live row: {r}"
+
 def t_stale_rows_show_no_fuel():
     got = _tower(f"""
       return ["est", "no_data", "dc"].map(function (s) {{
