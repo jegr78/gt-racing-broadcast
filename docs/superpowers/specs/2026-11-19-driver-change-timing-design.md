@@ -9,6 +9,10 @@ outgoing driver A drives into the box in lobby N, and the incoming driver B, who
 waited in the box of lobby N+1 since the end of the first lap, starts the pit crew's
 work there. The team calls the handover by voice.
 
+Each stint lobby runs a fixed number of laps (the Schedule's `Laps` cell for that row).
+The swap is due at the end of the second-to-last lap: A drives into the box after lap
+`Laps - 1` of lobby N and stops there for the change.
+
 The league rule: B may start the crew's work only once A's car has come to a standstill.
 The league allows a small tolerance (usually 3 to 4 s). Race Control checks this today
 after the event, from the replays of both lobbies: A's pit entry or standstill, and the
@@ -40,11 +44,14 @@ in the box, B starts the sender before the stint switch.
 
 ## The two moments
 
-Both are taken from the samples of the change window (`CHANGE_WINDOW_S` after the stint
-switch), per team.
+Both are taken per team from the samples of the change window (`CHANGE_WINDOW_S` after
+the stint switch).
 
-- **T_stop (A):** the first moment A's car stands in the box: off the racing line by more
-  than `BOX_LATERAL_M` and below 1 km/h for at least 1 s. GT7's auto drive takes the car
+- **T_stop (A):** the first moment A's car stands in the box once A's lobby counter has
+  reached `Laps - 1` of A's schedule row: off the racing line by more than
+  `BOX_LATERAL_M` and below 1 km/h for at least 1 s. A box stop before that lap is a
+  normal pit stop, not the handover. A row without a `Laps` cell falls back to the first
+  box stop in the change window, and the hint says so. GT7's auto drive takes the car
   from the pit entry to the box; its length depends on the track, so the pit entry is not
   used.
 - **T_service (B):** the first sign of the crew's work on B's parked car, whichever comes
