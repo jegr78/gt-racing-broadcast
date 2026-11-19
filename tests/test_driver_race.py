@@ -167,7 +167,7 @@ def _audit(path):
 
 def t_the_league_restart_default_and_its_override_per_restart():
     svc, _clock, path, league = _ctl()
-    assert dr.read_league(league) == {"restart": "keep"}
+    assert dr.read_league(league)["restart"] == "keep"
     dr.write_league(league, {"restart": "neutralise"})
     assert svc.red_flag("rc:Anna")["red_flag"]["mode"] == "neutralise", "the league default applies"
     assert svc.set_restart_mode("director:Bo", "keep")["red_flag"]["mode"] == "keep"
@@ -182,6 +182,41 @@ def t_the_league_restart_default_and_its_override_per_restart():
     actions = [r["action"] for r in _audit(path)]
     assert actions == ["red_flag", "restart_mode", "release"], actions
     assert _audit(path)[1]["who"] == "director:Bo" and _audit(path)[1]["mode"] == "keep"
+
+
+def t_the_league_lap_time_seconds_default_to_five_and_are_checked():
+    _path, league = _paths()
+    assert dr.read_league(league) == {"restart": "keep", "last_lap_s": 5}
+    assert dr.write_league(league, {"last_lap_s": 12}) == {"restart": "keep", "last_lap_s": 12}
+    assert dr.write_league(league, {"restart": "neutralise"}) == {"restart": "neutralise", "last_lap_s": 12}, \
+        "one league key changes, the other stays"
+    for bad in ({"last_lap_s": 0}, {"last_lap_s": 31}, {"last_lap_s": 5.0}, {"last_lap_s": True},
+                {"last_lap_s": "5"}, {"last_lap_s": None}, {}):
+        try:
+            dr.write_league(league, bad)
+        except ValueError:
+            pass  # expected
+        else:
+            raise AssertionError(f"{bad} must be refused")
+    assert dr.read_league(league)["last_lap_s"] == 12, "a refused change writes nothing"
+    with open(league, "w", encoding="utf-8") as fh:
+        json.dump({"last_lap_s": 99}, fh)
+    assert dr.read_league(league)["last_lap_s"] == 5, "a hand-edited value out of range reads as the default"
+
+
+def t_the_dashboard_carries_the_league_lap_time_seconds_live():
+    path, league = _paths()
+    dr.write_settings(path, {"formation": False, "delay_s": 30})
+    clock = [0.0]
+    svc = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                     multi_lobby=lambda: False, clock=lambda: clock[0], league_path=league,
+                     context=lambda: {"mode": "race"})
+    svc.tick()
+    assert svc.dashboard()["show"]["last_lap_s"] == 5, svc.dashboard()["show"]
+    dr.write_league(league, {"last_lap_s": 8})
+    assert svc.dashboard()["show"]["last_lap_s"] == 8, \
+        "a league change reaches the tower without a relay restart and without the delay"
+    assert "last_lap_s" not in json.dumps(dr.public_view(svc.dashboard())), "the public page has its Last column"
 
 
 def t_corrections_and_rejoins_survive_a_relay_restart():
@@ -370,7 +405,7 @@ def t_the_display_switches_skip_the_delay():
     svc.set_settings({"visible": True, "show_compound": False, "show_fuel": False})
     svc.tick()
     d = svc.dashboard()
-    assert d["visible"] is True and d["show"] == {"compound": False, "fuel": False}, \
+    assert d["visible"] is True and d["show"] == {"compound": False, "fuel": False, "last_lap_s": 5}, \
         f"Hide/Show and the display switches apply at once, not after the delay: {d}"
     pub = dr.public_view(d)
     assert "fuel_l" in pub["entries"][0] and "compound" in pub["entries"][0], \
@@ -515,7 +550,7 @@ def t_the_crew_sets_a_tyre_compound_that_outlives_a_driver_change():
         raise AssertionError(f"{bad!r} is no compound")
     svc.set_settings({"show_compound": False, "show_fuel": False})
     svc.tick()
-    assert svc.dashboard()["show"] == {"compound": False, "fuel": False}, svc.dashboard()["show"]
+    assert svc.dashboard()["show"] == {"compound": False, "fuel": False, "last_lap_s": 5}, svc.dashboard()["show"]
     again, _c, _p = _dash_service(ctx, path)
     svc.set_compound("rc:Anna", "A", "W")
     assert again.standings()["compounds"]["A"]["code"] == "W", "it survives a restart"

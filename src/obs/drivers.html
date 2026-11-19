@@ -115,7 +115,7 @@
   "use strict";
   const SVG = "http://www.w3.org/2000/svg";
   const MAX_ROWS = 15;
-  const CYCLE_MS = 15000;       // gap to the leader, interval, last lap
+  const CYCLE_MS = 15000;       // gap to the leader, then the interval
   const rows = document.getElementById("dd-rows");
   rows.textContent = "";
   document.body.setAttribute("data-hidden", "");   // off air until the relay says otherwise
@@ -144,10 +144,25 @@
   function safeColor(c, fallback) {
     return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;
   }
-  let showFuel = true, showTyre = true;
-  const PHASES = ["GAP", "INT", "LAST LAP"];
+  let showFuel = true, showTyre = true, lastLapS = 5;
+  const PHASES = ["GAP", "INT"];
   function phase() { return Math.floor(Date.now() / CYCLE_MS) % PHASES.length; }
   function phaseLabel() { return PHASES[phase()]; }
+  const laps = {};   // entry -> {ms, until}: its last lap and when that lap stops showing
+  function noteLaps(entries) {
+    const now = Date.now();
+    entries.forEach(function (e) {
+      const ms = typeof e.last_lap_ms === "number" && e.last_lap_ms > 0 ? e.last_lap_ms : null;
+      const seen = laps[e.entry];
+      if (!seen) laps[e.entry] = {ms: ms, until: 0};   // a lap set before the page saw the car is old
+      else if (ms !== seen.ms) laps[e.entry] = {ms: ms, until: ms ? now + lastLapS * 1000 : 0};
+    });
+  }
+  function lapShows(e) {
+    const seen = laps[e.entry];
+    return !flagged(e) && ["box", "no_data", "dc", "red_flag", "est"].indexOf(e.status) < 0 &&
+           !!seen && seen.ms === e.last_lap_ms && Date.now() < seen.until;
+  }
   const LOGO_RETRY_MS = 60000;
   const logoFailed = {};   // brand key -> when its logo last failed to load
   function brandCell(e) {
@@ -195,7 +210,7 @@
       if (e.lapped) return "+" + e.lapped + " L";
       return typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(e.gap_s < 100 ? 1 : 0) : "";
     }
-    if (phase() === 2 && e.last_lap_ms) return lapTime(e.last_lap_ms);
+    if (lapShows(e)) return lapTime(e.last_lap_ms);
     if (phase() === 1 && i > 0) {
       if (typeof e.interval_s === "number") return "+" + e.interval_s.toFixed(1);
       if (e.lapped) return "+" + e.lapped + " L";
@@ -242,10 +257,10 @@
       typeof d.remaining === "number" ? clock(d.remaining)
       : lap.leader ? "LAP " + lap.leader + (lap.count ? " / " + lap.count : "") : "";
     const fl = d.fastest;
+    noteLaps(d.entries || []);
     rows.replaceChildren(...(d.entries || []).slice(0, MAX_ROWS).map(function (e, i) {
       return row(e, i, column(e, i), "P" + (e.pit_stops || 0),
-                 fl && e.status !== "est" && fl.entry === e.entry && e.last_lap_ms === fl.ms &&
-                 !e.finished && phase() === 2);
+                 fl && fl.entry === e.entry && e.last_lap_ms === fl.ms && lapShows(e));
     }));
     document.getElementById("dd-phase").textContent = phaseLabel();
     const box = document.getElementById("drivers-fastest");
@@ -378,6 +393,7 @@
         const show = d.show || {};
         showFuel = show.fuel !== false && d.mode !== "qualifying";
         showTyre = show.compound !== false;
+        lastLapS = typeof show.last_lap_s === "number" ? show.last_lap_s : 5;
         const tower = document.getElementById("drivers-tower");
         tower.classList.toggle("no-tyre", !showTyre);
         tower.classList.toggle("no-fuel", !showFuel);

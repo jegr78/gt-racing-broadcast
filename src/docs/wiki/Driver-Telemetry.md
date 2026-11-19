@@ -156,9 +156,14 @@ It never carries connection ids, corrections or who made them.
   remaining time), the fastest lap and a track map with each car as a numbered dot in
   its entry colour. Dots sit on the racing line; in a close pack a dot slides back
   along the line to stay readable, never past the car behind, and otherwise lies under
-  the dot ahead. The value column cycles every 15 seconds through the gap to the
-  leader, the interval to the car ahead and the last lap, and a small label in the header
-  (`GAP`, `INT`, `LAST LAP`) names the current one; a car in the box shows `Box`. Right of the tyre ring a bar
+  the dot ahead. The value column switches every 15 seconds between the gap to the
+  leader and the interval to the car ahead, and a small label in the header (`GAP`,
+  `INT`) names the current one. When a car completes a lap, its row shows the new lap
+  time for 5 seconds, purple if it is the fastest lap of the race, then returns to the
+  gap; a lap that does not count shows nothing. The seconds are a league setting
+  (Control Center Home, **Lap time**, or `racecast event race --last-lap-seconds N`,
+  1 to 30) that the relay applies at once. A reloaded overlay does not replay the laps
+  it already had. A car in the box shows `Box`. Right of the tyre ring a bar
   and a percentage show each car's fuel (GT7 reports the tank in percent); both turn
   amber at 10 % or less, and a car without data shows none. A car that took the
   chequered flag shows a flag in place of ring and fuel, and its final gap. In

@@ -14,7 +14,8 @@ Corrections and rejoin marks persist in
 restart; every action appends a line with identity and time to
 `driver-race-audit.jsonl`. The red flag restart default is a league rule and lives
 in the profile (`profiles/<name>/driver-race.json`, `restart`: `keep` or
-`neutralise`), so it travels with a profile export. Stdlib only.
+`neutralise`; `last_lap_s`: how long the OBS tower shows a new lap), so it travels
+with a profile export. Stdlib only.
 """
 import collections
 import json
@@ -35,6 +36,8 @@ FILENAME = "driver-race.json"
 ACTIONS = "driver-race-actions.json"
 AUDIT = "driver-race-audit.jsonl"
 RESTART_MODES = ("keep", "neutralise")
+LAST_LAP_S = 5                 # how long the OBS tower shows a car's new lap time
+LAST_LAP_S_RANGE = (1, 30)
 MAX_REASON = 200
 MAX_ENTRY = 120
 MAX_CORRECTION_M = 100_000.0
@@ -135,17 +138,36 @@ def write_settings(path, changes):
     return current
 
 
+def _lap_seconds(n):
+    return type(n) is int and LAST_LAP_S_RANGE[0] <= n <= LAST_LAP_S_RANGE[1]
+
+
 def read_league(path):
-    """The league's red flag restart default; `keep` when unset or unreadable."""
-    restart = _read_json(path).get("restart") if path else None
-    return {"restart": restart if restart in RESTART_MODES else "keep"}
+    """The league's red flag restart default and how long the tower shows a new lap;
+    the defaults when unset or unreadable."""
+    doc = _read_json(path) if path else {}
+    restart, seconds = doc.get("restart"), doc.get("last_lap_s")
+    return {"restart": restart if restart in RESTART_MODES else "keep",
+            "last_lap_s": seconds if _lap_seconds(seconds) else LAST_LAP_S}
+
+
+def validate_league(changes):
+    """The league keys of `changes` (`restart`, `last_lap_s`); ValueError on a bad value."""
+    out = {k: changes[k] for k in ("restart", "last_lap_s") if k in changes}
+    if "restart" in out and out["restart"] not in RESTART_MODES:
+        raise ValueError("restart is keep or neutralise")
+    if "last_lap_s" in out and not _lap_seconds(out["last_lap_s"]):
+        raise ValueError("last_lap_s is %d to %d seconds" % LAST_LAP_S_RANGE)
+    return out
 
 
 def write_league(path, changes):
-    if changes.get("restart") not in RESTART_MODES:
-        raise ValueError("restart is keep or neutralise")
+    """Change `restart` and/or `last_lap_s`; ValueError on a bad or missing value."""
+    changes = validate_league(changes)
+    if not changes:
+        raise ValueError("nothing to change")
     doc = _read_json(path)
-    doc["restart"] = changes["restart"]
+    doc.update(changes)
     _write_json(path, doc)
     return read_league(path)
 
@@ -478,7 +500,7 @@ class Service:
         race = self._current()
         settings = self._settings()
         out["delay_s"] = settings["delay_s"]
-        out["show"] = {"compound": settings["show_compound"], "fuel": settings["show_fuel"]}
+        out["show"] = self._show(settings)
         compounds = _saved_compounds(_actions_path_for(self._path))
         if out["mode"] == "qualifying":
             out["qualifying"] = qualifying(
@@ -689,8 +711,11 @@ class Service:
                     chosen = snap
                 else:
                     break
-        return dict(chosen, visible=settings["visible"], delay_s=delay,
-                    show={"compound": settings["show_compound"], "fuel": settings["show_fuel"]})
+        return dict(chosen, visible=settings["visible"], delay_s=delay, show=self._show(settings))
+
+    def _show(self, settings):
+        return {"compound": settings["show_compound"], "fuel": settings["show_fuel"],
+                "last_lap_s": read_league(self._league)["last_lap_s"]}
 
     def log(self, who, action, **fields):
         """Audit an action taken outside the race (a disconnect, a cover change)."""
