@@ -325,6 +325,26 @@ def t_history_and_quiet_connections_stay_bounded():
     assert set(race._cars) == {"a"}, f"quiet connections no entry follows are dropped: {set(race._cars)}"
 
 
+def t_a_car_far_behind_keeps_its_exact_gap_to_the_leader():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 30)
+    t = _drive(race, [a, b], [50, 10], 0.0, 1500)         # B falls 20 minutes behind
+    row = _row(race, "B", t)
+    passed = (row["distance_m"] + 15) / 50                 # when A was where B is now
+    assert race._entries["A"].ts[0] > passed, "the gap reaches back past the fine history"
+    assert row["gap_time_s"] is not None and abs(row["gap_time_s"] - (t - passed)) < 1.0, \
+        (row["gap_time_s"], t - passed)
+
+
+def t_the_long_history_stays_small():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    _drive(race, [a], [50], 0.0, rd.HISTORY_S + 120)
+    ent = race._entries["A"]
+    assert len(ent.ts) <= rd.MAX_HISTORY, len(ent.ts)
+    assert len(ent.cts) <= 125, f"older history keeps one point per second: {len(ent.cts)}"
+
+
 def t_a_long_gap_mid_lap_keeps_every_lap():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15)
