@@ -265,7 +265,7 @@
     }
     return s.slice(0, max - 1) + "\u2026";
   }
-  const NAME_MAX = 20;
+  const NAME_MAX = 16;
   function driverCell(e) {
     const d = el("div", "", fitName(e.driver, NAME_MAX));
     d.appendChild(el("small", "", e.team || e.entry || ""));

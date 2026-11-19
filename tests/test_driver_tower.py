@@ -434,7 +434,7 @@ def t_the_tower_only_cuts_the_surname():
                             surname("xX_SpeedDemon_Xx")];""")
     if got is None:
         return
-    assert got == ["HART", "FITZGER\u2026", "XX_SPEE\u2026"], got
+    assert got == ["HART", "FITZGE\u2026", "XX_SPE\u2026"], got
 
 
 def t_the_pages_show_names_through_the_rule():

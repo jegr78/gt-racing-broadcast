@@ -138,7 +138,7 @@
     const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
     return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
   }
-  const SURNAME_MAX = 8;   // what the name column holds at 20px bold
+  const SURNAME_MAX = 7;   // what the name column holds at 20px bold
   // The surname only (a one-word ID whole), cut with an ellipsis when it does not fit.
   function surname(name) {
     const parts = String(name || "").trim().split(/\s+/);

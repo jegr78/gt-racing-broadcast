@@ -80,7 +80,7 @@
     }
     return s.slice(0, max - 1) + "\u2026";
   }
-  var NAME_MAX = 14;       // the race table's driver line
+  var NAME_MAX = 10;       // the race table's driver line
   var NAME_LIST_MAX = 16;  // events, readiness, senders and the fastest lap
   var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"], dc: ["DC", "bad"],
                 est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"],
