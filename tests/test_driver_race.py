@@ -623,12 +623,12 @@ def t_public_view_has_no_exact_gaps():
     assert row["gap_s"] == 1.0 and not {"gap_time_s", "interval_time_s", "quiet_s", "in_box"} & set(row), row
 
 
-def _recording_service(enabled=lambda: True):
+def _recording_service(enabled=lambda: True, context=None):
     d = tempfile.mkdtemp()
     wall = [1000.0]
     svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
                      trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
-                     enabled=enabled, wall=lambda: wall[0], recording_dir=d)
+                     enabled=enabled, wall=lambda: wall[0], recording_dir=d, context=context)
     svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
     svc.open_recording()
     return svc, wall, d
@@ -943,6 +943,111 @@ def t_a_recording_failure_reaches_the_relay_log():
     finally:
         log.removeHandler(h)
     assert any("race recording unavailable" in m for m in seen), seen
+
+
+ROSTER_X = dict(ROSTER, X={"number": "9", "bgColor": "#999", "textColor": "#000", "cupTeam": "Grey Team"})
+
+
+def _roster_service():
+    ctx = {"roster": ROSTER_X, "stint": None, "remaining": None, "mode": "race"}
+    svc, clock, path = _dash_service(ctx)
+    _feed(svc, clock, "A", "a", -20.0, 6.0)
+    _feed(svc, clock, "B", "b", -60.0, 6.0)
+    return svc, clock, path, ctx
+
+
+def _rows(st):
+    return {r["entry"]: r for r in st["entries"]}
+
+
+def t_every_roster_entry_stands_in_the_payload_without_a_sender():
+    svc, clock, _path, _ctx = _roster_service()
+    svc.tick()
+    rows = svc.dashboard()["entries"]
+    x = _rows(svc.standings())["X"]
+    assert x["status"] == "no_sender" and x["gap_s"] is None and x["driver"] == "", x
+    assert [r["entry"] for r in rows][-1] == "X" and rows[-1]["status"] == "no_sender", rows
+    assert rows[-1]["pos"] == 3 and rows[-1]["number"] == "9" and rows[-1]["x"] is None, rows[-1]
+    pub = dr.public_view(svc.dashboard())["entries"][-1]
+    assert pub["status"] == "no_sender" and set(pub) <= set(dr._PUBLIC_ROW), pub
+
+
+def t_an_estimate_places_a_roster_entry_that_never_sent():
+    svc, clock, path, _ctx = _roster_service()
+    st = svc.estimate("rc:Cy", "X", "A", 1.0)
+    x = _rows(st)["X"]
+    assert x["status"] == "est" and x["estimate"] == {"ref": "A", "seconds": 1.0}, x
+
+
+def t_race_control_names_the_driver_of_a_car_without_a_sender():
+    svc, clock, path, ctx = _roster_service()
+    st = svc.set_driver_name("rc:Anna", "X", "  Kim Berg ")
+    assert _rows(st)["X"]["driver"] == "Kim Berg" and st["driver_names"] == {"X": "Kim Berg"}, st["driver_names"]
+    svc.tick()
+    assert svc.dashboard()["entries"][-1]["driver"] == "Kim Berg"
+    rec = _audit(path)[-1]
+    assert (rec["who"], rec["action"], rec["entry"], rec["name"]) == ("rc:Anna", "driver_name", "X", "Kim Berg"), rec
+    again, _c, _p = _dash_service(ctx, path=path)
+    assert _rows(again.standings())["X"]["driver"] == "Kim Berg", "the name survives a relay restart"
+    again.reset("rc:Anna")
+    assert _rows(again.standings())["X"]["driver"] == "Kim Berg", "a race reset keeps the name"
+    for bad in (None, 5, "x" * (dr.MAX_DRIVER_NAME + 1)):
+        try:
+            svc.set_driver_name("rc:Anna", "X", bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} must be refused")
+    st = svc.set_driver_name("rc:Anna", "X", "")
+    assert _rows(st)["X"]["driver"] == "" and st["driver_names"] == {}, "an empty name removes it"
+    dr.clear_actions(os.path.dirname(path))
+    svc.set_driver_name("rc:Anna", "X", "Kim")
+    dr.clear_actions(os.path.dirname(path))
+    fresh, _c, _p = _dash_service(ctx, path=path)
+    assert _rows(fresh.standings())["X"]["driver"] == "", "a fresh event starts without names"
+
+
+def t_a_retirement_is_audited_persisted_and_can_be_undone():
+    svc, clock, path, ctx = _roster_service()
+    st = svc.retire("director:Bo", "A", True)
+    assert [r["entry"] for r in st["entries"]] == ["B", "X", "A"] and _rows(st)["A"]["status"] == "retired", st
+    rec = _audit(path)[-1]
+    assert (rec["who"], rec["action"], rec["entry"], rec["on"]) == ("director:Bo", "retire", "A", True), rec
+    svc.tick()
+    assert svc.dashboard()["entries"][-1]["status"] == "retired"
+    assert dr.public_view(svc.dashboard())["entries"][-1]["status"] == "retired"
+    again, _c, _p = _dash_service(ctx, path=path)
+    assert _rows(again.standings())["A"]["status"] == "retired", "a retirement survives a relay restart"
+    st = again.retire("rc:Anna", "A", False)
+    assert _rows(st)["A"]["status"] != "retired" and _audit(path)[-1]["on"] is False
+    again.retire("rc:Anna", "B", True)
+    again.reset("rc:Anna")
+    assert _rows(again.standings())["B"]["status"] != "retired", "a race reset drops retirements"
+    again.retire("rc:Anna", "B", True)
+    dr.clear_actions(os.path.dirname(path))
+    fresh, _c, _p = _dash_service(ctx, path=path)
+    assert _rows(fresh.standings())["B"]["status"] != "retired", "a fresh event drops retirements"
+    for bad in (("A", "yes"), ("", True)):
+        try:
+            svc.retire("rc:Anna", *bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad} must be refused")
+
+
+def t_a_retired_car_raises_no_disconnect_and_records_as_retired():
+    ctx = {"roster": {"C": {}, "B": {}}, "mode": "race"}
+    svc, wall, d = _recording_service(context=lambda: ctx)
+    svc.set_settings({"formation": False})
+    svc.recording_start("pit")
+    _two_cars(svc, wall, 1010.0)
+    svc.retire("rc:Cy", "B", True)
+    _two_cars(svc, wall, 1010.0 + dr.race_distance.NO_DATA_S + 2, quiet_b=True)
+    svc.tick()
+    _flush(svc)
+    assert [e["entry"] for e in svc.recording_status()["events"]] == [], \
+        f"a retired car raises no disconnect: {svc.recording_status()['events']}"
+    sample = {r["entry"]: r for r in svc.recording_at(wall[0])["rows"]}
+    assert sample["B"]["status"] == "retired", sample
 
 
 if __name__ == "__main__":

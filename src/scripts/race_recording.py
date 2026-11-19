@@ -336,6 +336,7 @@ class Recorder:
                 continue
             if (quiet > NO_DATA_S and may_suspect and row.get("distance_m") is not None
                     and not row.get("finished") and not row.get("waiting")
+                    and row.get("status") != "retired"
                     and not (row.get("in_box") and window)):
                 self._suspect(row, quiet, now)
 

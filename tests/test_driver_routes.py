@@ -506,6 +506,41 @@ def t_both_desks_set_and_clear_an_estimate_and_bad_input_is_refused():
         srv.shutdown()
 
 
+def t_both_desks_retire_a_car_and_name_a_driver_and_bad_input_is_refused():
+    srv, port, _path, _hub = _serve()
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/retire?t={rc}",
+                            json.dumps({"entry": ENTRIES[1], "on": True}).encode(), hdr)
+        race = json.loads(text)["race"] if st == 200 else {}
+        assert st == 200 and race["last_action"]["who"] == "race_control:dave", (st, text[:300])
+        assert race["last_action"]["action"] == "retire"
+        st, text, _h = _req(port, f"/console/drivers/race/retire?t={director}",
+                            json.dumps({"entry": ENTRIES[1], "on": False}).encode(), hdr)
+        assert st == 200 and json.loads(text)["race"]["last_action"]["who"] == "director:bob", (st, text[:300])
+        st, text, _h = _req(port, f"/console/drivers/race/driver-name?t={director}",
+                            json.dumps({"entry": ENTRIES[0], "name": "Kim Berg"}).encode(), hdr)
+        assert st == 200 and json.loads(text)["race"]["driver_names"] == {ENTRIES[0]: "Kim Berg"}, (st, text[:300])
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/driver-name?t={rc}",
+                            json.dumps({"entry": ENTRIES[0], "name": ""}).encode(), hdr)
+        assert st == 200 and json.loads(text)["race"]["driver_names"] == {}, (st, text[:300])
+        for action, body in (("retire", {"entry": ENTRIES[0], "on": True}),
+                             ("driver-name", {"entry": ENTRIES[0], "name": "X"})):
+            assert _req(port, f"/console/drivers/race/{action}?t={alice}", json.dumps(body).encode(),
+                        hdr)[0] == 403, f"a commentator never reaches {action}"
+        for action, bad in (("retire", {"entry": "Invented Team", "on": True}),
+                            ("retire", {"entry": ENTRIES[0], "on": "yes"}),
+                            ("driver-name", {"entry": "Invented Team", "name": "X"}),
+                            ("driver-name", {"entry": ENTRIES[0], "name": "x" * 41}),
+                            ("driver-name", {"entry": ENTRIES[0], "name": 5})):
+            st, text, _h = _req(port, f"/console/race-control/drivers/race/{action}?t={rc}",
+                                json.dumps(bad).encode(), hdr)
+            assert st == 400, (action, bad, st, text)
+    finally:
+        srv.shutdown()
+
+
 def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     import threading, time
 

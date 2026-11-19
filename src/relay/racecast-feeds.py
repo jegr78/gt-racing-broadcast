@@ -14916,7 +14916,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 who = getattr(self, "_race_who", None) or "tailnet"
                 if p[:2] == ["drivers", "race"] and driver_race_svc is not None:
                     action = p[2] if len(p) == 3 else None
-                    if action in ("quali", "fastest", "compound", "estimate") and hud_source:
+                    if action in ("quali", "fastest", "compound", "estimate", "retire",
+                                  "driver-name") and hud_source:
                         roster = hud_source.roster_names()
                         named = [body.get(k) for k in ("entry", "ref") if body.get(k) is not None]
                         if roster and any(n not in roster for n in named):
@@ -14954,6 +14955,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "compound": lambda: svc.set_compound(who, b.get("entry"), b.get("code")),
                         "estimate": lambda: svc.estimate(who, b.get("entry"), b.get("ref"), b.get("seconds"),
                                                          b.get("clear") is True),
+                        "retire": lambda: svc.retire(who, b.get("entry"), b.get("on", True)),
+                        "driver-name": lambda: svc.set_driver_name(who, b.get("entry"), b.get("name")),
                     }
                     if action in actions:
                         try:

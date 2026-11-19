@@ -390,6 +390,18 @@ def t_finished_car_raises_nothing():
             h.close()
 
 
+def t_retired_and_senderless_cars_raise_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            rows = [_srow("1", quiet_s=9.0, status="retired"), _srow("2", quiet_s=9.0),
+                    _srow("3", quiet_s=None, distance_m=None, status="no_sender")]
+            h.rec.observe(_st("racing", rows), {}, 1000.0)
+            assert [e["entry"] for e in _events(h)] == ["2"], _events(h)
+        finally:
+            h.close()
+
+
 def t_red_flag_raises_nothing():
     with tempfile.TemporaryDirectory() as d:
         h = _Rec(d)
