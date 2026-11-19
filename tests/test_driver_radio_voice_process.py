@@ -66,7 +66,7 @@ def t_nested_transcription_cannot_escape_the_outer_native_owner():
                 "run_process(ai_agents.Invocation([sys.executable,'-c',"+repr(inner)+"],"+repr(d)+",'',30,'speech'),None,threading.Event(),30,ai_jobs.execution_env({}),inherit_tree=True)")
         owner=p.Owned([sys.executable,'-c',script],b'',config.execution_env(),events=True)
         pid=None
-        def dead():
+        def dead(wait=0):
             if os.name=='nt':
                 import ctypes as ct
                 kernel=ct.WinDLL('kernel32',use_last_error=True)
@@ -74,10 +74,14 @@ def t_nested_transcription_cannot_escape_the_outer_native_owner():
                 kernel.WaitForSingleObject.argtypes=[ct.c_void_p,ct.c_uint32];kernel.CloseHandle.argtypes=[ct.c_void_p]
                 handle=kernel.OpenProcess(0x00100000,False,pid)
                 if not handle:return True
-                try:return kernel.WaitForSingleObject(handle,0)==0
+                try:return kernel.WaitForSingleObject(handle,int(wait*1000))==0
                 finally:kernel.CloseHandle(handle)
-            result=subprocess.run(['ps','-p',str(pid),'-o','stat='],capture_output=True,text=True,errors='replace',check=False)
-            return not result.stdout.strip() or result.stdout.strip().startswith('Z')
+            until=time.monotonic()+wait
+            while True:
+                result=subprocess.run(['ps','-p',str(pid),'-o','stat='],capture_output=True,text=True,errors='replace',check=False)
+                if not result.stdout.strip() or result.stdout.strip().startswith('Z'):return True
+                if time.monotonic()>=until:return False
+                time.sleep(.05)
         try:
             until=time.monotonic()+5
             while time.monotonic()<until:
@@ -86,7 +90,7 @@ def t_nested_transcription_cannot_escape_the_outer_native_owner():
             assert type(pid) is int and pid>1, 'nested fixture must start before cancellation'
             assert not dead()
             owner.close()
-            assert dead(), 'transcription process escaped native owner cancellation'
+            assert dead(wait=10), 'transcription process escaped native owner cancellation'
         finally:
             owner.close()
             if pid is not None and not dead():

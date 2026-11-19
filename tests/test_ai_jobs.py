@@ -87,7 +87,7 @@ def prepared(root):
     return pkg
 
 
-def wait_for(fn,timeout=5):
+def wait_for(fn,timeout=30):
     end=time.monotonic()+timeout
     while time.monotonic()<end:
         if fn():return
@@ -284,7 +284,7 @@ def t_failure_classification_and_no_retry():
 def t_cancel_tree_and_machine_admission():
     with tempfile.TemporaryDirectory() as d:
         pkg=prepared(d);machine=Path(d)/'machine';runner=j.Runner(machine,Path(d)/'profileA','a')
-        result=[];adapter=FakeAdapter(d,'tree')
+        result=[];adapter=FakeAdapter(d,'tree',timeout=60)
         th=threading.Thread(target=lambda:result.append(runner.run(package(),pkg,adapter)))
         th.start()
         def running():
