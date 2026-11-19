@@ -369,6 +369,14 @@ def t_driver_telemetry_controls_for_directors_and_race_control():
     assert cp.decide({"director"}, ["race-control", "red-flag"], "POST") == cp.FORBIDDEN
 
 
+def t_class_lap_counts_are_a_desk_route():
+    path = ["drivers", "race", "class-laps"]
+    assert cp.decide({"director"}, path, "POST") == cp.ALLOW
+    assert cp.decide({"race_control"}, ["race-control"] + path, "POST") == cp.ALLOW
+    assert cp.decide({"commentator"}, path, "POST") == cp.FORBIDDEN
+    assert cp.decide({"commentator"}, ["race-control"] + path, "POST") == cp.FORBIDDEN
+
+
 def t_recording_routes_are_desk_routes():
     for path, method in ((["drivers", "race", "recording"], "GET"),
                          (["drivers", "race", "recording", "at"], "GET"),

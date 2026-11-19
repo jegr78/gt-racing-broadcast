@@ -9,8 +9,8 @@ because distances along another line mean nothing.
 
 Race Control actions (#1113): red flag, restart mode and release, rejoin marks,
 corrections, change overrides, estimates for quiet cars (in memory only),
-retirements and driver names for entries without a sender.
-Corrections, rejoin marks, retirements and driver names persist in
+retirements, driver names for entries without a sender and class lap counts.
+Corrections, rejoin marks, retirements, driver names and class lap counts persist in
 `driver-race-actions.json` next to the settings and come back after a relay
 restart; every action appends a line with identity and time to
 `driver-race-audit.jsonl`. The red flag restart default is a league rule and lives
@@ -434,6 +434,51 @@ def _saved_quali(path, segment):
     return out
 
 
+def _saved_class_laps(path, stint):
+    """{class: lap count} of one stint; anything malformed is dropped."""
+    raw = _read_json(path).get("class_laps")
+    raw = raw.get(stint) if isinstance(raw, dict) else None
+    out = {}
+    for cls, laps in (raw.items() if isinstance(raw, dict) else ()):
+        if isinstance(cls, str) and 0 < len(cls) <= MAX_CLASS and type(laps) is int \
+                and 0 < laps <= MAX_LAPS and len(out) < MAX_QUALI:
+            out[cls] = laps
+    return out
+
+
+def _store_class_laps(doc, stint, cls, laps):
+    raw = doc.get("class_laps") if isinstance(doc.get("class_laps"), dict) else {}
+    done = raw.get(stint) if isinstance(raw.get(stint), dict) else {}
+    if laps is None:
+        done.pop(cls, None)
+    elif stint not in raw and len(raw) >= MAX_QUALI:
+        raise ValueError(f"at most {MAX_QUALI} stints carry class lap counts")
+    elif cls in done or len(done) < MAX_QUALI:
+        done[cls] = laps
+    else:
+        raise ValueError(f"at most {MAX_QUALI} classes per stint")
+    if done:
+        raw[stint] = done
+    else:
+        raw.pop(stint, None)
+    doc["class_laps"] = raw
+
+
+def _named_classes(roster):
+    return {info.get("carClass") for info in roster.values()
+            if isinstance(info, dict) and isinstance(info.get("carClass"), str) and info.get("carClass")}
+
+
+def _class_name(cls):
+    if not isinstance(cls, str) or not cls.strip() or len(cls) > MAX_CLASS:
+        raise ValueError(f"class is 1 to {MAX_CLASS} characters")
+    try:
+        cls.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("class is not valid text") from None
+    return cls.strip()
+
+
 def _entry_name(entry):
     if not isinstance(entry, str) or not entry.strip() or len(entry) > MAX_ENTRY:
         raise ValueError(f"entry is 1 to {MAX_ENTRY} characters")
@@ -625,12 +670,15 @@ class Service:
             rows.append(row)
         self._mark_dc(rows)
         fl = race.fastest
+        first = next((name for name in st["classes"] if name), None)
+        class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))) \
+            if st["classes"] else {}
         out.update({
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
             "fastest": self._shown_lap(race, fl, roster),
             "classes": [{"name": name, "color": colors.get(name, ""),
                          "lap": st["class_lap"][name],
-                         "laps": st["lap"]["count"] if rows and rows[0]["class"] == name else None,
+                         "laps": st["lap"]["count"] if name == first else class_laps.get(name) if name else None,
                          "fastest": self._shown_lap(race, race.fastest_by_class.get(name), roster)}
                         for name in st["classes"]],
             "entries": rows})
@@ -884,6 +932,7 @@ class Service:
                    compounds=_saved_compounds(_actions_path_for(self._path)),
                    driver_overrides=_override_list(_saved_overrides(_actions_path_for(self._path))),
                    quali_overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
+                   class_laps=_saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))),
                    league=read_league(self._league), last_action=self._last_action)
         return out
 
@@ -1078,13 +1127,63 @@ class Service:
                 self._final_lobby_laps = race.lap_count = saved["lap_count"]
         return saved
 
-    def stint_switch(self, final_laps=None, window=True, final_row=None):
+    def class_laps(self, stint=None):
+        """{class: lap count} Race Control set for `stint` (default: the one on air)."""
+        stint = self._context().get("stint") if stint is None else stint
+        return _saved_class_laps(_actions_path_for(self._path), _segment_key(stint))
+
+    def set_class_laps(self, who, cls, laps, stint=None):
+        """Set the lap count of a class other than the fastest for one stint, or clear
+        it with None. Display only: it never finishes a car."""
+        cls = _class_name(cls)
+        if laps is not None and (type(laps) is not int or not 0 < laps <= MAX_LAPS):
+            raise ValueError(f"laps is a whole number from 1 to {MAX_LAPS}, or null")
+        ctx = self._context()
+        if cls not in _named_classes(ctx.get("roster") or {}):
+            raise ValueError("unknown class")
+        stint = _segment_key(ctx.get("stint") if stint is None else stint)
+
+        def update(doc):
+            _store_class_laps(doc, stint, cls, laps)
+        with self._lock:
+            self._log(who, "class_laps", stint=stint, **{"class": cls}, laps=laps)
+            self._save_actions(update)
+        return self.standings()
+
+    def _prefill_class_laps(self, defaults, ctx):
+        """The Schedule's `Laps <Class>` cells of the row on air, where no desk value is."""
+        named = {c.lower(): c for c in _named_classes(ctx.get("roster") or {})}
+        stint = _segment_key(ctx.get("stint"))
+        saved = _saved_class_laps(_actions_path_for(self._path), stint)
+        fill = {}
+        for cls, laps in (defaults.items() if isinstance(defaults, dict) else ()):
+            cls = named.get(cls.lower()) if isinstance(cls, str) else None
+            if cls and cls not in saved and type(laps) is int and 0 < laps <= MAX_LAPS:
+                fill[cls] = laps
+        if not fill:
+            return
+
+        def update(doc):
+            for cls, laps in fill.items():
+                _store_class_laps(doc, stint, cls, laps)
+        for cls, laps in fill.items():
+            self._log("schedule", "class_laps", stint=stint, **{"class": cls}, laps=laps)
+        self._save_actions(update)
+
+    def stint_switch(self, final_laps=None, window=True, final_row=None, class_laps=None):
         """The broadcast switched stints: open the change window (unless `window` is
         False, a relay start that finds the last row on air). `final_row` (default:
         `final_laps` given) says the last row is on air; `final_laps` is its lobby's lap
-        count, None until a count is set."""
+        count, None until a count is set. `class_laps` are the row's `Laps <Class>`
+        cells; they never replace a value the desks set."""
         final_row = final_laps is not None if final_row is None else final_row
+        ctx = self._context() if class_laps else None
         with self._lock:
+            if class_laps:
+                try:
+                    self._prefill_class_laps(class_laps, ctx)
+                except (OSError, ValueError):
+                    pass  # the desks can still enter the count
             race = self._current()
             if window:
                 race.open_change_window(self._clock())

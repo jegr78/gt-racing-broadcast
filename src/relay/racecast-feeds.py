@@ -7371,6 +7371,7 @@ class ScheduleSource:
         self.items = []
         self.rows = []
         self.laps = {}
+        self.class_laps = {}
         self.last_ok = None
         self.last_error = None
         # Pending panel saves (spec 2026-10-06): applied after every refresh so a
@@ -7453,6 +7454,28 @@ class ScheduleSource:
                 out[line] = int(cell)
         return out
 
+    @staticmethod
+    def _parse_class_laps(text):
+        """{line: {class: lap count}} from optional `Laps <Class>` header columns."""
+        rows = list(csv.reader(io.StringIO(text)))
+        cols = []
+        for i, h in enumerate(rows[0] if rows else []):
+            h = (h or "").strip()
+            if h[:5].lower() == "laps ":
+                cols.append((i, h[5:].strip()))
+        out = {}
+        for line, r in enumerate(rows[1:], 2):
+            for i, cls in cols:
+                cell = r[i].strip() if len(r) > i else ""
+                if cell.isascii() and cell.isdigit() and 0 < int(cell) <= 999:
+                    out.setdefault(line, {})[cls] = int(cell)
+        return out
+
+    def class_laps_at(self, idx):
+        """The `Laps <Class>` cells of schedule row `idx` (0-based)."""
+        with self.lock:
+            return dict(self.class_laps.get(self.rows[idx][3]) or {}) if 0 <= idx < len(self.rows) else {}
+
     def final_laps(self):
         """The `Laps` cell of the last schedule row, or None."""
         with self.lock:
@@ -7473,6 +7496,7 @@ class ScheduleSource:
                 text = resp.read().decode("utf-8", "replace")
             rows = self._parse_rows(text, self.allow_local)
             self._fetched_laps = self._parse_laps(text)
+            self._fetched_class_laps = self._parse_class_laps(text)
             if not rows:
                 self.last_error = ("Sheet reachable, but no channel IDs found "
                                    "(correct tab name? a column with UC… IDs / watch URLs? sharing?)")
@@ -7488,6 +7512,7 @@ class ScheduleSource:
             with self.lock:
                 self.rows = rows
                 self.laps = getattr(self, "_fetched_laps", {})
+                self.class_laps = getattr(self, "_fetched_class_laps", {})
                 self.items = [u for u, _n, _s, _l in rows]
                 self.last_ok = time.time()
                 self.last_error = None
@@ -14966,6 +14991,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "retire": lambda: svc.retire(who, b.get("entry"), b.get("on", True)),
                         "driver-name": lambda: svc.set_driver_name(who, b.get("entry"), b.get("name"),
                                                                    b.get("driver", "")),
+                        "class-laps": lambda: svc.set_class_laps(who, b.get("class"), b.get("laps")),
                     }
                     if action in actions:
                         try:
@@ -15455,7 +15481,8 @@ def dashboard_ticks(relay, race_svc, stop_evt, every):
 def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
     """Tell the driver race when the broadcast switches stints: that opens the driver
     change window, and the switch onto the last schedule row brings the final lobby's
-    lap count (the row's `Laps` cell, else the event setting). Endurance only."""
+    lap count (the row's `Laps` cell, else the event setting). The row's `Laps <Class>`
+    cells pre-fill the class lap counts, at a switch and at a start. Endurance only."""
     last = None
     while not stop_evt.wait(interval):
         if relay.solo:
@@ -15468,8 +15495,10 @@ def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
                 final, last_row = None, bool(rows) and idx == len(rows) - 1
                 if last_row:
                     final = relay.race_source.final_laps() or settings_laps()
-                if switched or last_row:
-                    race_svc.stint_switch(final_laps=final, window=switched, final_row=last_row)
+                class_laps = relay.race_source.class_laps_at(idx) if rows else {}
+                if switched or last_row or class_laps:
+                    race_svc.stint_switch(final_laps=final, window=switched, final_row=last_row,
+                                          class_laps=class_laps)
                     LOG.info("driver race: %s row %d%s", "stint switch to" if switched
                              else "on air at start:", idx + 1,
                              f", final lobby over {final} laps" if final else "")
