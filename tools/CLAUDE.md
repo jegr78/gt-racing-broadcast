@@ -35,7 +35,13 @@ explicitly. `release.yml` fails at once on a ref that is not a `v*` tag, so a
 dispatch from a branch cannot publish a release named after it. It creates the
 GitHub release only when release-please has not already done so; any other create
 failure stops the run before the builds. `ci.yml` runs the suite on all
-three OSes for every PR. Under macOS arm64 capacity constraints GitHub cancels a job
+three OSes for every PR. On the release-please PR (`release-please--branches--main`), which edits only
+`CHANGELOG.md`, `version.txt` and the manifest, the CodeQL analysis and every
+`ci.yml` job but `lint` skip through a job-level `if:`; main's push run already tested that code.
+A skipped matrix job reports no check names, so `ci-ok` (`needs` every job, `if:
+always()`, red on a failed or cancelled job) is the fixed-name result the ruleset requires.
+`rerun-unacquired.py` ignores `ci-ok` when it judges a run, since it fails with the jobs
+it needs. Under macOS arm64 capacity constraints GitHub cancels a job
 after about 15 minutes with "The job was not acquired by Runner of type hosted even
 after multiple attempts" (no runner, no step); `rerun-unacquired.yml` then reruns the
 CI run through `tools/rerun-unacquired.py`, only when every failed job is of that kind

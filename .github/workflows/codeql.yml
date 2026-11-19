@@ -17,6 +17,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze (python)
+    if: github.head_ref != 'release-please--branches--main'
     runs-on: ubuntu-latest
     permissions:
       security-events: write  # required to upload CodeQL results

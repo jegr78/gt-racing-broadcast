@@ -9,6 +9,9 @@ name: CI
 # scarce ones, so they get exactly one job, not three. NB: the matrix job names
 # below ("test (<os>, <ver>)") are the ruleset's required status checks: if you
 # change a combo, update Protect main's required checks to match or PRs deadlock.
+# The release-please PR only edits CHANGELOG.md, version.txt and the manifest, so
+# every job but lint skips there; main's push run already tested the same code.
+# ci-ok is the one fixed-name result: a skipped matrix job reports no check names.
 on:
   push:
     branches: [main, "epic/**"]
@@ -46,6 +49,7 @@ jobs:
         run: python tools/lint.py
 
   test:
+    if: github.head_ref != 'release-please--branches--main'
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -108,6 +112,7 @@ jobs:
         run: python tools/e2e-event-info.py
 
   build:
+    if: github.head_ref != 'release-please--branches--main'
     # Build self-verify (tokenization, blanked password, no secrets shipped, no
     # shell scripts). OS-independent: it asserts the assembled dist/ contents,
     # not runtime behaviour: so one ubuntu job suffices instead of re-running it
@@ -122,6 +127,7 @@ jobs:
         run: python tools/build.py
 
   binary-smoke:
+    if: github.head_ref != 'release-please--branches--main'
     timeout-minutes: 15
     # CI must exercise everything the release pipeline exercises: release.yml
     # builds the PyInstaller binary and runs the build-binary smoke test, so a
@@ -140,6 +146,7 @@ jobs:
         run: python tools/build-binary.py --version ci-smoke
 
   native-package:
+    if: github.head_ref != 'release-please--branches--main'
     timeout-minutes: 15
     # Exercise the actual frozen relay and private coaching journal on the other
     # producer OSes too. binary-smoke and e2e-binary cover Linux; these runs keep
@@ -160,6 +167,7 @@ jobs:
         run: python tools/e2e.py --build --coach-only
 
   e2e:
+    if: github.head_ref != 'release-please--branches--main'
     timeout-minutes: 15
     # Integration outer loop: stand up the relay + Control Center from src/ and
     # assert the live HTTP surface (cockpit auth gating, tally, chat round-trip,
@@ -181,6 +189,7 @@ jobs:
         run: python tools/engineer-replay.py --check
 
   visual:
+    if: github.head_ref != 'release-please--branches--main'
     timeout-minutes: 15
     # Visual acceptance run: renders Control Center, Director Panel, cockpit and
     # Race Control in Chromium and fails on a layout-rule finding. The stdlib e2e
@@ -232,3 +241,15 @@ jobs:
           name: visual-report
           path: visual-report/
           if-no-files-found: ignore
+
+  ci-ok:
+    if: always()
+    needs: [lint, test, build, binary-smoke, native-package, e2e, visual]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed or was skipped on purpose
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          case " $RESULTS " in *" failure "*|*" cancelled "*) exit 1;; esac
