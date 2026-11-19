@@ -154,7 +154,9 @@ It never carries connection ids, corrections or who made them.
   Dashboard** in the Stint scene (Program in the solo collections). It shows a timing
   tower of up to 15 entries, the lap against the lap count (or the race timer's
   remaining time), the fastest lap and a track map with each car as a numbered dot in
-  its entry colour. The value column alternates every 15 seconds between the gap to the
+  its entry colour. Dots sit on the racing line; in a close pack a dot slides back
+  along the line to stay readable, never past the car behind, and otherwise lies under
+  the dot ahead. The value column alternates every 15 seconds between the gap to the
   leader and the last lap; a car in the box shows `Box`. Right of the tyre ring a bar
   and a percentage show each car's fuel (GT7 reports the tank in percent); both turn
   amber at 10 % or less, and a car without data shows none. A car that took the
