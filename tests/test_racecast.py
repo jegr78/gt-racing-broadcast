@@ -8254,22 +8254,32 @@ def t_ai_start_and_the_ui_service_turn_termination_into_cleanup():
     import signal, socket, subprocess, urllib.request
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]
-    proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "src", "racecast.py"), "ui", "--no-browser"],
-                            env=dict(os.environ, RACECAST_UI_PORT=str(port)), stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, errors="replace")
-    try:
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
+    # A file, not a pipe: a descendant holding an inherited pipe must not stand in for the UI's exit.
+    with tempfile.TemporaryFile() as log:
+        proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "src", "racecast.py"), "ui", "--no-browser"],
+                                env=dict(os.environ, RACECAST_UI_PORT=str(port)), stdout=log,
+                                stderr=subprocess.STDOUT)
+        try:
+            deadline, ready = time.monotonic() + 60, False
+            while not ready and proc.poll() is None and time.monotonic() < deadline:
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1); ready = True
+                except Exception:
+                    time.sleep(0.2)
+            proc.send_signal(signal.SIGTERM)
             try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1); break
-            except Exception:
-                time.sleep(0.2)
-        proc.send_signal(signal.SIGTERM)
-        out = proc.communicate(timeout=20)[0]
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-    assert "Control Center stopped" in out, "a SIGTERM runs the UI's shutdown, which stops running analyses"
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                pass  # judged below from proc.poll()
+            code = proc.poll()
+        finally:
+            if proc.poll() is None:
+                proc.kill(); proc.wait()
+        log.seek(0)
+        out = log.read().decode("utf-8", "replace")
+    assert ready, "racecast ui never answered /api/ping: " + out[-2000:]
+    assert code is not None, "racecast ui ignored SIGTERM for 60 s: " + out[-2000:]
+    assert "Control Center stopped" in out, f"a SIGTERM runs the UI's shutdown (exit {code}): " + out[-2000:]
 
 
 if __name__ == "__main__":
