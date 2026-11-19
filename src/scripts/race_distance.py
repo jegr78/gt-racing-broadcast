@@ -938,8 +938,7 @@ class Race:
             car = self._cars.get(e.active) or _NO_CAR
             quiet, retired = self._quiet(e, now), self._out(e)
             lapped = gap = interval = gap_time = interval_time = None
-            if e.distance is not None and not retired \
-                    and (not quiet or e.finished_at is not None):   # a finish is final
+            if self._timed(e, now):
                 lapped, gap = self._behind(ents[0], e) if i else (0, 0)
                 interval = self._behind(ents[i - 1], e)[1] if i else None
                 gap_time = self._time_behind(ents[0], e, now) if i else 0.0
@@ -1010,11 +1009,17 @@ class Race:
                     a, b = row[by], prev[by]
                     row[key] = None if a is None or b is None else round(max(0.0, a - b), 2)
 
+    def _timed(self, e, now):
+        """Whether a row's gaps are measured: a running car with data, or a finished one
+        (a finish is final)."""
+        return e.distance is not None and not self._out(e) \
+            and (not self._quiet(e, now) or e.finished_at is not None)
+
     def _class_pass(self, ents, rows, ranked, now):
         """Fill each row's class fields like the overall ones, within its class, and
-        return the class names in order; [] with fewer than two classes."""
+        return the class names in order; [] with fewer than two named classes."""
         names = list(dict.fromkeys(self._classes.get(e.entry, "") for e in ents))
-        if len(names) < 2:
+        if len([n for n in names if n]) < 2:
             return []
         if "" in names:
             names.remove("")
@@ -1029,7 +1034,7 @@ class Race:
             for k, i in enumerate(refs):
                 lead, e, row = ents[refs[0]], ents[i], rows[i]
                 prev = ents[refs[k - 1]] if k else None
-                live = e.distance is not None and (not self._quiet(e, now) or e.finished_at is not None)
+                live = self._timed(e, now)
                 lapped = gap = interval = None
                 if not k:
                     lapped, gap = (0, 0) if live or self._estimated(e) else (None, None)

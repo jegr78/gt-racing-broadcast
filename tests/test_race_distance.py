@@ -1432,10 +1432,21 @@ def t_an_entry_without_a_class_forms_its_own_group():
 
 def t_the_unclassified_group_stays_last_when_it_leads():
     race = rd.Race(TRACE, formation=False)
-    race.set_classes({"B": "G"})
-    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50))]
-    t = _drive(race, cars, [40] * 2, 0.0, 12)
-    assert race.standings(t)["classes"] == ["G", ""], race.standings(t)["classes"]
+    race.set_classes({"B": "G", "C": "H"})
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90))]
+    t = _drive(race, cars, [40] * 3, 0.0, 12)
+    assert race.standings(t)["classes"] == ["G", "H", ""], race.standings(t)["classes"]
+
+
+def t_one_named_class_and_blank_cells_is_no_class_mode():
+    race = rd.Race(TRACE, formation=False)
+    race.set_classes({"A": "GT3", "B": ""})
+    race.set_roster(["A", "B", "X"])
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, 12)
+    st = race.standings(t)
+    assert st["classes"] == [], f"blank Class cells never make a second class: {st['classes']}"
+    assert all(r["class"] is None and r["class_pos"] is None for r in st["entries"]), st["entries"]
 
 
 def t_one_class_leaves_the_rows_unchanged():
