@@ -47,6 +47,15 @@ def t_opaque_origin_cannot_delete_or_assign_tracks_without_profile():
         server.server_close()
 
 
+def provider_child_started(runner, adapter):
+    def started():
+        if hasattr(adapter, 'scratch_output') and (adapter.scratch_output / 'child.pid').exists():
+            return True
+        assert runner.status(runner.profile)['busy'], 'the provider ended before its child started'
+        return False
+    jobs.wait_for(started)
+
+
 def t_foreign_profile_cannot_cancel_another_profiles_job_over_http():
     with workspace.profiles() as root:
         m = workspace.m
@@ -54,7 +63,7 @@ def t_foreign_profile_cannot_cancel_another_profiles_job_over_http():
         runner = ai_jobs.Runner(machine, machine / 'alpha', 'alpha')
         owner = ai_jobs.BackgroundJobs()
         runner.background_jobs = owner
-        adapter = jobs.FakeAdapter(root, 'tree')
+        adapter = jobs.FakeAdapter(root, 'tree', timeout=60)
         ctx = web._ctx()
         ctx.update(telemetry_profile_scope=m.telemetry_profile_scope,
                    ai_request=m.ai_request_data)
@@ -62,8 +71,7 @@ def t_foreign_profile_cannot_cancel_another_profiles_job_over_http():
         try:
             # Server startup must not consume the synthetic provider's timeout.
             job = runner.start(jobs.package(), jobs.prepared(root), adapter)
-            jobs.wait_for(lambda: hasattr(adapter, 'scratch_output') and
-                          (adapter.scratch_output / 'child.pid').exists())
+            provider_child_started(runner, adapter)
             code, status = http.request(port, '/api/ai/status?profile=beta')
             assert code == 200 and status['active']['foreign'] and status['active']['id'] == job
             code, result = http.request(port, '/api/ai/cancel?profile=beta',
@@ -263,7 +271,7 @@ def child_service(root, interrupt=False):
     """Run the real UI lifecycle with an owned synthetic provider and ephemeral port."""
     m = workspace.m
     root = Path(root)
-    adapter = jobs.FakeAdapter(root, 'tree')
+    adapter = jobs.FakeAdapter(root, 'tree', timeout=60)
     text = adapter.script.read_text(encoding='utf-8')
     adapter.script.write_text(text.replace('sys.stdin.read()',
         "sys.stdin.read();Path(__file__).with_name('provider.pid').write_text(str(os.getpid()))"), encoding='utf-8')
@@ -276,8 +284,7 @@ def child_service(root, interrupt=False):
             server = serve(ctx, host, port)
             # Start the timed fixture only once the real UI is ready to serve.
             job = runner.start(jobs.package(), prepared, adapter)
-            jobs.wait_for(lambda: hasattr(adapter, 'scratch_output') and
-                          (adapter.scratch_output / 'child.pid').exists())
+            provider_child_started(runner, adapter)
             print('READY ' + json.dumps({'port': server.server_address[1], 'job': job,
                   'machine': str(machine), 'provider': int((root / 'provider.pid').read_text()),
                   'child': int((adapter.scratch_output / 'child.pid').read_text())}), flush=True)
@@ -369,7 +376,7 @@ def t_background_shutdown_keeps_lease_until_process_tree_cleanup_finishes():
         machine = Path(root) / 'machine'
         owner = ai_jobs.BackgroundJobs()
         runner = ai_jobs.Runner(machine, Path(root) / 'profile', 'p', background_jobs=owner)
-        adapter = jobs.FakeAdapter(root, 'tree')
+        adapter = jobs.FakeAdapter(root, 'tree', timeout=60)
         entered, release = threading.Event(), threading.Event()
         terminate = ai_jobs.terminate_tree
         def paused_cleanup(proc, tree=None):
@@ -380,8 +387,7 @@ def t_background_shutdown_keeps_lease_until_process_tree_cleanup_finishes():
         with patch.object(ai_jobs, 'terminate_tree', side_effect=paused_cleanup):
             try:
                 runner.start(jobs.package(), jobs.prepared(root), adapter)
-                jobs.wait_for(lambda: hasattr(adapter, 'scratch_output') and
-                              (adapter.scratch_output / 'child.pid').exists())
+                provider_child_started(runner, adapter)
                 closer.start()
                 assert entered.wait(5)
                 jobs.error(lambda: ai_jobs.Lease(machine).acquire(), 'busy')

@@ -24,7 +24,7 @@ def main():
     parser.add_argument('--shots',action='store_true')
     parser.add_argument('--browser-executable')
     args=parser.parse_args()
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
     state={'profile':'demo'};calls=[];inputs=[];errors=[]
     class Process:
         def __init__(self,argv,input_text=None):
@@ -58,6 +58,10 @@ def main():
                 try:
                     page=browser.new_page(viewport={'width':1440,'height':900})
                     page.on('pageerror',lambda error:errors.append(error.stack))
+                    traffic=[]
+                    page.on('request',lambda request:traffic.append(('sent',request.method,request.url)))
+                    page.on('requestfailed',lambda request:traffic.append(('failed',request.url,request.failure)))
+                    page.on('requestfinished',lambda request:traffic.append(('done',request.url)))
                     page.goto(f'http://127.0.0.1:{port}/')
                     page.wait_for_function("() => activeProfile==='demo' && lastStatus?.os==='linux'")
                     page.evaluate("""() => {window.confirmed=[];window.alerts=[];window.allowConfirm=true;
@@ -68,14 +72,17 @@ def main():
                         page.evaluate('(name)=>showView(name)',name)
                         page.locator(f'[data-view="{name}"]').wait_for(state='visible')
                     def click_job(selector,expected,prompts=None,with_replay_probe=False):
-                        before=len(calls)
+                        before=len(calls);seen=len(traffic)
                         page.evaluate('(values)=>{promptAnswers=values;}',prompts or [])
-                        with page.expect_response(lambda response:'/api/op/' in response.url and not response.url.endswith('/telemetry-replay-status')) as response:
-                            if with_replay_probe:
-                                page.wait_for_function('!tmReplayBusy')
-                                page.evaluate('tmReplayPoll()')
-                                page.wait_for_function('!tmReplayBusy')
-                            (page.locator(selector) if isinstance(selector,str) else selector).click()
+                        try:
+                            with page.expect_response(lambda response:'/api/op/' in response.url and not response.url.endswith('/telemetry-replay-status')) as response:
+                                if with_replay_probe:
+                                    page.wait_for_function('!tmReplayBusy')
+                                    page.evaluate('tmReplayPoll()')
+                                    page.wait_for_function('!tmReplayBusy')
+                                (page.locator(selector) if isinstance(selector,str) else selector).click()
+                        except PlaywrightTimeout as exc:
+                            raise AssertionError(('no /api/op response',selector,page.evaluate('alerts'),traffic[seen:][-20:])) from exc
                         result=response.value.json();assert result['ok'],result
                         page.wait_for_function("id=>jobId===id && !document.getElementById('jobchip').hidden && document.getElementById('jobchip').textContent==='done'",arg=result['job_id'])
                         # Replay status polls are read-only background work, not operator submissions.
