@@ -576,6 +576,28 @@ def t_ob_compile_groups_four_static_cuts():
     assert 'font-family: "Roboto-Bold"' not in css
 
 
+
+def _face_weights(css, family):
+    """{(file, style): weight descriptor} of the @font-face blocks of `family`."""
+    out = {}
+    for block in css.split("@font-face")[1:]:
+        if f'font-family: "{family}"' in block:
+            f = block.split("url(/overlay/fonts/")[1].split(")")[0]
+            style = block.split("font-style: ")[1].split(";")[0]
+            out[(f, style)] = block.split("font-weight: ")[1].split(";")[0]
+    return out
+
+
+def t_ob_a_bold_sibling_takes_the_heavy_weights():
+    css = ob.compile_overlay_css(
+        {"slots": {}, "fonts": ["Barlow.woff2", "Barlow-Bold.woff2",
+                                "Barlow-Italic.woff2", "Barlow-BoldItalic.woff2"]}, SLOTS)
+    w = _face_weights(css, "Barlow")
+    assert w[("Barlow.woff2", "normal")] == "1 699", \
+        f"the regular file must not claim weight 800, or bold text renders regular: {w}"
+    assert w[("Barlow-Italic.woff2", "italic")] == "1 699", f"the same for italics: {w}"
+    assert w[("Barlow-Bold.woff2", "normal")] == "700", w
+
 def t_ob_font_families_collapses_cut_siblings():
     fams = ob.font_families(["NunitoSans.woff2", "NunitoSans-Italic.woff2",
                              "NunitoSans-Bold.woff2", "League.woff2"])
