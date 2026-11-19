@@ -1066,6 +1066,7 @@ def t_recording_at_authenticates_with_t_and_reads_time():
         _req(port, f"/console/drivers/race/recording?t={director}", b'{"action":"start"}',
              {"Content-Type": "application/json"})
         srv.race_svc.tick()
+        assert srv.race_svc._recorder()._writer.flush(), "the sample reaches the store"
         now = time.time()
         st, text, _h = _req(port, f"/console/drivers/race/recording/at?t={director}&time={now}")
         assert st == 200 and "rows" in _json.loads(text), (st, text)
