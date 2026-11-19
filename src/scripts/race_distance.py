@@ -59,6 +59,7 @@ nearest the predicted distance decides.
 """
 import bisect
 import math
+from array import array
 
 from gt7_tracks import _Line
 
@@ -70,6 +71,8 @@ BOX_LEAVE_MPS = 2.0
 CHANGE_WINDOW_S = 600.0     # a stint switch's window closes after this, or when every team changed
 HISTORY_S = 900.0
 MAX_HISTORY = 12000         # samples per entry, a hard cap next to HISTORY_S
+COARSE_STEP_S = 1.0         # history older than the fine one keeps one point per second
+MAX_COARSE = 86400          # 24 hours of coarse history per entry
 MAX_SPEED_MPS = 120.0
 STEP_SLACK_M = 20.0         # projection noise on top of MAX_SPEED_MPS over the sample's time
 SNAP_M = 40.0               # around the line the counter may be a sample early or late
@@ -105,11 +108,23 @@ class _Car:
         self.last_ms = None        # the last last_ms seen
 
 
+def _interpolate(ts, ds, d):
+    """The time at distance d in one history; None outside it."""
+    if not ds or d < ds[0] or d > ds[-1]:
+        return None
+    i = bisect.bisect_left(ds, d)
+    if i == 0 or ds[i] == d:
+        return ts[i]
+    d0, d1, t0, t1 = ds[i - 1], ds[i], ts[i - 1], ts[i]
+    return t0 + (t1 - t0) * (d - d0) / (d1 - d0) if d1 > d0 else t1
+
+
 class _Entry:
     def __init__(self, entry, conn):
         self.entry, self.active = entry, conn
         self.distance = None
         self.ts, self.ds = [], []
+        self.cts, self.cds = array("d"), array("d")
         self.change_anchor = None
         self.changed = False
         self.held = False          # endurance: the counter dropped, waiting for a rejoin
@@ -128,6 +143,7 @@ class _Entry:
 
     def restart(self):
         self.distance, self.ts, self.ds = None, [], []
+        self.cts, self.cds = array("d"), array("d")
         self.pit_stops, self.finished_at, self.since = 0, None, None
 
 
@@ -477,11 +493,7 @@ class Race:
             ent.distance = distance
         ent.ts.append(t)
         ent.ds.append(ent.distance)
-        if ent.ts[0] < t - HISTORY_S:
-            cut = bisect.bisect_left(ent.ts, t - HISTORY_S)
-            del ent.ts[:cut], ent.ds[:cut]
-        if len(ent.ts) > MAX_HISTORY:
-            del ent.ts[:len(ent.ts) - MAX_HISTORY], ent.ds[:len(ent.ds) - MAX_HISTORY]
+        self._trim(ent, t)
         self._lap_timing(ent, car, t, prev_lap is not None and lap > prev_lap,
                          last_ms if new_lap_time else None)
         # A single lobby counts laps in race distance: after a red flag restart from the
@@ -616,14 +628,30 @@ class Race:
         return "racing"
 
     @staticmethod
+    def _trim(ent, t):
+        """Keep HISTORY_S at full rate; older samples move to the coarse history."""
+        cut = bisect.bisect_left(ent.ts, t - HISTORY_S) if ent.ts[0] < t - HISTORY_S else 0
+        cut = max(cut, len(ent.ts) - MAX_HISTORY)
+        if cut <= 0:
+            return
+        for ts, d in zip(ent.ts[:cut], ent.ds[:cut], strict=True):
+            if not ent.cts or ts - ent.cts[-1] >= COARSE_STEP_S:
+                ent.cts.append(ts)
+                ent.cds.append(d)
+        del ent.ts[:cut], ent.ds[:cut]
+        if len(ent.cts) > MAX_COARSE:
+            del ent.cts[:len(ent.cts) - MAX_COARSE], ent.cds[:len(ent.cds) - MAX_COARSE]
+
+    @staticmethod
     def _time_at(ent, d):
         """When `ent` reached distance d, interpolated; None outside its history."""
-        if not ent.ds or d < ent.ds[0] or d > ent.ds[-1]:
+        if ent.ds and d >= ent.ds[0]:
+            return _interpolate(ent.ts, ent.ds, d)
+        if not ent.cds or d < ent.cds[0]:
             return None
-        i = bisect.bisect_left(ent.ds, d)
-        if i == 0 or ent.ds[i] == d:
-            return ent.ts[i]
-        d0, d1, t0, t1 = ent.ds[i - 1], ent.ds[i], ent.ts[i - 1], ent.ts[i]
+        if d <= ent.cds[-1] or not ent.ds:
+            return _interpolate(ent.cts, ent.cds, d)
+        d0, d1, t0, t1 = ent.cds[-1], ent.ds[0], ent.cts[-1], ent.ts[0]
         return t0 + (t1 - t0) * (d - d0) / (d1 - d0) if d1 > d0 else t1
 
     def _behind(self, ahead, ent):
