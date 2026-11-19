@@ -6061,11 +6061,13 @@ def _start_driver_invite(fresh, path=None):
     without the last event's corrections; a takeover or recovery restart keeps them."""
     import driver_invite
     import driver_race
+    import race_recording
     import timing_link
     path = path or _driver_invite_path()
     runtime = os.path.dirname(os.path.abspath(path))
     if fresh:
         driver_race.clear_actions(runtime)
+        race_recording.rotate(runtime)
     if fresh or driver_invite.current(path) is None:
         driver_invite.create(path)
     timing = timing_link.path_in(runtime)
