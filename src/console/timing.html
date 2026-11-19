@@ -237,13 +237,15 @@
     const rows = quali ? (d.qualifying || []) : (d.entries || []);
     const fl = d.fastest;
     $("timing").tBodies[0].replaceChildren(...rows.map(function (e, i) {
-      const tr = el("tr", e.status === "box" ? "box" : e.status === "no_data" || e.status === "dc" ? "off" : "");
+      const done = e.finished && e.status !== "est";
+      const tr = el("tr", done ? "" : e.status === "box" ? "box" : e.status === "no_data" || e.status === "dc" ? "off" : "");
       const all = {
         pos: cell("pos", e.pos, "pos"), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
         laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
         gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
                   : e.status === "est" ? estGap(e, i)
-                  : STATUS[e.status] || (e.finished ? finishedGap(e, i) : i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
+                  : e.finished ? finishedGap(e, i)
+                  : STATUS[e.status] || (i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
                   : typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "")),
         int: cell("int", i && typeof e.interval_s === "number" ? "+" + e.interval_s.toFixed(1) : ""),
         last: cell("last", lapTime(e.last_lap_ms),

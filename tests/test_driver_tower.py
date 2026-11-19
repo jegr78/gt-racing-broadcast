@@ -87,11 +87,11 @@ def t_fuel_reads_whole_percent_and_turns_amber_at_ten():
     assert got[:6] == [56, 10, 7, 10, 100, 0], f"whole percent, clamped to the tank: {got}"
     assert got[6:] == [None, None], f"no fuel reading, no percent: {got}"
     low = _tower("""
-      return [56.4, 10.0, 10.4, 7.2].map(function (f) {
+      return [56.4, 10.0, 10.4, 10.6, 7.2].map(function (f) {
         return classes(fuelCell({fuel_l: f, status: "racing"})).join(" ");
       });""")
-    assert ["low" in c.split() for c in low] == [False, True, False, True], \
-        f"amber at or below 10 %: {low}"
+    assert ["low" in c.split() for c in low] == [False, True, True, False, True], \
+        f"amber at or below the 10 % the tower shows: {low}"
 
 
 def t_a_racing_row_carries_tyre_and_fuel_columns():
@@ -144,6 +144,22 @@ def t_a_finished_row_shows_the_flag_and_its_final_gap():
     assert any("dd-flag" in c for c in got["bare"]), f"with both switches off the flag stays: {got}"
 
 
+def t_a_finished_car_keeps_flag_and_gap_after_it_parks_or_leaves():
+    got = _tower(f"""
+      showFuel = true; showTyre = true;
+      return ["box", "no_data", "dc"].map(function (s) {{
+        const e = Object.assign({{}}, {json.dumps(CAR)}, {{finished: true, status: s}});
+        const r = row(e, 1, column(e, 1), "P1");
+        return {{value: column(e, 1), row: r.className, cls: classes(r)}};
+      }});""")
+    if got is None:
+        return
+    for g in got:
+        assert g["value"] == "+1.4", f"the final gap, not the status: {got}"
+        assert any("dd-flag" in c for c in g["cls"]), f"the flag stays: {got}"
+        assert g["row"] == "dd-row", f"a finished row is neither dimmed nor boxed: {got}"
+
+
 def t_estimated_rows_keep_their_gap_and_tag():
     got = _tower(f"""
       const e = Object.assign({{}}, {json.dumps(CAR)}, {{status: "est", finished: true}});
@@ -159,6 +175,9 @@ def t_the_public_page_flags_a_finished_row_with_its_gap():
     assert 'e.finished ? "Finished"' not in page, "the public page shows the flag, not the word"
     assert "function finishedGap(" in page and "chequer" in page, \
         "a finished row's gap cell carries the chequered flag"
+    gap = page[page.index("gap: cell(\"gap\""):page.index("int: cell(")]
+    assert gap.index("e.finished ? finishedGap") < gap.index("STATUS[e.status]"), \
+        "a finish is final: the flag and gap stay when the car parks or leaves"
 
 
 if __name__ == "__main__":

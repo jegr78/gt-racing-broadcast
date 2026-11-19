@@ -811,7 +811,7 @@ class Race:
             car = self._cars[e.active]
             quiet = self._quiet(e, now)
             lapped = gap = interval = gap_time = interval_time = None
-            if e.distance is not None and not quiet:
+            if e.distance is not None and (not quiet or e.finished_at is not None):   # a finish is final
                 lapped, gap = self._behind(ents[0], e) if i else (0, 0)
                 interval = self._behind(ents[i - 1], e)[1] if i else None
                 gap_time = self._time_behind(ents[0], e, now) if i else 0.0

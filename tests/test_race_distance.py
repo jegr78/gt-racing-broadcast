@@ -137,6 +137,18 @@ def t_lap_count_finish_ends_the_leader_then_each_car_at_its_next_crossing():
     assert _row(race, "B", t)["distance_m"] == frozen, "a finished car's distance is frozen"
 
 
+def t_a_finished_car_keeps_its_final_gap_after_its_data_stops():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)
+    t = _drive(race, [a, b], [50, 50], 0.0, (2 * L + 5) / 50 + 12)     # both take the flag
+    final = _row(race, "B", t)["gap_s"]
+    assert _row(race, "B", t)["finished"] and final is not None, race.standings(t)
+    t += rd.NO_DATA_S + 5                                                # both senders leave
+    row = _row(race, "B", t)
+    assert row["status"] == "no_data", row
+    assert row["gap_s"] == final, f"the final gap stays after the data stops: {row}"
+
+
 def t_the_corrected_leader_takes_the_flag_first():
     race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)

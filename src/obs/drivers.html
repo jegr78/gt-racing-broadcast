@@ -150,16 +150,19 @@
   function fuelCell(e) {
     const quiet = e.status === "est" || e.status === "no_data" || e.status === "dc";
     const pct = quiet ? null : fuelPct(e);
-    const cell = el("span", "dd-fuel" + (pct !== null && e.fuel_l <= 10 ? " low" : ""));
+    const cell = el("span", "dd-fuel" + (pct !== null && pct <= 10 ? " low" : ""));
+    if (pct === null) return cell;   // no bar: an empty one would read as an empty tank
     const bar = el("span", "dd-fuel-bar");
     const level = el("i");
-    level.style.height = (pct || 0) + "%";
+    level.style.height = pct + "%";
     bar.appendChild(level);
     cell.appendChild(bar);
-    cell.appendChild(el("span", "", pct === null ? "" : pct + "%"));
+    cell.appendChild(el("span", "", pct + "%"));
     return cell;
   }
+  function flagged(e) { return e.finished && e.status !== "est"; }
   function column(e, i) {
+    if (flagged(e)) return gapText(e, i);   // a finish is final, wherever the car is now
     if (e.status === "box") return "Box";
     if (e.status === "no_data") return "No data";
     if (e.status === "dc") return "DC";
@@ -169,12 +172,13 @@
       if (e.lapped) return "+" + e.lapped + " L";
       return typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(e.gap_s < 100 ? 1 : 0) : "";
     }
-    if (!e.finished && phase() === 1 && e.last_lap_ms) return lapTime(e.last_lap_ms);
+    if (phase() === 1 && e.last_lap_ms) return lapTime(e.last_lap_ms);
     return gapText(e, i);
   }
   function row(e, i, value, pits, fl) {
-    const r = el("div", "dd-row" + (e.status === "box" ? " box" : "") +
-                       (e.status === "no_data" || e.status === "dc" ? " off" : ""));
+    const done = flagged(e);
+    const r = el("div", "dd-row" + (done ? "" : e.status === "box" ? " box" :
+                                    e.status === "no_data" || e.status === "dc" ? " off" : ""));
     r.appendChild(el("span", "dd-pos", String(e.pos)));
     const num = el("span", "dd-num", e.number || String(e.entry || "").slice(0, 3));
     num.style.background = safeColor(e.color, "#39414d");
@@ -185,18 +189,17 @@
     name.appendChild(el("span", "dd-driver", surname(e.driver)));
     r.appendChild(name);
     const slots = (showTyre ? 1 : 0) + (showFuel ? 1 : 0);
-    const flagged = e.finished && e.status !== "est";
-    if (flagged && slots) {   // the chequered flag takes the tyre and fuel columns
+    if (done && slots) {   // the chequered flag takes the tyre and fuel columns
       const flag = el("span", "dd-flag");
       flag.style.gridColumn = "span " + slots;
       r.appendChild(flag);
-    } else if (!flagged) {
+    } else if (!done) {
       const code = ["RS", "RM", "RH", "I", "W"].indexOf(e.compound) >= 0 ? e.compound : "";
       r.appendChild(el("span", "dd-tyre" + (code ? " " + code : ""), code));
       r.appendChild(fuelCell(e));
     }
     const val = el("span", "dd-val" + (fl ? " fl" : ""));
-    if (flagged && !slots) val.appendChild(el("span", "dd-flag"));
+    if (done && !slots) val.appendChild(el("span", "dd-flag"));
     val.appendChild(document.createTextNode(value));
     if (e.status === "est") val.appendChild(el("span", "dd-est", "EST"));
     r.appendChild(val);
