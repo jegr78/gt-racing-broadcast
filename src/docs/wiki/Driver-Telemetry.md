@@ -107,7 +107,8 @@ and says so. Changing the layout mid-event starts the race over.
   clicks). It stops counting, drops below every running car and shows **DNF** on every
   screen, the recording and its CSV included; its dot leaves the track map. Several
   retired cars rank by the distance they covered. A retired car raises no disconnect
-  event, ends its estimate and cannot be an estimate's reference. **Undo DNF** takes
+  event, ends its estimate and cannot be an estimate's reference; an estimate that
+  followed it ends too, so Race Control attaches that car to another one. **Undo DNF** takes
   back a mis-press: the car counts on from its last distance.
 - **Pit stops** count every box stop the car drives out of. The count is an estimate:
   the relay sees a stop as standing off the racing line, so a car beached beside the

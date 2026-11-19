@@ -1050,6 +1050,15 @@ def t_a_retired_car_raises_no_disconnect_and_records_as_retired():
     assert sample["B"]["status"] == "retired", sample
 
 
+def t_a_reference_retirement_ends_the_estimate_in_the_audit():
+    svc, clock, path, _ctx = _roster_service()
+    svc.estimate("rc:Cy", "X", "A", 1.0)
+    st = svc.retire("rc:Anna", "A", True)
+    assert _rows(st)["X"]["status"] == "no_sender" and _rows(st)["X"]["estimate"] is None, _rows(st)["X"]
+    ends = [r for r in _audit(path) if r["action"] == "estimate_end"]
+    assert [(r["who"], r["entry"], r["reason"]) for r in ends] == [("rc:Anna", "X", "reference_retired")], ends
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

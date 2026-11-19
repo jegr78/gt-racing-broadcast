@@ -223,12 +223,16 @@ class Race:
 
     def retire(self, entry, on, now):
         """Mark a car retired (DNF), or undo it: the car then counts on from its last
-        distance."""
+        distance. Returns the entries whose estimate followed the retired car and ended."""
         self._advance(now)
         ent = self._entries.get(entry)
+        ended = []
         if on:
             self._retired.add(entry)
             self._est.pop(entry, None)
+            ended = [e for e, est in self._est.items() if est["ref"] == entry]
+            for e in ended:
+                del self._est[e]
             if ent is not None:
                 ent.resume, ent.waiting, ent.frozen = False, False, None
                 car = self._cars.get(ent.active)
@@ -240,6 +244,7 @@ class Race:
                 ent.finished_at = now              # a finish by hand classifies it where it stopped
             elif ent is not None and ent.distance is not None:
                 ent.resume = True
+        return ended
 
     def _out(self, ent):
         return ent.entry in self._retired
@@ -376,7 +381,7 @@ class Race:
                 est["on"] = False
                 continue
             if ref is not None and ref.distance is not None and self._red is None \
-                    and not self._finished and ent.finished_at is None and not self._out(ref) \
+                    and not self._finished and ent.finished_at is None \
                     and ref.finished_at is None and not ref.waiting and not self._quiet(ref, now):
                 d, lag = self._distance_at(ref, now - est["seconds"]), est["seconds"]
                 first = self._first(ref)

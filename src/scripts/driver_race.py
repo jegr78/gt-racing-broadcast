@@ -938,8 +938,10 @@ class Service:
             doc["retired"] = sorted(marks)
         with self._lock:
             self._save_actions(update)
-            self._current().retire(entry, on, self._clock())
+            ended = self._current().retire(entry, on, self._clock())
             self._log(who, "retire", entry=entry, on=on)
+            for other in ended:
+                self._log(who, "estimate_end", entry=other, reason="reference_retired")
         return self.standings()
 
     def set_driver_name(self, who, entry, name):

@@ -1225,15 +1225,16 @@ def t_a_retirement_ends_its_estimate_and_it_is_no_reference():
     _raises(lambda: race.estimate("B", "A", 1.0, t), "a retired car takes no estimate")
 
 
-def t_an_estimate_holds_when_its_reference_retires():
+def t_an_estimate_ends_when_its_reference_retires():
     race, (a, b, c, d), t = _retire_field()
     t = _drive(race, [a, b, d], [40] * 3, t, rd.NO_DATA_S + 1)
     race.estimate("C", "B", 1.0, t)
     t = _drive(race, [a, b, d], [40] * 3, t, 1)
-    race.retire("B", True, t)
-    held = _row(race, "C", t)["distance_m"]
-    t = _drive(race, [a, b, d], [40] * 3, t, 3)
-    assert _row(race, "C", t)["distance_m"] == held, "it no longer follows a retired car"
+    assert race.retire("B", True, t) == ["C"], "the retirement names the estimate it ended"
+    rc = _row(race, "C", t)
+    assert rc["status"] == "no_data" and rc["estimate"] is None, f"Race Control re-attaches it: {rc}"
+    assert race.retire("B", False, t) == []
+    assert _row(race, "C", t)["estimate"] is None, "undoing the DNF does not bring the estimate back"
 
 
 def t_a_retired_leader_does_not_hold_back_the_flag():
