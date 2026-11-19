@@ -638,6 +638,15 @@ def _flush(svc):
     svc._recorder()._writer.flush()
 
 
+def t_tick_hands_the_viewer_classes_to_the_recorder():
+    svc, _wall, _d = _recording_service()
+    seen = []
+    svc._viewer = lambda ctx: {"classes": [{"name": "GT3"}], "entries": []}
+    svc._observe = lambda standings, classes=None: seen.append(classes)
+    svc.tick()
+    assert seen == [[{"name": "GT3"}]], seen
+
+
 def t_tick_records_in_race_mode_only():
     mode = ["race"]
     svc, wall, _d = _recording_service(enabled=lambda: mode[0] == "race")

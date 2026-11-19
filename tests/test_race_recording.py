@@ -715,6 +715,50 @@ def t_decide_rejects_a_decision_that_is_no_string():
             h.close()
 
 
+def _class_st(classed=True):
+    rows = [_srow("1", **({"class": "GT3", "class_pos": 1} if classed else {})),
+            _srow("2", **({"class": "GT4", "class_pos": 1} if classed else {}))]
+    st = _st(rows=rows)
+    st["classes"] = ["GT3", "GT4"] if classed else []
+    return st
+
+
+def t_samples_and_csv_carry_the_class():
+    meta = [{"name": "GT3", "color": "#f00", "lap": 4, "laps": 30, "x": 1},
+            {"name": "GT4", "color": "#0f0", "lap": 3, "laps": None}]
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_class_st(), {}, 100.0, meta)
+            h.flush()
+            doc = h.store.sample_at(100.0)
+            assert doc["rows"][0]["class"] == "GT3" and doc["rows"][0]["class_pos"] == 1, doc
+            assert doc["rows"][1]["class"] == "GT4", doc
+            assert doc["classes"][0] == {"name": "GT3", "color": "#f00", "lap": 4, "laps": 30}, doc
+            rows = list(h.store.csv_rows())
+            assert "class,class_pos" in ",".join(rows[0]), rows[0]
+            col = rows[0].index("class")
+            assert rows[1][col:col + 2] == ["GT3", 1], rows[1]
+        finally:
+            h.close()
+
+
+def t_a_single_class_recording_stays_as_before():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_class_st(classed=False), {}, 100.0, [{"name": "GT3"}])
+            h.flush()
+            doc = h.store.sample_at(100.0)
+            assert "classes" not in doc, doc
+            assert "class" not in doc["rows"][0] and "class_pos" not in doc["rows"][0], doc
+            rows = list(h.store.csv_rows())
+            col = rows[0].index("class")
+            assert all(c in (None, "") for c in rows[1][col:col + 2]), rows[1]
+        finally:
+            h.close()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

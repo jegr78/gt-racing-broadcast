@@ -737,7 +737,7 @@ class Service:
             standings = self._current().standings(self._clock()) if recording else None
         if recording:
             self._mark_dc(standings["entries"])
-            self._observe(standings)
+            self._observe(standings, snap.get("classes"))
         self.save_fastest()
 
     def open_recording(self):
@@ -746,12 +746,12 @@ class Service:
         if self._recording_dir and self._enabled():
             self._guarded(self._recorder)
 
-    def _observe(self, standings):
+    def _observe(self, standings, classes=None):
         """Feed the recorder; a recording failure never stops the tick."""
         if self._rec is None and (not self._rec_allowed or self._clock() < self._rec_retry):
             return
         self._guarded(lambda: self._recorder().observe(
-            standings, self._compound_codes, self._wall()))
+            standings, self._compound_codes, self._wall(), classes))
 
     def _guarded(self, fn):
         """Run fn; any failure is logged once and backs off RECORDING_RETRY_S."""

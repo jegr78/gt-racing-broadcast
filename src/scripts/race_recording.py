@@ -17,7 +17,7 @@ POINTER = "race-recording.json"
 _SAMPLE_COLUMNS = ["state", "red_flag"]
 _ROW_COLUMNS = ["pos", "entry", "driver", "laps", "gap_time_s", "interval_time_s", "lapped",
                 "status", "finished", "compound", "pit_stops", "correction_m", "rejoin",
-                "gt7_position", "position_mismatch"]
+                "gt7_position", "position_mismatch", "class", "class_pos"]
 CSV_HEADER = ["time_utc"] + _SAMPLE_COLUMNS + _ROW_COLUMNS
 SAMPLE_EVERY_S = 1.0
 COUNTING_STATES = ("racing", "final_lap", "finishing")
@@ -288,8 +288,9 @@ class Recorder:
                 self._meta("stopped_by", who)
             return self._status_head()
 
-    def observe(self, standings, compounds, now_wall):
-        """`compounds` is {entry: code} or a callable giving it, read only when a sample is due."""
+    def observe(self, standings, compounds, now_wall, classes=None):
+        """`compounds` is {entry: code} or a callable giving it, read only when a sample is due.
+        `classes` is the viewer's [{name, color, lap, laps}], kept only in class mode."""
         with self._lock:
             state = standings.get("state")
             if state in COUNTING_STATES and not self._auto_done:
@@ -304,7 +305,7 @@ class Recorder:
                 self._meta("auto_started", "0")
             self._last_state = state
             if self._running and self._sample_due(now_wall):
-                doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {})
+                doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {}, classes)
                 if self._writer.put(lambda s: s.add_sample(now_wall, doc)):
                     lo, hi = self._span or (now_wall, now_wall)
                     self._span = (min(lo, now_wall), max(hi, now_wall))
@@ -400,11 +401,18 @@ class Recorder:
         return out
 
 
-def _sample(standings, compounds):
+def _sample(standings, compounds, classes=None):
+    in_classes = bool(standings.get("classes"))
     rows = []
     for i, r in enumerate(standings.get("entries") or []):
         row = {"pos": i + 1, **{k: r.get(k) for k in SAMPLE_FIELDS}}
         row["compound"] = compounds.get(r.get("entry"))
+        if in_classes:
+            row["class"] = r.get("class")
+            row["class_pos"] = r.get("class_pos")
         rows.append(row)
-    return {"state": standings.get("state"), "red_flag": standings.get("red_flag"),
-            "rows": rows}
+    doc = {"state": standings.get("state"), "red_flag": standings.get("red_flag"),
+           "rows": rows}
+    if in_classes and classes:
+        doc["classes"] = [{k: c.get(k) for k in ("name", "color", "lap", "laps")} for c in classes]
+    return doc
