@@ -1060,6 +1060,32 @@ def t_a_bad_name_in_the_actions_file_is_dropped():
     json.dumps(st, ensure_ascii=False).encode("utf-8")
 
 
+
+def t_an_entry_with_a_lone_surrogate_is_refused_by_every_action():
+    svc, clock, path, _ctx = _roster_service()
+    for act in (lambda: svc.retire("rc:Anna", "A\ud800", True),
+                lambda: svc.set_compound("rc:Anna", "A\ud800", "RM")):
+        try:
+            act()
+            raise AssertionError("an entry that cannot be written as UTF-8 must be refused")
+        except ValueError:
+            pass  # expected
+    doc = dr._read_json(dr._actions_path_for(path))
+    assert not doc.get("retired") and not doc.get("compounds"), f"nothing is stored: {doc}"
+    json.dumps(svc.standings(), ensure_ascii=False).encode("utf-8")
+
+
+def t_a_fastest_lap_with_a_bad_driver_name_is_not_loaded():
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "fastest.json")
+        for driver in ("M\ud800", "Ann\u202e"):
+            with open(f, "w", encoding="utf-8") as fh:
+                json.dump({"track": "t", "entry": "A", "driver": driver, "ms": 90000}, fh)
+            assert dr._saved_fastest(f, "t") is None, f"a saved fastest lap with {driver!r} is dropped"
+        with open(f, "w", encoding="utf-8") as fh:
+            json.dump({"track": "t", "entry": "A", "driver": "x" * 32, "ms": 90000}, fh)
+        assert dr._saved_fastest(f, "t") is not None, "an old 32 character name still loads"
+
 def t_the_audit_is_written_before_the_name_changes():
     svc, clock, path, _ctx = _roster_service()
     svc._log = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("audit failed"))

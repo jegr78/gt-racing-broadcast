@@ -213,7 +213,8 @@ def _saved_fastest(path, track):
     doc = _read_json(path)
     entry, driver, ms = doc.get("entry"), doc.get("driver"), doc.get("ms")
     if doc.get("track") == track and isinstance(entry, str) and isinstance(driver, str) \
-            and type(ms) is int and ms > 0 and len(entry) <= MAX_ENTRY and len(driver) <= MAX_ENTRY:
+            and type(ms) is int and ms > 0 and len(entry) <= MAX_ENTRY \
+            and _valid_name(driver, rule=driver_invite.KNOWN_NAME):
         return {"entry": entry, "driver": driver, "ms": ms}
     return None
 
@@ -400,6 +401,10 @@ def _saved_quali(path, segment):
 def _entry_name(entry):
     if not isinstance(entry, str) or not entry.strip() or len(entry) > MAX_ENTRY:
         raise ValueError(f"entry is 1 to {MAX_ENTRY} characters")
+    try:
+        entry.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("entry is not valid text") from None
     return entry.strip()
 
 
@@ -955,9 +960,9 @@ class Service:
             (marks.add if on else marks.discard)(entry)
             doc["retired"] = sorted(marks)
         with self._lock:
+            self._log(who, "retire", entry=entry, on=on)
             self._save_actions(update)
             ended = self._current().retire(entry, on, self._clock())
-            self._log(who, "retire", entry=entry, on=on)
             for other in ended:
                 self._log(who, "estimate_end", entry=other, reason="reference_retired")
         return self.standings()
