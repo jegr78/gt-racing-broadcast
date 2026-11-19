@@ -90,6 +90,7 @@ and says so. Changing the layout mid-event starts the race over.
   the relay is in qualifying mode.
 - **Gap and interval** are the time the car ahead needed from the same point. A car a
   full lap or more down shows `+N L`.
+- **Timing tower** (the on-air `drivers.html`): the gap column shows the gap to the leader. The desks show exact gaps for lapped cars too, as `+1 L · 1:02.5`. The public timing page and the cockpit are unchanged, and exact gaps never reach the public view.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
   while its sender has been quiet for five seconds; the entry keeps its place.
 - **Pit stops** count every box stop the car drives out of. The count is an estimate:
@@ -265,6 +266,35 @@ Corrections and rejoin marks survive a relay restart; a race reset and the next
 and when in `runtime/<profile>/driver-race-audit.jsonl`. Race Control and the director
 use them from the Race Control desk ([Console](Console)) and the Director Panel
 ([Director](Director#driver-telemetry)).
+
+### Race recording and disconnect events
+
+The relay records the live race for Race Control to review after the fact.
+
+- **Recording** runs in race mode only. It starts when the first car starts counting and
+  stops at the finish; a later race in the same event starts it again. The director and
+  Race Control can start and stop it by hand; in qualifying the desk refuses a start. It
+  stores one sample per second of the live, undelayed standings in one SQLite file per
+  event, `runtime/<profile>/race-recording-<UTC stamp>.sqlite`, named by the pointer
+  `race-recording.json`. A fresh `event start` with the relay stopped begins a new file.
+  An `event start` on an already running relay continues the current recording, like the
+  invite. A relay restart resumes the recording. The desk's **Download CSV** exports it
+  with spreadsheet formulas neutralised, and **Browse recording** opens the frozen
+  standings page at the end of the recording. A recording error never stops the race or the
+  fastest-lap save; the desk warns when samples were dropped.
+- **Disconnect events** open while the recording runs, when a car with a distance sends
+  no data for five seconds. The event is dated by the car's last packet. There is none for
+  a car in the box during the driver change window, none under a red flag, none for a car
+  still waiting for its red flag restart and none for a car that took the flag.
+  States: **suspected**, **dropout** (data came back), **confirmed** and **dismissed**.
+  The director or Race Control confirms or dismisses an event on the desk; the decision
+  is logged in `driver-race-audit.jsonl`. A desk can play a sound on a new suspicion
+  (checkbox, per browser, off by default). The relay decides nothing about a rejoin;
+  that stays with Race Control.
+- **Show standings** opens the frozen standings page for a moment: 5, 10, 15, 20 or 30
+  seconds before the event's last packet (default 10). Its slider covers the whole
+  recording, and it follows a recording that still runs. It opens through the console,
+  for the director and Race Control.
 
 The box detection and the lap counter in the pit lane are not yet confirmed against a
 recording of real pit stops. The race lives in the relay's memory: a relay restart

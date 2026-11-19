@@ -78,6 +78,12 @@ Standby Cover, sets the HUD banner *Red Flag - Race Suspended* and holds the rac
 it says when the cover or the banner could not be set. **Restart released** lowers the
 cover and clears the banner again. Every action is logged with the person's name.
 
+The card also holds the **race recording** and its disconnect events: start and stop
+recording, a CSV download, the event list with **Confirm DC** and **Dismiss**, and **Show
+standings** with a choice of 5 to 30 seconds before the last packet, which opens the frozen
+standings page. Race Control and the director can use all of it. Details:
+[Driver telemetry](Driver-Telemetry#race-recording-and-disconnect-events).
+
 ### On a phone
 
 The Commentator Cockpit and the Race Control desk use the same layout on a narrow screen

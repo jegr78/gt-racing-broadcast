@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race snapshot</title>
+<!-- The frozen standings from the race recording, opened from a desk's DC event. Every
+     fetch is relative, so the page works under /console/drivers, /console/race-control/drivers
+     and the tailnet /drivers. Every server string goes in through textContent. -->
+<style>
+  :root { color-scheme: dark; --bg: #0b0d10; --panel: #14171c; --panel-2: #1b1f25; --edge: #2a2f37;
+          --ink: #e8eaed; --muted: #9aa0a6; --accent: #2bd66a; --bad: #ff4d5e; --amb: #ffb454;
+          --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 10px 14px;
+           background: var(--panel); border-bottom: 1px solid var(--edge); }
+  h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  main { padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; max-width: 1100px; }
+  .muted { color: var(--muted); }
+  .mono { font-family: var(--mono); }
+  .stamp { font-family: var(--mono); font-size: 15px; }
+  .slider { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .slider .edge { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  input[type=range] { -webkit-appearance: none; appearance: none; flex: 1 1 16em; min-width: 0; height: 22px;
+                      background: transparent; margin: 0; cursor: pointer; }
+  input[type=range]:disabled { cursor: default; opacity: .45; }
+  input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--edge); }
+  input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--edge); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px;
+                                            border-radius: 50%; background: var(--ink); border: 2px solid var(--panel-2); }
+  input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--ink);
+                                        border: 2px solid var(--panel-2); }
+  input[type=range]:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
+  .note { min-height: 1.3em; }
+  .note.err { color: var(--bad); }
+  .banner { border: 1px solid var(--bad); color: var(--bad); border-radius: 6px; padding: 6px 9px; }
+  .tbl { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--edge); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  th.num { text-align: right; }
+  td.num { font-family: var(--mono); font-size: 13px; text-align: right; white-space: nowrap; }
+  .pill { display: inline-block; border-radius: 9px; padding: 1px 7px; font-size: 11px; border: 1px solid var(--edge);
+          margin-right: 4px; }
+  .pill.ok { border-color: var(--accent); color: var(--accent); }
+  .pill.bad { border-color: var(--bad); color: var(--bad); }
+  .pill.amb { border-color: var(--amb); color: var(--amb); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Race snapshot</h1>
+  <span class="stamp" id="stamp">-</span>
+  <span class="muted" id="state"></span>
+</header>
+<main>
+  <div class="slider">
+    <span class="edge" id="from"></span>
+    <input type="range" id="slider" min="0" max="0" step="1" value="0" disabled aria-label="Recording time">
+    <span class="edge" id="to"></span>
+  </div>
+  <div class="note muted" id="note" role="status"></div>
+  <div class="banner" id="red" hidden>Red flag</div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th class="num">Pos</th><th>Entry</th><th class="num">Laps</th><th class="num">Gap</th>
+        <th class="num">Int.</th><th>Status</th><th class="num">Pits</th><th class="num">Corr.</th><th>Tyre</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"],
+                waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
+  var STATES = {waiting: "Waiting for the start", final_lap: "Final lap", finishing: "Finishing",
+                finished: "Finished", no_line: "No distance"};
+  var $ = function (id) { return document.getElementById(id); };
+  var slider = $("slider"), note = $("note");
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function secs(v) {
+    return typeof v !== "number" ? "" :
+      (v < 60 ? v.toFixed(1) : Math.floor(v / 60) + ":" + (v % 60).toFixed(1).padStart(4, "0"));
+  }
+  function clock(t) { return new Date(t * 1000).toLocaleTimeString(); }
+  function say(text, err) { note.textContent = text || ""; note.className = "note " + (err ? "err" : "muted"); }
+  function failure(status) {
+    return {404: "No recording yet.", 503: "Recording unavailable.", 403: "Not allowed for this login.",
+            400: "No valid time in the link."}[status] || "Request failed (" + status + ").";
+  }
+
+  async function get(path) {
+    try {
+      var r = await fetch(path, {cache: "no-store"});
+      var d = await r.json().catch(function () { return null; });
+      return {status: r.status, data: r.ok ? d : null};
+    } catch (e) { return {status: 0, data: null}; }
+  }
+
+  function render(s) {
+    $("stamp").textContent = clock(s.t);
+    $("state").textContent = STATES[s.state] || "";
+    $("red").hidden = !s.red_flag;
+    var rows = (s.rows || []).map(function (e) {
+      var tr = el("tr");
+      var st = STATUS[e.status] || [String(e.status || ""), ""];
+      var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
+                         : (e.pos > 1 ? secs(e.gap_time_s) : "");
+      var entry = el("td");
+      entry.append(el("div", "", e.entry), el("div", "muted", e.driver || ""));
+      var status = el("td");
+      if (st[0]) status.append(el("span", "pill " + st[1], st[0]));
+      if (e.finished) status.append(el("span", "pill ok", "Finished"));
+      if (e.rejoin) status.append(el("span", "pill amb", "Rejoin"));
+      if (e.position_mismatch) status.append(el("span", "pill amb", "GT7 P" + e.gt7_position));
+      tr.append(el("td", "num", String(e.pos)), entry, el("td", "num", e.laps == null ? "" : String(e.laps)),
+                el("td", "num", gap), el("td", "num", e.pos > 1 ? secs(e.interval_time_s) : ""), status,
+                el("td", "num", e.pit_stops == null ? "" : String(e.pit_stops)),
+                el("td", "num", e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""),
+                el("td", "mono", e.compound || ""));
+      return tr;
+    });
+    if (!rows.length) {
+      var td = el("td", "muted", "No cars in this sample.");
+      td.colSpan = 9;
+      var tr = el("tr"); tr.append(td); rows = [tr];
+    }
+    $("rows").replaceChildren.apply($("rows"), rows);
+  }
+
+  async function show(t) {
+    // A fresh query on purpose: the console token never lands in this page's links.
+    history.replaceState(null, "", location.pathname + "?time=" + encodeURIComponent(t.toFixed(1)));
+    var r = await get("./race/recording/at?time=" + encodeURIComponent(t));
+    if (!r.data) { $("rows").replaceChildren(); return say(failure(r.status), r.status !== 404); }
+    say(Math.abs(r.data.t - t) > 2 ? "Nearest sample to " + clock(t) + "." : "");
+    render(r.data);
+    shown = true;
+  }
+
+  var timer = null;
+  slider.addEventListener("input", function () {
+    clearTimeout(timer);
+    var v = parseFloat(slider.value);
+    $("stamp").textContent = clock(v);
+    timer = setTimeout(function () { show(v); }, 150);
+  });
+
+  var shown = false;                  // true once a sample is on screen
+  var wanted = parseFloat(new URLSearchParams(location.search).get("time"));
+
+  // A running recording grows: the slider's range follows it, the chosen time stays.
+  // The first span also brings the first sample to a page opened before there was one.
+  async function loadSpan() {
+    var st = await get("./race/recording");
+    var span = st.data && st.data.span;
+    if (span) {
+      slider.min = String(Math.floor(span[0]));
+      slider.max = String(Math.ceil(span[1]));
+      slider.disabled = false;
+      $("from").textContent = clock(span[0]);
+      $("to").textContent = clock(span[1]);
+      if (!shown) {
+        var t = isFinite(wanted) ? wanted : span[1];
+        slider.value = String(Math.round(t));
+        await show(t);
+      }
+    }
+    return {status: st.status, span: span};
+  }
+
+  (async function start() {
+    var st = await loadSpan();
+    setInterval(loadSpan, 10000);
+    if (!st.span) say(st.status && st.status !== 200 ? failure(st.status) : "No recording yet.",
+                      st.status !== 200 && st.status !== 404);
+  })();
+})();
+</script>
+</body>
+</html>

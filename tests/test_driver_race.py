@@ -550,6 +550,245 @@ def t_the_public_view_is_timing_only_and_follows_the_switches():
     assert dr.public_view(None) == {"v": 1, "mode": "race", "entries": []}
 
 
+def t_public_view_has_no_exact_gaps():
+    snap = {"v": 1, "mode": "race", "show": {"compound": True, "fuel": True},
+            "entries": [{"entry": "A", "gap_s": 1.0, "gap_time_s": 61.0, "interval_time_s": 61.0,
+                         "quiet_s": 0.2, "in_box": False}]}
+    row = dr.public_view(snap)["entries"][0]
+    assert row["gap_s"] == 1.0 and not {"gap_time_s", "interval_time_s", "quiet_s", "in_box"} & set(row), row
+
+
+def _recording_service(enabled=lambda: True):
+    d = tempfile.mkdtemp()
+    wall = [1000.0]
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     enabled=enabled, wall=lambda: wall[0], recording_dir=d)
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
+    svc.open_recording()
+    return svc, wall, d
+
+
+def _flush(svc):
+    svc._recorder()._writer.flush()
+
+
+def t_tick_records_in_race_mode_only():
+    mode = ["race"]
+    svc, wall, _d = _recording_service(enabled=lambda: mode[0] == "race")
+    svc.recording_start("pit")
+    svc.tick()
+    _flush(svc)
+    assert svc.recording_status()["span"] is not None, "race mode: tick records a sample"
+    mode[0] = "qualifying"
+    wall[0] += 5
+    svc.tick()
+    _flush(svc)
+    span = svc.recording_status()["span"]
+    assert span[0] == span[1] == 1000.0, f"qualifying mode records nothing: {span}"
+    assert svc.recording_at(1000.0)["rows"][0]["entry"] == "A"
+    assert svc.recording_csv()[0][0] == "time_utc"
+
+
+def t_recording_start_is_audited():
+    svc, _wall, d = _recording_service()
+    svc.recording_start("Anna")
+    svc.recording_stop("Ben")
+    svc._recorder()._events[1] = {"id": 1, "entry": "A", "state": "suspected"}
+    svc._recorder()._store.add_event({"id": 1, "entry": "A", "state": "suspected"})
+    svc.recording_decide("Cy", "1", "confirm")
+    svc.recording_decide("Cy", 1, "dismiss")
+    try:
+        svc.recording_decide("Cy", "x", "confirm")
+        raise AssertionError("a bad id must raise")
+    except ValueError:
+        pass
+    with open(dr.audit_path_for(os.path.join(d, "driver-race.json")), encoding="utf-8") as fh:
+        recs = [json.loads(line) for line in fh]
+    got = [(r["who"], r["action"]) for r in recs]
+    assert got == [("Anna", "recording_start"), ("Ben", "recording_stop"),
+                   ("Cy", "dc_confirm"), ("Cy", "dc_dismiss")], got
+
+
+def t_the_recording_carries_the_compound_code():
+    svc, wall, _d = _recording_service()
+    svc.set_compound("pit", "A", "RS")
+    svc.recording_start("pit")
+    svc.tick()
+    _flush(svc)
+    assert svc.recording_at(1000.0)["rows"][0]["compound"] == "RS", svc.recording_at(1000.0)
+
+
+def t_a_failing_recording_does_not_stop_the_fastest_lap_save():
+    d = tempfile.mkdtemp()
+    blocker = os.path.join(d, "file")
+    open(blocker, "w").close()
+    wall = [1000.0]
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     wall=lambda: wall[0], recording_dir=os.path.join(blocker, "sub"))
+    svc.open_recording()
+    svc.set_fastest("pit", "A", "Max", 90000)
+    svc.tick()
+    assert os.path.exists(svc._fastest_path()), "the fastest lap is saved although recording failed"
+    opened = []
+    real = dr.race_recording.open_current
+    dr.race_recording.open_current = lambda *a: opened.append(1) or real(*a)
+    try:
+        svc.tick()
+        assert not opened, "a failed open is not retried within the backoff"
+        wall[0] += dr.RECORDING_RETRY_S + 1
+        svc.tick()
+        assert opened, "it retries after the backoff"
+    finally:
+        dr.race_recording.open_current = real
+
+
+def t_recording_without_a_directory_and_unknown_events_raise():
+    svc = dr.Service(os.path.join(tempfile.mkdtemp(), "driver-race.json"), pick=lambda: None,
+                     trace_for=lambda i: None, multi_lobby=lambda: False)
+    try:
+        svc.recording_status()
+        raise AssertionError("no recording_dir must raise")
+    except RuntimeError as e:
+        assert "unavailable" in str(e)
+    svc, _wall, _d = _recording_service()
+    try:
+        svc.recording_decide("Cy", "99", "confirm")
+        raise AssertionError("an unknown id must raise")
+    except KeyError:
+        pass  # the route maps this to 404
+
+
+def t_a_qualifying_relay_neither_records_nor_creates_a_file():
+    d = tempfile.mkdtemp()
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False,
+                     enabled=lambda: False, recording_dir=d)
+    st = svc.recording_status()
+    assert st["running"] is False and st["available"] is True, st
+    assert st["span"] is None and st["events"] == [], st
+    try:
+        svc.recording_start("pit")
+        raise AssertionError("a manual start in qualifying must be refused")
+    except dr.NotRaceMode:
+        pass
+    svc.tick()
+    assert not [f for f in os.listdir(d) if f.startswith("race-recording")], os.listdir(d)
+
+
+def t_nothing_opens_a_recording_before_open_recording():
+    d = tempfile.mkdtemp()
+    wall = [1000.0]
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     wall=lambda: wall[0], recording_dir=d)
+    svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
+
+    def files():
+        return [f for f in os.listdir(d) if f.startswith("race-recording")]
+    svc.tick()
+    st = svc.recording_status()
+    assert st["running"] is False and st["span"] is None, st
+    for act in (lambda: svc.recording_start("pit"), lambda: svc.recording_stop("pit")):
+        try:
+            act()
+        except RuntimeError:
+            pass  # the route answers 503 until the relay owns its port
+    assert files() == [], f"a relay that may still lose its port touches no recording: {files()}"
+    svc.open_recording()
+    assert "race-recording.json" in files() and len(files()) > 1, files()
+    q = dr.Service(os.path.join(d, "q.json"), pick=lambda: None, trace_for=lambda i: None,
+                   multi_lobby=lambda: False, enabled=lambda: False, recording_dir=tempfile.mkdtemp())
+    q.open_recording()
+    assert q._rec is None, "qualifying opens nothing"
+
+
+def _failing_service():
+    d = tempfile.mkdtemp()
+    blocker = os.path.join(d, "file")
+    open(blocker, "w").close()
+    wall = [1000.0]
+    svc = dr.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "good"},
+                     trace_for=lambda i: TRACE, multi_lobby=lambda: False, clock=lambda: wall[0],
+                     wall=lambda: wall[0], recording_dir=os.path.join(blocker, "sub"))
+    svc.open_recording()
+    return svc
+
+
+def t_store_errors_turn_into_recording_unavailable():
+    svc = _failing_service()
+    for call in (svc.recording_status, lambda: svc.recording_start("pit"),
+                 lambda: svc.recording_at(1.0), svc.recording_csv):
+        try:
+            call()
+            raise AssertionError("an unopenable recording must raise RuntimeError")
+        except RuntimeError as e:
+            assert "unavailable" in str(e), e
+    svc, _wall, _d = _recording_service()
+    rec = svc._recorder()
+
+    class _Broken:
+        def sample_at(self, t):
+            raise dr.sqlite3.OperationalError("disk I/O error")
+
+        def csv_rows(self):
+            yield ["time_utc"]
+            raise dr.sqlite3.OperationalError("disk I/O error")
+    rec._store = _Broken()
+    for call in (lambda: svc.recording_at(1.0), svc.recording_csv):
+        try:
+            call()
+            raise AssertionError("a store error must raise RuntimeError")
+        except RuntimeError as e:
+            assert "unavailable" in str(e), e
+
+
+def t_recording_decide_rejects_bad_types():
+    svc, _wall, _d = _recording_service()
+    for event_id, decision in ((1, []), (1, None), (1.5, "confirm"), (float("inf"), "confirm"),
+                               (float("nan"), "confirm"), ([1], "confirm")):
+        try:
+            svc.recording_decide("Cy", event_id, decision)
+            raise AssertionError(f"{event_id!r}/{decision!r} accepted")
+        except ValueError:
+            pass  # the route maps this to 400
+    try:
+        svc.recording_decide("Cy", 1.0, "confirm")
+        raise AssertionError("an unknown integral float id must reach the lookup")
+    except KeyError:
+        pass
+
+
+def t_any_recorder_error_keeps_the_fastest_lap_save():
+    svc, wall, _d = _recording_service()
+
+    class _Boom:
+        def observe(self, *a):
+            raise TypeError("corrupt meta")
+    svc._rec = _Boom()
+    svc.set_fastest("pit", "A", "Max", 90000)
+    svc.tick()
+    assert os.path.exists(svc._fastest_path()), "a recorder bug never skips save_fastest"
+
+
+def t_a_recording_failure_reaches_the_relay_log():
+    import logging
+    seen = []
+
+    class _H(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+    log = logging.getLogger("racecast.relay")
+    h = _H()
+    log.addHandler(h)
+    try:
+        _failing_service()
+    finally:
+        log.removeHandler(h)
+    assert any("race recording unavailable" in m for m in seen), seen
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
