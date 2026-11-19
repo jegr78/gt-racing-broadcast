@@ -62,6 +62,7 @@ nearest the predicted distance decides.
   reference's history covers S it holds at the reference's first known distance.
 - Roster: every entry of `set_roster` stands in the order; one that never sent reads
   `no_sender` at the end until a sender connects or an estimate places it.
+- Names: Race Control may replace the shown name of one driver of an entry.
 - Retirement: a retired car (DNF) stops counting and ranks below every running car,
   retired cars among themselves by distance; undoing it counts on from that distance.
 """
@@ -205,7 +206,7 @@ class Race:
         self._est = {}              # entry -> {ref, seconds, held, lag, on}
         self._roster = []           # the Configuration entries, in order
         self._retired = set()
-        self._names = {}            # entry -> the driver Race Control named for a car without a sender
+        self._names = {}            # (entry, registered driver or "") -> the name Race Control set
         self._ended_est = []        # entries whose estimate their returning data ended
 
     # -- commands ------------------------------------------------------------------
@@ -214,12 +215,16 @@ class Race:
         without a sender."""
         self._roster = [e for e in entries if isinstance(e, str)]
 
-    def set_driver_name(self, entry, name):
-        """The driver shown for an entry without a sender; a falsy name removes it."""
+    def set_driver_name(self, entry, driver, name):
+        """Show `name` for the driver registered as `driver` ("" for an entry without a
+        sender); a falsy name removes it."""
         if name:
-            self._names[entry] = name
+            self._names[(entry, driver)] = name
         else:
-            self._names.pop(entry, None)
+            self._names.pop((entry, driver), None)
+
+    def display_name(self, entry, driver):
+        return self._names.get((entry, driver), driver)
 
     def retire(self, entry, on, now):
         """Mark a car retired (DNF), or undo it: the car then counts on from its last
@@ -921,7 +926,7 @@ class Race:
             est = self._est.get(e.entry)
             rows.append({
                 "entry": e.entry, "conn": e.active,
-                "driver": car.name if car is not _NO_CAR else self._names.get(e.entry, ""),
+                "driver": self.display_name(e.entry, car.name), "driver_registered": car.name,
                 "distance_m": None if shown is None else round(shown, 1),
                 "laps": max(0, math.floor(shown / self.length)) if shown is not None else 0,
                 "gap_s": None if lapped else (None if gap is None else round(gap, 2)),

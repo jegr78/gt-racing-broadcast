@@ -1276,13 +1276,17 @@ def t_a_retired_leader_does_not_hold_back_the_final_lap():
     assert _row(race, "B", t)["finished"], "B takes the flag at its next crossing"
 
 
-def t_a_car_without_a_sender_shows_the_driver_race_control_named():
+def t_race_control_overrides_the_name_of_one_driver_of_an_entry():
     race, (a, b), t = _field()
-    race.set_driver_name("X", "Kim Berg")
-    race.set_driver_name("A", "Not Shown")
-    assert _row(race, "X", t)["driver"] == "Kim Berg" and _row(race, "A", t)["driver"] == "Driver", \
-        "a named driver shows only for a car without a sender"
-    race.set_driver_name("X", "")
+    race.set_driver_name("X", "", "Kim Berg")
+    race.set_driver_name("A", "Driver", "Ann")
+    race.set_driver_name("B", "Somebody Else", "Zed")
+    assert _row(race, "X", t)["driver"] == "Kim Berg", "a car without a sender shows the name"
+    assert _row(race, "A", t)["driver"] == "Ann" and _row(race, "A", t)["driver_registered"] == "Driver", \
+        "a sender's name is overridden, its registered name kept for the desks"
+    assert _row(race, "B", t)["driver"] == "Driver", "another driver of the entry keeps their own name"
+    assert race.display_name("A", "Driver") == "Ann" and race.display_name("A", "Other") == "Other"
+    race.set_driver_name("X", "", "")
     assert _row(race, "X", t)["driver"] == ""
 
 

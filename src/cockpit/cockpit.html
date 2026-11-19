@@ -844,9 +844,21 @@ function timingNum(e) {
   if (/^#[0-9a-fA-F]{3,8}$/.test(e.text_color || '')) s.style.color = e.text_color;
   return {cls: 'num', node: s};
 }
+// The whole name if it fits; else the first name as an initial; else cut with an ellipsis.
+function fitName(name, max) {
+  var s = String(name || "").trim();
+  if (s.length <= max) return s;
+  var parts = s.split(/\s+/);
+  if (parts.length > 1) {
+    s = parts[0].charAt(0) + ". " + parts.slice(1).join(" ");
+    if (s.length <= max) return s;
+  }
+  return s.slice(0, max - 1) + "\u2026";
+}
+const NAME_MAX = 16;
 function timingDriver(e) {
   const d = document.createElement('div');
-  d.textContent = e.driver || '';
+  d.textContent = fitName(e.driver, NAME_MAX);
   const small = document.createElement('small');
   small.textContent = e.team || e.entry || '';
   d.appendChild(small);
@@ -940,7 +952,7 @@ async function pollTiming() {
     const s = document.createElement('span');
     s.className = 'fl'; s.textContent = 'Fastest lap ' + lapTime(fl.ms);
     flBox.appendChild(s);
-    flBox.appendChild(document.createTextNode(' · ' + fl.driver + ' (' + (fl.team || fl.entry) + ')'));
+    flBox.appendChild(document.createTextNode(' · ' + fitName(fl.driver, NAME_MAX) + ' (' + (fl.team || fl.entry) + ')'));
   }
   setTimeout(pollTiming, 2000);
 }

@@ -138,9 +138,12 @@
     const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
     return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
   }
+  const SURNAME_MAX = 8;   // what the name column holds at 20px bold
+  // The surname only (a one-word ID whole), cut with an ellipsis when it does not fit.
   function surname(name) {
     const parts = String(name || "").trim().split(/\s+/);
-    return (parts[parts.length - 1] || "").toUpperCase();
+    const s = (parts[parts.length - 1] || "").toUpperCase();
+    return s.length <= SURNAME_MAX ? s : s.slice(0, SURNAME_MAX - 1) + "\u2026";
   }
   function safeColor(c, fallback) {
     return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;

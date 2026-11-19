@@ -14956,7 +14956,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "estimate": lambda: svc.estimate(who, b.get("entry"), b.get("ref"), b.get("seconds"),
                                                          b.get("clear") is True),
                         "retire": lambda: svc.retire(who, b.get("entry"), b.get("on", True)),
-                        "driver-name": lambda: svc.set_driver_name(who, b.get("entry"), b.get("name")),
+                        "driver-name": lambda: svc.set_driver_name(who, b.get("entry"), b.get("name"),
+                                                                   b.get("driver", "")),
                     }
                     if action in actions:
                         try:

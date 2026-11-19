@@ -45,7 +45,7 @@ li{margin-bottom:6px}
       <select id="segment"><option value="">Pick your stint</option></select>
     </div>
     <label for="name">Your name</label>
-    <input id="name" maxlength="32" autocomplete="nickname" placeholder="Letters, digits, spaces, _ . -">
+    <input id="name" maxlength="24" autocomplete="nickname" placeholder="Letters, digits, spaces, _ . -">
     <button id="register" class="primary">Get my sender command</button>
     <div id="err" class="err" role="alert" hidden></div>
   </section>
@@ -121,7 +121,7 @@ li{margin-bottom:6px}
     if (multi) body.segment = $('segment').value;
     if (!body.entry) return fail('Pick your entry.');
     if (multi && !body.segment) return fail('Pick your stint or segment.');
-    if (!/^[A-Za-z0-9 _.\-]{1,32}$/.test(body.name)) return fail('Use up to 32 letters, digits, spaces, _ . - for your name.');
+    if (!/^[A-Za-z0-9 _.\-]{1,24}$/.test(body.name)) return fail('Use up to 24 letters, digits, spaces, _ . - for your name.');
     let d, r;
     try {
       r = await fetch('/console/drive/register?i=' + encodeURIComponent(invite), {method: 'POST',

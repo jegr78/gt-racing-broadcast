@@ -520,11 +520,12 @@ def t_both_desks_retire_a_car_and_name_a_driver_and_bad_input_is_refused():
                             json.dumps({"entry": ENTRIES[1], "on": False}).encode(), hdr)
         assert st == 200 and json.loads(text)["race"]["last_action"]["who"] == "director:bob", (st, text[:300])
         st, text, _h = _req(port, f"/console/drivers/race/driver-name?t={director}",
-                            json.dumps({"entry": ENTRIES[0], "name": "Kim Berg"}).encode(), hdr)
-        assert st == 200 and json.loads(text)["race"]["driver_names"] == {ENTRIES[0]: "Kim Berg"}, (st, text[:300])
+                            json.dumps({"entry": ENTRIES[0], "driver": "", "name": "Kim Berg"}).encode(), hdr)
+        assert st == 200 and json.loads(text)["race"]["driver_overrides"] == [
+            {"entry": ENTRIES[0], "driver": "", "name": "Kim Berg"}], (st, text[:300])
         st, text, _h = _req(port, f"/console/race-control/drivers/race/driver-name?t={rc}",
                             json.dumps({"entry": ENTRIES[0], "name": ""}).encode(), hdr)
-        assert st == 200 and json.loads(text)["race"]["driver_names"] == {}, (st, text[:300])
+        assert st == 200 and json.loads(text)["race"]["driver_overrides"] == [], (st, text[:300])
         for action, body in (("retire", {"entry": ENTRIES[0], "on": True}),
                              ("driver-name", {"entry": ENTRIES[0], "name": "X"})):
             assert _req(port, f"/console/drivers/race/{action}?t={alice}", json.dumps(body).encode(),
@@ -532,7 +533,9 @@ def t_both_desks_retire_a_car_and_name_a_driver_and_bad_input_is_refused():
         for action, bad in (("retire", {"entry": "Invented Team", "on": True}),
                             ("retire", {"entry": ENTRIES[0], "on": "yes"}),
                             ("driver-name", {"entry": "Invented Team", "name": "X"}),
-                            ("driver-name", {"entry": ENTRIES[0], "name": "x" * 41}),
+                            ("driver-name", {"entry": ENTRIES[0], "name": "x" * 25}),
+                            ("driver-name", {"entry": ENTRIES[0], "name": "x\ud800"}),
+                            ("driver-name", {"entry": ENTRIES[0], "driver": "a\nb", "name": "Ann"}),
                             ("driver-name", {"entry": ENTRIES[0], "name": 5})):
             st, text, _h = _req(port, f"/console/race-control/drivers/race/{action}?t={rc}",
                                 json.dumps(bad).encode(), hdr)

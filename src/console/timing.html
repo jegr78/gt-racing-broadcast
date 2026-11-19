@@ -254,8 +254,20 @@
     td.appendChild(img);
     return td;
   }
+  // The whole name if it fits; else the first name as an initial; else cut with an ellipsis.
+  function fitName(name, max) {
+    var s = String(name || "").trim();
+    if (s.length <= max) return s;
+    var parts = s.split(/\s+/);
+    if (parts.length > 1) {
+      s = parts[0].charAt(0) + ". " + parts.slice(1).join(" ");
+      if (s.length <= max) return s;
+    }
+    return s.slice(0, max - 1) + "\u2026";
+  }
+  const NAME_MAX = 20;
   function driverCell(e) {
-    const d = el("div", "", e.driver || "");
+    const d = el("div", "", fitName(e.driver, NAME_MAX));
     d.appendChild(el("small", "", e.team || e.entry || ""));
     return cell("drv", d, "drv");
   }
@@ -312,7 +324,7 @@
     $("fastest").replaceChildren();
     if (fl && !quali) {
       $("fastest").append(el("span", "fl", "Fastest lap " + lapTime(fl.ms)),
-                          document.createTextNode(" · " + fl.driver + " (" + (fl.team || fl.entry) + ")"));
+                          document.createTextNode(" · " + fitName(fl.driver, NAME_MAX) + " (" + (fl.team || fl.entry) + ")"));
     }
   }
 

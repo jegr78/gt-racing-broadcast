@@ -979,31 +979,96 @@ def t_an_estimate_places_a_roster_entry_that_never_sent():
     assert x["status"] == "est" and x["estimate"] == {"ref": "A", "seconds": 1.0}, x
 
 
-def t_race_control_names_the_driver_of_a_car_without_a_sender():
+def t_race_control_overrides_driver_names():
     svc, clock, path, ctx = _roster_service()
     st = svc.set_driver_name("rc:Anna", "X", "  Kim Berg ")
-    assert _rows(st)["X"]["driver"] == "Kim Berg" and st["driver_names"] == {"X": "Kim Berg"}, st["driver_names"]
+    assert _rows(st)["X"]["driver"] == "Kim Berg", _rows(st)["X"]
+    st = svc.set_driver_name("director:Bo", "A", "Max H", driver="Max A")
+    assert _rows(st)["A"]["driver"] == "Max H" and _rows(st)["A"]["driver_registered"] == "Max A", _rows(st)["A"]
+    assert st["driver_overrides"] == [{"entry": "A", "driver": "Max A", "name": "Max H"},
+                                      {"entry": "X", "driver": "", "name": "Kim Berg"}], st["driver_overrides"]
+    svc._current().fastest = {"entry": "A", "driver": "Max A", "ms": 61000}
+    assert svc.standings()["fastest"]["driver"] == "Max H", "the desks' fastest lap shows the override"
     svc.tick()
-    assert svc.dashboard()["entries"][-1]["driver"] == "Kim Berg"
+    d = svc.dashboard()
+    assert _rows(d)["X"]["driver"] == "Kim Berg" and _rows(d)["A"]["driver"] == "Max H", d["entries"]
+    assert d["fastest"]["driver"] == "Max H" and dr.public_view(d)["fastest"]["driver"] == "Max H", d["fastest"]
+    assert "driver_registered" not in _rows(d)["A"], "viewers never see the registered name"
     rec = _audit(path)[-1]
-    assert (rec["who"], rec["action"], rec["entry"], rec["name"]) == ("rc:Anna", "driver_name", "X", "Kim Berg"), rec
+    assert (rec["who"], rec["action"], rec["entry"], rec["driver"], rec["name"]) == \
+        ("director:Bo", "driver_name", "A", "Max A", "Max H"), rec
     again, _c, _p = _dash_service(ctx, path=path)
-    assert _rows(again.standings())["X"]["driver"] == "Kim Berg", "the name survives a relay restart"
+    _feed(again, _c, "A", "a", -20.0, 2.0)
+    assert _rows(again.standings())["A"]["driver"] == "Max H", "the override survives a relay restart"
     again.reset("rc:Anna")
-    assert _rows(again.standings())["X"]["driver"] == "Kim Berg", "a race reset keeps the name"
-    for bad in (None, 5, "x" * (dr.MAX_DRIVER_NAME + 1)):
-        try:
-            svc.set_driver_name("rc:Anna", "X", bad)
-        except ValueError:
-            continue
-        raise AssertionError(f"{bad!r} must be refused")
-    st = svc.set_driver_name("rc:Anna", "X", "")
-    assert _rows(st)["X"]["driver"] == "" and st["driver_names"] == {}, "an empty name removes it"
-    dr.clear_actions(os.path.dirname(path))
-    svc.set_driver_name("rc:Anna", "X", "Kim")
+    assert _rows(again.standings())["X"]["driver"] == "Kim Berg", "a race reset keeps the overrides"
+    st = svc.set_driver_name("rc:Anna", "A", "", driver="Max A")
+    assert _rows(st)["A"]["driver"] == "Max A" and len(st["driver_overrides"]) == 1, "an empty name removes it"
     dr.clear_actions(os.path.dirname(path))
     fresh, _c, _p = _dash_service(ctx, path=path)
-    assert _rows(fresh.standings())["X"]["driver"] == "", "a fresh event starts without names"
+    assert _rows(fresh.standings())["X"]["driver"] == "", "a fresh event starts without overrides"
+
+
+def t_each_driver_of_an_entry_keeps_their_own_override():
+    svc, clock, path, _ctx = _roster_service()
+    svc.set_driver_name("rc:Anna", "A", "Max H", driver="Max A")
+    svc.set_driver_name("rc:Anna", "A", "Old Name", driver="Alexander Fitzgerald-Smith")
+    st = svc.set_driver_name("rc:Anna", "A", "Lea W", driver="Lea Weber")
+    assert [o["driver"] for o in st["driver_overrides"]] == ["Alexander Fitzgerald-Smith", "Lea Weber", "Max A"], \
+        f"a driver registered with up to 32 characters can be renamed: {st['driver_overrides']}"
+    assert _rows(st)["A"]["driver"] == "Max H", "the driver in the car keeps their override"
+
+
+def t_a_desk_name_follows_the_sender_name_rule():
+    svc, clock, path, _ctx = _roster_service()
+    bad = (None, 5, "x\ud800", "Ann\u202eBerg", "Ann\u200bBerg", "Ann\nBerg", "x" * 25, "Ann;rm",
+           "Ana Ru\u00edz")
+    for name in bad:
+        try:
+            svc.set_driver_name("rc:Anna", "X", name)
+        except ValueError:
+            continue
+        raise AssertionError(f"{name!r} must be refused")
+    for driver in ("x\ud800", "a\nb", 5):
+        try:
+            svc.set_driver_name("rc:Anna", "A", "Ann", driver=driver)
+        except ValueError:
+            continue
+        raise AssertionError(f"registered name {driver!r} must be refused")
+    for name in ("x\ud800", "Ann\u202e", "a\nb", "x" * 25):
+        try:
+            svc.set_fastest("rc:Anna", "A", name, 61000)
+        except ValueError:
+            continue
+        raise AssertionError(f"fastest lap driver {name!r} must be refused")
+    assert not os.path.exists(dr.audit_path_for(path)), "a refused name logs nothing"
+    assert dr._saved_overrides(dr._actions_path_for(path)) == []
+    json.dumps(svc.standings(), ensure_ascii=False).encode("utf-8")
+
+
+def t_a_bad_name_in_the_actions_file_is_dropped():
+    svc, clock, path, ctx = _roster_service()
+    with open(dr._actions_path_for(path), "w", encoding="utf-8") as fh:
+        json.dump({"driver_names": [["X", "", "Kim Berg"], ["C", "x" * 32, "Alexander Fitzgerald-Smith"],
+                                    ["D", "", "x" * 33], ["B", "", "x\ud800"], ["A", "a\nb", "Ann"],
+                                    ["A", "Max A", "Ann\u202e"], "junk", ["A"]]}, fh)
+    fresh, _c, _p = _dash_service(ctx, path=path)
+    st = fresh.standings()
+    assert st["driver_overrides"] == [{"entry": "C", "driver": "x" * 32, "name": "Alexander Fitzgerald-Smith"},
+                                      {"entry": "X", "driver": "", "name": "Kim Berg"}], \
+        f"names saved under the old 32 character rule stay: {st['driver_overrides']}"
+    json.dumps(st, ensure_ascii=False).encode("utf-8")
+
+
+def t_the_audit_is_written_before_the_name_changes():
+    svc, clock, path, _ctx = _roster_service()
+    svc._log = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("audit failed"))
+    try:
+        svc.set_driver_name("rc:Anna", "X", "Kim Berg")
+    except RuntimeError:
+        pass  # expected
+    assert dr._saved_overrides(dr._actions_path_for(path)) == [], "a failed audit leaves no name behind"
+    assert _rows(svc.standings())["X"]["driver"] == ""
 
 
 def t_a_retirement_is_audited_persisted_and_can_be_undone():

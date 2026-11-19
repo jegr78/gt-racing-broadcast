@@ -399,6 +399,56 @@ def t_the_public_page_flags_a_finished_row_with_its_gap():
         "a finish is final: the flag and gap stay when the car parks or leaves"
 
 
+def _function(path, name):
+    """The source of one top-level JS function in a page or script, by brace matching."""
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    start = src.index("function " + name + "(")
+    depth, i = 0, src.index("{", start)
+    while True:
+        depth += {"{": 1, "}": -1}.get(src[i], 0)
+        i += 1
+        if depth == 0:
+            return src[start:i]
+
+
+NAME_PAGES = [os.path.join(ROOT, "src", *rel) for rel in (
+    ("console", "timing.html"), ("console", "race-snapshot.html"), ("console", "driver-desk.js"),
+    ("cockpit", "cockpit.html"))]
+
+
+def t_every_page_shortens_a_long_name_the_same_way():
+    cases = [["Lena Hart", 14], ["Alexander Fitzgerald", 14], ["Alexander Fitzgerald-Smithson", 14],
+             ["xX_SpeedDemon_Xx", 14], ["Anna Maria Schmidt", 16], ["", 14], ["Ann", 3]]
+    want = ["Lena Hart", "A. Fitzgerald", "A. Fitzgerald\u2026", "xX_SpeedDemon\u2026", "A. Maria Schmidt", "", "Ann"]
+    for path in NAME_PAGES:
+        got = _run(_function(path, "fitName") + "\n;console.log(JSON.stringify("
+                   + json.dumps(cases) + ".map(c => fitName(c[0], c[1]))));")
+        if got is None:
+            return
+        assert got == want, f"{os.path.basename(path)}: {got}"
+
+
+def t_the_tower_only_cuts_the_surname():
+    got = _tower("""return [surname("Lena Hart"), surname("Alexander Fitzgerald-Smithson"),
+                            surname("xX_SpeedDemon_Xx")];""")
+    if got is None:
+        return
+    assert got == ["HART", "FITZGER\u2026", "XX_SPEE\u2026"], got
+
+
+def t_the_pages_show_names_through_the_rule():
+    for path, uses in ((NAME_PAGES[0], ("fitName(e.driver", "fitName(fl.driver")),
+                       (NAME_PAGES[1], ("fitName(e.driver",)),
+                       (NAME_PAGES[2], ("fitName(e.driver", "fitName(fl.driver", "fitName(ev.driver",
+                                        "fitName(s.name")),
+                       (NAME_PAGES[3], ("fitName(e.driver", "fitName(fl.driver"))):
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        for use in uses:
+            assert use in src, f"{os.path.basename(path)} shows names through fitName: {use}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
