@@ -45,6 +45,8 @@ Three operator-reported issues with the visual overlay builder (#114, #146):
   values, and Save writes the full property snapshot per slot (not only the
   diff). The producer accepts that this freezes a profile's look against future
   base-CSS changes.
+  Since #1178 an unedited colour that the page takes from a CSS variable is saved
+  as the `var(--name)` reference, so theme variables in customCss keep working.
 
 ## Key insight: one page = one canvas = exactly what is on air
 

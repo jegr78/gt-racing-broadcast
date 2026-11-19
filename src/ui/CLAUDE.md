@@ -132,6 +132,26 @@ Loaded when working under `src/ui/`.
   each DOM change via a MutationObserver; hidden or zero-width slots keep their size.
   The canvas calls the same `RacecastFit.fit` with its zoom. Tests:
   `tests/test_overlay_fit.py`.
+- **Timing tower brand logos.** The Timing tower (`drivers.html`) declares
+  `data-edit-props="showBrands"`; the builder shows it as the **Brand logos** checkbox
+  (on unless `false`), the compiler emits `--dd-brands: none|flex` on `#drivers-tower` and
+  the canvas sets the same property inline. The page's `.dd-brand` reads it, so the
+  switch is pure CSS and the canvas follows it. `canvas_logo` points the sample rows'
+  `/drivers/brand/` logos at `/api/overlay/asset/brands/`. Test:
+  `t_the_timing_tower_has_a_brand_logos_switch_that_reflows_the_rows`.
+- **Variable colours stay references (#1178).** Save writes each slot's full snapshot,
+  but an unedited `color`, `background` or `borderColor` whose page value is a whole
+  `var(--name)` is saved as that reference, so a `:root { --dd-bg: ... }` in customCss
+  still recolours the slot. `extract_slots` reports them per slot as `vars`, from plain
+  `#id` rules (last declaration wins) and, for `color`, an `html`/`body` rule (this
+  assumes no ancestor between body and the slot sets a colour). The
+  builder's `ovSaveValue` substitutes them; the panel shows the on-air colour, and an
+  edit pins the value. The override hint skips a prop whose on-air value is just its
+  variable (`ovFollowsVar`). A layout saved before keeps its resolved colours; clearing the
+  field puts the slot back on the variable. `_safe_value` accepts `var()` only as
+  `var(--name)` with an optional hex, keyword or `rgb()` fallback. Tests:
+  `t_ob_extract_slots_reports_variable_backed_colours`,
+  `t_cc_save_keeps_the_variable_reference_of_an_unedited_colour`.
 - **Default-hidden slots.** `overlay_build.DEFAULT_HIDDEN_SLOTS` = `race-engineer`
   ("Race engineer") and `coach` ("Coach"), the AI Race Engineer / AI Coach HUD lines
   (`/hud/data` `raceEngineer` / `coach`). `hud.html` hides them; only an explicit

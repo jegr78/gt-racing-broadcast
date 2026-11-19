@@ -167,7 +167,7 @@ def _audit(path):
 
 def t_the_league_restart_default_and_its_override_per_restart():
     svc, _clock, path, league = _ctl()
-    assert dr.read_league(league) == {"restart": "keep"}
+    assert dr.read_league(league)["restart"] == "keep"
     dr.write_league(league, {"restart": "neutralise"})
     assert svc.red_flag("rc:Anna")["red_flag"]["mode"] == "neutralise", "the league default applies"
     assert svc.set_restart_mode("director:Bo", "keep")["red_flag"]["mode"] == "keep"
@@ -182,6 +182,41 @@ def t_the_league_restart_default_and_its_override_per_restart():
     actions = [r["action"] for r in _audit(path)]
     assert actions == ["red_flag", "restart_mode", "release"], actions
     assert _audit(path)[1]["who"] == "director:Bo" and _audit(path)[1]["mode"] == "keep"
+
+
+def t_the_league_lap_time_seconds_default_to_five_and_are_checked():
+    _path, league = _paths()
+    assert dr.read_league(league) == {"restart": "keep", "last_lap_s": 5}
+    assert dr.write_league(league, {"last_lap_s": 12}) == {"restart": "keep", "last_lap_s": 12}
+    assert dr.write_league(league, {"restart": "neutralise"}) == {"restart": "neutralise", "last_lap_s": 12}, \
+        "one league key changes, the other stays"
+    for bad in ({"last_lap_s": 0}, {"last_lap_s": 31}, {"last_lap_s": 5.0}, {"last_lap_s": True},
+                {"last_lap_s": "5"}, {"last_lap_s": None}, {}):
+        try:
+            dr.write_league(league, bad)
+        except ValueError:
+            pass  # expected
+        else:
+            raise AssertionError(f"{bad} must be refused")
+    assert dr.read_league(league)["last_lap_s"] == 12, "a refused change writes nothing"
+    with open(league, "w", encoding="utf-8") as fh:
+        json.dump({"last_lap_s": 99}, fh)
+    assert dr.read_league(league)["last_lap_s"] == 5, "a hand-edited value out of range reads as the default"
+
+
+def t_the_dashboard_carries_the_league_lap_time_seconds_live():
+    path, league = _paths()
+    dr.write_settings(path, {"formation": False, "delay_s": 30})
+    clock = [0.0]
+    svc = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                     multi_lobby=lambda: False, clock=lambda: clock[0], league_path=league,
+                     context=lambda: {"mode": "race"})
+    svc.tick()
+    assert svc.dashboard()["show"]["last_lap_s"] == 5, svc.dashboard()["show"]
+    dr.write_league(league, {"last_lap_s": 8})
+    assert svc.dashboard()["show"]["last_lap_s"] == 8, \
+        "a league change reaches the tower without a relay restart and without the delay"
+    assert "last_lap_s" not in json.dumps(dr.public_view(svc.dashboard())), "the public page has its Last column"
 
 
 def t_corrections_and_rejoins_survive_a_relay_restart():
@@ -370,7 +405,7 @@ def t_the_display_switches_skip_the_delay():
     svc.set_settings({"visible": True, "show_compound": False, "show_fuel": False})
     svc.tick()
     d = svc.dashboard()
-    assert d["visible"] is True and d["show"] == {"compound": False, "fuel": False}, \
+    assert d["visible"] is True and d["show"] == {"compound": False, "fuel": False, "last_lap_s": 5}, \
         f"Hide/Show and the display switches apply at once, not after the delay: {d}"
     pub = dr.public_view(d)
     assert "fuel_l" in pub["entries"][0] and "compound" in pub["entries"][0], \
@@ -515,7 +550,7 @@ def t_the_crew_sets_a_tyre_compound_that_outlives_a_driver_change():
         raise AssertionError(f"{bad!r} is no compound")
     svc.set_settings({"show_compound": False, "show_fuel": False})
     svc.tick()
-    assert svc.dashboard()["show"] == {"compound": False, "fuel": False}, svc.dashboard()["show"]
+    assert svc.dashboard()["show"] == {"compound": False, "fuel": False, "last_lap_s": 5}, svc.dashboard()["show"]
     again, _c, _p = _dash_service(ctx, path)
     svc.set_compound("rc:Anna", "A", "W")
     assert again.standings()["compounds"]["A"]["code"] == "W", "it survives a restart"
@@ -547,6 +582,37 @@ def t_the_public_view_is_timing_only_and_ignores_the_obs_switches():
                                       "color": "", "text_color": "", "best_ms": 90000, "gap_ms": 0,
                                       "compound": None}, quali
     assert dr.public_view(None) == {"v": 1, "mode": "race", "entries": []}
+
+
+def t_viewer_rows_carry_the_brand_key_and_name():
+    roster = {"A": {"number": "1", "brandKey": "bmw", "brandName": "BMW M4 GT3"},
+              "B": {"number": "2", "brandKey": "../etc", "brandName": "Odd"},
+              "C": {"number": "3"}}
+    rows = [dr._viewer_entry({"entry": e, "driver": "Max"}, roster) for e in ("A", "B", "C", "Z")]
+    assert (rows[0]["brand"], rows[0]["brand_name"]) == ("bmw", "BMW M4 GT3"), rows[0]
+    assert rows[1]["brand"] == "", f"a key outside the asset-key charset never reaches a page: {rows[1]}"
+    assert rows[2]["brand"] == "" and rows[2]["brand_name"] == "", rows[2]
+    assert rows[3]["brand"] == "", "an entry missing from the roster has no brand"
+    pub = dr.public_view({"v": 1, "mode": "race", "entries": [dict(rows[0], pos=1)]})
+    assert pub["entries"][0]["brand"] == "bmw" and pub["entries"][0]["brand_name"] == "BMW M4 GT3", \
+        f"the public page shows the logo too: {pub}"
+
+
+def t_the_public_view_names_a_brand_only_with_a_logo():
+    rows = [{"entry": "A", "brand": "bmw", "brand_name": "BMW"}, {"entry": "B", "brand": "ghost", "brand_name": "G"}]
+    for key in ("entries", "qualifying"):
+        view = {"v": 1, key: [dict(r) for r in rows]}
+        out = dr.public_brands(view, lambda k: k == "bmw")
+        assert [r["brand"] for r in out[key]] == ["bmw", ""], \
+            f"a brand without a logo would make every viewer ask for it again: {out}"
+        assert out[key][1]["brand_name"] == "G" and view[key][1]["brand"] == "ghost", out
+
+
+def t_the_desk_standings_carry_each_entrys_brand():
+    st = {"state": "racing", "entries": [{"entry": "A", "laps": 1}, {"entry": "Z", "laps": 0}]}
+    out = dr.with_brands(st, {"A": {"brandKey": "bmw", "brandName": "BMW"}})
+    assert [(e["brand"], e["brand_name"]) for e in out["entries"]] == [("bmw", "BMW"), ("", "")], out
+    assert "brand" not in st["entries"][0], "the standings themselves stay untouched"
 
 
 def t_public_view_has_no_exact_gaps():

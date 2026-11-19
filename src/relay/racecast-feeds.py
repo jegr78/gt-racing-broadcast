@@ -208,6 +208,7 @@ import timing_host      # optional external fan-out of the public timing (#1161)
 import timing_publish
 import driver_ingest    # driver telemetry connections behind the invite (#1111)
 import driver_race      # race distance, gaps and finish from driver telemetry (#1112)
+import brand_logos      # the timing pages' brand logos
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -728,6 +729,8 @@ TIMING_BUDGET_KBPS = timing_feed.budget_kbps(os.environ.get("RACECAST_TIMING_BUD
 PAGE_CSP = ("img-src 'self' data: https://static-cdn.jtvnw.net "
             "https://yt3.ggpht.com https://yt4.ggpht.com")
 TIMING_ABUSE_RPS = 300                    # far above honest load, which the budget paces
+TIMING_BRAND_RPS = 100                    # logo loads: a page load fetches each brand once
+BRAND_CACHE_S = 86400
 _AUTO_COVER_FALSEY = {"0", "false", "no", "off"}
 
 
@@ -12118,6 +12121,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Public timing (#1128): one body per tick for every viewer, and the poll interval
     # stretches with the crowd so the page stays within its share of the upload.
     _timing_rl = console_auth.RateLimiter(limit=TIMING_ABUSE_RPS * 10, window_s=10)
+    # Logos have their own cap and never touch the poll budget, whose viewer estimate
+    # reads only the data polls.
+    _brand_rl = console_auth.RateLimiter(limit=TIMING_BRAND_RPS * 10, window_s=10)
+    _brand_bytes = brand_logos.ByteWindow(TIMING_BUDGET_KBPS * 125)
+    _logos = brand_logos.Logos([brands_dir, os.path.join(assets_dir, "brands") if assets_dir else None])
+
+    def _roster_brands():
+        roster = hud_source.roster_details() if hud_source else {}
+        return {driver_race.with_brands({"entries": [{"entry": e}]}, roster)["entries"][0]["brand"]
+                for e in roster} - {""}
+
+    def _brand_png(key):
+        """A roster brand's logo, or None: the one lookup every timing page uses."""
+        return _logos.get(key) if key in _roster_brands() else None
     _timing_pub = [None]                # the timing host publisher, when the league has a host
 
     def _timing_link_id():
@@ -12144,8 +12161,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         return timing_host.viewer_url(url, link_id) if url and link_id else None
 
     def _timing_public():
-        view = driver_race.public_view(
-            driver_race_svc.dashboard() if driver_race_svc is not None else None)
+        view = driver_race.public_brands(driver_race.public_view(
+            driver_race_svc.dashboard() if driver_race_svc is not None else None),
+            lambda key: _brand_png(key) is not None)
         hosted = _timing_hosted_url()
         # Funnel viewers move to the host only while it is the served path, live, and not
         # about to hit its daily request quota.
@@ -12158,7 +12176,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     if timing_publisher is not None and timing_link_path:
         _timing_pub[0] = timing_publisher(
             link_fn=_timing_link_id, served_fn=_timing_served, fallback_fn=_timing_funnel_url,
-            body_fn=lambda: (_timing_body.get()[1], round(_timing_body.age(), 1)))
+            body_fn=lambda: (_timing_body.get()[1], round(_timing_body.age(), 1)),
+            brands_fn=lambda: _logos.for_keys(_roster_brands()))
     _timing_budget = timing_feed.Budget(TIMING_BUDGET_KBPS)
     _timing_page = []                   # the page's encode() tuple, built once
     _timing_error = [None]              # last build error, logged once
@@ -14261,7 +14280,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                            cookie_path="/console")
                 if p == ["drivers", "race"] and driver_race_svc is not None:
                     # Order, distances and gaps from driver telemetry (#1112).
-                    return self._send(driver_race_svc.standings(), no_store=True)
+                    return self._send(driver_race.with_brands(
+                        driver_race_svc.standings(),
+                        hud_source.roster_details() if hud_source else {}), no_store=True)
+                if len(p) == 3 and p[:2] == ["drivers", "brand"]:
+                    return self._send_brand(p[2])
                 if p == ["drivers", "dashboard"] and driver_race_svc is not None:
                     # The viewer payload, delayed (#1115): overlay, cockpit, public page.
                     return self._send(driver_race_svc.dashboard() or {"v": 1, "entries": []},
@@ -14422,7 +14445,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         def _timing(self, rest, method):
             link = _timing_cache.get() if _timing_cache else None
             presented = (parse_qs(urlparse(self.path).query).get("l") or [""])[0]
-            if method != "GET" or rest not in ([], ["data"]):
+            brand = len(rest) == 2 and rest[0] == "brand"
+            if method != "GET" or (rest not in ([], ["data"]) and not brand):
                 self._send({"error": "not found"}, 404)
                 return None
             if not link or not hmac.compare_digest(presented.encode("utf-8", "replace"),
@@ -14431,6 +14455,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if not _timing_authfail_rl.allow(client):
                     return self._send({"error": "too many attempts"}, 429)
                 return self._send({"error": "this timing link is not valid (any more)"}, 403)
+            if brand:
+                if not _brand_rl.allow("all"):
+                    return self._send({"error": "too many requests"}, 429)
+                return self._send_brand(rest[1], _brand_bytes)
             if rest == []:
                 with _timing_page_lock:
                     if not _timing_page:
@@ -14469,6 +14497,25 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       {"X-Poll-After": f"{interval:.1f}",
                                        "X-Data-Age": f"{_timing_body.age():.1f}"})
             _timing_budget.served(sent + timing_feed.HEADER_BYTES, interval)
+            return None
+
+        def _send_brand(self, key, window=None):
+            png = _brand_png(key)
+            if png is None:
+                return self._send({"error": "not found"}, 404)
+            if window is not None and not window.take(len(png)):
+                self.send_response(429)
+                self.send_header("Retry-After", str(brand_logos.WINDOW_S))
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png)))
+            self.send_header("Cache-Control", f"public, max-age={BRAND_CACHE_S}")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(png)
             return None
 
         def _send_encoded(self, etag, raw, gz, gz_etag, ctype, extra=None):

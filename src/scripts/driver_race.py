@@ -14,13 +14,15 @@ Corrections and rejoin marks persist in
 restart; every action appends a line with identity and time to
 `driver-race-audit.jsonl`. The red flag restart default is a league rule and lives
 in the profile (`profiles/<name>/driver-race.json`, `restart`: `keep` or
-`neutralise`), so it travels with a profile export. Stdlib only.
+`neutralise`; `last_lap_s`: how long the OBS tower shows a new lap), so it travels
+with a profile export. Stdlib only.
 """
 import collections
 import json
 import logging
 import math
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -34,6 +36,8 @@ FILENAME = "driver-race.json"
 ACTIONS = "driver-race-actions.json"
 AUDIT = "driver-race-audit.jsonl"
 RESTART_MODES = ("keep", "neutralise")
+LAST_LAP_S = 5                 # how long the OBS tower shows a car's new lap time
+LAST_LAP_S_RANGE = (1, 30)
 MAX_REASON = 200
 MAX_ENTRY = 120
 MAX_CORRECTION_M = 100_000.0
@@ -134,17 +138,36 @@ def write_settings(path, changes):
     return current
 
 
+def _lap_seconds(n):
+    return type(n) is int and LAST_LAP_S_RANGE[0] <= n <= LAST_LAP_S_RANGE[1]
+
+
 def read_league(path):
-    """The league's red flag restart default; `keep` when unset or unreadable."""
-    restart = _read_json(path).get("restart") if path else None
-    return {"restart": restart if restart in RESTART_MODES else "keep"}
+    """The league's red flag restart default and how long the tower shows a new lap;
+    the defaults when unset or unreadable."""
+    doc = _read_json(path) if path else {}
+    restart, seconds = doc.get("restart"), doc.get("last_lap_s")
+    return {"restart": restart if restart in RESTART_MODES else "keep",
+            "last_lap_s": seconds if _lap_seconds(seconds) else LAST_LAP_S}
+
+
+def validate_league(changes):
+    """The league keys of `changes` (`restart`, `last_lap_s`); ValueError on a bad value."""
+    out = {k: changes[k] for k in ("restart", "last_lap_s") if k in changes}
+    if "restart" in out and out["restart"] not in RESTART_MODES:
+        raise ValueError("restart is keep or neutralise")
+    if "last_lap_s" in out and not _lap_seconds(out["last_lap_s"]):
+        raise ValueError("last_lap_s is %d to %d seconds" % LAST_LAP_S_RANGE)
+    return out
 
 
 def write_league(path, changes):
-    if changes.get("restart") not in RESTART_MODES:
-        raise ValueError("restart is keep or neutralise")
+    """Change `restart` and/or `last_lap_s`; ValueError on a bad or missing value."""
+    changes = validate_league(changes)
+    if not changes:
+        raise ValueError("nothing to change")
     doc = _read_json(path)
-    doc["restart"] = changes["restart"]
+    doc.update(changes)
     _write_json(path, doc)
     return read_league(path)
 
@@ -193,18 +216,52 @@ def _saved_fastest(path, track):
     return None
 
 
+# The relay's ASSET_KEY_RE, capped: a brand key names a logo file, never a path.
+BRAND_KEY_RE = re.compile(r"[a-z0-9-]{1,64}")
+
+
+def _brand(info):
+    """(key, name) of a roster entry's brand; a key outside the asset-key charset is ""."""
+    key = info.get("brandKey")
+    key = key if isinstance(key, str) and BRAND_KEY_RE.fullmatch(key) else ""
+    name = info.get("brandName")
+    return key, name[:MAX_ENTRY] if isinstance(name, str) else ""
+
+
 def _viewer_entry(row, roster):
     info = roster.get(row["entry"]) or {}
+    brand, brand_name = _brand(info)
     return {"entry": row["entry"], "number": info.get("number") or "",
             "driver": row["driver"], "team": info.get("cupTeam") or "",
-            "color": info.get("bgColor") or "", "text_color": info.get("textColor") or ""}
+            "color": info.get("bgColor") or "", "text_color": info.get("textColor") or "",
+            "brand": brand, "brand_name": brand_name}
+
+
+def public_brands(view, has_logo):
+    """A copy of the public view whose rows name a brand only when `has_logo(key)`:
+    a viewer's page asks for every named logo, and a missing one again later."""
+    out = dict(view)
+    for key in ("entries", "qualifying"):
+        if key in out:
+            out[key] = [r if not r.get("brand") or has_logo(r["brand"]) else dict(r, brand="")
+                        for r in out[key] or ()]
+    return out
+
+
+def with_brands(standings, roster):
+    """A copy of `standings` whose entries carry their roster brand, for the desks."""
+    def one(e):
+        brand, name = _brand(roster.get(e.get("entry")) or {})
+        return dict(e, brand=brand, brand_name=name)
+    return dict(standings, entries=[one(e) for e in standings.get("entries") or ()])
 
 
 _PUBLIC_TOP = ("v", "mode", "stint", "remaining", "remaining_running", "delay_s", "track_name", "state",
                "red_flag", "lap")
 _PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color", "laps",
                "stint_laps", "gap_s", "interval_s", "lapped", "status", "pit_stops",
-               "last_lap_ms", "finished", "best_ms", "gap_ms", "compound", "fuel_l")
+               "last_lap_ms", "finished", "best_ms", "gap_ms", "compound", "fuel_l", "brand",
+               "brand_name")
 
 
 def public_view(snap):
@@ -443,7 +500,7 @@ class Service:
         race = self._current()
         settings = self._settings()
         out["delay_s"] = settings["delay_s"]
-        out["show"] = {"compound": settings["show_compound"], "fuel": settings["show_fuel"]}
+        out["show"] = self._show(settings)
         compounds = _saved_compounds(_actions_path_for(self._path))
         if out["mode"] == "qualifying":
             out["qualifying"] = qualifying(
@@ -654,8 +711,11 @@ class Service:
                     chosen = snap
                 else:
                     break
-        return dict(chosen, visible=settings["visible"], delay_s=delay,
-                    show={"compound": settings["show_compound"], "fuel": settings["show_fuel"]})
+        return dict(chosen, visible=settings["visible"], delay_s=delay, show=self._show(settings))
+
+    def _show(self, settings):
+        return {"compound": settings["show_compound"], "fuel": settings["show_fuel"],
+                "last_lap_s": read_league(self._league)["last_lap_s"]}
 
     def log(self, who, action, **fields):
         """Audit an action taken outside the race (a disconnect, a cover change)."""

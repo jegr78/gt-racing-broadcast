@@ -207,7 +207,10 @@
                     title="League rule after a red flag; Race Control and the director can override it per restart">
               <option value="keep">Red flag: keep gaps</option>
               <option value="neutralise">Red flag: neutralise</option>
-            </select></div>
+            </select>
+            <label title="League rule: how long the OBS tower shows a car's new lap time before the gap returns">
+              Lap time <input id="evt-race-lastlap" type="number" min="1" max="30" style="width:3.5em"
+                              aria-label="Seconds the tower shows a new lap (league)"> s</label></div>
           <div class="enverr" id="evt-race-err" hidden></div>
         </section>
         <section>
@@ -1358,6 +1361,7 @@ function renderEventRace(s) {
   if (document.activeElement !== $('evt-race-laps')) $('evt-race-laps').value = s.lap_count || '';
   $('evt-race-laps').hidden = s.finish_mode !== 'laps';
   if (document.activeElement !== $('evt-race-restart')) $('evt-race-restart').value = s.restart || 'keep';
+  if (document.activeElement !== $('evt-race-lastlap')) $('evt-race-lastlap').value = s.last_lap_s || 5;
 }
 async function fetchEventRace() {
   let d;
@@ -1378,6 +1382,10 @@ async function saveEventRace(changes) {
 $('evt-race-formation').addEventListener('change', e => saveEventRace({formation: e.target.checked}));
 $('evt-race-mode').addEventListener('change', e => saveEventRace({finish_mode: e.target.value}));
 $('evt-race-restart').addEventListener('change', e => saveEventRace({restart: e.target.value}));
+$('evt-race-lastlap').addEventListener('change', e => {
+  const n = parseInt(e.target.value, 10);
+  if (Number.isFinite(n)) saveEventRace({last_lap_s: n}); else fetchEventRace();
+});
 $('evt-race-laps').addEventListener('change', e => {
   const n = parseInt(e.target.value, 10);
   saveEventRace({lap_count: Number.isFinite(n) ? n : null});
@@ -4327,6 +4335,11 @@ function ovApplyProp(el, prop, value) {
       else st.removeProperty(name);
       return;
     }
+    if (prop === 'showBrands') {
+      if (typeof value === 'boolean') st.setProperty('--dd-brands', value ? 'flex' : 'none');
+      else st.removeProperty('--dd-brands');
+      return;
+    }
     if (prop === 'barColor' || prop === 'trackColor') {
       const name = '--audience-' + (prop === 'barColor' ? 'bar' : 'track') + '-color';
       if (value) st.setProperty(name,value); else st.removeProperty(name);
@@ -4371,6 +4384,7 @@ function ovStyleSlot(id) {
   const ov = (ovState.layout.slots && ovState.layout.slots[id]) || {};
   Object.keys(OV_CSSNAME).forEach(p => ovApplyProp(el, p, ov[p]));
   if (id.startsWith('audience-')) ['presentation','showNumber','showPercent','barColor','trackColor'].forEach(p => ovApplyProp(el,p,ov[p]));
+  if (id === 'drivers-tower') ovApplyProp(el, 'showBrands', ov.showBrands);
   ovApplyProp(el, 'textShadow', ov.textShadow);
   ovApplyProp(el, 'visible', ov.visible);
   ovApplyProp(el, 'slant', ov.slant);
@@ -5013,12 +5027,13 @@ function ovDropZeroSizes(slots) {
     });
   });
 }
-function ovBaseValues(id) {
+function ovBaseValues(id, onAir) {
   const el = ovState.shadow && ovState.shadow.getElementById(id);
   if (!el) return {};
   // Base values are the page CSS plus the slot's own values. customCss is off
-  // while reading, or the save-all would copy its rules into the slot map.
-  return ovWithoutCustom(() => {
+  // while reading, or the save-all would copy its rules into the slot map;
+  // `onAir` keeps it on, for display only.
+  const read = () => {
     const cs = getComputedStyle(el);
     // A slot inside a display:none ancestor (the #tele block before telemetry
     // arrives) resolves its size to "auto", not px: leave it unset rather than
@@ -5040,7 +5055,8 @@ function ovBaseValues(id) {
       v.borderColor = ovRgbToHex(cs.borderColor);
     }
     return v;
-  });
+  };
+  return onAir ? read() : ovWithoutCustom(read);
 }
 
 // The computed properties that show each builder prop's effect, compared with
@@ -5111,10 +5127,16 @@ function ovRenderPanel() {
   const ov = (ovState.layout.slots && ovState.layout.slots[id]) || {};
   const base = ovBaseValues(id);
   const view = Object.assign({}, base, ov);   // override wins; base fills the rest
+  const onAir = ovBaseValues(id, true);
+  ['color', 'background', 'borderColor'].forEach(p => {
+    if (ovVarBacked(meta, ov, p)) view[p] = onAir[p];
+  });
   const props = meta.props || [];
   const has = p => props.includes(p);
   const h = document.createElement('h4'); h.textContent = meta.label; panel.appendChild(h);
-  const over = ovCustomOverrides(id, props);
+  const el = ovState.shadow.getElementById(id);
+  const over = ovCustomOverrides(id, props).filter(p => !(ovVarBacked(meta, ov, p) &&
+    ovFollowsVar(el, p, ov[p] !== undefined ? ov[p] : meta.vars[p])));
   if (over.length) {
     const p = document.createElement('p');
     p.className = 'envhint ov-override';
@@ -5176,6 +5198,13 @@ function ovRenderPanel() {
     remove.onclick = () => audiencePlace(id,false); panel.appendChild(remove);
     const edit = document.createElement('button'); edit.textContent = 'Edit shared value';
     edit.onclick = () => audienceOpen(id); panel.appendChild(edit);
+  }
+  if (has('showBrands')) {
+    const label = document.createElement('label');
+    const input = document.createElement('input'); input.type = 'checkbox'; input.checked = ov.showBrands !== false;
+    input.onchange = () => { ovSetProp(id, 'showBrands', input.checked); ovCommit(); };
+    label.append(input, document.createTextNode('Brand logos'));
+    panel.appendChild(label);
   }
   if (has('fontSize')) panel.appendChild(ovNumField('fontSize', 'Font size (px)', view));
   if (has('lineHeight') || has('letterSpacing')) {
@@ -5328,6 +5357,31 @@ async function ovUploadFont(input) {
   ovRefreshFontUI();
 }
 
+// What Save writes for one prop: the edit, else the page variable an unedited colour
+// comes from (so a custom :root override still recolours it), else the base value.
+function ovSaveValue(meta, ov, base, p) {
+  if (ov[p] !== undefined) return ov[p];
+  const ref = meta.vars && meta.vars[p];
+  return (ref && base[p] !== undefined && base[p] !== '') ? ref : base[p];
+}
+
+// A prop that follows a page variable: unedited with a variable base, or saved as one.
+function ovVarBacked(meta, ov, p) {
+  const v = ov[p] !== undefined ? ov[p] : (meta.vars || {})[p];
+  return typeof v === 'string' && v.trim().startsWith('var(');
+}
+
+// Whether the slot's on-air `p` is just what its variable reference resolves to, so a
+// custom :root variable recolours it and an edit in the panel still takes effect.
+function ovFollowsVar(el, p, ref) {
+  const probe = document.createElement('div');
+  probe.style.setProperty(OV_CSSNAME[p], ref);
+  el.parentNode.appendChild(probe);
+  const n = OV_COMPUTED[p][0];
+  try { return getComputedStyle(probe).getPropertyValue(n) === getComputedStyle(el).getPropertyValue(n); }
+  finally { probe.remove(); }
+}
+
 async function saveOverlay() {
   $('overlay-err').hidden = true;
   const b = $('overlay-save');
@@ -5343,7 +5397,7 @@ async function saveOverlay() {
     const allowed = new Set(s.props || []);
     const merged = {};
     (s.props || []).forEach(p => {
-      const v = (ov[p] !== undefined) ? ov[p] : base[p];
+      const v = ovSaveValue(s, ov, base, p);
       if (v !== undefined && v !== '' && allowed.has(p)) merged[p] = v;
     });
     // Save-all normally keeps CSS properties only. Persist the editor constraint

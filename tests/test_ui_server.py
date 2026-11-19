@@ -4419,6 +4419,28 @@ def t_api_event_race_reads_and_saves():
         httpd.shutdown()
 
 
+def t_home_edits_the_lap_time_seconds_next_to_the_restart_default():
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    assert 'id="evt-race-lastlap"' in html, "Home edits how long the tower shows a new lap"
+    restart = html.index('id="evt-race-restart"')
+    field = html.index('id="evt-race-lastlap"')
+    assert restart < field < html.index('id="evt-race-err"'), "the control sits next to the restart default"
+    assert re.search(r'id="evt-race-lastlap" type="number" min="1" max="30"', html), "the league range is 1 to 30"
+    render = html[html.index("function renderEventRace("):html.index("async function fetchEventRace(")]
+    assert "$('evt-race-lastlap').value = s.last_lap_s" in render, "Home shows the saved seconds"
+    wire = html[html.index("$('evt-race-lastlap').addEventListener"):]
+    wire = wire[:wire.index("\n});")]
+    assert "parseInt(" in wire and "saveEventRace({last_lap_s: n})" in wire, \
+        "the seconds go out as an integer through the event race save"
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _post_json(port, "/api/event-race", {"last_lap_s": 7})
+        assert code == 200 and json.loads(body)["settings"] == {"last_lap_s": 7}, body
+    finally:
+        httpd.shutdown()
+
+
 def t_api_event_invite_reads_and_renews():
     httpd, port = _serve(_ctx())
     try:

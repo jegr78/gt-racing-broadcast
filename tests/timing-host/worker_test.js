@@ -407,3 +407,108 @@ Deno.test("the ack starts a new day's count at 00:00 UTC without a viewer reques
   await publish(room, ws, state(3));
   eq(ws.sent.at(-1).requests_today, 0, "a new UTC day");
 });
+
+// Brand logos (the publisher's brand frames), delivered over the viewer sockets.
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+function png(extra = [1, 2, 3]) {
+  return new Uint8Array([...PNG, ...extra]);
+}
+function b64(bytes) {
+  let raw = "";
+  for (const b of bytes) raw += String.fromCharCode(b);
+  return btoa(raw);
+}
+function brand(key, bytes = png()) {
+  return JSON.stringify({ t: "brand", key, png: typeof bytes === "string" ? bytes : b64(bytes) });
+}
+function logos(ws) {
+  return ws.sent.filter((m) => m.t === "brand");
+}
+
+Deno.test("a viewer gets every stored logo over its socket, after the state", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  await publish(room, ws, brand("bmw"));
+  await publish(room, ws, brand("audi", png([7])));
+  const v = await viewer(env);
+  const kinds = v.ws.sent.map((m) => m.t);
+  assert(kinds.indexOf("state") < kinds.indexOf("brand"), `timing first: ${kinds}`);
+  eq(logos(v.ws).map((m) => m.key).sort(), ["audi", "bmw"], "each logo once");
+  eq(logos(v.ws).find((m) => m.key === "bmw").png, b64(png()), "the bytes the relay sent");
+  await publish(room, ws, state(2));
+  eq(ws.sent.at(-1).requests_today, 1, "logos cost no request: only the socket upgrade counts");
+});
+
+Deno.test("a new or replaced logo reaches every connected viewer once", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  const a = await viewer(env), b = await viewer(env);
+  await publish(room, ws, brand("bmw"));
+  await publish(room, ws, brand("bmw", png([9])));
+  for (const v of [a, b]) {
+    eq(logos(v.ws).map((m) => m.png), [b64(png()), b64(png([9]))], "added, then replaced");
+  }
+  const late = await viewer(env);
+  eq(logos(late.ws).map((m) => m.png), [b64(png([9]))], "a late viewer gets only the current one");
+});
+
+Deno.test("logos survive the room's eviction", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  await publish(room, ws, brand("bmw"));
+  const fresh = new TimingRoom(room.ctx, env);   // hibernation drops the memory, not storage
+  env.rooms.set(LINK, fresh);
+  const v = await viewer(env);
+  eq(logos(v.ws).map((m) => m.key), ["bmw"], "read back from storage");
+});
+
+Deno.test("only a small PNG under a valid key is kept, up to the brand cap", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  await publish(room, ws, brand("svg", new TextEncoder().encode("<svg onload=alert(1)>")));
+  await publish(room, ws, brand("Bad/Key"));
+  await publish(room, ws, brand("big", png(new Array(256 * 1024 - 8 + 1).fill(0))));
+  await publish(room, ws, brand("junk", "%%%not base64"));
+  eq((await viewer(env)).ws.sent.filter((m) => m.t === "brand").length, 0, "nothing of that is kept");
+  for (let i = 0; i < 70; i++) await publish(room, ws, brand(`b${i}`));
+  eq(room.brands.length, 64, "a room holds at most 64 logos");
+  const keys = logos((await viewer(env)).ws).map((m) => m.key);
+  assert(keys.includes("b63") && !keys.includes("b64"), "past the cap nothing new is added");
+  await publish(room, ws, brand("b0", png([9])));
+  const b0 = logos((await viewer(env)).ws).find((m) => m.key === "b0");
+  eq(b0.png, b64(png([9])), "a known brand is replaced even at the cap");
+});
+
+Deno.test("there is no logo route: logos never cost a request", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  await publish(room, ws, brand("bmw"));
+  const calls = env.calls;
+  for (const p of [`/t/${LINK}/brand/bmw`, `/t/${LINK}/brand/publish`, `/t/${LINK}/brand/ws`]) {
+    eq((await worker.fetch(req(p, WS), env)).status, 404, p);
+  }
+  eq(env.calls, calls, "no Durable Object call");
+  assert(!ws.closed, "the relay's publisher keeps its socket");
+});
+
+Deno.test("the page may show logos from blob URLs", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  const csp = (await worker.fetch(req(`/t/${LINK}`), env)).headers.get("content-security-policy");
+  assert(/img-src [^;]*blob:/.test(csp), csp);
+});
+
+Deno.test("end clears the room's logos", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  await publish(room, ws, state(1));
+  await publish(room, ws, brand("bmw"));
+  await publish(room, ws, JSON.stringify({ t: "end" }));
+  assert(!room.ctx.storage.data.has("brand:bmw") && room.brands.length === 0, "storage and memory cleared");
+});

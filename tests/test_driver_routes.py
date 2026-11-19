@@ -8,6 +8,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import driver_ingest  # noqa: E402
+import brand_logos  # noqa: E402
 import driver_race  # noqa: E402
 import driver_invite  # noqa: E402
 import timing_link  # noqa: E402
@@ -22,6 +23,10 @@ ENTRIES = ["Team A #1", "Team B #2"]
 class _Hud:
     def roster_names(self):
         return list(ENTRIES)
+
+    def roster_details(self):
+        return {"Team A #1": {"brandKey": "bmw", "brandName": "BMW"},
+                "Team B #2": {"brandKey": "ghost", "brandName": "Ghost"}}
 
 
 def _wire(pid):
@@ -71,7 +76,8 @@ def _serve(solo=True, segments=(), clock=None, recording_dir=None, enabled=lambd
                             **({"clock": clock} if clock else {}))
     extra.setdefault("sender_script_path", os.path.join(ROOT, "src", "relay", "racecast-sender.py"))
     extra.setdefault("race_snapshot_page_path", os.path.join(ROOT, "src", "console", "race-snapshot.html"))
-    srv = g._serve(solo=solo, hud_source=_Hud(), driver_hub=hub, driver_invite_path=path,
+    extra.setdefault("hud_source", _Hud())
+    srv = g._serve(solo=solo, driver_hub=hub, driver_invite_path=path,
                    drive_page_path=os.path.join(ROOT, "src", "console", "drive.html"),
                    driver_segments=lambda: list(segments), driver_race_svc=race,
                    driver_desk_path=os.path.join(ROOT, "src", "console", "driver-desk.js"), **extra)
@@ -95,12 +101,113 @@ def t_the_dashboard_page_and_its_override_are_served_on_the_tailnet():
         srv.shutdown()
 
 
+with open(os.path.join(ROOT, "src", "assets", "brands", "bmw.png"), "rb") as _fh:
+    BMW_PNG = _fh.read()
+
+
+def _brand_dirs(override=None):
+    """(assets_dir, brands_dir): bmw and other bundled, `override` {name: bytes} on top."""
+    assets, brands = tempfile.mkdtemp(), tempfile.mkdtemp()
+    os.makedirs(os.path.join(assets, "brands"))
+    for name in ("bmw.png", "other.png"):
+        with open(os.path.join(assets, "brands", name), "wb") as fh:
+            fh.write(BMW_PNG)
+    for name, data in (override or {}).items():
+        with open(os.path.join(brands, name), "wb") as fh:
+            fh.write(data)
+    return assets, brands
+
+
+def t_the_public_timing_link_serves_roster_brand_logos_and_nothing_else():
+    assets, brands = _brand_dirs()
+    srv, port, _lp, link, _hub = _timing_server(assets_dir=assets, brands_dir=brands)
+    try:
+        st, body, h = _req_raw(port, f"/console/timing/brand/bmw?l={link}")
+        assert st == 200 and body == BMW_PNG and h["Content-Type"] == "image/png", (st, h)
+        assert "max-age=" in h.get("Cache-Control", "") and h.get("X-Content-Type-Options") == "nosniff", h
+        assert _req_raw(port, f"/console/timing/brand/bmw?l={link}&from=host")[0] == 200, \
+            "a viewer back from the host keeps its logos"
+        for key in ("other", "ghost", "BMW", "..", "..%2Fbrands%2Fbmw", "bmw.png", "%2e%2e", "a" * 65):
+            assert _req_raw(port, f"/console/timing/brand/{key}?l={link}")[0] == 404, \
+                f"only a roster brand with a PNG resolves: {key}"
+        for tail in ("/console/timing/brand?l=", "/console/timing/brand/bmw/x?l="):
+            assert _req_raw(port, tail + link)[0] == 404, tail
+        assert _req(port, f"/console/timing/brand/bmw?l={link}", b"{}",
+                    {"Content-Type": "application/json"})[0] == 404, "GET only"
+        assert _req_raw(port, "/console/timing/brand/bmw?l=wrong")[0] == 403, "the timing link guards the logos"
+        codes = [_req_raw(port, "/console/timing/brand/bmw?l=wrong")[0] for _ in range(130)]
+        assert 429 in codes, "wrong links on the logo route share the timing link's failure cap"
+    finally:
+        srv.shutdown()
+
+
+def t_the_public_data_names_only_brands_with_a_logo():
+    assets, brands = _brand_dirs()
+    srv, port, _lp, link, _hub = _timing_server(assets_dir=assets, brands_dir=brands)
+    srv.race_svc.dashboard = lambda: {"v": 1, "mode": "race", "entries": [
+        {"pos": 1, "entry": "Team A #1", "brand": "bmw", "brand_name": "BMW"},
+        {"pos": 2, "entry": "Team B #2", "brand": "ghost", "brand_name": "Ghost"}]}
+    try:
+        rows = json.loads(_req(port, f"/console/timing/data?l={link}")[1])["entries"]
+        assert [r["brand"] for r in rows] == ["bmw", ""], f"Funnel and host get only logos that load: {rows}"
+    finally:
+        srv.shutdown()
+
+
+def t_logo_bytes_stay_within_the_timing_budget():
+    assets, brands = _brand_dirs()
+    old = g.m.TIMING_BUDGET_KBPS
+    g.m.TIMING_BUDGET_KBPS = 1
+    try:
+        srv, port, _lp, link, _hub = _timing_server(assets_dir=assets, brands_dir=brands)
+    finally:
+        g.m.TIMING_BUDGET_KBPS = old
+    try:
+        got = [_req_raw(port, f"/console/timing/brand/bmw?l={link}") for _ in range(30)]
+        codes = [st for st, _b, _h in got]
+        assert codes[0] == 200 and 429 in codes, f"a crowd's logo burst waits for the uplink: {codes}"
+        assert next(h for st, _b, h in got if st == 429).get("Retry-After"), "the page learns when to ask again"
+    finally:
+        srv.shutdown()
+
+
+def t_a_brand_override_wins_and_only_a_small_png_is_served():
+    fake = b"\x89PNG\r\n\x1a\n" + b"override"
+    assets, brands = _brand_dirs({"bmw.png": fake, "ghost.png": b"<svg onload=alert(1)>"})
+    srv, port, _lp, link, _hub = _timing_server(assets_dir=assets, brands_dir=brands)
+    try:
+        assert _req_raw(port, f"/console/timing/brand/bmw?l={link}")[1] == fake, "the league's override first"
+        assert _req_raw(port, f"/console/timing/brand/ghost?l={link}")[0] == 404, "a file that is no PNG never goes out"
+        with open(os.path.join(brands, "bmw.png"), "wb") as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n" + bytes(brand_logos.MAX_BYTES))
+        assert _req_raw(port, f"/console/timing/brand/bmw?l={link}")[0] == 404, "an oversized logo is left out"
+    finally:
+        srv.shutdown()
+
+
+def t_brand_logos_reach_every_console_role_and_the_desk_standings():
+    assets, brands = _brand_dirs()
+    srv, port, _p, _hub = _serve(assets_dir=assets, brands_dir=brands)
+    try:
+        assert _req_raw(port, "/drivers/brand/bmw")[1] == BMW_PNG, "the OBS tower and tailnet desks"
+        for who in ("alice", "bob", "dave"):
+            st, body, _h = _req_raw(port, f"/console/drivers/brand/bmw?t={g._tok(who)}")
+            assert st == 200 and body == BMW_PNG, f"{who}: the cockpit and both desks show logos ({st})"
+        assert _req_raw(port, "/console/drivers/brand/bmw")[0] in (401, 403), "a console route needs a sign-in"
+        assert _req_raw(port, "/drivers/brand/other")[0] == 404, "only roster brands"
+        srv.race_svc.standings = lambda: {"state": "racing", "entries": [{"entry": "Team A #1"}]}
+        rows = json.loads(_req(port, "/drivers/race")[1])["entries"]
+        assert rows[0]["brand"] == "bmw", f"the desks' race table shows the logo: {rows}"
+    finally:
+        srv.shutdown()
+
+
 def t_tower_gap_column_reads_the_leader_gap():
     with open(os.path.join(ROOT, "src", "obs", "drivers.html"), encoding="utf-8") as fh:
         src = fh.read()
     col = src[src.index("function column("):src.index("function row(")]
     assert "e.gap_s" in col, "the tower column shows the gap to the leader"
-    assert "e.interval_s" not in col, "the tower column no longer shows the interval"
+    assert "e.interval_s" in col, "the interval to the car ahead is a phase of its own"
 
 
 def t_the_public_timing_link_reaches_timing_data_and_nothing_else():
@@ -870,6 +977,17 @@ def t_timing_link_route_reports_host():
         assert pub.fns["link_fn"]() == link and pub.fns["served_fn"]() == "hosted"
         assert pub.fns["fallback_fn"]() == f"https://{FUNNEL_HOST}/console/timing?l={link}"
         assert d["funnel_url"] == pub.fns["fallback_fn"](), d
+    finally:
+        srv.shutdown()
+
+
+def t_the_publisher_gets_the_same_logos_as_the_funnel_page():
+    pub = _FakePublisher()
+    assets, brands = _brand_dirs()
+    srv, _port, _lp, _link, _hub = _timing_server(timing_publisher=pub.make, funnel_host=FUNNEL_HOST,
+                                                  assets_dir=assets, brands_dir=brands)
+    try:
+        assert pub.fns["brands_fn"]() == {"bmw": BMW_PNG}, "the hosted page shows what Funnel shows"
     finally:
         srv.shutdown()
 

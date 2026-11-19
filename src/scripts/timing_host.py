@@ -5,6 +5,7 @@ tick; the host fans it out to every viewer and acks. Spec:
 docs/superpowers/specs/2026-11-17-timing-host-fanout-design.md. Stdlib only; the relay
 imports it.
 """
+import base64
 import collections
 import json
 import re
@@ -40,6 +41,11 @@ def state_frame(seq, age_s, body, fallback):
     """A state frame around the already encoded public JSON `body` (bytes)."""
     head = json.dumps({"t": "state", "seq": seq, "age_s": round(age_s, 1), "fallback": fallback})
     return head[:-1] + ', "data": ' + body.decode("utf-8") + "}"
+
+
+def brand_frame(key, png):
+    """One brand logo for the room to serve at /t/<link id>/brand/<key>."""
+    return json.dumps({"t": "brand", "key": key, "png": base64.b64encode(png).decode("ascii")})
 
 
 def end_frame():

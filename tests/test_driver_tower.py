@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The OBS timing tower (src/obs/drivers.html) and the public timing page's finish:
-the value column's cycle, the fuel column and the chequered flag. The JS checks run
+the value column's cycle, the fresh lap time, the fuel column and the chequered flag. The JS checks run
 under node when it is installed (skipped otherwise).
 Run: python3 tests/test_driver_tower.py"""
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -17,7 +18,7 @@ TIMING = os.path.join(ROOT, "src", "console", "timing.html")
 _DOM = r"""
 function node(tag) {
   return {tag: tag, className: "", textContent: "", style: {}, children: [], attrs: {},
-          classList: {add() {}, remove() {}, toggle() {}},
+          classList: {add() {}, remove() {}, toggle() {}}, remove() { this.removed = true; },
           setAttribute(k, v) { this.attrs[k] = v; }, toggleAttribute() {},
           appendChild(c) { this.children.push(c); return c; },
           append(...c) { this.children.push(...c); }, prepend() {},
@@ -60,21 +61,148 @@ def _tower(body):
 
 CAR = {"pos": 2, "entry": "Team B #2", "number": "2", "driver": "Ann Lind", "team": "Team B",
        "status": "racing", "gap_s": 1.44, "lapped": 0, "last_lap_ms": 118412, "fuel_l": 56.4,
-       "finished": False, "compound": "RM", "pit_stops": 1}
+       "finished": False, "compound": "RM", "pit_stops": 1, "brand": "bmw", "brand_name": "BMW"}
 
 
-def t_the_value_column_cycles_gap_and_last_lap_only():
+def t_the_value_column_cycles_gap_and_interval():
     got = _tower(f"""
-      const e = {json.dumps(CAR)};
-      return [0, 1, 2, 3].map(function (k) {{
+      const e = Object.assign({json.dumps(CAR)}, {{interval_s: 0.52}});
+      return [0, 1, 2].map(function (k) {{
         Date.now = () => k * CYCLE_MS + 1;
-        showFuel = true;
-        return column(e, 1);
+        return [column(e, 1), column(e, 0), phaseLabel()];
       }});""")
     if got is None:
         return
-    assert got == ["+1.4", "1:58.412", "+1.4", "1:58.412"], \
-        f"two phases, gap then last lap, fuel never in the value column: {got}"
+    assert [g[0] for g in got] == ["+1.4", "+0.5", "+1.4"], \
+        f"two phases, gap to the leader and interval to the car ahead: {got}"
+    assert [g[1] for g in got] == ["Leader"] * 3, f"the leader reads Leader in both phases: {got}"
+    assert [g[2] for g in got] == ["GAP", "INT", "GAP"], f"the header names the phase: {got}"
+
+
+# Feeds payloads behind a fixed leader to renderRace at the given clock and reads each
+# following row's value cell.
+_RACE = """
+  const LEAD = {pos: 1, entry: "Lead #1", status: "racing", last_lap_ms: 118000};
+  function race(t, entries, extra) {
+    Date.now = () => t;
+    renderRace(Object.assign({mode: "race", entries: [LEAD].concat(entries)}, extra || {}));
+    return rows.children.slice(1).map(function (r) {
+      const v = r.children.filter(c => /dd-val/.test(c.className))[0];
+      return {text: text(v), fl: / fl$/.test(v.className)};
+    });
+  }
+"""
+
+
+def _lap(**kw):
+    return dict(CAR, **kw)
+
+
+def t_a_new_lap_shows_for_the_league_seconds_then_the_gap():
+    got = _tower(_RACE + f"""
+      lastLapS = 5;
+      const a = {json.dumps(_lap())}, b = {json.dumps(_lap(last_lap_ms=117000))};
+      return [race(1000, [a]), race(2000, [b]), race(6999, [b]), race(7001, [b])].map(r => r[0].text);""")
+    if got is None:
+        return
+    assert got == ["+1.4", "1:57.000", "1:57.000", "+1.4"], \
+        f"a completed lap replaces the gap for five seconds, then the gap returns: {got}"
+
+
+def t_the_lap_time_follows_the_league_setting():
+    got = _tower(_RACE + f"""
+      lastLapS = 2;
+      const a = {json.dumps(_lap())}, b = {json.dumps(_lap(last_lap_ms=117000))};
+      race(1000, [a]); race(2000, [b]);
+      return [race(3999, [b])[0].text, race(4001, [b])[0].text];""")
+    if got is None:
+        return
+    assert got == ["1:57.000", "+1.4"], f"two seconds when the league says two: {got}"
+
+
+def t_a_page_load_does_not_flash_the_laps_already_set():
+    got = _tower(_RACE + f"""
+      const a = {json.dumps(_lap())}, late = {json.dumps(_lap(entry="Team C #3", number="3", pos=3))};
+      const first = race(1000, [a]).map(r => r.text);
+      const joined = race(2000, [a, late]).map(r => r.text);
+      return [first, joined];""")
+    if got is None:
+        return
+    assert got[0] == ["+1.4"], f"the first payload counts as already shown: {got}"
+    assert got[1][1] == "+1.4", f"an entry the page has not seen does not flash either: {got}"
+
+
+def t_no_lap_time_means_nothing_to_show():
+    got = _tower(_RACE + f"""
+      const a = {json.dumps(_lap())}, cleared = {json.dumps(_lap(last_lap_ms=None))};
+      race(1000, [a]);
+      return [race(2000, [cleared])[0].text, race(3000, [a])[0].text];""")
+    if got is None:
+        return
+    assert got[0] == "+1.4", f"a cleared lap time shows no lap: {got}"
+    assert got[1] == "1:58.412", f"a lap after a cleared one is new again: {got}"
+
+
+def t_the_fastest_lap_shows_purple_only_while_it_shows():
+    got = _tower(_RACE + f"""
+      lastLapS = 5;
+      const fl = {{fastest: {{entry: "Team B #2", driver: "Ann Lind", team: "Team B", ms: 117000}}}};
+      const a = {json.dumps(_lap())}, b = {json.dumps(_lap(last_lap_ms=117000))};
+      race(1000, [a], fl);
+      return [race(2000, [b], fl)[0], race(8000, [b], fl)[0]];""")
+    if got is None:
+        return
+    assert got[0] == {"text": "1:57.000", "fl": True}, f"the race's fastest lap shows purple: {got}"
+    assert got[1] == {"text": "+1.4", "fl": False}, f"the gap after it is never purple: {got}"
+
+
+def t_status_rows_keep_their_value_when_a_lap_lands():
+    got = _tower(_RACE + f"""
+      const out = {{}};
+      for (const [k, extra] of [["est", {{status: "est"}}], ["box", {{status: "box"}}],
+                                ["dc", {{status: "dc"}}], ["red", {{status: "red_flag"}}],
+                                ["done", {{finished: true}}]]) {{
+        lastLapS = 5;
+        const a = Object.assign({json.dumps(_lap())}, {{entry: k}});
+        const fl = {{fastest: {{entry: k, ms: 117000}}}};
+        race(1000, [a], fl);
+        const cell = race(2000, [Object.assign({{}}, a, extra, {{last_lap_ms: 117000}})], fl)[0];
+        out[k] = cell.text;
+        out.purple = (out.purple || []).concat(cell.fl ? [k] : []);
+        out[k + "_after"] = race(3000, [Object.assign({{}}, a, {{last_lap_ms: 117000}})], fl)[0].text;
+      }}
+      return out;""")
+    if got is None:
+        return
+    assert got["est"] == "+1.4EST" and got["box"] == "Box" and got["dc"] == "DC", got
+    assert got["red"] == "Red flag" and got["done"] == "+1.4", got
+    assert got["purple"] == [], f"a status or finished row never tints its value purple: {got}"
+    assert got["box_after"] == "1:57.000", \
+        f"the memory follows every row, so the lap shows out of the box within its seconds: {got}"
+
+
+def t_the_page_takes_the_seconds_from_the_payload():
+    got = _run(_DOM + _script(TOWER) + """
+      ;(async function () {
+        const out = [];
+        for (const show of [{last_lap_s: 9}, {}]) {
+          fetch = () => Promise.resolve({ok: true, json: () => Promise.resolve(
+            {visible: true, mode: "race", entries: [], show: show})});
+          await poll();
+          out.push(lastLapS);
+        }
+        return out;
+      })().then(r => console.log(JSON.stringify(r)));""")
+    if got is not None:
+        assert got == [9, 5], f"the league's seconds from the dashboard payload, else five: {got}"
+
+
+def t_a_lapped_car_without_an_interval_reads_its_laps():
+    got = _tower(f"""
+      Date.now = () => CYCLE_MS + 1;
+      return column(Object.assign({json.dumps(CAR)}, {{lapped: 1, interval_s: null}}), 5);""")
+    if got is not None:
+        assert got == "+1 L", f"the interval phase falls back to the lap count: {got}"
 
 
 def t_fuel_reads_whole_percent_and_turns_amber_at_ten():
@@ -114,9 +242,52 @@ def t_the_builder_sample_rows_have_the_live_columns():
     rows = sample.split('<div class="dd-row">')[1:]
     assert len(rows) == 3, len(rows)
     for r in rows:
-        order = [r.find(f'class="{c}') for c in ("dd-tyre", "dd-fuel", "dd-val", "dd-pit")]
+        order = [r.find(f'class="{c}') for c in ("dd-pos", "dd-id", "dd-brand", "dd-num", "dd-name",
+                                                  "dd-tyre", "dd-fuel", "dd-val", "dd-pit")]
         assert -1 not in order and order == sorted(order), \
-            f"each sample row the builder draws has tyre, fuel, value and stops like a live row: {r}"
+            f"each sample row the builder draws has the live columns in order: {r}"
+        assert '<img src="/drivers/brand/' in r, f"the builder canvas shows a logo: {r}"
+
+def t_the_logo_sits_between_position_and_number_and_hides_when_missing():
+    got = _tower(f"""
+      const r = row({json.dumps(CAR)}, 1, "+1.4", "P1");
+      const id = r.children[1];
+      const img = id.children[0].children[0];
+      const out = {{second: id.className, inner: id.children.map(c => c.className), src: img.attrs.src || img.src,
+                    alt: img.alt}};
+      img.onerror();
+      out.removed = !!img.removed;
+      const again = row({json.dumps(CAR)}, 1, "+1.4", "P1").children[1].children[0];
+      out.retried = again.children.length;
+      const none = row(Object.assign({{}}, {json.dumps(CAR)}, {{brand: ""}}), 1, "", "P1").children[1].children[0];
+      out.empty = none.children.length;
+      return out;""")
+    if got is None:
+        return
+    assert got["second"] == "dd-id" and got["inner"] == ["dd-brand", "dd-num"], \
+        f"the logo sits between position and number: {got}"
+    assert got["src"] == "/drivers/brand/bmw" and got["alt"] == "BMW", got
+    assert got["removed"] and got["retried"] == 0, f"a missing logo leaves an empty cell, no retry each second: {got}"
+    assert got["empty"] == 0, f"no brand, no image: {got}"
+
+
+def t_the_public_page_has_a_foldable_brand_column():
+    with open(TIMING, encoding="utf-8") as fh:
+        page = fh.read()
+    assert '["pos", "Pos"], ["brand", ""], ["num", "#"]' in page, "the logo sits between position and number"
+    assert 'const OPTIONAL = [["brand", "Brand"]' in page, "the reader can fold the logos away"
+    assert "img.remove()" in page and "logoFailed" in page, "a missing logo shows nothing and waits a minute"
+    assert "HOSTED ? hostedLogos[e.brand]" in page, "the hosted page takes logos from its socket, never per request"
+
+
+def t_the_desks_and_the_cockpit_show_logos_through_the_console_route():
+    for rel in (("console", "driver-desk.js"), ("cockpit", "cockpit.html")):
+        with open(os.path.join(ROOT, "src", *rel), encoding="utf-8") as fh:
+            src = fh.read()
+        assert re.search(r"RC_API\(['\"]/drivers/brand/", src), f"{rel[-1]}: the logo goes through /console like its data"
+        at = re.search(r"['\"]/drivers/brand/", src).start()
+        assert ".remove()" in src[at - 400:at + 200], f"{rel[-1]}: a missing logo shows nothing"
+
 
 def t_stale_rows_show_no_fuel():
     got = _tower(f"""

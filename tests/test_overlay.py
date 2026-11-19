@@ -1559,6 +1559,126 @@ def t_a_quote_or_backslash_never_reaches_a_generated_rule():
         assert '\\' not in css and bad not in css, f"{bad!r} would open a CSS string: {css}"
 
 
+def t_the_timing_tower_has_a_brand_logos_switch_that_reflows_the_rows():
+    with open(os.path.join(ROOT, "src", "obs", "drivers.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    tower = next(sl for sl in ob.extract_slots(html) if sl["id"] == "drivers-tower")
+    assert "showBrands" in tower["props"], f"the builder offers the switch on the Timing tower: {tower}"
+    layout = lambda v: {"slots": {"drivers-tower": {"showBrands": v}}}
+    slots = ob.extract_slots(html)
+    assert "#drivers-tower { --dd-brands: none; }" in ob.compile_overlay_css(layout(False), slots), \
+        "switched off, the tower's brand cells collapse"
+    assert "--dd-brands: flex" in ob.compile_overlay_css(layout(True), slots)
+    for junk in ("false", 0, None, "none; x"):
+        assert "--dd-brands" not in ob.compile_overlay_css(layout(junk), slots), f"only a bool: {junk!r}"
+    style = ob.base_style(html)
+    assert re.search(r"\.dd-brand\s*\{[^}]*display:\s*var\(--dd-brands,\s*flex\)", style), \
+        "the logos show by default and the switch is pure CSS, so the builder canvas follows it"
+    assert re.search(r"\.dd-id\s*\{[^}]*display:\s*flex", style), \
+        "logo and number share one auto grid track, which shrinks when the logos are off"
+    canvas = ob.canvas_logo(ob.base_body(html), None)
+    assert 'src="/api/overlay/asset/brands/bmw"' in canvas and "/drivers/brand/" not in canvas, \
+        "the canvas loads the sample logos from the Control Center, not the relay"
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        cc = fh.read()
+    assert "'showBrands'" in cc and "--dd-brands" in cc and "Brand logos" in cc, \
+        "the builder renders the switch and previews it on the canvas"
+
+
+# #1178: an untouched colour that the page takes from a CSS variable is saved as the
+# variable reference, so a :root override in the custom CSS still recolours it.
+
+def t_ob_extract_slots_reports_variable_backed_colours():
+    html = ("<style>\n html, body { margin: 0; color: var(--fg); }\n"
+            " #a { background: var(--bg); border-color: var(--line, #fff); }\n"
+            " /* #b { background: var(--gone); } */\n"
+            " #b { background: var(--bg); }\n #b { background: #123456; }\n"
+            " #c { color: #fff; border-left: 6px solid var(--acc); }\n"
+            " #d.flag, #d .inner { background: var(--x); }\n"
+            " #e { background-color: var(--panel); }\n</style>"
+            '<div id="a" data-edit="A" data-edit-kind="text"></div>'
+            '<div id="b" data-edit="B" data-edit-kind="box"></div>'
+            '<div id="c" data-edit="C" data-edit-kind="text"></div>'
+            '<div id="d" data-edit="D" data-edit-kind="box"></div>'
+            '<div id="e" data-edit="E" data-edit-kind="box"></div>')
+    by = {s["id"]: s for s in ob.extract_slots(html)}
+    assert by["a"].get("vars") == {"color": "var(--fg)", "background": "var(--bg)",
+                               "borderColor": "var(--line, #fff)"}, \
+        f"own and body-inherited variable colours are reported: {by['a'].get('vars')}"
+    assert "vars" not in by["b"], "a later literal declaration wins over the variable"
+    assert "vars" not in by["c"], \
+        "an own literal colour blocks the body's, and a border-side shorthand is no borderColor"
+    assert "vars" not in by["d"], "only the plain #id selector describes the slot"
+    assert by["e"].get("vars") == {"background": "var(--panel)"}, by["e"].get("vars")
+
+
+def t_ob_builder_pages_report_their_variable_colours():
+    def slots(name):
+        with open(os.path.join(ROOT, "src", "obs", name), encoding="utf-8") as f:
+            return {s["id"]: s.get("vars") for s in ob.extract_slots(f.read())}
+    dd = slots("drivers.html")
+    panel = {"color": "var(--dd-fg)", "background": "var(--dd-bg)"}
+    for sid in ("drivers-header", "drivers-tower", "drivers-fastest"):
+        assert dd[sid] == panel, f"{sid} follows the --dd-* theme: {dd[sid]}"
+    assert dd["drivers-map"] == {"background": "var(--dd-bg)"}, dd["drivers-map"]
+    im = slots("intermission.html")
+    assert im["ichat"] == {"color": "var(--ichat-fg)", "background": "var(--ichat-bg)"}, im["ichat"]
+    for name in ("hud.html", "splitscreen.html"):
+        assert not any(slots(name).values()), f"{name} declares no slot colour through a variable"
+
+
+
+def t_ob_a_long_variable_value_is_refused_fast():
+    import time
+    start = time.monotonic()
+    got = ob._safe_value("var(--a, rgb(" + " " * 32000 + "x")
+    took = time.monotonic() - start
+    assert got is None and took < 0.1, f"a 32k value is refused at once, not after {took:.2f} s"
+
+def t_ob_compile_keeps_a_variable_reference_colour():
+    slots = [{"id": "x", "label": "X", "props": list(ob.KIND_TEXT)}]
+    good = {"background": "var(--dd-bg)", "color": "var(--fg, #fff)",
+            "borderColor": "var(--line, rgba(0, 0, 0, .5))", "borderWidth": 2, "borderStyle": "solid"}
+    css = ob.compile_overlay_css({"slots": {"x": good}}, slots)
+    for decl in ("background: var(--dd-bg)", "color: var(--fg, #fff)",
+                 "border-color: var(--line, rgba(0, 0, 0, .5))"):
+        assert decl in css, f"{decl} is kept as a reference: {css}"
+    for bad in ("var(--x, url(//h/a.png))", "var(dd-bg)", "var(--a) var(--b)", "var(--a b)",
+                "var(--x);}body{color:red", "linear-gradient(var(--a), url(//h/a.png))"):
+        css = ob.compile_overlay_css({"slots": {"x": {"background": bad}}}, slots)
+        assert "background" not in css, f"{bad!r} must be dropped: {css}"
+    aud = [{"id": "w", "label": "W", "props": ["barColor"]}]
+    assert "bar-color" not in ob.compile_overlay_css(
+        {"slots": {"w": {"barColor": "var(--a, url(x))"}}}, aud), "every colour value is checked"
+
+
+
+def t_cc_save_keeps_the_variable_reference_of_an_unedited_colour():
+    src = _cc_src()
+    assert "ovSaveValue(s, ov, base, p)" in _cc_fn(src, "saveOverlay"), "Save goes through ovSaveValue"
+    panel = _cc_fn(src, "ovRenderPanel")
+    assert "ovVarBacked(meta, ov, p)" in panel and "ovBaseValues(id, true)" in panel, \
+        "the panel shows a variable colour as it renders on air"
+    assert "!(ovVarBacked(meta, ov, p) &&\n    ovFollowsVar(el, p," in panel, \
+        "a custom :root variable recolouring the slot is no override hint: editing still pins"
+    node = shutil.which("node")
+    if not node:
+        return
+    js = (_cc_fn(src, "ovSaveValue") + "\n}\n" + _cc_fn(src, "ovVarBacked") + "\n}\n" +
+          "const meta = {vars: {background: 'var(--dd-bg)', color: 'var(--dd-fg)'}};\n"
+          "const base = {background: '#0a0d12', color: '#f2f4f7', left: 48};\n"
+          "console.log(JSON.stringify([ovSaveValue(meta, {}, base, 'background'),"
+          " ovSaveValue(meta, {color: '#ff0000'}, base, 'color'), ovSaveValue(meta, {}, base, 'left'),"
+          " ovSaveValue({}, {}, base, 'background'), ovSaveValue(meta, {}, {}, 'background'),"
+          " ovSaveValue(meta, {background: 'var(--dd-bg)'}, base, 'background'),"
+          " ovVarBacked(meta, {}, 'background'), ovVarBacked(meta, {background: '#ff0000'}, 'background'),"
+          " ovVarBacked({}, {background: 'var(--x)'}, 'background'), ovVarBacked(meta, {}, 'left')]))")
+    out = subprocess.run([node, "-"], input=js, capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", check=True, timeout=30).stdout.strip()
+    assert out == ('["var(--dd-bg)","#ff0000",48,"#0a0d12",null,"var(--dd-bg)",true,false,true,false]'), \
+        f"an unedited variable colour saves as its reference, an edit as its value: {out}"
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):

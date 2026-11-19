@@ -59,7 +59,7 @@ PROP_ORDER = ("left", "top", "offsetRight", "offsetTop", "width", "height", "pad
               "fontStyle", "color", "background", "borderColor", "borderStyle",
               "align", "valign", "textTransform", "opacity",
               "rotation", "shear", "textShadow", "visible", "presentation",
-              "showNumber", "showPercent", "barColor", "trackColor")
+              "showNumber", "showPercent", "barColor", "trackColor", "showBrands")
 
 # Slot kinds: the single source for which properties a slot offers. extract_slots
 # derives slot["props"] from the element's data-edit-kind. `text` is a strict
@@ -85,6 +85,10 @@ FIT_ALIASES = ("teamNameMax", "teamNameMin")
 # verbatim path is customCss. Reject anything carrying CSS-structural characters,
 # and quotes or backslashes, which would open a string that swallows the rule.
 _UNSAFE_VALUE = re.compile(r"[;{}<>\"'\\]|/\*|\*/")
+# A value that uses var() must be exactly one reference to a custom property, with
+# at most a hex, keyword or rgb()/rgba() fallback.
+_VAR_VALUE = re.compile(r"var\(\s*--[A-Za-z0-9_-]+\s*(?:,\s*(?:#[0-9A-Fa-f]{3,8}|[A-Za-z]+"
+                        r"|rgba?\([0-9.%\s,/]+\))\s*)?\)")
 
 # Sample content for the same-origin builder canvas, so the operator positions
 # slots against realistic text. Each team is four slots (#136): number, name and
@@ -346,6 +350,7 @@ def extract_slots(html):
     A DEFAULT_HIDDEN_SLOTS slot carries defaultHidden. It is the single source
     of truth, so there is no hardcoded slot list to drift."""
     slots = []
+    css = _CSS_COMMENT_RE.sub("", base_style(html))
     for tag in re.finditer(r"<[^>]*\bdata-edit=\"[^\"]*\"[^>]*>", html):
         text = tag.group(0)
         mid = re.search(r"\bid=\"([^\"]+)\"", text)
@@ -367,8 +372,35 @@ def extract_slots(html):
             slot["lockAspect"] = True
         if slot["id"] in DEFAULT_HIDDEN_SLOTS:
             slot["defaultHidden"] = True    # the builder's Visible starts unchecked
+        refs = {p: v for p, v in _variable_colours(css, slot["id"]).items() if p in slot["props"]}
+        if refs:
+            slot["vars"] = refs
         slots.append(slot)
     return slots
+
+
+# Builder colour prop -> the declarations that set it on the slot itself.
+_VAR_DECLS = {"color": ("color",), "background": ("background", "background-color"),
+              "borderColor": ("border-color",)}
+_DECL_RE = re.compile(r"(?<![\w-])([a-z-]+)\s*:\s*([^;]+)")
+
+
+def _variable_colours(css, slot_id):
+    """{prop: "var(--name)"} for the slot's colour props whose last declaration in a
+    plain #id rule is a whole var() value. color falls back to an html/body rule, as
+    the slot inherits it, when no #id rule declares one."""
+    own, inherited = {}, {}
+    for selectors, body in _top_level_rules(css):
+        items = {s.strip() for s in selectors.split(",")}
+        target = own if "#" + slot_id in items else inherited if items & {"html", "body"} else None
+        if target is None:
+            continue
+        for name, value in _DECL_RE.findall(body):
+            for prop, decls in _VAR_DECLS.items():
+                if name.lower() in decls and (target is own or prop == "color"):
+                    target[prop] = value.strip()
+    merged = {**inherited, **own}
+    return {p: v for p, v in merged.items() if _VAR_VALUE.fullmatch(v)}
 
 
 def valid_aspect_settings(slot):
@@ -415,8 +447,9 @@ def base_body(html):
 
 def canvas_logo(body, logo_url):
     """*body* with the league logo loaded from *logo_url* instead of the relay-only
-    /hud/logo. Without a URL the src is empty, which hides the slot through its
+    /hud/logo, and the timing tower's sample brand logos from the Control Center. Without a URL the src is empty, which hides the slot through its
     onerror like the live HUD does, without a request."""
+    body = body.replace('src="/drivers/brand/', 'src="/api/overlay/asset/brands/')
     return body.replace('src="/hud/logo"', f'src="{escape(logo_url or "", quote=True)}"')
 
 
@@ -602,6 +635,8 @@ def _safe_value(value):
         return value
     if isinstance(value, str):
         v = value.strip()
+        if "var(" in v.lower() and not _VAR_VALUE.fullmatch(v):
+            return None
         return v if v and not _UNSAFE_VALUE.search(v) and _parens_balanced(v) else None
     return None
 
@@ -656,6 +691,9 @@ def _declaration(prop, value):
             return None
         name = "number" if prop == "showNumber" else "percent"
         return f"--audience-{name}: {'block' if value else 'none'}"
+    if prop == "showBrands":
+        # The timing tower's logos (drivers.html reads --dd-brands); unset keeps them on.
+        return f"--dd-brands: {'flex' if value else 'none'}" if isinstance(value, bool) else None
     if prop in ("barColor", "trackColor"):
         safe = _safe_value(value)
         name = "bar" if prop == "barColor" else "track"

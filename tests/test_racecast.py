@@ -6824,7 +6824,7 @@ def t_driver_race_settings_go_to_the_relay_or_the_file():
     league = os.path.join(d, "profile", "driver-race.json")
     assert m.event_race_read_data(path=path, league_path=league)["settings"] == {
         "formation": True, "finish_mode": "laps", "lap_count": None, "delay_s": 0, "visible": False,
-        "show_compound": True, "show_fuel": True, "restart": "keep"}
+        "show_compound": True, "show_fuel": True, "restart": "keep", "last_lap_s": 5}
     off = m.event_race_write_data({"formation": False, "lap_count": 20}, alive=lambda: False, path=path, league_path=league)
     assert off["ok"] and off["applied"] == "file" and off["settings"]["lap_count"] == 20, off
     assert m.event_race_read_data(path=path, league_path=league)["settings"]["formation"] is False
@@ -6848,6 +6848,38 @@ def t_driver_race_settings_go_to_the_relay_or_the_file():
     assert not both["ok"], both
     assert m.event_race_read_data(path=path, league_path=league)["settings"]["restart"] == "neutralise", \
         "a refused combined change leaves the restart default as it was"
+    secs = m.event_race_write_data({"last_lap_s": 9}, alive=lambda: True, path=path,
+                                   league_path=league, post=lambda *_a: 1 / 0)
+    assert secs["ok"] and secs["applied"] == "profile" and secs["settings"]["last_lap_s"] == 9, \
+        "the lap time seconds are a profile file, no relay call"
+    for n in (0, 31, 5.5, "5"):
+        bad = m.event_race_write_data({"last_lap_s": n}, alive=lambda: False, path=path, league_path=league)
+        assert not bad["ok"] and "last_lap_s" in bad["error"], bad
+    both = m.event_race_write_data({"last_lap_s": 3, "finish_mode": "time"}, alive=lambda: True,
+                                   foreign=lambda: False, path=path, league_path=league,
+                                   post=lambda *_a: {"ok": False, "error": "busy"})
+    assert not both["ok"], both
+    assert m.event_race_read_data(path=path, league_path=league)["settings"]["last_lap_s"] == 9, \
+        "a refused combined change leaves the lap time seconds as they were"
+    assert m.event_race_write_data({"last_lap_s": 3, "restart": "keep"}, alive=lambda: False, path=path,
+                                   league_path=league)["settings"]["last_lap_s"] == 3
+
+
+def t_event_race_takes_the_lap_time_seconds():
+    calls = []
+    old = (m.event_race_write_data, m._apply_active_profile_env)
+    m.event_race_write_data = lambda changes: calls.append(changes) or {
+        "ok": True, "applied": "profile", "settings": {"formation": True, "finish_mode": "time",
+                                                        "lap_count": None, "restart": "keep", "last_lap_s": 7}}
+    m._apply_active_profile_env = lambda: None
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            m.event_race_cmd(["--last-lap-seconds", "7"])
+    finally:
+        m.event_race_write_data, m._apply_active_profile_env = old
+    assert calls == [{"last_lap_s": 7}], calls
+    assert "new lap shows 7 s" in out.getvalue(), out.getvalue()
 
 
 def t_driver_invite_follows_the_event_and_regenerates():
