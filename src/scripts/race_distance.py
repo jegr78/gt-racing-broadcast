@@ -58,7 +58,12 @@ nearest the predicted distance decides.
   connection active at once, continuing from the current distance.
 - Estimate: Race Control puts a quiet car S seconds behind a reference car. While it
   stays quiet it shows the reference's distance S seconds ago, frozen under a red flag
-  (its restart anchor) and after the flag; its next data ends the estimate.
+  (its restart anchor) and after the flag; its next data ends the estimate. Before the
+  reference's history covers S it holds at the reference's first known distance.
+- Roster: every entry of `set_roster` stands in the order; one that never sent reads
+  `no_sender` at the end until a sender connects or an estimate places it.
+- Retirement: a retired car (DNF) stops counting and ranks below every running car,
+  retired cars among themselves by distance; undoing it counts on from that distance.
 """
 import bisect
 import math
@@ -111,6 +116,9 @@ class _Car:
         self.last_ms = None        # the last last_ms seen
 
 
+_NO_CAR = _Car(None, "")      # stands in for the car of an entry that never sent
+
+
 def _interpolate(values, keys, k):
     """The value at key k in one history (time at a distance, or the reverse); None
     outside it."""
@@ -157,6 +165,7 @@ class _Entry:
         self.last_lap_ms = None
         self.stint_laps = 0        # race laps since the active car began counting
         self.parked = None         # (conn, counting state) of the car moved away from it
+        self.resume = False        # an undone retirement: count on from `distance`
 
     def restart(self):
         self.distance, self.ts, self.ds = None, [], []
@@ -193,15 +202,51 @@ class Race:
         self._used_rejoins = []     # entries whose rejoin mark a change consumed
         self.fastest = None         # {entry, driver, ms}
         self._window_leader = None  # the leader's distance when the change window opened
-        self._est = {}              # entry -> {ref, seconds, held, on}
+        self._est = {}              # entry -> {ref, seconds, held, lag, on}
+        self._roster = []           # the Configuration entries, in order
+        self._retired = set()
+        self._names = {}            # entry -> the driver Race Control named for a car without a sender
         self._ended_est = []        # entries whose estimate their returning data ended
 
     # -- commands ------------------------------------------------------------------
+    def set_roster(self, entries):
+        """The Configuration entries in order; each stands in the standings, with or
+        without a sender."""
+        self._roster = [e for e in entries if isinstance(e, str)]
+
+    def set_driver_name(self, entry, name):
+        """The driver shown for an entry without a sender; a falsy name removes it."""
+        if name:
+            self._names[entry] = name
+        else:
+            self._names.pop(entry, None)
+
+    def retire(self, entry, on, now):
+        """Mark a car retired (DNF), or undo it: the car then counts on from its last
+        distance."""
+        self._advance(now)
+        ent = self._entries.get(entry)
+        if on:
+            self._retired.add(entry)
+            self._est.pop(entry, None)
+            if ent is not None:
+                ent.resume, ent.waiting, ent.frozen = False, False, None
+                car = self._cars.get(ent.active)
+                if car is not None:
+                    car.counting, car.lap_ok, car.pending = False, False, None
+        elif entry in self._retired:
+            self._retired.discard(entry)
+            if ent is not None and ent.distance is not None:
+                ent.resume = True
+
+    def _out(self, ent):
+        return ent.entry in self._retired
+
     def open_change_window(self, now):
         if self.multi_lobby:
             self._window_until = now + CHANGE_WINDOW_S
             self._window_leader = max((self._shown(e) for e in self._entries.values()
-                                       if e.distance is not None), default=None)
+                                       if e.distance is not None and not self._out(e)), default=None)
             for ent in self._entries.values():
                 ent.changed = False
 
@@ -211,7 +256,7 @@ class Race:
         self._red = {"at": now, "mode": mode}
         self._restart_mode = mode
         for ent in self._entries.values():
-            if ent.waiting:
+            if ent.waiting or self._out(ent):
                 continue                           # a second red flag keeps the first anchor
             ent.frozen = None
             est = self._est.get(ent.entry)
@@ -271,19 +316,35 @@ class Race:
         ent, other = self._entries.get(entry), self._entries.get(ref)
         if entry == ref:
             raise ValueError("an entry cannot follow itself")
-        if ent is None:
-            raise ValueError("that entry has no car in the race")
+        if ent is None and entry not in self._roster and entry not in self._parked:
+            raise ValueError("that entry is not in the race")
+        if entry in self._retired or ref in self._retired:
+            raise ValueError("no estimate for or behind a retired car")
         if other is None or other.distance is None or self._quiet(other, now):
             raise ValueError("the reference needs a car with data")
         if self._red is not None:
             raise ValueError("no estimate under a red flag")
-        if self._finished or ent.finished_at is not None or other.finished_at is not None:
+        if self._finished or (ent is not None and ent.finished_at is not None) \
+                or other.finished_at is not None:
             raise ValueError("no estimate after the flag")
-        self._est[entry] = {"ref": ref, "seconds": float(seconds), "held": None, "on": False}
+        if ent is None:
+            ent = self._adopt(entry)
+        self._est[entry] = {"ref": ref, "seconds": float(seconds), "held": None,
+                            "lag": float(seconds), "on": False}
         self._advance(now)
         if self._quiet(ent, now) and not self._est[entry]["on"]:
             del self._est[entry]
-            raise ValueError("the reference has no distance that far back")
+            raise ValueError("the reference has no distance to follow yet")
+
+    def _adopt(self, entry):
+        """The entry, created or taken back from the parked ones, without a car yet."""
+        if entry in self._parked:
+            ent = self._entries[entry] = self._parked.pop(entry)
+            ent.active = None
+        else:
+            ent = self._entries[entry] = _Entry(entry, None)
+            ent.adjust, ent.pit_adjust, ent.rejoin = self._preset.pop(entry, [0.0, 0, False])
+        return ent
 
     def clear_estimate(self, entry):
         """Remove an entry's estimate; False when it had none."""
@@ -307,11 +368,14 @@ class Race:
                 est["on"] = False
                 continue
             if ref is not None and ref.distance is not None and self._red is None \
-                    and not self._finished and ent.finished_at is None \
+                    and not self._finished and ent.finished_at is None and not self._out(ref) \
                     and ref.finished_at is None and not ref.waiting and not self._quiet(ref, now):
-                d = self._distance_at(ref, now - est["seconds"])
+                d, lag = self._distance_at(ref, now - est["seconds"]), est["seconds"]
+                first = self._first(ref)
+                if d is None and first is not None:   # its history starts later: hold there
+                    d, lag = first[1], now - first[0]
                 if d is not None:
-                    est["held"] = d + ref.adjust
+                    est["held"], est["lag"] = d + ref.adjust, lag
             est["on"] = est["held"] is not None
 
     def override_change(self, entry, conn, now):
@@ -352,7 +416,8 @@ class Race:
     def finish(self, now):
         self._advance(now)
         for ent in self._entries.values():
-            if ent.finished_at is None:
+            if ent.finished_at is None and not self._out(ent) \
+                    and (ent.active is not None or self._estimated(ent)):
                 ent.finished_at = now
         self._finished = True
 
@@ -486,14 +551,10 @@ class Race:
             return                                # not newer than what this car already sent
         if car is not None and car.entry != entry:
             self._move(car, entry)
-        ent = self._entries.get(entry)
+        ent = self._entries.get(entry) or self._adopt(entry)
         resumed = None
-        if ent is None and entry in self._parked:
-            ent = self._entries[entry] = self._parked.pop(entry)
+        if ent.active is None:
             ent.active, resumed, ent.parked = conn, ent.parked, None
-        elif ent is None:
-            ent = self._entries[entry] = _Entry(entry, conn)
-            ent.adjust, ent.pit_adjust, ent.rejoin = self._preset.pop(entry, [0.0, 0, False])
         if car is None:
             car = self._cars[conn] = _Car(conn, name)
             car.entry = entry
@@ -513,7 +574,8 @@ class Race:
         prev_lap = car.lap
         if prev_lap is not None and lap < prev_lap and ent.waiting:
             car.restart_ready = True              # the restart lobby after a red flag
-        elif active and prev_lap is not None and lap < prev_lap and ent.finished_at is None:
+        elif active and prev_lap is not None and lap < prev_lap and ent.finished_at is None \
+                and not self._out(ent):
             car.counting = False                  # a new GT7 session on this console
             if self.multi_lobby and ent.change_anchor is not None:
                 ent.relobby = True
@@ -542,6 +604,8 @@ class Race:
         self._box(car, t)
         if active and car.left_box and car.counting:
             ent.pit_stops += 1
+        if self._out(ent):
+            return
         if ent.waiting:
             if car.restart_ready and car.left_box and lap <= MAX_CHANGE_LAP:
                 old = self._cars.get(ent.active)
@@ -559,7 +623,11 @@ class Race:
         if not active or ent.finished_at is not None or ent.held:
             return
         before = ent.distance
-        if not car.counting:
+        if not car.counting and ent.resume:
+            if not self._start(ent, car, t, ent.distance, lap, s, from_line=False):
+                return
+            ent.resume = False
+        elif not car.counting:
             lap0 = 2 if self.formation else 1
             if lap < lap0 or (self.multi_lobby and ent.changed) \
                     or not self._late_start_ok(ent, lap, lap0) \
@@ -651,7 +719,8 @@ class Race:
         ent.change_anchor, ent.changed, ent.held, ent.relobby = None, True, False, False
         ent.ts.append(t)
         ent.ds.append(ent.distance)
-        if all(e.changed for e in self._entries.values()):
+        if all(e.changed for e in self._entries.values()
+               if e.active is not None and not self._out(e)):
             self._window_until = None
 
     def _final_car(self, ent):
@@ -663,13 +732,13 @@ class Race:
         if self._finishing_at is not None:
             if ent.finished_at is None and t > self._finishing_at:
                 ent.finished_at = t
-                self._finished = all(e.finished_at is not None or self._quiet(e, t)
+                self._finished = all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
                                      for e in self._entries.values())
             return
         # The order Race Control's corrections set is the order that takes the flag.
         shown = self._shown(ent)
-        leader = max((self._shown(e) for e in self._entries.values() if e.distance is not None),
-                     default=None)
+        leader = max((self._shown(e) for e in self._entries.values()
+                      if e.distance is not None and not self._out(e)), default=None)
         if shown is None or shown < leader:
             return
         if self.finish_mode == "laps" and self.lap_count:
@@ -680,7 +749,8 @@ class Race:
         by_flag = self._final_lap_at is not None and t > self._final_lap_at
         if by_laps or by_flag:
             ent.finished_at = self._finishing_at = t
-            self._finished = len(self._entries) == 1
+            self._finished = sum(1 for e in self._entries.values()
+                                 if e.active is not None and not self._out(e)) == 1
 
     def _shown(self, ent):
         est = self._est.get(ent.entry)
@@ -741,6 +811,13 @@ class Race:
         return _across(ent.ts, ent.ds, ent.cts, ent.cds, d)
 
     @staticmethod
+    def _first(ent):
+        """(time, distance) where `ent`'s history begins; None without one."""
+        if ent.cts:
+            return ent.cts[0], ent.cds[0]
+        return (ent.ts[0], ent.ds[0]) if ent.ts else None
+
+    @staticmethod
     def _distance_at(ent, t):
         """`ent`'s distance at time t, interpolated; its last one after its history,
         None before it."""
@@ -779,7 +856,15 @@ class Race:
 
     def standings(self, now):
         self._advance(now)
-        ents = list(self._entries.values())
+        place = {n: i for i, n in enumerate(self._roster)}
+        live = [e for e in self._entries.values() if not self._out(e)]
+        ents = [e for e in live if e.active is not None or self._estimated(e)]
+        idle = [e for e in live if e.active is None and not self._estimated(e)] + \
+            [_Entry(n, None) for n in self._roster if n not in self._entries and n not in self._retired]
+        idle.sort(key=lambda e: place.get(e.entry, len(place)))
+        out = [e for e in self._entries.values() if self._out(e)] + \
+            [_Entry(n, None) for n in self._roster if n in self._retired and n not in self._entries]
+        out.sort(key=lambda e: (-self._shown(e) if e.distance is not None else math.inf, e.entry))
         winner = next((e for e in ents if self._finishing_at is not None
                        and e.finished_at == self._finishing_at and e.distance is not None), None)
         # No car is classified with more laps than the winner took the flag on.
@@ -800,18 +885,21 @@ class Race:
             ref = self._entries.get(est["ref"]) if est else None
             if ref is not None and laps >= 0:
                 at = self._time_at(ref, laps * self.length - ref.adjust)
-                reached = None if at is None else at + est["seconds"]
+                reached = None if at is None else at + est["lag"]
             if reached is None:
                 reached = e.finished_at if e.finished_at is not None else math.inf
             return (0, -laps, reached, -dist, e.entry)
         ents.sort(key=key)
         mismatch = self._mismatches(ents)
+        lap = self._lap_display(ents)
+        ents += idle + out
         rows = []
         for i, e in enumerate(ents):
-            car = self._cars[e.active]
-            quiet = self._quiet(e, now)
+            car = self._cars.get(e.active) or _NO_CAR
+            quiet, retired = self._quiet(e, now), self._out(e)
             lapped = gap = interval = gap_time = interval_time = None
-            if e.distance is not None and (not quiet or e.finished_at is not None):   # a finish is final
+            if e.distance is not None and not retired \
+                    and (not quiet or e.finished_at is not None):   # a finish is final
                 lapped, gap = self._behind(ents[0], e) if i else (0, 0)
                 interval = self._behind(ents[i - 1], e)[1] if i else None
                 gap_time = self._time_behind(ents[0], e, now) if i else 0.0
@@ -819,7 +907,8 @@ class Race:
             shown = self._shown(e)
             est = self._est.get(e.entry)
             rows.append({
-                "entry": e.entry, "driver": car.name, "conn": e.active,
+                "entry": e.entry, "conn": e.active,
+                "driver": car.name if car is not _NO_CAR else self._names.get(e.entry, ""),
                 "distance_m": None if shown is None else round(shown, 1),
                 "laps": max(0, math.floor(shown / self.length)) if shown is not None else 0,
                 "gap_s": None if lapped else (None if gap is None else round(gap, 2)),
@@ -829,18 +918,21 @@ class Race:
                 "quiet_s": None if car.t is None else round(max(0.0, now - car.t), 1),
                 "in_box": bool(car.in_box),
                 "lapped": lapped or 0,
-                "status": ("est" if self._estimated(e) else "no_data") if quiet else
+                "status": "retired" if retired else
+                          ("est" if self._estimated(e) else
+                           "no_sender" if e.active is None else "no_data") if quiet else
                           "box" if car.in_box else
                           "waiting" if e.distance is None else
                           "red_flag" if e.waiting else "racing",
-                "finished": e.finished_at is not None,
+                "finished": e.finished_at is not None and not retired,
                 "waiting": e.waiting,
                 "pit_stops": max(0, e.pit_stops + e.pit_adjust),
                 "correction_m": round(e.adjust, 1),
                 "last_lap_ms": e.last_lap_ms, "stint_laps": e.stint_laps,
                 "fuel_l": None if car.fuel is None else round(car.fuel, 1),
-                **dict(zip(("x", "z"), self._est_xy(e) if self._estimated(e) and quiet
-                                       else (car.x, car.z), strict=True)),
+                **dict(zip(("x", "z"), (None, None) if retired else
+                           self._est_xy(e) if self._estimated(e) and quiet
+                           else (car.x, car.z), strict=True)),
                 "rejoin": e.rejoin,
                 "gt7_position": car.position,
                 "position_mismatch": e.entry in mismatch,
@@ -851,7 +943,7 @@ class Race:
                 "restart_mode": self._restart_mode,
                 "change_window": self._window_until is not None and now <= self._window_until,
                 "fastest": self.fastest,
-                "lap": self._lap_display(ents), "entries": rows}
+                "lap": lap, "entries": rows}
 
     def _estimate_gaps(self, ents, rows):
         """An estimated car's gaps are its reference's plus the seconds; the intervals
@@ -863,8 +955,8 @@ class Race:
                 est = self._est[e.entry]
                 ref = by_entry.get(est["ref"]) or {}
                 lapped = math.floor((lead - est["held"]) / self.length) if i and lead is not None else 0
-                gap = None if lapped or ref.get("gap_s") is None else ref["gap_s"] + est["seconds"]
-                gap_time = None if ref.get("gap_time_s") is None else ref["gap_time_s"] + est["seconds"]
+                gap = None if lapped or ref.get("gap_s") is None else ref["gap_s"] + est["lag"]
+                gap_time = None if ref.get("gap_time_s") is None else ref["gap_time_s"] + est["lag"]
                 row.update(lapped=max(0, lapped), gap_s=None if gap is None else round(gap, 2),
                            gap_time_s=None if gap_time is None else round(gap_time, 2))
             elif not (i and self._estimated(ents[i - 1])):
