@@ -1209,6 +1209,12 @@ def t_a_trailing_slash_on_the_snapshot_page_redirects():
         srv.shutdown()
 
 
+def t_the_snapshot_redirect_never_carries_a_line_break():
+    loc = g.m._slashless_location("/drivers//snapshot/", "time=5&x=a\r\nSet-Cookie:%20y")
+    assert "\r" not in loc and "\n" not in loc, loc
+    assert loc.startswith("/drivers/snapshot?time=5&x=a"), loc
+    assert g.m._slashless_location("//drivers/snapshot/", "") == "/drivers/snapshot"
+
 def t_an_unauthenticated_snapshot_visit_with_oauth_gets_the_launcher():
     srv, port, _p, _hub = _serve(recording_dir=tempfile.mkdtemp(),
                                  discord_client_id="cid", discord_client_secret="secret")

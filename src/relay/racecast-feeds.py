@@ -68,7 +68,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
 
 import argparse, collections, csv, datetime, hashlib, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode, urljoin
+from urllib.parse import urlparse, quote, unquote, parse_qs, parse_qsl, urlencode, urljoin
 from urllib.request import Request, urlopen
 
 # OBS reflection (best effort). obs_ws lives in src/scripts (repo) or the
@@ -1494,6 +1494,14 @@ def stream_transition(prev, cur):
     if prev is True and cur is False:
         return "stopped"
     return None
+
+
+def _slashless_location(path, query):
+    """A same-site redirect target: the path rebuilt from its segments, so it never turns
+    scheme-relative, and every segment and query value percent-encoded."""
+    clean = "/" + "/".join(quote(x, safe="") for x in path.split("/") if x)
+    pairs = parse_qsl(query, keep_blank_values=True)
+    return clean + ("?" + urlencode(pairs) if pairs else "")
 
 
 def _fmt_uptime(seconds):
@@ -14239,11 +14247,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"error": "page not found"}, 404)
                     url = urlparse(self.path)
                     if url.path.endswith("/"):
-                        # Relative fetches need the path without the slash; rebuilt from
-                        # its segments so the Location never turns scheme-relative.
-                        clean = "/" + "/".join(x for x in url.path.split("/") if x)
+                        # Relative fetches need the path without the slash.
                         self.send_response(302)
-                        self.send_header("Location", clean + ("?" + url.query if url.query else ""))
+                        self.send_header("Location", _slashless_location(url.path, url.query))
                         self.send_header("Content-Length", "0")
                         self.end_headers()
                         return None
