@@ -34,6 +34,14 @@ way to keep such a car in the order with a rough gap until its data returns.
   effect until it goes quiet. An estimated car never takes the chequered flag by itself:
   Race Control finishes the classification with the existing tools.
 
+## Later additions
+
+- **Start hold.** Before the reference has history S seconds back (right after the
+  start), X waits at the reference's first known distance until it has; the gap counts
+  the time since then.
+- **Entries without a sender.** An estimate may place a roster entry that never sent;
+  the relay creates it without a connection.
+
 ## Not in scope
 
 - No automatic estimate. Race Control always decides.

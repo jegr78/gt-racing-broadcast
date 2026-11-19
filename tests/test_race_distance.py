@@ -1008,15 +1008,12 @@ def t_an_estimated_car_keeps_its_place_when_the_winner_takes_the_flag():
     assert order == ["A", "B", "C", "D"], f"C stays between B and D after A's flag: {order}"
 
 
-def t_an_estimate_that_reaches_before_the_history_is_refused():
+def t_an_estimate_that_reaches_before_the_history_holds_at_its_start():
     race, _cars, t = _quiet_c()
     race.clear_estimate("C")
-    try:
-        race.estimate("C", "B", 3000.0, t)
-        raise AssertionError("an estimate with no distance to show must be refused")
-    except ValueError:
-        pass  # expected
-    assert _row(race, "C", t)["estimate"] is None
+    race.estimate("C", "B", 3000.0, t)
+    rc = _row(race, "C", t)
+    assert rc["status"] == "est" and abs(rc["distance_m"] - race._entries["B"].ds[0]) < 0.01, rc
 
 
 def t_an_estimate_needs_two_cars_and_a_reference_with_data():
@@ -1047,6 +1044,364 @@ def t_an_estimate_reads_the_coarse_history_too():
     assert ent.ts[0] > t - rd.HISTORY_S - 100, "the lookup reaches back past the fine history"
     rb, ra = _row(race, "B", t), _row(race, "A", t)
     assert abs(rb["distance_m"] - (ra["distance_m"] - 40 * (rd.HISTORY_S + 100))) < 45, (ra, rb)
+
+
+def _order(race, t):
+    return [r["entry"] for r in race.standings(t)["entries"]]
+
+
+def _raises(fn, why):
+    try:
+        fn()
+    except ValueError:
+        return
+    raise AssertionError(why)
+
+
+def _field(roster=("A", "B", "X"), **kw):
+    """A and B at 40 m/s, B one second behind; X is in the roster and never sends."""
+    race = rd.Race(TRACE, formation=False, **kw)
+    race.set_roster(list(roster))
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, 12)
+    return race, (a, b), t
+
+
+def t_a_roster_entry_without_a_sender_stands_at_the_end_as_no_sender():
+    race, (a, b), t = _field(roster=("X", "A", "B", "Y"))
+    assert _order(race, t) == ["A", "B", "X", "Y"], _order(race, t)
+    rx = _row(race, "X", t)
+    assert rx["status"] == "no_sender" and rx["gap_s"] is None and rx["distance_m"] is None, rx
+    assert rx["driver"] == "" and rx["quiet_s"] is None and rx["x"] is None and rx["laps"] == 0, rx
+    assert not rx["finished"] and rx["estimate"] is None, rx
+
+
+def t_a_sender_that_connects_later_takes_over_the_roster_entry():
+    race, (a, b), t = _field()
+    x = Car(race, "X", "x", L - 100)
+    x.along = b.along - 100
+    t = _drive(race, [a, b, x], [40, 40, 40], t, L / 40 + 2)       # its own crossing gives its line
+    rx = _row(race, "X", t)
+    assert rx["status"] == "racing" and rx["distance_m"] is not None and rx["driver"] == "Driver", rx
+
+
+def t_an_estimate_places_a_car_that_never_sent():
+    race, (a, b), t = _field()
+    race.estimate("X", "B", 1.0, t)
+    t = _drive(race, [a, b], [40, 40], t, 10)
+    rb, rx = _row(race, "B", t), _row(race, "X", t)
+    assert rx["status"] == "est" and abs(rx["distance_m"] - (rb["distance_m"] - 40)) < 3, (rb, rx)
+    assert abs(rx["gap_s"] - (rb["gap_s"] + 1.0)) < 0.02 and abs(rx["interval_s"] - 1.0) < 0.02, rx
+    assert rx["estimate"] == {"ref": "B", "seconds": 1.0} and rx["quiet_s"] is None, rx
+    assert _order(race, t) == ["A", "B", "X"], _order(race, t)
+
+
+def t_an_estimated_never_seen_car_can_sit_between_two_cars_with_data():
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "C", "X"])
+    a, b, c = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50), Car(race, "C", "c", L - 170)
+    t = _drive(race, [a, b, c], [40, 40, 40], 0.0, 12)
+    race.estimate("X", "B", 1.0, t)
+    t = _drive(race, [a, b, c], [40, 40, 40], t, 5)
+    assert _order(race, t) == ["A", "B", "X", "C"], _order(race, t)
+    rx, rc = _row(race, "X", t), _row(race, "C", t)
+    assert abs(rc["interval_s"] - (rc["gap_s"] - rx["gap_s"])) < 0.02, (rx, rc)
+
+
+def t_an_estimate_needs_a_roster_entry_and_leaves_no_row_when_refused():
+    race, (a, b), t = _field()
+    _raises(lambda: race.estimate("Nobody", "B", 1.0, t), "an entry outside the roster is refused")
+    race.red_flag(t, "keep")
+    _raises(lambda: race.estimate("X", "B", 1.0, t), "no estimate under a red flag")
+    assert "X" not in race._entries and _row(race, "X", t)["status"] == "no_sender", \
+        "a refused estimate creates no car"
+
+
+def t_a_cleared_estimate_leaves_a_never_seen_car_without_a_sender():
+    race, (a, b), t = _field(roster=("A", "B", "X", "Y"))
+    race.estimate("Y", "B", 1.0, t)
+    assert race.clear_estimate("Y")
+    t = _drive(race, [a, b], [40, 40], t, 2)
+    assert _row(race, "Y", t)["status"] == "no_sender" and _order(race, t) == ["A", "B", "X", "Y"], \
+        f"cars without a sender keep the roster order: {_order(race, t)}"
+    race.finish(t)
+    assert not _row(race, "Y", t)["finished"], "a car without a sender takes no flag"
+
+
+def t_real_data_ends_the_estimate_of_a_never_seen_car():
+    race, (a, b), t = _field()
+    race.estimate("X", "B", 1.0, t)
+    t = _drive(race, [a, b], [40, 40], t, 3)
+    x = Car(race, "X", "x", L - 300)
+    x.along = b.along - 300
+    t = _drive(race, [a, b, x], [40, 40, 40], t, 3)
+    rx = _row(race, "X", t)
+    assert rx["status"] == "waiting" and rx["estimate"] is None and rx["quiet_s"] == 0.0, \
+        f"its own sender ends the estimate: {rx}"
+    assert race.take_ended_estimates() == ["X"]
+
+
+def t_an_estimate_at_the_start_holds_at_the_references_first_distance():
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "X"])
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, 3)
+    first = race._entries["B"].ds[0]
+    race.estimate("X", "B", 5.0, t)
+    rb, rx = _row(race, "B", t), _row(race, "X", t)
+    assert rx["status"] == "est" and abs(rx["distance_m"] - first) < 0.01, (first, rx)
+    assert _order(race, t) == ["A", "B", "X"], _order(race, t)
+    lag = t - race._entries["B"].ts[0]
+    assert abs(rx["gap_s"] - (rb["gap_s"] + lag)) < 0.05, f"the hold's gap is the time since then: {rx} {lag}"
+    t = _drive(race, [a, b], [40, 40], t, 1)
+    assert abs(_row(race, "X", t)["distance_m"] - first) < 0.01, "it holds until the history covers S"
+    t = _drive(race, [a, b], [40, 40], t, 10)
+    rb, rx = _row(race, "B", t), _row(race, "X", t)
+    assert abs(rx["distance_m"] - (rb["distance_m"] - 200)) < 5, f"then it follows 5 s behind: {rb} {rx}"
+    assert abs(rx["gap_s"] - (rb["gap_s"] + 5.0)) < 0.02, rx
+
+
+def _retire_field():
+    """A, B, C and D at 40 m/s, a second apart."""
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "C", "D", "X"])
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90), ("D", 130))]
+    t = _drive(race, cars, [40] * 4, 0.0, 12)
+    return race, cars, t
+
+
+def t_a_retired_car_sits_below_every_running_car_and_stops_counting():
+    race, (a, b, c, d), t = _retire_field()
+    race.retire("A", True, t)
+    held = _row(race, "A", t)["distance_m"]
+    t = _drive(race, [a, b, c, d], [40] * 4, t, 5)
+    ra = _row(race, "A", t)
+    assert _order(race, t) == ["B", "C", "D", "X", "A"], _order(race, t)
+    assert ra["status"] == "retired" and ra["distance_m"] == held, ra
+    assert ra["gap_s"] is None and ra["interval_s"] is None and ra["x"] is None and ra["fuel_l"] is None, ra
+    assert _row(race, "B", t)["gap_s"] == 0, "the next car leads"
+
+
+def t_retired_cars_rank_among_themselves_by_distance():
+    race, (a, b, c, d), t = _retire_field()
+    race.set_roster(["A", "B", "C", "D", "AA"])
+    race.retire("D", True, t)
+    t = _drive(race, [a, b, c], [40] * 3, t, 5)
+    race.retire("B", True, t)
+    race.retire("AA", True, t)
+    assert _order(race, t) == ["A", "C", "B", "D", "AA"], _order(race, t)
+    assert _row(race, "AA", t)["status"] == "retired"
+
+
+def t_undoing_a_retirement_counts_on_from_the_last_distance():
+    race, (a, b, c, d), t = _retire_field()
+    race.retire("B", True, t)
+    held = _row(race, "B", t)["distance_m"]
+    t = _drive(race, [a, b, c, d], [40] * 4, t, 5)
+    race.retire("B", False, t)
+    t = _drive(race, [a, b, c, d], [40] * 4, t, 2)
+    rb = _row(race, "B", t)
+    assert rb["status"] == "racing" and abs(rb["distance_m"] - (held + 80)) < 5, (held, rb)
+
+
+def t_a_retired_car_keeps_its_distance_when_its_console_leaves_the_session():
+    race, (a, b, c, d), t = _retire_field()
+    race.retire("B", True, t)
+    held = _row(race, "B", t)["distance_m"]
+    _new_lobby(b, L - 15)
+    t = _drive(race, [a, b, c, d], [40, None, 40, 40], t, 3)
+    assert _row(race, "B", t)["distance_m"] == held, "a new session does not wipe a retired car"
+
+
+def t_a_retirement_ends_its_estimate_and_it_is_no_reference():
+    race, (a, b, c, d), t = _retire_field()
+    t = _drive(race, [a, b, d], [40] * 3, t, rd.NO_DATA_S + 1)
+    race.estimate("C", "B", 1.0, t)
+    race.retire("C", True, t)
+    assert _row(race, "C", t)["status"] == "retired" and _row(race, "C", t)["estimate"] is None
+    race.retire("C", False, t)
+    race.retire("B", True, t)
+    _raises(lambda: race.estimate("C", "B", 1.0, t), "a retired car is no reference")
+    _raises(lambda: race.estimate("B", "A", 1.0, t), "a retired car takes no estimate")
+
+
+def t_an_estimate_ends_when_its_reference_retires():
+    race, (a, b, c, d), t = _retire_field()
+    t = _drive(race, [a, b, d], [40] * 3, t, rd.NO_DATA_S + 1)
+    race.estimate("C", "B", 1.0, t)
+    t = _drive(race, [a, b, d], [40] * 3, t, 1)
+    assert race.retire("B", True, t) == ["C"], "the retirement names the estimate it ended"
+    rc = _row(race, "C", t)
+    assert rc["status"] == "no_data" and rc["estimate"] is None, f"Race Control re-attaches it: {rc}"
+    assert race.retire("B", False, t) == []
+    assert _row(race, "C", t)["estimate"] is None, "undoing the DNF does not bring the estimate back"
+
+
+def t_a_retired_leader_does_not_hold_back_the_flag():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    race.set_roster(["A", "B", "X"])
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, 12)
+    race.retire("A", True, t)
+    t = _drive(race, [a, b], [40, 40], t, 2 * L / 40 + 2)
+    snap = race.standings(t)
+    assert snap["state"] == "finished", f"B wins once the leader retired: {snap['state']}"
+    assert _row(race, "B", t)["finished"] and not _row(race, "A", t)["finished"]
+    assert _row(race, "A", t)["status"] == "retired" and _order(race, t) == ["B", "X", "A"]
+
+
+def t_a_finish_by_hand_leaves_a_retired_car_unclassified():
+    race, (a, b, c, d), t = _retire_field()
+    race.retire("D", True, t)
+    race.finish(t)
+    rd_ = _row(race, "D", t)
+    assert rd_["status"] == "retired" and not rd_["finished"], rd_
+    held = _row(race, "D", t)["distance_m"]
+    race.retire("D", False, t)
+    t = _drive(race, [a, b, c, d], [40] * 4, t, 3)
+    rd_ = _row(race, "D", t)
+    assert rd_["finished"] and rd_["distance_m"] == held, f"undone after the flag it is classified where it stopped: {rd_}"
+    assert _order(race, t)[3] == "D", _order(race, t)
+    race.retire("A", True, t)
+    assert not _row(race, "A", t)["finished"], "a DNF after the flag reads DNF, not finished"
+
+
+def t_a_retired_leader_does_not_hold_back_the_final_lap():
+    race = rd.Race(TRACE, formation=False, finish_mode="time")
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [80, 40], 0.0, 60)
+    race.retire("A", True, t)
+    race.final_lap(t)
+    t = _drive(race, [a, b], [80, 40], t, 25)                      # B crosses well short of A
+    assert _row(race, "B", t)["finished"], "B takes the flag at its next crossing"
+
+
+def t_race_control_overrides_the_name_of_one_driver_of_an_entry():
+    race, (a, b), t = _field()
+    race.set_driver_name("X", "", "Kim Berg")
+    race.set_driver_name("A", "Driver", "Ann")
+    race.set_driver_name("B", "Somebody Else", "Zed")
+    assert _row(race, "X", t)["driver"] == "Kim Berg", "a car without a sender shows the name"
+    assert _row(race, "A", t)["driver"] == "Ann" and _row(race, "A", t)["driver_registered"] == "Driver", \
+        "a sender's name is overridden, its registered name kept for the desks"
+    assert _row(race, "B", t)["driver"] == "Driver", "another driver of the entry keeps their own name"
+    assert race.display_name("A", "Driver") == "Ann" and race.display_name("A", "Other") == "Other"
+    race.set_driver_name("X", "", "")
+    assert _row(race, "X", t)["driver"] == ""
+
+
+def t_the_change_window_closes_without_waiting_for_retired_or_senderless_cars():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    race.set_roster(["A", "B", "C", "X"])
+    a, b, c = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 60), ("C", 110)))
+    t = _drive(race, [a, b, c], [50] * 3, 0.0, 60)
+    race.retire("C", True, t)
+    race.estimate("X", "B", 1.0, t)
+    race.open_change_window(t)
+    for car in (a, b):
+        car.box = True
+    t = _drive(race, [a, b, c], [None, None, 50], t, 3)
+    for car in (a, b):
+        car.along = -5.0
+    t = _drive(race, [a, b, c], [None, None, 50], t, 3)
+    for car in (a, b):
+        car.box = False
+    t = _drive(race, [a, b, c], [40, 40, 50], t, 5)
+    assert race.standings(t)["change_window"] is False, "every team that can change has changed"
+
+
+def t_a_retired_car_still_sending_does_not_hold_back_the_finish():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b, c = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90)))
+    t = _drive(race, [a, b, c], [40] * 3, 0.0, 12)
+    race.retire("C", True, t)
+    t = _drive(race, [a, b, c], [40] * 3, t, 2 * L / 40 + 3)
+    assert race.standings(t)["state"] == "finished", race.standings(t)["state"]
+
+
+def t_a_retired_car_does_not_level_a_neutralised_restart():
+    race = rd.Race(TRACE, formation=False)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
+    t = _drive(race, [a, b], [50, 50], 0.0, 30)
+    db = _row(race, "B", t)["distance_m"]
+    race.retire("A", True, t)
+    race.red_flag(t, "neutralise")
+    for car in (a, b):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b], [None, None], t, 3.1)
+    b.box = False
+    t = _drive(race, [a, b], [None, 40], t, 1)
+    assert abs(_row(race, "B", t)["distance_m"] - (db + 40)) < 10, \
+        f"B restarts from its own distance, not the retired car's: {db} {_row(race, 'B', t)}"
+
+
+def t_a_rejoin_starts_at_the_leader_still_running():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    out = Car(race, "R", "r1", L - 12, "Rex")
+    lead, gone = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 115, "Ann")
+    t = _drive(race, [out, lead, gone], [60, 50, 50], 0.0, 30)
+    t = _drive(race, [out, lead], [60, 50], t, 30)
+    race.retire("R", True, t)
+    race.rejoin("B", True)
+    race.open_change_window(t)
+    start = _row(race, "A", t)["distance_m"]
+    back = Car(race, "B", "b2", L - 15, "Ben")
+    t = _drive(race, [lead, back], [50, 40], t, 2)                     # lap 1 of the next lobby
+    back.box = True
+    t = _drive(race, [lead, back], [50, None], t, 3)
+    back.box = False
+    t = _drive(race, [lead, back], [50, 40], t, 1)
+    rb = _row(race, "B", t)
+    assert abs(rb["distance_m"] - (start + 40)) < 15, f"B joins at A's distance, not R's: {start} {rb}"
+
+
+def t_corrections_reach_a_car_without_a_sender():
+    race, (a, b), t = _field()
+    race.correct("X", 0.0, pit_stops=1)
+    race.rejoin("X", True)
+    rx = _row(race, "X", t)
+    assert rx["pit_stops"] == 1 and rx["rejoin"] is True, f"a pit stop correction shows on a car without a sender: {rx}"
+
+
+def t_a_parked_entry_can_be_estimated():
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "C"])
+    a, b, c = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50), Car(race, "C", "c", L - 90)
+    t = _drive(race, [a, b, c], [40] * 3, 0.0, 12, positions=lambda car: "ABC".index(car.entry) + 1)
+    b.entry = "A"                                          # the producer moves B's only car to A
+    t = _drive(race, [a, b, c], [40] * 3, t, rd.NO_DATA_S + 1)
+    race.estimate("B", "C", 1.0, t)
+    rb = _row(race, "B", t)
+    assert rb["status"] == "est" and rb["distance_m"] is not None, rb
+
+
+def _mid_lap_start():
+    """Three cars cross the line and give the medoid; A and B, 200 m apart in mid lap,
+    then start from where they are, so A's history begins ahead of B."""
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "Q1", "Q2", "Q3", "X"])
+    qs = [Car(race, "Q%d" % i, "q%d" % i, L - 5 * i) for i in (1, 2, 3)]
+    t = _drive(race, qs, [20] * 3, 0.0, 2)
+    a, b = Car(race, "A", "a", 1.5 * L), Car(race, "B", "b", 1.5 * L - 200)
+    t = _drive(race, qs + [a, b], [20, 20, 20, 40, 40], t, 1)
+    return race, (a, b, *qs), t
+
+
+def t_a_running_car_has_a_gap_before_the_car_ahead_has_history_there():
+    race, cars, t = _mid_lap_start()
+    rb = _row(race, "B", t)
+    assert rb["status"] == "racing" and rb["gap_s"] is not None and abs(rb["gap_s"] - 5.0) < 0.5, \
+        f"200 m at 40 m/s is about 5 s while A's history starts ahead of B: {rb}"
+    assert rb["interval_s"] is not None and rb["gap_time_s"] is not None, rb
+
+
+def t_a_start_hold_estimate_shows_its_reference_gap_plus_the_lag():
+    race, cars, t = _mid_lap_start()
+    race.estimate("X", "B", 30.0, t)
+    rb, rx = _row(race, "B", t), _row(race, "X", t)
+    lag = t - race._entries["B"].ts[0]
+    assert rx["status"] == "est" and rx["gap_s"] is not None and abs(rx["gap_s"] - (rb["gap_s"] + lag)) < 0.05, \
+        (rb, rx)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,8 @@ it does not change what the PlayStation or your other apps do.
 
 1. Open the invite link the producer shares for the event.
 2. Pick your entry and, in an endurance race, your stint or qualifying segment.
-3. Type your name and press **Get my sender command**.
+3. Type your name (up to 24 letters, digits, spaces, `_ . -`; your PSN Online ID fits) and
+   press **Get my sender command**.
 
 The page shows a command with your personal code. The code works for the whole event.
 When the producer renews the invite link, open the new link and register again.
@@ -97,6 +98,28 @@ and says so. Changing the layout mid-event starts the race over.
   tower, cockpit, public timing page, the recording and its frozen standings), until the
   car sends data again. A car Race Control placed with an **estimate** shows **EST**
   instead of either (see below).
+- **No sender**: every entry of the Configuration roster stands in the order from the
+  start. One whose driver never ran a sender sits at the end with no gap: **No sender**
+  on the desks, **No data** on the tower, the cockpit and the public timing page. A
+  sender that connects later takes the entry over. Race Control can place such a car
+  with an estimate and give it a driver name (see below); without a name the screens
+  show the team.
+- **Driver name**: Race Control and the director can change the name every screen shows
+  for any driver, also one with a sender, to fix a questionable name. Pick the entry and
+  the driver (the one in the car is preselected; "(no sender)" for an entry without
+  one), type the name and press **Set name**; **Clear name** removes it. The change
+  belongs to that driver of that entry, so the next driver of the same car keeps their
+  own name. The desk lists every active change. Names follow the sender rule.
+- **Long names**: a screen that shows a full name shows it whole when it fits, else the
+  first name as an initial (`A. Fitzgerald`), else cut with `…`; a one-word ID (a PSN
+  Online ID) is cut directly. The timing tower shows the surname only, cut with `…`.
+- **DNF**: Race Control or the director retire a car on the desk (**Retire (DNF)**, two
+  clicks). It stops counting, drops below every running car and shows **DNF** on every
+  screen, the recording and its CSV included; its dot leaves the track map. Several
+  retired cars rank by the distance they covered. A retired car raises no disconnect
+  event, ends its estimate and cannot be an estimate's reference; an estimate that
+  followed it ends too, so Race Control attaches that car to another one. **Undo DNF** takes
+  back a mis-press: the car counts on from its last distance.
 - **Pit stops** count every box stop the car drives out of. The count is an estimate:
   the relay sees a stop as standing off the racing line, so a car beached beside the
   track or stopped there under a red flag counts as a pit stop too. The desks' `Pits`
@@ -292,7 +315,9 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   A **change override** makes a team's other sender the active one at once.
 - **Estimate** keeps a car without data in the order: pick the quiet entry, the car it
   runs behind and the seconds, then **Set estimate**. While the car stays quiet it
-  shows where the reference car was that many seconds ago, its gap is the reference's
+  shows where the reference car was that many seconds ago (right after the start, before
+  the reference has driven that long, it waits at the reference's first known distance,
+  just behind it on the grid), its gap is the reference's
   gap plus the seconds, and every screen marks it **EST** (desks, tower, cockpit,
   public timing page, the recording and its CSV). On the track map its dot moves with
   the reference, set back by the gap, inside a dashed amber ring. The reference must send data. Set it
@@ -303,8 +328,9 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   its reference took the flag, and an estimated car never takes the flag by itself.
   Estimates are not saved: a relay restart drops them.
 
-Corrections and rejoin marks survive a relay restart; a race reset and the next
-`event start` drop them. Every action is logged with who
+Corrections, rejoin marks and retirements survive a relay restart; a race reset and
+the next `event start` drop them. Driver name changes survive a race reset too and go
+with the next `event start`. Every action is logged with who
 and when in `runtime/<profile>/driver-race-audit.jsonl`. Race Control and the director
 use them from the Race Control desk ([Console](Console)) and the Director Panel
 ([Director](Director#driver-telemetry)).

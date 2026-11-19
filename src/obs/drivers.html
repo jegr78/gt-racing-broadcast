@@ -80,6 +80,7 @@
   .dd-pit { text-align: center; font-size: 15px; color: var(--dd-dim); font-variant-numeric: tabular-nums; }
   .dd-row.box .dd-val { color: #ffd23f; }
   .dd-row.off .dd-driver, .dd-row.off .dd-val { color: var(--dd-dim); }
+  .dd-row.dnf .dd-val { color: var(--dd-accent); font-weight: 800; }
   .dd-est { display: inline-block; margin-left: 4px; padding: 0 3px; border: 1px solid #ffb454; border-radius: 3px;
             color: #ffb454; font-size: 11px; font-weight: 800; line-height: 16px; vertical-align: 3px; }
   #drivers-fastest {
@@ -87,7 +88,8 @@
     padding: 0 14px; background: var(--dd-bg); display: flex; align-items: center; gap: 12px; font-size: 18px;
   }
   #drivers-fastest b { background: var(--dd-purple); color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 14px; }
-  #dd-fl-time { margin-left: auto; color: var(--dd-purple); font-weight: 700; font-variant-numeric: tabular-nums; }
+  #dd-fl-who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #dd-fl-time { flex: none; margin-left: auto; color: var(--dd-purple); font-weight: 700; font-variant-numeric: tabular-nums; }
   #drivers-fastest.none { visibility: hidden; }
   #drivers-map { position: absolute; right: 48px; top: 64px; width: 420px; height: 420px; box-sizing: border-box;
                  background: var(--dd-bg); padding: 16px; }
@@ -137,6 +139,7 @@
     const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
     return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
   }
+  // The surname only (a one-word ID whole); the column's CSS ellipsis cuts what does not fit.
   function surname(name) {
     const parts = String(name || "").trim().split(/\s+/);
     return (parts[parts.length - 1] || "").toUpperCase();
@@ -186,7 +189,7 @@
       ? Math.round(Math.min(100, Math.max(0, e.fuel_l))) : null;
   }
   function fuelCell(e) {
-    const quiet = e.status === "est" || e.status === "no_data" || e.status === "dc";
+    const quiet = ["est", "no_data", "dc", "no_sender", "retired"].indexOf(e.status) >= 0;
     const pct = quiet ? null : fuelPct(e);
     const cell = el("span", "dd-fuel" + (pct !== null && pct <= 10 ? " low" : ""));
     if (pct === null) return cell;   // no bar: an empty one would read as an empty tank
@@ -202,7 +205,8 @@
   function column(e, i) {
     if (flagged(e)) return gapText(e, i);   // a finish is final, wherever the car is now
     if (e.status === "box") return "Box";
-    if (e.status === "no_data") return "No data";
+    if (e.status === "no_data" || e.status === "no_sender") return "No data";
+    if (e.status === "retired") return "DNF";
     if (e.status === "dc") return "DC";
     if (e.status === "red_flag") return "Red flag";
     if (e.status === "est") {   // the estimated gap stays put: its last lap and fuel are stale
@@ -220,7 +224,8 @@
   function row(e, i, value, pits, fl) {
     const done = flagged(e);
     const r = el("div", "dd-row" + (done ? "" : e.status === "box" ? " box" :
-                                    e.status === "no_data" || e.status === "dc" ? " off" : ""));
+                                    e.status === "retired" ? " off dnf" :
+                                    ["no_data", "dc", "no_sender"].indexOf(e.status) >= 0 ? " off" : ""));
     r.appendChild(el("span", "dd-pos", String(e.pos)));
     const num = el("span", "dd-num", e.number || String(e.entry || "").slice(0, 3));
     num.style.background = safeColor(e.color, "#39414d");
@@ -239,7 +244,7 @@
       flag.style.gridColumn = "span " + slots;
       r.appendChild(flag);
     } else if (!done) {
-      const code = ["RS", "RM", "RH", "I", "W"].indexOf(e.compound) >= 0 ? e.compound : "";
+      const code = e.status !== "retired" && ["RS", "RM", "RH", "I", "W"].indexOf(e.compound) >= 0 ? e.compound : "";
       r.appendChild(el("span", "dd-tyre" + (code ? " " + code : ""), code));
       r.appendChild(fuelCell(e));
     }

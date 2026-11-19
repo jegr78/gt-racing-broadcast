@@ -8,8 +8,9 @@ that puts the last schedule row on air. A changed layout pick starts a new race,
 because distances along another line mean nothing.
 
 Race Control actions (#1113): red flag, restart mode and release, rejoin marks,
-corrections, change overrides and estimates for quiet cars (in memory only).
-Corrections and rejoin marks persist in
+corrections, change overrides, estimates for quiet cars (in memory only),
+retirements and driver names for entries without a sender.
+Corrections, rejoin marks, retirements and driver names persist in
 `driver-race-actions.json` next to the settings and come back after a relay
 restart; every action appends a line with identity and time to
 `driver-race-audit.jsonl`. The red flag restart default is a league rule and lives
@@ -29,6 +30,7 @@ import threading
 import time
 
 import atomic_replace
+import driver_invite
 import race_distance
 import race_recording
 
@@ -196,8 +198,8 @@ def _last_audited(path):
 
 
 def clear_actions(runtime_dir):
-    """A fresh event: drop every action (corrections, rejoin marks, tyre compounds,
-    qualifying corrections) and the fastest lap; the audit log stays."""
+    """A fresh event: drop every action (corrections, rejoin marks, retirements, driver
+    names, tyre compounds, qualifying corrections) and the fastest lap; the audit log stays."""
     for name in (ACTIONS, FASTEST):
         path = os.path.join(runtime_dir, name)
         try:
@@ -211,7 +213,8 @@ def _saved_fastest(path, track):
     doc = _read_json(path)
     entry, driver, ms = doc.get("entry"), doc.get("driver"), doc.get("ms")
     if doc.get("track") == track and isinstance(entry, str) and isinstance(driver, str) \
-            and type(ms) is int and ms > 0 and len(entry) <= MAX_ENTRY and len(driver) <= MAX_ENTRY:
+            and type(ms) is int and ms > 0 and len(entry) <= MAX_ENTRY \
+            and _valid_name(driver, rule=driver_invite.KNOWN_NAME):
         return {"entry": entry, "driver": driver, "ms": ms}
     return None
 
@@ -336,6 +339,36 @@ def _saved_actions(path):
     return corrections, rejoins
 
 
+def _saved_retired(path):
+    raw = _read_json(path).get("retired")
+    return [e for e in (raw if isinstance(raw, list) else ())
+            if isinstance(e, str) and 0 < len(e) <= MAX_ENTRY][:MAX_QUALI]
+
+
+def _valid_name(name, empty=False, rule=driver_invite.NAME):
+    """A desk-entered driver name follows the sender registration rule; `rule`
+    KNOWN_NAME also takes names stored before the 24 character cap."""
+    return isinstance(name, str) and ((empty and name == "") or bool(rule.match(name)))
+
+
+def _saved_overrides(path):
+    """[[entry, registered driver or "", shown name]] from the actions file; anything
+    malformed is dropped."""
+    raw = _read_json(path).get("driver_names")
+    out = []
+    for item in (raw if isinstance(raw, list) else ()):
+        if isinstance(item, list) and len(item) == 3 and isinstance(item[0], str) \
+                and 0 < len(item[0]) <= MAX_ENTRY and _valid_name(item[1], True, driver_invite.KNOWN_NAME) \
+                and _valid_name(item[2], rule=driver_invite.KNOWN_NAME) and len(out) < MAX_QUALI:
+            out.append(item)
+    return out
+
+
+def _override_list(saved):
+    return sorted(({"entry": e, "driver": d, "name": n} for e, d, n in saved),
+                  key=lambda o: (o["entry"], o["driver"]))
+
+
 def _saved_compounds(path):
     """{entry: {code, who, ts}} from the actions file; anything malformed is skipped."""
     raw = _read_json(path).get("compounds")
@@ -368,6 +401,10 @@ def _saved_quali(path, segment):
 def _entry_name(entry):
     if not isinstance(entry, str) or not entry.strip() or len(entry) > MAX_ENTRY:
         raise ValueError(f"entry is 1 to {MAX_ENTRY} characters")
+    try:
+        entry.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("entry is not valid text") from None
     return entry.strip()
 
 
@@ -450,6 +487,10 @@ class Service:
             race.correct(entry, metres, pits)
         for entry in rejoins:
             race.rejoin(entry, True)
+        for entry in _saved_retired(_actions_path_for(self._path)):
+            race.retire(entry, True, self._clock())
+        for entry, driver, name in _saved_overrides(_actions_path_for(self._path)):
+            race.set_driver_name(entry, driver, name)
         race.fastest = _saved_fastest(self._fastest_path(), pick_id)
         self._saved_fastest = race.fastest
         return race
@@ -478,14 +519,14 @@ class Service:
         """Race Control's correction: clear the fastest lap (no entry) or set it."""
         if entry is not None:
             entry = _entry_name(entry)
-            if not isinstance(driver, str) or not 0 < len(driver) <= MAX_ENTRY:
-                raise ValueError(f"driver is 1 to {MAX_ENTRY} characters")
+            if not _valid_name(driver):
+                raise ValueError("driver is 1 to 24 letters, digits, spaces, _ . or -")
             if type(ms) is not int or not 0 < ms < 3_600_000:
                 raise ValueError("ms is a lap time in milliseconds")
         with self._lock:
             race = self._current()
-            race.fastest = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
             self._log(who, "fastest", **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
+            race.fastest = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
         self.save_fastest()
         return self.standings()
 
@@ -498,6 +539,7 @@ class Service:
                "track": pick.get("id"), "track_name": pick.get("track") or None,
                "visible": self._settings()["visible"]}
         race = self._current()
+        race.set_roster(list(roster))
         settings = self._settings()
         out["delay_s"] = settings["delay_s"]
         out["show"] = self._show(settings)
@@ -510,6 +552,7 @@ class Service:
                 seen=self._quali_seen.setdefault((pick.get("id"), _segment_key(ctx.get("segment"))), {}))
             for row in out["qualifying"]:
                 row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
+                row["driver"] = race.display_name(row["entry"], row["driver"])
             return out
         st = race.standings(self._clock())
         rows = []
@@ -526,7 +569,8 @@ class Service:
         out.update({
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
             "fastest": None if fl is None else dict(
-                fl, team=(roster.get(fl["entry"]) or {}).get("cupTeam") or ""),
+                fl, team=(roster.get(fl["entry"]) or {}).get("cupTeam") or "",
+                driver=race.display_name(fl["entry"], fl["driver"])),
             "entries": rows})
         return out
 
@@ -756,16 +800,24 @@ class Service:
             for entry in race.take_ended_estimates():
                 self._log("race", "estimate_end", entry=entry)
 
+    def _roster(self):
+        return list(self._context().get("roster") or {})
+
     def standings(self):
+        ctx = self._context()
         with self._lock:
             race = self._current()
+            race.set_roster(list(ctx.get("roster") or {}))
             out = race.standings(self._clock())
+            if out["fastest"]:
+                fl = out["fastest"]
+                out["fastest"] = dict(fl, driver=race.display_name(fl["entry"], fl["driver"]))
             pick_id = self._race_pick
         self._mark_dc(out["entries"])
         out.update(settings=read_settings(self._path), track=pick_id,
                    compounds=_saved_compounds(_actions_path_for(self._path)),
-                   quali_overrides=_saved_quali(_actions_path_for(self._path),
-                                                self._context().get("segment")),
+                   driver_overrides=_override_list(_saved_overrides(_actions_path_for(self._path))),
+                   quali_overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
                    league=read_league(self._league), last_action=self._last_action)
         return out
 
@@ -887,9 +939,53 @@ class Service:
                 or not math.isfinite(seconds) or not 0 <= seconds <= MAX_ESTIMATE_S:
             raise ValueError(f"seconds is a number from 0 to {int(MAX_ESTIMATE_S)}")
         seconds = float(seconds)
+        roster = self._roster()
         with self._lock:
-            self._current().estimate(entry, ref, seconds, self._clock())
+            race = self._current()
+            race.set_roster(roster)
+            race.estimate(entry, ref, seconds, self._clock())
             self._log(who, "estimate", entry=entry, ref=ref, seconds=seconds)
+        return self.standings()
+
+    def retire(self, who, entry, on):
+        """Mark a car retired (DNF) or undo it; persisted until a race reset."""
+        entry = _entry_name(entry)
+        if not isinstance(on, bool):
+            raise ValueError("on is true or false")
+
+        def update(doc):
+            marks = set(_saved_retired(_actions_path_for(self._path)))
+            if on and entry not in marks and len(marks) >= MAX_QUALI:
+                raise ValueError(f"at most {MAX_QUALI} retirements")
+            (marks.add if on else marks.discard)(entry)
+            doc["retired"] = sorted(marks)
+        with self._lock:
+            self._log(who, "retire", entry=entry, on=on)
+            self._save_actions(update)
+            ended = self._current().retire(entry, on, self._clock())
+            for other in ended:
+                self._log(who, "estimate_end", entry=other, reason="reference_retired")
+        return self.standings()
+
+    def set_driver_name(self, who, entry, name, driver=""):
+        """Show `name` for the driver of `entry` registered as `driver` ("" for an entry
+        without a sender); "" removes it. Names follow the sender registration rule."""
+        entry = _entry_name(entry)
+        if not _valid_name(driver, True, driver_invite.KNOWN_NAME):
+            raise ValueError("driver is the registered name, or empty for an entry without a sender")
+        name = name.strip() if isinstance(name, str) else name
+        if not _valid_name(name, empty=True):
+            raise ValueError("name is up to 24 letters, digits, spaces, _ . or -")
+        saved = [o for o in _saved_overrides(_actions_path_for(self._path)) if o[:2] != [entry, driver]]
+        if name and len(saved) >= MAX_QUALI:
+            raise ValueError(f"at most {MAX_QUALI} driver names")
+
+        def update(doc):
+            doc["driver_names"] = saved + ([[entry, driver, name]] if name else [])
+        with self._lock:
+            self._log(who, "driver_name", entry=entry, driver=driver, name=name)
+            self._save_actions(update)
+            self._current().set_driver_name(entry, driver, name)
         return self.standings()
 
     def override_change(self, who, entry, conn):
@@ -941,11 +1037,11 @@ class Service:
             self._log(who, "finish")
 
     def reset(self, who="tailnet"):
-        """Start the race over: its corrections, rejoin marks and fastest lap go with it;
-        tyre compounds and qualifying corrections stay."""
+        """Start the race over: its corrections, rejoin marks, retirements and fastest
+        lap go with it; tyre compounds, driver names and qualifying corrections stay."""
         def drop_race(doc):
-            doc.pop("corrections", None)
-            doc.pop("rejoin", None)
+            for key in ("corrections", "rejoin", "retired"):
+                doc.pop(key, None)
         with self._lock:
             self._log(who, "reset")
             self._save_actions(drop_race)

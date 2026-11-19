@@ -45,7 +45,7 @@ _DRIVER_DESK_POST = {("reassign",), ("disconnect",), ("race", "recording"),
                      ("race", "recording", "event")} | {
     ("race", a) for a in ("settings", "final-lap", "finish", "red-flag", "restart-mode",
                           "release", "rejoin", "correct", "change", "fastest", "quali", "compound",
-                          "estimate")}
+                          "estimate", "retire", "driver-name")}
 
 
 def _driver_desk_route(rest, method):

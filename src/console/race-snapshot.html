@@ -74,8 +74,21 @@
 <script>
 (function () {
   "use strict";
+  // The whole name if it fits; else the first name as an initial; else cut with an ellipsis.
+  function fitName(name, max) {
+    var s = String(name || "").trim();
+    if (s.length <= max) return s;
+    var parts = s.split(/\s+/);
+    if (parts.length > 1) {
+      s = parts[0].charAt(0) + ". " + parts.slice(1).join(" ");
+      if (s.length <= max) return s;
+    }
+    return s.slice(0, max - 1) + "\u2026";
+  }
+  var NAME_MAX = 18;
   var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"], dc: ["DC", "bad"],
-                est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
+                est: ["EST", "amb"], waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"],
+                no_sender: ["No sender", ""], retired: ["DNF", "bad"]};
   var STATES = {waiting: "Waiting for the start", final_lap: "Final lap", finishing: "Finishing",
                 finished: "Finished", no_line: "No distance"};
   var $ = function (id) { return document.getElementById(id); };
@@ -116,7 +129,7 @@
       var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
                          : (e.pos > 1 ? secs(e.gap_time_s) : "");
       var entry = el("td");
-      entry.append(el("div", "", e.entry), el("div", "muted", e.driver || ""));
+      entry.append(el("div", "", e.entry), el("div", "muted", fitName(e.driver, NAME_MAX)));
       var status = el("td");
       if (st[0]) status.append(el("span", "pill " + st[1], st[0]));
       if (e.finished) status.append(el("span", "pill ok", "Finished"));
