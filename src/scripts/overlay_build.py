@@ -790,6 +790,11 @@ def _font_faces(fonts):
         if stem in groups:
             groups[stem].insert(0, (n, "normal", "1 1000"))
             absorbed.add(n)
+    # A 700 sibling owns the heavy weights; a ranged face covering them would win.
+    for members in groups.values():
+        bold = {style for _n, style, weight in members if weight == "700"}
+        members[:] = [(n, style, "1 699" if weight == "1 1000" and style in bold else weight)
+                      for n, style, weight in members]
     out = []
     for stem, n in plain:
         if n in absorbed:
