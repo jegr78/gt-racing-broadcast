@@ -100,7 +100,7 @@ def t_tower_gap_column_reads_the_leader_gap():
         src = fh.read()
     col = src[src.index("function column("):src.index("function row(")]
     assert "e.gap_s" in col, "the tower column shows the gap to the leader"
-    assert "e.interval_s" not in col, "the tower column no longer shows the interval"
+    assert "e.interval_s" in col, "the interval to the car ahead is a phase of its own"
 
 
 def t_the_public_timing_link_reaches_timing_data_and_nothing_else():
