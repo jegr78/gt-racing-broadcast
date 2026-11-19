@@ -2289,6 +2289,8 @@ TEAM_BG_COLOR_HEADERS = ("bg color", "bg colour", "background color",
                          "background colour")
 TEAM_TEXT_COLOR_HEADERS = ("text color", "text colour", "fg color", "fg colour")
 CUP_TEAM_HEADERS = ("cup team",)   # team-vs-team leagues: the driver's team (#1115)
+CLASS_HEADERS = ("class",)         # multiclass events: the car's class
+CLASS_COLOR_HEADERS = ("class color", "class colour")
 
 # A plausible CSS colour token: #rgb/#rgba/#rrggbb/#rrggbbaa, an
 # rgb()/rgba()/hsl()/hsla() function, or a bare keyword. Anything else -> "". This
@@ -2402,6 +2404,8 @@ def parse_config_roster(text):
     ci = next((header.index(h) for h in TEAM_BG_COLOR_HEADERS if h in header), None)
     fi = next((header.index(h) for h in TEAM_TEXT_COLOR_HEADERS if h in header), None)
     ui = next((header.index(h) for h in CUP_TEAM_HEADERS if h in header), None)
+    ki = next((header.index(h) for h in CLASS_HEADERS if h in header), None)
+    kci = next((header.index(h) for h in CLASS_COLOR_HEADERS if h in header), None)
     out = {}
     for row in rows[1:]:
         if len(row) <= ti:
@@ -2423,6 +2427,10 @@ def parse_config_roster(text):
                           row[fi] if fi is not None and len(row) > fi else "")}
         if cup_team:
             out[label]["cupTeam"] = cup_team
+        if ki is not None:
+            out[label]["carClass"] = row[ki].strip()[:24] if len(row) > ki else ""
+            out[label]["classColor"] = sanitize_css_color(
+                row[kci] if kci is not None and len(row) > kci else "")
     return out
 
 
