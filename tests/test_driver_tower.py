@@ -429,12 +429,25 @@ def t_every_page_shortens_a_long_name_the_same_way():
         assert got == want, f"{os.path.basename(path)}: {got}"
 
 
-def t_the_tower_only_cuts_the_surname():
+def t_the_tower_shows_the_surname_and_leaves_the_cut_to_css():
     got = _tower("""return [surname("Lena Hart"), surname("Alexander Fitzgerald-Smithson"),
                             surname("xX_SpeedDemon_Xx")];""")
     if got is None:
         return
-    assert got == ["HART", "FITZGE\u2026", "XX_SPE\u2026"], got
+    assert got == ["HART", "FITZGERALD-SMITHSON", "XX_SPEEDDEMON_XX"], got
+    with open(TOWER, encoding="utf-8") as fh:
+        css = fh.read()
+    assert re.search(r"\.dd-driver \{[^}]*text-overflow: ellipsis", css), "the column cuts what does not fit"
+
+
+def t_the_interval_phase_falls_back_to_the_gap():
+    got = _tower(f"""
+      Date.now = () => CYCLE_MS + 1;
+      const e = Object.assign({{}}, {json.dumps(CAR)}, {{interval_s: null, gap_s: 3.24}});
+      return [phaseLabel(), column(e, 1)];""")
+    if got is None:
+        return
+    assert got == ["INT", "+3.2"], f"a running car without an interval shows its gap: {got}"
 
 
 def t_the_pages_show_names_through_the_rule():

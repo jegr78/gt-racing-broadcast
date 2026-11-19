@@ -88,7 +88,8 @@
     padding: 0 14px; background: var(--dd-bg); display: flex; align-items: center; gap: 12px; font-size: 18px;
   }
   #drivers-fastest b { background: var(--dd-purple); color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 14px; }
-  #dd-fl-time { margin-left: auto; color: var(--dd-purple); font-weight: 700; font-variant-numeric: tabular-nums; }
+  #dd-fl-who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #dd-fl-time { flex: none; margin-left: auto; color: var(--dd-purple); font-weight: 700; font-variant-numeric: tabular-nums; }
   #drivers-fastest.none { visibility: hidden; }
   #drivers-map { position: absolute; right: 48px; top: 64px; width: 420px; height: 420px; box-sizing: border-box;
                  background: var(--dd-bg); padding: 16px; }
@@ -138,12 +139,10 @@
     const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
     return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
   }
-  const SURNAME_MAX = 7;   // what the name column holds at 20px bold
-  // The surname only (a one-word ID whole), cut with an ellipsis when it does not fit.
+  // The surname only (a one-word ID whole); the column's CSS ellipsis cuts what does not fit.
   function surname(name) {
     const parts = String(name || "").trim().split(/\s+/);
-    const s = (parts[parts.length - 1] || "").toUpperCase();
-    return s.length <= SURNAME_MAX ? s : s.slice(0, SURNAME_MAX - 1) + "\u2026";
+    return (parts[parts.length - 1] || "").toUpperCase();
   }
   function safeColor(c, fallback) {
     return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;

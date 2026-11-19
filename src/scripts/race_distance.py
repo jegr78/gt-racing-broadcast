@@ -92,6 +92,7 @@ LAP_TIME_WAIT_S = 6.0       # GT7 reports a lap's time shortly after the line
 PRUNE_EVERY_S = 10.0
 MAX_CHANGE_LAP = 2          # a car leaving a fresh lobby's box has driven at most lap 1
 LINE_QUORUM = 3
+GAP_SPEED_MPS = 10.0        # below this a gap from distance and speed means nothing
 
 
 class _Car:
@@ -870,7 +871,17 @@ class Race:
         if now is not None and self._quiet(ahead, now):
             return None
         reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
-        return None if reached is None else max(0.0, self._cars[ent.active].t - reached)
+        if reached is None:
+            return self._gap_by_speed(ahead, ent)
+        return max(0.0, self._cars[ent.active].t - reached)
+
+    def _gap_by_speed(self, ahead, ent):
+        """The distance to `ahead` at `ent`'s speed: an estimate while `ahead`'s history
+        does not reach back to `ent` (both started counting mid-lap); None when slow."""
+        car = self._cars.get(ent.active)
+        if car is None or car.speed < GAP_SPEED_MPS:
+            return None
+        return max(0.0, self._shown(ahead) - self._shown(ent)) / car.speed
 
     def standings(self, now):
         self._advance(now)

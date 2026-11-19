@@ -1375,6 +1375,35 @@ def t_a_parked_entry_can_be_estimated():
     assert rb["status"] == "est" and rb["distance_m"] is not None, rb
 
 
+def _mid_lap_start():
+    """Three cars cross the line and give the medoid; A and B, 200 m apart in mid lap,
+    then start from where they are, so A's history begins ahead of B."""
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "Q1", "Q2", "Q3", "X"])
+    qs = [Car(race, "Q%d" % i, "q%d" % i, L - 5 * i) for i in (1, 2, 3)]
+    t = _drive(race, qs, [20] * 3, 0.0, 2)
+    a, b = Car(race, "A", "a", 1.5 * L), Car(race, "B", "b", 1.5 * L - 200)
+    t = _drive(race, qs + [a, b], [20, 20, 20, 40, 40], t, 1)
+    return race, (a, b, *qs), t
+
+
+def t_a_running_car_has_a_gap_before_the_car_ahead_has_history_there():
+    race, cars, t = _mid_lap_start()
+    rb = _row(race, "B", t)
+    assert rb["status"] == "racing" and rb["gap_s"] is not None and abs(rb["gap_s"] - 5.0) < 0.5, \
+        f"200 m at 40 m/s is about 5 s while A's history starts ahead of B: {rb}"
+    assert rb["interval_s"] is not None and rb["gap_time_s"] is not None, rb
+
+
+def t_a_start_hold_estimate_shows_its_reference_gap_plus_the_lag():
+    race, cars, t = _mid_lap_start()
+    race.estimate("X", "B", 30.0, t)
+    rb, rx = _row(race, "B", t), _row(race, "X", t)
+    lag = t - race._entries["B"].ts[0]
+    assert rx["status"] == "est" and rx["gap_s"] is not None and abs(rx["gap_s"] - (rb["gap_s"] + lag)) < 0.05, \
+        (rb, rx)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
