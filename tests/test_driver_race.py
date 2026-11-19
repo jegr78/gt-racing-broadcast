@@ -775,6 +775,17 @@ def t_the_recording_carries_the_compound_code():
     assert svc.recording_at(1000.0)["rows"][0]["compound"] == "RS", svc.recording_at(1000.0)
 
 
+def t_voiding_the_fastest_lap_removes_it_from_its_class():
+    ctx = {"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"}
+    svc, _clock, _path = _dash_service(ctx)
+    race = svc._current()
+    race.fastest = {"entry": "B", "driver": "Max B", "ms": 61000}
+    race.fastest_by_class = {"G": dict(race.fastest), "H": {"entry": "A", "driver": "Max A", "ms": 62000}}
+    svc.set_fastest("rc:Anna")
+    assert svc._current().fastest_by_class == {"H": {"entry": "A", "driver": "Max A", "ms": 62000}}, \
+        f"the voided lap leaves its class, the other class keeps its lap: {svc._current().fastest_by_class}"
+
+
 def t_a_failing_recording_does_not_stop_the_fastest_lap_save():
     d = tempfile.mkdtemp()
     blocker = os.path.join(d, "file")

@@ -526,6 +526,8 @@ class Service:
         with self._lock:
             race = self._current()
             self._log(who, "fastest", **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
+            if entry is None:
+                race.fastest_by_class = {c: f for c, f in race.fastest_by_class.items() if f != race.fastest}
             race.fastest = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
         self.save_fastest()
         return self.standings()
