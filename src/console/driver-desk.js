@@ -1,7 +1,8 @@
 /* Driver telemetry controls shared by the Race Control desk and the Director Panel
    (#1114, #1115). DriverDesk.mount(el, {base, fullRedFlag, dashboardToggle}) polls the
    relay and renders: the invite link, the race with its finish and red flag controls,
-   corrections, rejoin and change overrides, the dashboard's delay, fastest lap and
+   the race recording with its disconnect events, corrections, rejoin and change
+   overrides, the dashboard's delay, fastest lap and
    qualifying corrections (plus its on-air switch with dashboardToggle), and the
    senders with readiness, reassign and disconnect. `base` prefixes every route: "/race-control" on the desk (its fetch
    shim adds /console), "" on the panel. Every text goes in through textContent. */
@@ -30,7 +31,9 @@
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
     ".dd td.num{font-family:var(--mono,ui-monospace,monospace);text-align:right;white-space:nowrap}",
     ".dd .tbl{overflow-x:auto}",
-    ".dd .pill{display:inline-block;border-radius:9px;padding:1px 7px;font-size:11px;border:1px solid var(--edge,#2a2f37)}",
+    ".dd td.num.lap{white-space:normal}",
+    ".dd .race th,.dd .race td{padding:4px}.dd .race .pills{display:flex;flex-wrap:wrap;gap:3px}",
+    ".dd .pill{display:inline-block;white-space:nowrap;border-radius:9px;padding:1px 7px;font-size:11px;border:1px solid var(--edge,#2a2f37)}",
     ".dd .pill.ok{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd .pill.bad{border-color:#ff4d5e;color:#ff4d5e}",
     ".dd .pill.amb{border-color:#ffb454;color:#ffb454}",
@@ -39,6 +42,10 @@
     ".dd .stale{opacity:.45}",
     ".dd [hidden]{display:none!important}",
     ".dd select{width:auto;max-width:100%}",
+    ".dd a.btn{background:var(--panel-2,#1b1f25);color:var(--ink,#e8eaed);border:1px solid var(--edge,#2a2f37);",
+    "border-radius:6px;padding:5px 9px;text-decoration:none}.dd a.btn:hover{border-color:var(--ink,#e8eaed)}",
+    ".dd .rec{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--muted,#9aa0a6)}",
+    ".dd .rec.on{background:#ff4d5e}",
     ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}"
   ].join("");
 
@@ -58,14 +65,22 @@
     if (sel) o.selected = true;
     return o;
   }
-  function secs(v) { return v == null ? "" : (v < 60 ? v.toFixed(1) : Math.floor(v / 60) + ":" + (v % 60).toFixed(1).padStart(4, "0")); }
+  function secs(v) { return typeof v !== "number" ? "" : (v < 60 ? v.toFixed(1) : Math.floor(v / 60) + ":" + (v % 60).toFixed(1).padStart(4, "0")); }
   var STATUS = {racing: ["", ""], box: ["Box", "amb"], no_data: ["No data", "bad"],
                 waiting: ["Waiting", ""], red_flag: ["Red flag", "bad"]};
   var ACTIONS = {correct: "correction", final_lap: "Final lap", finish: "Finish", reset: "reset",
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
                  reassign: "reassign", disconnect: "disconnect", red_flag_cover_down: "cover down",
-                 fastest: "fastest lap", quali: "qualifying time", compound: "tyre compound"};
+                 fastest: "fastest lap", quali: "qualifying time", compound: "tyre compound",
+                 recording_start: "recording start", recording_stop: "recording stop",
+                 dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed"};
+  var EVENT_STATES = {suspected: ["Suspected DC", "bad"], dropout: ["Dropout", "amb"],
+                      confirmed: ["Confirmed DC", "bad"], dismissed: ["Dismissed", ""]};
+  var OFFSETS = [5, 10, 15, 20, 30];
+  var SOUND_KEY = "racecast.desk.dcSound";
+  function loadSound() { try { return localStorage.getItem(SOUND_KEY) === "1"; } catch (e) { return false; } }
+  function saveSound(on) { try { localStorage.setItem(SOUND_KEY, on ? "1" : "0"); } catch (e) { /* private mode */ } }
   var COMPOUNDS = [["", "—"], ["RS", "RS Racing Soft"], ["RM", "RM Racing Medium"], ["RH", "RH Racing Hard"],
                    ["I", "I Intermediate"], ["W", "W Wet"]];
 
@@ -187,10 +202,139 @@
 
     // -- race table -----------------------------------------------------------------
     var raceBody = el("tbody");
-    var raceTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
+    var raceTable = el("div", {cls: "tbl"}, [el("table", {cls: "race"}, [el("thead", {}, [el("tr", {}, [
       "Pos", "Entry", "Laps", "Gap", "Int.", "Status", "Pits", "Corr."].map(function (h) {
         return el("th", h === "Pits" ? {text: h, title: PIT_HINT} : {text: h}); }))]), raceBody])]);
     var raceNote = el("div", {cls: "muted"});
+
+    // -- race recording and its disconnect events -------------------------------------
+    // Links bypass the fetch shim, so they take the console prefix from RC_API themselves.
+    function href(path) { var u = base + path; return window.RC_API ? window.RC_API(u) : u; }
+    var recDot = el("span", {cls: "rec", "aria-hidden": "true"});
+    var recText = el("span", {text: "Not recording"});
+    var recStart = button("Start recording", "", null, function () {
+      act("/drivers/race/recording", {action: "start"}, "Recording started");
+    });
+    var recStop = button("Stop recording", "warn", "rec-stop", function () {
+      act("/drivers/race/recording", {action: "stop"}, "Recording stopped");
+    });
+    var recCsv = el("a", {cls: "btn", text: "Download CSV", href: href("/drivers/race/recording/csv"),
+                          download: "race-recording.csv"});
+    // Without a time the page opens at the end of the recording, with the slider over all of it.
+    var recBrowse = el("a", {cls: "btn", text: "Browse recording", href: href("/drivers/snapshot"),
+                             target: "_blank", rel: "noopener"});
+    var recWarn = el("div", {cls: "msg err", role: "alert", hidden: ""});
+    var evTitle = el("h3", {text: "Events (0)"});
+    var evBody = el("tbody");
+    var evTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
+      "Entry", "State", ""].map(function (h) { return el("th", {text: h}); }))]),
+      evBody])]);
+    var soundBox = el("input", {type: "checkbox", "aria-label": "Sound on suspicion"});
+    soundBox.checked = loadSound();
+    var audio = null;
+    // Browsers allow audio only after a gesture, so the context starts on this click.
+    function wakeAudio() {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      try {
+        audio = audio || new AC();
+        if (audio.state === "suspended") audio.resume().catch(function () {});
+      } catch (e) { audio = null; }
+    }
+    soundBox.addEventListener("change", function () {
+      saveSound(soundBox.checked);
+      if (soundBox.checked) wakeAudio();
+    });
+    // A stored "on" survives a reload, but the audio waits for the first click on the desk.
+    root.addEventListener("click", function () { if (soundBox.checked && !audio) wakeAudio(); });
+    function beep() {
+      if (!soundBox.checked || !audio) return;
+      try {
+        var o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime;
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.2, t0);
+        g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25);
+        o.connect(g); g.connect(audio.destination);
+        o.start(t0); o.stop(t0 + 0.25);
+      } catch (e) { /* no audio device */ }
+    }
+    var evEmpty = el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No disconnects."})]);
+    var evRows = Object.create(null);   // keyed by event id: an open offset choice survives the poll
+    var evSeen = null;                  // ids seen so far; null until the first poll seeds it
+    var suspected = Object.create(null);
+    function evRow(ev) {
+      var id = ev.id;
+      var who = el("td"), what = el("td");
+      var confirm = button("Confirm DC", "alarm", null, function () {
+        act("/drivers/race/recording/event", {id: id, decision: "confirm"}, "DC confirmed");
+      });
+      var dismiss = button("Dismiss", "", null, function () {
+        act("/drivers/race/recording/event", {id: id, decision: "dismiss"}, "DC dismissed");
+      });
+      var offset = el("select", {"aria-label": "Seconds before the last packet"},
+                      OFFSETS.map(function (n) { return opt(String(n), n + " s before", n === 10); }));
+      var showBtn = button("Show standings", "", null, function () {
+        var r = evRows[id];
+        var at = r.ev.last_packet - parseInt(offset.value, 10);
+        window.open(href("/drivers/snapshot?time=" + encodeURIComponent(at.toFixed(1))), "_blank", "noopener");
+      });
+      var tr = el("tr", {}, [who, what, el("td", {}, [el("div", {cls: "row"}, [confirm, dismiss]),
+        el("div", {cls: "row", style: "margin-top:4px"}, [offset, showBtn])])]);
+      return evRows[id] = {tr: tr, who: who, what: what, confirm: confirm, dismiss: dismiss, ev: ev};
+    }
+    // Returns true when the set of suspected entries changed, so the race table re-marks them.
+    function renderRecording(rec) {
+      var before = Object.keys(suspected).sort().join("\n");
+      suspected = Object.create(null);
+      var running = !!(rec && rec.running);
+      recDot.className = "rec" + (running ? " on" : "");
+      recText.textContent = !rec ? "Recording unavailable." : running
+        ? "Recording since " + new Date(rec.started_at * 1000).toLocaleTimeString() + " by " + rec.started_by
+        : "Not recording";
+      recStart.hidden = running;
+      recStart.disabled = !rec;
+      recStop.hidden = !running;
+      recCsv.hidden = recBrowse.hidden = !(rec && rec.span);
+      // Keep the last events on screen; the stale note covers a dead relay.
+      if (!rec) return before !== "";
+      var lost = (rec.dropped || 0) + (rec.failed || 0);
+      recWarn.hidden = !lost;
+      recWarn.textContent = lost ? "The recording has gaps: " + (rec.dropped || 0) + " samples dropped, " +
+        (rec.failed || 0) + " writes failed." : "";
+      var events = rec.events || [];
+      var open = 0, fresh = false;
+      var ids = events.map(function (ev) {
+        var r = evRows[ev.id] || evRow(ev);
+        r.ev = ev;
+        var undecided = ev.state === "suspected" || ev.state === "dropout";
+        if (undecided) open++;
+        if (ev.state === "suspected") {
+          suspected[ev.entry] = true;
+          if (evSeen && !evSeen[ev.id]) fresh = true;
+        }
+        var st = EVENT_STATES[ev.state] || [String(ev.state), ""];
+        var label = ev.state === "dropout" && typeof ev.dropout_s === "number"
+          ? "Dropout, " + Math.round(ev.dropout_s) + " s" : st[0];
+        r.who.replaceChildren(el("div", {text: ev.entry}), el("div", {cls: "muted", text: ev.driver || ""}));
+        r.what.replaceChildren.apply(r.what, [el("span", {cls: "pill " + st[1], text: label}),
+          el("div", {cls: "muted", text: "Last packet " + new Date(ev.last_packet * 1000).toLocaleTimeString()}),
+          ev.decided_by ? el("div", {cls: "muted", text: "by " + ev.decided_by}) : null].filter(Boolean));
+        r.confirm.hidden = r.dismiss.hidden = !undecided;
+        return ev.id;
+      });
+      evSeen = Object.create(null);
+      ids.forEach(function (id) { evSeen[id] = true; });
+      if (fresh) beep();
+      evTitle.textContent = "Events (" + open + ")";
+      // Rows stay in place and only new ones are inserted, so a focused control keeps its focus.
+      var rows = ids.map(function (id) { return evRows[id].tr; });
+      if (!rows.length) rows = [evEmpty];
+      rows.forEach(function (tr, i) {
+        if (evBody.children[i] !== tr) evBody.insertBefore(tr, evBody.children[i] || null);
+      });
+      while (evBody.children.length > rows.length) evBody.removeChild(evBody.lastChild);
+      return Object.keys(suspected).sort().join("\n") !== before;
+    }
 
     // -- correction / rejoin / change form ------------------------------------------
     var corrEntry = el("select", {"aria-label": "Entry to correct"});
@@ -323,9 +467,14 @@
       el("div", {cls: "row"}, [mode, laps, finalLap, finish]),
       el("div", {cls: "row"}, [redFlag, restart, release]),
       redBanner,
-      el("h3", {text: "Race"}), raceNote, raceTable,
+      el("h3", {text: "Race"}),
+      el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
+      recWarn, raceNote, raceTable,
       el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
       multiRow,
+      evTitle,
+      el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
+      evTable,
       el("h3", {text: "Dashboard"}),
       el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
       el("div", {cls: "row"}, [flText, flClear]),
@@ -382,16 +531,19 @@
         finished: "Finished."}[r.state] || "";
       var rows = (r.entries || []).map(function (e, i) {
         var st = STATUS[e.status] || [e.status, ""];
-        var gap = e.lapped ? "+" + e.lapped + " L" : (i ? secs(e.gap_s) : "");
+        // No-break spaces: a narrow desk wraps only between the lap count and the time.
+        var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
+                           : (i ? secs(e.gap_s) : "");
         var cells = [el("td", {cls: "num", text: String(i + 1)}),
           el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted", text: e.driver})]),
           el("td", {cls: "num", text: String(e.laps)}),
-          el("td", {cls: "num", text: gap}), el("td", {cls: "num", text: e.lapped ? "" : secs(e.interval_s)}),
-          el("td", {}, [st[0] ? el("span", {cls: "pill " + st[1], text: st[0]}) : null,
+          el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}), el("td", {cls: "num", text: secs(e.interval_time_s)}),
+          el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
+                        st[0] ? el("span", {cls: "pill " + st[1], text: st[0]}) : null,
                         e.finished ? el("span", {cls: "pill ok", text: "Finished"}) : null,
                         e.rejoin ? el("span", {cls: "pill amb", text: "Rejoin"}) : null,
                         e.position_mismatch ? el("span", {cls: "pill amb", text: "GT7 P" + e.gt7_position,
-                                                           title: "GT7's position disagrees with the distance order"}) : null]),
+                                                           title: "GT7's position disagrees with the distance order"}) : null])]),
           el("td", {cls: "num", text: String(e.pit_stops), title: PIT_HINT}),
           el("td", {cls: "num", text: e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""})];
         return el("tr", {}, cells);
@@ -464,12 +616,16 @@
       staleNote.hidden = !stale;
       if (stale) staleNote.textContent = "Relay not reachable since " + state.staleSince.toLocaleTimeString() +
         ": the tables below are not current.";
-      [raceTable, readyTable, sendTable].forEach(function (t) { t.classList.toggle("stale", stale); });
+      [raceTable, evTable, readyTable, sendTable].forEach(function (t) { t.classList.toggle("stale", stale); });
     }
     async function refresh() {
-      var r = await call("/drivers/race", undefined, true);
+      // Both start at once; a slow recording call never holds back the race table.
+      var raceCall = call("/drivers/race", undefined, true);
+      var recCall = call("/drivers/race/recording", undefined, true);
+      var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
+      if (renderRecording(await recCall) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
       if (rd) renderSenders(rd);
     }

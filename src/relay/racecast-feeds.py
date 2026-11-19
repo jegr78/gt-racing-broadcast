@@ -11964,7 +11964,8 @@ def engineer_page_for(console_page):
 
 _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
                                 ("health-monitor",), ("race-control",), ("race-engineer",), ("driver-radio",),
-                                ("driver-radio", "messages-view"), ("buttons",)})
+                                ("driver-radio", "messages-view"), ("buttons",),
+                                ("drivers", "snapshot"), ("race-control", "drivers", "snapshot")})
 
 
 # The largest request body the control server reads (a parsed POST, or one drained
@@ -12041,7 +12042,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  event_documents_source=None, browser_hosts=(), track_pick=None,
                  telemetry_probe_obj=None, driver_hub=None, driver_invite_path=None,
                  drive_page_path=None, sender_script_path=None, driver_segments=None,
-                 driver_desk_path=None,
+                 driver_desk_path=None, race_snapshot_page_path=None,
                  driver_race_svc=None, timing_link_path=None, timing_page_path=None,
                  timing_publisher=None, funnel_host=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
@@ -12214,6 +12215,60 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if no_store:
                 self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
+        def _recording_get(self, sub):
+            """The race recording reads: status, a sample at a wall time, the CSV export."""
+            svc = driver_race_svc
+            try:
+                if sub is None:
+                    return self._send(svc.recording_status(), no_store=True)
+                if sub == "at":
+                    raw = parse_qs(urlparse(self.path).query).get("time", [""])[0]
+                    try:
+                        t = float(raw)
+                    except ValueError:
+                        t = math.nan
+                    if not math.isfinite(t):
+                        return self._send({"error": "time must be a finite number"}, 400)
+                    sample = svc.recording_at(t)
+                    return self._send(sample or {"error": "no recording"}, 200 if sample else 404,
+                                      no_store=True)
+                if sub == "csv":
+                    out = io.StringIO()
+                    csv.writer(out).writerows(svc.recording_csv())
+                    body = out.getvalue().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Disposition", 'attachment; filename="race-recording.csv"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers(); self.wfile.write(body)
+                    return None
+            except RuntimeError:
+                return self._send({"error": "recording unavailable"}, 503)
+            return self._send({"error": "not found"}, 404)
+
+        def _recording_post(self, sub, body, who):
+            """Start or stop the race recording, or confirm or dismiss a disconnect event."""
+            svc = driver_race_svc
+            try:
+                if sub is None:
+                    action = body.get("action")
+                    if action not in ("start", "stop"):
+                        return self._send({"ok": False, "error": "action must be start or stop"}, 400)
+                    out = svc.recording_start(who) if action == "start" else svc.recording_stop(who)
+                    return self._send({"ok": True, "recording": out})
+                if sub == "event":
+                    ev = svc.recording_decide(who, body.get("id"), body.get("decision"))
+                    return self._send({"ok": True, "event": ev})
+            except KeyError:
+                return self._send({"ok": False, "error": "unknown event"}, 404)
+            except ValueError as exc:
+                return self._send({"ok": False, "error": str(exc)}, 400)
+            except driver_race.NotRaceMode as exc:
+                return self._send({"ok": False, "error": str(exc)}, 409)
+            except RuntimeError:
+                return self._send({"ok": False, "error": "recording unavailable"}, 503)
+            return self._send({"error": "not found"}, 404)
         def _send_file(self, path, ctype):
             try:
                 with open(path, "rb") as fh: body = fh.read()
@@ -14175,6 +14230,28 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     invite = self._drive_invite()
                     return self._send({"invite": bool(invite), "connections": driver_hub.connections()},
                                       no_store=True)
+                if p[:3] == ["drivers", "race", "recording"] and len(p) <= 4 \
+                        and driver_race_svc is not None:
+                    return self._recording_get(p[3] if len(p) == 4 else None)
+                if p == ["drivers", "snapshot"]:
+                    # The frozen standings page; its relative fetches work under every prefix.
+                    if not race_snapshot_page_path:
+                        return self._send({"error": "page not found"}, 404)
+                    url = urlparse(self.path)
+                    if url.path.endswith("/"):
+                        # Relative fetches need the path without the slash; rebuilt from
+                        # its segments so the Location never turns scheme-relative.
+                        clean = "/" + "/".join(x for x in url.path.split("/") if x)
+                        self.send_response(302)
+                        self.send_header("Location", clean + ("?" + url.query if url.query else ""))
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return None
+                    # Only a token the console gate verified becomes the cookie.
+                    via_console = bool(getattr(self, "_race_who", None))
+                    return self._send_page(race_snapshot_page_path, "",
+                                           cookie_token=self._cockpit_token() if via_console else None,
+                                           cookie_path="/console")
                 if p == ["drivers", "race"] and driver_race_svc is not None:
                     # Order, distances and gaps from driver telemetry (#1112).
                     return self._send(driver_race_svc.standings(), no_store=True)
@@ -14799,6 +14876,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                "settings": driver_race_svc.set_settings(body, who)})
                         except ValueError as exc:
                             return self._send({"ok": False, "error": str(exc)}, 400)
+                    if action == "recording" or p[2:] == ["recording", "event"]:
+                        return self._recording_post(p[3] if len(p) == 4 else None, body, who)
                     commands = {"final-lap": driver_race_svc.final_lap,
                                 "finish": driver_race_svc.finish, "reset": driver_race_svc.reset}
                     if action in commands:
@@ -16270,7 +16349,7 @@ def main():
                      if args.overlay_dir else None),
         trace_for=lambda pick_id: track_pick.store.tracks.reference_trace(pick_id)
         if track_pick.store.tracks else None,
-        multi_lobby=lambda: not relay.solo)
+        multi_lobby=lambda: not relay.solo, recording_dir=runtime)
     _hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))
     driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update,
                                    invite_id=lambda: (_hub_invite.get() or {}).get("id"))
@@ -16289,6 +16368,9 @@ def main():
     driver_desk_path = next((os.path.abspath(c) for c in (
         os.path.join(here, "driver-desk.js"), os.path.join(here, "..", "driver-desk.js"),
         os.path.join(here, "..", "console", "driver-desk.js")) if os.path.exists(c)), None)
+    race_snapshot_page_path = next((os.path.abspath(c) for c in (
+        os.path.join(here, "race-snapshot.html"), os.path.join(here, "..", "race-snapshot.html"),
+        os.path.join(here, "..", "console", "race-snapshot.html")) if os.path.exists(c)), None)
     timing_page_path = next((os.path.abspath(c) for c in (
         os.path.join(here, "timing.html"), os.path.join(here, "..", "timing.html"),
         os.path.join(here, "..", "console", "timing.html")) if os.path.exists(c)), None)
@@ -16382,7 +16464,7 @@ def main():
         telemetry_probe_obj=probe,
         driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
-        driver_desk_path=driver_desk_path,
+        driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
         timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(poll=stop_evt),
@@ -16415,6 +16497,7 @@ def main():
 
     relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
     relay.keep_awake.start()
+    race_svc.open_recording()   # the port is ours, so the recording file is too
     radio_service.start()
     if coach_service is not None:coach_service.start()
     radio_enricher.start()
