@@ -163,6 +163,13 @@ It never carries connection ids, corrections or who made them.
   amber at 10 % or less, and a car without data shows none. A car that took the
   chequered flag shows a flag in place of ring and fuel, and its final gap. In
   qualifying the tower shows best lap and gap.
+- **Brand logos**: between position and number each entry shows the logo of its
+  Configuration tab brand, on a light plate. The logo is the HUD's PNG: the league's
+  override in `runtime/<profile>/brands/<key>.png` first, then the bundled one. An entry
+  without a brand, or whose brand has no PNG, shows an empty cell. The overlay builder's
+  **Brand logos** switch on the Timing tower hides the column and the rows close up; it
+  is on by default. The desks, the cockpit and the public timing page always show the
+  logos (the public page lets each reader fold them away like any column).
 - **On air only when switched on.** The page stays empty until the race settings say
   `visible`; a new install starts off air. The director puts it on air with **Show
   dashboard** in the panel's Driver telemetry section; Race Control cannot, because it
@@ -182,7 +189,7 @@ It never carries connection ids, corrections or who made them.
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every
-  column at once.
+  column at once, logos included.
 
 ### Public live timing
 
@@ -193,8 +200,8 @@ under **Public timing** with **Copy** and **New link**, and both desks show it
 next to the invite. From the command line, `racecast event timing` prints it and
 `--new` replaces it; the old link then stops working.
 
-The page needs no login and shows timing only: order, number and colour, driver and
-team, gaps, last lap, pit stops, the fastest lap, the remaining time, and compound and
+The page needs no login and shows timing only: order, brand logo, number and colour,
+driver and team, gaps, last lap, pit stops, the fastest lap, the remaining time, and compound and
 fuel as the display switches set them. In qualifying it shows the ranking. It has the
 same delay as the broadcast dashboard. Readers can switch columns on and off, and an
 activity list notes new fastest laps, red flags and the chequered flag.
@@ -206,7 +213,10 @@ machine `.env`, default 1000 kbit/s). With more viewers the page refreshes less 
 at least every 30 s, and shows how old its data is; nobody is turned away. At the
 default budget that holds roughly 4000 viewers; beyond them the page stays at 30 s and
 the upload grows again. Race
-Control, the desks and the stream overlay never slow down for it.
+Control, the desks and the stream overlay never slow down for it. The brand logos are
+not part of the refresh budget: each viewer loads each logo once and its browser keeps it
+for a day. The relay holds the logo uploads to the same rate, so a crowd arriving at once
+gets its logos over the following minutes while the timing itself stays current.
 
 ### Hosted live timing (optional)
 
@@ -246,7 +256,11 @@ unavailable" and stops trying after 30 minutes.
 
 The free plan allows 100,000 requests a day per Cloudflare account (reset at 00:00
 UTC). Each viewer costs two (the page and its live connection); the relay's updates cost
-about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The Home row and
+about 2,200 for a 24 h event. That leaves room for roughly 48,000 viewers a day. The
+brand logos cost nothing extra: the relay sends them to the host once per connection, and
+the host hands them to each viewer over the live connection, so the hosted page shows the
+same logos as Funnel. A host deployed before brand logos existed shows none until
+`racecast timing-host deploy` runs again (**Check** says it is out of date). The Home row and
 the desks show an estimate of today's use. It includes earlier timing links of the same day,
 but starts again at 0 after a relay restart, and it does not count other Workers on the same
 account, so use one Cloudflare account per league. Above the limit Cloudflare stops serving

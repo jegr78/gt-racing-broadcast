@@ -9,6 +9,13 @@ const PROTOCOL_V = "1";
 const PERSIST_EVERY_MS = 30 * 1000;
 const ORPHAN_MS = 30 * 60 * 1000;
 const TOMBSTONE_MS = 7 * 24 * 60 * 60 * 1000;
+// Brand logos reach viewers over their socket, never as requests. The relay's caps
+// (brand_logos.MAX_BYTES, MAX_LOGOS); SQLite storage takes 8 MB per value and a socket
+// message up to 32 MiB, so a base64 logo always fits.
+const BRAND_KEY = /^[a-z0-9-]{1,64}$/;
+const BRAND_MAX_BYTES = 256 * 1024;
+const MAX_BRANDS = 64;
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 let PAGE = "";
 
@@ -19,7 +26,7 @@ export function setPage(html) {
 // Older Safari versions do not count wss: as 'self', so the socket origin is named too.
 function pageCsp(host) {
   return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
-    `img-src 'self' data:; connect-src 'self' wss://${host}; base-uri 'none'; ` +
+    `img-src 'self' data: blob:; connect-src 'self' wss://${host}; base-uri 'none'; ` +
     "form-action 'none'; frame-ancestors 'none'";
 }
 
@@ -46,6 +53,21 @@ function sameKey(given, expected) {
   return diff === 0;
 }
 
+// The PNG in a brand frame, or null for anything else.
+function brandPng(b64) {
+  if (typeof b64 !== "string" || b64.length > Math.ceil(BRAND_MAX_BYTES / 3) * 4) return null;
+  let raw;
+  try {
+    raw = atob(b64);
+  } catch (_e) {
+    return null;
+  }
+  if (raw.length > BRAND_MAX_BYTES || raw.length < PNG_MAGIC.length) return null;
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return PNG_MAGIC.every((b, i) => bytes[i] === b) ? bytes : null;
+}
+
 function utcDay(ms) {
   return Math.floor(ms / 86400000);
 }
@@ -56,7 +78,7 @@ export default {
     if (url.pathname === "/version") return text(env.RACECAST_VERSION || "", 200);
     const m = url.pathname.match(ROUTE);
     if (!m || !LINK_ID.test(m[1])) return text("not found", 404);
-    const isSocket = m[2] === "/ws" || m[2] === "/publish";
+    const isSocket = m[2] !== undefined;
     if (m[2] === "/publish") {
       const auth = request.headers.get("Authorization") || "";
       if (!publisherAllowed(auth, env.PUBLISH_KEY)) return text("unauthorized", 401);
@@ -82,6 +104,7 @@ export class TimingRoom {
     this.day = null;
     this.requestsToday = 0;
     this.lastPersist = 0;
+    this.brands = []; // keys stored as brand:<key> (base64 PNG)
   }
 
   now() {
@@ -97,6 +120,7 @@ export class TimingRoom {
     this.moved = (await s.get("moved")) ?? null;
     this.day = (await s.get("day")) ?? null;
     this.requestsToday = (await s.get("requests_today")) ?? 0;
+    this.brands = (await s.get("brands")) ?? [];
     this.loaded = true;
   }
 
@@ -121,13 +145,29 @@ export class TimingRoom {
   async fetch(request) {
     await this.load();
     const url = new URL(request.url);
-    const path = url.pathname;
-    if (path.endsWith("/publish")) return this.acceptPublisher();
+    const m = url.pathname.match(ROUTE) || [];
+    if (m[2] === "/publish") return this.acceptPublisher();
     this.countRequest();
-    if (path.endsWith("/ws")) return this.acceptViewer();
+    if (m[2] === "/ws") return this.acceptViewer();
     if (this.phase === "live") return text(PAGE, 200, "text/html; charset=utf-8", url.host);
     if (this.phase === "ended") return text("this timing link has ended", 410);
     return text("unknown timing link", 404);
+  }
+
+  async onBrand(msg) {
+    if (!BRAND_KEY.test(msg.key) || !brandPng(msg.png) || this.phase !== "live") return;
+    const known = this.brands.includes(msg.key);
+    if (!known && this.brands.length >= MAX_BRANDS) return;
+    if (!known) this.brands = [...this.brands, msg.key];
+    await this.ctx.storage.put({ [`brand:${msg.key}`]: msg.png, brands: this.brands });
+    this.broadcast(JSON.stringify({ t: "brand", key: msg.key, png: msg.png }));
+  }
+
+  async sendBrands(ws) {
+    for (const key of this.brands) {
+      const png = await this.ctx.storage.get(`brand:${key}`);
+      if (typeof png === "string") ws.send(JSON.stringify({ t: "brand", key, png }));
+    }
   }
 
   async acceptPublisher() {
@@ -147,6 +187,7 @@ export class TimingRoom {
     const ws = pair[1];
     this.ctx.acceptWebSocket(ws, ["viewer"]);
     if (this.state) ws.send(this.replay());
+    await this.sendBrands(ws);
     if (this.moved) ws.send(JSON.stringify({ t: "moved", to: this.moved }));
     if (this.publishers().length === 0) ws.send(JSON.stringify({ t: "publisher", up: false }));
     return new Response(null, { status: 101, webSocket: pair[0] });
@@ -197,6 +238,8 @@ export class TimingRoom {
       this.moved = typeof msg.to === "string" ? msg.to : null;
       await this.ctx.storage.put("moved", this.moved);
       this.broadcast(JSON.stringify({ t: "moved", to: this.moved }));
+    } else if (msg.t === "brand") {
+      await this.onBrand(msg);
     } else if (msg.t === "end") {
       await this.end();
     }
@@ -254,6 +297,7 @@ export class TimingRoom {
     this.state = null;
     this.stateAt = null;
     this.moved = null;
+    this.brands = [];
     await this.ctx.storage.deleteAll();
     await this.ctx.storage.put("phase", "ended");
     await this.ctx.storage.setAlarm(this.now() + TOMBSTONE_MS);
@@ -264,6 +308,7 @@ export class TimingRoom {
     if (this.phase === "ended") {
       await this.ctx.storage.deleteAll();
       this.phase = null;
+      this.brands = [];
       return;
     }
     if (this.phase === "live" && this.publishers().length === 0) await this.end();

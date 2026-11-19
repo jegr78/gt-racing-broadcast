@@ -68,13 +68,15 @@ SETTINGS = th.Settings("https://h.example.workers.dev", "key")
 
 
 class _Rig:
-    def __init__(self, settings=SETTINGS, fail=None, conn=_Conn):
+    def __init__(self, settings=SETTINGS, fail=None, conn=_Conn, brands=None):
         self.clock, self.log, self.conn_cls = _Clock(), _Log(), conn
+        self.brands = brands if brands is not None else {}
         self.settings, self.link, self.served = settings, LINK_A, "hosted"
         self.conns, self.fail, self.acks = [], fail, []
         self.pub = tp.Publisher(lambda: self.settings, lambda: self.link,
                                 lambda: (b'{"v":1}', 0.5), lambda: self.served,
-                                lambda: FALLBACK, connect=self._connect, clock=self.clock,
+                                lambda: FALLBACK, brands_fn=lambda: self.brands,
+                                connect=self._connect, clock=self.clock,
                                 wall=lambda: 86400 * 3 + self.clock.t, log=self.log)
 
     def _connect(self, url, headers, timeout):
@@ -250,6 +252,72 @@ def t_msgs_today_counts_sent_frames_and_resets_daily():
     assert r.pub.status()["msgs_today"] == 3, "moved:null on connect plus two states"
     r.step(86400.0)
     assert r.pub.status()["msgs_today"] == 1, "a new UTC day starts the count again"
+
+
+PNG = b"\x89PNG\r\n\x1a\n"
+
+
+def _brands(conn):
+    return [f["key"] for f in conn.sent if f["t"] == "brand"]
+
+
+def t_brand_logos_follow_the_first_state_one_per_step():
+    r = _Rig(brands={"bmw": PNG + b"1", "audi": PNG + b"2"})
+    wait = r.step()
+    kinds = [f["t"] for f in r.conns[0].sent]
+    assert kinds.index("state") < kinds.index("brand"), f"viewers get timing before logos: {kinds}"
+    assert _brands(r.conns[0]) == ["audi"] and wait < 1.0, \
+        f"one logo per step, the next one soon after: {kinds}, {wait}"
+    r.step(wait)
+    r.step(2.0)
+    assert _brands(r.conns[0]) == ["audi", "bmw"], "each logo once per connection"
+    assert r.pub.status()["msgs_today"] == len(r.conns[0].sent), "the quota estimate counts every logo"
+
+
+def t_no_logo_goes_before_the_first_state():
+    r = _Rig(brands={"bmw": PNG + b"1"})
+    r.pub._body_fn = lambda: 1 / 0
+    r.step()
+    r.step(0.2)
+    assert _brands(r.conns[0]) == [], "a room without a state is not live and would drop the logo"
+
+
+class _BrandFailConn(_AckingConn):
+    attempts = 0
+
+    def send_text(self, text):
+        if json.loads(text)["t"] == "brand":
+            _BrandFailConn.attempts += 1
+            raise ConnectionError("uplink too slow")
+        super().send_text(text)
+
+
+def t_a_failed_logo_pauses_logos_while_states_flow():
+    _BrandFailConn.attempts = 0
+    r = _Rig(brands={"bmw": PNG + b"1"}, conn=_BrandFailConn)
+    r.step()
+    for _ in range(10):
+        r.step(2.0)
+    assert len(r.conns) == 2, f"one reconnect, then the logos wait: {len(r.conns)} connections"
+    assert len(r.states(r.conns[-1])) >= 8, "the timing keeps flowing"
+    assert _BrandFailConn.attempts == 1, "no logo upload loop on a slow uplink"
+    r.step(tp.BRAND_PAUSE_S)
+    assert _BrandFailConn.attempts == 2, "after the pause the logo is tried again"
+
+
+def t_brand_logos_go_again_on_a_new_connection_or_a_change():
+    r = _Rig(brands={"bmw": PNG + b"1"})
+    r.step()
+    r.brands = {"bmw": PNG + b"1b", "ford": PNG + b"3"}
+    r.step(2.0)
+    r.step(0.2)
+    assert sorted(_brands(r.conns[0])) == ["bmw", "bmw", "ford"], \
+        f"a changed logo and a new brand go out: {_brands(r.conns[0])}"
+    r.conns[0].closed = True
+    r.step(2.0)
+    for _ in range(4):
+        r.step(2.0)
+    assert sorted(_brands(r.conns[-1])) == ["bmw", "ford"], "a new connection sends every logo again"
 
 
 def t_body_failure_skips_the_tick():

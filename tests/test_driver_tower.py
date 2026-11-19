@@ -5,6 +5,7 @@ under node when it is installed (skipped otherwise).
 Run: python3 tests/test_driver_tower.py"""
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -17,7 +18,7 @@ TIMING = os.path.join(ROOT, "src", "console", "timing.html")
 _DOM = r"""
 function node(tag) {
   return {tag: tag, className: "", textContent: "", style: {}, children: [], attrs: {},
-          classList: {add() {}, remove() {}, toggle() {}},
+          classList: {add() {}, remove() {}, toggle() {}}, remove() { this.removed = true; },
           setAttribute(k, v) { this.attrs[k] = v; }, toggleAttribute() {},
           appendChild(c) { this.children.push(c); return c; },
           append(...c) { this.children.push(...c); }, prepend() {},
@@ -60,7 +61,7 @@ def _tower(body):
 
 CAR = {"pos": 2, "entry": "Team B #2", "number": "2", "driver": "Ann Lind", "team": "Team B",
        "status": "racing", "gap_s": 1.44, "lapped": 0, "last_lap_ms": 118412, "fuel_l": 56.4,
-       "finished": False, "compound": "RM", "pit_stops": 1}
+       "finished": False, "compound": "RM", "pit_stops": 1, "brand": "bmw", "brand_name": "BMW"}
 
 
 def t_the_value_column_cycles_gap_interval_and_last_lap():
@@ -124,9 +125,52 @@ def t_the_builder_sample_rows_have_the_live_columns():
     rows = sample.split('<div class="dd-row">')[1:]
     assert len(rows) == 3, len(rows)
     for r in rows:
-        order = [r.find(f'class="{c}') for c in ("dd-tyre", "dd-fuel", "dd-val", "dd-pit")]
+        order = [r.find(f'class="{c}') for c in ("dd-pos", "dd-id", "dd-brand", "dd-num", "dd-name",
+                                                  "dd-tyre", "dd-fuel", "dd-val", "dd-pit")]
         assert -1 not in order and order == sorted(order), \
-            f"each sample row the builder draws has tyre, fuel, value and stops like a live row: {r}"
+            f"each sample row the builder draws has the live columns in order: {r}"
+        assert '<img src="/drivers/brand/' in r, f"the builder canvas shows a logo: {r}"
+
+def t_the_logo_sits_between_position_and_number_and_hides_when_missing():
+    got = _tower(f"""
+      const r = row({json.dumps(CAR)}, 1, "+1.4", "P1");
+      const id = r.children[1];
+      const img = id.children[0].children[0];
+      const out = {{second: id.className, inner: id.children.map(c => c.className), src: img.attrs.src || img.src,
+                    alt: img.alt}};
+      img.onerror();
+      out.removed = !!img.removed;
+      const again = row({json.dumps(CAR)}, 1, "+1.4", "P1").children[1].children[0];
+      out.retried = again.children.length;
+      const none = row(Object.assign({{}}, {json.dumps(CAR)}, {{brand: ""}}), 1, "", "P1").children[1].children[0];
+      out.empty = none.children.length;
+      return out;""")
+    if got is None:
+        return
+    assert got["second"] == "dd-id" and got["inner"] == ["dd-brand", "dd-num"], \
+        f"the logo sits between position and number: {got}"
+    assert got["src"] == "/drivers/brand/bmw" and got["alt"] == "BMW", got
+    assert got["removed"] and got["retried"] == 0, f"a missing logo leaves an empty cell, no retry each second: {got}"
+    assert got["empty"] == 0, f"no brand, no image: {got}"
+
+
+def t_the_public_page_has_a_foldable_brand_column():
+    with open(TIMING, encoding="utf-8") as fh:
+        page = fh.read()
+    assert '["pos", "Pos"], ["brand", ""], ["num", "#"]' in page, "the logo sits between position and number"
+    assert 'const OPTIONAL = [["brand", "Brand"]' in page, "the reader can fold the logos away"
+    assert "img.remove()" in page and "logoFailed" in page, "a missing logo shows nothing and waits a minute"
+    assert "HOSTED ? hostedLogos[e.brand]" in page, "the hosted page takes logos from its socket, never per request"
+
+
+def t_the_desks_and_the_cockpit_show_logos_through_the_console_route():
+    for rel in (("console", "driver-desk.js"), ("cockpit", "cockpit.html")):
+        with open(os.path.join(ROOT, "src", *rel), encoding="utf-8") as fh:
+            src = fh.read()
+        assert re.search(r"RC_API\(['\"]/drivers/brand/", src), f"{rel[-1]}: the logo goes through /console like its data"
+        at = re.search(r"['\"]/drivers/brand/", src).start()
+        assert ".remove()" in src[at - 400:at + 200], f"{rel[-1]}: a missing logo shows nothing"
+
 
 def t_stale_rows_show_no_fuel():
     got = _tower(f"""

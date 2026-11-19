@@ -71,3 +71,39 @@ Deno.test("the hosted path is recognised", () => {
   eq(L.hostedLink("/t/linkAAAAAAAAAAAAAAAAAAAA"), "linkAAAAAAAAAAAAAAAAAAAA", "hosted");
   eq(L.hostedLink("/console/timing"), null, "Funnel");
 });
+
+Deno.test("a brand logo resolves beside the page on both hosts", () => {
+  const id = "linkAAAAAAAAAAAAAAAAAAAA";
+  eq(L.brandUrl(`/t/${id}`, "", "bmw"), `/t/${id}/brand/bmw`, "hosted page");
+  eq(L.brandUrl(`/t/${id}/`, "?from=x", "bmw"), `/t/${id}/brand/bmw`, "hosted page, trailing slash");
+  eq(L.brandUrl("/console/timing", `?l=${id}&from=host`, "aston-martin"),
+     `/console/timing/brand/aston-martin?l=${id}`, "Funnel page keeps only the link id");
+  eq(L.brandUrl("/console/timing", `?from=moved&l=${id}`, "bmw"), `/console/timing/brand/bmw?l=${id}`, "any order");
+  eq(L.brandUrl("/console/timing", "", "bmw"), "/console/timing/brand/bmw", "no id, no query");
+  for (const bad of ["", "BMW", "../x", "a/b", null]) eq(L.brandUrl("/console/timing", "", bad), null, `no URL for ${bad}`);
+});
+
+Deno.test("a missing logo is asked for again later and later", () => {
+  const M = L.LOGO_RETRY_MS;
+  eq(L.logoWanted(undefined, 0), true, "never failed");
+  eq(L.logoWanted({ at: 1000, n: 1 }, 1000 + M - 1), false, "failed just now");
+  eq(L.logoWanted({ at: 1000, n: 1 }, 1000 + M), true, "a minute later, the host may have it now");
+  eq(L.logoWanted({ at: 0, n: 3 }, 4 * M - 1), false, "the third failure waits four minutes");
+  eq(L.logoWanted({ at: 0, n: 3 }, 4 * M), true, "then asks again");
+  eq(L.logoWanted({ at: 0, n: 40 }, L.LOGO_RETRY_MAX_MS), true, "never longer than the ceiling");
+  eq(L.logoWanted({ at: 0, n: 40 }, L.LOGO_RETRY_MAX_MS - 1), false, "but up to it");
+});
+
+Deno.test("a logo from the host's socket becomes bytes for that key only when it is a PNG", () => {
+  const ok = btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2));
+  const got = L.brandMessage({ t: "brand", key: "bmw", png: ok });
+  eq(got && got.key, "bmw", "key");
+  eq(got && Array.from(got.bytes).slice(0, 4), [0x89, 0x50, 0x4e, 0x47], "decoded bytes");
+  let big = String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+  big += "\0".repeat(256 * 1024);
+  for (const bad of [{ t: "brand", key: "../x", png: ok }, { t: "brand", key: "bmw", png: btoa("<svg onload=alert(1)></svg>") },
+                     { t: "brand", key: "bmw", png: "%%%" }, { t: "brand", key: "bmw" },
+                     { t: "brand", key: "bmw", png: btoa(big) }]) {
+    eq(L.brandMessage(bad), null, JSON.stringify(bad).slice(0, 60));
+  }
+});

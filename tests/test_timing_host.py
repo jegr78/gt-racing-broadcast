@@ -25,6 +25,13 @@ def t_end_and_moved_frames():
     assert json.loads(th.moved_frame("https://x/y")) == {"t": "moved", "to": "https://x/y"}
 
 
+def t_brand_frame_carries_the_png_as_base64():
+    import base64
+    frame = json.loads(th.brand_frame("bmw", b"\x89PNG\r\n\x1a\nxyz"))
+    assert frame["t"] == "brand" and frame["key"] == "bmw", frame
+    assert base64.b64decode(frame["png"]) == b"\x89PNG\r\n\x1a\nxyz", frame
+
+
 def t_parse_host_frame_reads_ack():
     ack = th.parse_host_frame('{"t":"ack","seq":5,"viewers":12,"requests_today":40}')
     assert ack == {"t": "ack", "seq": 5, "viewers": 12, "requests_today": 40}, ack

@@ -29,6 +29,9 @@
   td.num span { display: inline-block; min-width: 30px; text-align: center; border-radius: 4px; padding: 1px 5px;
                 font-weight: 800; background: #39414d; color: #fff; }
   td.drv { white-space: normal; min-width: 120px; }
+  td.brand { width: 40px; padding-left: 2px; padding-right: 2px; }
+  td.brand img { display: block; width: 36px; height: 24px; box-sizing: border-box; padding: 2px; margin: 0 auto;
+                 object-fit: contain; border-radius: 4px; background: #f2f4f7; }
   td.drv small { display: block; color: var(--muted); font-size: 12px; }
   tr.box td { color: var(--warn); }
   tr.off td { color: var(--muted); }
@@ -49,7 +52,8 @@
   #feed time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
   #state { color: var(--muted); font-size: 13px; padding: 14px; text-align: center; }
   @media (max-width: 600px) { main { padding: 10px 8px 20px; } td, th { padding: 6px 5px; } body { font-size: 14px; }
-                              td.drv { min-width: 100px; } }
+                              td.drv { min-width: 88px; } td.brand { width: 28px; padding: 0 1px; }
+                              td.brand img { width: 26px; height: 18px; padding: 1px; } }
 </style>
 </head>
 <body>
@@ -105,6 +109,34 @@
     },
     // The Funnel data names the hosted link only while the host is served and its publisher
     // is connected; a viewer who fell back waits a while so a flaky host cannot ping-pong it.
+    LOGO_RETRY_MS: 60000,
+    LOGO_MAX_B64: 349528,       // base64 of the relay's 256 KiB cap
+    LOGO_RETRY_MAX_MS: 1800000,
+    // A brand logo beside the page: /t/<id>/brand/<key> on the host, ?l=<id> on Funnel.
+    brandUrl: function (pathname, search, key) {
+      if (typeof key !== "string" || !/^[a-z0-9-]{1,64}$/.test(key)) return null;
+      const url = pathname.replace(/\/?$/, "/brand/") + key;
+      const id = /(?:^\?|&)l=([A-Za-z0-9_-]+)/.exec(search || "");
+      return id ? url + "?l=" + id[1] : url;
+    },
+    // A logo from the host's socket: {key, bytes} for a PNG, else null.
+    brandMessage: function (m) {
+      if (!m || typeof m.key !== "string" || !/^[a-z0-9-]{1,64}$/.test(m.key)) return null;
+      if (typeof m.png !== "string" || m.png.length > this.LOGO_MAX_B64) return null;
+      let raw;
+      try { raw = atob(m.png); } catch (e) { return null; }
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const magic = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+      return bytes.length > magic.length && magic.every(function (b, i) { return bytes[i] === b; })
+        ? {key: m.key, bytes: bytes} : null;
+    },
+    // A logo that failed loads again after a while (the host may receive it later),
+    // each failure doubling the wait. fail: {at, n} or undefined.
+    logoWanted: function (fail, now) {
+      if (!fail) return true;
+      return now - fail.at >= Math.min(this.LOGO_RETRY_MAX_MS, this.LOGO_RETRY_MS * Math.pow(2, fail.n - 1));
+    },
     funnelMove: function (data, search, sinceLoadS) {
       const to = data && data.moved_to;
       if (typeof to !== "string" || !/^https:\/\//.test(to)) return null;
@@ -120,10 +152,10 @@
   const LOGIC = window.TimingLogic;
   const HOSTED = LOGIC.hostedLink(location.pathname);
   // Race columns the reader can switch.
-  const RACE = [["pos", "Pos"], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["laps", "Laps"],
+  const RACE = [["pos", "Pos"], ["brand", ""], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["laps", "Laps"],
                 ["gap", "Gap"], ["int", "Int."], ["last", "Last"], ["fuel", "Fuel"], ["pits", "Pits"]];
-  const QUALI = [["pos", "Pos"], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["best", "Best"], ["gap", "Gap"]];
-  const OPTIONAL = [["tyre", "Tyre"], ["laps", "Laps"], ["gap", "Gap"], ["int", "Int."], ["last", "Last"],
+  const QUALI = [["pos", "Pos"], ["brand", ""], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["best", "Best"], ["gap", "Gap"]];
+  const OPTIONAL = [["brand", "Brand"], ["tyre", "Tyre"], ["laps", "Laps"], ["gap", "Gap"], ["int", "Int."], ["last", "Last"],
                     ["fuel", "Fuel"], ["pits", "Pits"]];
   const STATUS = {box: "Box", no_data: "No data", dc: "DC", red_flag: "Red flag"};
   const DATA = location.pathname.replace(/\/?$/, "/data") + location.search;
@@ -203,6 +235,24 @@
     if (hex(e.text_color)) s.style.color = hex(e.text_color);
     return cell("num", s, "num");
   }
+  const logoFailed = {};   // brand key -> {at, n}: its last failed load and how many
+  const hostedLogos = {};  // brand key -> blob URL of the logo the host's socket sent
+  function brandCell(e) {
+    const td = cell("brand", "", "brand");
+    // The hosted page gets its logos over the socket: a request per logo would cost quota.
+    const url = HOSTED ? hostedLogos[e.brand] : LOGIC.brandUrl(location.pathname, location.search, e.brand);
+    if (!url || !LOGIC.logoWanted(logoFailed[e.brand], Date.now())) return td;
+    const img = el("img");
+    img.alt = e.brand_name || "";
+    img.title = e.brand_name || "";
+    img.onerror = function () {
+      logoFailed[e.brand] = {at: Date.now(), n: (logoFailed[e.brand] ? logoFailed[e.brand].n : 0) + 1};
+      img.remove();
+    };
+    img.src = url;
+    td.appendChild(img);
+    return td;
+  }
   function driverCell(e) {
     const d = el("div", "", e.driver || "");
     d.appendChild(el("small", "", e.team || e.entry || ""));
@@ -240,7 +290,7 @@
       const done = e.finished && e.status !== "est";
       const tr = el("tr", done ? "" : e.status === "box" ? "box" : e.status === "no_data" || e.status === "dc" ? "off" : "");
       const all = {
-        pos: cell("pos", e.pos, "pos"), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
+        pos: cell("pos", e.pos, "pos"), brand: brandCell(e), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
         laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
         gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
                   : e.status === "est" ? estGap(e, i)
@@ -338,6 +388,13 @@
         got = Date.now();
         dataAge = typeof m.age_s === "number" ? m.age_s : 0;
         render(m.data); activity(m.data);
+      } else if (m.t === "brand") {
+        const logo = LOGIC.brandMessage(m);
+        if (!logo) return;
+        if (hostedLogos[logo.key]) URL.revokeObjectURL(hostedLogos[logo.key]);
+        hostedLogos[logo.key] = URL.createObjectURL(new Blob([logo.bytes], {type: "image/png"}));
+        delete logoFailed[logo.key];
+        if (last) render(last);
       } else if (m.t === "publisher") {
         publisherUp = m.up === true;
       } else if (m.t === "moved" && typeof m.to === "string" && /^https:\/\//.test(m.to)) {

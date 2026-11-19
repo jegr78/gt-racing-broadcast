@@ -12,6 +12,8 @@ import timing_host
 import ws_client
 
 TICK_S = 2.0
+BRAND_GAP_S = 0.2               # between two logos: one per step keeps the acks flowing
+BRAND_PAUSE_S = 60.0            # after a failed logo: a slow uplink must not loop on uploads
 ACK_TIMEOUT_S = 15.0
 BACKOFF_MIN_S = 2.0
 BACKOFF_MAX_S = 30.0
@@ -46,13 +48,13 @@ def _explain(error):
 class Publisher:
     """settings_fn() -> timing_host.Settings | None; link_fn() -> link id | None;
     body_fn() -> (public JSON bytes, age_s); served_fn() -> "hosted" | "funnel";
-    fallback_fn() -> Funnel page URL | None."""
+    fallback_fn() -> Funnel page URL | None; brands_fn() -> {brand key: PNG bytes}."""
 
     def __init__(self, settings_fn, link_fn, body_fn, served_fn, fallback_fn,
-                 connect=ws_client.WsClient.connect, clock=time.monotonic, wall=time.time,
-                 log=LOG):
+                 brands_fn=dict, connect=ws_client.WsClient.connect, clock=time.monotonic,
+                 wall=time.time, log=LOG):
         self._settings_fn, self._link_fn, self._body_fn = settings_fn, link_fn, body_fn
-        self._served_fn, self._fallback_fn = served_fn, fallback_fn
+        self._served_fn, self._fallback_fn, self._brands_fn = served_fn, fallback_fn, brands_fn
         self._connect, self._clock, self._wall, self._log = connect, clock, wall, log
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -66,6 +68,8 @@ class Publisher:
         self._last_sent = None
         self._last_ack = None
         self._moved = None
+        self._brands_sent = {}          # what this connection's room holds
+        self._brands_paused_until = 0.0
         self._backoff = 0.0
         self._next_attempt = 0.0
         self._last_error = None
@@ -136,6 +140,7 @@ class Publisher:
         self._send_moved()
         if self._conn is not None and (self._last_sent is None or now - self._last_sent >= TICK_S):
             self._send_state(now)
+        brands_pending = self._conn is not None and self._last_sent is not None and self._send_brand()
         self._read_acks()
         if self._conn is not None and now - self._last_ack > ACK_TIMEOUT_S:
             self._close()
@@ -144,6 +149,8 @@ class Publisher:
             return max(BACKOFF_MIN_S, self._next_attempt - now)
         if self._last_sent is None:
             return TICK_S
+        if brands_pending:
+            return BRAND_GAP_S
         return max(0.1, self._last_sent + TICK_S - self._clock())
 
     def _open(self, link, now):
@@ -157,6 +164,7 @@ class Publisher:
         with self._lock:
             self._conn, self._conn_link, self._room, self._opened_at = conn, link, link, now
             self._last_ack, self._last_sent, self._moved = now, None, None
+            self._brands_sent = {}
             replaced = self._logged_error == REPLACED
             self._backoff = BACKOFF_MAX_S if replaced else 0.0
             self._last_error = None
@@ -276,6 +284,24 @@ class Publisher:
         if self._send(timing_host.state_frame(self._seq + 1, age_s, body, self._fallback_fn())):
             self._seq += 1
             self._last_sent = now
+
+    def _send_brand(self):
+        """Send the first logo the room lacks; True while more are owed."""
+        if self._clock() < self._brands_paused_until:
+            return False
+        try:
+            brands = self._brands_fn()
+        except Exception as e:
+            self._error(f"reading the brand logos failed: {e!r}")
+            return False
+        owed = sorted(k for k, png in brands.items() if self._brands_sent.get(k) != png)
+        if not owed:
+            return False
+        if not self._send(timing_host.brand_frame(owed[0], brands[owed[0]])):
+            self._brands_paused_until = self._clock() + BRAND_PAUSE_S
+            return False
+        self._brands_sent[owed[0]] = brands[owed[0]]
+        return len(owed) > 1
 
     def _read_acks(self):
         while self._conn is not None:
