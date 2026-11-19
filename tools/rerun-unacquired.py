@@ -18,13 +18,14 @@ import sys
 MAX_ATTEMPTS = 3
 UNACQUIRED = 'was not acquired by Runner'
 FAILED = ('failure', 'cancelled', 'timed_out')
+AGGREGATOR = 'ci-ok'   # fails with the jobs it needs; `gh run rerun --failed` reruns it too
 
 
 def should_rerun(attempt, jobs, annotations):
     """The failed job IDs to rerun, or [] when the run must stay red."""
     if attempt >= MAX_ATTEMPTS:
         return []
-    failed = [j for j in jobs if j.get('conclusion') in FAILED]
+    failed = [j for j in jobs if j.get('conclusion') in FAILED and j.get('name') != AGGREGATOR]
     unacquired = [j['id'] for j in failed
                   if not j.get('steps') and not j.get('runner_name')
                   and any(UNACQUIRED in note for note in annotations.get(j['id'], []))]
