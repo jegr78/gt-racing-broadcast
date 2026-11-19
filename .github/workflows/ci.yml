@@ -9,9 +9,10 @@ name: CI
 # scarce ones, so they get exactly one job, not three. NB: the matrix job names
 # below ("test (<os>, <ver>)") are the ruleset's required status checks: if you
 # change a combo, update Protect main's required checks to match or PRs deadlock.
-# The release-please PR only edits CHANGELOG.md, version.txt and the manifest, so
-# every job but lint skips there; main's push run already tested the same code.
-# ci-ok is the one fixed-name result: a skipped matrix job reports no check names.
+# A PR whose diff touches only CHANGELOG.md, version.txt and the manifest (the
+# release-please PR) skips every job but lint: no code changed, and main's push run
+# already tested it. ci-ok is the one fixed-name result: a skipped matrix job
+# reports no check names.
 on:
   push:
     branches: [main, "epic/**"]
@@ -30,6 +31,31 @@ defaults:
     shell: bash
 
 jobs:
+  scope:
+    # Decided by the diff, not the branch name: a fork can name its branch anything.
+    runs-on: ubuntu-latest
+    outputs:
+      release_only: ${{ steps.diff.outputs.release_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          only=false
+          if [ "$EVENT" = "pull_request" ]; then
+            changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+            if [ -n "$changed" ] && ! grep -qvxE 'CHANGELOG\.md|version\.txt|\.release-please-manifest\.json' <<<"$changed"; then
+              only=true
+            fi
+          fi
+          echo "release_only=$only" >> "$GITHUB_OUTPUT"
+          echo "changed: ${changed:-n/a}; release_only=$only"
+
   lint:
     # Fast mechanical gate (ruff.toml mirrors the CodeQL alert classes:
     # unclosed files, mixed returns, unused imports, bugbear). CodeQL stays
@@ -49,7 +75,8 @@ jobs:
         run: python tools/lint.py
 
   test:
-    if: github.head_ref != 'release-please--branches--main'
+    needs: scope
+    if: needs.scope.outputs.release_only != 'true'
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -112,7 +139,8 @@ jobs:
         run: python tools/e2e-event-info.py
 
   build:
-    if: github.head_ref != 'release-please--branches--main'
+    needs: scope
+    if: needs.scope.outputs.release_only != 'true'
     # Build self-verify (tokenization, blanked password, no secrets shipped, no
     # shell scripts). OS-independent: it asserts the assembled dist/ contents,
     # not runtime behaviour: so one ubuntu job suffices instead of re-running it
@@ -127,7 +155,8 @@ jobs:
         run: python tools/build.py
 
   binary-smoke:
-    if: github.head_ref != 'release-please--branches--main'
+    needs: scope
+    if: needs.scope.outputs.release_only != 'true'
     timeout-minutes: 15
     # CI must exercise everything the release pipeline exercises: release.yml
     # builds the PyInstaller binary and runs the build-binary smoke test, so a
@@ -146,7 +175,8 @@ jobs:
         run: python tools/build-binary.py --version ci-smoke
 
   native-package:
-    if: github.head_ref != 'release-please--branches--main'
+    needs: scope
+    if: needs.scope.outputs.release_only != 'true'
     timeout-minutes: 15
     # Exercise the actual frozen relay and private coaching journal on the other
     # producer OSes too. binary-smoke and e2e-binary cover Linux; these runs keep
@@ -167,7 +197,8 @@ jobs:
         run: python tools/e2e.py --build --coach-only
 
   e2e:
-    if: github.head_ref != 'release-please--branches--main'
+    needs: scope
+    if: needs.scope.outputs.release_only != 'true'
     timeout-minutes: 15
     # Integration outer loop: stand up the relay + Control Center from src/ and
     # assert the live HTTP surface (cockpit auth gating, tally, chat round-trip,
@@ -189,7 +220,8 @@ jobs:
         run: python tools/engineer-replay.py --check
 
   visual:
-    if: github.head_ref != 'release-please--branches--main'
+    needs: scope
+    if: needs.scope.outputs.release_only != 'true'
     timeout-minutes: 15
     # Visual acceptance run: renders Control Center, Director Panel, cockpit and
     # Race Control in Chromium and fails on a layout-rule finding. The stdlib e2e
@@ -244,7 +276,7 @@ jobs:
 
   ci-ok:
     if: always()
-    needs: [lint, test, build, binary-smoke, native-package, e2e, visual]
+    needs: [scope, lint, test, build, binary-smoke, native-package, e2e, visual]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed or was skipped on purpose
