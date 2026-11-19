@@ -34,15 +34,20 @@ def t_the_driver_dashboard_is_a_builder_page_in_both_profile_kinds():
         assert data['ok'], data
         assert {s['id'] for s in data['slots']} >= {
             'drivers-header', 'drivers-tower', 'drivers-fastest', 'drivers-map'}, data['slots']
+        tower = next(s for s in data['slots'] if s['id'] == 'drivers-tower')
+        assert tower.get('vars', {}).get('background') == 'var(--dd-bg)', \
+            f"the builder learns which base colours are page variables: {tower}"
     with tempfile.TemporaryDirectory() as td:
         original = cli._mk_active_profile(td)
         od = Path(td) / 'profiles/demo/overlay'
         try:
             saved = m.overlay_layout_write_data('drivers', {
-                'page': 'drivers', 'slots': {'drivers-tower': {'left': 90, 'fontSize': 24}}})
+                'page': 'drivers', 'slots': {'drivers-tower': {
+                    'left': 90, 'fontSize': 24, 'background': 'var(--dd-bg)'}}})
             assert saved['ok'], saved
             css = (od / 'drivers.css').read_text(encoding="utf-8")
             assert '#drivers-tower' in css and 'left: 90px' in css, css
+            assert 'background: var(--dd-bg)' in css, f"a saved variable reference reaches the page: {css}"
             assert not (od / 'hud.css').exists(), "the dashboard has its own stylesheet"
         finally:
             m._env_base, m._runtime_base_dir = original
