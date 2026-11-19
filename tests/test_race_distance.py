@@ -997,7 +997,7 @@ def t_an_estimated_car_keeps_its_place_when_the_winner_takes_the_flag():
 
 
 def t_an_estimate_that_reaches_before_the_history_is_refused():
-    race, (a, b, c, d), t = _quiet_c()
+    race, _cars, t = _quiet_c()
     race.clear_estimate("C")
     try:
         race.estimate("C", "B", 3000.0, t)
