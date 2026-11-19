@@ -1255,8 +1255,12 @@ def t_a_finish_by_hand_leaves_a_retired_car_unclassified():
     race.finish(t)
     rd_ = _row(race, "D", t)
     assert rd_["status"] == "retired" and not rd_["finished"], rd_
+    held = _row(race, "D", t)["distance_m"]
     race.retire("D", False, t)
-    assert not _row(race, "D", t)["finished"], "undone after the flag it is still unclassified"
+    t = _drive(race, [a, b, c, d], [40] * 4, t, 3)
+    rd_ = _row(race, "D", t)
+    assert rd_["finished"] and rd_["distance_m"] == held, f"undone after the flag it is classified where it stopped: {rd_}"
+    assert _order(race, t)[3] == "D", _order(race, t)
     race.retire("A", True, t)
     assert not _row(race, "A", t)["finished"], "a DNF after the flag reads DNF, not finished"
 
@@ -1344,6 +1348,26 @@ def t_a_rejoin_starts_at_the_leader_still_running():
     t = _drive(race, [lead, back], [50, 40], t, 1)
     rb = _row(race, "B", t)
     assert abs(rb["distance_m"] - (start + 40)) < 15, f"B joins at A's distance, not R's: {start} {rb}"
+
+
+def t_corrections_reach_a_car_without_a_sender():
+    race, (a, b), t = _field()
+    race.correct("X", 0.0, pit_stops=1)
+    race.rejoin("X", True)
+    rx = _row(race, "X", t)
+    assert rx["pit_stops"] == 1 and rx["rejoin"] is True, f"a pit stop correction shows on a car without a sender: {rx}"
+
+
+def t_a_parked_entry_can_be_estimated():
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "C"])
+    a, b, c = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50), Car(race, "C", "c", L - 90)
+    t = _drive(race, [a, b, c], [40] * 3, 0.0, 12, positions=lambda car: "ABC".index(car.entry) + 1)
+    b.entry = "A"                                          # the producer moves B's only car to A
+    t = _drive(race, [a, b, c], [40] * 3, t, rd.NO_DATA_S + 1)
+    race.estimate("B", "C", 1.0, t)
+    rb = _row(race, "B", t)
+    assert rb["status"] == "est" and rb["distance_m"] is not None, rb
 
 
 if __name__ == "__main__":

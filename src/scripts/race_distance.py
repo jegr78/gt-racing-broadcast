@@ -236,11 +236,19 @@ class Race:
                     car.counting, car.lap_ok, car.pending = False, False, None
         elif entry in self._retired:
             self._retired.discard(entry)
-            if ent is not None and ent.distance is not None:
+            if ent is not None and self._finished and ent.finished_at is None:
+                ent.finished_at = now              # a finish by hand classifies it where it stopped
+            elif ent is not None and ent.distance is not None:
                 ent.resume = True
 
     def _out(self, ent):
         return ent.entry in self._retired
+
+    def _ghost(self, entry):
+        """A row for a roster entry the race has not seen, with its preset corrections."""
+        ent = _Entry(entry, None)
+        ent.adjust, ent.pit_adjust, ent.rejoin = self._preset.get(entry, [0.0, 0, False])
+        return ent
 
     def open_change_window(self, now):
         if self.multi_lobby:
@@ -860,10 +868,10 @@ class Race:
         live = [e for e in self._entries.values() if not self._out(e)]
         ents = [e for e in live if e.active is not None or self._estimated(e)]
         idle = [e for e in live if e.active is None and not self._estimated(e)] + \
-            [_Entry(n, None) for n in self._roster if n not in self._entries and n not in self._retired]
+            [self._ghost(n) for n in self._roster if n not in self._entries and n not in self._retired]
         idle.sort(key=lambda e: place.get(e.entry, len(place)))
         out = [e for e in self._entries.values() if self._out(e)] + \
-            [_Entry(n, None) for n in self._roster if n in self._retired and n not in self._entries]
+            [self._ghost(n) for n in self._roster if n in self._retired and n not in self._entries]
         out.sort(key=lambda e: (-self._shown(e) if e.distance is not None else math.inf, e.entry))
         winner = next((e for e in ents if self._finishing_at is not None
                        and e.finished_at == self._finishing_at and e.distance is not None), None)
@@ -991,7 +999,7 @@ class Race:
         if self.multi_lobby:
             return set()
         known = [(e.entry, self._cars[e.active].position) for e in ordered
-                 if e.distance is not None and self._cars[e.active].position]
+                 if e.distance is not None and e.active in self._cars and self._cars[e.active].position]
         out = set()
         for i, (a, pa) in enumerate(known):
             for b, pb in known[i + 1:]:
