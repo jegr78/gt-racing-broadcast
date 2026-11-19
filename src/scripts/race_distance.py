@@ -688,6 +688,16 @@ class Race:
             return est["held"]
         return None if ent.distance is None else ent.distance + ent.adjust
 
+    def _est_xy(self, ent):
+        """Map position of an estimated car: its reference's spot, set back by the gap."""
+        ref = self._entries.get(self._est[ent.entry]["ref"])
+        car = self._cars.get(ref.active) if ref is not None else None
+        shown, ahead = self._shown(ent), self._shown(ref) if ref is not None else None
+        if car is None or car.s is None or shown is None or ahead is None:
+            last = self._cars.get(ent.active)
+            return (last.x, last.z) if last is not None else (None, None)
+        return self._line.point_at(car.s - (ahead - shown))
+
     def _estimated(self, ent):
         est = self._est.get(ent.entry)
         return est is not None and est["on"]
@@ -829,7 +839,8 @@ class Race:
                 "correction_m": round(e.adjust, 1),
                 "last_lap_ms": e.last_lap_ms, "stint_laps": e.stint_laps,
                 "fuel_l": None if car.fuel is None else round(car.fuel, 1),
-                "x": car.x, "z": car.z,
+                **dict(zip(("x", "z"), self._est_xy(e) if self._estimated(e) and quiet
+                                       else (car.x, car.z), strict=True)),
                 "rejoin": e.rejoin,
                 "gt7_position": car.position,
                 "position_mismatch": e.entry in mismatch,

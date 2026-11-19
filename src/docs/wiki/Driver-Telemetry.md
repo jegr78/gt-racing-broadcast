@@ -268,7 +268,8 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   runs behind and the seconds, then **Set estimate**. While the car stays quiet it
   shows where the reference car was that many seconds ago, its gap is the reference's
   gap plus the seconds, and every screen marks it **EST** (desks, tower, cockpit,
-  public timing page, the recording and its CSV). The reference must send data. Set it
+  public timing page, the recording and its CSV). On the track map its dot moves with
+  the reference, set back by the gap, inside a dashed amber ring. The reference must send data. Set it
   again to change it, **Clear estimate** removes it, and the estimate ends by itself
   when the car sends data again; the car then continues from its real distance. An
   estimate set on a car that still sends data waits until it goes quiet. It holds still
