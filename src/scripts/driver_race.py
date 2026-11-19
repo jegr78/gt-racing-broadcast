@@ -199,23 +199,20 @@ def _viewer_entry(row, roster):
 
 
 _PUBLIC_TOP = ("v", "mode", "stint", "remaining", "remaining_running", "delay_s", "track_name", "state",
-               "red_flag", "lap", "show")
+               "red_flag", "lap")
 _PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color", "laps",
                "stint_laps", "gap_s", "interval_s", "lapped", "status", "pit_stops",
-               "last_lap_ms", "finished", "best_ms", "gap_ms")
+               "last_lap_ms", "finished", "best_ms", "gap_ms", "compound", "fuel_l")
 
 
 def public_view(snap):
     """The public live timing page's data (#1128): a dashboard snapshot cut to an
-    allowlist, with compound and fuel only where the display switches show them."""
+    allowlist. The display switches hide compound and fuel on OBS only."""
     if not snap:
         return {"v": 1, "mode": "race", "entries": []}
-    show = snap.get("show") or {}
-    keep = _PUBLIC_ROW + (("compound",) if show.get("compound", True) else ()) \
-        + (("fuel_l",) if show.get("fuel", True) else ())
 
     def rows(items):
-        return [{k: r[k] for k in keep if k in r} for r in items or ()]
+        return [{k: r[k] for k in _PUBLIC_ROW if k in r} for r in items or ()]
     out = {k: snap[k] for k in _PUBLIC_TOP if k in snap}
     fl = snap.get("fastest")
     if fl:
@@ -456,6 +453,7 @@ class Service:
                 row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
             return out
         st = race.standings(self._clock())
+        dc = self._confirmed_dc()
         rows = []
         for i, r in enumerate(st["entries"]):
             row = _viewer_entry(r, roster)
@@ -464,6 +462,8 @@ class Service:
                                           "finished", "x", "z")})
             row["pos"] = i + 1
             row["compound"] = (compounds.get(r["entry"]) or {}).get("code")
+            if row["status"] == "no_data" and r["entry"] in dc:
+                row["status"] = "dc"
             rows.append(row)
         fl = race.fastest
         out.update({
@@ -472,6 +472,13 @@ class Service:
                 fl, team=(roster.get(fl["entry"]) or {}).get("cupTeam") or ""),
             "entries": rows})
         return out
+
+    def _confirmed_dc(self):
+        """Entries shown as DC; a recorder failure only costs the label, never the tick."""
+        try:
+            return self._rec.confirmed_silent() if self._rec is not None else set()
+        except Exception:
+            return set()
 
     def line(self):
         """The picked layout's line for the track map, at most LINE_POINTS points;
