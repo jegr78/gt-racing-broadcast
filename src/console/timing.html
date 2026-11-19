@@ -32,6 +32,8 @@
   td.drv small { display: block; color: var(--muted); font-size: 12px; }
   tr.box td { color: var(--warn); }
   tr.off td { color: var(--muted); }
+  .est { display: inline-block; margin-left: 5px; padding: 0 5px; border: 1px solid var(--warn); border-radius: 4px;
+         color: var(--warn); font-size: 11px; font-weight: 700; line-height: 1.45; vertical-align: 1px; }
   .fl { color: var(--purple); font-weight: 700; }
   .tyre { font-weight: 800; }
   .tyre.RS { color: #ff5a4f; } .tyre.RM { color: #ffd23f; } .tyre.RH { color: #f2f4f7; }
@@ -176,6 +178,13 @@
     if (value instanceof Node) td.appendChild(value); else td.textContent = value === undefined || value === null ? "" : String(value);
     return td;
   }
+  // An estimated position: the gap Race Control set, marked EST.
+  function estGap(e, i) {
+    const s = el("span", "", i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
+                 : typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "");
+    s.appendChild(el("span", "est", "EST"));
+    return s;
+  }
   function numCell(e) {
     const s = el("span", "", e.number || String(e.entry || "").slice(0, 3));
     if (hex(e.color)) s.style.background = hex(e.color);
@@ -221,6 +230,7 @@
         pos: cell("pos", e.pos, "pos"), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
         laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
         gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
+                  : e.status === "est" ? estGap(e, i)
                   : STATUS[e.status] || (e.finished ? "Finished" : i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
                   : typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "")),
         int: cell("int", i && typeof e.interval_s === "number" ? "+" + e.interval_s.toFixed(1) : ""),

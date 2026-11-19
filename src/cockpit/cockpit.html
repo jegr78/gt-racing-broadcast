@@ -81,6 +81,8 @@
   #timing td.drv { white-space: normal; min-width: 96px; }
   #timing td.drv small { display: block; opacity: .6; }
   #timing tr.box td { color: #ffd361; }
+  #timing .est { display: inline-block; margin-left: 4px; padding: 0 4px; border: 1px solid #ffb454;
+                 border-radius: 3px; color: #ffb454; font-size: 10px; font-weight: 700; line-height: 1.4; }
   #timing .fl { color: #c49bff; font-weight: 700; }
   #timing .tyre { font-weight: 800; }
   #timing .tyre.RS { color: #ff5a4f; } #timing .tyre.RM { color: #ffd23f; } #timing .tyre.RH { color: #f2f4f7; }
@@ -848,6 +850,16 @@ function timingDriver(e) {
   return {cls: 'drv', node: d};
 }
 const TIMING_STATUS = {box: 'Box', no_data: 'No data', dc: 'DC', red_flag: 'Red flag'};
+// An estimated position: the gap Race Control set, marked EST.
+function timingEst(text) {
+  const s = document.createElement('span');
+  s.textContent = text;
+  const tag = document.createElement('span');
+  tag.className = 'est';
+  tag.textContent = 'EST';
+  s.appendChild(tag);
+  return s;
+}
 function timingTyre(e) {
   const s = document.createElement('span');
   const code = ['RS', 'RM', 'RH', 'I', 'W'].indexOf(e.compound) >= 0 ? e.compound : '';
@@ -893,8 +905,9 @@ async function pollTiming() {
     } else {
       if (e.status === 'box') tr.className = 'box';
       const laps = e.stint_laps !== undefined && e.stint_laps !== e.laps ? e.laps + ' (' + e.stint_laps + ')' : e.laps;
-      const gap = TIMING_STATUS[e.status] || (i === 0 ? '' : e.lapped ? '+' + e.lapped + ' L'
-                  : typeof e.gap_s === 'number' ? '+' + e.gap_s.toFixed(1) : '');
+      const gapText = i === 0 ? '' : e.lapped ? '+' + e.lapped + ' L'
+                      : typeof e.gap_s === 'number' ? '+' + e.gap_s.toFixed(1) : '';
+      const gap = e.status === 'est' ? {node: timingEst(gapText)} : TIMING_STATUS[e.status] || gapText;
       const last = document.createElement('span');
       last.textContent = lapTime(e.last_lap_ms);
       if (fl && fl.entry === e.entry && fl.ms === e.last_lap_ms) last.className = 'fl';
