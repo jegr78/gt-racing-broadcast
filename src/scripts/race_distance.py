@@ -641,8 +641,12 @@ class Race:
         also while `ahead` is quiet (its history is stale)."""
         if ahead.distance is None or ent.distance is None:
             return None
-        if ent.finished_at is not None and ahead.finished_at is not None:
-            return ent.finished_at - ahead.finished_at
+        if ent.finished_at is not None:
+            # Against when `ahead` passed that point: a car ranked ahead can take the flag later.
+            reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
+            if reached is None:
+                reached = ahead.finished_at
+            return None if reached is None else max(0.0, ent.finished_at - reached)
         if ent.waiting or ahead.waiting:
             return None                            # no running time while a red flag holds them
         if now is not None and self._quiet(ahead, now):

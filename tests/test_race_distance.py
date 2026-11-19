@@ -160,6 +160,19 @@ def t_a_lapped_car_taking_the_flag_stays_behind_a_lead_lap_car_still_running():
     assert order == ["A", "C", "B"], f"C reached that lap long before B took the flag: {order}"
 
 
+def t_no_gap_turns_negative_when_a_car_ranked_ahead_takes_the_flag_later():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 6), Car(race, "C", "c", L - 100)
+    t = _drive(race, [a, b, c], [60, 29.5, 50], 0.0, 110)    # B takes the flag before C
+    t = _drive(race, [a, b, c], [60, 29.5, 50], t, 30)       # then C, ranked ahead of B
+    snap = race.standings(t)
+    assert snap["state"] == "finished" and [r["entry"] for r in snap["entries"]] == ["A", "C", "B"], snap
+    for r in snap["entries"][1:]:
+        for key in ("gap_s", "interval_s", "gap_time_s", "interval_time_s"):
+            assert r[key] is None or r[key] >= 0, f"{r['entry']} {key}={r[key]} after the finish"
+    assert _row(race, "B", t)["interval_time_s"] > 0, "B reached that lap after C, so it is behind"
+
+
 def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
