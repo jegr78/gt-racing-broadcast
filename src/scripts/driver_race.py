@@ -21,6 +21,7 @@ import json
 import logging
 import math
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -193,18 +194,52 @@ def _saved_fastest(path, track):
     return None
 
 
+# The relay's ASSET_KEY_RE, capped: a brand key names a logo file, never a path.
+BRAND_KEY_RE = re.compile(r"[a-z0-9-]{1,64}")
+
+
+def _brand(info):
+    """(key, name) of a roster entry's brand; a key outside the asset-key charset is ""."""
+    key = info.get("brandKey")
+    key = key if isinstance(key, str) and BRAND_KEY_RE.fullmatch(key) else ""
+    name = info.get("brandName")
+    return key, name[:MAX_ENTRY] if isinstance(name, str) else ""
+
+
 def _viewer_entry(row, roster):
     info = roster.get(row["entry"]) or {}
+    brand, brand_name = _brand(info)
     return {"entry": row["entry"], "number": info.get("number") or "",
             "driver": row["driver"], "team": info.get("cupTeam") or "",
-            "color": info.get("bgColor") or "", "text_color": info.get("textColor") or ""}
+            "color": info.get("bgColor") or "", "text_color": info.get("textColor") or "",
+            "brand": brand, "brand_name": brand_name}
+
+
+def public_brands(view, has_logo):
+    """A copy of the public view whose rows name a brand only when `has_logo(key)`:
+    a viewer's page asks for every named logo, and a missing one again later."""
+    out = dict(view)
+    for key in ("entries", "qualifying"):
+        if key in out:
+            out[key] = [r if not r.get("brand") or has_logo(r["brand"]) else dict(r, brand="")
+                        for r in out[key] or ()]
+    return out
+
+
+def with_brands(standings, roster):
+    """A copy of `standings` whose entries carry their roster brand, for the desks."""
+    def one(e):
+        brand, name = _brand(roster.get(e.get("entry")) or {})
+        return dict(e, brand=brand, brand_name=name)
+    return dict(standings, entries=[one(e) for e in standings.get("entries") or ()])
 
 
 _PUBLIC_TOP = ("v", "mode", "stint", "remaining", "remaining_running", "delay_s", "track_name", "state",
                "red_flag", "lap")
 _PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color", "laps",
                "stint_laps", "gap_s", "interval_s", "lapped", "status", "pit_stops",
-               "last_lap_ms", "finished", "best_ms", "gap_ms", "compound", "fuel_l")
+               "last_lap_ms", "finished", "best_ms", "gap_ms", "compound", "fuel_l", "brand",
+               "brand_name")
 
 
 def public_view(snap):

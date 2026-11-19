@@ -79,6 +79,9 @@
   #timing td.num span { display: inline-block; min-width: 26px; text-align: center; border-radius: 4px;
                         padding: 1px 4px; font-weight: 700; background: #39414d; color: #fff; }
   #timing td.drv { white-space: normal; min-width: 96px; }
+  #timing td.logo { width: 28px; padding-right: 0; }
+  #timing td.logo img { display: block; width: 26px; height: 18px; box-sizing: border-box; padding: 1px;
+                        border-radius: 3px; background: #f2f4f7; object-fit: contain; }
   #timing td.drv small { display: block; opacity: .6; }
   #timing tr.box td { color: #ffd361; }
   #timing .est { display: inline-block; margin-left: 4px; padding: 0 4px; border: 1px solid #ffb454;
@@ -849,6 +852,19 @@ function timingDriver(e) {
   d.appendChild(small);
   return {cls: 'drv', node: d};
 }
+const logoFailed = {};   // brand key -> when its logo last failed to load
+// The entry's brand logo; a missing one leaves the cell empty for a minute.
+function timingLogo(e) {
+  const span = document.createElement('span');
+  const key = /^[a-z0-9-]{1,64}$/.test(e.brand || '') ? e.brand : '';
+  if (!key || Date.now() - (logoFailed[key] || -Infinity) < 60000) return {cls: 'logo', node: span};
+  const img = document.createElement('img');
+  img.alt = img.title = e.brand_name || '';
+  img.onerror = function () { logoFailed[key] = Date.now(); img.remove(); };
+  img.src = window.RC_API('/drivers/brand/' + key);
+  span.appendChild(img);
+  return {cls: 'logo', node: span};
+}
 const TIMING_STATUS = {box: 'Box', no_data: 'No data', dc: 'DC', red_flag: 'Red flag'};
 // An estimated position: the gap Race Control set, marked EST.
 function timingEst(text) {
@@ -887,8 +903,8 @@ async function pollTiming() {
   parts.forEach(function (p) { const s = document.createElement('span'); s.textContent = p; head.appendChild(s); });
   if (d.red_flag) { const s = document.createElement('span'); s.className = 'flag'; s.textContent = 'RED FLAG'; head.appendChild(s); }
   const quali = d.mode === 'qualifying';
-  const cols = quali ? ['Pos', '#', 'Driver', 'Tyre', 'Best', 'Gap']
-                     : ['Pos', '#', 'Driver', 'Tyre', 'Laps', 'Gap', 'Int.', 'Last', 'Fuel', 'Pits'];
+  const cols = quali ? ['Pos', '', '#', 'Driver', 'Tyre', 'Best', 'Gap']
+                     : ['Pos', '', '#', 'Driver', 'Tyre', 'Laps', 'Gap', 'Int.', 'Last', 'Fuel', 'Pits'];
   const thead = $('timing').tHead;
   thead.textContent = '';
   const htr = document.createElement('tr');
@@ -900,7 +916,7 @@ async function pollTiming() {
   rows.forEach(function (e, i) {
     const tr = document.createElement('tr');
     if (quali) {
-      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), timingTyre(e), lapTime(e.best_ms),
+      timingCells(tr, [e.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), lapTime(e.best_ms),
                        e.gap_ms ? '+' + (e.gap_ms / 1000).toFixed(3) : '']);
     } else {
       if (e.status === 'box') tr.className = 'box';
@@ -911,7 +927,7 @@ async function pollTiming() {
       const last = document.createElement('span');
       last.textContent = lapTime(e.last_lap_ms);
       if (fl && fl.entry === e.entry && fl.ms === e.last_lap_ms) last.className = 'fl';
-      timingCells(tr, [e.pos, timingNum(e), timingDriver(e), timingTyre(e), laps, gap,
+      timingCells(tr, [e.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), laps, gap,
                        typeof e.interval_s === 'number' && i ? '+' + e.interval_s.toFixed(1) : '',
                        {node: last}, typeof e.fuel_l === 'number' ? e.fuel_l.toFixed(1) + ' L' : '',
                        e.pit_stops || 0]);

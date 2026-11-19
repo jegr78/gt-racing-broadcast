@@ -230,7 +230,8 @@ Security boundaries that apply everywhere:
   timing page `/console/timing` and its `/data` (#1128), authorized by the event's
   separate timing link (`timing_link`): GET only, the delayed timing allowlist
   (`driver_race.public_view`), one upload budget for all viewers that stretches their
-  poll interval instead of turning anyone away.
+  poll interval instead of turning anyone away, plus the roster's brand logos
+  (`/console/timing/brand/<key>`, PNG only).
 - The `race_control` role reaches exactly one program change: the full `RED FLAG`
   (`POST /console/race-control/red-flag`, #1114) raises the Standby Cover, sets the HUD
   banner and holds the driver race. No step-up; it is logged with the person's identity.
@@ -238,7 +239,8 @@ Security boundaries that apply everywhere:
   dashboard on air. Race data the desks maintain (corrections, tyre compound, the
   dashboard's compound and fuel columns) is not a program change.
 - The optional league timing host (#1161) is the relay's one outbound fan-out: it sends
-  only the delayed public timing body (`driver_race.public_view`) to the league's own
+  only the delayed public timing body (`driver_race.public_view`) and the roster's brand
+  logos to the league's own
   Cloudflare Worker over an authenticated WebSocket. Nothing new is funnelled, and the
   host never reaches back into the relay.
 - No destructive HTTP endpoint for chat or cues: clear/import/pull stay producer-only CLI

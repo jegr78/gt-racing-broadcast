@@ -46,6 +46,8 @@
     "border-radius:6px;padding:5px 9px;text-decoration:none}.dd a.btn:hover{border-color:var(--ink,#e8eaed)}",
     ".dd .rec{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--muted,#9aa0a6)}",
     ".dd .rec.on{background:#ff4d5e}",
+    ".dd td.logo{width:30px;padding-right:0}.dd td.logo img{display:block;width:28px;height:20px;box-sizing:border-box;",
+    "padding:1px;border-radius:3px;background:#f2f4f7;object-fit:contain}",
     ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}"
   ].join("");
 
@@ -95,6 +97,19 @@
     var t = String(text || "").trim().match(/^(?:(\d{1,2}):)?(\d{1,2}(?:\.\d{1,3})?)$/);
     if (!t) return NaN;
     return Math.round(((t[1] ? parseInt(t[1], 10) : 0) * 60 + parseFloat(t[2])) * 1000);
+  }
+
+  var logoFailed = {};   // brand key -> when its logo last failed to load
+  // The entry's brand logo; a missing one leaves the cell empty for a minute.
+  function logoCell(e) {
+    var td = el("td", {cls: "logo"});
+    var key = /^[a-z0-9-]{1,64}$/.test(e.brand || "") ? e.brand : "";
+    if (!key || Date.now() - (logoFailed[key] || -Infinity) < 60000) return td;
+    var img = el("img", {alt: e.brand_name || "", title: e.brand_name || ""});
+    img.onerror = function () { logoFailed[key] = Date.now(); img.remove(); };
+    img.src = (window.RC_API ? window.RC_API("/drivers/brand/" + key) : "/drivers/brand/" + key);
+    td.appendChild(img);
+    return td;
   }
 
   function mount(root, opts) {
@@ -204,7 +219,7 @@
     // -- race table -----------------------------------------------------------------
     var raceBody = el("tbody");
     var raceTable = el("div", {cls: "tbl"}, [el("table", {cls: "race"}, [el("thead", {}, [el("tr", {}, [
-      "Pos", "Entry", "Laps", "Gap", "Int.", "Status", "Pits", "Corr."].map(function (h) {
+      "Pos", "", "Entry", "Laps", "Gap", "Int.", "Status", "Pits", "Corr."].map(function (h) {
         return el("th", h === "Pits" ? {text: h, title: PIT_HINT} : {text: h}); }))]), raceBody])]);
     var raceNote = el("div", {cls: "muted"});
 
@@ -562,7 +577,7 @@
         // No-break spaces: a narrow desk wraps only between the lap count and the time.
         var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
                            : (i ? secs(e.gap_s) : "");
-        var cells = [el("td", {cls: "num", text: String(i + 1)}),
+        var cells = [el("td", {cls: "num", text: String(i + 1)}), logoCell(e),
           el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted", text: e.driver})]),
           el("td", {cls: "num", text: String(e.laps)}),
           el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}), el("td", {cls: "num", text: secs(e.interval_time_s)}),
@@ -576,7 +591,7 @@
           el("td", {cls: "num", text: e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""})];
         return el("tr", {}, cells);
       });
-      if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "8", cls: "muted", text: "No driver data yet."})])];
+      if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "9", cls: "muted", text: "No driver data yet."})])];
       raceBody.replaceChildren.apply(raceBody, rows);
     }
 

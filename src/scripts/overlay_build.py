@@ -59,7 +59,7 @@ PROP_ORDER = ("left", "top", "offsetRight", "offsetTop", "width", "height", "pad
               "fontStyle", "color", "background", "borderColor", "borderStyle",
               "align", "valign", "textTransform", "opacity",
               "rotation", "shear", "textShadow", "visible", "presentation",
-              "showNumber", "showPercent", "barColor", "trackColor")
+              "showNumber", "showPercent", "barColor", "trackColor", "showBrands")
 
 # Slot kinds: the single source for which properties a slot offers. extract_slots
 # derives slot["props"] from the element's data-edit-kind. `text` is a strict
@@ -415,8 +415,9 @@ def base_body(html):
 
 def canvas_logo(body, logo_url):
     """*body* with the league logo loaded from *logo_url* instead of the relay-only
-    /hud/logo. Without a URL the src is empty, which hides the slot through its
+    /hud/logo, and the timing tower's sample brand logos from the Control Center. Without a URL the src is empty, which hides the slot through its
     onerror like the live HUD does, without a request."""
+    body = body.replace('src="/drivers/brand/', 'src="/api/overlay/asset/brands/')
     return body.replace('src="/hud/logo"', f'src="{escape(logo_url or "", quote=True)}"')
 
 
@@ -656,6 +657,9 @@ def _declaration(prop, value):
             return None
         name = "number" if prop == "showNumber" else "percent"
         return f"--audience-{name}: {'block' if value else 'none'}"
+    if prop == "showBrands":
+        # The timing tower's logos (drivers.html reads --dd-brands); unset keeps them on.
+        return f"--dd-brands: {'flex' if value else 'none'}" if isinstance(value, bool) else None
     if prop in ("barColor", "trackColor"):
         safe = _safe_value(value)
         name = "bar" if prop == "barColor" else "track"

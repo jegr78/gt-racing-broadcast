@@ -4327,6 +4327,11 @@ function ovApplyProp(el, prop, value) {
       else st.removeProperty(name);
       return;
     }
+    if (prop === 'showBrands') {
+      if (typeof value === 'boolean') st.setProperty('--dd-brands', value ? 'flex' : 'none');
+      else st.removeProperty('--dd-brands');
+      return;
+    }
     if (prop === 'barColor' || prop === 'trackColor') {
       const name = '--audience-' + (prop === 'barColor' ? 'bar' : 'track') + '-color';
       if (value) st.setProperty(name,value); else st.removeProperty(name);
@@ -4371,6 +4376,7 @@ function ovStyleSlot(id) {
   const ov = (ovState.layout.slots && ovState.layout.slots[id]) || {};
   Object.keys(OV_CSSNAME).forEach(p => ovApplyProp(el, p, ov[p]));
   if (id.startsWith('audience-')) ['presentation','showNumber','showPercent','barColor','trackColor'].forEach(p => ovApplyProp(el,p,ov[p]));
+  if (id === 'drivers-tower') ovApplyProp(el, 'showBrands', ov.showBrands);
   ovApplyProp(el, 'textShadow', ov.textShadow);
   ovApplyProp(el, 'visible', ov.visible);
   ovApplyProp(el, 'slant', ov.slant);
@@ -5176,6 +5182,13 @@ function ovRenderPanel() {
     remove.onclick = () => audiencePlace(id,false); panel.appendChild(remove);
     const edit = document.createElement('button'); edit.textContent = 'Edit shared value';
     edit.onclick = () => audienceOpen(id); panel.appendChild(edit);
+  }
+  if (has('showBrands')) {
+    const label = document.createElement('label');
+    const input = document.createElement('input'); input.type = 'checkbox'; input.checked = ov.showBrands !== false;
+    input.onchange = () => { ovSetProp(id, 'showBrands', input.checked); ovCommit(); };
+    label.append(input, document.createTextNode('Brand logos'));
+    panel.appendChild(label);
   }
   if (has('fontSize')) panel.appendChild(ovNumField('fontSize', 'Font size (px)', view));
   if (has('lineHeight') || has('letterSpacing')) {

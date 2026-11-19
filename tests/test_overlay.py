@@ -1559,6 +1559,32 @@ def t_a_quote_or_backslash_never_reaches_a_generated_rule():
         assert '\\' not in css and bad not in css, f"{bad!r} would open a CSS string: {css}"
 
 
+def t_the_timing_tower_has_a_brand_logos_switch_that_reflows_the_rows():
+    with open(os.path.join(ROOT, "src", "obs", "drivers.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    tower = next(sl for sl in ob.extract_slots(html) if sl["id"] == "drivers-tower")
+    assert "showBrands" in tower["props"], f"the builder offers the switch on the Timing tower: {tower}"
+    layout = lambda v: {"slots": {"drivers-tower": {"showBrands": v}}}
+    slots = ob.extract_slots(html)
+    assert "#drivers-tower { --dd-brands: none; }" in ob.compile_overlay_css(layout(False), slots), \
+        "switched off, the tower's brand cells collapse"
+    assert "--dd-brands: flex" in ob.compile_overlay_css(layout(True), slots)
+    for junk in ("false", 0, None, "none; x"):
+        assert "--dd-brands" not in ob.compile_overlay_css(layout(junk), slots), f"only a bool: {junk!r}"
+    style = ob.base_style(html)
+    assert re.search(r"\.dd-brand\s*\{[^}]*display:\s*var\(--dd-brands,\s*flex\)", style), \
+        "the logos show by default and the switch is pure CSS, so the builder canvas follows it"
+    assert re.search(r"\.dd-id\s*\{[^}]*display:\s*flex", style), \
+        "logo and number share one auto grid track, which shrinks when the logos are off"
+    canvas = ob.canvas_logo(ob.base_body(html), None)
+    assert 'src="/api/overlay/asset/brands/bmw"' in canvas and "/drivers/brand/" not in canvas, \
+        "the canvas loads the sample logos from the Control Center, not the relay"
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        cc = fh.read()
+    assert "'showBrands'" in cc and "--dd-brands" in cc and "Brand logos" in cc, \
+        "the builder renders the switch and previews it on the canvas"
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):

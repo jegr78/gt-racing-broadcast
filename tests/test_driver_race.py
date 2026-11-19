@@ -549,6 +549,37 @@ def t_the_public_view_is_timing_only_and_ignores_the_obs_switches():
     assert dr.public_view(None) == {"v": 1, "mode": "race", "entries": []}
 
 
+def t_viewer_rows_carry_the_brand_key_and_name():
+    roster = {"A": {"number": "1", "brandKey": "bmw", "brandName": "BMW M4 GT3"},
+              "B": {"number": "2", "brandKey": "../etc", "brandName": "Odd"},
+              "C": {"number": "3"}}
+    rows = [dr._viewer_entry({"entry": e, "driver": "Max"}, roster) for e in ("A", "B", "C", "Z")]
+    assert (rows[0]["brand"], rows[0]["brand_name"]) == ("bmw", "BMW M4 GT3"), rows[0]
+    assert rows[1]["brand"] == "", f"a key outside the asset-key charset never reaches a page: {rows[1]}"
+    assert rows[2]["brand"] == "" and rows[2]["brand_name"] == "", rows[2]
+    assert rows[3]["brand"] == "", "an entry missing from the roster has no brand"
+    pub = dr.public_view({"v": 1, "mode": "race", "entries": [dict(rows[0], pos=1)]})
+    assert pub["entries"][0]["brand"] == "bmw" and pub["entries"][0]["brand_name"] == "BMW M4 GT3", \
+        f"the public page shows the logo too: {pub}"
+
+
+def t_the_public_view_names_a_brand_only_with_a_logo():
+    rows = [{"entry": "A", "brand": "bmw", "brand_name": "BMW"}, {"entry": "B", "brand": "ghost", "brand_name": "G"}]
+    for key in ("entries", "qualifying"):
+        view = {"v": 1, key: [dict(r) for r in rows]}
+        out = dr.public_brands(view, lambda k: k == "bmw")
+        assert [r["brand"] for r in out[key]] == ["bmw", ""], \
+            f"a brand without a logo would make every viewer ask for it again: {out}"
+        assert out[key][1]["brand_name"] == "G" and view[key][1]["brand"] == "ghost", out
+
+
+def t_the_desk_standings_carry_each_entrys_brand():
+    st = {"state": "racing", "entries": [{"entry": "A", "laps": 1}, {"entry": "Z", "laps": 0}]}
+    out = dr.with_brands(st, {"A": {"brandKey": "bmw", "brandName": "BMW"}})
+    assert [(e["brand"], e["brand_name"]) for e in out["entries"]] == [("bmw", "BMW"), ("", "")], out
+    assert "brand" not in st["entries"][0], "the standings themselves stay untouched"
+
+
 def t_public_view_has_no_exact_gaps():
     snap = {"v": 1, "mode": "race", "show": {"compound": True, "fuel": True},
             "entries": [{"entry": "A", "gap_s": 1.0, "gap_time_s": 61.0, "interval_time_s": 61.0,
