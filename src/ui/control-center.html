@@ -436,7 +436,7 @@
               aria-label="Advanced overlay CSS" oninput="ovCustomCssChanged()"
               placeholder="Raw CSS appended verbatim AFTER the generated rules. The pro escape hatch. Existing hand-written CSS is imported here on first use."></textarea>
             <p class="envhint">The canvas previews this CSS on top of the slot values, as on air.
-              Rules on <code>html</code>, <code>body</code> or <code>:root</code>, relative
+              Rules on <code>html</code> or <code>body</code> alone, relative
               <code>url()</code>s and <code>@import</code> can look different on air: check them with Preview.</p>
           </details>
           <p class="envhint ovhint">The builder writes the generated <b>profiles/&lt;active&gt;/overlay/&lt;page&gt;.css</b>
@@ -3399,7 +3399,7 @@ async function loadOverlay(retry = 0) {
   templatePicker.hidden = !ovState.templates.length;
   ovState.active = layoutR.active || '';
   ovPreviewInit();
-  ovState.baseCss = (slotsR.css || '').replace(/:root/g, ':host').replace(/html\s*,\s*body/g, ':host');
+  ovState.baseCss = ovShadowCss(slotsR.css || '');
   ovState.body = slotsR.body || '';
   ovState.telemetry = !!slotsR.telemetry;
   ovState.layout = layoutR.layout || {version: 1, page: overlayPage, slots: {}, fonts: [], customCss: ''};
@@ -3889,7 +3889,7 @@ async function audienceMutate(action,id,fields) {
     if (slots.audience.active !== session.profile) throw new Error('Active profile changed; reload the builder.');
     ovState.allSlots = slots.slots; ovState.audience = slots.audience;
     ovState.body = slots.body;
-    ovState.baseCss = slots.css.replace(/:root/g,':host').replace(/html\s*,\s*body/g,':host');
+    ovState.baseCss = ovShadowCss(slots.css);
     if (action === 'create') audiencePlace(result.widget.id,true);
     else if (action === 'delete') { delete ovState.layout.slots[id]; ovReloadCanvasFromLayout(); ovCommit(); }
     else ovReloadCanvasFromLayout();
@@ -3996,7 +3996,7 @@ function ovBuildCanvas() {
   });
   ovState.slotRules = {};
   sh.getElementById('ov-body-font').textContent = ovBodyFontCss();
-  sh.getElementById('ov-custom-css').textContent = $('overlayCss').value;
+  sh.getElementById('ov-custom-css').textContent = ovShadowCss($('overlayCss').value);
   // Reference grid: inserted right after <style> (before the slots) + pointer-events
   // none, so it paints UNDER the slots and over the Overlay.png backdrop.
   ovState.gridEl = document.createElement('div');
@@ -4709,6 +4709,10 @@ function ovSelect(id) {
 function ovDeselect() { ovSelect(null); }
 
 // Run `fn` with customCss switched off, for reading what the builder itself sets.
+// The canvas is a shadow root: page-level selectors address its host instead.
+function ovShadowCss(css) {
+  return css.replace(/:root/g, ':host').replace(/html\s*,\s*body/g, ':host');
+}
 function ovWithoutCustom(fn) {
   const custom = ovState.shadow && ovState.shadow.getElementById('ov-custom-css');
   if (custom) custom.disabled = true;
@@ -5080,7 +5084,7 @@ function ovCustomOverrides(id, props) {
 function ovCustomCssChanged() {
   const custom = ovState.shadow && ovState.shadow.getElementById('ov-custom-css');
   if (!custom) return;
-  custom.textContent = $('overlayCss').value;
+  custom.textContent = ovShadowCss($('overlayCss').value);
   ovPositionSel();
   clearTimeout(ovState.customCssTimer);
   ovState.customCssTimer = setTimeout(() => {
