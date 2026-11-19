@@ -629,7 +629,7 @@ class Service:
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
             "fastest": self._shown_lap(race, fl, roster),
             "classes": [{"name": name, "color": colors.get(name, ""),
-                         "lap": next((r["laps"] for r in rows if r["class"] == name), None),
+                         "lap": st["class_lap"][name],
                          "laps": st["lap"]["count"] if rows and rows[0]["class"] == name else None,
                          "fastest": self._shown_lap(race, race.fastest_by_class.get(name), roster)}
                         for name in st["classes"]],

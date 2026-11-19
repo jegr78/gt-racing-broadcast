@@ -1167,12 +1167,12 @@ CLASS_ROSTER = {"A": {"number": "1", "cupTeam": "Red Bulls", "carClass": "H", "c
                 "C": {"number": "3", "carClass": "G", "classColor": ""}}
 
 
-def _class_service(path=None):
+def _class_service(path=None, along=None, until=6.0):
     ctx = {"roster": {k: dict(v) for k, v in CLASS_ROSTER.items()}, "stint": None, "remaining": None,
            "mode": "race"}
     svc, clock, path = _dash_service(ctx, path)
-    along = {"A": -20.0, "B": -60.0, "C": -100.0}
-    while clock[0] < 6.0:
+    along = along or {"A": -20.0, "B": -60.0, "C": -100.0}
+    while clock[0] < until:
         clock[0] = round(clock[0] + 0.1, 3)
         for entry in along:
             along[entry] += 5.0
@@ -1195,10 +1195,23 @@ def t_the_dashboard_carries_classes_in_order():
     assert rows["C"]["class_color"] == "#0c0", f"a row shows its class colour: {rows['C']}"
     assert rows["C"]["class_gap_s"] is not None and rows["B"]["class_gap_s"] == 0, rows
     g = d["classes"][1]
-    assert g["lap"] == rows["B"]["laps"] and g["laps"] is None, g
+    assert g["laps"] is None, g
     assert d["classes"][0]["laps"] == 10, f"the leader's class runs the race lap count: {d['classes'][0]}"
     assert g["fastest"] == {"entry": "C", "driver": "Max C", "team": "", "ms": 63000}, g
     assert d["classes"][0]["fastest"] is None, d["classes"][0]
+
+
+def t_a_class_header_lap_follows_the_overall_lap_rule():
+    svc, _clock, _path, _ctx = _class_service(
+        along={"A": -20.0, "B": -20.0 - 0.9 * L, "C": -40.0 - 0.9 * L}, until=70.0)
+    svc.set_settings({"finish_mode": "laps", "lap_count": 10})
+    svc.tick()
+    d = svc.dashboard()
+    rows = _rows(d)
+    assert rows["A"]["laps"] == rows["B"]["laps"] + 1, rows
+    h, g = d["classes"]
+    assert h["lap"] == d["lap"]["leader"], f"the leader's class reads the overall LAP: {h} {d['lap']}"
+    assert g["lap"] == d["lap"]["leader"] - 1, f"a class leader one lap down reads one less: {g} {d['lap']}"
 
 
 def t_a_class_change_in_the_roster_reaches_the_next_tick():

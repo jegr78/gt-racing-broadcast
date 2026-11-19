@@ -980,12 +980,14 @@ class Race:
                 "class_lapped": None})
         self._estimate_gaps(ents, rows)
         classes = self._class_pass(ents, rows, ranked, now)
+        class_lap = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
+                     ["leader"] for name in classes}
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
                 "restart_mode": self._restart_mode,
                 "change_window": self._window_until is not None and now <= self._window_until,
                 "fastest": self.fastest,
-                "lap": lap, "classes": classes, "entries": rows}
+                "lap": lap, "classes": classes, "class_lap": class_lap, "entries": rows}
 
     def _estimate_gaps(self, ents, rows):
         """An estimated car's gaps are its reference's plus the seconds; the intervals
