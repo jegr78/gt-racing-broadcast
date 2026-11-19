@@ -154,9 +154,12 @@ It never carries connection ids, corrections or who made them.
   Dashboard** in the Stint scene (Program in the solo collections). It shows a timing
   tower of up to 15 entries, the lap against the lap count (or the race timer's
   remaining time), the fastest lap and a track map with each car as a numbered dot in
-  its entry colour. The value column alternates every 15 seconds between the interval,
-  the last lap and the fuel; a car in the box shows `Box`. In qualifying the tower shows
-  best lap and gap.
+  its entry colour. The value column alternates every 15 seconds between the gap to the
+  leader and the last lap; a car in the box shows `Box`. Right of the tyre ring a bar
+  and a percentage show each car's fuel (GT7 reports the tank in percent); both turn
+  amber at 10 % or less, and a car without data shows none. A car that took the
+  chequered flag shows a flag in place of ring and fuel, and its final gap. In
+  qualifying the tower shows best lap and gap.
 - **On air only when switched on.** The page stays empty until the race settings say
   `visible`; a new install starts off air. The director puts it on air with **Show
   dashboard** in the panel's Driver telemetry section; Race Control cannot, because it
@@ -167,7 +170,8 @@ It never carries connection ids, corrections or who made them.
   driver changes and applies to the race and qualifying; the last change wins and the
   desks show who made it. **Show compound** and **Show fuel** switch those two columns
   on the on-air dashboard for every entry; name and number always show. The cockpit and
-  the public timing page always show both.
+  the public timing page always show both; the public page marks a finished car with a
+  chequered flag next to its final gap.
 - **Corrections** from both desks: clear or set the fastest lap, and set or delete an
   entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart.
   A race reset clears the fastest lap; qualifying times and tyre compounds stay until

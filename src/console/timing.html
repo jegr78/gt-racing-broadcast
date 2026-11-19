@@ -35,6 +35,9 @@
   .est { display: inline-block; margin-left: 5px; padding: 0 5px; border: 1px solid var(--warn); border-radius: 4px;
          color: var(--warn); font-size: 11px; font-weight: 700; line-height: 1.45; vertical-align: 1px; }
   .fl { color: var(--purple); font-weight: 700; }
+  .chequer { display: inline-block; width: 16px; height: 12px; margin-right: 6px; vertical-align: -1px;
+             box-shadow: 0 0 0 1px #f2f4f7;
+             background: repeating-conic-gradient(#111 0 25%, #f2f4f7 0 50%) 0 0 / 8px 8px; }
   .tyre { font-weight: 800; }
   .tyre.RS { color: #ff5a4f; } .tyre.RM { color: #ffd23f; } .tyre.RH { color: #f2f4f7; }
   .tyre.I { color: #4fdc74; } .tyre.W { color: #4aa8ff; }
@@ -185,6 +188,15 @@
     s.appendChild(el("span", "est", "EST"));
     return s;
   }
+  // A finished car: the chequered flag and its final gap.
+  function finishedGap(e, i) {
+    const s = el("span", "", null);
+    const flag = el("span", "chequer");
+    flag.title = "Finished";
+    s.append(flag, i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
+             : typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "");
+    return s;
+  }
   function numCell(e) {
     const s = el("span", "", e.number || String(e.entry || "").slice(0, 3));
     if (hex(e.color)) s.style.background = hex(e.color);
@@ -231,7 +243,7 @@
         laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
         gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
                   : e.status === "est" ? estGap(e, i)
-                  : STATUS[e.status] || (e.finished ? "Finished" : i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
+                  : STATUS[e.status] || (e.finished ? finishedGap(e, i) : i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
                   : typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "")),
         int: cell("int", i && typeof e.interval_s === "number" ? "+" + e.interval_s.toFixed(1) : ""),
         last: cell("last", lapTime(e.last_lap_ms),
