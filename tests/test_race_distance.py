@@ -191,7 +191,7 @@ def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
     t = _drive(race, [a, b], [50, 50], 0.0, 20)
     ea, eb = race._entries["A"], race._entries["B"]
     ea.distance, eb.distance = L + 900.0, L + 850.0          # the final lobby's line sits mid-lap
-    ea.finished_at = race._finishing_at = t
+    race._flag(ea, t)
     eb.ts, eb.ds = [t - 30, t - 10, t - 1], [L - 100.0, L + 10.0, eb.distance]
     order = [r["entry"] for r in race.standings(t)["entries"]]
     assert order == ["A", "B"], f"the car that took the flag first is the winner: {order}"
@@ -720,6 +720,124 @@ def t_a_lap_count_finish_after_a_red_flag_restart_counts_the_whole_race():
     assert race.standings(t)["state"] == "racing", race.standings(t)["entries"][0]
     t = _drive(race, [a], [50], t, 0.2 * L / 50)
     assert _row(race, "A", t)["finished"], "3 laps of race distance finish it, whatever the restart lobby counts"
+
+
+def _keep_restart_final_lobby(mode, lap_count=3, quiet_car=False):
+    """Endurance final lobby after a keep restart from one box 180 m before the line:
+    A leads B by 150 m of race distance and leaves the box first, B 2 s later; C runs
+    further back. B is faster, so it passes A on the road but not in race distance.
+    `quiet_car`: the final lobby runs five laps before the red flag, and a fourth car
+    E stops sending shortly before it and never joins the restart lobby."""
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode=mode)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 165), Car(race, "C", "c", L - 600)
+    if quiet_car:
+        race.final_lobby(lap_count if mode == "laps" else None, 0.0)
+        e = Car(race, "E", "e", L - 300)
+        t = _drive(race, [a, b, c, e], [50] * 4, 0.0, 5 * L / 50 - 10)
+        t = _drive(race, [a, b, c], [50] * 3, t, 10)
+    else:
+        t = _drive(race, [a, b, c], [50, 50, 50], 0.0, 40)
+        race.final_lobby(lap_count if mode == "laps" else None, t)
+    race.red_flag(t, "keep")
+    for car in (a, b, c):
+        _new_lobby(car, L - 180)
+    t = _drive(race, [a, b, c], [None] * 3, t, 3)
+    a.box = False
+    t = _drive(race, [a, b, c], [40, None, None], t, 2)
+    b.box = False
+    t = _drive(race, [a, b, c], [40, 40, None], t, 2)
+    c.box = False
+    t = _drive(race, [a, b, c], [50, 50.8, 50], t, 3)
+    race.release(t)
+    return race, (a, b, c), t
+
+
+def _flags(race, cars, t, seconds, speeds=(50, 50.8, 50)):
+    """Drive on and record each car's (time, GT7 lap) when it first shows finished."""
+    flags = {}
+    for _ in range(int(seconds * HZ)):
+        t = _drive(race, list(cars), list(speeds), t, 1.0 / HZ)
+        for car in cars:
+            if car.entry not in flags and _row(race, car.entry, t)["finished"]:
+                flags[car.entry] = (t, car.lap())
+    return flags, t
+
+
+def t_after_a_keep_restart_the_first_car_past_the_lobby_count_starts_the_finish():
+    race, cars, t = _keep_restart_final_lobby("laps")
+    flags, t = _flags(race, cars, t, 1.6 * 3 * L / 50)
+    assert {e: lap for e, (_, lap) in flags.items()} == {"A": 4, "B": 4, "C": 4}, \
+        f"every car takes the flag on the lobby lap GT7 ends the race: {flags}"
+    assert flags["B"][0] < flags["A"][0], f"B leads on the road, so it takes the flag first: {flags}"
+    snap = race.standings(t)
+    rows = snap["entries"]
+    assert snap["state"] == "finished" and [r["entry"] for r in rows] == ["A", "B", "C"], \
+        f"race laps, then who completed them first: {[(r['entry'], r['laps']) for r in rows]}"
+    assert len({r["laps"] for r in rows}) == 1, [r["laps"] for r in rows]
+    gaps = [r["gap_time_s"] for r in rows]
+    assert gaps[0] == 0.0 and 0 < gaps[1] < gaps[2] < 30, f"gaps in tower order: {gaps}"
+
+
+def t_after_a_keep_restart_a_timed_finish_ends_at_the_first_lead_lap_crossing():
+    race, cars, t = _keep_restart_final_lobby("time")
+    t = _drive(race, list(cars), [50, 50.8, 50], t, 100)
+    race.final_lap(t)
+    called = t
+    flags, t = _flags(race, cars, t, 1.6 * L / 50)
+    assert set(flags) == {"A", "B", "C"} and max(f[0] for f in flags.values()) - called < L / 50, \
+        f"every car takes the flag within one lap of the call: {flags}"
+    assert min(flags, key=lambda e: flags[e][0]) == "B", f"B crosses first on the lead lap: {flags}"
+    rows = race.standings(t)["entries"]
+    assert [r["entry"] for r in rows] == ["A", "B", "C"] and len({r["laps"] for r in rows}) == 1, \
+        [(r["entry"], r["laps"]) for r in rows]
+
+
+def t_after_a_keep_restart_a_lapped_finisher_leaves_the_leaders_their_laps():
+    race, cars, t = _keep_restart_final_lobby("laps")
+    race.correct("C", -L)                                     # Race Control takes a lap off C
+    flags, t = _flags(race, cars, t, 1.6 * 3 * L / 50)
+    rows = race.standings(t)["entries"]
+    assert set(flags) == {"A", "B", "C"} and [r["entry"] for r in rows] == ["A", "B", "C"], (flags, rows)
+    assert rows[0]["laps"] == rows[1]["laps"] == rows[2]["laps"] + 1, \
+        f"a lapped car's flag does not take a lap off the leaders: {[(r['entry'], r['laps']) for r in rows]}"
+    assert rows[1]["lapped"] == 0 and 0 < rows[1]["gap_time_s"] < 5, rows[1]
+
+
+def t_a_quiet_car_does_not_hold_back_a_timed_finish_after_a_keep_restart():
+    race, cars, t = _keep_restart_final_lobby("time", quiet_car=True)
+    t = _drive(race, list(cars), [50, 50.8, 50], t, 100)
+    race.final_lap(t)
+    called = t
+    flags, t = _flags(race, cars, t, 1.6 * L / 50)
+    assert set(flags) == {"A", "B", "C"} and max(f[0] for f in flags.values()) - called < L / 50, \
+        f"E's counter from before the red flag is no lead lap: {flags}"
+
+
+def t_an_endurance_winner_stays_first_when_its_race_lap_ends_past_the_line():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    race.final_lobby(2, 0.0)
+    x, y = Car(race, "X", "x", L - 25), Car(race, "Y", "y", L - 15)
+    t = _drive(race, [x, y], [50, 50], 0.0, 5)
+    race.correct("X", -5.0)                                   # X's race lap ends 5 m past the line
+    race.correct("Y", 5.0)                                    # Y's 5 m before it
+    flags, t = _flags(race, [x, y], t, 2 * L / 50 + 10, speeds=(51, 50))
+    rows = race.standings(t)["entries"]
+    assert set(flags) == {"X", "Y"} and flags["X"][0] < flags["Y"][0], flags
+    assert [r["entry"] for r in rows] == ["X", "Y"] and rows[1]["laps"] <= rows[0]["laps"], \
+        f"X passed Y and took the flag first: {[(r['entry'], r['laps']) for r in rows]}"
+
+
+def t_a_car_sent_round_again_shows_the_winners_laps_and_its_gap_at_that_lap():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60), Car(race, "C", "c", L - 800)
+    t = _drive(race, [a, b, c], [50, 50, 50], 0.0, 2)
+    race.correct("B", 200.0)                                  # Race Control puts B ahead
+    t = _drive(race, [a, b, c], [50, 50, 50], t, (2 * L + 60) / 50)
+    t = _drive(race, [a, b, c], [50, 50, 50], t, L / 50 + 2)  # A goes round again
+    ra, rb, rc = (_row(race, e, t) for e in "ABC")
+    assert ra["finished"] and ra["laps"] == rb["laps"], f"no more laps than the winner: {ra} {rb}"
+    assert ra["gap_time_s"] is not None and 0 < ra["gap_time_s"] < rc["gap_time_s"], \
+        f"A's gap is measured where it completed the winner's laps: {ra['gap_time_s']} {rc['gap_time_s']}"
 
 
 def t_lap_times_fuel_and_the_fastest_race_lap():

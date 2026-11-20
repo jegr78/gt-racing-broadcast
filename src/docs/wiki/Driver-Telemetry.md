@@ -124,13 +124,16 @@ and says so. Changing the layout mid-event starts the race over.
   the relay sees a stop as standing off the racing line, so a car beached beside the
   track or stopped there under a red flag counts as a pit stop too. The desks' `Pits`
   column says so on hover; correct a wrong count with the pit stop correction.
-- **Finish after laps**: the leader finishes on completing the lap count on GT7's
-  lap counter, lap 1 included, so a formation lap counts as in the lobby's own
-  setting; every other car at its next crossing of the line. **Timed**: Race Control or
-  the director triggers **Final lap**, and the race ends at the leader's next crossing.
+- **Finish after laps**: in a single lobby the leader finishes on completing the lap
+  count on GT7's lap counter, lap 1 included, so a formation lap counts as in the
+  lobby's own setting; every other car at its next crossing of the line. **Timed**: Race
+  Control or the director triggers **Final lap**, and the race ends at the leader's next
+  crossing. An endurance final lobby ends on the road, see below.
   The race timer never ends a race. **Finish** freezes the order at once. After the
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
+  No car shows more laps than the leader had when the flag fell, and a finished car's
+  gap is the time it completed that many laps after the car ahead.
 
 In an endurance race each stint switch on air opens a window for driver changes. When
 the team's car stands in the box and the next driver's car then leaves the box of the
@@ -140,6 +143,11 @@ never counts. The lap count applies to the final lobby only and counts that lobb
 laps on GT7's counter, from the car that took over after the last stint switch: the
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
 event setting. A lap count set while the final stint is already on air applies at once.
+The final lobby's flag follows the road, as in GT7: the first of its cars to complete
+the count takes it, or after **Final lap** the first car to cross the line on the
+lobby's leading lap, even when another car leads in race distance. Every other car
+finishes at its next crossing, and the order after the flag stays laps first, then who
+completed them first.
 
 ### Classes
 
@@ -361,8 +369,11 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   switch it for one restart. **Restart released** ends the mode. A car still in the
   lobby it raced in (a red flag pressed by mistake, or a suspension the lobby drove
   through) counts on from where it is; a car in a restart lobby still resumes when it
-  leaves the box. A lap count is counted in race distance, so a restart from the box
-  does not shift it.
+  leaves the box. In a single lobby a lap count is counted in race distance, so a
+  restart from the box does not shift it, and each car finishes where its race laps
+  end, not on the restart lobby's line. In an endurance final lobby the count stays on
+  GT7's counter: after a restart that keeps the gaps a car can lead on the road but
+  not in race distance, and the flag still falls on the road.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
   leader's distance at the stint switch, so its later departure from the box becomes
   its deficit.

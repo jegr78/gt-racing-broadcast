@@ -33,13 +33,16 @@ nearest the predicted distance decides.
   only with a lobby counter of at most MAX_CHANGE_LAP.
 - Finish: single lobby when the leader completes `lap_count` laps of GT7's counter,
   lap 1 (a formation lap) included, counted in race distance so a red flag restart
-  from the box keeps the count;
-  endurance when the leader's car of the final lobby (it took over after the final
-  stint switch) passes `lap_count` on that lobby's counter. `final_lap` ends the race
-  at the leader's next crossing. Every other car finishes at its next crossing after
-  the leader; `finish` freezes everything at once. The race timer never ends a race.
-  From the winner's flag on the order is laps, then who reached that lap count first,
-  so a lapped car taking the flag stays behind a lead-lap car still running.
+  from the box keeps the count; `final_lap` ends it at the leader's next crossing.
+  Endurance follows the final lobby on the road, as GT7 does: the first of its cars
+  (each took over after the final stint switch) to pass `lap_count` on that lobby's
+  counter, or after `final_lap` the first to cross on the lobby's leading counter,
+  takes the flag, whoever leads in race distance. Every other car finishes at its
+  next crossing; `finish` freezes everything at once. The race timer never ends a race.
+  From the first flag on the order is laps, then who reached that lap count first,
+  so a lapped car taking the flag stays behind a lead-lap car still running. The first
+  flag's car stays first when it led in race distance; no car counts more laps than
+  the leader had at the flag, and a finished car's gap is measured at that lap count.
 - Red flag (#1113): `red_flag` freezes every entry's distance. In the restart lobby
   (a new connection, or a counter that dropped) each car continues from its anchor
   when it leaves the box. `keep` anchors at the frozen distance, `neutralise`
@@ -195,6 +198,8 @@ class Race:
         self._final_at = None       # endurance: when the final stint lobby went on air
         self._final_lap_at = None
         self._finishing_at = None
+        self._winner_entry = None   # the first flag's car when it led in race distance
+        self._flag_laps = math.inf
         self._finished = False
         self._pruned_at = None
         self._red = None            # {"at", "mode"} while the red flag mode runs
@@ -774,22 +779,46 @@ class Race:
                 self._finished = all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
                                      for e in self._entries.values())
             return
+        if self.multi_lobby and self._final_car(ent):
+            # GT7 ends the final lobby on the road, which after a red flag restart need
+            # not follow race distance.
+            by_laps = self.finish_mode == "laps" and self.lap_count and car.lap > self.lap_count
+            by_flag = self._final_lap_at is not None and t > self._final_lap_at \
+                and car.lap >= self._lobby_lead_lap(t)
+            if by_laps or by_flag:
+                self._flag(ent, t)
+            return
         # The order Race Control's corrections set is the order that takes the flag.
-        shown = self._shown(ent)
-        leader = max((self._shown(e) for e in self._entries.values()
-                      if e.distance is not None and not self._out(e)), default=None)
+        shown, leader = self._shown(ent), self._race_lead()
         if shown is None or shown < leader:
             return
-        if self.finish_mode == "laps" and self.lap_count:
-            by_laps = (car.lap > self.lap_count and self._final_car(ent)) if self.multi_lobby \
-                else shown >= (self.lap_count - (1 if self.formation else 0)) * self.length - SNAP_M
-        else:
-            by_laps = False
+        by_laps = not self.multi_lobby and self.finish_mode == "laps" and self.lap_count \
+            and shown >= (self.lap_count - (1 if self.formation else 0)) * self.length - SNAP_M
         by_flag = self._final_lap_at is not None and t > self._final_lap_at
         if by_laps or by_flag:
-            ent.finished_at = self._finishing_at = t
-            self._finished = sum(1 for e in self._entries.values()
-                                 if e.active is not None and not self._out(e)) == 1
+            self._flag(ent, t)
+
+    def _race_lead(self):
+        """The leading shown distance, None before any car counts."""
+        return max((self._shown(e) for e in self._entries.values()
+                    if e.distance is not None and not self._out(e)), default=None)
+
+    def _flag(self, ent, t):
+        """`ent` takes the first flag. It is the winner when it leads in race distance;
+        no car is classified with more race laps than the leader has now."""
+        lead, shown = self._race_lead(), self._shown(ent)
+        self._winner_entry = ent if shown is not None and shown >= lead else None
+        self._flag_laps = math.floor(lead / self.length) if lead is not None else math.inf
+        ent.finished_at = self._finishing_at = t
+        self._finished = sum(1 for e in self._entries.values()
+                             if e.active is not None and not self._out(e)) == 1
+
+    def _lobby_lead_lap(self, now):
+        """The highest GT7 counter among the final lobby's running cars."""
+        laps = [c.lap for e in self._entries.values()
+                if not self._out(e) and not e.waiting and self._final_car(e) and not self._quiet(e, now)
+                for c in [self._cars.get(e.active)] if c.counting and c.lap is not None]
+        return max(laps, default=0)
 
     def _shown(self, ent):
         est = self._est.get(ent.entry)
@@ -881,10 +910,14 @@ class Race:
         if ahead.distance is None or ent.distance is None:
             return None
         if ent.finished_at is not None:
-            # Against when `ahead` passed that point: a car ranked ahead can take the flag later.
+            # At the lap count the order compares: a car ranked ahead can take the flag later.
+            laps = self._ranked_laps(ent)
+            if laps is not None and laps > 0:
+                mine = self._time_at(ent, laps * self.length - ent.adjust)
+                theirs = self._time_at(ahead, laps * self.length - ahead.adjust)
+                if mine is not None and theirs is not None:
+                    return max(0.0, mine - theirs)
             reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
-            if reached is None:
-                reached = ahead.finished_at
             return None if reached is None else max(0.0, ent.finished_at - reached)
         if ent.waiting or ahead.waiting:
             return None                            # no running time while a red flag holds them
@@ -903,6 +936,29 @@ class Race:
             return None
         return max(0.0, self._shown(ahead) - self._shown(ent)) / car.speed
 
+    def _winner(self):
+        """The car classified first after the flag regardless of laps: the first flag's
+        car when it led in race distance. An endurance flag can fall on the road ahead
+        of the distance leader after a red flag restart; then the order alone decides."""
+        e = self._winner_entry
+        if self._finishing_at is None or e is None or e.distance is None or self._out(e) \
+                or (e.active is None and not self._estimated(e)):
+            return None
+        return e
+
+    def _ranked_laps(self, ent):
+        """The race laps the order counts for `ent`; after the flag never more than the
+        winner's, or without one the leader's when the flag fell."""
+        shown = self._shown(ent)
+        if shown is None or not self.length:
+            return None
+        laps = math.floor(shown / self.length)
+        if self._finishing_at is None:
+            return laps
+        winner = self._winner()
+        cap = math.floor(self._shown(winner) / self.length) if winner is not None else self._flag_laps
+        return min(laps, cap)
+
     def standings(self, now):
         self._advance(now)
         place = {n: i for i, n in enumerate(self._roster)}
@@ -914,10 +970,7 @@ class Race:
         out = [e for e in self._entries.values() if self._out(e)] + \
             [self._ghost(n) for n in self._roster if n in self._retired and n not in self._entries]
         out.sort(key=lambda e: (-self._shown(e) if e.distance is not None else math.inf, e.entry))
-        winner = next((e for e in ents if self._finishing_at is not None
-                       and e.finished_at == self._finishing_at and e.distance is not None), None)
-        # No car is classified with more laps than the winner took the flag on.
-        cap = math.floor(self._shown(winner) / self.length) if winner and self.length else math.inf
+        winner = self._winner()
 
         def key(e):
             shown = self._shown(e)
@@ -927,7 +980,8 @@ class Race:
                 return (0, -dist, 1.0 if self._estimated(e) else 0.0, 0.0, "")
             if e is winner:
                 return (-1, 0, 0.0, 0.0, "")
-            laps = min(math.floor(dist / self.length), cap) if self.length and shown is not None else -1
+            laps = self._ranked_laps(e)
+            laps = -1 if laps is None else laps
             # Whoever reached that lap count first is ahead, finished or still running.
             reached = self._time_at(e, laps * self.length - e.adjust) if laps >= 0 else None
             est = self._est.get(e.entry) if self._estimated(e) else None
@@ -959,7 +1013,7 @@ class Race:
                 "entry": e.entry, "conn": e.active,
                 "driver": self.display_name(e.entry, car.name), "driver_registered": car.name,
                 "distance_m": None if shown is None else round(shown, 1),
-                "laps": max(0, math.floor(shown / self.length)) if shown is not None else 0,
+                "laps": max(0, self._ranked_laps(e)) if shown is not None else 0,
                 "gap_s": None if lapped else (None if gap is None else round(gap, 2)),
                 "interval_s": None if interval is None else round(interval, 2),
                 "gap_time_s": None if gap_time is None else round(gap_time, 2),
