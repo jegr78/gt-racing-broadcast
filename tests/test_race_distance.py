@@ -1068,7 +1068,7 @@ def _field(roster=("A", "B", "X"), **kw):
 
 
 def t_a_roster_entry_without_a_sender_stands_at_the_end_as_no_sender():
-    race, (a, b), t = _field(roster=("X", "A", "B", "Y"))
+    race, _cars, t = _field(roster=("X", "A", "B", "Y"))
     assert _order(race, t) == ["A", "B", "X", "Y"], _order(race, t)
     rx = _row(race, "X", t)
     assert rx["status"] == "no_sender" and rx["gap_s"] is None and rx["distance_m"] is None, rx
@@ -1109,7 +1109,7 @@ def t_an_estimated_never_seen_car_can_sit_between_two_cars_with_data():
 
 
 def t_an_estimate_needs_a_roster_entry_and_leaves_no_row_when_refused():
-    race, (a, b), t = _field()
+    race, _cars, t = _field()
     _raises(lambda: race.estimate("Nobody", "B", 1.0, t), "an entry outside the roster is refused")
     race.red_flag(t, "keep")
     _raises(lambda: race.estimate("X", "B", 1.0, t), "no estimate under a red flag")
@@ -1277,7 +1277,7 @@ def t_a_retired_leader_does_not_hold_back_the_final_lap():
 
 
 def t_race_control_overrides_the_name_of_one_driver_of_an_entry():
-    race, (a, b), t = _field()
+    race, _cars, t = _field()
     race.set_driver_name("X", "", "Kim Berg")
     race.set_driver_name("A", "Driver", "Ann")
     race.set_driver_name("B", "Somebody Else", "Zed")
@@ -1356,7 +1356,7 @@ def t_a_rejoin_starts_at_the_leader_still_running():
 
 
 def t_corrections_reach_a_car_without_a_sender():
-    race, (a, b), t = _field()
+    race, _cars, t = _field()
     race.correct("X", 0.0, pit_stops=1)
     race.rejoin("X", True)
     rx = _row(race, "X", t)
