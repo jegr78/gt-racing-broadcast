@@ -59,7 +59,7 @@ flagged for it. No machine access.
 
 - **Red flag.** Its `RED FLAG` raises the Standby Cover, sets the HUD banner *Red Flag -
   Race Suspended* and holds the driver race. **Restart released** lowers the cover and
-  clears the banner. No step-up secret; the relay logs who pressed it.
+  clears the banner when this desk raised them. No step-up secret; the relay logs who pressed it.
 - **Race data.** It keeps the driver race straight: corrections, rejoin marks, estimated
   positions, retirements (DNF), driver names, tyre compounds, the restart rule, race
   recording and disconnect events. See

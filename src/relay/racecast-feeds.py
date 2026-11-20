@@ -7079,7 +7079,7 @@ def cockpit_tally(rows, live_idx, me_key):
 
 
 def race_control_schedule(rows, live_map, live_idx):
-    """Redacted schedule for the Race Control monitoring desk (#244): stint +
+    """Redacted schedule for the Race Control desk (#244): stint +
     streamer + live-feed marker per row, with NO stream URL. The redaction is the
     same boundary as /console/takeover/status. Feed URLs never leave the tailnet,
     and this desk is reachable over the public Funnel. Pure for unit testing.
@@ -13351,10 +13351,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     cookie_path="/console",
                 )
                 return None
-            # Race Control monitoring desk (#244): a read-only page + ONE new data
-            # endpoint, both gated on the race_control capability. The redacted
-            # schedule strips stream URLs (the Funnel boundary). The desk's
-            # program/timer/chat reuse the ANY cockpit endpoints (no new surface).
+            # Race Control desk (#244): the page + its schedule data endpoint, both gated
+            # on the race_control capability. The redacted schedule strips stream URLs
+            # (the Funnel boundary). The desk's program/timer/chat reuse the ANY cockpit
+            # endpoints (no new surface).
             if sub and sub[0] == "race-control":
                 if console_policy.decide(roles, sub, method, has_step_up) != console_policy.ALLOW:
                     self._send({"error": "forbidden"}, 403)
