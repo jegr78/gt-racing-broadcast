@@ -448,7 +448,8 @@ use them from the Race Control desk ([Console](Console)) and the Director Panel
 The relay records the live race for Race Control to review after the fact.
 
 - **Recording** runs in race mode only. It starts when the first car starts counting and
-  stops at the finish; a later race in the same event starts it again. The director and
+  stops at the finish, with the final classification as its last sample; a later race
+  in the same event starts it again. The director and
   Race Control can start and stop it by hand; in qualifying the desk refuses a start. It
   stores one sample per second of the live, undelayed standings in one SQLite file per
   event, `runtime/<profile>/race-recording-<UTC stamp>.sqlite`, named by the pointer
