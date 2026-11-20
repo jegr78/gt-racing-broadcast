@@ -716,7 +716,7 @@ def t_decide_rejects_a_decision_that_is_no_string():
 
 
 def _class_st(classed=True):
-    cx = {"class_gap_s": 2.5, "class_interval_s": 1.5, "class_lapped": 1}
+    cx = {"class_gap_s": 2.5, "class_interval_s": 1.5, "class_lapped": 1, "class_gap_time_s": 97.25}
     rows = [_srow("1", **({"class": "GT3", "class_pos": 1, **cx} if classed else {})),
             _srow("2", **({"class": "GT4", "class_pos": 1, **cx} if classed else {}))]
     st = _st(rows=rows)
@@ -737,6 +737,7 @@ def t_samples_and_csv_carry_the_class():
             assert doc["rows"][1]["class"] == "GT4", doc
             assert (doc["rows"][0]["class_gap_s"], doc["rows"][0]["class_interval_s"],
                     doc["rows"][0]["class_lapped"]) == (2.5, 1.5, 1), doc
+            assert doc["rows"][0]["class_gap_time_s"] == 97.25, f"the snapshot page shows the exact class gap: {doc}"
             assert doc["classes"][0] == {"name": "GT3", "color": "#f00", "lap": 4, "laps": 30}, doc
             rows = list(h.store.csv_rows())
             assert rows[0] == rr.CSV_HEADER + ["class", "class_pos"], rows[0]
@@ -754,7 +755,8 @@ def t_a_single_class_recording_stays_as_before():
             h.flush()
             doc = h.store.sample_at(100.0)
             assert "classes" not in doc, doc
-            assert not {"class", "class_pos", "class_gap_s", "class_interval_s", "class_lapped"} & set(doc["rows"][0]), doc
+            assert not {"class", "class_pos", "class_gap_s", "class_interval_s", "class_lapped",
+                        "class_gap_time_s"} & set(doc["rows"][0]), doc
             rows = list(h.store.csv_rows())
             assert rows[0] == rr.CSV_HEADER and "class" not in rows[0], f"the CSV as before: {rows[0]}"
             assert len(rows[1]) == len(rr.CSV_HEADER), rows[1]

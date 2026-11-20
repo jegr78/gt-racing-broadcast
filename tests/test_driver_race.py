@@ -1266,6 +1266,12 @@ def t_the_public_view_keeps_the_class_fields():
     for key in ("class", "class_color", "class_pos", "class_gap_s", "class_interval_s", "class_lapped"):
         assert key in pub["entries"][0], f"{key} reaches the public page: {pub['entries'][0]}"
     assert "class_secret" not in pub["entries"][0], pub["entries"][0]
+    desk = _rows(svc.standings())
+    assert all(isinstance(desk[e]["class_gap_time_s"], float) for e in "ABC"), \
+        f"the desks get the exact class gap: {desk}"
+    for row in d["entries"] + pub["entries"]:
+        assert "class_gap_time_s" not in row and "gap_time_s" not in row, \
+            f"an exact gap never reaches the dashboard or the public page: {row}"
     assert pub["classes"][0] == {"name": "H", "color": "#c00", "lap": d["classes"][0]["lap"],
                                  "laps": d["classes"][0]["laps"],
                                  "fastest": {"entry": "A", "driver": "Max A", "team": "Red Bulls",

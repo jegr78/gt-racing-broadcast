@@ -66,7 +66,7 @@ def t_two_classes_group_under_coloured_headers():
     got = _render({"t": 100, "state": "racing",
                    "rows": [_row("A", 1, "GT3", 1), _row("B", 2, "GT4", 1),
                             _row("C", 3, "GT3", 2, class_gap_s=4.5, class_interval_s=4.5),
-                            _row("D", 4, "GT3", 3, class_gap_s=None, class_lapped=2),
+                            _row("D", 4, "GT3", 3, class_gap_s=None, class_lapped=2, class_gap_time_s=158.2),
                             _row("E", 5, "", 1)],
                    "classes": [{"name": "GT3", "color": "#ff0000", "lap": 5, "laps": 30},
                                {"name": "GT4", "color": "#00ff00", "lap": 4, "laps": None}]})
@@ -81,7 +81,7 @@ def t_two_classes_group_under_coloured_headers():
     gap = lambda i: (got[i]["cells"][3], got[i]["cells"][4])
     assert gap(1) == ("", ""), "class leader reads like the overall leader: %r" % (gap(1),)
     assert gap(2) == ("4.5", "4.5"), "class gap, not the overall 99.0: %r" % (gap(2),)
-    assert gap(3)[0] == "+2\u00a0L", "lapped reads +n L: %r" % (gap(3),)
+    assert gap(3)[0] == "+2\u00a0L\u00a0\u00b7 2:38.2", "lapped in the class reads +n L and the class time: %r" % (gap(3),)
     assert gap(5) == ("", ""), gap(5)
     assert "|C|" in got[2]["cells"][1], "C is GT3's second car"
 

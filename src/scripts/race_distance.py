@@ -987,7 +987,7 @@ class Race:
                 "position_mismatch": e.entry in mismatch,
                 "estimate": None if est is None else {"ref": est["ref"], "seconds": est["seconds"]},
                 "class": None, "class_pos": None, "class_gap_s": None, "class_interval_s": None,
-                "class_lapped": None})
+                "class_lapped": None, "class_gap_time_s": None})
         self._estimate_gaps(ents, rows)
         classes = self._class_pass(ents, rows, ranked, now)
         shown = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
@@ -1059,15 +1059,19 @@ class Race:
                 lead, e, row = ents[refs[0]], ents[i], rows[i]
                 prev = ents[refs[k - 1]] if k else None
                 live = self._timed(e, now)
-                lapped = gap = interval = None
+                lapped = gap = interval = gap_time = None
                 if not k:
                     lapped, gap = (0, 0) if live or self._estimated(e) else (None, None)
+                    gap_time = 0.0 if gap is not None else None
                 elif self._estimated(e) or self._estimated(lead):
                     if live or self._estimated(e):
                         lapped, gap = self._class_gap_from_rows(rows[refs[0]], row, lead, e)
+                        gap_time = self._row_time_gap(rows[refs[0]], row)
                 elif live:
                     lapped, gap = self._behind(lead, e)
+                    gap_time = self._time_behind(lead, e, now)
                 gap = None if lapped or gap is None else round(gap, 2)
+                row["class_gap_time_s"] = None if gap_time is None else round(gap_time, 2)
                 if k and (self._estimated(e) or self._estimated(prev)):
                     ahead = rows[refs[k - 1]]["class_gap_s"]
                     interval = None if gap is None or ahead is None else round(max(0.0, gap - ahead), 2)
@@ -1086,8 +1090,13 @@ class Race:
         laps = math.floor((a - b) / self.length)
         if laps >= 1:
             return laps, None
+        return 0, self._row_time_gap(lead_row, row)
+
+    @staticmethod
+    def _row_time_gap(lead_row, row):
+        """Seconds between two overall rows' time gaps; None without both."""
         t0, t1 = lead_row["gap_time_s"], row["gap_time_s"]
-        return 0, None if t0 is None or t1 is None else max(0.0, t1 - t0)
+        return None if t0 is None or t1 is None else max(0.0, t1 - t0)
 
     def _lap_display(self, ordered):
         """{leader, count}: the leader's running lap against the lap count. In endurance

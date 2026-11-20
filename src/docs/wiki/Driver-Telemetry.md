@@ -185,9 +185,13 @@ except on the tower.
   per class. The public page lists each class's fastest lap and adds a filter (all
   classes or one), kept per browser. A [timing host](#hosted-live-timing-optional)
   deployed before classes existed shows them only after a redeploy. The
-  desks show the class position, with the overall position on hover.
+  desks show the class position, with the overall position on hover. A car lapped
+  within its class reads `+1 L · 1:02.5` on the desks, the exact time to its class
+  leader, like the overall gap outside class mode. The public page and the cockpit show
+  the laps only.
 - **Recording**: samples carry each car's class and class position, and the frozen
-  standings page groups by class with the class gaps. The CSV adds `class` and
+  standings page groups by class with the class gaps, a car lapped in its class with
+  the exact time as on the desks. The CSV adds `class` and
   `class_pos` columns only when the recording holds samples from class mode.
 
 ### Dashboard
