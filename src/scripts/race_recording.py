@@ -319,18 +319,23 @@ class Recorder:
                 self._meta("auto_started", "1")
                 if not self._running:
                     self._begin("auto", now_wall)
-            if (state == "finished" and self._last_state not in (None, "finished")
-                    and self._running):
+            final = (state == "finished" and self._last_state not in (None, "finished")
+                     and self._running)
+            self._last_state = state
+            # The final classification is sampled off the grid, then the recording stops.
+            if self._running and (final or self._sample_due(now_wall)):
+                self._add_sample(standings, compounds, classes, now_wall)
+            if final:
                 self._end()
                 self._auto_done = False          # the next race starts recording again
                 self._meta("auto_started", "0")
-            self._last_state = state
-            if self._running and self._sample_due(now_wall):
-                doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {}, classes)
-                if self._writer.put(lambda s: s.add_sample(now_wall, doc)):
-                    lo, hi = self._span or (now_wall, now_wall)
-                    self._span = (min(lo, now_wall), max(hi, now_wall))
             self._detect(standings, now_wall)
+
+    def _add_sample(self, standings, compounds, classes, now_wall):
+        doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {}, classes)
+        if self._writer.put(lambda s: s.add_sample(now_wall, doc)):
+            lo, hi = self._span or (now_wall, now_wall)
+            self._span = (min(lo, now_wall), max(hi, now_wall))
 
     def _sample_due(self, now):
         """Keep a one-second grid; a clock that went back or jumped ahead starts a new one."""

@@ -934,6 +934,44 @@ def t_after_a_keep_restart_a_lapped_finisher_leaves_the_leaders_their_laps():
     assert rows[1]["lapped"] == 0 and 0 < rows[1]["gap_time_s"] < 5, rows[1]
 
 
+def t_a_running_car_keeps_its_gap_and_lap_against_a_finished_car():
+    """After a keep restart C and D left their box 100 m before A's, so their race
+    distance reaches A's frozen finish distance 100 m before their own line."""
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    a, c, d = Car(race, "A", "a", L - 15), Car(race, "C", "c", L - 65), Car(race, "D", "d", L - 115)
+    t = _drive(race, [a, c, d], [50, 50, 50], 0.0, 40)
+    race.final_lobby(None, t)
+    race.red_flag(t, "keep")
+    _new_lobby(a, L - 180)
+    _new_lobby(c, L - 280)
+    _new_lobby(d, L - 280)
+    t = _drive(race, [a, c, d], [None] * 3, t, 3)
+    a.box = False
+    t = _drive(race, [a, c, d], [50, None, None], t, 3)
+    c.box = False
+    t = _drive(race, [a, c, d], [50, 50, None], t, 3)
+    d.box = False
+    t = _drive(race, [a, c, d], [50, 50, 50], t, 3)
+    race.correct("D", -L)                                       # Race Control takes a lap off D
+    t = _drive(race, [a, c, d], [50, 50, 50], t, 60)
+    while not a.lap() == c.lap() == d.lap():
+        t = _drive(race, [a, c, d], [50, 50, 50], t, 1.0 / HZ)
+    race.final_lap(t)
+    seen = []
+    while not _row(race, "D", t)["finished"] and len(seen) < 3 * L / 50 * HZ:
+        t = _drive(race, [a, c, d], [50, 50, 50], t, 1.0 / HZ)
+        rc, rd_ = _row(race, "C", t), _row(race, "D", t)
+        if _row(race, "A", t)["finished"]:
+            seen.append((rc["finished"], rc["gap_time_s"], rc["interval_time_s"], rd_["lapped"]))
+    running = [s for s in seen if not s[0]]
+    assert running and all(g is not None and abs(g - 3.0) < 0.2 for _, g, _, _ in running), \
+        f"a running car keeps its 3 s behind a finished one, never 0.0: {[s[1] for s in running]}"
+    assert all(i is not None and abs(i - 3.0) < 0.2 for _, _, i, _ in running), \
+        f"and its interval: {[s[2] for s in running]}"
+    assert seen and all(s[3] == 1 for s in seen), \
+        f"a lapped car stays lapped until and after its flag: {[s[3] for s in seen]}"
+
+
 def t_a_quiet_car_does_not_hold_back_a_timed_finish_after_a_keep_restart():
     race, cars, t = _keep_restart_final_lobby("time", quiet_car=True)
     t = _drive(race, list(cars), [50, 50.8, 50], t, 100)

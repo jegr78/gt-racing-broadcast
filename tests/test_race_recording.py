@@ -234,10 +234,14 @@ def t_auto_starts_on_the_first_counting_state_and_stops_at_finish():
             assert st["running"] is True and st["started_by"] == "auto", st
             assert st["started_at"] == 101.0, st
             h.rec.observe(_st("finishing"), {}, 102.0)
-            h.rec.observe(_st("finished"), {}, 103.0)
+            h.rec.observe(_st("finished", [_srow("7", finished=True)]), {}, 102.4)
+            h.rec.observe(_st("finished"), {}, 103.5)
             h.flush()
             assert h.rec.status()["running"] is False
-            assert h.store.span() == (101.0, 102.0), h.store.span()
+            assert h.store.span() == (101.0, 102.4), "the final classification is the last sample: %r" % (
+                h.store.span(),)
+            last = h.store.sample_at(102.4)
+            assert last["state"] == "finished" and last["rows"][0]["finished"] is True, last
             doc = h.store.sample_at(101.0)
             assert doc["rows"][0]["pos"] == 1 and doc["rows"][0]["compound"] == "RM", doc
             assert h.store.meta("running") == "0"
