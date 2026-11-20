@@ -133,7 +133,8 @@ and says so. Changing the layout mid-event starts the race over.
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
   No car shows more laps than the leader had when the flag fell, and a finished car's
-  gap is the time it completed that many laps after the car ahead.
+  gap is the time it completed that many laps after the car ahead. A finished car with
+  fewer laps than the car it is compared with reads lapped (`+1 L`).
 
 In an endurance race each stint switch on air opens a window for driver changes. When
 the team's car stands in the box and the next driver's car then leaves the box of the
@@ -198,7 +199,9 @@ except on the tower.
   desks show the class position, with the overall position on hover. A car lapped
   within its class reads `+1 L · 1:02.5` on the desks, the exact time to its class
   leader, like the overall gap outside class mode. Its interval to the class car ahead
-  keeps its time too, also a lap down. An estimated car's class times come from the
+  keeps its time too, also a lap down. After the flag the class gaps follow the overall
+  rule: a car that finished with fewer laps than its class leader reads lapped, even
+  when the class count keeps the class header below its laps. An estimated car's class times come from the
   overall gaps, so its EST mark applies there as well. The public page and the cockpit
   show the laps only.
 - **Recording**: samples carry each car's class and class position, and the frozen
@@ -434,6 +437,9 @@ The relay records the live race for Race Control to review after the fact.
   a car in the box during the driver change window, none under a red flag, none for a car
   still waiting for its red flag restart and none for a car that took the flag.
   States: **suspected**, **dropout** (data came back), **confirmed** and **dismissed**.
+  A race reset ends every silence still open: its event stays in the list, marked
+  **Before the race reset**, and marks no car of the new race, also not as DC. The
+  recording itself continues.
   The director or Race Control confirms or dismisses an event on the desk; the decision
   is logged in `driver-race-audit.jsonl`. A desk can play a sound on a new suspicion
   (checkbox, per browser, off by default). The relay decides nothing about a rejoin;

@@ -32,7 +32,6 @@
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
     ".dd td.num{font-family:var(--mono,ui-monospace,monospace);text-align:right;white-space:nowrap}",
     ".dd .tbl{overflow-x:auto}",
-    ".dd td.num.lap{white-space:normal}",
     ".dd .race th,.dd .race td{padding:4px}.dd .race .pills{display:flex;flex-wrap:wrap;gap:3px}",
     ".dd .pill{display:inline-block;white-space:nowrap;border-radius:9px;padding:1px 7px;font-size:11px;border:1px solid var(--edge,#2a2f37)}",
     ".dd .pill.ok{border-color:#3ecf6e;color:#3ecf6e}",
@@ -136,7 +135,7 @@
   // "+N L" and the exact time when there is one; no-break spaces let a narrow desk wrap
   // only between the lap count and the time.
   function lappedText(laps, time) {
-    return "+" + laps + "\u00a0L" + (typeof time === "number" ? "\u00a0\u00b7 " + secs(time) : "");
+    return "+" + laps + "\u00a0L" + (typeof time === "number" ? "\u00a0\u00b7\u00a0" + secs(time) : "");
   }
   // A race row's exact interval, also for a car a lap behind the car ahead.
   function intervalTime(e, grouped) { return grouped ? e.class_interval_time_s : e.interval_time_s; }
@@ -421,7 +420,7 @@
         r.ev = ev;
         var undecided = ev.state === "suspected" || ev.state === "dropout";
         if (undecided) open++;
-        if (ev.state === "suspected") {
+        if (ev.state === "suspected" && !ev.reset_at) {
           suspected[ev.entry] = true;
           if (evSeen && !evSeen[ev.id]) fresh = true;
         }
@@ -431,7 +430,8 @@
         r.who.replaceChildren(el("div", {text: ev.entry}), el("div", {cls: "muted", text: fitName(ev.driver, NAME_LIST_MAX)}));
         r.what.replaceChildren.apply(r.what, [el("span", {cls: "pill " + st[1], text: label}),
           el("div", {cls: "muted", text: "Last packet " + new Date(ev.last_packet * 1000).toLocaleTimeString()}),
-          ev.decided_by ? el("div", {cls: "muted", text: "by " + ev.decided_by}) : null].filter(Boolean));
+          ev.decided_by ? el("div", {cls: "muted", text: "by " + ev.decided_by}) : null,
+          ev.reset_at ? el("div", {cls: "muted", text: "Before the race reset"}) : null].filter(Boolean));
         r.confirm.hidden = r.dismiss.hidden = !undecided;
         return ev.id;
       });

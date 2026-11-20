@@ -1567,10 +1567,10 @@ def t_the_desk_links_the_whole_recording():
         "the slider over the whole recording is reachable from the desk"
 
 
-def t_the_desk_lapped_gap_breaks_after_the_dot():
+def t_the_desk_lapped_gap_stays_on_one_line():
     desk = _console_src("driver-desk.js")
-    assert '"\\u00a0L" + (typeof time === "number" ? "\\u00a0\\u00b7 " + secs(time)' in desk, \
-        "+1 L, NBSP, dot, plain space, time"
+    assert '"\\u00a0L" + (typeof time === "number" ? "\\u00a0\\u00b7\\u00a0" + secs(time)' in desk \
+        and "td.num.lap{white-space:normal}" not in desk, "+1 L, dot and time are joined by NBSPs and never wrap"
 
 
 def t_the_desk_pills_do_not_wrap_inside():
@@ -1583,6 +1583,13 @@ def t_the_desk_forgets_suspicions_when_the_status_fails():
     fn = desk[desk.index("function renderRecording(rec)"):]
     assert fn.index("suspected = Object.create(null)") < fn.index("if (!rec) return"), \
         "a failed status poll leaves no stale Suspected DC marks"
+
+
+def t_the_desk_marks_no_car_from_an_event_before_the_race_reset():
+    fn = _console_src("driver-desk.js")
+    fn = fn[fn.index("function renderRecording(rec)"):]
+    assert 'if (ev.state === "suspected" && !ev.reset_at) {' in fn, \
+        "an old race's suspicion puts no Suspected DC on a car of the new race"
 
 
 def t_the_desk_swallows_a_refused_audio_resume():

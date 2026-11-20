@@ -164,7 +164,7 @@
       var first = grouped ? e.class_pos <= 1 : e.pos <= 1;
       var gapS = grouped ? e.class_gap_s : e.gap_time_s;
       var lappedTime = grouped ? e.class_gap_time_s : e.gap_time_s;
-      var gap = lapped ? "+" + lapped + "\u00a0L" + (typeof lappedTime === "number" ? "\u00a0\u00b7 " + secs(lappedTime) : "")
+      var gap = lapped ? "+" + lapped + "\u00a0L" + (typeof lappedTime === "number" ? "\u00a0\u00b7\u00a0" + secs(lappedTime) : "")
                        : (first ? "" : secs(gapS));
       // A recording from before the exact class interval falls back to the rounded one.
       var classInterval = typeof e.class_interval_time_s === "number" ? e.class_interval_time_s : e.class_interval_s;

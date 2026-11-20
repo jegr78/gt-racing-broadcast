@@ -1633,6 +1633,48 @@ def t_a_class_lap_stops_at_its_class_count_once_the_flag_is_out():
         "a class count never finishes a car"
 
 
+def t_a_finisher_with_fewer_laps_reads_lapped_overall_and_in_its_class():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=6)
+    pack = ["G%d" % i for i in range(1, 9)]
+    race.set_classes({"X": "H", **{e: "G" for e in pack}})
+    race.set_class_laps({"G": 5})
+    cars = [Car(race, e, e.lower(), L - 10 - 7 * i) for i, e in enumerate(["X"] + pack)]
+    t = _drive(race, cars, [60, 50.5, 50.4, 50.3, 50.2, 50.1, 49.9, 49.8, 49.7], 0.0, 6 * L / 49 + 20)
+    st = race.standings(t)
+    rows = st["entries"]
+    assert st["state"] == "finished" and st["class_lap"]["G"] == 5, (st["state"], st["class_lap"])
+    lead_g = next(r for r in rows if r["class"] == "G" and r["class_pos"] == 1)
+    short = [r for r in rows if r["class"] == "G" and r["laps"] < lead_g["laps"]]
+    assert short and any(r["distance_m"] % L > lead_g["distance_m"] % L for r in short), \
+        "a lapped finisher crossed its line further past it than the class leader did"
+    for r in rows:
+        down = rows[0]["laps"] - r["laps"]
+        assert r["lapped"] == down and (r["gap_s"] is None) == bool(down), \
+            f"{r['entry']} finished {down} lap(s) down overall: {r}"
+        down = lead_g["laps"] - r["laps"] if r["class"] == "G" else 0
+        assert r["class_lapped"] == down and (r["class_gap_s"] is None) == bool(down), \
+            f"{r['entry']} finished {down} lap(s) down in its class, the class count notwithstanding: {r}"
+
+
+def t_an_estimated_car_finished_a_lap_down_reads_lapped_overall_and_in_its_class():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    race.set_classes({"A": "H", "B": "G", "C": "G", "D": "G"})
+    a, b, c, d = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90), ("D", 170)))
+    t = _drive(race, [a, b, c, d], [45, 40, 40, 40], 0.0, 40)
+    t = _drive(race, [a, b, d], [45, 40, 40], t, rd.NO_DATA_S + 1)
+    race.estimate("C", "B", 20.0, t)
+    for _ in range(4):                                     # the estimate moves on each standings read
+        t = _drive(race, [a, b, d], [45, 40, 40], t, L / 80)
+        race.standings(t)
+    assert all(_row(race, e, t)["finished"] for e in "ABD"), race.standings(t)
+    race.finish(t)
+    rb, rc = _row(race, "B", t), _row(race, "C", t)
+    assert rc["status"] == "est" and rc["laps"] == rb["laps"] - 1 \
+        and rc["distance_m"] % L > rb["distance_m"] % L, (rb, rc)
+    assert rc["lapped"] == 1 and rc["gap_s"] is None, f"C finished a lap down overall: {rc}"
+    assert rc["class_lapped"] == 1 and rc["class_gap_s"] is None, f"C finished a lap down in its class: {rc}"
+
+
 def t_a_hidden_class_count_never_caps_the_class_lap():
     race = rd.Race(TRACE, formation=False, finish_mode="time")
     race.set_classes({"A": "H", "B": "G", "C": "G"})

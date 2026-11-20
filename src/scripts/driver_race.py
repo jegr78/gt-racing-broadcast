@@ -782,9 +782,11 @@ class Service:
             self._snapshots.append((self._clock(), snap))
             recording = self._recording_dir and self._enabled()
             standings = self._current().standings(self._clock()) if recording else None
+            rec = self._rec
+            generation = rec.generation if rec is not None else None
         if recording:
             self._mark_dc(standings["entries"])
-            self._observe(standings, snap.get("classes"))
+            self._observe(standings, snap.get("classes"), generation=generation)
         self.save_fastest()
 
     def open_recording(self):
@@ -793,12 +795,12 @@ class Service:
         if self._recording_dir and self._enabled():
             self._guarded(self._recorder)
 
-    def _observe(self, standings, classes=None):
+    def _observe(self, standings, classes=None, generation=None):
         """Feed the recorder; a recording failure never stops the tick."""
         if self._rec is None and (not self._rec_allowed or self._clock() < self._rec_retry):
             return
         self._guarded(lambda: self._recorder().observe(
-            standings, self._compound_codes, self._wall(), classes))
+            standings, self._compound_codes, self._wall(), classes, generation))
 
     def _guarded(self, fn):
         """Run fn; any failure is logged once and backs off RECORDING_RETRY_S."""
@@ -1257,11 +1259,14 @@ class Service:
             self._log(who, "finish")
 
     def reset(self, who="tailnet"):
-        """Start the race over: its corrections, rejoin marks, retirements and fastest
-        lap go with it; tyre compounds, driver names and qualifying corrections stay."""
+        """Start the race over: its corrections, rejoin marks, retirements, fastest lap
+        and open disconnects go with it; tyre compounds, driver names, qualifying
+        corrections and the recording stay."""
         def drop_race(doc):
             for key in ("corrections", "rejoin", "retired"):
                 doc.pop(key, None)
+        if self._recording_dir and self._rec is None and self._rec_allowed and self._enabled():
+            self._guarded(self._recorder)
         with self._lock:
             self._log(who, "reset")
             self._save_actions(drop_race)
@@ -1271,3 +1276,7 @@ class Service:
                 pass  # no fastest lap recorded
             self._final_lobby_laps, self._final_on_air = None, False
             self._race = self._build(self._pick()["id"] if self._pick() else None)
+            # Under the lock, so a tick reads the new race and the new generation together.
+            rec = self._rec
+            if rec is not None:
+                self._guarded(lambda: rec.new_race(self._wall()))

@@ -489,9 +489,9 @@ def t_the_desk_class_gap_reads_laps_down_in_the_class():
         return
     assert got[0] == {"text": "2.5", "lap": False}, f"a car lapped overall but not in its class: {got[0]}"
     assert got[1] == {"text": "+1\u00a0L", "lap": True}, f"a car lapped in its class without a time: {got[1]}"
-    assert got[2] == {"text": "+1\u00a0L\u00a0\u00b7 2:38.2", "lap": True}, \
+    assert got[2] == {"text": "+1\u00a0L\u00a0\u00b7\u00a02:38.2", "lap": True}, \
         f"a car lapped in its class shows the exact time to its class leader: {got[2]}"
-    assert got[3] == {"text": "+1\u00a0L\u00a0\u00b7 1:30.0", "lap": True}, f"overall as before: {got[3]}"
+    assert got[3] == {"text": "+1\u00a0L\u00a0\u00b7\u00a01:30.0", "lap": True}, f"overall as before: {got[3]}"
 
 
 def t_the_desk_class_interval_keeps_the_exact_time():

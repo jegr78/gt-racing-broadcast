@@ -264,8 +264,9 @@ class Recorder:
         self._next_id = max(self._events, default=0) + 1
         # The event of each entry whose silence has not ended yet.
         self._silent = {e.get("entry"): e["id"] for e in self._events.values()
-                        if e.get("returned") is None}
+                        if e.get("returned") is None and e.get("reset_at") is None}
         self._wall = wall
+        self.generation = 0   # bumped by new_race; standings carry the one they were read under
 
     def _meta(self, key, value):
         self._writer.put(lambda s: s.set_meta(key, value))
@@ -296,10 +297,22 @@ class Recorder:
                 self._meta("stopped_by", who)
             return self._status_head()
 
-    def observe(self, standings, compounds, now_wall, classes=None):
-        """`compounds` is {entry: code} or a callable giving it, read only when a sample is due.
-        `classes` is the viewer's [{name, color, lap, laps}], kept only in class mode."""
+    def new_race(self, now):
+        """A race reset: each silence still open ends with the old race and its event,
+        decided or not, stays listed with `reset_at`."""
         with self._lock:
+            self.generation += 1
+            for eid in self._silent.values():
+                self._update(self._events[eid], {"reset_at": now})
+            self._silent.clear()
+
+    def observe(self, standings, compounds, now_wall, classes=None, generation=None):
+        """`compounds` is {entry: code} or a callable giving it, read only when a sample is due.
+        `classes` is the viewer's [{name, color, lap, laps}], kept only in class mode.
+        Standings read under an older `generation` than the current one are ignored."""
+        with self._lock:
+            if generation is not None and generation != self.generation:
+                return
             state = standings.get("state")
             if state in COUNTING_STATES and not self._auto_done:
                 self._auto_done = True
