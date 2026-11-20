@@ -39,6 +39,8 @@
   .dd-row { display: grid; grid-template-columns: 30px auto 1fr 30px 42px 96px 40px; align-items: center;
             height: 40px; padding: 0 10px; gap: 8px; }
   .dd-row:nth-child(even) { background: var(--dd-row); }
+  #dd-rows.grouped .dd-row:nth-child(even) { background: none; }
+  #dd-rows.grouped .dd-row.alt { background: var(--dd-row); }
   .dd-pos { font-weight: 800; text-align: right; }
   /* Tyre compound: a coloured letter in a ring, as GT7 broadcasts show it. */
   .dd-tyre { width: 30px; height: 30px; box-sizing: border-box; border-radius: 50%; border: 3px solid transparent;
@@ -301,16 +303,22 @@
     noteLaps(d.entries || []);
     const book = pages(d.entries || [], list, MAX_ROWS);
     const page = book[book.length > 1 ? Math.floor(Date.now() / (CYCLE_MS * PHASES.length)) % book.length : 0];
+    let inGroup = 0;
+    rows.classList.toggle("grouped", list.length > 0);
     rows.replaceChildren(...page.map(function (item, i) {
-      if (item.header) return classHeader(item.header);
+      if (item.header) { inGroup = 0; return classHeader(item.header); }
       const e = list.length ? inClass(item) : item;
       const at = list.length ? e.pos - 1 : i;
-      return row(e, at, column(e, at), "P" + (e.pit_stops || 0),
-                 fl && fl.entry === e.entry && e.last_lap_ms === fl.ms && lapShows(e));
+      const r = row(e, at, column(e, at), "P" + (e.pit_stops || 0),
+                    fl && fl.entry === e.entry && e.last_lap_ms === fl.ms && lapShows(e));
+      if (list.length && inGroup++ % 2) r.className += " alt";
+      return r;
     }));
     document.getElementById("dd-phase").textContent = phaseLabel();
+    // A paged tower shows its page's class; one page cycles the classes that have a lap.
     const timed = list.filter(function (c) { return c.fastest; });
-    const cls = timed.length ? timed[Math.floor(Date.now() / CYCLE_MS) % timed.length] : null;
+    const cls = book.length > 1 ? page[0].header
+      : timed.length ? timed[Math.floor(Date.now() / CYCLE_MS) % timed.length] : null;
     const shown = list.length ? cls && cls.fastest : fl;
     const label = document.getElementById("dd-fl-class");
     label.textContent = cls ? cls.name || "" : "";

@@ -649,6 +649,48 @@ def t_a_class_without_a_fastest_lap_leaves_the_box_to_the_others():
     assert got == [["H", False], ["H", False]], f"the box never blanks for a class without a lap yet: {got}"
 
 
+def t_a_paged_tower_shows_the_fastest_lap_of_its_class():
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    d = {"entries": _cars("H", 10) + _cars("G", 10, 11), "classes": [hf, G], "fastest": hf["fastest"]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      const box = document.getElementById("drivers-fastest");
+      let hidden = false;
+      box.classList.toggle = (c, on) => {{ if (c === "none") hidden = !!on; }};
+      return [0, 1, 2, 3].map(function (k) {{
+        const r = shown(k * CYCLE_MS + 1, d);
+        return [r[0].head, document.getElementById("dd-fl-class").textContent, hidden];
+      }});""")
+    if got is None:
+        return
+    assert got == [["H", "H", False], ["H", "H", False], ["G", "G", True], ["G", "G", True]], \
+        f"the box follows the page's class and hides while that class has no lap: {got}"
+
+
+def t_the_stripes_restart_in_each_class():
+    d = {"entries": _cars("H", 3) + _cars("G", 3, 4), "classes": [H, G]}
+    got = _tower(_CLASS_RACE + f"""
+      let grouped = null;
+      rows.classList.toggle = (c, on) => {{ if (c === "grouped") grouped = !!on; }};
+      shown(1, {json.dumps(d)});
+      const alt = rows.children.map(r => / alt\\b/.test(r.className));
+      const inClass = grouped;
+      shown(1, {{entries: {json.dumps(d["entries"])}, classes: []}});
+      return [alt, inClass, grouped, rows.children.map(r => / alt\\b/.test(r.className))];""")
+    if got is None:
+        return
+    alt, in_class, outside, plain = got
+    assert alt == [False, False, True, False, False, False, True, False], \
+        f"each class starts unstriped under its header: {alt}"
+    assert in_class is True and outside is False, f"the grouped stripes only in class mode: {got}"
+    assert not any(plain), f"outside class mode the nth-child stripes stay: {plain}"
+    with open(TOWER, encoding="utf-8") as fh:
+        css = fh.read()
+    assert re.search(r"#dd-rows\.grouped \.dd-row:nth-child\(even\) \{ background: none;", css), \
+        "the position stripes give way to the class stripes"
+    assert re.search(r"#dd-rows\.grouped \.dd-row\.alt \{ background: var\(--dd-row\);", css), css[:0]
+
+
 def t_the_map_rings_the_class_and_est_wins():
     got = _tower(f"""
       line = {{points: [[0, 0], [100, 0], [100, 100], [0, 100]]}};
