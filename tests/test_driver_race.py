@@ -486,6 +486,18 @@ QUALI_CLASSES = {"A": {"number": "1", "carClass": "GT3", "classColor": "#f00"},
                  "E": {"number": "5"}}
 
 
+def t_a_class_colour_that_is_no_colour_never_reaches_a_page():
+    roster = {"A": {"carClass": "GT3", "classColor": "red;background:url(x)"},
+              "B": {"carClass": "GT4", "classColor": "rgba(0, 160, 0, 0.5)"},
+              "C": {"carClass": "GT2", "classColor": "#0af"},
+              "D": {"carClass": "GT1", "classColor": "orange"},
+              "E": {"carClass": "LMP", "classColor": "expression(alert(1))"},
+              "F": {"carClass": "GT3", "classColor": "#c00"}}
+    got = dr._class_colors(roster)
+    assert got == {"GT3": "#c00", "GT4": "rgba(0, 160, 0, 0.5)", "GT2": "#0af", "GT1": "orange", "LMP": ""}, \
+        f"only a hex, rgb/rgba numbers or a colour name pass; the rest is no colour: {got}"
+
+
 def t_qualifying_ranks_each_class_on_its_own():
     conns = [{"entry": e, "segment": "Q1", "name": e.lower(), "latest": {"best_ms": ms}}
              for e, ms in (("A", 90000), ("B", 95000), ("C", 90700), ("D", 96000), ("E", 91000))]

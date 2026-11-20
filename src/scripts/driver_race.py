@@ -298,12 +298,17 @@ _PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color"
 _PUBLIC_LAP = ("entry", "driver", "team", "ms")
 
 
+# The pages' own colour rule: a hex colour, rgb/rgba numbers or a colour name.
+CLASS_COLOR_RE = re.compile(r"#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]{1,40}\)|[a-zA-Z]{3,20}")
+
+
 def _class_colors(roster):
-    """Each class's colour: the first one set for it in roster order."""
+    """Each class's colour: the first valid one set for it in roster order, else ""."""
     out = {}
     for info in roster.values():
         if isinstance(info, dict) and not out.get(info.get("carClass") or ""):
-            out[info.get("carClass") or ""] = info.get("classColor") or ""
+            color = info.get("classColor")
+            out[info.get("carClass") or ""] = color if isinstance(color, str) and CLASS_COLOR_RE.fullmatch(color) else ""
     return out
 
 
