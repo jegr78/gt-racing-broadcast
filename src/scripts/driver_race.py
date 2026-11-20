@@ -381,15 +381,11 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
     return rows
 
 
-def _lap_of(row):
-    return {"entry": row["entry"], "driver": row["driver"], "team": row["team"], "ms": row["best_ms"]}
-
-
 def quali_classes(rows, roster):
     """Fill the qualifying rows' class fields (class, class_pos, class_gap_ms,
-    class_interval_ms, class_color) and return (rows, [{name, color, fastest}]) with
-    the classes in the order of their fastest car, unclassed last; ([] without two
-    named classes, rows untouched)."""
+    class_interval_ms, class_color) and return (rows, [{name, color}]) with the
+    classes in the order of their fastest car; ([] without two named classes, rows
+    untouched)."""
     if len(_named_classes(roster)) < 2:
         return rows, []
     colors = _class_colors(roster)
@@ -406,9 +402,7 @@ def quali_classes(rows, roster):
                     "class_interval_ms": None if ms is None or ahead is None else ms - ahead})
         group.append(row)
     names = [n for n in members if n] + ([""] if "" in members else [])
-    return rows, [{"name": n, "color": colors.get(n, ""),
-                   "fastest": _lap_of(members[n][0]) if members[n][0]["best_ms"] is not None else None}
-                  for n in names]
+    return rows, [{"name": n, "color": colors.get(n, "")} for n in names]
 
 
 def _saved_actions(path):
@@ -736,7 +730,7 @@ class Service:
         out["show"] = self._show(settings)
         compounds = _saved_compounds(_actions_path_for(self._path))
         if out["mode"] == "qualifying":
-            out["qualifying"], out["classes"], out["fastest"] = self._quali(ctx, race, roster, compounds)
+            out["qualifying"], out["classes"] = self._quali(ctx, race, roster, compounds)
             return out
         class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))) \
             if len(_named_classes(roster)) >= 2 else {}
@@ -770,7 +764,7 @@ class Service:
         return out
 
     def _quali(self, ctx, race, roster, compounds):
-        """(rows, classes, fastest lap) of the qualifying segment on air; under the lock."""
+        """(rows, classes) of the qualifying segment on air; under the lock."""
         pick = self._pick() or {}
         rows = qualifying(
             ctx.get("connections") or [], ctx.get("segment"), roster,
@@ -780,8 +774,7 @@ class Service:
         for row in rows:
             row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
             row["driver"] = race.display_name(row["entry"], row["driver"])
-        rows, classes = quali_classes(rows, roster)
-        return rows, classes, _lap_of(rows[0]) if rows and rows[0]["best_ms"] is not None else None
+        return quali_classes(rows, roster)
 
     @staticmethod
     def _shown_lap(race, fl, roster):
@@ -1036,7 +1029,7 @@ class Service:
                 out["fastest"] = dict(fl, driver=race.display_name(fl["entry"], fl["driver"]))
             if ctx.get("mode") == "qualifying":
                 out["mode"], out["segment"] = "qualifying", ctx.get("segment")
-                out["qualifying"], out["quali_classes"], _fl = self._quali(
+                out["qualifying"], out["quali_classes"] = self._quali(
                     ctx, race, ctx.get("roster") or {}, _saved_compounds(_actions_path_for(self._path)))
             pick_id = self._race_pick
         self._mark_dc(out["entries"])

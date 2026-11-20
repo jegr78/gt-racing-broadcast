@@ -397,7 +397,7 @@
         const all = {
           pos: cell("pos", v.pos, "pos"), brand: brandCell(e), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
           laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
-          gap: cell("gap", quali ? (i ? plusMs(v.gap_ms) : "")
+          gap: cell("gap", quali ? (i ? plusMs(v.gap_ms) : typeof e.best_ms === "number" ? "Pole" : "")
                     : e.status === "est" ? estGap(v, i)
                     : e.finished ? finishedGap(v, i)
                     : STATUS[e.status] || (i === 0 ? "" : v.lapped ? "+" + v.lapped + " L"
@@ -416,7 +416,8 @@
     $("timing").tBodies[0].replaceChildren(...body);
     $("state").hidden = rows.length > 0;
     $("fastest").replaceChildren();
-    if (classes.length) {
+    // Qualifying lists no fastest lap: the best lap column holds each driver's best.
+    if (classes.length && !quali) {
       groups.forEach(function (g) {
         if (!g.cls.fastest) return;
         const name = el("span", "flcls", g.cls.name || "Unclassed");
@@ -425,7 +426,7 @@
         line.append(name, ...fastestText(g.cls.fastest));
         $("fastest").append(line);
       });
-    } else if (fl) {
+    } else if (fl && !quali) {
       $("fastest").append(...fastestText(fl));
     }
   }

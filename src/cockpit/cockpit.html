@@ -975,7 +975,8 @@ async function pollTiming() {
         const q = g.cls ? {pos: e.class_pos, gap_ms: e.class_gap_ms, interval_ms: e.class_interval_ms} : e;
         timingCells(tr, [q.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e),
                          timingLap(e.best_ms, i === 0 && typeof e.best_ms === 'number' ? 'fl' : ''),
-                         i ? timingPlusMs(q.gap_ms) : '', i ? timingPlusMs(q.interval_ms) : '',
+                         i ? timingPlusMs(q.gap_ms) : typeof e.best_ms === 'number' ? 'Pole' : '',
+                         i ? timingPlusMs(q.interval_ms) : '',
                          timingLap(e.last_lap_ms, e.last_lap_ms === e.best_ms && typeof e.best_ms === 'number'
                            ? (i === 0 ? 'fl' : 'pb') : '')]);
       } else {
@@ -1004,7 +1005,7 @@ async function pollTiming() {
     box.appendChild(s);
     box.appendChild(document.createTextNode(' · ' + fitName(fl.driver, NAME_MAX) + ' (' + (fl.team || fl.entry) + ')'));
   }
-  if (classes.length) {
+  if (classes.length && !quali) {
     classes.forEach(function (c) {
       if (!c.fastest) return;
       const line = document.createElement('div');
@@ -1016,7 +1017,7 @@ async function pollTiming() {
       flLine(line, c.fastest);
       flBox.appendChild(line);
     });
-  } else if (fl) {
+  } else if (fl && !quali) {
     flLine(flBox, fl);
   }
   setTimeout(pollTiming, 2000);

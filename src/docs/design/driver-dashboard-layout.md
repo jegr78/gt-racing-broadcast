@@ -44,7 +44,7 @@ column it needs exists in our data except the compound, which is optional by des
 **Qualifying: the LMU qualifying tower.** Position, number, driver and the best lap as
 a fixed column, then the value column alternating the gap to P1 and the interval by
 best lap like the race's, with each completed lap flashing in it (purple for P1's best,
-green for a personal best). Classes rank on their own as in the race.
+green for a personal best). P1 reads `Pole`; no fastest lap box. Classes rank on their own as in the race.
 
 **Commentator Cockpit:** the same payload as a plain table (all columns at once), since
 the commentator reads it, not the viewer.

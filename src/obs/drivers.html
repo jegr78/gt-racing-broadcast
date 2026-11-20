@@ -407,7 +407,7 @@
   function qualiColumn(e, i) {
     if (lapShows(e)) return lapTime(e.last_lap_ms);
     if (typeof e.best_ms !== "number") return "";
-    if (i === 0) return "Leader";
+    if (i === 0) return "Pole";
     return plusMs(phase() === 1 ? e.interval_ms : e.gap_ms);
   }
   // A fresh lap's colour: purple for P1's (its class's) best, green for a personal best.
@@ -437,7 +437,11 @@
     }));
     placeFastest();
     showPhase(QUALI_PHASES[phase()], ["gap", "interval"][phase()]);
-    fastestBox(book, page, list, d.fastest);
+    // No fastest lap box: the best lap column holds each driver's best.
+    const label = document.getElementById("dd-fl-class");
+    label.textContent = "";
+    label.style.color = "";
+    document.getElementById("drivers-fastest").classList.add("none");
     drawCars([]);
   }
   function project(x, z) {

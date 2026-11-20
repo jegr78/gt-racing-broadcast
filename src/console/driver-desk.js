@@ -202,7 +202,7 @@
     var gap = grouped ? e.class_gap_ms : e.gap_ms, interval = grouped ? e.class_interval_ms : e.interval_ms;
     var best = typeof e.best_ms === "number";
     return {pos: String(grouped ? e.class_pos : e.pos), best: lapTime(e.best_ms), bestFl: best && !k,
-            gap: k ? plusMs(gap) : "", interval: k ? plusMs(interval) : "", last: lapTime(e.last_lap_ms),
+            gap: k ? plusMs(gap) : best ? "Pole" : "", interval: k ? plusMs(interval) : "", last: lapTime(e.last_lap_ms),
             mark: best && e.last_lap_ms === e.best_ms ? (k ? "pb" : "fl") : ""};
   }
 

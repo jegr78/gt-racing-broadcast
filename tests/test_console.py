@@ -601,7 +601,7 @@ def t_the_desk_shows_qualifying_per_class_with_every_column():
     assert [(g[0], g[1]) for g in groups] == [("GT3", "#f00"), ("GT4", "")], f"classes, a bad colour dropped: {groups}"
     gt4 = groups[1][2]
     assert [(c["pos"], c["best"], c["gap"], c["interval"], c["last"], c["mark"]) for c in gt4] == [
-        ("1", "1:35.000", "", "", "1:36.000", ""), ("2", "1:35.400", "+0.400", "+0.400", "1:35.400", "pb")], \
+        ("1", "1:35.000", "Pole", "", "1:36.000", ""), ("2", "1:35.400", "+0.400", "+0.400", "1:35.400", "pb")], \
         f"positions, gaps and intervals within the class, a personal best marked: {gt4}"
     assert groups[0][2][0]["mark"] == "fl" and groups[0][2][0]["bestFl"], "the class's fastest lap is purple"
     assert (flat["pos"], flat["gap"], flat["interval"]) == ("3", "+5.400", "+0.400"), f"overall without classes: {flat}"

@@ -507,9 +507,9 @@ def t_qualifying_ranks_each_class_on_its_own():
     assert got == [("A", 1, "GT3", 1, 0, None, "#f00"), ("C", 2, "GT3", 2, 700, 700, "#f00"),
                    ("E", 3, "", 1, 0, None, ""), ("B", 4, "GT4", 1, 0, None, "#0f0"),
                    ("D", 5, "GT4", 2, 1000, 1000, "#0f0")], got
-    assert [(c["name"], c["color"], c["fastest"]["entry"], c["fastest"]["ms"]) for c in classes] == [
-        ("GT3", "#f00", "A", 90000), ("GT4", "#0f0", "B", 95000), ("", "", "E", 91000)], \
-        f"classes in order of their fastest car, unclassed last, each with its fastest lap: {classes}"
+    assert classes == [{"name": "GT3", "color": "#f00"}, {"name": "GT4", "color": "#0f0"},
+                       {"name": "", "color": ""}], \
+        f"classes in order of their fastest car, without a fastest lap: qualifying has none: {classes}"
     one = {"A": {"carClass": "GT3"}, "C": {"carClass": "GT3"}}
     rows, classes = dr.quali_classes(dr.qualifying(conns[:3:2], "Q1", one), one)
     assert classes == [] and "class" not in rows[0], "one named class is no class mode"
@@ -523,15 +523,16 @@ def t_the_qualifying_dashboard_and_desk_carry_classes_and_the_fastest_lap():
     svc, _clock, _path = _dash_service(ctx)
     svc.tick()
     d = svc.dashboard()
-    assert [c["name"] for c in d["classes"]] == ["GT3", "GT4"] and d["fastest"]["entry"] == "A", d
-    assert d["fastest"] == {"entry": "A", "driver": "a", "team": "", "ms": 90000}, d["fastest"]
+    assert [c["name"] for c in d["classes"]] == ["GT3", "GT4"], d
+    assert "fastest" not in d, f"qualifying shows no fastest lap: the best lap column holds it: {d}"
     st = svc.standings()
     assert st["mode"] == "qualifying" and st["segment"] == "Q1", st
     assert [(r["entry"], r["class_pos"], r["last_lap_ms"]) for r in st["qualifying"]] == [
         ("A", 1, 90000), ("C", 2, 90700), ("B", 1, 95000)], f"the desks get the live ranking: {st['qualifying']}"
     assert [c["name"] for c in st["quali_classes"]] == ["GT3", "GT4"], st["quali_classes"]
     pub = dr.public_view(d)
-    assert pub["qualifying"][1]["class_gap_ms"] == 700 and pub["classes"][0]["fastest"]["ms"] == 90000, pub
+    assert pub["qualifying"][1]["class_gap_ms"] == 700 and pub["classes"][0]["fastest"] is None, pub
+    assert "fastest" not in pub, f"the public activity list notes no pole lap as a fastest lap: {pub}"
 
 
 def t_a_qualifying_time_stays_when_its_sender_goes_quiet():

@@ -1132,8 +1132,8 @@ def t_qualifying_keeps_the_best_lap_and_cycles_gap_and_interval():
     assert [r["best"] for r in gap] == ["1:30.000", "1:30.400", "1:31.250", ""], \
         f"the best lap is a column of its own, empty without a lap: {gap}"
     assert [r["bestFl"] for r in gap] == [True, False, False, False], f"P1's best lap is purple: {gap}"
-    assert [r["value"] for r in gap] == ["Leader", "+0.400", "+1.250", ""], f"the gap to P1: {gap}"
-    assert [r["value"] for r in inter] == ["Leader", "+0.400", "+0.850", ""], f"the interval by best lap: {inter}"
+    assert [r["value"] for r in gap] == ["Pole", "+0.400", "+1.250", ""], f"P1 reads Pole, then the gap to P1: {gap}"
+    assert [r["value"] for r in inter] == ["Pole", "+0.400", "+0.850", ""], f"the interval by best lap: {inter}"
     assert not any(r["pit"] for r in gap), "qualifying has no pit stop column"
     assert lap == ["12:34", "QUALIFYING"], f"the timer takes the lap line, else it names the session: {lap}"
 
@@ -1149,7 +1149,7 @@ def t_a_qualifying_lap_flashes_purple_green_or_white():
     now, later = got
     assert [(r["value"], r["mark"]) for r in now[:3]] == [("1:30.000", "fl"), ("1:31.000", ""), ("1:31.250", "pb")], \
         f"P1's new best purple, a personal best green, another lap white: {now}"
-    assert [r["value"] for r in later[:3]] == ["Leader", "+0.400", "+1.250"], f"then the gap returns: {later}"
+    assert [r["value"] for r in later[:3]] == ["Pole", "+0.400", "+1.250"], f"then the gap returns: {later}"
 
 
 def t_qualifying_ranks_each_class_under_its_header():
@@ -1171,10 +1171,9 @@ def t_qualifying_ranks_each_class_under_its_header():
     shown, label, time, interval = got
     assert interval == "+1.000", f"the interval is to the class car ahead, not the overall one: {interval}"
     assert [r.get("head") or [r["pos"], r["value"], r["bestFl"]] for r in shown] == [
-        "GT3", ["1", "Leader", True], ["2", "+0.700", False], "GT4", ["1", "Leader", True], ["2", "+1.000", False]], \
-        f"positions, gaps and the purple best restart per class: {shown}"
-    assert label in ("GT3", "GT4") and time in ("1:30.000", "1:35.000"), \
-        f"the fastest lap box shows a class's fastest lap: {label} {time}"
+        "GT3", ["1", "Pole", True], ["2", "+0.700", False], "GT4", ["1", "Pole", True], ["2", "+1.000", False]], \
+        f"positions, gaps and the purple best restart per class, each class P1 on Pole: {shown}"
+    assert label == "" and time == "", f"qualifying has no fastest lap box: {label} {time}"
 
 
 def t_the_public_page_shows_qualifying_per_class_with_every_column():
@@ -1200,11 +1199,11 @@ def t_the_public_page_shows_qualifying_per_class_with_every_column():
     cars = [r for r in got["rows"] if "head" not in r]
     assert [r["head"] for r in got["rows"] if "head" in r] == ["GT3", "GT4"], f"one header per class: {got['rows']}"
     assert [(r["pos"], r["best"], r["gap"], r["int"], r["last"]) for r in cars] == [
-        ("1", "1:30.000", "", "", "1:30.000"), ("2", "1:30.700", "+0.700", "+0.700", "1:31.000"),
-        ("1", "1:35.000", "", "", "1:35.000"), ("2", "1:36.000", "+1.000", "+1.000", "1:36.000")], \
+        ("1", "1:30.000", "Pole", "", "1:30.000"), ("2", "1:30.700", "+0.700", "+0.700", "1:31.000"),
+        ("1", "1:35.000", "Pole", "", "1:35.000"), ("2", "1:36.000", "+1.000", "+1.000", "1:36.000")], \
         f"positions, gaps and intervals within the class: {cars}"
     assert got["marks"] == ["fl", "", "fl", "pb"], f"P1's best purple, a personal best green: {got['marks']}"
-    assert "GT3" in got["fastest"] and "GT4" in got["fastest"], f"each class's fastest lap: {got['fastest']}"
+    assert got["fastest"] == "", f"qualifying lists no fastest lap: {got['fastest']}"
 
 
 def t_the_cockpit_shows_every_qualifying_column_per_class():
@@ -1215,6 +1214,8 @@ def t_the_cockpit_shows_every_qualifying_column_per_class():
     assert "const classes = Array.isArray(d.classes)" in page, "qualifying groups by class like the race"
     assert "gap_ms: e.class_gap_ms, interval_ms: e.class_interval_ms" in page, \
         "a class row reads its gap and interval within the class"
+    assert "typeof e.best_ms === 'number' ? 'Pole'" in page, "P1 (of its class) reads Pole"
+    assert "} else if (fl && !quali) {" in page, "qualifying shows no fastest lap line"
 
 
 if __name__ == "__main__":
