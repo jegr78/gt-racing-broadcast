@@ -512,7 +512,8 @@ DESK_RACE = {"entries": [{"entry": "A", "class": "GT3", "class_pos": 1}, {"entry
              "classes": ["GT3", "GT4", ""], "class_lap": {"GT3": 7, "GT4": 6, "": 6},
              "class_laps": {"GT4": 18}, "lap": {"leader": 7, "count": 20},
              "class_colors": {"GT3": "#e10600", "GT4": "red;background:url(x)", "": ""},
-             "class_counts": {"GT3": True, "GT4": True, "": True}}
+             "class_counts": {"GT3": True, "GT4": True, "": True},
+             "class_count": {"GT3": 20, "GT4": 18, "": None}}
 
 
 def t_the_desk_groups_the_race_by_class():
@@ -564,11 +565,20 @@ def t_the_desk_fastest_lap_entries_follow_the_class():
 
 def t_the_desk_class_header_count_follows_the_overall_rule():
     import json
-    race = dict(DESK_RACE, class_counts={"GT3": True, "GT4": False, "": False})
+    race = dict(DESK_RACE, class_count={"GT3": 20, "GT4": None, "": None})
     got = _desk_fn("classGroups", "classGroups(" + json.dumps(race) + ").map(g => g.laps)")
     if got is None:
         return
-    assert got == [20, None, None], f"outside the final lobby a class count stays off the header: {got}"
+    assert got == [20, None, None], f"the header shows the relay's class count in race laps, none where it is off: {got}"
+
+
+def t_the_desk_lap_line_shows_the_race_lap_and_the_lobby_lap():
+    got = _desk_fn("lapText", '[lapText({lap: {leader: 4, count: 19}, lobby_lap: 5}), lapText({lap: {leader: 4, count: null}}),'
+                              ' lapText({lap: {}, lobby_lap: null})]')
+    if got is None:
+        return
+    assert got == ["Race lap 4 / 19 \u00b7 Lobby lap 5", "Race lap 4", ""], \
+        f"the race lap against the count, then GT7's lap of the lobby on air: {got}"
 
 
 def t_the_desk_class_gap_reads_laps_down_in_the_class():

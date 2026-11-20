@@ -54,6 +54,7 @@
     "padding:1px;border-radius:3px;background:#f2f4f7;object-fit:contain}",
     ".dd tr.cls td{background:var(--panel-2,#1b1f25);font-weight:600}",
     ".dd tr.cls .lap{margin-left:8px;color:var(--muted,#9aa0a6);font-weight:400;font-family:var(--mono,ui-monospace,monospace)}",
+    ".dd .lapline{margin:4px 0;font-weight:600;font-family:var(--mono,ui-monospace,monospace)}.dd .lapline:empty{display:none}",
     ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}"
   ].join("");
 
@@ -161,17 +162,22 @@
     return {text: e.lapped ? lappedText(e.lapped, e.gap_time_s) : (i ? secs(e.gap_s) : ""),
             lap: !!e.lapped};
   }
+  // The race laps driven against the count, and GT7's lap of the lobby on air.
+  function lapText(r) {
+    var lap = r.lap || {}, parts = [];
+    if (typeof lap.leader === "number") parts.push("Race lap " + lap.leader + (typeof lap.count === "number" ? " / " + lap.count : ""));
+    if (typeof r.lobby_lap === "number") parts.push("Lobby lap " + r.lobby_lap);
+    return parts.join(" \u00b7 ");
+  }
   // The race rows under their class: [{name, color, lap, laps, rows}] in class order; one group named null outside class mode.
   function classGroups(r) {
     var rows = r.entries || [], names = Array.isArray(r.classes) ? r.classes : [];
     if (!names.length) return [{name: null, rows: rows}];
-    var lap = r.class_lap || {}, set = r.class_laps || {}, colors = r.class_colors || {}, first = names.filter(Boolean)[0];
-    var counted = r.class_counts || {};
-    var count = r.lap && typeof r.lap.count === "number" ? r.lap.count : null;
+    var lap = r.class_lap || {}, counts = r.class_count || {}, colors = r.class_colors || {};
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k) && typeof o[k] === "number" ? o[k] : null; }
     return names.map(function (n) {
       var c = Object.prototype.hasOwnProperty.call(colors, n) ? colors[n] : "";
-      return {name: n, lap: own(lap, n), laps: n === first ? count : counted[n] === true ? own(set, n) : null,
+      return {name: n, lap: own(lap, n), laps: own(counts, n),
               color: typeof c === "string" && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c) ? c : "",
               rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === n; })};
     });
@@ -377,6 +383,7 @@
       "Pos", "", "Entry", "Laps", "Gap", "Int.", "Status", "Pits", "Corr."].map(function (h) {
         return el("th", h === "Pits" ? {text: h, title: PIT_HINT} : {text: h}); }))]), raceBody])]);
     var raceNote = el("div", {cls: "muted"});
+    var lapLine = el("div", {cls: "lapline"});
 
     // -- race recording and its disconnect events -------------------------------------
     // Links bypass the fetch shim, so they take the console prefix from RC_API themselves.
@@ -799,7 +806,7 @@
       redBanner,
       el("h3", {text: "Race"}),
       el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
-      recWarn, raceNote, raceTable,
+      recWarn, raceNote, lapLine, raceTable,
       el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry, estSide, estRef, estSec,
                                estSet, estClear]),
@@ -888,6 +895,7 @@
           (e.status === "est" ? "" : " (waiting for its data to stop)");
       }).join(", ") : "";
       renderClassLaps(r);
+      lapLine.textContent = lapText(r);
       var all = r.entries || [];
       function raceRow(e, grouped, k) {
         var i = all.indexOf(e);

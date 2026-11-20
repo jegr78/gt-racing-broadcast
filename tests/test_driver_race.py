@@ -1301,6 +1301,25 @@ def t_a_class_header_lap_follows_the_overall_lap_rule():
     assert g["lap"] == d["lap"]["leader"] - 1, f"a class leader one lap down reads one less: {g} {d['lap']}"
 
 
+def t_the_lobby_lap_reaches_the_crew_and_never_the_viewers():
+    svc, _clock, _path, _ctx = _class_service()
+    svc.tick()
+    d = svc.dashboard()
+    assert isinstance(d["lobby_lap"], int) and d["lobby_lap"] >= 1, \
+        f"the cockpit's dashboard carries GT7's lobby lap: {d.get('lobby_lap')}"
+    assert "lobby_lap" not in json.dumps(dr.public_view(d)), "the public timing data never carries it"
+    desk = dr.with_brands(svc.standings(), {})
+    assert desk["lobby_lap"] == d["lobby_lap"] and set(desk["class_count"]) == {c["name"] for c in d["classes"]}, \
+        f"GET /drivers/race gives the desks the lobby lap and the class counts: {desk.get('lobby_lap')} {desk.get('class_count')}"
+    root = os.path.join(os.path.dirname(HERE), "src")
+    for page in ("obs/drivers.html", "console/timing.html", "timing-host/worker.js"):
+        with open(os.path.join(root, page), encoding="utf-8") as fh:
+            assert "lobby_lap" not in fh.read(), f"{page} is seen by viewers and never shows the lobby lap"
+    for page in ("cockpit/cockpit.html", "console/driver-desk.js"):
+        with open(os.path.join(root, page), encoding="utf-8") as fh:
+            assert "lobby_lap" in fh.read(), f"{page} shows the lobby lap to the crew"
+
+
 def t_a_class_change_in_the_roster_reaches_the_next_tick():
     svc, _clock, _path, ctx = _class_service()
     svc.tick()
