@@ -49,7 +49,10 @@ nearest the predicted distance decides.
   when it leaves the box. `keep` is a release staggered by the gaps: every car
   anchors at the leader's frozen distance less its whole laps behind, and its later
   box exit is its gap. `neutralise` anchors every car of a lap at that lap's best
-  distance. Gaps leave out the stoppage, from the red flag to the first box exit.
+  distance. Gaps leave out the stoppage, from the red flag to the first box exit. A car
+  that resumed behind the restart point of the car it is compared with compares, up
+  to a lap past that point, with that car's pass after the restart plus the time it
+  took to its restart point before the red flag, so a box exit never meets a flying lap.
   `release` ends the mode: a car still in its old session counts on from where it
   is, one in a restart lobby still resumes at its box exit.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
@@ -180,11 +183,13 @@ class _Entry:
         self.parked = None         # (conn, counting state) of the car moved away from it
         self.resume = False        # an undone retirement: count on from `distance`
         self.crossed = None        # (interpolated time, sample time) of its last crossing
+        self.resumed = None        # restart: (red flag number, box exit time, anchor distance)
 
     def restart(self):
         self.distance, self.ts, self.ds = None, [], []
         self.cts, self.cds = array("d"), array("d")
         self.pit_stops, self.finished_at, self.since = 0, None, None
+        self.resumed = None
 
 
 class Race:
@@ -228,6 +233,7 @@ class Race:
         self._names = {}            # (entry, registered driver or "") -> the name Race Control set
         self._ended_est = []        # entries whose estimate their returning data ended
         self._shared_line = None    # the line station a quorum of counting cars agreed on
+        self._red_flags = 0
 
     # -- commands ------------------------------------------------------------------
     def set_roster(self, entries):
@@ -304,6 +310,7 @@ class Race:
         """Freeze every entry; each continues from its anchor in the restart lobby."""
         self._advance(now)
         self._red = {"at": now, "mode": mode}
+        self._red_flags += 1
         self._restart_mode = mode
         if self._stopped is None:                  # a second red flag keeps the first stoppage
             self._stopped = max((c.t for c in self._cars.values() if c.t is not None), default=now)
@@ -702,6 +709,7 @@ class Race:
                     old.counting = False
                 if self._start(ent, car, t, self._anchor_of(ent), lap, s, from_line=False):
                     ent.active, ent.waiting, ent.held = conn, False, False
+                    ent.resumed = (self._red_flags, t, ent.distance)
                     if self._stopped is not None:  # the first car out ends the stoppage
                         self._close_stoppage(t)
                     ent.ts.append(t)
@@ -1032,11 +1040,11 @@ class Race:
             laps = self._ranked_laps(ent)
             if laps is not None and laps > 0:
                 mine = self._time_at(ent, laps * self.length - ent.adjust)
-                theirs = self._time_at(ahead, laps * self.length - ahead.adjust)
+                theirs = self._passed(ahead, ent, laps * self.length)
                 if mine is not None and theirs is not None:
-                    return max(0.0, self._racing(mine) - self._racing(theirs))
-            reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
-            return None if reached is None else max(0.0, self._racing(ent.finished_at) - self._racing(reached))
+                    return max(0.0, self._racing(mine) - theirs)
+            reached = self._passed(ahead, ent, ent.distance + ent.adjust)
+            return None if reached is None else max(0.0, self._racing(ent.finished_at) - reached)
         if ent.waiting or ahead.waiting:
             return None                            # no running time while a red flag holds them
         if now is not None and self._quiet(ahead, now):
@@ -1048,10 +1056,49 @@ class Race:
             mine = self._time_at(ent, last[1] + ahead.adjust - ent.adjust)
             if mine is not None:
                 return max(0.0, self._racing(mine) - self._racing(last[0]))
-        reached = self._time_at(ahead, at)
+        reached = self._passed(ahead, ent, ent.distance + ent.adjust)
         if reached is None:
             return self._gap_by_speed(ahead, ent)
-        return max(0.0, self._racing(self._cars[ent.active].t) - self._racing(reached))
+        return max(0.0, self._racing(self._cars[ent.active].t) - reached)
+
+    def _passed(self, ahead, ent, at):
+        """The racing time `ahead` passed the shown distance `at` that `ent` compares with
+        it; None outside its history. A car that resumed from a red flag behind the
+        restart point of `ahead` compares, up to a lap past that point, with `ahead`'s
+        pass after the restart plus the time `ahead` took to its restart point before
+        the red flag, so neither car's way out of the box meets the other's flying lap."""
+        mine, theirs = ent.resumed, ahead.resumed
+        if mine is not None and theirs is not None and mine[0] == theirs[0]:
+            own, lead = mine[2] + ent.adjust, theirs[2] + ahead.adjust
+            behind = lead - own
+            if behind > 1.0 and own <= at < lead + self.length:
+                after = self._time_at(ahead, at + behind - ahead.adjust)
+                before = self._racing_at(ahead, own - ahead.adjust)   # where `ent` restarted
+                if after is not None and before is not None:
+                    return self._racing(after) - (self._racing(theirs[1]) - before)
+        reached = self._time_at(ahead, at - ahead.adjust)
+        return None if reached is None else self._racing(reached)
+
+    def _racing_at(self, ent, d):
+        """The racing time `ent` passed raw distance d; None outside its history. Between
+        its last distance before a restart and its anchor it moves on the racing clock,
+        so it never lands in the stoppage."""
+        t = self._time_at(ent, d)
+        if t is None or ent.resumed is None:
+            return None if t is None else self._racing(t)
+        _, exit_t, anchor = ent.resumed
+        i = bisect.bisect_left(ent.ts, exit_t)
+        if i:
+            t0, d0 = ent.ts[i - 1], ent.ds[i - 1]
+        else:
+            j = bisect.bisect_left(ent.cts, exit_t)
+            if not j:
+                return self._racing(t)
+            t0, d0 = ent.cts[j - 1], ent.cds[j - 1]
+        if not d0 < d < anchor:
+            return self._racing(t)
+        r0, r1 = self._racing(t0), self._racing(exit_t)
+        return r0 + (r1 - r0) * (d - d0) / (anchor - d0)
 
     def _gap_by_speed(self, ahead, ent):
         """The distance to `ahead` at `ent`'s speed: an estimate while `ahead`'s history
