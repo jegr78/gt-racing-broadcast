@@ -1585,6 +1585,13 @@ def t_the_desk_forgets_suspicions_when_the_status_fails():
         "a failed status poll leaves no stale Suspected DC marks"
 
 
+def t_the_desk_marks_no_car_from_an_event_before_the_race_reset():
+    fn = _console_src("driver-desk.js")
+    fn = fn[fn.index("function renderRecording(rec)"):]
+    assert 'if (ev.state === "suspected" && !ev.reset_at) {' in fn, \
+        "an old race's suspicion puts no Suspected DC on a car of the new race"
+
+
 def t_the_desk_swallows_a_refused_audio_resume():
     assert "audio.resume().catch(function () {})" in _console_src("driver-desk.js")
 

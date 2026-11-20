@@ -434,6 +434,9 @@ The relay records the live race for Race Control to review after the fact.
   a car in the box during the driver change window, none under a red flag, none for a car
   still waiting for its red flag restart and none for a car that took the flag.
   States: **suspected**, **dropout** (data came back), **confirmed** and **dismissed**.
+  A race reset ends every silence still open: its event stays in the list, marked
+  **Before the race reset**, and marks no car of the new race, also not as DC. The
+  recording itself continues.
   The director or Race Control confirms or dismisses an event on the desk; the decision
   is logged in `driver-race-audit.jsonl`. A desk can play a sound on a new suspicion
   (checkbox, per browser, off by default). The relay decides nothing about a rejoin;
