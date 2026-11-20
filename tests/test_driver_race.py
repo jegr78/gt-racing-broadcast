@@ -422,6 +422,7 @@ def t_the_fastest_lap_survives_a_relay_restart_and_carries_the_team():
     again.tick()
     fl = again.dashboard()["fastest"]
     assert fl == {"entry": "A", "driver": "Max A", "team": "Red Bulls", "ms": 61234}, fl
+    assert "by_class" not in dr._read_json(svc._fastest_path()), "one class: the file as before"
     svc.set_fastest("rc:Anna")
     voided, _c, _p = _dash_service(ctx, path)
     voided.tick()

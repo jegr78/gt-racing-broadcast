@@ -17,7 +17,8 @@ POINTER = "race-recording.json"
 _SAMPLE_COLUMNS = ["state", "red_flag"]
 _ROW_COLUMNS = ["pos", "entry", "driver", "laps", "gap_time_s", "interval_time_s", "lapped",
                 "status", "finished", "compound", "pit_stops", "correction_m", "rejoin",
-                "gt7_position", "position_mismatch", "class", "class_pos"]
+                "gt7_position", "position_mismatch"]
+_CLASS_COLUMNS = ["class", "class_pos"]
 CSV_HEADER = ["time_utc"] + _SAMPLE_COLUMNS + _ROW_COLUMNS
 SAMPLE_EVERY_S = 1.0
 COUNTING_STATES = ("racing", "final_lap", "finishing")
@@ -147,22 +148,29 @@ class Store:
         return None if row is None else row[0]
 
     def csv_rows(self):
-        """Header, then one row per (sample, entry), oldest sample first."""
-        yield list(CSV_HEADER)
+        """Header, then one row per (sample, entry), oldest sample first; the class
+        columns only when a sample was taken in class mode."""
         with self._lock:
             cur = self._conn.execute("SELECT t, doc FROM samples ORDER BY t")
             samples = cur.fetchall()
+        columns = _ROW_COLUMNS + (_CLASS_COLUMNS if any(_classed(raw) for _t, raw in samples) else [])
+        yield ["time_utc"] + _SAMPLE_COLUMNS + columns
         for t, raw in samples:
             stamp = datetime.datetime.fromtimestamp(t, datetime.timezone.utc)
             when = stamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             doc = json.loads(raw)
             head = [when, _cell(doc.get("state")), _red_flag_cell(doc.get("red_flag"))]
             for r in doc.get("rows") or []:
-                yield head + [_cell(r.get(c)) for c in _ROW_COLUMNS]
+                yield head + [_cell(r.get(c)) for c in columns]
 
     def close(self):
         with self._lock:
             self._conn.close()
+
+
+def _classed(raw):
+    rows = json.loads(raw).get("rows")
+    return any(isinstance(r, dict) and "class" in r for r in (rows if isinstance(rows, list) else ()))
 
 
 def _red_flag_cell(red):

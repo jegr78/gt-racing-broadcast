@@ -619,7 +619,8 @@ class Service:
             if fastest is None and not by_class:
                 os.remove(self._fastest_path())
             else:
-                _write_json(self._fastest_path(), dict(fastest or {}, track=track, by_class=by_class))
+                _write_json(self._fastest_path(), dict(fastest or {}, track=track,
+                                                       **({"by_class": by_class} if by_class else {})))
         except OSError:
             pass  # the race keeps it in memory; the next change writes it again
 
