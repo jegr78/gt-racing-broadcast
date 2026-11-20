@@ -1053,7 +1053,7 @@ def t_an_estimate_moves_a_quiet_car_with_its_reference():
     rd_ = _row(race, "D", t)
     assert abs(rd_["interval_time_s"] - (rd_["gap_time_s"] - rc["gap_time_s"])) < 0.02, \
         f"the car behind takes its interval from the gaps: {rd_}"
-    assert rc["estimate"] == {"ref": "B", "seconds": 1.0}, rc["estimate"]
+    assert rc["estimate"] == {"ref": "B", "seconds": 1.0, "ahead": False}, rc["estimate"]
 
 
 def t_an_estimate_ends_when_the_car_sends_again():
@@ -1223,7 +1223,7 @@ def t_an_estimate_places_a_car_that_never_sent():
     rb, rx = _row(race, "B", t), _row(race, "X", t)
     assert rx["status"] == "est" and abs(rx["distance_m"] - (rb["distance_m"] - 40)) < 3, (rb, rx)
     assert abs(rx["gap_s"] - (rb["gap_s"] + 1.0)) < 0.02 and abs(rx["interval_s"] - 1.0) < 0.02, rx
-    assert rx["estimate"] == {"ref": "B", "seconds": 1.0} and rx["quiet_s"] is None, rx
+    assert rx["estimate"] == {"ref": "B", "seconds": 1.0, "ahead": False} and rx["quiet_s"] is None, rx
     assert _order(race, t) == ["A", "B", "X"], _order(race, t)
 
 
@@ -1798,6 +1798,193 @@ def t_an_estimated_class_leader_behind_another_class_leads_its_class():
     assert rc["class_pos"] == 2 and abs(rc["class_gap_s"] - 2.0) < 0.05 \
         and abs(rc["class_interval_s"] - 2.0) < 0.05, rc
 
+
+def _quiet_a(seconds=1.0, **kw):
+    """A, B, C and D at 40 m/s, A one second ahead of B; A's sender stops and Race
+    Control puts it `seconds` ahead of B."""
+    race = rd.Race(TRACE, formation=False, **kw)
+    a, b, c, d = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90), ("D", 170)))
+    t = _drive(race, [a, b, c, d], [40, 40, 40, 40], 0.0, 5)
+    t = _drive(race, [b, c, d], [40, 40, 40], t, rd.NO_DATA_S + 1)
+    race.estimate("A", "B", seconds, t, ahead=True)
+    return race, (a, b, c, d), t
+
+
+def t_an_estimate_ahead_puts_a_quiet_leader_in_front_of_its_reference():
+    race, (a, b, c, d), t = _quiet_a()
+    t = _drive(race, [b, c, d], [40, 40, 40], t, 30)
+    snap = race.standings(t)
+    ra, rb, rc, rd_ = (_row(race, e, t) for e in "ABCD")
+    assert ra["status"] == "est" and abs(ra["distance_m"] - (rb["distance_m"] + 40)) < 3, \
+        f"A is where B will be in a second: {ra['distance_m']} vs {rb['distance_m']}"
+    assert [r["entry"] for r in snap["entries"]] == ["A", "B", "C", "D"], snap["entries"]
+    assert ra["gap_s"] == 0 and ra["gap_time_s"] == 0.0 and ra["interval_s"] is None, ra
+    assert abs(rb["gap_s"] - 1.0) < 0.02 and abs(rb["gap_time_s"] - 1.0) < 0.02, rb
+    assert abs(rb["interval_s"] - 1.0) < 0.02 and abs(rb["interval_time_s"] - 1.0) < 0.02, rb
+    assert abs(rc["gap_s"] - 2.0) < 0.05 and abs(rc["gap_time_s"] - 2.0) < 0.05, \
+        f"C's gap is its gap to B plus the seconds: {rc}"
+    assert abs(rd_["gap_time_s"] - 4.0) < 0.05 and abs(rd_["interval_time_s"] - 2.0) < 0.05, rd_
+    assert ra["estimate"] == {"ref": "B", "seconds": 1.0, "ahead": True}, ra["estimate"]
+    assert snap["lap"]["leader"] == math.floor(ra["distance_m"] / L) + 1, snap["lap"]
+
+
+def t_an_estimated_car_ahead_moves_on_the_map_ahead_of_its_reference():
+    race, (a, b, c, d), t = _quiet_a()
+    t = _drive(race, [b, c, d], [40, 40, 40], t, 30)
+    ra = _row(race, "A", t)
+    x, z = _pos(b.along + 40)
+    assert math.hypot(ra["x"] - x, ra["z"] - z) < 5, f"A's dot runs a second ahead of B: {(ra['x'], ra['z'])}"
+
+
+def t_an_estimate_ahead_adds_the_distance_the_reference_covered_in_the_seconds():
+    race, (a, b, c, d), t = _quiet_a(seconds=2.0)
+    t = _drive(race, [b, c, d], [60, 60, 60], t, 10)
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert abs(ra["distance_m"] - (rb["distance_m"] + 120)) < 3, \
+        f"two seconds of B's own recent pace: {ra['distance_m']} vs {rb['distance_m']}"
+
+
+def t_an_estimate_ahead_before_the_history_covers_the_seconds_uses_what_it_has():
+    race, _cars, t = _quiet_a()
+    race.clear_estimate("A")
+    race.estimate("A", "B", 3000.0, t, ahead=True)
+    ent = race._entries["B"]
+    first_t, first_d = ent.ts[0], ent.ds[0]
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert abs(ra["distance_m"] - (2 * rb["distance_m"] - first_d)) < 0.1, (ra, rb, first_d)
+    assert abs(rb["gap_time_s"] - (t - first_t)) < 0.02, f"B's gap is the time its history covers: {rb}"
+
+
+def t_an_estimate_ahead_of_zero_seconds_wins_the_tie():
+    race, (a, b, c, d), t = _quiet_a(seconds=0.0)
+    t = _drive(race, [b, c, d], [40, 40, 40], t, 2)
+    assert _order(race, t)[:2] == ["A", "B"], _order(race, t)
+
+
+def t_an_estimate_ahead_can_place_a_car_in_the_middle_of_the_field():
+    race, (a, b, c, d), t = _quiet_c()
+    race.clear_estimate("C")
+    race.estimate("C", "D", 1.0, t, ahead=True)
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 10)
+    rc, rd_ = _row(race, "C", t), _row(race, "D", t)
+    assert _order(race, t) == ["A", "B", "C", "D"], _order(race, t)
+    assert abs(rc["gap_s"] - (rd_["gap_s"] - 1.0)) < 0.02, (rc, rd_)
+    assert abs(rd_["interval_s"] - 1.0) < 0.02 and abs(rd_["interval_time_s"] - 1.0) < 0.02, rd_
+
+
+def t_an_estimate_ahead_holds_under_a_red_flag():
+    race, (a, b, c, d), t = _quiet_a()
+    t = _drive(race, [b, c, d], [40, 40, 40], t, 5)
+    race.red_flag(t, "keep")
+    held = _row(race, "A", t)["distance_m"]
+    t = _drive(race, [b, c, d], [40, 40, 40], t, 10)
+    assert _row(race, "A", t)["distance_m"] == held, "no movement under a red flag"
+    assert abs(race._entries["A"].frozen - held) < 0.5, "the restart anchor is the estimate"
+
+
+def _until_finished(race, cars, entry, t, limit):
+    end = t + limit
+    while not _row(race, entry, t)["finished"]:
+        assert t < end, f"{entry} never takes the flag: {race.standings(t)['entries']}"
+        t = _drive(race, cars, [40] * len(cars), t, 0.1)
+    return t
+
+
+def t_an_estimated_leader_never_blocks_the_flag():
+    race, (a, b, c, d), t = _quiet_a(finish_mode="laps", lap_count=2)
+    t = _until_finished(race, [b, c, d], "B", t, 2 * L / 40)
+    dist = _row(race, "B", t)["distance_m"]
+    assert 2 * L - rd.SNAP_M <= dist < 2 * L + 10, f"B takes the flag at its crossing of the count: {dist}"
+    t = _until_finished(race, [b, c, d], "D", t, 10)
+    rows = race.standings(t)["entries"]
+    assert [r["entry"] for r in rows] == ["A", "B", "C", "D"], f"A keeps its estimated place: {rows}"
+    assert not rows[0]["finished"] and rows[0]["status"] == "est", "the estimate takes no flag by itself"
+
+
+def t_an_estimated_leader_never_blocks_the_flag_in_the_final_lobby():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    race.final_lobby(2, 0.0)
+    a, b, c = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90)))
+    t = _drive(race, [a, b, c], [40, 40, 40], 0.0, 5)
+    t = _drive(race, [b, c], [40, 40], t, rd.NO_DATA_S + 1)
+    race.estimate("A", "B", 1.0, t, ahead=True)
+    assert race.standings(t)["lap"]["count"] == 2, "the header keeps the final lobby's count"
+    t = _until_finished(race, [b, c], "B", t, 2 * L / 40)
+    assert b.lap() == 3, f"B takes the flag past the lobby count: {b.lap()}"
+    t = _until_finished(race, [b, c], "C", t, 10)
+    assert _order(race, t) == ["A", "B", "C"], _order(race, t)
+
+
+def t_an_estimate_ahead_keeps_its_place_when_a_car_between_takes_the_flag():
+    race, (a, b, c, d), t = _quiet_c(finish_mode="laps", lap_count=2)
+    race.clear_estimate("C")
+    race.estimate("C", "D", 4.5, t, ahead=True)
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 1)
+    assert _order(race, t) == ["C", "A", "B", "D"], _order(race, t)
+    t = _until_finished(race, [a, b, d], "A", t, 2 * L / 40)
+    assert _order(race, t) == ["C", "A", "B", "D"], f"C stays ahead of A after A's flag: {_order(race, t)}"
+
+
+def t_an_estimate_ahead_places_a_never_seen_car_in_the_lead():
+    race, (a, b), t = _field()
+    race.estimate("X", "A", 1.0, t, ahead=True)
+    t = _drive(race, [a, b], [40, 40], t, 5)
+    snap = race.standings(t)
+    rx, ra, rb = (_row(race, e, t) for e in "XAB")
+    assert _order(race, t) == ["X", "A", "B"] and rx["status"] == "est", snap["entries"]
+    assert abs(ra["gap_s"] - 1.0) < 0.02 and abs(rb["gap_s"] - 2.0) < 0.05, (ra, rb)
+    assert snap["lap"]["leader"] is not None, f"the header reads the estimated leader's lap: {snap['lap']}"
+
+
+def t_a_never_seen_estimated_leader_keeps_the_final_lobby_header():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    race.set_roster(["A", "B", "X"])
+    race.final_lobby(3, 0.0)
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, 12)
+    race.estimate("X", "A", 1.0, t, ahead=True)
+    snap = race.standings(t)
+    assert _order(race, t)[0] == "X" and snap["lap"] == {"leader": a.lap(), "count": 3}, \
+        f"the header follows the final lobby's counter: {snap['lap']}"
+
+def t_an_estimated_leader_past_the_count_never_lifts_the_lap_header_past_it():
+    race, (a, b, c, d), t = _quiet_a(seconds=2.0, finish_mode="laps", lap_count=2)
+    seen = []
+    while not _row(race, "B", t)["finished"]:
+        t = _drive(race, [b, c, d], [40, 40, 40], t, 0.1)
+        snap = race.standings(t)
+        if snap["state"] == "racing" and _row(race, "A", t)["distance_m"] >= 2 * L:
+            seen.append(snap["lap"]["leader"])
+    assert seen and set(seen) == {2}, f"the header stays on the count before the flag: {sorted(set(seen))}"
+
+
+def t_an_estimated_class_leader_never_lifts_its_class_header_past_the_class_count():
+    race, (a, b, c, d), t = _quiet_c(finish_mode="laps", lap_count=5)
+    race.set_classes({"A": "H", "B": "H", "C": "G", "D": "G"})
+    race.set_class_laps({"G": 1})
+    race.clear_estimate("C")
+    race.estimate("C", "D", 2.0, t, ahead=True)
+    seen = set()
+    while _row(race, "D", t)["distance_m"] < L:
+        t = _drive(race, [a, b, d], [40, 40, 40], t, 0.5)
+        if _row(race, "C", t)["distance_m"] >= L:
+            seen.add(race.standings(t)["class_lap"]["G"])
+    assert seen == {1}, f"the class header stays on its count before the flag: {seen}"
+
+
+def t_an_estimated_leader_ahead_of_a_lapped_reference_still_sets_every_gap():
+    race = rd.Race(TRACE, formation=False)
+    a, b, c, d = (Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90), ("D", 170)))
+    t = _drive(race, [a, b, c, d], [40, 40, 40, 40], 0.0, 120)
+    t = _drive(race, [b, c, d], [40, 40, 40], t, rd.NO_DATA_S + 1)
+    race.correct("D", -L)                                   # D a lap down: its gap_s is empty
+    race.estimate("A", "D", 82.5, t, ahead=True)
+    t = _drive(race, [b, c, d], [40, 40, 40], t, 5)
+    rb, rc, rd_ = (_row(race, e, t) for e in "BCD")
+    assert _order(race, t) == ["A", "B", "C", "D"] and rd_["gap_s"] is None, (_order(race, t), rd_)
+    assert abs(rb["gap_s"] - 0.97) < 0.1 and abs(rc["gap_s"] - 1.97) < 0.1, \
+        f"the gaps count from the estimated leader, not from B: {rb['gap_s']} {rc['gap_s']}"
+    assert abs(rb["gap_time_s"] - 0.97) < 0.1, rb
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

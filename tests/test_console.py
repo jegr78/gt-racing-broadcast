@@ -414,6 +414,24 @@ def t_the_desk_offers_a_lap_count_per_slower_class():
         f"one input per named class after the first, which runs on the Schedule laps, none for the unclassed: {got}"
 
 
+def t_the_desk_estimates_a_quiet_car_behind_or_ahead_of_its_reference():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    assert 'opt("behind", "behind"' in desk and 'opt("ahead", "ahead of"' in desk, \
+        "the estimate row offers behind (the default) and ahead of"
+    assert '"/drivers/race/estimate", estimateBody(' in desk, "the row posts the direction it shows"
+    got = _desk_fn("estimateBody,estimateText",
+                   '[estimateBody("A", "B", 1.5, "behind"), estimateBody("A", "B", 2, "ahead"), '
+                   'estimateText({ref: "B", seconds: 1.5, ahead: false}), '
+                   'estimateText({ref: "B", seconds: 2, ahead: true})]')
+    if got is None:
+        return
+    assert got == [{"entry": "A", "ref": "B", "seconds": 1.5, "ahead": False},
+                   {"entry": "A", "ref": "B", "seconds": 2, "ahead": True},
+                   "1.5 s behind B", "2 s ahead of B"], \
+        f"the route gets an explicit direction and the desk names it: {got}"
+
+
 DESK_RACE = {"entries": [{"entry": "A", "class": "GT3", "class_pos": 1}, {"entry": "B", "class": "GT4", "class_pos": 1},
                          {"entry": "C", "class": "GT3", "class_pos": 2}, {"entry": "D", "class": "", "class_pos": 1}],
              "classes": ["GT3", "GT4", ""], "class_lap": {"GT3": 7, "GT4": 6, "": 6},

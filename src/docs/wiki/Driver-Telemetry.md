@@ -397,19 +397,28 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   its deficit.
 - **Corrections** add or remove metres and pit stops per entry, always with a reason.
   A **change override** makes a team's other sender the active one at once.
-- **Estimate** keeps a car without data in the order: pick the quiet entry, the car it
-  runs behind and the seconds, then **Set estimate**. While the car stays quiet it
-  shows where the reference car was that many seconds ago (right after the start, before
-  the reference has driven that long, it waits at the reference's first known distance,
-  just behind it on the grid), its gap is the reference's
-  gap plus the seconds, and every screen marks it **EST** (desks, tower, cockpit,
-  public timing page, the recording and its CSV). On the track map its dot moves with
-  the reference, set back by the gap, inside a dashed amber ring. The reference must send data. Set it
+- **Estimate** keeps a car without data in the order: pick the quiet entry, **behind**
+  or **ahead of**, the reference car and the seconds, then **Set estimate**. Behind is
+  the default. While the car stays quiet, behind shows it where the reference car was
+  that many seconds ago (right after the start, before the reference has driven that
+  long, it waits at the reference's first known distance, just behind it on the grid),
+  and its gap is the reference's gap plus the seconds. Ahead of places it in front by
+  the distance the reference covered in the last that many seconds, at the reference's
+  own recent pace (right after the start it adds what the reference covered so far),
+  and the reference's gap is the car's gap plus the seconds. Use ahead of for a quiet
+  leader, which has no car in front of it: as the leader every other car's gap is to
+  it, so the reference reads the seconds and every other car its gap to the reference
+  plus the seconds. Every screen marks the car **EST** (desks, tower, cockpit, public
+  timing page, the recording and its CSV). On the track map its dot moves with the
+  reference, moved back or forward by the gap, inside a dashed amber ring. The
+  reference must send data. Set it
   again to change it, **Clear estimate** removes it, and the estimate ends by itself
   when the car sends data again; the car then continues from its real distance. An
   estimate set on a car that still sends data waits until it goes quiet. It holds still
   under a red flag (the restart anchor is the estimated distance) and after the car or
-  its reference took the flag, and an estimated car never takes the flag by itself.
+  its reference took the flag. An estimated car never takes the flag by itself and
+  never holds it back: with an estimated car in the lead, the first real car past the
+  count takes the flag, and the estimated car keeps its place in the classification.
   Estimates are not saved: a relay restart drops them.
 
 Corrections, rejoin marks and retirements survive a relay restart; a race reset and

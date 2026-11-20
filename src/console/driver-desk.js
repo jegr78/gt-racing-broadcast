@@ -137,6 +137,13 @@
   function lappedText(laps, time) {
     return "+" + laps + "\u00a0L" + (typeof time === "number" ? "\u00a0\u00b7\u00a0" + secs(time) : "");
   }
+  // The estimate route's body; `side` is the row's "behind" or "ahead" choice.
+  function estimateBody(entry, ref, seconds, side) {
+    return {entry: entry, ref: ref, seconds: seconds, ahead: side === "ahead"};
+  }
+  function estimateText(est) {
+    return est.seconds + " s " + (est.ahead ? "ahead of " : "behind ") + est.ref;
+  }
   // A race row's exact interval, also for a car a lap behind the car ahead.
   function intervalTime(e, grouped) { return grouped ? e.class_interval_time_s : e.interval_time_s; }
   // A race row's Gap cell; grouped rows read laps down within the class.
@@ -461,13 +468,15 @@
       if (d) { corrM.value = ""; corrPit.value = ""; corrWhy.value = ""; }
     });
     var estEntry = el("select", {"aria-label": "Quiet entry to estimate"});
+    var estSide = el("select", {"aria-label": "Behind or ahead of the reference"},
+                     [opt("behind", "behind", true), opt("ahead", "ahead of")]);
     var estRef = el("select", {"aria-label": "Reference entry"});
     var estSec = el("input", {type: "number", min: "0", step: "0.1", placeholder: "seconds",
-                              "aria-label": "Seconds behind the reference"});
+                              "aria-label": "Seconds from the reference"});
     var estSet = button("Set estimate", "", null, async function () {
       var n = parseFloat(estSec.value);
-      if (!isFinite(n) || n < 0) return say("Seconds behind as a number, 0 or more", true);
-      var d = await act("/drivers/race/estimate", {entry: estEntry.value, ref: estRef.value, seconds: n},
+      if (!isFinite(n) || n < 0) return say("Seconds as a number, 0 or more", true);
+      var d = await act("/drivers/race/estimate", estimateBody(estEntry.value, estRef.value, n, estSide.value),
                         "Estimate set");
       if (d) estSec.value = "";
     });
@@ -643,8 +652,8 @@
       el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
       recWarn, raceNote, raceTable,
       el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry,
-                               el("span", {cls: "muted", text: "behind"}), estRef, estSec, estSet, estClear]),
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry, estSide, estRef, estSec,
+                               estSet, estClear]),
       estList,
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Retire"}), retEntry, retOn, retOff]),
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Driver name"}), nameEntry, nameDriver, nameText,
@@ -726,7 +735,7 @@
       }).join(", ") : "";
       var est = (r.entries || []).filter(function (e) { return e.estimate; });
       estList.textContent = est.length ? "Estimated: " + est.map(function (e) {
-        return e.entry + " " + e.estimate.seconds + " s behind " + e.estimate.ref +
+        return e.entry + " " + estimateText(e.estimate) +
           (e.status === "est" ? "" : " (waiting for its data to stop)");
       }).join(", ") : "";
       renderClassLaps(r);
@@ -736,7 +745,7 @@
         var st = STATUS[e.status] || [e.status, ""];
         var stPill = {cls: "pill " + st[1], text: st[0]};
         if (e.status === "est" && e.estimate) {
-          stPill.title = "Estimated " + e.estimate.seconds + " s behind " + e.estimate.ref + " until its data returns";
+          stPill.title = "Estimated " + estimateText(e.estimate) + " until its data returns";
         }
         var gap = gapCell(e, grouped, i, k);
         var cells = [el("td", grouped ? {cls: "num", text: String(e.class_pos), title: "P" + (i + 1) + " overall"}
