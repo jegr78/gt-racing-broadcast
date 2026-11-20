@@ -82,10 +82,17 @@ def t_two_classes_group_under_coloured_headers():
     gap = lambda i: (got[i]["cells"][3], got[i]["cells"][4])
     assert gap(1) == ("", ""), "class leader reads like the overall leader: %r" % (gap(1),)
     assert gap(2) == ("4.5", "4.5"), "class gap, not the overall 99.0: %r" % (gap(2),)
-    assert gap(3) == ("+2\u00a0L\u00a0\u00b7 2:38.2", "2:33.7"), \
+    assert gap(3) == ("+2\u00a0L\u00a0\u00b7\u00a02:38.2", "2:33.7"), \
         "lapped in the class reads +n L, the class time and the exact class interval: %r" % (gap(3),)
     assert gap(5) == ("", ""), gap(5)
     assert "|C|" in got[2]["cells"][1], "C is GT3's second car"
+
+
+def t_the_lapped_gap_cell_stays_on_one_line():
+    with open(PAGE, encoding="utf-8") as f:
+        page = f.read()
+    assert "td.num { font-family: var(--mono); font-size: 13px; text-align: right; white-space: nowrap; }" in page, \
+        "the gap cell never wraps between +1 L, the dot and the time"
 
 
 def t_one_class_or_none_stays_flat():

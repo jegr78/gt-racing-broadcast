@@ -32,7 +32,6 @@
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
     ".dd td.num{font-family:var(--mono,ui-monospace,monospace);text-align:right;white-space:nowrap}",
     ".dd .tbl{overflow-x:auto}",
-    ".dd td.num.lap{white-space:normal}",
     ".dd .race th,.dd .race td{padding:4px}.dd .race .pills{display:flex;flex-wrap:wrap;gap:3px}",
     ".dd .pill{display:inline-block;white-space:nowrap;border-radius:9px;padding:1px 7px;font-size:11px;border:1px solid var(--edge,#2a2f37)}",
     ".dd .pill.ok{border-color:#3ecf6e;color:#3ecf6e}",
@@ -136,7 +135,7 @@
   // "+N L" and the exact time when there is one; no-break spaces let a narrow desk wrap
   // only between the lap count and the time.
   function lappedText(laps, time) {
-    return "+" + laps + "\u00a0L" + (typeof time === "number" ? "\u00a0\u00b7 " + secs(time) : "");
+    return "+" + laps + "\u00a0L" + (typeof time === "number" ? "\u00a0\u00b7\u00a0" + secs(time) : "");
   }
   // A race row's exact interval, also for a car a lap behind the car ahead.
   function intervalTime(e, grouped) { return grouped ? e.class_interval_time_s : e.interval_time_s; }

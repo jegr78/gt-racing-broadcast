@@ -898,10 +898,17 @@ class Race:
         """(laps behind, seconds behind) of `ent` relative to `ahead`."""
         if ahead.distance is None or ent.distance is None:
             return None, None
-        laps = math.floor((self._shown(ahead) - self._shown(ent)) / self.length)
+        laps = self._laps_behind(ahead, ent)
         if laps >= 1:
             return laps, None
         return 0, self._time_behind(ahead, ent)
+
+    def _laps_behind(self, ahead, ent):
+        """Whole laps `ent` is behind `ahead`; for a car that took the flag the laps the
+        order counts, since a frozen finish distance overshoots the line by chance."""
+        if ent.finished_at is not None and self._finishing_at is not None:
+            return max(0, self._ranked_laps(ahead) - self._ranked_laps(ent))
+        return math.floor((self._shown(ahead) - self._shown(ent)) / self.length)
 
     def _time_behind(self, ahead, ent, now=None):
         """Seconds `ent` is behind `ahead` by distance history, also when lapped; None
@@ -1074,7 +1081,7 @@ class Race:
             if self._estimated(e):
                 est = self._est[e.entry]
                 ref = by_entry.get(est["ref"]) or {}
-                lapped = math.floor((lead - est["held"]) / self.length) if i and lead is not None else 0
+                lapped = self._laps_behind(ents[0], e) if i and lead is not None else 0
                 gap = None if lapped or ref.get("gap_s") is None else ref["gap_s"] + est["lag"]
                 gap_time = None if ref.get("gap_time_s") is None else ref["gap_time_s"] + est["lag"]
                 row.update(lapped=max(0, lapped), gap_s=None if gap is None else round(gap, 2),
@@ -1143,10 +1150,9 @@ class Race:
     def _class_gap_from_rows(self, lead_row, row, lead, e):
         """(laps, seconds) of `e` behind its class leader from their overall rows: the
         rule for estimated cars, whose own history is stale."""
-        a, b = self._shown(lead), self._shown(e)
-        if a is None or b is None:
+        if self._shown(lead) is None or self._shown(e) is None:
             return None, None
-        laps = math.floor((a - b) / self.length)
+        laps = self._laps_behind(lead, e)
         if laps >= 1:
             return laps, None
         return 0, self._row_time_gap(lead_row, row)
