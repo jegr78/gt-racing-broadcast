@@ -20,6 +20,9 @@ nearest the predicted distance decides.
   rejoins it (#1113).
 - Box: a car standing (below BOX_SPEED_MPS) more than BOX_LATERAL_M off the line for
   BOX_HOLD_S. Not confirmed by a recording yet (#1110 measures pit stops).
+- Pit stops: every box stop the active counting car drives out of, plus one per stint
+  switch for a team's takeover in the next lobby (a change, a driver staying on, a
+  rejoin, or an override after a switch), at most one per team and switch.
 - Driver change (multi-lobby only): inside the change window the active car
   standing in the box sets the team's anchor; another connection of the team that
   then leaves the box continues from it. A driver who stays on for the next stint keeps
@@ -177,6 +180,7 @@ class _Entry:
         self.adjust = 0.0          # corrections in metres
         self.pit_adjust = 0
         self.pit_stops = 0
+        self.switch_pit = False    # a pit stop already counted since the latest stint switch
         self.finished_at = None
         self.last_lap_ms = None
         self.stint_laps = 0        # race laps since the active car began counting
@@ -209,6 +213,7 @@ class Race:
         self.lap_count = lap_count
         self._cars, self._entries = {}, {}
         self._window_until = None
+        self._switched = False      # endurance: a stint switch opened a change window
         self._final_at = None       # endurance: when the final stint lobby went on air
         self._final_lap_at = None
         self._finishing_at = None
@@ -303,10 +308,10 @@ class Race:
 
     def open_change_window(self, now):
         if self.multi_lobby:
-            self._window_until = now + CHANGE_WINDOW_S
+            self._window_until, self._switched = now + CHANGE_WINDOW_S, True
             self._lobby_at = now
             for ent in self._entries.values():
-                ent.changed, ent.stint_end = False, None
+                ent.changed, ent.stint_end, ent.switch_pit = False, None, False
 
     def red_flag(self, now, mode):
         """Freeze every entry; each continues from its anchor in the restart lobby."""
@@ -475,6 +480,9 @@ class Race:
         if old is not None and old is not car:
             old.counting = False
         ent.active = conn
+        if self._switched and not ent.switch_pit:
+            ent.pit_stops += 1                    # a missed driver change at a stint switch
+            ent.switch_pit = True
         ent.changed, ent.change_anchor, ent.held, ent.relobby = True, None, False, False
         ent.stint_end = ent.distance + ent.adjust
         return True
@@ -704,6 +712,8 @@ class Race:
         self._box(car, t)
         if active and car.left_box and car.counting:
             ent.pit_stops += 1
+            if self._window_until is not None and t <= self._window_until:
+                ent.switch_pit = True
         if self._out(ent):
             return
         if ent.waiting:
@@ -845,6 +855,11 @@ class Race:
                     and not self._estimated(e)), default=None)
 
     def _changed(self, ent, t):
+        """The team took over in the next lobby: one pit stop per stint switch, unless
+        one was already counted since the switch."""
+        if not ent.switch_pit:
+            ent.pit_stops += 1
+            ent.switch_pit = True
         ent.stint_end = ent.distance + ent.adjust
         ent.change_anchor, ent.changed, ent.held, ent.relobby = None, True, False, False
         ent.ts.append(t)

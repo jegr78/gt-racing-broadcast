@@ -280,7 +280,7 @@ def t_endurance_change_continues_from_the_old_cars_anchor():
     t = _drive(race, [new, rival], [40, 50], t, 10)
     row = _row(race, "A", t)
     assert row["driver"] == "Lea" and abs(row["distance_m"] - (anchor + 400)) < 25, (row, anchor)
-    assert row["pit_stops"] == 0, "a driver change is no pit stop"
+    assert row["pit_stops"] == 1, f"the driver change at a stint switch is a pit stop: {row}"
 
 
 def t_a_driver_staying_on_continues_into_the_next_lobby():
@@ -297,6 +297,159 @@ def t_a_driver_staying_on_continues_into_the_next_lobby():
     t = _drive(race, [car, rival], [40, 50], t, 10)
     row = _row(race, "A", t)
     assert row["driver"] == "Max" and abs(row["distance_m"] - (anchor + 400)) < 25, (row, anchor)
+
+
+def _switch_and_box(race, cars, t):
+    """A stint switch, then every car in `cars` stands in its box of the old lobby."""
+    race.open_change_window(t)
+    for car in cars:
+        car.box = True
+    return _drive(race, cars, [None] * len(cars), t, 3)
+
+
+def _take_over(race, car, others, speeds, t):
+    """`car` starts lap 1 of the next lobby, stops in its box and leaves it."""
+    car.box = True
+    t = _drive(race, [car] + others, [None] + speeds, t, 3)
+    car.box = False
+    return _drive(race, [car] + others, [40] + speeds, t, 5)
+
+
+def t_a_driver_staying_on_counts_one_pit_stop():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    car, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [car, rival], [50, 50], 0.0, 60)
+    t = _switch_and_box(race, [car], t)
+    car.along = -5.0                                  # the next lobby: same console, counter 0
+    t = _take_over(race, car, [rival], [50], t)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Max" and row["pit_stops"] == 1, \
+        f"staying on through a stint switch is one pit stop: {row}"
+
+
+def t_a_rejoined_team_counts_one_pit_stop():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    lead, gone = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 115, "Ann")
+    t = _drive(race, [lead, gone], [50, 50], 0.0, 30)
+    t = _drive(race, [lead], [50], t, 30)                               # B disconnected
+    race.rejoin("B", True)
+    t = _switch_and_box(race, [lead], t)
+    nxt, back = Car(race, "A", "a2", L - 15, "Lea"), Car(race, "B", "b2", L - 15, "Ben")
+    t = _drive(race, [nxt, back], [40, 40], t, 2)
+    nxt.box = back.box = True
+    t = _drive(race, [nxt, back], [None, None], t, 3)
+    nxt.box = back.box = False
+    t = _drive(race, [nxt, back], [40, 40], t, 5)
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert rb["driver"] == "Ben" and rb["pit_stops"] == 1, f"a rejoin is one pit stop: {rb}"
+    assert ra["driver"] == "Lea" and ra["pit_stops"] == 1, f"a takeover is one pit stop: {ra}"
+
+
+def t_two_stint_switches_count_two_pit_stops():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    car, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [car, rival], [50, 50], 0.0, 60)
+    for n, conn in enumerate(("a2", "a3"), start=1):
+        t = _switch_and_box(race, [car], t)
+        car = Car(race, "A", conn, L - 15, "Driver " + conn)
+        t = _drive(race, [car, rival], [40, 50], t, 2)
+        t = _take_over(race, car, [rival], [50], t)
+        t = _drive(race, [car, rival], [50, 50], t, 60)
+        row = _row(race, "A", t)
+        assert row["driver"] == "Driver " + conn and row["pit_stops"] == n, (n, row)
+
+
+def t_a_restart_lobby_after_a_stint_switch_adds_no_pit_stop():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old = Car(race, "A", "a1", L - 15, "Max")
+    rivals = [Car(race, e, e.lower() + "1", L - 10 - 20 * i, "Old" + e) for i, e in enumerate("BC")]
+    t = _drive(race, [old] + rivals, [50] * 3, 0.0, 60)
+    t = _switch_and_box(race, [old], t)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [new] + rivals, [40, 50, 50], t, 2)
+    t = _take_over(race, new, rivals, [50, 50], t)
+    race.red_flag(t, "keep")
+    cars = []
+    for i, e in enumerate("ABC"):
+        car = Car(race, e, e.lower() + "3", 0.0, "Restart " + e)
+        _new_lobby(car, L - 300 - 20 * i)
+        cars.append(car)
+    t = _drive(race, cars, [None] * 3, t, 3)
+    for car in cars:
+        car.box = False
+    t = _drive(race, cars, [40] * 3, t, 5)
+    rows = {e: _row(race, e, t) for e in "ABC"}
+    assert all(r["driver"] == "Restart " + e for e, r in rows.items()), rows
+    assert [rows[e]["pit_stops"] for e in "ABC"] == [1, 0, 0], \
+        f"only the driver change counts, not the restart lobby's box exit: {rows}"
+
+def t_a_single_lobby_box_exit_counts_once():
+    race = rd.Race(TRACE, formation=False)
+    car = Car(race, "A", "a1", L - 15, "Max")
+    t = _drive(race, [car], [50], 0.0, 30)
+    race.open_change_window(t)
+    t = _take_over(race, car, [], [], t)
+    assert _row(race, "A", t)["pit_stops"] == 1, "a single lobby counts the plain box stop only"
+
+
+def t_a_box_exit_that_is_also_a_rejoin_counts_once():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    lead, late = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 115, "Ann")
+    t = _drive(race, [lead, late], [50, 50], 0.0, 20)                   # both still on lap 1
+    race.rejoin("B", True)
+    race.open_change_window(t)
+    t = _take_over(race, late, [lead], [50], t)
+    row = _row(race, "B", t)
+    assert race.take_used_rejoins() == ["B"], "the box exit took the rejoin"
+    assert row["pit_stops"] == 1, f"the counting car's box exit and its rejoin are one stop: {row}"
+
+
+def t_a_change_override_at_a_stint_switch_counts_one_pit_stop():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 60)
+    t = _switch_and_box(race, [old], t)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [new, rival], [40, 50], t, 25)                     # crosses without a box stop
+    assert race.override_change("A", "a2", t)
+    assert race.override_change("A", "a2", t), "a second override of the same change"
+    t = _drive(race, [new, rival], [40, 50], t, 2)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Lea" and row["pit_stops"] == 1, \
+        f"an override for a missed change at a switch counts once: {row}"
+    race.rejoin("A", True)                                              # marked by mistake
+    late = Car(race, "A", "a4", L - 15, "Kai")
+    t = _drive(race, [late, rival], [40, 50], t, 2)
+    t = _take_over(race, late, [rival], [50], t)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Kai" and row["pit_stops"] == 1, \
+        f"a rejoin after the override in the same window adds nothing: {row}"
+    t = _drive(race, [late, rival], [50, 50], t, 30)
+    t = _switch_and_box(race, [late], t)
+    nxt = Car(race, "A", "a3", L - 15, "Ben")
+    t = _drive(race, [nxt, rival], [40, 50], t, 2)
+    t = _take_over(race, nxt, [rival], [50], t)
+    assert _row(race, "A", t)["driver"] == "Ben", "the automatic change happened first"
+    assert race.override_change("A", "a3", t)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Ben" and row["pit_stops"] == 2, \
+        f"an override after the automatic change adds nothing: {row}"
+
+
+def t_a_box_stop_in_the_window_and_a_later_override_count_one_pit_stop():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 10, "Ann")
+    t = _drive(race, [old, rival], [50, 50], 0.0, 60)
+    t = _switch_and_box(race, [old], t)
+    old.box = False
+    t = _drive(race, [old, rival], [40, 50], t, 5)                      # drives on: a plain stop
+    assert _row(race, "A", t)["pit_stops"] == 1, _row(race, "A", t)
+    new = Car(race, "A", "a2", L - 15, "Lea")
+    t = _drive(race, [old, new, rival], [50, 40, 50], t, 25)
+    assert race.override_change("A", "a2", t)
+    row = _row(race, "A", t)
+    assert row["driver"] == "Lea" and row["pit_stops"] == 1, \
+        f"one stint switch is at most one pit stop: {row}"
 
 
 def t_a_box_stop_outside_the_change_window_changes_nobody():
@@ -823,6 +976,7 @@ def t_a_change_override_switches_the_team_now():
     row = _row(race, "A", t)
     assert row["driver"] == "Lea" and abs(row["distance_m"] - (before + 200)) < 25, (row, before)
     assert not race.override_change("A", "nobody", t), "only a connection of the team"
+    assert row["pit_stops"] == 0, f"an override without a stint switch is no pit stop: {row}"
 
 
 def t_a_change_override_without_a_known_line_changes_nothing():

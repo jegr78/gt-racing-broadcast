@@ -175,7 +175,13 @@ and says so. Changing the layout mid-event starts the race over.
   event, ends its estimate and cannot be an estimate's reference; an estimate that
   followed it ends too, so Race Control attaches that car to another one. **Undo DNF** takes
   back a mis-press: the car counts on from its last distance.
-- **Pit stops** count every box stop the car drives out of. The count is an estimate:
+- **Pit stops** count every box stop the car drives out of. In an endurance race the
+  driver change at a stint switch counts as one pit stop too: the team's car that
+  leaves the next lobby's box and takes over adds one, whether a new driver takes
+  over, the driver stays on or the team rejoins. A **change override** after a stint
+  switch counts that team's driver change once. A team counts at most one pit stop
+  per stint switch, a box stop inside the change window included. The box exit of
+  a restart lobby after a red flag adds none. The count is an estimate:
   the relay sees a stop as standing off the racing line, so a car beached beside the
   track or stopped there under a red flag counts as a pit stop too. The desks' `Pits`
   column says so on hover; correct a wrong count with the pit stop correction.
