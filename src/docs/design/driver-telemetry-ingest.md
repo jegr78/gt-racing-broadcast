@@ -34,7 +34,18 @@ endurance; `segments` then lists the stint and qualifying labels of the `Schedul
 
 `POST /console/drive/register?i=<invite>` with
 `{"entry": "...", "segment": "...", "name": "..."}` returns `{"ok": true, "v": 1,
-"code": "D1:..."}`. The name takes up to 24 ASCII letters, digits, spaces, `_ . -`,
+"pending": true, "code": "D1:..."}`. The registration is a request, and the ingest
+refuses the code until Race Control or the director approves it, as Approval below
+describes. Behind Funnel the client is the last `X-Forwarded-For` address the local
+proxy appends; from any other peer the relay ignores that header. An IPv6 client counts
+by its /64. Registration answers 429 beyond 30 registrations a minute per client. At 200
+waiting requests a new one drops the oldest waiting request of the client holding the
+most (on a tie the oldest of them), so a newcomer always lands. A client keeps at most three waiting requests per entry
+and stint and eight in all; a further registration drops that client's own oldest
+waiting request, never another client's. The ingest answers that code 410; the relay
+remembers the last 500 dropped codes of the invite. Two requests with
+the same entry, stint and name from different clients both wait, and the desks mark
+them as duplicates. The desks never see the client address. The name takes up to 24 ASCII letters, digits, spaces, `_ . -`,
 because it ends up in a command line (PSN Online IDs have at most 16); codes issued
 under the earlier 32 character rule stay valid. While the entry already has its live senders,
 registration answers 409 and the invite page shows the reason. `GET /console/drive/sender.py?i=<invite>`
@@ -63,11 +74,39 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 | Status | Meaning | Client action |
 |---|---|---|
 | 400 | malformed batch | drop that batch |
-| 403 | invalid or revoked code | register again (the sender script retries once a minute and tells the driver) |
+| 403 | invalid, revoked or rejected code | register again (the sender script retries once a minute and tells the driver) |
 | 409 | the entry already has its live senders | retry rarely; the producer can disconnect the other one |
-| 410 | the producer disconnected this sender | register again |
+| 410 | the producer disconnected this sender, or a cap dropped this waiting registration | register again and use the new code; the sender script says so once and stops |
+| 423 | the registration waits for approval, the body carries `"pending": true` | keep the code, tell the driver it waits, retry every few seconds, the sender script every 10 s |
 | 413 | body too large | send smaller batches |
 | 429 | too many failed attempts or senders | retry after a minute |
+
+## Approval
+
+Every registration lands as a pending request in `runtime/<profile>/driver-requests.json`,
+bound to the invite. A new invite starts with none, a relay restart keeps them and
+`racecast event stop` deletes the file. The
+ingest answers 423 for a pending request, 403 for a rejected one and for a code without a
+request, and only an approved request reaches the hub, so nothing of an unapproved code
+reaches the race, the recording, the dashboard or the public timing. An approval may
+correct the entry, the stint and the name. The relay then uses the corrected values in
+place of the ones signed into the code. These routes are on the tailnet, for directors
+also under `/console/drivers/*` and for Race Control under
+`/console/race-control/drivers/*`. `GET /drivers/requests` returns `{multi_lobby, entries, segments, requests: [{conn,
+entry, segment, name, status, ts, registered {entry, segment, name}, who, decided}]}`;
+`POST /drivers/requests/approve` and `/correct` take `{conn, entry?, segment?, name?}`,
+where a missing field keeps the request's value, and `/reject` takes `{conn}`. They answer
+`{ok, request}`, 400 for a value outside the roster, the stint labels or the name rule,
+404 for an unknown request and 409 when the status does not allow the decision. Only a
+pending request is approved, only an approved one corrected, and a rejection is final.
+`POST /drivers/requests/reject-pending` rejects every waiting request and answers `{ok,
+rejected}` with their count; if requests keep coming, renew the invite. A rejection
+stops new data and leaves what the code sent before in the race and the recording;
+`/drivers/reassign` and `/drivers/race/change` answer 409 for a rejected connection.
+A decision answers 404 when the invite was renewed meanwhile and 500 when the file
+could not be written, which leaves the request as it was. Each decision appends `driver_approve`, `driver_correct`,
+`driver_reject` or `driver_reject_pending` with `who` to `driver-race-audit.jsonl`, the
+single decisions with the new values and `before`.
 
 ## Limits
 
@@ -126,4 +165,6 @@ and `position_mismatch` (single lobby: GT7's position contradicts the distance o
 ## Versioning
 
 `v` in every reply is the contract version. A change that an existing client cannot
-follow raises it; the relay then states which versions it accepts.
+follow raises it, and the relay then states which versions it accepts. The approval
+stayed in v1. A client that does not know 423 treats it as a failed post and keeps
+retrying, which is what a waiting client has to do.

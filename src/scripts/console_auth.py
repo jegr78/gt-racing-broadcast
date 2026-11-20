@@ -104,15 +104,21 @@ class RateLimiter:
     """Fixed-window per-key counter (auth failures, chat sends). Time-injectable
     so tests are deterministic. Best-effort, in-process only."""
 
-    def __init__(self, limit, window_s):
+    def __init__(self, limit, window_s, max_keys=10000):
         self.limit = limit
         self.window_s = window_s
+        self.max_keys = max_keys
         self._hits = {}                    # key -> (window_start, count)
         self._lock = threading.Lock()      # ThreadingHTTPServer = one thread/request
 
     def allow(self, key, now=None):
         now = time.time() if now is None else now
         with self._lock:                   # read-modify-write must be atomic
+            if key not in self._hits and len(self._hits) >= self.max_keys:
+                for k in [k for k, (s, _c) in self._hits.items() if now - s >= self.window_s]:
+                    del self._hits[k]
+                while len(self._hits) >= self.max_keys:
+                    del self._hits[next(iter(self._hits))]   # the oldest key, so the map stays bounded
             start, count = self._hits.get(key, (now, 0))
             if now - start >= self.window_s:
                 start, count = now, 0

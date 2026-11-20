@@ -636,6 +636,8 @@ class Race:
         t, lap, speed, x, z = checked
         self._prune(t, conn)
         car = self._cars.get(conn)
+        if car is not None:
+            car.name = name                       # an approval may correct it, whatever the sample's time
         if car is not None and car.t is not None and t <= car.t:
             return                                # not newer than what this car already sent
         if car is not None and car.entry != entry:

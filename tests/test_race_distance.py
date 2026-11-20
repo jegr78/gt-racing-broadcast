@@ -427,6 +427,16 @@ def t_an_implausible_step_keeps_the_entry_live():
     assert row["distance_m"] == d and row["status"] == "racing", row
 
 
+def t_a_corrected_name_applies_even_with_a_sample_of_the_same_time():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    t = _drive(race, [a], [50], 0.0, 3)
+    x, z = _pos(a.along)
+    race.update("A", "a", "Corrected", {"t": t, "lap": 1, "x": x, "z": z, "speed_kmh": 180.0})
+    assert _row(race, "A", t)["driver"] == "Corrected", \
+        "the name is the registration's, not the sample's: a coarse clock repeats a time"
+
+
 def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
