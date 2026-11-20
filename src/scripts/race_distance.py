@@ -51,7 +51,8 @@ nearest the predicted distance decides.
   a car still in its old session counts on from where it is, one in a restart lobby
   still resumes at its box exit.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
-  window starts from the leader's distance when the window opened.
+  window starts from the leader's distance where its old lobby's car stopped (where
+  the leader is, while it still runs).
 - Lap times (#1115): the relay times every lap of the active car between two steps
   of GT7's counter. A lap counts only when the car counted for all of it (not the
   formation lap, not lap 1 of a follow-up lobby, not a lap with a start, red flag,
@@ -160,6 +161,7 @@ class _Entry:
         self.ts, self.ds = [], []
         self.cts, self.cds = array("d"), array("d")
         self.change_anchor = None
+        self.stint_end = None      # change window: the shown distance where its old car stopped
         self.changed = False
         self.held = False          # endurance: the counter dropped, waiting for a rejoin
         self.relobby = False       # endurance: the same driver moved on to the next lobby
@@ -216,7 +218,6 @@ class Race:
         self.fastest_by_class = {}  # class name -> {entry, driver, ms}
         self._classes = {}          # entry -> class name
         self._class_laps = {}       # class name -> the lap count Race Control set
-        self._window_leader = None  # the leader's distance when the change window opened
         self._est = {}              # entry -> {ref, seconds, ahead, held, lag, on}
         self._roster = []           # the Configuration entries, in order
         self._retired = set()
@@ -290,10 +291,8 @@ class Race:
     def open_change_window(self, now):
         if self.multi_lobby:
             self._window_until = now + CHANGE_WINDOW_S
-            self._window_leader = max((self._shown(e) for e in self._entries.values()
-                                       if e.distance is not None and not self._out(e)), default=None)
             for ent in self._entries.values():
-                ent.changed = False
+                ent.changed, ent.stint_end = False, None
 
     def red_flag(self, now, mode):
         """Freeze every entry; each continues from its anchor in the restart lobby."""
@@ -439,6 +438,7 @@ class Race:
             old.counting = False
         ent.active = conn
         ent.changed, ent.change_anchor, ent.held, ent.relobby = True, None, False, False
+        ent.stint_end = ent.distance + ent.adjust
         return True
 
     def _anchor_of(self, ent):
@@ -750,13 +750,13 @@ class Race:
 
     def _change(self, ent, car, t):
         window = self._window_until is not None and t <= self._window_until
-        if ent.rejoin and window and car.left_box and car.lap <= MAX_CHANGE_LAP \
-                and self._window_leader is not None:
+        anchor = self._rejoin_anchor(ent) if ent.rejoin and window and car.left_box \
+            and car.lap <= MAX_CHANGE_LAP else None
+        if anchor is not None:
             old = self._cars.get(ent.active)
             if old is not None and old is not car:
                 old.counting = False
-            if self._start(ent, car, t, self._window_leader - ent.adjust, car.lap, car.s,
-                           from_line=False):
+            if self._start(ent, car, t, anchor - ent.adjust, car.lap, car.s, from_line=False):
                 ent.active, ent.rejoin = car.conn, False
                 self._used_rejoins.append(ent.entry)
                 self._changed(ent, t)
@@ -777,7 +777,18 @@ class Race:
             ent.active = car.conn
             self._changed(ent, t)
 
+    def _rejoin_anchor(self, ent):
+        """The leader's distance where its car of the old lobby stopped: the stint end
+        of a team that changed, else where the team's car is now (standing in the box,
+        or still on track); estimated cars move with another team and never count. None
+        before any car counts."""
+        return max((e.stint_end if e.stint_end is not None else self._shown(e)
+                    for e in self._entries.values()
+                    if e is not ent and e.distance is not None and not self._out(e)
+                    and not self._estimated(e)), default=None)
+
     def _changed(self, ent, t):
+        ent.stint_end = ent.distance + ent.adjust
         ent.change_anchor, ent.changed, ent.held, ent.relobby = None, True, False, False
         ent.ts.append(t)
         ent.ds.append(ent.distance)
