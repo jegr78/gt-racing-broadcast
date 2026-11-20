@@ -581,6 +581,32 @@ def t_the_desk_lap_line_shows_the_race_lap_and_the_lobby_lap():
         f"the race lap against the count, then GT7's lap of the lobby on air: {got}"
 
 
+def t_the_desk_shows_qualifying_per_class_with_every_column():
+    rows = [{"entry": "A", "pos": 1, "best_ms": 90000, "gap_ms": 0, "interval_ms": None, "last_lap_ms": 90000,
+             "class": "GT3", "class_pos": 1, "class_gap_ms": 0, "class_interval_ms": None},
+            {"entry": "B", "pos": 2, "best_ms": 95000, "gap_ms": 5000, "interval_ms": 5000, "last_lap_ms": 96000,
+             "class": "GT4", "class_pos": 1, "class_gap_ms": 0, "class_interval_ms": None},
+            {"entry": "C", "pos": 3, "best_ms": 95400, "gap_ms": 5400, "interval_ms": 400, "last_lap_ms": 95400,
+             "class": "GT4", "class_pos": 2, "class_gap_ms": 400, "class_interval_ms": 400}]
+    r = {"mode": "qualifying", "segment": "Q1", "qualifying": rows,
+         "quali_classes": [{"name": "GT3", "color": "#f00"}, {"name": "GT4", "color": "red;x"}]}
+    got = _desk_fn("lapTime,plusMs,lapText,qualiGroups,qualiCells",
+                   f"[lapText({json.dumps(r)}), qualiGroups({json.dumps(r)}).map(function (g) {{"
+                   "return [g.name, g.color, g.rows.map(function (e, k) { return qualiCells(e, true, k); })]; }), "
+                   f"qualiCells({json.dumps(rows[2])}, false, 2)]")
+    if got is None:
+        return
+    line, groups, flat = got
+    assert line == "Qualifying \u00b7 Q1", f"the lap line names the segment: {line}"
+    assert [(g[0], g[1]) for g in groups] == [("GT3", "#f00"), ("GT4", "")], f"classes, a bad colour dropped: {groups}"
+    gt4 = groups[1][2]
+    assert [(c["pos"], c["best"], c["gap"], c["interval"], c["last"], c["mark"]) for c in gt4] == [
+        ("1", "1:35.000", "", "", "1:36.000", ""), ("2", "1:35.400", "+0.400", "+0.400", "1:35.400", "pb")], \
+        f"positions, gaps and intervals within the class, a personal best marked: {gt4}"
+    assert groups[0][2][0]["mark"] == "fl" and groups[0][2][0]["bestFl"], "the class's fastest lap is purple"
+    assert (flat["pos"], flat["gap"], flat["interval"]) == ("3", "+5.400", "+0.400"), f"overall without classes: {flat}"
+
+
 def t_the_desk_class_gap_reads_laps_down_in_the_class():
     got = _desk_fn("secs,lappedText,gapCell",
                    "[gapCell({lapped: 1, class_lapped: 0, class_gap_s: 2.5, gap_time_s: 90}, true, 4, 1),"

@@ -90,6 +90,7 @@
   #timing .est { display: inline-block; margin-left: 4px; padding: 0 4px; border: 1px solid #ffb454;
                  border-radius: 3px; color: #ffb454; font-size: 10px; font-weight: 700; line-height: 1.4; }
   #timing .fl { color: #c49bff; font-weight: 700; }
+  #timing .pb { color: #4fdc74; font-weight: 700; }
   #timing .tyre { font-weight: 800; }
   #timing .tyre.RS { color: #ff5a4f; } #timing .tyre.RM { color: #ffd23f; } #timing .tyre.RH { color: #f2f4f7; }
   #timing .tyre.I { color: #4fdc74; } #timing .tyre.W { color: #4aa8ff; }
@@ -913,6 +914,14 @@ function timingClassHead(c, span) {
   tr.appendChild(td);
   return tr;
 }
+function timingPlusMs(ms) { return typeof ms === 'number' ? '+' + (ms / 1000).toFixed(3) : ''; }
+// A lap time cell; `cls` "fl" is P1's (its class's) best, "pb" a personal best.
+function timingLap(ms, cls) {
+  const s = document.createElement('span');
+  s.textContent = lapTime(ms);
+  if (cls) s.className = cls;
+  return {node: s};
+}
 function timingTyre(e) {
   const s = document.createElement('span');
   const code = ['RS', 'RM', 'RH', 'I', 'W'].indexOf(e.compound) >= 0 ? e.compound : '';
@@ -941,7 +950,7 @@ async function pollTiming() {
   parts.forEach(function (p) { const s = document.createElement('span'); s.textContent = p; head.appendChild(s); });
   if (d.red_flag) { const s = document.createElement('span'); s.className = 'flag'; s.textContent = 'RED FLAG'; head.appendChild(s); }
   const quali = d.mode === 'qualifying';
-  const cols = quali ? ['Pos', '', '#', 'Driver', 'Tyre', 'Best', 'Gap']
+  const cols = quali ? ['Pos', '', '#', 'Driver', 'Tyre', 'Best', 'Gap', 'Int.', 'Last']
                      : ['Pos', '', '#', 'Driver', 'Tyre', 'Laps', 'Gap', 'Int.', 'Last', 'Fuel', 'Pits'];
   const thead = $('timing').tHead;
   thead.textContent = '';
@@ -952,7 +961,7 @@ async function pollTiming() {
   body.textContent = '';
   const fl = d.fastest;
   // Class mode: each class under its header with positions and gaps within the class.
-  const classes = !quali && Array.isArray(d.classes)
+  const classes = Array.isArray(d.classes)
     ? d.classes.filter(function (c) { return c && typeof c.name === 'string'; }) : [];
   const groups = classes.length ? classes.map(function (c) {
     return {cls: c, rows: rows.filter(function (e) { return (e.class == null ? '' : e.class) === c.name; })};
@@ -963,8 +972,12 @@ async function pollTiming() {
     g.rows.forEach(function (e, i) {
       const tr = document.createElement('tr');
       if (quali) {
-        timingCells(tr, [e.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), lapTime(e.best_ms),
-                         e.gap_ms ? '+' + (e.gap_ms / 1000).toFixed(3) : '']);
+        const q = g.cls ? {pos: e.class_pos, gap_ms: e.class_gap_ms, interval_ms: e.class_interval_ms} : e;
+        timingCells(tr, [q.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e),
+                         timingLap(e.best_ms, i === 0 && typeof e.best_ms === 'number' ? 'fl' : ''),
+                         i ? timingPlusMs(q.gap_ms) : '', i ? timingPlusMs(q.interval_ms) : '',
+                         timingLap(e.last_lap_ms, e.last_lap_ms === e.best_ms && typeof e.best_ms === 'number'
+                           ? (i === 0 ? 'fl' : 'pb') : '')]);
       } else {
         const v = g.cls ? {pos: e.class_pos, lapped: e.class_lapped, gap_s: e.class_gap_s, interval_s: e.class_interval_s} : e;
         if (e.status === 'box') tr.className = 'box';
@@ -1003,7 +1016,7 @@ async function pollTiming() {
       flLine(line, c.fastest);
       flBox.appendChild(line);
     });
-  } else if (fl && !quali) {
+  } else if (fl) {
     flLine(flBox, fl);
   }
   setTimeout(pollTiming, 2000);

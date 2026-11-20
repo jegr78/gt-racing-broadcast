@@ -12,6 +12,7 @@
     --dd-dim: #9aa3ad;
     --dd-accent: #e10600;
     --dd-purple: #b26bff;
+    --dd-pb: #4fdc74;
     --dd-fuel: #4fdc74;
     --dd-fuel-low: #ffb454;
     --dd-font: "Segoe UI", Roboto, Arial, sans-serif;
@@ -59,6 +60,11 @@
   #drivers-tower.no-tyre .dd-row { grid-template-columns: 30px auto 1fr 42px 96px 40px; }
   #drivers-tower.no-tyre.no-fuel .dd-row { grid-template-columns: 30px auto 1fr 96px 40px; }
   #drivers-tower.no-tyre .dd-tyre, #drivers-tower.no-fuel .dd-fuel { display: none; }
+  /* Qualifying: the best lap is a column of its own, beside the value column; no pit stops. */
+  #drivers-tower.quali .dd-row { grid-template-columns: 30px auto 1fr 30px 96px 96px; }
+  #drivers-tower.quali.no-tyre .dd-row { grid-template-columns: 30px auto 1fr 96px 96px; }
+  .dd-best { text-align: right; font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .dd-best.fl { color: var(--dd-purple); }
   /* Fuel in percent of the tank (GT7's fuel level is a percentage) beside a level bar. */
   .dd-fuel { display: flex; align-items: center; gap: 4px; height: 26px; color: var(--dd-fuel);
              font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -83,6 +89,7 @@
   .dd-driver { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dd-val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .dd-val.fl { color: var(--dd-purple); }
+  .dd-val.pb { color: var(--dd-pb); }
   .dd-pit { text-align: center; font-size: 15px; color: var(--dd-dim); font-variant-numeric: tabular-nums; }
   .dd-row.box .dd-val { color: #ffd23f; }
   .dd-row.off .dd-driver, .dd-row.off .dd-val { color: var(--dd-dim); }
@@ -167,6 +174,7 @@
   }
   let showFuel = true, showTyre = true, lastLapS = 5;
   const PHASES = ["GAP TO LEADER", "INTERVAL"];
+  const QUALI_PHASES = ["GAP TO P1", "INTERVAL"];
   function phase() { return Math.floor(Date.now() / CYCLE_MS) % PHASES.length; }
   function phaseLabel() { return PHASES[phase()]; }
   function showPhase(label, key) {
@@ -244,7 +252,8 @@
     }
     return gapText(e, i);
   }
-  function row(e, i, value, pits, fl) {
+  // `best` (qualifying) adds the best lap cell before the value and leaves out the pit stops.
+  function row(e, i, value, pits, fl, best) {
     const done = flagged(e);
     const r = el("div", "dd-row" + (done ? "" : e.status === "box" ? " box" :
                                     e.status === "retired" ? " off dnf" :
@@ -271,12 +280,13 @@
       r.appendChild(el("span", "dd-tyre" + (code ? " " + code : ""), code));
       r.appendChild(fuelCell(e));
     }
-    const val = el("span", "dd-val" + (fl ? " fl" : ""));
+    if (best) r.appendChild(el("span", "dd-best" + (best.fl ? " fl" : ""), best.text));
+    const val = el("span", "dd-val" + (fl ? " " + (fl === true ? "fl" : fl) : ""));
     if (done && !slots) val.appendChild(el("span", "dd-flag"));
     val.appendChild(document.createTextNode(value));
     if (e.status === "est") val.appendChild(el("span", "dd-est", "EST"));
     r.appendChild(val);
-    r.appendChild(el("span", "dd-pit", pits));
+    if (!best) r.appendChild(el("span", "dd-pit", pits));
     return r;
   }
   // The rows for a tower measured empty as m = {box: its height, inner: that without padding and
@@ -372,7 +382,11 @@
     }));
     placeFastest();
     showPhase(phaseLabel(), ["gap", "interval"][phase()]);
-    // A paged tower shows its page's class; one page cycles the classes that have a lap.
+    fastestBox(book, page, list, fl);
+    drawCars(d.entries || []);
+  }
+  // A paged tower shows its page's class; one page cycles the classes that have a lap.
+  function fastestBox(book, page, list, fl) {
     const timed = list.filter(function (c) { return c.fastest; });
     const cls = book.length > 1 ? page[0].header
       : timed.length ? timed[Math.floor(Date.now() / CYCLE_MS) % timed.length] : null;
@@ -387,20 +401,43 @@
         surname(shown.driver) + " · " + (shown.team || String(shown.entry).replace(/\s*#\d+$/, ""));
       document.getElementById("dd-fl-time").textContent = lapTime(shown.ms);
     }
-    drawCars(d.entries || []);
+  }
+  function plusMs(ms) { return typeof ms === "number" ? "+" + (ms / 1000).toFixed(3) : ""; }
+  // A qualifying row's value: a fresh lap, else the gap to P1 or the interval by best lap.
+  function qualiColumn(e, i) {
+    if (lapShows(e)) return lapTime(e.last_lap_ms);
+    if (typeof e.best_ms !== "number") return "";
+    if (i === 0) return "Leader";
+    return plusMs(phase() === 1 ? e.interval_ms : e.gap_ms);
+  }
+  // A fresh lap's colour: purple for P1's (its class's) best, green for a personal best.
+  function lapMark(e, i) {
+    if (!lapShows(e) || e.last_lap_ms !== e.best_ms) return false;
+    return i === 0 ? "fl" : "pb";
   }
   function renderQualifying(d) {
-    document.getElementById("dd-lap").textContent = "QUALIFYING";
-    showPhase("", "");
-    rows.classList.remove("grouped");
-    const label = document.getElementById("dd-fl-class");
-    label.textContent = "";
-    label.style.color = "";
-    rows.replaceChildren(...(d.qualifying || []).slice(0, towerRows()).map(function (e, i) {
-      return row(e, i, i === 0 ? lapTime(e.best_ms) : e.gap_ms === null ? "" : "+" + (e.gap_ms / 1000).toFixed(3), "");
+    // The session line names the segment; a running timer takes the lap line, as in the race.
+    document.getElementById("dd-lap").textContent = typeof d.remaining === "number" ? clock(d.remaining) : "QUALIFYING";
+    const list = d.classes || [];
+    const entries = d.qualifying || [];
+    noteLaps(entries);
+    const book = pages(entries, list, towerRows());
+    const page = book[book.length > 1 ? Math.floor(Date.now() / (CYCLE_MS * QUALI_PHASES.length)) % book.length : 0];
+    let inGroup = 0;
+    rows.classList.toggle("grouped", list.length > 0);
+    rows.replaceChildren(...page.map(function (item, i) {
+      if (item.header) { inGroup = 0; return classHeader(item.header); }
+      const e = list.length ? Object.assign({}, item, {pos: item.class_pos, gap_ms: item.class_gap_ms,
+                                                       interval_ms: item.class_interval_ms}) : item;
+      const at = list.length ? e.pos - 1 : i;
+      const r = row(e, at, qualiColumn(e, at), "", lapMark(e, at),
+                    {text: lapTime(e.best_ms), fl: at === 0 && typeof e.best_ms === "number"});
+      if (list.length && inGroup++ % 2) r.className += " alt";
+      return r;
     }));
     placeFastest();
-    document.getElementById("drivers-fastest").classList.add("none");
+    showPhase(QUALI_PHASES[phase()], ["gap", "interval"][phase()]);
+    fastestBox(book, page, list, d.fastest);
     drawCars([]);
   }
   function project(x, z) {
@@ -522,6 +559,7 @@
         const tower = document.getElementById("drivers-tower");
         tower.classList.toggle("no-tyre", !showTyre);
         tower.classList.toggle("no-fuel", !showFuel);
+        tower.classList.toggle("quali", d.mode === "qualifying");
         if (d.mode === "qualifying") renderQualifying(d); else renderRace(d);
       }
     } catch (e) { /* transient; keep the last render */ }

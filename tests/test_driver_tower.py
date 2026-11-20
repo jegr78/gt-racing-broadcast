@@ -447,12 +447,16 @@ def t_the_header_badge_follows_the_value_column():
         race(k * CYCLE_MS + 1, [{json.dumps(CAR)}]);
         return [badge.textContent, badge.attrs["data-phase"]];
       }});
-      renderQualifying({{mode: "qualifying", qualifying: []}});
-      return out.concat([[badge.textContent, badge.attrs["data-phase"]]]);""")
+      [0, 1].forEach(function (k) {{
+        Date.now = () => k * CYCLE_MS + 1;
+        renderQualifying({{mode: "qualifying", qualifying: []}});
+        out.push([badge.textContent, badge.attrs["data-phase"]]);
+      }});
+      return out;""")
     if got is None:
         return
-    assert got == [["GAP TO LEADER", "gap"], ["INTERVAL", "interval"], ["", ""]], \
-        f"the badge names the column's phase for the override CSS and is empty in qualifying: {got}"
+    assert got == [["GAP TO LEADER", "gap"], ["INTERVAL", "interval"], ["GAP TO P1", "gap"], ["INTERVAL", "interval"]], \
+        f"the badge names the column's phase for the override CSS, in qualifying the gap to P1: {got}"
 
 
 def t_the_header_badge_is_readable_on_stream():
@@ -1086,6 +1090,131 @@ def t_the_cockpit_renders_one_class_as_today():
     assert _cockpit({"mode": "race", "entries": flat_rows, "classes": []}) == got, "an empty class list is as before"
     assert all(isinstance(r, list) for r in got), f"no class header outside class mode: {got}"
     assert [r[0] for r in got] == ["1", "2", "3", "4"] and [r[6] for r in got] == ["", "+1.0", "+1 L", "+1 L"], got
+
+
+# Renders a qualifying payload at clock t and reads each row: a header's name, or a car's
+# position, best lap cell and value cell with their colour classes.
+_QUALI = """
+  function quali(t, d) {
+    Date.now = () => t;
+    renderQualifying(Object.assign({mode: "qualifying"}, d));
+    return rows.children.map(function (r) {
+      if (/dd-class/.test(r.className)) return {head: r.children[0].textContent};
+      const v = r.children.filter(c => /dd-val/.test(c.className))[0];
+      const b = r.children.filter(c => /dd-best/.test(c.className))[0];
+      return {pos: r.children[0].textContent, best: b ? b.textContent : null, bestFl: !!b && / fl$/.test(b.className),
+              value: text(v), mark: v.className.replace("dd-val", "").trim(),
+              pit: r.children.some(c => /dd-pit/.test(c.className))};
+    });
+  }
+"""
+
+
+def _q(entry, pos, best, gap, interval, last=None, **kw):
+    return dict(CAR, entry=entry, number=str(pos), pos=pos, best_ms=best, gap_ms=gap, interval_ms=interval,
+                last_lap_ms=last, **kw)
+
+
+QROWS = [_q("A #1", 1, 90000, 0, None, 90000), _q("B #2", 2, 90400, 400, 400, 91000),
+         _q("C #3", 3, 91250, 1250, 850, 91250), _q("D #4", 4, None, None, None)]
+
+
+def t_qualifying_keeps_the_best_lap_and_cycles_gap_and_interval():
+    got = _tower(_QUALI + f"""
+      const d = {{qualifying: {json.dumps(QROWS)}, remaining: 754}};
+      const out = [quali(1, d)];
+      const timed = document.getElementById("dd-lap").textContent;
+      out.push(quali(CYCLE_MS + 1, {{qualifying: d.qualifying}}));
+      return out.concat([[timed, document.getElementById("dd-lap").textContent]]);""")
+    if got is None:
+        return
+    gap, inter, lap = got
+    assert [r["best"] for r in gap] == ["1:30.000", "1:30.400", "1:31.250", ""], \
+        f"the best lap is a column of its own, empty without a lap: {gap}"
+    assert [r["bestFl"] for r in gap] == [True, False, False, False], f"P1's best lap is purple: {gap}"
+    assert [r["value"] for r in gap] == ["Leader", "+0.400", "+1.250", ""], f"the gap to P1: {gap}"
+    assert [r["value"] for r in inter] == ["Leader", "+0.400", "+0.850", ""], f"the interval by best lap: {inter}"
+    assert not any(r["pit"] for r in gap), "qualifying has no pit stop column"
+    assert lap == ["12:34", "QUALIFYING"], f"the timer takes the lap line, else it names the session: {lap}"
+
+
+def t_a_qualifying_lap_flashes_purple_green_or_white():
+    before = [dict(r, last_lap_ms=None) for r in QROWS]
+    got = _tower(_QUALI + f"""
+      lastLapS = 5;
+      quali(1000, {{qualifying: {json.dumps(before)}}});
+      return [quali(2000, {{qualifying: {json.dumps(QROWS)}}}), quali(7001, {{qualifying: {json.dumps(QROWS)}}})];""")
+    if got is None:
+        return
+    now, later = got
+    assert [(r["value"], r["mark"]) for r in now[:3]] == [("1:30.000", "fl"), ("1:31.000", ""), ("1:31.250", "pb")], \
+        f"P1's new best purple, a personal best green, another lap white: {now}"
+    assert [r["value"] for r in later[:3]] == ["Leader", "+0.400", "+1.250"], f"then the gap returns: {later}"
+
+
+def t_qualifying_ranks_each_class_under_its_header():
+    gt3 = {"name": "GT3", "color": "#f00", "fastest": {"entry": "A #1", "driver": "Max", "team": "", "ms": 90000}}
+    gt4 = {"name": "GT4", "color": "#0f0", "fastest": {"entry": "B #2", "driver": "Ann", "team": "", "ms": 95000}}
+    rows = [_q("A #1", 1, 90000, 0, None, **{"class": "GT3"}, class_pos=1, class_gap_ms=0, class_interval_ms=None),
+            _q("C #3", 2, 90700, 700, 700, **{"class": "GT3"}, class_pos=2, class_gap_ms=700, class_interval_ms=700),
+            _q("B #2", 3, 95000, 5000, 4300, **{"class": "GT4"}, class_pos=1, class_gap_ms=0,
+               class_interval_ms=None),
+            _q("D #4", 5, 96000, 6000, 600, **{"class": "GT4"}, class_pos=2, class_gap_ms=1000,
+               class_interval_ms=1000)]
+    got = _tower(_QUALI + f"""
+      const d = {{qualifying: {json.dumps(rows)}, classes: {json.dumps([gt3, gt4])}}};
+      const out = quali(1, d);
+      return [out, document.getElementById("dd-fl-class").textContent, document.getElementById("dd-fl-time").textContent,
+              quali(CYCLE_MS + 1, d)[5].value];""")
+    if got is None:
+        return
+    shown, label, time, interval = got
+    assert interval == "+1.000", f"the interval is to the class car ahead, not the overall one: {interval}"
+    assert [r.get("head") or [r["pos"], r["value"], r["bestFl"]] for r in shown] == [
+        "GT3", ["1", "Leader", True], ["2", "+0.700", False], "GT4", ["1", "Leader", True], ["2", "+1.000", False]], \
+        f"positions, gaps and the purple best restart per class: {shown}"
+    assert label in ("GT3", "GT4") and time in ("1:30.000", "1:35.000"), \
+        f"the fastest lap box shows a class's fastest lap: {label} {time}"
+
+
+def t_the_public_page_shows_qualifying_per_class_with_every_column():
+    gt3 = {"name": "GT3", "color": "#c00", "fastest": {"entry": "A #1", "driver": "Max", "team": "", "ms": 90000}}
+    gt4 = {"name": "GT4", "color": "#0a0", "fastest": {"entry": "B #2", "driver": "Ann", "team": "", "ms": 95000}}
+    rows = [_q("A #1", 1, 90000, 0, None, 90000, **{"class": "GT3"}, class_pos=1, class_gap_ms=0,
+               class_interval_ms=None),
+            _q("C #3", 2, 90700, 700, 700, 91000, **{"class": "GT3"}, class_pos=2, class_gap_ms=700,
+               class_interval_ms=700),
+            _q("B #2", 3, 95000, 5000, 4300, 95000, **{"class": "GT4"}, class_pos=1, class_gap_ms=0,
+               class_interval_ms=None),
+            _q("D #4", 4, 96000, 6000, 1000, 96000, **{"class": "GT4"}, class_pos=2, class_gap_ms=1000,
+               class_interval_ms=1000)]
+    got = _public(f"""
+      render({{mode: "qualifying", qualifying: {json.dumps(rows)}, classes: {json.dumps([gt3, gt4])}}});
+      const marks = els.timing.tBodies[0].children.filter(r => r.className !== "cls").map(
+        r => r.children.filter(td => td.dataset.col === "last")[0].className);
+      return {{head: els.timing.tHead.children[0].children.map(th => th.textContent), rows: body(), marks: marks,
+               fastest: text(document.getElementById("fastest"))}};""")
+    if got is None:
+        return
+    assert got["head"] == ["Pos", "", "#", "Driver", "Tyre", "Best", "Gap", "Int.", "Last"], got["head"]
+    cars = [r for r in got["rows"] if "head" not in r]
+    assert [r["head"] for r in got["rows"] if "head" in r] == ["GT3", "GT4"], f"one header per class: {got['rows']}"
+    assert [(r["pos"], r["best"], r["gap"], r["int"], r["last"]) for r in cars] == [
+        ("1", "1:30.000", "", "", "1:30.000"), ("2", "1:30.700", "+0.700", "+0.700", "1:31.000"),
+        ("1", "1:35.000", "", "", "1:35.000"), ("2", "1:36.000", "+1.000", "+1.000", "1:36.000")], \
+        f"positions, gaps and intervals within the class: {cars}"
+    assert got["marks"] == ["fl", "", "fl", "pb"], f"P1's best purple, a personal best green: {got['marks']}"
+    assert "GT3" in got["fastest"] and "GT4" in got["fastest"], f"each class's fastest lap: {got['fastest']}"
+
+
+def t_the_cockpit_shows_every_qualifying_column_per_class():
+    with open(os.path.join(ROOT, "src", "cockpit", "cockpit.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    assert "['Pos', '', '#', 'Driver', 'Tyre', 'Best', 'Gap', 'Int.', 'Last']" in page, \
+        "the cockpit's qualifying table has best lap, gap, interval and last lap"
+    assert "const classes = Array.isArray(d.classes)" in page, "qualifying groups by class like the race"
+    assert "gap_ms: e.class_gap_ms, interval_ms: e.class_interval_ms" in page, \
+        "a class row reads its gap and interval within the class"
 
 
 if __name__ == "__main__":

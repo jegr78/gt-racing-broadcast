@@ -293,8 +293,8 @@ _PUBLIC_TOP = ("v", "mode", "stint", "remaining", "remaining_running", "delay_s"
 _CLASS_ROW = ("class", "class_pos", "class_gap_s", "class_interval_s", "class_lapped")
 _PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color", "laps",
                "stint_laps", "gap_s", "interval_s", "lapped", "status", "pit_stops",
-               "last_lap_ms", "finished", "best_ms", "gap_ms", "compound", "fuel_l", "brand",
-               "brand_name", "class_color") + _CLASS_ROW
+               "last_lap_ms", "finished", "best_ms", "gap_ms", "interval_ms", "class_gap_ms",
+               "class_interval_ms", "compound", "fuel_l", "brand", "brand_name", "class_color") + _CLASS_ROW
 _PUBLIC_LAP = ("entry", "driver", "team", "ms")
 
 
@@ -335,34 +335,75 @@ def public_view(snap):
 
 def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
-    driver, team, color, text_color, best_ms, gap_ms}]; entries without a lap last.
-    Only live senders count, and a best lap under `min_ms` (faster than the line
-    allows) is ignored. `overrides` {entry: ms or None} are Race Control's
-    corrections: a set time replaces GT7's, None deletes it. `seen` {entry: (ms,
-    name)} carries the bests of earlier calls and is updated in place, so a lap stays
-    ranked after its sender goes quiet."""
+    driver, team, color, text_color, best_ms, gap_ms, interval_ms, last_lap_ms}];
+    entries without a lap last. Only live senders count, and a lap under `min_ms`
+    (faster than the line allows) is ignored. `overrides` {entry: ms or None} are
+    Race Control's corrections: a set time replaces GT7's, None deletes it. `seen`
+    {entry: (best ms, name, last ms)} carries earlier calls and is updated in place,
+    so a lap stays after its sender goes quiet or GT7 starts a new session."""
     best = seen if seen is not None else {}
+
+    def lap(ms):
+        return ms if type(ms) is int and max(0, min_ms) < ms < MAX_LAP_MS else None
     for c in connections:
         if not c.get("live", True):
             continue
         if segment is not None and c.get("segment") not in (segment, None):
             continue
-        ms = (c.get("latest") or {}).get("best_ms")
-        ms = ms if type(ms) is int and ms > max(0, min_ms) else None
+        latest = c.get("latest") or {}
+        ms, last = lap(latest.get("best_ms")), lap(latest.get("last_ms"))
         cur = best.get(c["entry"])
         if cur is None and len(best) >= MAX_QUALI:
             continue
         if cur is None or (ms is not None and (cur[0] is None or ms < cur[0])):
-            best[c["entry"]] = (ms, c.get("name") or "")
-    best = {e: (ms if ms is None or ms > max(0, min_ms) else None, name)
-            for e, (ms, name) in best.items()}
+            cur = (ms, c.get("name") or "", cur[2] if cur else None)
+        if last is not None:
+            cur = (cur[0], cur[1], last)
+        best[c["entry"]] = cur
+    ranked = {e: (lap(ms), name, lap(last)) for e, (ms, name, last) in best.items()}
     for entry, ms in (overrides or {}).items():
-        best[entry] = (ms, best.get(entry, (None, ""))[1])
-    order = sorted(best.items(), key=lambda kv: (kv[1][0] is None, kv[1][0] or 0, kv[0]))
+        _ms, name, last = ranked.get(entry, (None, "", None))
+        ranked[entry] = (ms, name, last)
+    order = sorted(ranked.items(), key=lambda kv: (kv[1][0] is None, kv[1][0] or 0, kv[0]))
     pole = order[0][1][0] if order else None
-    return [dict(_viewer_entry({"entry": e, "driver": name}, roster), pos=i + 1, best_ms=ms,
-                 gap_ms=None if ms is None or pole is None else ms - pole)
-            for i, (e, (ms, name)) in enumerate(order)]
+    rows = []
+    for i, (e, (ms, name, last)) in enumerate(order):
+        ahead = order[i - 1][1][0] if i else None
+        rows.append(dict(_viewer_entry({"entry": e, "driver": name}, roster), pos=i + 1, best_ms=ms,
+                         gap_ms=None if ms is None or pole is None else ms - pole,
+                         interval_ms=None if ms is None or ahead is None else ms - ahead,
+                         last_lap_ms=last))
+    return rows
+
+
+def _lap_of(row):
+    return {"entry": row["entry"], "driver": row["driver"], "team": row["team"], "ms": row["best_ms"]}
+
+
+def quali_classes(rows, roster):
+    """Fill the qualifying rows' class fields (class, class_pos, class_gap_ms,
+    class_interval_ms, class_color) and return (rows, [{name, color, fastest}]) with
+    the classes in the order of their fastest car, unclassed last; ([] without two
+    named classes, rows untouched)."""
+    if len(_named_classes(roster)) < 2:
+        return rows, []
+    colors = _class_colors(roster)
+    members = {}
+    for row in rows:
+        cls = (roster.get(row["entry"]) or {}).get("carClass") or ""
+        cls = cls if isinstance(cls, str) else ""
+        group = members.setdefault(cls, [])
+        lead = group[0]["best_ms"] if group else row["best_ms"]
+        ahead = group[-1]["best_ms"] if group else None
+        ms = row["best_ms"]
+        row.update({"class": cls, "class_pos": len(group) + 1, "class_color": colors.get(cls, ""),
+                    "class_gap_ms": None if ms is None or lead is None else ms - lead,
+                    "class_interval_ms": None if ms is None or ahead is None else ms - ahead})
+        group.append(row)
+    names = [n for n in members if n] + ([""] if "" in members else [])
+    return rows, [{"name": n, "color": colors.get(n, ""),
+                   "fastest": _lap_of(members[n][0]) if members[n][0]["best_ms"] is not None else None}
+                  for n in names]
 
 
 def _saved_actions(path):
@@ -562,7 +603,7 @@ class Service:
         self._line_tried = None
         self._final_lobby_laps = None
         self._final_on_air = False  # endurance: the last schedule row is on air
-        self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver)}
+        self._quali_seen = {}      # (pick, segment) -> {entry: (best ms, driver, last ms)}
 
     def _current(self):
         pick = self._pick()
@@ -690,14 +731,7 @@ class Service:
         out["show"] = self._show(settings)
         compounds = _saved_compounds(_actions_path_for(self._path))
         if out["mode"] == "qualifying":
-            out["qualifying"] = qualifying(
-                ctx.get("connections") or [], ctx.get("segment"), roster,
-                min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
-                overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
-                seen=self._quali_seen.setdefault((pick.get("id"), _segment_key(ctx.get("segment"))), {}))
-            for row in out["qualifying"]:
-                row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
-                row["driver"] = race.display_name(row["entry"], row["driver"])
+            out["qualifying"], out["classes"], out["fastest"] = self._quali(ctx, race, roster, compounds)
             return out
         class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))) \
             if len(_named_classes(roster)) >= 2 else {}
@@ -729,6 +763,20 @@ class Service:
                         for name in st["classes"]],
             "entries": rows})
         return out
+
+    def _quali(self, ctx, race, roster, compounds):
+        """(rows, classes, fastest lap) of the qualifying segment on air; under the lock."""
+        pick = self._pick() or {}
+        rows = qualifying(
+            ctx.get("connections") or [], ctx.get("segment"), roster,
+            min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
+            overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
+            seen=self._quali_seen.setdefault((pick.get("id"), _segment_key(ctx.get("segment"))), {}))
+        for row in rows:
+            row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
+            row["driver"] = race.display_name(row["entry"], row["driver"])
+        rows, classes = quali_classes(rows, roster)
+        return rows, classes, _lap_of(rows[0]) if rows and rows[0]["best_ms"] is not None else None
 
     @staticmethod
     def _shown_lap(race, fl, roster):
@@ -981,6 +1029,10 @@ class Service:
             if out["fastest"]:
                 fl = out["fastest"]
                 out["fastest"] = dict(fl, driver=race.display_name(fl["entry"], fl["driver"]))
+            if ctx.get("mode") == "qualifying":
+                out["mode"], out["segment"] = "qualifying", ctx.get("segment")
+                out["qualifying"], out["quali_classes"], _fl = self._quali(
+                    ctx, race, ctx.get("roster") or {}, _saved_compounds(_actions_path_for(self._path)))
             pick_id = self._race_pick
         self._mark_dc(out["entries"])
         out.update(settings=read_settings(self._path), track=pick_id,

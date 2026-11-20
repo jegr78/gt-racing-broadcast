@@ -319,6 +319,9 @@ desk:
 - the race order with gaps, status, pit stops and corrections; a correction needs a
   reason
 - in endurance, rejoin marks and a change override per team
+- in qualifying, the segment's ranking in place of the race order: best lap, gap to P1,
+  interval to the car ahead and last lap, grouped by class with
+  [classes](Driver-Telemetry#classes)
 - with [classes](Driver-Telemetry#classes), the order grouped by class and a lap count
   for every class after the first
 - the [driver dashboard](Driver-Telemetry#on-air-and-in-the-cockpit): **Show

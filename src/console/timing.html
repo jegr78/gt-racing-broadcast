@@ -7,7 +7,7 @@
 <title>Live timing</title>
 <style>
   :root { color-scheme: dark; --bg: #0b0d10; --panel: #14171c; --edge: #232830; --ink: #e8eaed;
-          --muted: #9aa0a6; --accent: #e10600; --purple: #c49bff; --warn: #ffd361; }
+          --muted: #9aa0a6; --accent: #e10600; --purple: #c49bff; --pb: #4fdc74; --warn: #ffd361; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; }
   header { padding: 14px 16px 10px; background: var(--panel); border-bottom: 3px solid var(--accent); }
@@ -47,6 +47,7 @@
   .est { display: inline-block; margin-left: 5px; padding: 0 5px; border: 1px solid var(--warn); border-radius: 4px;
          color: var(--warn); font-size: 11px; font-weight: 700; line-height: 1.45; vertical-align: 1px; }
   .fl { color: var(--purple); font-weight: 700; }
+  .pb { color: var(--pb); font-weight: 700; }
   .chequer { display: inline-block; width: 16px; height: 12px; margin-right: 6px; vertical-align: -1px;
              box-shadow: 0 0 0 1px #f2f4f7;
              background: repeating-conic-gradient(#111 0 25%, #f2f4f7 0 50%) 0 0 / 8px 8px; }
@@ -62,7 +63,12 @@
   #state { color: var(--muted); font-size: 13px; padding: 14px; text-align: center; }
   @media (max-width: 600px) { main { padding: 10px 8px 20px; } td, th { padding: 6px 5px; } body { font-size: 14px; }
                               td.drv { min-width: 88px; } td.brand { width: 28px; padding: 0 1px; }
-                              td.brand img { width: 26px; height: 18px; padding: 1px; } }
+                              td.brand img { width: 26px; height: 18px; padding: 1px; }
+                              /* Qualifying has two lap time columns: they and the names give way. */
+                              #timing.quali td.drv { min-width: 64px; }
+                              #timing.quali td[data-col="best"], #timing.quali td[data-col="gap"],
+                              #timing.quali td[data-col="int"], #timing.quali td[data-col="last"] {
+                                font-size: 12px; padding-left: 3px; padding-right: 3px; } }
 </style>
 </head>
 <body>
@@ -166,7 +172,8 @@
   // Race columns the reader can switch.
   const RACE = [["pos", "Pos"], ["brand", ""], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["laps", "Laps"],
                 ["gap", "Gap"], ["int", "Int."], ["last", "Last"], ["fuel", "Fuel"], ["pits", "Pits"]];
-  const QUALI = [["pos", "Pos"], ["brand", ""], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["best", "Best"], ["gap", "Gap"]];
+  const QUALI = [["pos", "Pos"], ["brand", ""], ["num", "#"], ["drv", "Driver"], ["tyre", "Tyre"], ["best", "Best"],
+                 ["gap", "Gap"], ["int", "Int."], ["last", "Last"]];
   const OPTIONAL = [["brand", "Brand"], ["tyre", "Tyre"], ["laps", "Laps"], ["gap", "Gap"], ["int", "Int."], ["last", "Last"],
                     ["fuel", "Fuel"], ["pits", "Pits"]];
   const STATUS = {box: "Box", no_data: "No data", dc: "DC", red_flag: "Red flag", no_sender: "No data", retired: "DNF"};
@@ -271,6 +278,12 @@
             document.createTextNode(" · " + fitName(fl.driver, NAME_MAX) + " (" + (fl.team || fl.entry) + ")")];
   }
 
+  function plusMs(ms) { return typeof ms === "number" ? "+" + (ms / 1000).toFixed(3) : ""; }
+  // A qualifying last lap that set a best: purple for P1 (of its class), green for a personal best.
+  function qualiMark(e, i) {
+    if (typeof e.last_lap_ms !== "number" || e.last_lap_ms !== e.best_ms) return "";
+    return i === 0 ? "fl" : "pb";
+  }
   function cell(key, value, cls) {
     const td = el("td", cls);
     td.dataset.col = key;
@@ -358,12 +371,13 @@
     if (d.red_flag) $("session").appendChild(el("span", "flag", "RED FLAG"));
     $("session").appendChild(el("span", "", "")).id = "age";
     tick();
+    $("timing").className = quali ? "quali" : "";
     $("timing").tHead.replaceChildren(el("tr"));
     cols.forEach(function (c) { $("timing").tHead.rows[0].appendChild(el("th", "", c[1])); });
     const rows = quali ? (d.qualifying || []) : (d.entries || []);
     const fl = d.fastest;
     // Class mode: each class under its header with positions and gaps within the class.
-    const classes = !quali && Array.isArray(d.classes)
+    const classes = Array.isArray(d.classes)
       ? d.classes.filter(function (c) { return c && typeof c.name === "string"; }) : [];
     const shown = picker(classes);
     const groups = classes.length ? classes.filter(function (c) { return shown === null || c.name === shown; })
@@ -375,23 +389,25 @@
       if (g.cls) body.push(classHead(g.cls, cols.length));
       const flg = g.cls ? g.cls.fastest : fl;
       g.rows.forEach(function (e, i) {
-        const v = g.cls ? {pos: e.class_pos, lapped: e.class_lapped, gap_s: e.class_gap_s, interval_s: e.class_interval_s} : e;
+        const v = g.cls ? {pos: e.class_pos, lapped: e.class_lapped, gap_s: e.class_gap_s, interval_s: e.class_interval_s,
+                           gap_ms: e.class_gap_ms, interval_ms: e.class_interval_ms} : e;
         const done = e.finished && e.status !== "est";
         const tr = el("tr", done ? "" : e.status === "box" ? "box" : e.status === "retired" ? "off dnf"
                       : ["no_data", "dc", "no_sender"].indexOf(e.status) >= 0 ? "off" : "");
         const all = {
           pos: cell("pos", v.pos, "pos"), brand: brandCell(e), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
           laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
-          gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
+          gap: cell("gap", quali ? (i ? plusMs(v.gap_ms) : "")
                     : e.status === "est" ? estGap(v, i)
                     : e.finished ? finishedGap(v, i)
                     : STATUS[e.status] || (i === 0 ? "" : v.lapped ? "+" + v.lapped + " L"
                     : typeof v.gap_s === "number" ? "+" + v.gap_s.toFixed(1) : "")),
-          int: cell("int", i && typeof v.interval_s === "number" ? "+" + v.interval_s.toFixed(1) : ""),
-          last: cell("last", lapTime(e.last_lap_ms),
-                     flg && flg.entry === e.entry && flg.ms === e.last_lap_ms ? "fl" : ""),
+          int: cell("int", quali ? (i ? plusMs(v.interval_ms) : "")
+                    : i && typeof v.interval_s === "number" ? "+" + v.interval_s.toFixed(1) : ""),
+          last: cell("last", lapTime(e.last_lap_ms), quali ? qualiMark(e, i)
+                     : flg && flg.entry === e.entry && flg.ms === e.last_lap_ms ? "fl" : ""),
           fuel: cell("fuel", typeof e.fuel_l === "number" ? e.fuel_l.toFixed(1) + " L" : ""),
-          best: cell("best", lapTime(e.best_ms), i === 0 ? "fl" : ""),
+          best: cell("best", lapTime(e.best_ms), i === 0 && typeof e.best_ms === "number" ? "fl" : ""),
         };
         cols.forEach(function (c) { tr.appendChild(all[c[0]]); });
         body.push(tr);
@@ -409,7 +425,7 @@
         line.append(name, ...fastestText(g.cls.fastest));
         $("fastest").append(line);
       });
-    } else if (fl && !quali) {
+    } else if (fl) {
       $("fastest").append(...fastestText(fl));
     }
   }
