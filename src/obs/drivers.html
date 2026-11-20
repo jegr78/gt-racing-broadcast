@@ -126,7 +126,11 @@
 <script>
   "use strict";
   const SVG = "http://www.w3.org/2000/svg";
-  const MAX_ROWS = 15;
+  const DEFAULT_ROWS = 15;      // while the tower cannot be measured
+  const MIN_ROWS = 5;
+  const LEGACY_PX = 128;        // the builder canvas height: a saved height up to it means none
+  const PAGE_BOTTOM = 1016;     // the bottom margin, as the header's 64 px at the top
+  const FL_GAP = 16;            // from the tower to the fastest lap box under it
   const CYCLE_MS = 15000;       // gap to the leader, then the interval
   const rows = document.getElementById("dd-rows");
   rows.textContent = "";
@@ -266,6 +270,47 @@
     r.appendChild(el("span", "dd-pit", pits));
     return r;
   }
+  // The rows for a tower measured empty as m = {box: its height, inner: that without padding and
+  // border, top, rowH, below: what the fastest lap box under it needs}. A set height holds the rows
+  // it fits; without one the tower grows down the page.
+  function capacity(m) {
+    if (!(m.rowH > 0)) return DEFAULT_ROWS;
+    const room = m.box > LEGACY_PX ? m.inner : PAGE_BOTTOM - m.below - m.top - (m.box - m.inner);
+    return Math.max(MIN_ROWS, Math.floor(room / m.rowH));
+  }
+  // Whether the fastest lap box sits under the tower, in its column, and so moves with it.
+  function follows(t, f) {
+    return f.top >= t.top && f.left < t.left + t.width && f.left + f.width > t.left;
+  }
+  function rect(n) { return {left: n.offsetLeft, top: n.offsetTop, width: n.offsetWidth}; }
+  let flFollows = false;
+  // Clears the rows and measures the tower and the fastest lap box at their layout positions,
+  // so a resize or a new layout applies on the next render.
+  function towerRows() {
+    rows.replaceChildren();
+    const tower = document.getElementById("drivers-tower"), fl = document.getElementById("drivers-fastest");
+    tower.style.height = "";
+    fl.style.top = "";
+    flFollows = false;
+    if (typeof getComputedStyle !== "function" || !tower.getClientRects().length) return DEFAULT_ROWS;
+    if (tower.offsetHeight <= LEGACY_PX) {
+      tower.style.height = "auto";
+      flFollows = follows(rect(tower), rect(fl));
+    }
+    const cs = getComputedStyle(tower);
+    const inner = tower.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    const probe = rows.appendChild(el("div", "dd-row"));
+    const rowH = parseFloat(getComputedStyle(probe).height);
+    rows.replaceChildren();
+    return capacity({box: tower.offsetHeight, inner: inner, top: tower.offsetTop, rowH: rowH,
+                     below: flFollows ? fl.offsetHeight + FL_GAP : 0});
+  }
+  // Puts a following fastest lap box under the tower's last row.
+  function placeFastest() {
+    if (!flFollows) return;
+    const tower = document.getElementById("drivers-tower");
+    document.getElementById("drivers-fastest").style.top = tower.offsetTop + tower.offsetHeight + FL_GAP + "px";
+  }
   // The tower's pages: without classes one page of the first rows; with classes each class under
   // its header, all on one page when they fit, else one class per page cut at the page.
   function pages(entries, list, max) {
@@ -301,7 +346,7 @@
     const fl = d.fastest;
     const list = d.classes || [];
     noteLaps(d.entries || []);
-    const book = pages(d.entries || [], list, MAX_ROWS);
+    const book = pages(d.entries || [], list, towerRows());
     const page = book[book.length > 1 ? Math.floor(Date.now() / (CYCLE_MS * PHASES.length)) % book.length : 0];
     let inGroup = 0;
     let group = null;
@@ -316,6 +361,7 @@
       if (list.length && inGroup++ % 2) r.className += " alt";
       return r;
     }));
+    placeFastest();
     document.getElementById("dd-phase").textContent = phaseLabel();
     // A paged tower shows its page's class; one page cycles the classes that have a lap.
     const timed = list.filter(function (c) { return c.fastest; });
@@ -341,9 +387,10 @@
     const label = document.getElementById("dd-fl-class");
     label.textContent = "";
     label.style.color = "";
-    rows.replaceChildren(...(d.qualifying || []).slice(0, MAX_ROWS).map(function (e, i) {
+    rows.replaceChildren(...(d.qualifying || []).slice(0, towerRows()).map(function (e, i) {
       return row(e, i, i === 0 ? lapTime(e.best_ms) : e.gap_ms === null ? "" : "+" + (e.gap_ms / 1000).toFixed(3), "");
     }));
+    placeFastest();
     document.getElementById("drivers-fastest").classList.add("none");
     drawCars([]);
   }
