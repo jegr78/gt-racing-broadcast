@@ -1451,7 +1451,7 @@ def _pit_lane_restart(mode="keep", lead_speed=50, seconds=200, on_step=None):
     pit lane at 15 m/s; A and B then run at `lead_speed`. `on_step(race, cars, step, t)`
     runs after each tick from the last release on; returns its results."""
     race = rd.Race(TRACE, formation=False)
-    cars = a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115), Car(race, "C", "c", L - 215)
+    cars = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115), Car(race, "C", "c", L - 215)
     t = _drive(race, list(cars), [50, 50, 20], 0.0, 140)
     race.red_flag(t, mode)
     for car in cars:
@@ -1569,7 +1569,7 @@ def t_a_reference_inside_the_restart_jump_never_lands_in_the_stoppage():
     ran 50 m behind B and Race Control takes 100 m off E after the restart. E's
     restart point then lies inside B's jump from its frozen distance to its anchor."""
     race = rd.Race(TRACE, formation=False)
-    cars = a, b, e = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 315), Car(race, "E", "e", L - 365)
+    cars = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 315), Car(race, "E", "e", L - 365)
     t = _drive(race, list(cars), [50] * 3, 0.0, 40)
     race.red_flag(t, "keep")
     for car in cars:

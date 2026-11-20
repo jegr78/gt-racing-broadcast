@@ -517,7 +517,6 @@ DESK_RACE = {"entries": [{"entry": "A", "class": "GT3", "class_pos": 1}, {"entry
 
 
 def t_the_desk_groups_the_race_by_class():
-    import json
     got = _desk_fn("classGroups", "classGroups(" + json.dumps(DESK_RACE) + ").map(g => "
                    "[g.name, g.lap, g.laps, g.rows.map(e => e.entry), g.color])")
     if got is None:
@@ -528,7 +527,6 @@ def t_the_desk_groups_the_race_by_class():
 
 
 def t_the_desk_renders_one_class_as_today():
-    import json
     race = {"entries": [{"entry": "A"}, {"entry": "B"}], "classes": [], "class_lap": {}, "class_laps": {},
             "lap": {"leader": 3, "count": 20}}
     got = _desk_fn("classGroups", "classGroups(" + json.dumps(race) + ")")
@@ -539,7 +537,6 @@ def t_the_desk_renders_one_class_as_today():
 
 
 def t_the_desk_fastest_lap_form_takes_a_class():
-    import json
     r = {"fastest": {"entry": "A", "ms": 60000}, "classes": ["GT3", "GT4", ""],
          "class_fastest": {"GT3": {"entry": "A", "ms": 60000}, "GT4": None, "": None}}
     got = _desk_fn("scopedFastest,fastestBody,flClasses",
@@ -555,7 +552,6 @@ def t_the_desk_fastest_lap_form_takes_a_class():
 
 
 def t_the_desk_fastest_lap_entries_follow_the_class():
-    import json
     r = {"entries": [{"entry": "A", "class": "GT3"}, {"entry": "B", "class": "GT4"}, {"entry": "C", "class": "GT3"}]}
     got = _desk_fn("flEntries", "[flEntries(R, ''), flEntries(R, 'GT3'), flEntries(R, 'GT4')]".replace("R", json.dumps(r)))
     if got is None:
@@ -564,7 +560,6 @@ def t_the_desk_fastest_lap_entries_follow_the_class():
 
 
 def t_the_desk_class_header_count_follows_the_overall_rule():
-    import json
     race = dict(DESK_RACE, class_count={"GT3": 20, "GT4": None, "": None})
     got = _desk_fn("classGroups", "classGroups(" + json.dumps(race) + ").map(g => g.laps)")
     if got is None:
