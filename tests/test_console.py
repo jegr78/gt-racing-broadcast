@@ -479,15 +479,28 @@ def t_the_desk_class_header_count_follows_the_overall_rule():
 
 
 def t_the_desk_class_gap_reads_laps_down_in_the_class():
-    got = _desk_fn("secs,gapCell",
+    got = _desk_fn("secs,lappedText,gapCell",
                    "[gapCell({lapped: 1, class_lapped: 0, class_gap_s: 2.5, gap_time_s: 90}, true, 4, 1),"
                    " gapCell({lapped: 0, class_lapped: 1, class_gap_s: null}, true, 4, 1),"
+                   " gapCell({lapped: 2, class_lapped: 1, class_gap_s: null, class_gap_time_s: 158.2, gap_time_s: 300},"
+                   " true, 4, 1),"
                    " gapCell({lapped: 1, gap_time_s: 90}, false, 4, 1)]")
     if got is None:
         return
     assert got[0] == {"text": "2.5", "lap": False}, f"a car lapped overall but not in its class: {got[0]}"
-    assert got[1] == {"text": "+1\u00a0L", "lap": True}, f"a car lapped in its class: {got[1]}"
-    assert got[2] == {"text": "+1\u00a0L\u00a0\u00b7 1:30.0", "lap": True}, f"overall as before: {got[2]}"
+    assert got[1] == {"text": "+1\u00a0L", "lap": True}, f"a car lapped in its class without a time: {got[1]}"
+    assert got[2] == {"text": "+1\u00a0L\u00a0\u00b7 2:38.2", "lap": True}, \
+        f"a car lapped in its class shows the exact time to its class leader: {got[2]}"
+    assert got[3] == {"text": "+1\u00a0L\u00a0\u00b7 1:30.0", "lap": True}, f"overall as before: {got[3]}"
+
+
+def t_the_desk_class_interval_keeps_the_exact_time():
+    got = _desk_fn("intervalTime",
+                   "[intervalTime({class_interval_s: null, class_interval_time_s: 153.7, interval_time_s: 9}, true),"
+                   " intervalTime({class_interval_s: 1.5, interval_time_s: 9}, false)]")
+    if got is None:
+        return
+    assert got == [153.7, 9], f"grouped rows read the exact class interval, a lap down too: {got}"
 
 
 if __name__ == "__main__":

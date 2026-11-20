@@ -165,7 +165,9 @@ except on the tower.
   on the line: it belongs to the final lobby's row. An optional Schedule column
   `Laps <Class>` fills it when that row goes on air, unless the desk already holds a
   value or cleared it for that stint. Until a count shows, the header shows the class
-  leader's lap only.
+  leader's lap only. Once the overall leader has taken the flag, the class header on the
+  tower, the desks, the public page and the cockpit never reads a lap past the class
+  count, the same rule as the overall lap.
 - **Fastest lap**: the relay keeps one per class next to the overall one. On the desk's
   fastest lap form a class picked in the class selector narrows **Clear fastest lap**
   and **Set fastest lap** to that class's lap; the overall lap stays. A race reset
@@ -183,9 +185,15 @@ except on the tower.
   per class. The public page lists each class's fastest lap and adds a filter (all
   classes or one), kept per browser. A [timing host](#hosted-live-timing-optional)
   deployed before classes existed shows them only after a redeploy. The
-  desks show the class position, with the overall position on hover.
+  desks show the class position, with the overall position on hover. A car lapped
+  within its class reads `+1 L · 1:02.5` on the desks, the exact time to its class
+  leader, like the overall gap outside class mode. Its interval to the class car ahead
+  keeps its time too, also a lap down. An estimated car's class times come from the
+  overall gaps, so its EST mark applies there as well. The public page and the cockpit
+  show the laps only.
 - **Recording**: samples carry each car's class and class position, and the frozen
-  standings page groups by class with the class gaps. The CSV adds `class` and
+  standings page groups by class with the class gaps, a car lapped in its class with
+  the exact time and interval as on the desks. The CSV adds `class` and
   `class_pos` columns only when the recording holds samples from class mode.
 
 ### Dashboard

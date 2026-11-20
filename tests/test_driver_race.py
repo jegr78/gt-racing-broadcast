@@ -1266,6 +1266,13 @@ def t_the_public_view_keeps_the_class_fields():
     for key in ("class", "class_color", "class_pos", "class_gap_s", "class_interval_s", "class_lapped"):
         assert key in pub["entries"][0], f"{key} reaches the public page: {pub['entries'][0]}"
     assert "class_secret" not in pub["entries"][0], pub["entries"][0]
+    desk = _rows(svc.standings())
+    assert all(isinstance(desk[e]["class_gap_time_s"], float) for e in "ABC"), \
+        f"the desks get the exact class gap: {desk}"
+    assert isinstance(desk["C"]["class_interval_time_s"], float), f"the desks get the exact class interval: {desk['C']}"
+    for row in d["entries"] + pub["entries"]:
+        assert not {"class_gap_time_s", "class_interval_time_s", "gap_time_s", "interval_time_s"} & set(row), \
+            f"an exact gap never reaches the dashboard or the public page: {row}"
     assert pub["classes"][0] == {"name": "H", "color": "#c00", "lap": d["classes"][0]["lap"],
                                  "laps": d["classes"][0]["laps"],
                                  "fastest": {"entry": "A", "driver": "Max A", "team": "Red Bulls",
@@ -1479,6 +1486,62 @@ def t_a_class_lap_count_below_the_leader_lap_is_kept():
     after = svc.dashboard()
     assert _class_of(after, "G")["laps"] == 54 and after["state"] == before["state"], after["classes"]
     assert not any(r["finished"] for r in after["entries"]), "a class lap count never finishes a car"
+
+
+def _class_flag_service():
+    """H's A takes the flag on lap 3 of 3 while G's B and C run on; G's counts wait in
+    stints S2 (1 lap) and S3 (2 laps)."""
+    ctx = {"roster": {k: dict(v) for k, v in CLASS_ROSTER.items()}, "stint": None, "remaining": None,
+           "mode": "race"}
+    svc, clock, _path = _dash_service(ctx)
+    svc.set_settings({"finish_mode": "laps", "lap_count": 3})
+    svc.set_class_laps("rc:Anna", "G", 1, stint="S2")
+    svc.set_class_laps("rc:Anna", "G", 2, stint="S3")
+    along, speed = {"A": -10.0, "B": -30.0, "C": -50.0}, {"A": 60.0, "B": 40.0, "C": 35.0}
+
+    def drive(until):
+        while clock[0] < until:
+            clock[0] = round(clock[0] + 0.1, 3)
+            for entry in along:
+                along[entry] += speed[entry] / 10
+                svc.update({"entry": entry, "conn": entry.lower(), "name": "Max " + entry},
+                           _sample(clock[0], along[entry], max(0, int(along[entry] // L) + 1), speed[entry]))
+    return svc, drive, ctx
+
+
+def t_a_class_lap_stops_at_the_class_count_once_the_flag_is_out():
+    svc, drive, ctx = _class_flag_service()
+    drive(3 * L / 60 - 1)
+    ctx["stint"] = "S2"
+    svc.tick()
+    assert _class_of(svc.dashboard(), "G")["lap"] == 2, "before the flag the class lap may pass its count"
+    drive(3 * L / 60 + 1)
+    svc.tick()
+    d = svc.dashboard()
+    assert d["state"] == "finishing", d["state"]
+    assert (_class_of(d, "G")["lap"], _class_of(d, "G")["laps"]) == (1, 1), \
+        f"after the flag the class header never reads past its count: {d['classes']}"
+    assert _class_of(dr.public_view(d), "G")["lap"] == 1, "the public page reads the same class lap"
+    ctx["stint"] = "S3"
+    st = svc.standings()
+    assert st["class_lap"] == {"H": 3, "G": 2}, f"the desks read the class lap of the stint on air: {st['class_lap']}"
+
+
+def t_the_dashboard_reads_class_laps_only_in_class_mode():
+    svc, _clock, _path, ctx = _class_service()
+    calls = []
+    real = dr._saved_class_laps
+    dr._saved_class_laps = lambda *a: calls.append(a) or real(*a)
+    try:
+        for info in ctx["roster"].values():
+            info["carClass"] = "H"
+        svc.tick()
+        assert calls == [], f"outside class mode a tick never reads the class lap counts: {calls}"
+        ctx["roster"]["B"]["carClass"] = "G"
+        svc.tick()
+        assert calls, "in class mode a tick reads them"
+    finally:
+        dr._saved_class_laps = real
 
 
 def t_the_schedule_laps_belong_to_the_first_named_class():

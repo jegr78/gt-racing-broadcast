@@ -1569,7 +1569,7 @@ def t_the_desk_links_the_whole_recording():
 
 def t_the_desk_lapped_gap_breaks_after_the_dot():
     desk = _console_src("driver-desk.js")
-    assert '"\\u00a0L" + (typeof e.gap_time_s === "number" ? "\\u00a0\\u00b7 " + secs(e.gap_time_s)' in desk, \
+    assert '"\\u00a0L" + (typeof time === "number" ? "\\u00a0\\u00b7 " + secs(time)' in desk, \
         "+1 L, NBSP, dot, plain space, time"
 
 

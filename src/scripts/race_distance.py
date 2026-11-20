@@ -205,6 +205,7 @@ class Race:
         self.fastest = None         # {entry, driver, ms}
         self.fastest_by_class = {}  # class name -> {entry, driver, ms}
         self._classes = {}          # entry -> class name
+        self._class_laps = {}       # class name -> the lap count Race Control set
         self._window_leader = None  # the leader's distance when the change window opened
         self._est = {}              # entry -> {ref, seconds, held, lag, on}
         self._roster = []           # the Configuration entries, in order
@@ -221,6 +222,11 @@ class Race:
     def set_classes(self, classes):
         """Each entry's class name; an entry missing or mapped to "" has none."""
         self._classes = {e: c for e, c in classes.items() if isinstance(e, str) and isinstance(c, str) and c}
+
+    def set_class_laps(self, laps):
+        """Each class's lap count as Race Control set it; display only, it never
+        finishes a car."""
+        self._class_laps = dict(laps)
 
     def class_of(self, entry):
         """The entry's class name, "" without one."""
@@ -981,15 +987,23 @@ class Race:
                 "position_mismatch": e.entry in mismatch,
                 "estimate": None if est is None else {"ref": est["ref"], "seconds": est["seconds"]},
                 "class": None, "class_pos": None, "class_gap_s": None, "class_interval_s": None,
-                "class_lapped": None})
+                "class_lapped": None, "class_gap_time_s": None, "class_interval_time_s": None})
         self._estimate_gaps(ents, rows)
         classes = self._class_pass(ents, rows, ranked, now)
         shown = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
                  for name in classes}
-        class_lap = {name: d["leader"] for name, d in shown.items()}
         # A class count shows only with the overall one; in endurance on the class leader's final lobby counter.
         class_counts = {name: lap["count"] is not None and (not self.multi_lobby or d["count"] is not None)
                         for name, d in shown.items()}
+        first = next((name for name in classes if name), None)
+        class_lap = {}
+        for name, d in shown.items():
+            # The first class runs the overall count, which `_lap_display` already caps.
+            count = self._class_laps.get(name) if name and name != first and class_counts[name] else None
+            leader = d["leader"]
+            if leader is not None and count and self._finishing_at is not None:
+                leader = min(leader, count)
+            class_lap[name] = leader
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
                 "restart_mode": self._restart_mode,
@@ -1045,22 +1059,31 @@ class Race:
                 lead, e, row = ents[refs[0]], ents[i], rows[i]
                 prev = ents[refs[k - 1]] if k else None
                 live = self._timed(e, now)
-                lapped = gap = interval = None
+                lapped = gap = interval = gap_time = None
                 if not k:
                     lapped, gap = (0, 0) if live or self._estimated(e) else (None, None)
+                    gap_time = 0.0 if gap is not None else None
                 elif self._estimated(e) or self._estimated(lead):
                     if live or self._estimated(e):
                         lapped, gap = self._class_gap_from_rows(rows[refs[0]], row, lead, e)
+                        gap_time = self._row_time_gap(rows[refs[0]], row)
                 elif live:
                     lapped, gap = self._behind(lead, e)
+                    gap_time = self._time_behind(lead, e, now)
                 gap = None if lapped or gap is None else round(gap, 2)
+                row["class_gap_time_s"] = None if gap_time is None else round(gap_time, 2)
+                interval_time = None
                 if k and (self._estimated(e) or self._estimated(prev)):
                     ahead = rows[refs[k - 1]]["class_gap_s"]
                     interval = None if gap is None or ahead is None else round(max(0.0, gap - ahead), 2)
+                    a, b = rows[refs[k - 1]]["class_gap_time_s"], row["class_gap_time_s"]
+                    interval_time = None if a is None or b is None else max(0.0, b - a)
                 elif k and live:
                     interval = self._behind(prev, e)[1]
                     interval = None if interval is None else round(interval, 2)
-                row.update(class_lapped=lapped or 0, class_gap_s=gap, class_interval_s=interval)
+                    interval_time = self._time_behind(prev, e, now)
+                row.update(class_lapped=lapped or 0, class_gap_s=gap, class_interval_s=interval,
+                           class_interval_time_s=None if interval_time is None else round(interval_time, 2))
         return names
 
     def _class_gap_from_rows(self, lead_row, row, lead, e):
@@ -1072,8 +1095,13 @@ class Race:
         laps = math.floor((a - b) / self.length)
         if laps >= 1:
             return laps, None
+        return 0, self._row_time_gap(lead_row, row)
+
+    @staticmethod
+    def _row_time_gap(lead_row, row):
+        """Seconds between two overall rows' time gaps; None without both."""
         t0, t1 = lead_row["gap_time_s"], row["gap_time_s"]
-        return 0, None if t0 is None or t1 is None else max(0.0, t1 - t0)
+        return None if t0 is None or t1 is None else max(0.0, t1 - t0)
 
     def _lap_display(self, ordered):
         """{leader, count}: the leader's running lap against the lap count. In endurance

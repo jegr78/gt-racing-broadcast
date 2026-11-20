@@ -133,15 +133,20 @@
       .map(function (e) { return e.entry; });
   }
   function fastestBody(cls, body) { return cls ? Object.assign({class: cls}, body) : body; }
+  // "+N L" and the exact time when there is one; no-break spaces let a narrow desk wrap
+  // only between the lap count and the time.
+  function lappedText(laps, time) {
+    return "+" + laps + "\u00a0L" + (typeof time === "number" ? "\u00a0\u00b7 " + secs(time) : "");
+  }
+  // A race row's exact interval, also for a car a lap behind the car ahead.
+  function intervalTime(e, grouped) { return grouped ? e.class_interval_time_s : e.interval_time_s; }
   // A race row's Gap cell; grouped rows read laps down within the class.
   function gapCell(e, grouped, i, k) {
     if (grouped) {
-      return {text: e.class_lapped ? "+" + e.class_lapped + "\u00a0L" : (k ? secs(e.class_gap_s) : ""),
+      return {text: e.class_lapped ? lappedText(e.class_lapped, e.class_gap_time_s) : (k ? secs(e.class_gap_s) : ""),
               lap: !!e.class_lapped};
     }
-    // No-break spaces: a narrow desk wraps only between the lap count and the time.
-    return {text: e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
-                           : (i ? secs(e.gap_s) : ""),
+    return {text: e.lapped ? lappedText(e.lapped, e.gap_time_s) : (i ? secs(e.gap_s) : ""),
             lap: !!e.lapped};
   }
   // The race rows under their class: [{name, color, lap, laps, rows}] in class order; one group named null outside class mode.
@@ -741,7 +746,7 @@
                                e.driver_registered + ")" : "")})]),
           el("td", {cls: "num", text: String(e.laps)}),
           el("td", {cls: "num" + (gap.lap ? " lap" : ""), text: gap.text}),
-          el("td", {cls: "num", text: secs(grouped ? e.class_interval_s : e.interval_time_s)}),
+          el("td", {cls: "num", text: secs(intervalTime(e, grouped))}),
           el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
                         st[0] ? el("span", stPill) : null,
                         e.finished ? el("span", {cls: "pill ok", text: "Finished"}) : null,
