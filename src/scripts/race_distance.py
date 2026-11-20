@@ -975,6 +975,13 @@ class Race:
         return (ent.ts[0], ent.ds[0]) if ent.ts else None
 
     @staticmethod
+    def _last(ent):
+        """(time, distance) where `ent`'s history ends; None without one."""
+        if ent.ts:
+            return ent.ts[-1], ent.ds[-1]
+        return (ent.cts[-1], ent.cds[-1]) if ent.cts else None
+
+    @staticmethod
     def _distance_at(ent, t):
         """`ent`'s distance at time t, interpolated; its last one after its history,
         None before it."""
@@ -997,7 +1004,12 @@ class Race:
         order counts, since a frozen finish distance overshoots the line by chance."""
         if ent.finished_at is not None and self._finishing_at is not None:
             return max(0, self._ranked_laps(ahead) - self._ranked_laps(ent))
-        return math.floor((self._shown(ahead) - self._shown(ent)) / self.length)
+        shown = self._shown(ent)
+        if ahead.finished_at is not None and not self._estimated(ent):
+            # Against a frozen finish the laps at that moment, not a distance it closes on.
+            then = self._distance_at(ent, ahead.finished_at)
+            shown = shown if then is None else then + ent.adjust
+        return math.floor((self._shown(ahead) - shown) / self.length)
 
     def _time_behind(self, ahead, ent, now=None):
         """Seconds `ent` is behind `ahead` by distance history, also when lapped; None
@@ -1019,7 +1031,14 @@ class Race:
             return None                            # no running time while a red flag holds them
         if now is not None and self._quiet(ahead, now):
             return None
-        reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
+        at = ent.distance + ent.adjust - ahead.adjust
+        last = self._last(ahead) if ahead.finished_at is not None else None
+        if last is not None and at >= last[1]:
+            # Past a finished car's last point: the gap where this car passed it.
+            mine = self._time_at(ent, last[1] + ahead.adjust - ent.adjust)
+            if mine is not None:
+                return max(0.0, self._racing(mine) - self._racing(last[0]))
+        reached = self._time_at(ahead, at)
         if reached is None:
             return self._gap_by_speed(ahead, ent)
         return max(0.0, self._racing(self._cars[ent.active].t) - self._racing(reached))
