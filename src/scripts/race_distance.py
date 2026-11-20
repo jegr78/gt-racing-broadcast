@@ -1397,15 +1397,15 @@ class Race:
         """A lap count of GT7's counter in race laps. A single lobby counts the formation
         lap; in endurance it is the final lobby's count for `ent`'s car there: the race
         laps it has completed when its counter passes `count`, where the flag falls.
-        None without a count, or in endurance before `ent` runs in the final lobby."""
+        None without a count, or in endurance before `ent` runs in the final lobby; never below 1."""
         if not count:
             return None
         if not self.multi_lobby:
-            return count - (1 if self.formation else 0)
+            return max(1, count - (1 if self.formation else 0))
         car = self._cars.get(ent.active) if ent is not None else None
         if car is None or car.line is None or not self._final_car(ent):
             return None
-        return math.floor((car.anchor + ent.adjust - car.f0) / self.length) + count + 1 - car.lap0
+        return max(1, math.floor((car.anchor + ent.adjust - car.f0) / self.length) + count + 1 - car.lap0)
 
     def _lobby_lap(self, now):
         """GT7's counter of the lobby on air: the highest among the running cars that

@@ -54,6 +54,7 @@
     "padding:1px;border-radius:3px;background:#f2f4f7;object-fit:contain}",
     ".dd tr.cls td{background:var(--panel-2,#1b1f25);font-weight:600}",
     ".dd tr.cls .lap{margin-left:8px;color:var(--muted,#9aa0a6);font-weight:400;font-family:var(--mono,ui-monospace,monospace)}",
+    ".dd td.fl{color:#c49bff;font-weight:600}.dd td.pb{color:#4fdc74;font-weight:600}",
     ".dd .lapline{margin:4px 0;font-weight:600;font-family:var(--mono,ui-monospace,monospace)}.dd .lapline:empty{display:none}",
     ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}"
   ].join("");
@@ -162,8 +163,9 @@
     return {text: e.lapped ? lappedText(e.lapped, e.gap_time_s) : (i ? secs(e.gap_s) : ""),
             lap: !!e.lapped};
   }
-  // The race laps driven against the count, and GT7's lap of the lobby on air.
+  // The race laps driven against the count, and GT7's lap of the lobby on air; in qualifying the segment.
   function lapText(r) {
+    if (r.mode === "qualifying") return "Qualifying" + (r.segment ? " \u00b7 " + r.segment : "");
     var lap = r.lap || {}, parts = [];
     if (typeof lap.leader === "number") parts.push("Race lap " + lap.leader + (typeof lap.count === "number" ? " / " + lap.count : ""));
     if (typeof r.lobby_lap === "number") parts.push("Lobby lap " + r.lobby_lap);
@@ -181,6 +183,27 @@
               color: typeof c === "string" && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c) ? c : "",
               rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === n; })};
     });
+  }
+
+  function plusMs(ms) { return typeof ms === "number" ? "+" + (ms / 1000).toFixed(3) : ""; }
+  // The qualifying rows under their class, as classGroups does for the race.
+  function qualiGroups(r) {
+    var rows = r.qualifying || [], list = Array.isArray(r.quali_classes) ? r.quali_classes : [];
+    if (!list.length) return [{name: null, rows: rows}];
+    return list.map(function (c) {
+      var color = typeof c.color === "string" && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c.color) ? c.color : "";
+      return {name: c.name, color: color, lap: null,
+              rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === c.name; })};
+    });
+  }
+  // A qualifying row's cells; `k` is its place in the group. The last lap's mark is "fl" for P1's
+  // (its class's) best, "pb" for a personal best.
+  function qualiCells(e, grouped, k) {
+    var gap = grouped ? e.class_gap_ms : e.gap_ms, interval = grouped ? e.class_interval_ms : e.interval_ms;
+    var best = typeof e.best_ms === "number";
+    return {pos: String(grouped ? e.class_pos : e.pos), best: lapTime(e.best_ms), bestFl: best && !k,
+            gap: k ? plusMs(gap) : best ? "Pole" : "", interval: k ? plusMs(interval) : "", last: lapTime(e.last_lap_ms),
+            mark: best && e.last_lap_ms === e.best_ms ? (k ? "pb" : "fl") : ""};
   }
 
   var logoFailed = {};   // brand key -> when its logo last failed to load
@@ -382,6 +405,10 @@
     var raceTable = el("div", {cls: "tbl"}, [el("table", {cls: "race"}, [el("thead", {}, [el("tr", {}, [
       "Pos", "", "Entry", "Laps", "Gap", "Int.", "Status", "Pits", "Corr."].map(function (h) {
         return el("th", h === "Pits" ? {text: h, title: PIT_HINT} : {text: h}); }))]), raceBody])]);
+    var qualiBody = el("tbody");
+    var qualiTable = el("div", {cls: "tbl", hidden: ""}, [el("table", {cls: "race"}, [el("thead", {}, [el("tr", {}, [
+      "Pos", "", "Entry", "Best", "Gap", "Int.", "Last"].map(function (h) { return el("th", {text: h}); }))]),
+      qualiBody])]);
     var raceNote = el("div", {cls: "muted"});
     var lapLine = el("div", {cls: "lapline"});
 
@@ -806,7 +833,7 @@
       redBanner,
       el("h3", {text: "Race"}),
       el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
-      recWarn, raceNote, lapLine, raceTable,
+      recWarn, raceNote, lapLine, raceTable, qualiTable,
       el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry, estSide, estRef, estSec,
                                estSet, estClear]),
@@ -935,6 +962,34 @@
       });
       if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "9", cls: "muted", text: "No driver data yet."})])];
       raceBody.replaceChildren.apply(raceBody, rows);
+      var quali = r.mode === "qualifying";
+      raceTable.hidden = quali;
+      qualiTable.hidden = !quali;
+      if (quali) { raceNote.textContent = ""; renderQuali(r); }
+    }
+    function renderQuali(r) {
+      var rows = [];
+      qualiGroups(r).forEach(function (g) {
+        if (g.name !== null) {
+          var name = el("span", {text: g.name || "Unclassed"});
+          if (g.color) name.style.color = g.color;
+          rows.push(el("tr", {cls: "cls"}, [el("td", {colspan: "7"}, [name])]));
+        }
+        g.rows.forEach(function (e, k) {
+          var c = qualiCells(e, g.name !== null, k);
+          rows.push(el("tr", {}, [
+            el("td", g.name !== null ? {cls: "num", text: c.pos, title: "P" + e.pos + " overall"} : {cls: "num", text: c.pos}),
+            logoCell(e),
+            el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted nowrap", text: fitName(e.driver, NAME_MAX),
+                                                                title: e.driver || ""})]),
+            el("td", {cls: "num" + (c.bestFl ? " fl" : ""), text: c.best}),
+            el("td", {cls: "num", text: c.gap}),
+            el("td", {cls: "num", text: c.interval}),
+            el("td", {cls: "num" + (c.mark ? " " + c.mark : ""), text: c.last})]));
+        });
+      });
+      if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "7", cls: "muted", text: "No qualifying laps yet."})])];
+      qualiBody.replaceChildren.apply(qualiBody, rows);
     }
 
     function renderSenders(rd) {
@@ -1012,7 +1067,7 @@
       staleNote.hidden = !stale;
       if (stale) staleNote.textContent = "Relay not reachable since " + state.staleSince.toLocaleTimeString() +
         ": the tables below are not current.";
-      [raceTable, evTable, readyTable, sendTable, reqList].forEach(function (t) { t.classList.toggle("stale", stale); });
+      [raceTable, qualiTable, evTable, readyTable, sendTable, reqList].forEach(function (t) { t.classList.toggle("stale", stale); });
     }
     async function refresh() {
       // Both start at once; a slow recording call never holds back the race table.

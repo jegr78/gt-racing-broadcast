@@ -458,6 +458,83 @@ def t_qualifying_ranks_the_running_segment_by_best_lap():
         ("B", "Ann", 90100), ("A", "Max", 90500)], f"impossible and quiet senders are ignored: {rows}"
 
 
+def t_qualifying_rows_carry_the_interval_and_the_last_lap():
+    conns = [
+        {"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "last_ms": 91200}},
+        {"entry": "B", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90100, "last_ms": 90100}},
+        {"entry": "X", "segment": "Q1", "name": "Bo", "latest": {"best_ms": 90900, "last_ms": 5}},
+        {"entry": "C", "segment": "Q1", "name": "Lea", "latest": {"best_ms": -1, "last_ms": -1}},
+    ]
+    seen = {}
+    rows = dr.qualifying(conns, "Q1", ROSTER, min_ms=30000, seen=seen)
+    assert [(r["entry"], r["gap_ms"], r["interval_ms"], r["last_lap_ms"]) for r in rows] == [
+        ("B", 0, None, 90100), ("A", 400, 400, 91200), ("X", 800, 400, None), ("C", None, None, None)], \
+        f"interval to the car ahead by best lap; a lap faster than the line allows is no last lap: {rows}"
+    conns[0]["latest"] = {"best_ms": -1, "last_ms": -1}           # a new GT7 session
+    conns[1]["live"] = False
+    rows = dr.qualifying(conns, "Q1", ROSTER, min_ms=30000, seen=seen)
+    assert {r["entry"]: r["last_lap_ms"] for r in rows}["A"] == 91200, \
+        f"the last lap stays like the best when GT7 starts over: {rows}"
+    assert {r["entry"]: r["last_lap_ms"] for r in rows}["B"] == 90100, f"and when the sender goes quiet: {rows}"
+    assert "class" not in rows[0], "one class: no class fields"
+
+
+QUALI_CLASSES = {"A": {"number": "1", "carClass": "GT3", "classColor": "#f00"},
+                 "B": {"number": "2", "carClass": "GT4", "classColor": "#0f0"},
+                 "C": {"number": "3", "carClass": "GT3", "classColor": "#f00"},
+                 "D": {"number": "4", "carClass": "GT4", "classColor": "#0f0"},
+                 "E": {"number": "5"}}
+
+
+def t_a_class_colour_that_is_no_colour_never_reaches_a_page():
+    roster = {"A": {"carClass": "GT3", "classColor": "red;background:url(x)"},
+              "B": {"carClass": "GT4", "classColor": "rgba(0, 160, 0, 0.5)"},
+              "C": {"carClass": "GT2", "classColor": "#0af"},
+              "D": {"carClass": "GT1", "classColor": "orange"},
+              "E": {"carClass": "LMP", "classColor": "expression(alert(1))"},
+              "F": {"carClass": "GT3", "classColor": "#c00"}}
+    got = dr._class_colors(roster)
+    assert got == {"GT3": "#c00", "GT4": "rgba(0, 160, 0, 0.5)", "GT2": "#0af", "GT1": "orange", "LMP": ""}, \
+        f"only a hex, rgb/rgba numbers or a colour name pass; the rest is no colour: {got}"
+
+
+def t_qualifying_ranks_each_class_on_its_own():
+    conns = [{"entry": e, "segment": "Q1", "name": e.lower(), "latest": {"best_ms": ms}}
+             for e, ms in (("A", 90000), ("B", 95000), ("C", 90700), ("D", 96000), ("E", 91000))]
+    rows, classes = dr.quali_classes(dr.qualifying(conns, "Q1", QUALI_CLASSES), QUALI_CLASSES)
+    got = [(r["entry"], r["pos"], r["class"], r["class_pos"], r["class_gap_ms"], r["class_interval_ms"],
+            r["class_color"]) for r in rows]
+    assert got == [("A", 1, "GT3", 1, 0, None, "#f00"), ("C", 2, "GT3", 2, 700, 700, "#f00"),
+                   ("E", 3, "", 1, 0, None, ""), ("B", 4, "GT4", 1, 0, None, "#0f0"),
+                   ("D", 5, "GT4", 2, 1000, 1000, "#0f0")], got
+    assert classes == [{"name": "GT3", "color": "#f00"}, {"name": "GT4", "color": "#0f0"},
+                       {"name": "", "color": ""}], \
+        f"classes in order of their fastest car, without a fastest lap: qualifying has none: {classes}"
+    one = {"A": {"carClass": "GT3"}, "C": {"carClass": "GT3"}}
+    rows, classes = dr.quali_classes(dr.qualifying(conns[:3:2], "Q1", one), one)
+    assert classes == [] and "class" not in rows[0], "one named class is no class mode"
+
+
+def t_the_qualifying_dashboard_and_desk_carry_classes_and_the_fastest_lap():
+    conns = [{"entry": e, "segment": "Q1", "name": e.lower(), "latest": {"best_ms": ms, "last_ms": ms}}
+             for e, ms in (("A", 90000), ("B", 95000), ("C", 90700))]
+    ctx = {"roster": QUALI_CLASSES, "stint": "Q1", "remaining": 300, "mode": "qualifying",
+           "segment": "Q1", "connections": conns}
+    svc, _clock, _path = _dash_service(ctx)
+    svc.tick()
+    d = svc.dashboard()
+    assert [c["name"] for c in d["classes"]] == ["GT3", "GT4"], d
+    assert "fastest" not in d, f"qualifying shows no fastest lap: the best lap column holds it: {d}"
+    st = svc.standings()
+    assert st["mode"] == "qualifying" and st["segment"] == "Q1", st
+    assert [(r["entry"], r["class_pos"], r["last_lap_ms"]) for r in st["qualifying"]] == [
+        ("A", 1, 90000), ("C", 2, 90700), ("B", 1, 95000)], f"the desks get the live ranking: {st['qualifying']}"
+    assert [c["name"] for c in st["quali_classes"]] == ["GT3", "GT4"], st["quali_classes"]
+    pub = dr.public_view(d)
+    assert pub["qualifying"][1]["class_gap_ms"] == 700 and pub["classes"][0]["fastest"] is None, pub
+    assert "fastest" not in pub, f"the public activity list notes no pole lap as a fastest lap: {pub}"
+
+
 def t_a_qualifying_time_stays_when_its_sender_goes_quiet():
     conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500}},
              {"entry": "B", "segment": "Q1", "name": "Ann", "latest": {"best_ms": 90100}}]
@@ -578,10 +655,16 @@ def t_the_public_view_is_timing_only_and_ignores_the_obs_switches():
     quali = dr.public_view({"v": 1, "mode": "qualifying", "show": {"compound": True, "fuel": True},
                             "qualifying": [{"pos": 1, "entry": "A", "number": "1", "driver": "Max",
                                             "team": "", "color": "", "text_color": "", "best_ms": 90000,
-                                            "gap_ms": 0, "compound": None, "conn": "leak"}]})
+                                            "gap_ms": 0, "interval_ms": None, "last_lap_ms": 90000,
+                                            "class": "GT3", "class_pos": 1, "class_gap_ms": 0,
+                                            "class_interval_ms": None, "class_color": "#f00",
+                                            "compound": None, "conn": "leak", "latest": {"x": 1}}]})
     assert quali["qualifying"][0] == {"pos": 1, "entry": "A", "number": "1", "driver": "Max", "team": "",
                                       "color": "", "text_color": "", "best_ms": 90000, "gap_ms": 0,
-                                      "compound": None}, quali
+                                      "interval_ms": None, "last_lap_ms": 90000, "class": "GT3",
+                                      "class_pos": 1, "class_gap_ms": 0, "class_interval_ms": None,
+                                      "class_color": "#f00", "compound": None}, \
+        f"qualifying viewers get best lap, gap, interval, last lap and class, nothing else: {quali}"
     assert dr.public_view(None) == {"v": 1, "mode": "race", "entries": []}
 
 

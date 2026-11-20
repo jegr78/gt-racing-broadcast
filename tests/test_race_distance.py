@@ -2269,6 +2269,17 @@ def t_a_class_count_reads_race_laps_like_the_overall_one():
     assert st["class_lap"] == {"H": 3, "G": 2}, f"each class lap in race laps, capped: {st['class_lap']}"
 
 
+def t_a_lap_count_of_one_never_reads_zero():
+    race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=1)
+    race.set_classes({"A": "H", "B": "G"})
+    race.set_class_laps({"G": 1})
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 30))]
+    t = _drive(race, cars, [60, 40], 0.0, L / 60 + 1)
+    st = race.standings(t)
+    assert st["lap"]["count"] == 1 and st["class_count"]["G"] == 1, \
+        f"a race of one lap reads 1, not 0 / 0: {st['lap']} {st['class_count']}"
+
+
 def t_a_finisher_with_fewer_laps_reads_lapped_overall_and_in_its_class():
     race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=6)
     pack = ["G%d" % i for i in range(1, 9)]

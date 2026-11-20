@@ -309,9 +309,14 @@ It never carries connection ids, corrections or who made them.
   the live race. **Show dashboard**, **Hide dashboard** and the display switches act at
   once, never after the delay.
 - **Qualifying**: in qualifying mode the dashboard ranks the running segment by GT7's
-  best lap, with the gap to the fastest. A lap set while the sender was live stays on
-  the tower when the sender closes or loses its connection, until the relay restarts;
-  a best lap faster than the line allows is ignored.
+  best lap. Each row carries the best lap, the gap to P1, the interval to the car
+  ahead (both from the best laps) and the last lap GT7 reported. A best or last lap set
+  while the sender was live stays when the sender closes, loses its connection or
+  starts a new GT7 session, until the relay restarts; a lap faster than the line allows
+  is ignored. With [classes](#classes) each class ranks on its own: class position,
+  gap and interval within the class. Qualifying has no race laps: the header names the
+  segment and, with the race timer set, the remaining time. There is no fastest lap in
+  qualifying: the best lap column holds each driver's best.
 
 ### On air and in the cockpit
 
@@ -335,8 +340,16 @@ It never carries connection ids, corrections or who made them.
   it already had. A car in the box shows `Box`. Right of the tyre ring a bar
   and a percentage show each car's fuel (GT7 reports the tank in percent); both turn
   amber at 10 % or less, and a car without data shows none. A car that took the
-  chequered flag shows a flag in place of ring and fuel, and its final gap. In
-  qualifying the tower shows best lap and gap.
+  chequered flag shows a flag in place of ring and fuel, and its final gap.
+- **Qualifying on the tower**: the best lap has a column of its own, empty until the
+  entry's first lap, P1's in purple. P1's value cell reads `Pole` (with classes each
+  class's P1). For the others the value column switches every 15 seconds between
+  the gap to P1 and the interval to the car ahead, and the badge reads `GAP TO P1` or
+  `INTERVAL` (`data-phase` `gap` or `interval` as in the race). A completed lap shows for
+  the league's lap time seconds: purple when it is P1's best lap (in class mode its
+  class's P1), green when it is the driver's own best, white otherwise; a lap faster
+  than the line allows shows nothing. With classes the tower pages and groups as in
+  the race. The fastest lap box, fuel and pit stops do not show in qualifying.
 - **Brand logos**: between position and number each entry shows the logo of its
   Configuration tab brand, on a light plate. The logo is the HUD's PNG: the league's
   override in `runtime/<profile>/brands/<key>.png` first, then the bundled one. An entry
@@ -374,7 +387,8 @@ It never carries connection ids, corrections or who made them.
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every
-  column at once, logos included.
+  column at once, logos included; in qualifying best lap, gap, interval and last lap,
+  per class with classes. The desks show the same columns live, without the delay.
 
 ### Public live timing
 
@@ -387,7 +401,11 @@ next to the invite. From the command line, `racecast event timing` prints it and
 
 The page needs no login and shows timing only: order, brand logo, number and colour,
 driver and team, gaps, last lap, pit stops, the fastest lap, the remaining time, and compound and
-fuel as the display switches set them. In qualifying it shows the ranking. It has the
+fuel as the display switches set them. In qualifying it shows best lap, gap to P1,
+interval and last lap, grouped by class with the class filter as in the race; the best
+lap column always shows and P1 reads `Pole`. Neither the page nor its activity list
+shows a fastest lap in qualifying. A [timing host](#hosted-live-timing-optional) deployed before
+these columns existed shows them only after a redeploy. It has the
 same delay as the broadcast dashboard. Readers can switch columns on and off, and an
 activity list notes new fastest laps, red flags and the chequered flag.
 
