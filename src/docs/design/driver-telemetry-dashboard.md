@@ -163,9 +163,12 @@ director.
 - **Red flag.** Race Control or the director triggers `RED FLAG` (see Roles). It
   anchors every entry's last known distance. In the new lobby each car continues
   from its anchor when it leaves the box; lap 1 does not count. A profile setting
-  decides whether a restart keeps the gaps or neutralises them (order and laps
-  kept, cars in the same lap anchored level); Race Control and the director
-  override it per restart. "Restart released" ends the mode.
+  decides whether a restart keeps the gaps or neutralises them. Keep is a release
+  staggered by the gaps: every car starts from the leader's frozen distance less its
+  whole laps behind, and Race Control releases it its gap after the leader.
+  Neutralise keeps order and laps and anchors cars in the same lap level. Race
+  Control and the director override it per restart. "Restart released" ends the
+  mode.
 - **Safety car.** A leader-driven safety car needs no rule: the field closes up on
   track and the distances show it.
 - **Rejoin** (multi-lobby layer). A team that disconnected rejoins in the next

@@ -45,10 +45,12 @@ nearest the predicted distance decides.
   the leader had at the flag, and a finished car's gap is measured at that lap count.
 - Red flag (#1113): `red_flag` freezes every entry's distance. In the restart lobby
   (a new connection, or a counter that dropped) each car continues from its anchor
-  when it leaves the box. `keep` anchors at the frozen distance, `neutralise`
-  anchors every car of a lap at that lap's best distance. `release` ends the mode:
-  a car still in its old session counts on from where it is, one in a restart lobby
-  still resumes at its box exit.
+  when it leaves the box. `keep` is a release staggered by the gaps: every car
+  anchors at the leader's frozen distance less its whole laps behind, and its later
+  box exit is its gap. `neutralise` anchors every car of a lap at that lap's best
+  distance. Gaps leave out the stoppage, from the red flag to the first box exit.
+  `release` ends the mode: a car still in its old session counts on from where it
+  is, one in a restart lobby still resumes at its box exit.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
   window starts from the leader's distance where its old lobby's car stopped (where
   the leader is, while it still runs).
@@ -208,6 +210,8 @@ class Race:
         self._finished = False
         self._pruned_at = None
         self._red = None            # {"at", "mode"} while the red flag mode runs
+        self._stopped = None        # red flag: when the stoppage began, until the first restart
+        self._pauses = []           # (from, to) of each stoppage, left out of every gap
         self._restart_mode = "keep"
         self._preset = {}           # entry -> [metres, pit stops, rejoin] for entries not seen yet
         self._parked = {}           # entries whose only car was moved to another entry
@@ -275,6 +279,7 @@ class Race:
                 ent.finished_at = now              # a finish by hand classifies it where it stopped
             elif ent is not None and ent.distance is not None:
                 ent.resume = True
+        self._settle_stoppage()
         return ended
 
     def _out(self, ent):
@@ -297,6 +302,8 @@ class Race:
         self._advance(now)
         self._red = {"at": now, "mode": mode}
         self._restart_mode = mode
+        if self._stopped is None:                  # a second red flag keeps the first stoppage
+            self._stopped = max((c.t for c in self._cars.values() if c.t is not None), default=now)
         for ent in self._entries.values():
             if ent.waiting or self._out(ent):
                 continue                           # a second red flag keeps the first anchor
@@ -328,6 +335,26 @@ class Race:
             car = self._cars.get(ent.active)
             if ent.waiting and car is not None and not car.restart_ready and car.lap is not None:
                 car.counting, ent.waiting = True, False
+        self._settle_stoppage()
+
+    def _settle_stoppage(self, end=None):
+        """Drop an open stoppage that no car in a restart lobby waits out: the field
+        raced on in its own lobby. `end` (a finish) closes one still running there."""
+        if self._stopped is None:
+            return
+        waited = self._red is not None or any(
+            e.waiting and not self._out(e) and c is not None and c.restart_ready
+            for e in self._entries.values() for c in [self._cars.get(e.active)])
+        if end is not None and waited:
+            self._close_stoppage(end)
+        elif not waited:
+            self._stopped = None
+
+    def _close_stoppage(self, t):
+        """End the stoppage at sample time `t`, the time base it began on."""
+        if t > self._stopped:
+            self._pauses.append((self._stopped, t))
+        self._stopped = None
 
     def take_used_rejoins(self):
         """The entries whose rejoin mark was consumed since the last call."""
@@ -412,7 +439,8 @@ class Race:
             if ref is not None and ref.distance is not None and self._red is None \
                     and not self._finished and ent.finished_at is None \
                     and ref.finished_at is None and not ref.waiting and not self._quiet(ref, now):
-                d, lag = self._distance_at(ref, now - est["seconds"]), est["seconds"]
+                then = self._wall(self._racing(now) - est["seconds"])
+                d, lag = self._distance_at(ref, then), est["seconds"]
                 first = self._first(ref)
                 if d is None and first is not None:   # its history starts later: hold there
                     d, lag = first[1], now - first[0]
@@ -440,15 +468,18 @@ class Race:
         return True
 
     def _anchor_of(self, ent):
-        """Where an entry continues after the red flag. Neutralise levels the cars the
-        tower shows on one lap, corrections included."""
+        """Where an entry continues after the red flag, corrections included. Keep
+        starts every car from the leader's frozen distance less its whole laps behind,
+        since Race Control releases the cars by their gaps. Neutralise levels the cars
+        the tower shows on one lap."""
+        frozen = [e.frozen + e.adjust for e in self._entries.values() if e.frozen is not None]
+        own = ent.frozen + ent.adjust
         if self._restart_mode == "neutralise":
-            lap = math.floor((ent.frozen + ent.adjust) / self.length)
-            level = max(e.frozen + e.adjust for e in self._entries.values()
-                        if e.frozen is not None
-                        and math.floor((e.frozen + e.adjust) / self.length) == lap)
+            lap = math.floor(own / self.length)
+            level = max(f for f in frozen if math.floor(f / self.length) == lap)
             return level - ent.adjust
-        return ent.frozen
+        lead = max(frozen)
+        return lead - math.floor((lead - own) / self.length) * self.length - ent.adjust
 
     def final_lobby(self, lap_count, now):
         """Endurance: the final stint lobby is on air and runs `lap_count` laps."""
@@ -465,6 +496,7 @@ class Race:
                     and (ent.active is not None or self._estimated(ent)):
                 ent.finished_at = now
         self._finished = True
+        self._settle_stoppage(max((c.t for c in self._cars.values() if c.t is not None), default=now))
 
     # -- samples -------------------------------------------------------------------
     @staticmethod
@@ -658,6 +690,8 @@ class Race:
                     old.counting = False
                 if self._start(ent, car, t, self._anchor_of(ent), lap, s, from_line=False):
                     ent.active, ent.waiting, ent.held = conn, False, False
+                    if self._stopped is not None:  # the first car out ends the stoppage
+                        self._close_stoppage(t)
                     ent.ts.append(t)
                     ent.ds.append(ent.distance)
             return
@@ -896,6 +930,19 @@ class Race:
         """When `ent` reached distance d, interpolated; None outside its history."""
         return _across(ent.ts, ent.ds, ent.cts, ent.cds, d)
 
+    def _racing(self, t):
+        """`t` on the racing clock: a red flag stoppage, until the first car leaves the
+        restart lobby's box, does not count."""
+        open_ = t - self._stopped if self._stopped is not None and t > self._stopped else 0.0
+        return t - open_ - sum(min(t, b) - a for a, b in self._pauses if t > a)
+
+    def _wall(self, r):
+        """The time at which the racing clock read `r`."""
+        for a, b in self._pauses:
+            if r > a:
+                r += b - a
+        return r
+
     @staticmethod
     def _first(ent):
         """(time, distance) where `ent`'s history begins; None without one."""
@@ -941,9 +988,9 @@ class Race:
                 mine = self._time_at(ent, laps * self.length - ent.adjust)
                 theirs = self._time_at(ahead, laps * self.length - ahead.adjust)
                 if mine is not None and theirs is not None:
-                    return max(0.0, mine - theirs)
+                    return max(0.0, self._racing(mine) - self._racing(theirs))
             reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
-            return None if reached is None else max(0.0, ent.finished_at - reached)
+            return None if reached is None else max(0.0, self._racing(ent.finished_at) - self._racing(reached))
         if ent.waiting or ahead.waiting:
             return None                            # no running time while a red flag holds them
         if now is not None and self._quiet(ahead, now):
@@ -951,7 +998,7 @@ class Race:
         reached = self._time_at(ahead, ent.distance + ent.adjust - ahead.adjust)
         if reached is None:
             return self._gap_by_speed(ahead, ent)
-        return max(0.0, self._cars[ent.active].t - reached)
+        return max(0.0, self._racing(self._cars[ent.active].t) - self._racing(reached))
 
     def _gap_by_speed(self, ahead, ent):
         """The distance to `ahead` at `ent`'s speed: an estimate while `ahead`'s history

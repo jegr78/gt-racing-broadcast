@@ -562,7 +562,8 @@ def t_red_flag_anchors_and_each_car_continues_from_its_anchor():
     assert _row(race, "B", t)["distance_m"] == db and _row(race, "B", t)["status"] == "box"
     b.box = False
     t = _drive(race, [a, b], [40, 40], t, 5)
-    assert abs(_row(race, "B", t)["distance_m"] - (db + 200)) < 25
+    assert abs(_row(race, "B", t)["distance_m"] - (da + 200)) < 25, \
+        f"keep restarts B from A's frozen distance; its later release is its gap: {db}"
     assert _row(race, "A", t)["pit_stops"] == 0 and _row(race, "B", t)["pit_stops"] == 0, \
         "a red flag restart is no pit stop"
     race.release(t)
@@ -734,6 +735,60 @@ def t_a_release_in_the_same_lobby_drives_on_from_where_the_cars_are():
     for car, entry in ((a, "A"), (b, "B")):
         row = _row(race, entry, t)
         assert row["status"] == "racing" and abs(row["distance_m"] - (car.along + 15 - 15)) < 5, (row, car.along)
+    assert abs(_row(race, "B", t)["gap_time_s"] - 2.0) < 0.2, \
+        f"the lobby raced on, so no stoppage leaves the gaps: {_row(race, 'B', t)}"
+
+
+def _mis_press_with_a_car_that_never_sent():
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "E"])
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
+    t = _drive(race, [a, b], [50, 50], 0.0, 20)
+    race.estimate("E", "B", 2.0, t)                            # E never sent: no car waits for it
+    t = _drive(race, [a, b], [50, 50], t, 2)
+    race.red_flag(t, "keep")                                   # pressed by mistake
+    t = _drive(race, [a, b], [50, 50], t, 4)
+    race.release(t)
+    return race, (a, b), _drive(race, [a, b], [50, 50], t, 5)
+
+
+def t_a_mis_pressed_red_flag_leaves_no_stoppage_behind_a_car_that_never_sent():
+    race, (a, b), t = _mis_press_with_a_car_that_never_sent()
+    assert abs(_row(race, "B", t)["gap_time_s"] - 2.0) < 0.2, \
+        f"the lobby raced on, so no stoppage leaves the gaps: {_row(race, 'B', t)}"
+    t = _drive(race, [a, b], [50, 50], t, 30)
+    race.red_flag(t, "keep")
+    flag = t
+    for car in (a, b):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b], [None, None], t, 20)
+    a.box = False
+    t = _drive(race, [a, b], [50, None], t, 2)
+    b.box = False
+    t = _drive(race, [a, b], [50, 50], t, 1)
+    race.release(t)
+    assert len(race._pauses) == 1 and abs(race._pauses[0][0] - flag) < 0.2, \
+        f"only the real red flag's stoppage counts: {race._pauses} from {flag}"
+    t = _drive(race, [a, b], [50, 50], t, 5)
+    assert abs(_row(race, "B", t)["gap_time_s"] - 2.0) < 0.3, _row(race, "B", t)
+
+
+def t_a_stoppage_ends_when_its_last_restart_lobby_car_retires_or_the_race_finishes():
+    for end in ("retire", "finish"):
+        race = rd.Race(TRACE, formation=False)
+        a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115), Car(race, "C", "c", L - 215)
+        t = _drive(race, [a, b, c], [50, 50, 50], 0.0, 20)
+        race.red_flag(t, "keep")
+        _new_lobby(c, L - 15)                                  # only C moved to a restart lobby
+        t = _drive(race, [a, b, c], [50, 50, None], t, 4)
+        race.release(t)                                        # A and B raced on
+        if end == "retire":
+            race.retire("C", True, t)
+        else:
+            race.finish(t)
+        t = _drive(race, [a, b], [50, 50], t, 3)
+        assert race._stopped is None and (end == "finish" or abs(_row(race, "B", t)["gap_time_s"] - 2.0) < 0.2), \
+            f"after a {end} no stoppage stays open: {race._stopped} {_row(race, 'B', t)}"
 
 
 def t_a_lap_count_finish_after_a_red_flag_restart_counts_the_whole_race():
@@ -753,8 +808,9 @@ def t_a_lap_count_finish_after_a_red_flag_restart_counts_the_whole_race():
 
 def _keep_restart_final_lobby(mode, lap_count=3, quiet_car=False):
     """Endurance final lobby after a keep restart from one box 180 m before the line:
-    A leads B by 150 m of race distance and leaves the box first, B 2 s later; C runs
-    further back. B is faster, so it passes A on the road but not in race distance.
+    A leaves the box first, B 2 s later, and Race Control then takes 150 m off B, so B
+    trails by 230 m of race distance but only 80 m on the road; C leaves 8 s after B.
+    B is faster, so it passes A on the road but not in race distance.
     `quiet_car`: the final lobby runs five laps before the red flag, and a fourth car
     E stops sending shortly before it and never joins the restart lobby."""
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode=mode)
@@ -774,10 +830,11 @@ def _keep_restart_final_lobby(mode, lap_count=3, quiet_car=False):
     a.box = False
     t = _drive(race, [a, b, c], [40, None, None], t, 2)
     b.box = False
-    t = _drive(race, [a, b, c], [40, 40, None], t, 2)
+    t = _drive(race, [a, b, c], [40, 40, None], t, 8)                  # C released by its larger gap
     c.box = False
     t = _drive(race, [a, b, c], [50, 50.8, 50], t, 3)
     race.release(t)
+    race.correct("B", -150.0)
     return race, (a, b, c), t
 
 
@@ -1035,6 +1092,65 @@ def t_rows_mark_entries_waiting_for_their_restart():
     assert _row(race, "B", t)["waiting"], "B still stands in the box"
 
 
+def _staggered_keep_restart():
+    """A leads B by 2 s, C runs more than a lap down. After a minute's red flag Race
+    Control releases the restart lobby by the gaps: A, B 2 s later, C 3 s after A."""
+    race = rd.Race(TRACE, formation=False)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115), Car(race, "C", "c", L - 215)
+    t = _drive(race, [a, b, c], [50, 50, 20], 0.0, 140)
+    before = {e: _row(race, e, t) for e in "ABC"}
+    assert before["C"]["lapped"] == 1 and abs(before["B"]["gap_time_s"] - 2.0) < 0.1, before
+    race.red_flag(t, "keep")
+    for car in (a, b, c):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b, c], [None] * 3, t, 60)
+    a.box = False
+    t = _drive(race, [a, b, c], [50, None, None], t, 2)
+    b.box = False
+    t = _drive(race, [a, b, c], [50, 50, None], t, 1)
+    c.box = False
+    t = _drive(race, [a, b, c], [50, 50, 50], t, 0.5)
+    race.release(t)
+    return race, (a, b, c), t, before
+
+
+def t_a_keep_restart_released_by_the_gaps_counts_each_gap_once():
+    race, cars, t, before = _staggered_keep_restart()
+    lead = before["A"]["distance_m"]
+    for _ in range(100):
+        rb, rc = _row(race, "B", t), _row(race, "C", t)
+        assert abs(rb["gap_time_s"] - 2.0) < 0.3 and abs(rb["gap_s"] - 2.0) < 0.3, \
+            f"B left 2 s after A from A's distance: its gap is the stagger, once: {rb}"
+        assert rc["lapped"] == 1 and abs(rc["gap_time_s"] - (L / 50 + 3.0)) < 0.5, \
+            f"C keeps its lap down and reads A's lap plus its 3 s, without the stoppage: {rc}"
+        t = _drive(race, list(cars), [50, 50, 50], t, 0.5)
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert abs(ra["distance_m"] - rb["distance_m"] - 100) < 15, \
+        f"B resumed from A's frozen distance {lead}, 2 s later: {ra['distance_m']} {rb['distance_m']}"
+    assert _row(race, "C", t)["laps"] == _row(race, "A", t)["laps"] - 1, "C keeps its whole lap behind"
+    race.finish(t)
+    rc = _row(race, "C", t)
+    assert rc["finished"] and abs(rc["gap_time_s"] - (L / 50 + 3.0)) < 0.5, f"C's final gap: {rc}"
+
+
+def t_a_finish_by_hand_after_a_keep_restart_leaves_out_the_stoppage():
+    race = rd.Race(TRACE, formation=False)
+    a, c = Car(race, "A", "a", L - 15), Car(race, "C", "c", L - 25)
+    t = _drive(race, [a, c], [50, 15], 0.0, 1.9 * L / 50)            # C a lap down, still on lap 0
+    race.red_flag(t, "keep")
+    for car in (a, c):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, c], [None, None], t, 60)
+    a.box = False
+    t = _drive(race, [a, c], [50, None], t, 3)
+    c.box = False
+    t = _drive(race, [a, c], [50, 50], t, 2)
+    race.finish(t)
+    rc = _row(race, "C", t)
+    assert rc["finished"] and rc["laps"] == 0 and abs(rc["gap_time_s"] - (L / 50 + 3.0)) < 0.5, \
+        f"C's final gap is A's lap plus the 3 s stagger, without the stoppage: {rc}"
+
+
 def t_a_quiet_car_ahead_gives_no_exact_gap():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 50)
@@ -1139,6 +1255,22 @@ def t_an_estimate_holds_under_a_red_flag_and_after_the_flag():
     except ValueError:
         pass  # expected
 
+
+
+def t_an_estimate_behind_follows_racing_time_across_a_keep_restart():
+    race, (a, b, c, d), t = _quiet_c(seconds=3.0)
+    t = _drive(race, [a, b, d], [40, 40, 40], t, 5)
+    race.red_flag(t, "keep")
+    held = _row(race, "C", t)["distance_m"]
+    for car in (a, b, d):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b, d], [None] * 3, t, 30)
+    b.box = False
+    t = _drive(race, [a, b, d], [None, 40, None], t, 0.5)
+    race.release(t)
+    t = _drive(race, [a, b, d], [None, 40, None], t, 0.5)
+    assert abs(_row(race, "C", t)["distance_m"] - (held + 40)) < 5, \
+        f"C shows where B was three racing seconds ago, not inside the stoppage: {_row(race, 'C', t)} {held}"
 
 
 def t_an_estimate_ends_when_the_car_returns_on_another_connection():
