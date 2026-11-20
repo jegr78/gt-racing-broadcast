@@ -1257,8 +1257,9 @@ class Service:
             self._log(who, "finish")
 
     def reset(self, who="tailnet"):
-        """Start the race over: its corrections, rejoin marks, retirements and fastest
-        lap go with it; tyre compounds, driver names and qualifying corrections stay."""
+        """Start the race over: its corrections, rejoin marks, retirements, fastest lap
+        and open disconnects go with it; tyre compounds, driver names, qualifying
+        corrections and the recording stay."""
         def drop_race(doc):
             for key in ("corrections", "rejoin", "retired"):
                 doc.pop(key, None)
@@ -1271,3 +1272,5 @@ class Service:
                 pass  # no fastest lap recorded
             self._final_lobby_laps, self._final_on_air = None, False
             self._race = self._build(self._pick()["id"] if self._pick() else None)
+        if self._recording_dir and (self._rec is not None or (self._rec_allowed and self._enabled())):
+            self._guarded(lambda: self._recorder().new_race(self._wall()))

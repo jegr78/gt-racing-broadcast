@@ -687,6 +687,26 @@ def t_a_confirmed_disconnect_reads_dc_on_the_dashboard_until_data_returns():
     svc.tick()
     assert svc.dashboard()["entries"][0]["status"] != "dc", "a returned car is no longer a DC"
 
+def t_a_race_reset_ends_the_old_races_disconnects():
+    svc, wall, _d = _recording_service()
+    svc.set_settings({"formation": False})
+    svc.recording_start("pit")
+    _two_cars(svc, wall, 1010.0)
+    _two_cars(svc, wall, 1010.0 + dr.race_distance.NO_DATA_S + 1, quiet_b=True)
+    svc.tick()
+    ev = svc.recording_status()["events"][0]
+    assert ev["entry"] == "B" and ev["state"] == "suspected", ev
+    svc.recording_decide("rc:Cy", ev["id"], "confirm")
+    reset_at = wall[0]
+    svc.reset("rc:Anna")
+    _two_cars(svc, wall, wall[0] + 1, quiet_b=True)
+    svc.tick()
+    assert svc._recorder().confirmed_silent() == set(), "the old race's DC never marks the new race"
+    old = svc.recording_status()["events"][0]
+    assert old["id"] == ev["id"] and old["reset_at"] == reset_at, \
+        f"the event stays listed and is marked as ended by the reset: {old}"
+
+
 def _two_cars(svc, wall, until, quiet_b=False):
     """C ahead of B at 50 m/s until `until`; B sends nothing with quiet_b."""
     while wall[0] < until:

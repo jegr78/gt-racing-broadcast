@@ -264,7 +264,7 @@ class Recorder:
         self._next_id = max(self._events, default=0) + 1
         # The event of each entry whose silence has not ended yet.
         self._silent = {e.get("entry"): e["id"] for e in self._events.values()
-                        if e.get("returned") is None}
+                        if e.get("returned") is None and e.get("reset_at") is None}
         self._wall = wall
 
     def _meta(self, key, value):
@@ -295,6 +295,14 @@ class Recorder:
                 self._end()
                 self._meta("stopped_by", who)
             return self._status_head()
+
+    def new_race(self, now):
+        """A race reset: each silence still open ends with the old race and its event,
+        decided or not, stays listed with `reset_at`."""
+        with self._lock:
+            for eid in self._silent.values():
+                self._update(self._events[eid], {"reset_at": now})
+            self._silent.clear()
 
     def observe(self, standings, compounds, now_wall, classes=None):
         """`compounds` is {entry: code} or a callable giving it, read only when a sample is due.

@@ -442,6 +442,27 @@ def t_open_suspicion_survives_a_restart():
             h.close()
 
 
+def t_a_race_reset_ends_the_old_races_silences():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            h.rec.observe(_st(rows=[_srow("7", quiet_s=6.0), _srow("8", quiet_s=6.0)]), {}, 1000.0)
+            h.rec.decide("rc", [e["id"] for e in _events(h) if e["entry"] == "8"][0], "confirm")
+            h.rec.new_race(1010.0)
+            assert h.rec.confirmed_silent() == set(), "an old race's confirmed DC never marks the new race"
+            evs = {e["entry"]: e for e in _events(h)}
+            assert evs["7"]["state"] == "suspected" and evs["7"]["reset_at"] == 1010.0, evs
+            assert evs["8"]["state"] == "confirmed" and evs["8"]["reset_at"] == 1010.0, evs
+            h.rec.observe(_st(rows=[_srow("7", quiet_s=0.2)]), {}, 1020.0)
+            assert _events(h)[-1]["returned"] is None, "data in the new race closes no old event"
+            h.rec.observe(_st(rows=[_srow("7", quiet_s=6.0)]), {}, 1030.0)
+            assert [e["entry"] for e in _events(h)] == ["7", "8", "7"], "a new silence is a new event"
+            rec2 = h.reopen()
+            assert rec2._silent == {"7": 3}, "a restart keeps only the new race's silences: %r" % rec2._silent
+        finally:
+            h.close()
+
+
 def t_decide_rejects_unknown_decision_and_id():
     with tempfile.TemporaryDirectory() as d:
         h = _Rec(d)
