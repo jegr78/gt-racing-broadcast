@@ -699,6 +699,8 @@ class Service:
                 row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
                 row["driver"] = race.display_name(row["entry"], row["driver"])
             return out
+        class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint")))
+        race.set_class_laps(class_laps)
         st = race.standings(self._clock())
         colors = _class_colors(roster)
         rows = []
@@ -716,8 +718,6 @@ class Service:
         self._mark_dc(rows)
         fl = race.fastest
         first = next((name for name in st["classes"] if name), None)
-        class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))) \
-            if st["classes"] else {}
         out.update({
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
             "fastest": self._shown_lap(race, fl, roster),
@@ -968,6 +968,8 @@ class Service:
         with self._lock:
             race = self._current()
             self._set_roster(race, ctx.get("roster") or {})
+            class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint")))
+            race.set_class_laps(class_laps)
             out = race.standings(self._clock())
             if out["classes"]:
                 colors = _class_colors(ctx.get("roster") or {})
@@ -983,7 +985,7 @@ class Service:
                    compounds=_saved_compounds(_actions_path_for(self._path)),
                    driver_overrides=_override_list(_saved_overrides(_actions_path_for(self._path))),
                    quali_overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
-                   class_laps=_saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))),
+                   class_laps=class_laps,
                    league=read_league(self._league), last_action=self._last_action)
         return out
 

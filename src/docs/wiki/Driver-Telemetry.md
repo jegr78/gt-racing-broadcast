@@ -165,7 +165,9 @@ except on the tower.
   on the line: it belongs to the final lobby's row. An optional Schedule column
   `Laps <Class>` fills it when that row goes on air, unless the desk already holds a
   value or cleared it for that stint. Until a count shows, the header shows the class
-  leader's lap only.
+  leader's lap only. Once the overall leader has taken the flag, the class header on the
+  tower, the desks, the public page and the cockpit never reads a lap past the class
+  count, the same rule as the overall lap.
 - **Fastest lap**: the relay keeps one per class next to the overall one. On the desk's
   fastest lap form a class picked in the class selector narrows **Clear fastest lap**
   and **Set fastest lap** to that class's lap; the overall lap stays. A race reset

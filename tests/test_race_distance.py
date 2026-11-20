@@ -1457,6 +1457,34 @@ def t_a_class_count_shows_only_where_the_overall_count_shows():
     assert plain.standings(0.0)["class_counts"] == {}, "outside class mode there is none"
 
 
+def _class_flag_race(class_laps):
+    """H's A takes the flag on lap 3 of 3; G's B (40 m/s) and C (35 m/s) run on."""
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=3)
+    race.set_classes({"A": "H", "B": "G", "C": "G"})
+    race.set_class_laps(class_laps)
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 30), ("C", 50))]
+    return race, cars
+
+
+def t_a_class_lap_stops_at_its_class_count_once_the_flag_is_out():
+    race, cars = _class_flag_race({"G": 1, "H": 1})
+    t = _drive(race, cars, [60, 40, 35], 0.0, 3 * L / 60 - 1)
+    st = race.standings(t)
+    assert st["state"] == "racing" and st["class_lap"]["G"] == 2, \
+        f"before the flag a class lap may pass its count: {st['class_lap']}"
+    t = _drive(race, cars, [60, 40, 35], t, 2)
+    st = race.standings(t)
+    assert st["state"] == "finishing" and st["class_lap"]["G"] == 1, \
+        f"after the flag a class lap never passes its class count: {st['state']} {st['class_lap']}"
+    assert st["class_lap"]["H"] == 3, f"the first class follows the overall count, not a saved one: {st['class_lap']}"
+    plain, plain_cars = _class_flag_race({})
+    t = _drive(plain, plain_cars, [60, 40, 35], 0.0, 3 * L / 60 + 1)
+    other = plain.standings(t)
+    assert other["class_lap"]["G"] == 3, f"without a class count the class lap is not capped: {other['class_lap']}"
+    assert [r["finished"] for r in st["entries"]] == [r["finished"] for r in other["entries"]], \
+        "a class count never finishes a car"
+
+
 def t_an_entry_without_a_class_forms_its_own_group():
     race = rd.Race(TRACE, formation=False)
     race.set_classes({"A": "H", "B": "G"})
