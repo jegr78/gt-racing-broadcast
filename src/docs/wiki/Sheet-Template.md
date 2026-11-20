@@ -147,7 +147,7 @@ are found by name; without one, fixed positions apply (**A** = URL, **B** = Stre
 | `Streamer` *(or `Name`)* | B | Commentator name (matched to the Crew/Configuration roster) |
 | `Stint` | C | Stint label shown on the HUD (optional) |
 | `Laps` | none | Lap count of that stint lobby on GT7's counter (optional, header mode only). Only the last row's value is used: the [driver telemetry race](Driver-Telemetry#race-order-and-gaps) finishes when the leader completes it in the final lobby; empty falls back to `racecast event race --laps`. With [classes](Driver-Telemetry#classes) it is the lap count of the first class |
-| `Laps <Class>` *(e.g. `Laps GT4`)* | none | Lap count of that class in this row's lobby (optional, header mode only, 1 to 999). It fills the desk's class lap count when the row goes on air, unless Race Control already set one |
+| `Laps <Class>` *(e.g. `Laps GT4`)* | none | Lap count of that class in this row's lobby (optional, header mode only, 1 to 999). It fills the desk's class lap count when the row goes on air, unless Race Control already set or cleared one. Put it in the final lobby's row: like `Laps`, a class count shows only while the final lobby runs |
 
 Sample:
 

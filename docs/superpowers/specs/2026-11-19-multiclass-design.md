@@ -11,6 +11,11 @@ Status: implemented. Changes against the draft below:
 - A tower page stays for one full GAP and INT cycle (30 s), not 15 s, so every class
   shows both. When the tower pages, the fastest-lap box shows the page's class; it
   cycles every 15 s only when all classes fit on one page.
+- A class lap count shows only where the overall count shows: in an endurance event once
+  the final lobby's cars run on its counter, so `Laps <Class>` belongs to the final
+  lobby's row. A count Race Control cleared stays cleared for that stint.
+- Race Control can void or set one class's fastest lap without touching the overall one.
+- The CSV adds `class` and `class_pos` only for a recording with class-mode samples.
 - The driver change timing hint is not part of this implementation; its spec is still a
   draft.
 

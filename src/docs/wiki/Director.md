@@ -318,7 +318,8 @@ desk:
   for every class after the first
 - the [driver dashboard](Driver-Telemetry#on-air-and-in-the-cockpit): **Show
   dashboard** / **Hide dashboard** puts it on air (Director Panel only), the delay in
-  seconds, the fastest lap with **Clear fastest lap** and a form to set it, and
+  seconds, the fastest lap with **Clear fastest lap** and a form to set it (with
+  classes, a class selector narrows both to one class's lap), and
   qualifying corrections per entry: **Set time**, **Delete time** (for example after a
   track limits penalty) and **GT7 time** to undo the correction
 - the tyre compound per entry and the dashboard's **Show compound** / **Show fuel**
