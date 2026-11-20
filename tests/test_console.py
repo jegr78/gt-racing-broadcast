@@ -393,7 +393,6 @@ def t_recording_routes_are_desk_routes():
     assert cp.decide({"director"}, ["drivers", "snapshot"], "POST") == cp.NOT_FOUND
 
 
-
 def _desk_fn(name, call):
     """Runs one top-level function of driver-desk.js under node; None without node."""
     import sys

@@ -54,6 +54,7 @@ SNAPSHOT_EVERY_S = 0.5
 MAX_LAP_MS = 3_600_000
 MAX_QUALI = 200             # qualifying corrections kept
 MAX_CLASS = 24              # the roster caps a class name
+MAX_CLASSES = 64            # classes with a stored lap count or fastest lap
 LINE_POINTS = 600
 MAX_LAPS = 999
 LINE_RETRY_S = 10.0       # a pick without a downloaded line is looked up again this often
@@ -209,32 +210,40 @@ def clear_actions(runtime_dir):
             pass  # nothing recorded
 
 
+def _text(value, most, empty=False):
+    """A stored string of at most `most` characters that encodes as UTF-8."""
+    if not isinstance(value, str) or len(value) > most or not (value or empty):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _saved_lap(doc):
     """{entry, driver, ms} of a stored lap, or None when any part is invalid."""
     if not isinstance(doc, dict):
         return None
     entry, driver, ms = doc.get("entry"), doc.get("driver"), doc.get("ms")
-    if isinstance(entry, str) and isinstance(driver, str) \
-            and type(ms) is int and ms > 0 and len(entry) <= MAX_ENTRY \
+    if _text(entry, MAX_ENTRY) and _text(driver, MAX_ENTRY) and type(ms) is int and ms > 0 \
             and _valid_name(driver, rule=driver_invite.KNOWN_NAME):
         return {"entry": entry, "driver": driver, "ms": ms}
     return None
 
 
-def _saved_fastest(path, track):
-    """The persisted fastest lap of this track layout, or None."""
-    doc = _read_json(path)
+def _saved_fastest(doc, track):
+    """The fastest lap of this track layout in the fastest-lap file's `doc`, or None."""
     return _saved_lap(doc) if doc.get("track") == track else None
 
 
-def _saved_fastest_by_class(path, track):
-    """The persisted fastest lap of each class on this track layout."""
-    doc = _read_json(path)
+def _saved_fastest_by_class(doc, track):
+    """The fastest lap of each class on this track layout in the fastest-lap file's `doc`."""
     saved = doc.get("by_class") if doc.get("track") == track else None
     out = {}
     for cls, item in (saved.items() if isinstance(saved, dict) else ()):
         lap = _saved_lap(item)
-        if lap and len(cls) <= MAX_CLASS and len(out) < MAX_QUALI:
+        if lap and _text(cls, MAX_CLASS, empty=True) and len(out) < MAX_CLASSES:
             out[cls] = lap
     return out
 
@@ -363,14 +372,14 @@ def _saved_actions(path):
     corrections, rejoins = {}, []
     raw = doc.get("corrections")
     for entry, value in (raw.items() if isinstance(raw, dict) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and isinstance(value, list) \
+        if _text(entry, MAX_ENTRY) and isinstance(value, list) \
                 and len(value) == 2 and isinstance(value[0], (int, float)) \
                 and not isinstance(value[0], bool) and math.isfinite(value[0]) \
                 and type(value[1]) is int:
             corrections[entry] = (float(value[0]), value[1])
     raw = doc.get("rejoin")
     for entry in (raw if isinstance(raw, list) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY:
+        if _text(entry, MAX_ENTRY):
             rejoins.append(entry)
     return corrections, rejoins
 
@@ -378,7 +387,7 @@ def _saved_actions(path):
 def _saved_retired(path):
     raw = _read_json(path).get("retired")
     return [e for e in (raw if isinstance(raw, list) else ())
-            if isinstance(e, str) and 0 < len(e) <= MAX_ENTRY][:MAX_QUALI]
+            if _text(e, MAX_ENTRY)][:MAX_QUALI]
 
 
 def _valid_name(name, empty=False, rule=driver_invite.NAME):
@@ -393,8 +402,8 @@ def _saved_overrides(path):
     raw = _read_json(path).get("driver_names")
     out = []
     for item in (raw if isinstance(raw, list) else ()):
-        if isinstance(item, list) and len(item) == 3 and isinstance(item[0], str) \
-                and 0 < len(item[0]) <= MAX_ENTRY and _valid_name(item[1], True, driver_invite.KNOWN_NAME) \
+        if isinstance(item, list) and len(item) == 3 and _text(item[0], MAX_ENTRY) \
+                and _valid_name(item[1], True, driver_invite.KNOWN_NAME) \
                 and _valid_name(item[2], rule=driver_invite.KNOWN_NAME) and len(out) < MAX_QUALI:
             out.append(item)
     return out
@@ -410,8 +419,8 @@ def _saved_compounds(path):
     raw = _read_json(path).get("compounds")
     out = {}
     for entry, value in (raw.items() if isinstance(raw, dict) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and isinstance(value, dict) \
-                and value.get("code") in COMPOUNDS and isinstance(value.get("who"), str) \
+        if _text(entry, MAX_ENTRY) and isinstance(value, dict) \
+                and value.get("code") in COMPOUNDS and _text(value.get("who"), math.inf, empty=True) \
                 and isinstance(value.get("ts"), (int, float)) and math.isfinite(value["ts"]) \
                 and len(out) < MAX_QUALI:
             out[entry] = {"code": value["code"], "who": value["who"][:80], "ts": float(value["ts"])}
@@ -428,7 +437,7 @@ def _saved_quali(path, segment):
     raw = raw.get(_segment_key(segment)) if isinstance(raw, dict) else None
     out = {}
     for entry, ms in (raw.items() if isinstance(raw, dict) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and (
+        if _text(entry, MAX_ENTRY) and (
                 ms is None or (type(ms) is int and 0 < ms < MAX_LAP_MS)) and len(out) < MAX_QUALI:
             out[entry] = ms
     return out
@@ -450,8 +459,8 @@ def _saved_class_laps(path, stint):
     raw = _stint_class_laps(path, stint)
     out = {}
     for cls, laps in (raw.items() if isinstance(raw, dict) else ()):
-        if isinstance(cls, str) and 0 < len(cls) <= MAX_CLASS and type(laps) is int \
-                and 0 < laps <= MAX_LAPS and len(out) < MAX_QUALI:
+        if _text(cls, MAX_CLASS) and type(laps) is int \
+                and 0 < laps <= MAX_LAPS and len(out) < MAX_CLASSES:
             out[cls] = laps
     return out
 
@@ -460,14 +469,14 @@ def _store_class_laps(doc, stint, cls, laps):
     raw = doc.get("class_laps") if isinstance(doc.get("class_laps"), dict) else {}
     done = raw.get(stint) if isinstance(raw.get(stint), dict) else {}
     if laps is None:
-        if cls in done or len(done) < MAX_QUALI:
+        if cls in done or len(done) < MAX_CLASSES:
             done[cls] = None   # cleared: the Schedule never brings it back in this stint
     elif stint not in raw and len(raw) >= MAX_QUALI:
         raise ValueError(f"at most {MAX_QUALI} stints carry class lap counts")
-    elif cls in done or len(done) < MAX_QUALI:
+    elif cls in done or len(done) < MAX_CLASSES:
         done[cls] = laps
     else:
-        raise ValueError(f"at most {MAX_QUALI} classes per stint")
+        raise ValueError(f"at most {MAX_CLASSES} classes per stint")
     if done:
         raw[stint] = done
     else:
@@ -586,8 +595,9 @@ class Service:
         for entry, driver, name in _saved_overrides(_actions_path_for(self._path)):
             race.set_driver_name(entry, driver, name)
         race.set_classes(self._class_map)
-        race.fastest = _saved_fastest(self._fastest_path(), pick_id)
-        race.fastest_by_class = _saved_fastest_by_class(self._fastest_path(), pick_id)
+        saved = _read_json(self._fastest_path())
+        race.fastest = _saved_fastest(saved, pick_id)
+        race.fastest_by_class = _saved_fastest_by_class(saved, pick_id)
         self._saved_fastest = race.fastest
         self._saved_by_class = {c: dict(f) for c, f in race.fastest_by_class.items()}
         return race

@@ -1102,10 +1102,10 @@ def t_a_fastest_lap_with_a_bad_driver_name_is_not_loaded():
         for driver in ("M\ud800", "Ann\u202e"):
             with open(f, "w", encoding="utf-8") as fh:
                 json.dump({"track": "t", "entry": "A", "driver": driver, "ms": 90000}, fh)
-            assert dr._saved_fastest(f, "t") is None, f"a saved fastest lap with {driver!r} is dropped"
+            assert dr._saved_fastest(dr._read_json(f), "t") is None, f"a saved fastest lap with {driver!r} is dropped"
         with open(f, "w", encoding="utf-8") as fh:
             json.dump({"track": "t", "entry": "A", "driver": "x" * 32, "ms": 90000}, fh)
-        assert dr._saved_fastest(f, "t") is not None, "an old 32 character name still loads"
+        assert dr._saved_fastest(dr._read_json(f), "t") is not None, "an old 32 character name still loads"
 
 def t_the_audit_is_written_before_the_name_changes():
     svc, clock, path, _ctx = _roster_service()
@@ -1323,9 +1323,9 @@ def t_a_damaged_class_lap_is_not_loaded():
                     "": {"entry": "C", "driver": "Max C", "ms": -1}}
         with open(f, "w", encoding="utf-8") as fh:
             json.dump({"track": "t", "by_class": by_class}, fh)
-        assert dr._saved_fastest_by_class(f, "t") == {"G": {"entry": "B", "driver": "Max B", "ms": 62000}}, \
+        assert dr._saved_fastest_by_class(dr._read_json(f), "t") == {"G": {"entry": "B", "driver": "Max B", "ms": 62000}}, \
             "only valid class laps load, without an overall lap"
-        assert dr._saved_fastest_by_class(f, "u") == {}, "another layout loads none"
+        assert dr._saved_fastest_by_class(dr._read_json(f), "u") == {}, "another layout loads none"
 
 
 def t_a_hand_set_fastest_lap_moves_between_classes():
@@ -1550,6 +1550,60 @@ def t_a_bad_class_lap_count_in_the_actions_file_is_dropped():
                                   "S9": [1], "S8": {"G": 2.0}}}, fh)
     assert svc.class_laps() == {"G": 5}, svc.class_laps()
     assert svc.class_laps("S9") == {} and svc.class_laps("S8") == {}
+
+
+BAD = "G\ud800"   # a lone surrogate: valid JSON, never valid UTF-8
+
+
+def _file(doc):
+    path = os.path.join(tempfile.mkdtemp(), "actions.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    return path
+
+
+def t_a_class_lap_count_without_valid_text_is_dropped():
+    path = _file({"class_laps": {"": {BAD: 5, "G": 6}}})
+    assert dr._saved_class_laps(path, "") == {"G": 6}, dr._saved_class_laps(path, "")
+
+
+def t_a_fastest_lap_without_valid_text_is_dropped():
+    path = _file({"track": "t", "entry": BAD, "driver": "Max", "ms": 60000})
+    got = dr._saved_fastest(dr._read_json(path), "t")
+    assert got is None, got
+
+
+def t_a_class_fastest_lap_without_valid_text_is_dropped():
+    lap = {"entry": "B", "driver": "Max B", "ms": 62000}
+    path = _file({"track": "t", "by_class": {BAD: lap, "G": lap, "H": dict(lap, entry=BAD)}})
+    got = dr._saved_fastest_by_class(dr._read_json(path), "t")
+    assert got == {"G": lap}, got
+
+
+def t_a_qualifying_correction_without_valid_text_is_dropped():
+    path = _file({"qualifying": {"": {BAD: 60000, "A": 61000}}})
+    assert dr._saved_quali(path, "") == {"A": 61000}, dr._saved_quali(path, "")
+
+
+def t_a_tyre_compound_without_valid_text_is_dropped():
+    ok = {"code": "RM", "who": "rc:Anna", "ts": 1.0}
+    path = _file({"compounds": {BAD: ok, "A": ok, "B": dict(ok, who=BAD)}})
+    assert dr._saved_compounds(path) == {"A": ok}, dr._saved_compounds(path)
+
+
+def t_a_retirement_without_valid_text_is_dropped():
+    path = _file({"retired": [BAD, "A"]})
+    assert dr._saved_retired(path) == ["A"], dr._saved_retired(path)
+
+
+def t_a_correction_or_rejoin_without_valid_text_is_dropped():
+    path = _file({"corrections": {BAD: [5.0, 0], "A": [5.0, 0]}, "rejoin": [BAD, "A"]})
+    assert dr._saved_actions(path) == ({"A": (5.0, 0)}, ["A"]), dr._saved_actions(path)
+
+
+def t_a_driver_name_without_valid_text_is_dropped():
+    path = _file({"driver_names": [[BAD, "", "Kim"], ["A", "", "Kim"]]})
+    assert dr._saved_overrides(path) == [["A", "", "Kim"]], dr._saved_overrides(path)
 
 
 def t_class_fastest_laps_show_the_driver_name_override():
