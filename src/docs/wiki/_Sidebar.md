@@ -16,7 +16,7 @@
 - [Driver radio](Driver-Radio)
 - [Driver telemetry (driver guide)](Driver-Telemetry)
 - [Commentator Cockpit](Commentator-Cockpit)
-- [Race Control (monitoring desk)](Console#race-control-read-only-monitoring-desk)
+- [Race Control desk](Console#race-control-desk)
 - [Health Monitor](Health-Monitor)
 - [League owner setup](League-Owner-Setup)
 - [Who does what](Who-does-what)

@@ -195,10 +195,10 @@ on air only after the producer confirms it in the CLI or Control Center.
 ![Broadcast telemetry with the replay marker enabled](images/hud-telemetry-replay.png)
 
 > **"Race Control" here is the on-screen HUD banner** (the `RED FLAG`/`Driver Swaps`
-> dropdown you set, written to the Setup tab), **not** the read-only
-> [Race Control monitoring desk](Console#race-control-read-only-monitoring-desk) crew
-> role. They share a name but never interact: this banner stays director-only, and the
-> desk never writes to it.
+> dropdown you set, written to the Setup tab), **not** the
+> [Race Control desk](Console#race-control-desk) crew role. They share a name. The
+> dropdown stays director-only; the desk touches the banner only through its own
+> `RED FLAG`, which sets *Red Flag - Race Suspended* and clears it on **Restart released** when its own RED FLAG set it.
 
 ### Going live: Start/Stop the stream
 

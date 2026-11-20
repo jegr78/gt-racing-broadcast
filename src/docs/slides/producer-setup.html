@@ -28,9 +28,9 @@ Note: Welcome to producer setup. This is a one-time job per machine. Plan about 
 - A **YouTube login** (always required for cookies); a **Twitch login** too if any stint uses a gated Twitch feed.
 - Your league **profile**: its `SHEET_ID` rides along, so open the Sheet straight from the Control Center (**Open Sheet ↗**); no link to keep around.
 
-Details: [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC)
+Details: [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC) · Linux: [Linux producer](https://github.com/jegr78/gt-racing-broadcast/wiki/Linux-Producer), [Arch Linux](https://github.com/jegr78/gt-racing-broadcast/wiki/Arch-Linux)
 
-Note: Here's what you need. A modern PC running macOS, Windows or Linux. Sixteen gigabytes of RAM is tight, so reboot before events, while thirty-two is comfortable. A wired internet connection of at least twenty-five megabits down and ten up, with fifty and twenty recommended. A YouTube login is always required for cookies, plus a Twitch login if any stint uses a gated Twitch feed. And your league profile, which carries its own Sheet ID, so you can open the Sheet straight from the Control Center with Open Sheet, no link to keep around.
+Note: Here's what you need. A modern PC running macOS, Windows or Linux. Sixteen gigabytes of RAM is tight, so reboot before events, while thirty-two is comfortable. A wired internet connection of at least twenty-five megabits down and ten up, with fifty and twenty recommended. A YouTube login is always required for cookies, plus a Twitch login if any stint uses a gated Twitch feed. And your league profile, which carries its own Sheet ID, so you can open the Sheet straight from the Control Center with Open Sheet, no link to keep around. On Linux, the wiki has a page with the required packages, and an Arch Linux page tested on CachyOS.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -50,7 +50,7 @@ Note: Download matters as much as upload, because this station pulls in as much 
 </script></section>
 
 <section data-markdown><script type="text/template">
-## The easy way — the Setup wizard
+## The easy way: the Setup wizard
 Double-click **`racecast-ui`**. It opens in your browser and walks every step with a progress checklist. `racecast init` is the CLI equivalent.
 
 ![Setup wizard](assets/img/cc-setup.png)
@@ -61,7 +61,7 @@ Note: The easy way is the Setup wizard. Just double-click racecast U I. It opens
 </script></section>
 
 <section data-markdown><script type="text/template">
-## The steps — the Setup view
+## The steps in the Setup view
 Run them in the Control Center **Setup** view (CLI equivalents italic):
 
 1. **Get the tool**: download your OS's archive, extract into its own folder, double-click `racecast-ui`.
@@ -104,21 +104,30 @@ Note: To connect remote directors, your station still needs Tailscale, because i
 </script></section>
 
 <section data-markdown><script type="text/template">
+## Keep the cookies fresh (optional)
+YouTube cookies age. For long events, let the relay refresh them from your browser:
+
+- In **General Settings**, add `RACECAST_COOKIES_BROWSER=firefox` to the `.env` (or your browser).
+- While a YouTube source runs, the relay re-exports `yt-cookies.txt` once it is an hour old; the Twitch jar too, if it exists.
+- Stay logged in to YouTube (and Twitch) in that browser. A failed export keeps the old jar and retries an hour later.
+
+Details: [Configuration](https://github.com/jegr78/gt-racing-broadcast/wiki/Configuration)
+
+Note: YouTube cookies age, and a stale jar can make the next handover fail. For long events you can let the relay refresh them. In General Settings, add RACECAST COOKIES BROWSER to the machine dot env, set to firefox or the browser you use. While a Schedule, Qualifying or POV source is on YouTube, the relay then re-exports the YouTube cookie jar once it is an hour old, and the Twitch jar too, if you exported one. Stay logged in to YouTube and Twitch in that browser. A failed export keeps the old jar, logs a warning, and is retried an hour later.
+</script></section>
+
+<section data-markdown><script type="text/template">
 ## Preflight + recap
 Before your first event, run the hardware + tool check in the Control Center: **Preflight → Run**. *(CLI: `racecast preflight`.)*
 
 Fix anything flagged. Once everything is green, you're ready.
-
-Note: Finally, preflight and recap. Before your first event, run the hardware and tool check in the Control Center under Preflight, Run, or racecast preflight on the command line. Fix anything it flags, and once everything is green, you're ready.
-
----
 
 **Go deeper:**
 [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC) ·
 [Control Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center) ·
 [Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event)
 
-Note: To go deeper, the project wiki has fuller guides on setting up the broadcast PC, on the Control Center, and on running an event.
+Note: Finally, preflight and recap. Before your first event, run the hardware and tool check in the Control Center under Preflight, Run, or racecast preflight on the command line. Fix anything it flags, and once everything is green, you're ready.
 </script></section>
 
 </div></div>

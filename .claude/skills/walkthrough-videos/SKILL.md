@@ -27,7 +27,7 @@ billing enabled; key restricted to that API). Free tier covers the whole onboard
 ## Build
 
 ```bash
-# all 7 decks, chosen voice, with intro/outro + .srt/.vtt captions:
+# all 10 decks, chosen voice, with intro/outro + .srt/.vtt captions:
 .venv-pw/bin/python tools/build-walkthrough-videos.py --tts gcloud --voice en-US-Studio-Q
 # one deck:                 ... producer.html --tts gcloud --voice en-US-Studio-Q
 # coverage check (no browser): ... <deck> --list
@@ -66,7 +66,7 @@ live deck.
 
 ```bash
 python3 tests/test_walkthrough.py            # pure logic (also in run-tests.py)
-.venv-pw/bin/python tools/check-slides.py    # overflow guard, must stay "7 deck(s)"
+.venv-pw/bin/python tools/check-slides.py    # overflow guard, must stay "10 deck(s)"
 ```
 Then spot-check a rendered MP4: streams should be 1920x1080 h264 + aac with ~0 ms
 A/V drift (`ffprobe` the video vs audio stream `duration`).

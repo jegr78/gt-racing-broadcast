@@ -99,7 +99,7 @@ def t_resolve_director_and_producer_from_crew():
 def t_resolve_producer_implies_director_and_race_control():
     # A pure producer, with no Director or Race Control crew flag and not in the
     # schedule, still oversees the whole event: producer grants director for control
-    # and race_control for read-only monitoring, so they can steer the broadcast from
+    # and race_control for the race desk, so they can steer the broadcast from
     # the /console pages.
     crew = [("Alice", False, True)]
     assert m.resolve_roles(crew, set(), "alice") == {

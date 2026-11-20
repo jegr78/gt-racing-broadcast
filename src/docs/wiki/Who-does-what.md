@@ -4,7 +4,9 @@
 
 Three groups make the show happen: the **commentators** who stream each stint, the
 **producer** at the PC, and the **director** who chooses what viewers see. An optional
-**Race Control** desk can watch along **read-only**, no broadcast actions.
+**Race Control** desk raises the red flag and keeps the race data straight. Further
+optional roles: a **Race Engineer** who follows a driver's telemetry, **drivers** who send
+their own GT7 telemetry, and the **league admin** who prepares the league.
 
 ```mermaid
 flowchart LR
@@ -15,13 +17,13 @@ flowchart LR
   end
   subgraph D["Remote: Director"]
     D1["Choose scenes and graphics"]
-    D2["Press Feeds Next at driver changes"]
+    D2["ARM, SPLIT, NEXT at driver changes"]
     D3["Cut to interviews<br/>+ broadcast audio"]
   end
-  subgraph RC["Remote: Race Control (read-only)"]
-    RC1["Watch program + schedule"]
-    RC2["Monitor the race timer"]
-    RC3["No broadcast actions"]
+  subgraph RC["Remote: Race Control"]
+    RC1["Red flag and race data"]
+    RC2["Corrections, DNF, estimates"]
+    RC3["Crew chat and notes"]
   end
 ```
 
@@ -38,35 +40,62 @@ flowchart LR
 - Drives the whole show from a browser (panel or Companion buttons), no
   machine access. First time: [Director setup](Director-Setup); then the
   [Director guide](Director).
-- Chooses scenes and graphics, presses **Feeds Next** at each driver change, and cuts
-  to the interview segment (scene + broadcast audio). The interview conversation itself
-  is moderated from inside the Discord voice channel by one of its participants,
-  usually the final-stint streamer; the director can take that role but doesn't have to.
+- Chooses scenes and graphics and cuts to the interview segment (scene + broadcast
+  audio). The interview conversation itself is moderated from inside the Discord voice
+  channel by one of its participants, usually the final-stint streamer; the director can
+  take that role but doesn't have to.
+- At each driver change: **ARM** the off-air feed a few minutes ahead, wait until it is
+  serving, cut to **SPLIT**, then press **NEXT** (Companion: **Feeds Next**). Details:
+  [At a driver change](Director#at-a-driver-change).
+- Keeps every program control Race Control does not have, including putting the driver
+  dashboard on air.
 - Multiple directors can take turns; the producer can also direct locally.
 
-## Race Control (remote, read-only)
+## Race Control (remote)
 
-An optional **monitoring desk** for someone who needs to keep an eye on the race
-without touching the broadcast: e.g. a steward or a league official.
+An optional **race desk** for a steward or a league official. It runs from the personal
+[Console](Console) link the producer sends; the **Race Control** card appears for anyone
+flagged for it. No machine access.
 
-- **Read-only on the broadcast.** It triggers no scenes, graphics or feeds; the
-  **director keeps full control** of the show.
+- **Red flag.** Its `RED FLAG` raises the Standby Cover, sets the HUD banner *Red Flag -
+  Race Suspended* and holds the driver race. **Restart released** lowers the cover and
+  clears the banner when this desk raised them. No step-up secret; the relay logs who pressed it.
+- **Race data.** It keeps the driver race straight: corrections, rejoin marks, estimated
+  positions, retirements (DNF), driver names, tyre compounds, the restart rule, race
+  recording and disconnect events. See
+  [Driver telemetry](Driver-Telemetry#red-flag-rejoin-and-corrections).
+- **Graphics.** When the league sets `GRAPHICS_TAKE`, the desk can put graphics on air or
+  request them, and it alone sets the flag graphics. See [Console](Console#graphics).
+- **Crew chat** is its working channel: feed the crew the race-control facts as they
+  happen, e.g. a **drive-through / DSQ** for a team, a car's **rejoin time**, a team that
+  **can't field a driver** for the next stint, or a team **retiring** from the race.
+  **Note to commentator** sends a short note to the commentators' cockpits. Messages
+  post under the operator's own name.
 - Sees a live **program preview**, the **streamer / stint schedule** (stream URLs are
   redacted: they never leave the producer's tailnet), and the **race timer**.
-- **Posts to the crew chat** (its working channel, chat is two-way): feed the crew the
-  race-control facts as they happen, e.g. a **drive-through / DSQ** for a team, a car's
-  **rejoin time**, a team that **can't field a driver** for the next stint, or a team
-  **retiring** from the race, and **direct the commentators** through it (e.g. "cut to
-  car #7, P3"). Messages post under the operator's own name.
-- Drives nothing else from a browser, like the director: open the personal
-  [Console](Console) link the producer sends; the **Race Control** card appears for
-  anyone flagged for it. No machine access.
+- It switches no scenes or feeds. The director keeps every other program control,
+  including the driver dashboard's on-air switch.
 - The role is **additive**: the same person can be a director *and* run Race Control.
   The **producer / league admin** flags people for it (you don't flag yourself) with the
   **Race Control** column on the Sheet's Crew tab (or the Control Center
   [crew editor](Control-Center#profile)). See the
-  [Console launcher → Race Control](Console#race-control-read-only-monitoring-desk) for
-  the desk in detail.
+  [Console launcher → Race Control](Console#race-control-desk) for the desk in detail.
+
+## Race Engineer (remote, optional)
+
+A crew member who follows the driver's live telemetry on a solo POV profile: live
+instruments, lap analysis and references the producer shares. The desk has no broadcast
+controls. It needs the **Race Engineer** Crew column and the producer's **Allow Race
+Engineer** switch in the Control Center. See [Race Engineer](Race-Engineer) and
+[Console → Race Engineer access](Console#race-engineer-access). The AI Race Engineer in
+[Driver radio](Driver-Radio) is a different thing.
+
+## Drivers (optional telemetry sender)
+
+A driver can send their own GT7 telemetry to the broadcast. They open the event's invite
+link from the producer, pick their entry and run the **sender** on a device on the same
+network as the PlayStation. The race order, gaps and the driver dashboard come from this
+data. See [Driver telemetry](Driver-Telemetry).
 
 ## Commentators / streamers
 

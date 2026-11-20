@@ -16,31 +16,155 @@
 <section data-markdown><script type="text/template">
 <span class="role-tag">Race Control · Onboarding</span>
 # Race Control
-A **read-only** monitoring desk. Watch the race without touching the broadcast.
+The race desk. You hold the red flag, keep the race data right and talk to the crew.
 
-Note: Welcome to the Race Control onboarding. Race Control is a read-only monitoring desk. You watch the race closely, but you never touch the broadcast itself.
+Note: Welcome to the Race Control onboarding. Race Control is the race desk of the broadcast. You hold the red flag, you keep the race data right, and you talk to the crew.
 </script></section>
 
 <section data-markdown><script type="text/template">
-## Read-only on the broadcast
-- You trigger **no scenes, graphics or feeds**. The **director keeps full control**.
-- But the **crew chat is two-way**. It's your working channel (next →).
-
-[Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
-
-Note: You are read-only on the broadcast itself. You trigger no scenes, graphics or feeds, and the director keeps full control of what goes on air. But the crew chat is two-way, and that is your working channel, which we will look at next.
-</script></section>
-
-<section data-markdown><script type="text/template">
-## What you see
-
-![Race Control desk](assets/img/console-race-control.png)
-
-Live **program preview** · **redacted** streamer/stint schedule (URLs stay on the tailnet) · **race timer** · **crew chat** (under your own name).
+## What the desk can change
+- Raise the full **RED FLAG**.
+- Maintain the race data: Final lap and Finish, corrections, estimates, DNF, driver names, tyres.
+- Put graphics and flag graphics on air, if the league's `GRAPHICS_TAKE` allows it.
+- The **director keeps every other program control**, including the dashboard on-air switch.
 
 [Console](https://github.com/jegr78/gt-racing-broadcast/wiki/Console)
 
-Note: Here is what you see at the desk. There is a live program preview, the redacted streamer and stint schedule with the stream URLs kept on the tailnet, the race timer, and the crew chat, which posts under your own name.
+Note: The desk is more than a monitoring page. You can raise the full red flag. You maintain the race data, which means the final lap and the finish, corrections, estimates, retirements, driver names and tyres. If the league setting called graphics take allows it, you can also put graphics and flag graphics on air. The director keeps every other program control. That includes the switch that puts the driver dashboard on air.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## The desk
+
+![Race Control desk](assets/img/console-race-control.png)
+
+Program preview, schedule with **ON AIR** and **NEXT**, race timer, crew chat, note to commentator, track layout and the **Driver telemetry** card.
+
+Note: This is the desk. It shows the program preview, the schedule with the stint on air and the stint loaded next, the race timer and the crew chat. Next to them sit the note to commentator, the track layout card and the driver telemetry card. The schedule is redacted, so stream links never leave the tailnet.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Red flag and restart
+- **RED FLAG** raises the Standby Cover, sets the HUD banner *Red Flag - Race Suspended* and holds the race.
+- The desk says when the cover or the banner could not be set.
+- **Restart released** lowers the cover and clears the banner your RED FLAG raised.
+- The league rule keeps the gaps or neutralises them. You can switch it for one restart.
+- Every action is logged with your name.
+
+[Driver telemetry: red flag](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#red-flag-rejoin-and-corrections)
+
+Note: The red flag button raises the Standby Cover, sets the H U D banner that reads Red Flag, Race Suspended, and holds the race. If the cover or the banner could not be set, the desk tells you. Restart released lowers the cover and clears the banner again, as long as your red flag raised them. The league decides whether a restart keeps the gaps or neutralises them, and you can switch that rule for one restart. The relay logs every action with your name. Buttons that change the race for everyone ask for a second press within four seconds.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Race order and status
+The desk ranks the cars from the drivers' telemetry, with gap, interval and pit stops.
+
+- **No sender** means the driver never ran a sender.
+- **No data** means the sender has been quiet for five seconds.
+- **Box** means the car stands off the racing line.
+- **DC** means you confirmed the silence as a disconnect.
+- **EST** marks a car placed with an estimate, **DNF** a retired car.
+
+[Race order and gaps](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#race-order-and-gaps)
+
+Note: The desk ranks the cars from the drivers' own telemetry, with the gap to the leader, the interval to the car ahead and the pit stops. A few status words matter. No sender means the driver of that entry never ran a sender. No data means its sender has been quiet for five seconds, and the car keeps its place. Box means the car stands off the racing line. D C appears on every screen once you confirm the silence as a disconnect. E S T marks a car you placed with an estimate, and it replaces both No data and D C. D N F marks a retired car.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Corrections, estimate, DNF, names
+- **Corrections** add or remove metres and pit stops per entry. A reason is mandatory.
+- **Set estimate** keeps a quiet car in the order, N seconds behind a reference car. It ends when data returns.
+- **Retire (DNF)** takes two clicks. **Undo DNF** takes it back.
+- **Set name** overrides the name every screen shows for one driver. **Clear name** removes it.
+
+Note: Corrections add or remove metres and pit stops for one entry, and each one needs a reason. An estimate keeps a car without data in the order. You pick the quiet entry, the car it runs behind and the number of seconds, then press Set estimate. The estimate ends on its own when the car sends data again, and a relay restart drops it. Retire, D N F, takes two clicks and drops the car below every running car. Undo D N F takes back a mis-press. Set name changes the name every screen shows for one driver of one entry, and Clear name removes it.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Disconnects and the recording
+- The relay records the race once a second, in race mode. **Start** / **Stop** by hand, **Download CSV**.
+- A car with no data for five seconds opens a **suspected** event. Data back makes it a **dropout**.
+- **Confirm DC** or **Dismiss** it. A sound on a new suspicion is optional.
+- **Show standings** opens the frozen standings 5 to 30 seconds before the last packet.
+
+[Race recording](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#race-recording-and-disconnect-events)
+
+Note: The relay records the live race once a second while it runs in race mode. You can start and stop the recording by hand and download it as a C S V file. When a car sends no data for five seconds, the recording opens a suspected disconnect event. If data comes back, the event turns into a dropout. You confirm the disconnect or dismiss the event, and the decision is logged. The desk can play a sound on a new suspicion, off by default. Show standings opens the frozen standings from five to thirty seconds before the car's last packet. The relay decides nothing about a rejoin. That stays with you.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Classes
+With two or more named classes, every screen ranks the cars within their class.
+
+- The desk groups the order under a **class header** per class.
+- The **Class laps** row sets the lap count for every class after the first, 1 to 999.
+- The fastest lap is kept per class. A class picked in the selector narrows **Clear fastest lap** and **Set fastest lap**.
+
+[Classes](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#classes)
+
+Note: A league can run several car classes in one lobby. With at least two named classes, every screen ranks the cars within their class, and the desk groups the order under a header per class. The first class takes the normal lap count. For every other class you type the count into the class laps row, from one to nine hundred ninety nine. The relay keeps a fastest lap per class next to the overall one, and a class picked in the selector narrows the fastest lap controls to that class.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Dashboard data and tyres
+- The dashboard **delay**, up to 120 s, and the fastest lap with **Clear** / **Set fastest lap**.
+- Qualifying times with **Set time** and **Delete time**. **GT7 time** undoes it.
+- **Tyres** sets the compound per entry: RS, RM, RH, I or W.
+- **Show compound** and **Show fuel** switch those columns on the on-air dashboard.
+- The director alone puts the dashboard on air.
+
+[On air and in the cockpit](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#on-air-and-in-the-cockpit)
+
+Note: The desk also feeds the driver dashboard. You set its delay, up to one hundred twenty seconds, so it matches the commentator feed on air. You can clear or set the fastest lap, and in qualifying set or delete an entry's time, for example after a track limits penalty. GT7 time undoes that correction. GT7 sends no tyre compound, so you set it per entry: racing soft, medium or hard, intermediate or wet. Show compound and Show fuel switch those two columns on the on-air dashboard. Putting the dashboard itself on air stays with the director, because it is a program change.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Graphics and flag graphics
+The league sets `GRAPHICS_TAKE`. The director can change it per role during the event.
+
+- In **direct** mode you get **Put on air** / **Take off air**. One crew graphic is on air at a time.
+- In **request** mode **Request** goes to the director, who takes or declines it.
+- **Flag graphics** in the **Act** tab are yours alone, one at a time. They go on air directly, also in request mode.
+- Every take posts a line in the crew chat.
+
+[Console: graphics](https://github.com/jegr78/gt-racing-broadcast/wiki/Console#graphics)
+
+Note: Whether you may put graphics on air is a league setting called graphics take, and the director can change it per role during the event. In direct mode each graphic gets Put on air and Take off air, and a new crew graphic replaces the previous one. In request mode you ask the director, who takes or declines it, and a request expires after sixty seconds. Graphics the director put on air are never touched. Flag graphics, such as green, yellow, safety car or chequered, sit in the Act tab and belong to Race Control alone. They go on air directly, also in request mode, and only one shows at a time. Every take posts a line in the crew chat.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Note to commentator
+- Pick a commentator, tap a preset or type a short note, **Send**.
+- It lands in the **Race Control** card of that commentator's cockpit.
+- It is a heads-up, never a penalty or a flag.
+
+Note: The note to commentator sends a short heads-up to one commentator. Pick the commentator, tap a preset or type the note, and press Send. It appears in the Race Control card of that commentator's cockpit. It is a heads-up for the commentary, never a penalty and never a flag.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## On a phone
+At 820 px wide or less, a tab bar shows one part of the desk at a time:
+
+- **Act**: note to commentator, flag graphic, track layout, driver telemetry.
+- **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule**.
+
+The on-air banner, the race timer and a critical cue stay pinned at the top.
+
+[Console: on a phone](https://github.com/jegr78/gt-racing-broadcast/wiki/Console#on-a-phone)
+
+Note: On a phone the desk switches to tabs at the bottom. Act holds the note to commentator, the flag graphic, the track layout and the driver telemetry. The other tabs are Graphics, Chat with the crew and broadcast chat, Program and Schedule. The on-air banner, the race timer and a critical cue stay at the top while you scroll, and the page remembers the last tab.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Notes, documents and health
+![Notes dialog with Notes and Documents tabs](assets/img/event-info-documents.png)
+
+The header **Notes** button opens the league's notes and documents. The **Health Monitor** card on the launcher shows how the relay performs.
+
+[Health Monitor](https://github.com/jegr78/gt-racing-broadcast/wiki/Health-Monitor)
+
+Note: Two read-only helpers. The Notes button in the desk header opens the league owner's notes and document links, in two tabs. It hides when the league has none. The Health Monitor card on the Console launcher shows how the relay has been performing, live and over time. Any signed-in crew member can open it, and it never changes the broadcast.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -64,7 +188,7 @@ The role is **additive**. The same person can direct the show **and** run Race C
 
 [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
 
-Note: This is how the crew fits together. The Race Control role is additive, which means the same person can direct the show and run Race Control at the same time.
+Note: This is how the crew fits together. The Race Control role is additive, which means the same person can direct the show and run Race Control at the same time. A producer gets the Race Control desk automatically.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -79,21 +203,23 @@ Note: This is how the crew fits together. The Race Control role is additive, whi
 [Console](https://github.com/jegr78/gt-racing-broadcast/wiki/Console) ·
 [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
 
-Note: To get in, open the Console link the producer sends you and sign in with Discord, or use a personal sign-in link if your league has no Discord login. On the launcher, tap the Race Control card. It appears if you are flagged for the role, which the producer or admin sets in the Sheet's Crew tab, in the Race Control column. Over the public Funnel you need no Tailscale account; if the producer only runs the tailnet, you'll need the Tailscale app.
+Note: To get in, open the Console link the producer sends you and sign in with Discord, or use a personal sign-in link if your league has no Discord login. On the launcher, tap the Race Control card. It appears if you are flagged for the role, which the producer or admin sets in the Sheet's Crew tab, in the Race Control column. Over the public Funnel you need no Tailscale account. If the producer only runs the tailnet, you'll need the Tailscale app.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Recap
-- Read-only on the broadcast: no scenes, graphics or feeds.
-- **Post race-control info + direct commentators in the crew chat.**
-- Schedule is redacted; stream URLs stay on the tailnet.
-- Role is additive; one person can hold multiple roles.
+- You can raise **RED FLAG** and press **Restart released**. The director keeps every other program control.
+- Keep the race data right: corrections, estimates, DNF, names, tyres, class laps.
+- Confirm or dismiss disconnects; **Show standings** to review.
+- Graphics and flag graphics follow the league's `GRAPHICS_TAKE`.
+- Post race-control info in the crew chat. The role is additive.
 
 Go deeper:
 [Console](https://github.com/jegr78/gt-racing-broadcast/wiki/Console) ·
+[Driver telemetry](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry) ·
 [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
 
-Note: To recap: you are read-only on the broadcast, with no scenes, graphics or feeds. Your job is to post race-control information and direct the commentators in the crew chat. The schedule you see is redacted, so stream URLs stay on the tailnet. And the role is additive, so one person can hold several roles at once.
+Note: To recap. You can raise the red flag and release the restart, and the director keeps every other program control. You keep the race data right with corrections, estimates, retirements, driver names, tyres and class laps. You confirm or dismiss disconnects and review them with Show standings. Graphics and flag graphics follow the league's graphics take setting. You post race-control information and direct the commentators in the crew chat. And the role is additive, so one person can hold several roles at once.
 </script></section>
 
 </div></div>

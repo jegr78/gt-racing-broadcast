@@ -15,6 +15,7 @@
   :root{
     --paper:#f4f1ea; --card:#fbfaf6; --ink:#16181c; --soft:#5b6168; --line:#d8d2c6;
     --producer:#d62828; --director:#e08a00; --commentator:#1f7a8c; --racecontrol:#5b7186; --cc:#2563a8;
+    --driver:#2f7d32; --raceeng:#8a5a2b; --radio:#3949ab;
     --mono:'IBM Plex Mono',ui-monospace,monospace; --head:'Saira Condensed',system-ui,sans-serif;
   }
   *{box-sizing:border-box}
@@ -30,9 +31,11 @@
     box-shadow:0 2px 0 var(--line);page-break-inside:avoid;break-inside:avoid}
   .bar{height:9px}
   .card.p .bar{background:var(--producer)} .card.d .bar{background:var(--director)} .card.c .bar{background:var(--commentator)} .card.rc .bar{background:var(--racecontrol)}
+  .mini.dr .bar{background:var(--driver)} .mini.re .bar{background:var(--raceeng)} .mini.rad .bar{background:var(--radio)}
   .card .body{padding:16px 17px 18px}
   .role{font-family:var(--head);font-weight:700;letter-spacing:.1em;text-transform:uppercase;font-size:22px;margin:0;display:flex;align-items:center;gap:9px}
   .card.p .role{color:var(--producer)} .card.d .role{color:var(--director)} .card.c .role{color:var(--commentator)} .card.rc .role{color:var(--racecontrol)}
+  .mini.dr .role{color:var(--driver)} .mini.re .role{color:var(--raceeng)} .mini.rad .role{color:var(--radio)}
   .role .num{font-size:12px;color:var(--soft);font-family:var(--mono);font-weight:600;border:1px solid var(--line);border-radius:6px;padding:2px 7px}
   .sub{font-size:11px;color:var(--soft);letter-spacing:.05em;margin:3px 0 13px}
 
@@ -51,11 +54,17 @@
   .ccband .bar{background:var(--cc)}
   .ccband .body{padding:14px 17px 16px}
   .ccband .role{color:var(--cc)}
+  .cards .minis{grid-column:1/-1;order:1}
+  .minis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;page-break-inside:avoid;break-inside:avoid}
+  .mini{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 0 var(--line);overflow:hidden}
+  .mini .bar{height:9px} .mini .body{padding:12px 13px 13px} .mini .role{font-size:18px}
+  .mini li{font-size:11px;line-height:1.4;margin:3px 0}
+  @media screen and (max-width:600px){.minis{grid-template-columns:1fr}}
   .vmap{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 20px;margin:8px 0 0}
   @media(max-width:900px){.vmap{grid-template-columns:1fr}}
   .vmap div{font-size:11px;line-height:1.5;border-top:1px solid var(--line);padding:3px 0}
   .vmap .vn{font-weight:600;color:var(--cc)}
-  @media print{ body{padding:0;background:#fff} .sheet{max-width:none} .top{padding:14px 14px 0} .cards{padding:0 14px} }
+  @media print{ li{font-size:11px;line-height:1.4;margin:2px 0} h3{margin:11px 0 5px} .card .body{padding:12px 15px 13px} .ccband{margin-top:12px} .cards .minis{order:0} .vmap{grid-template-columns:repeat(3,1fr)} body{padding:0;background:#fff} .sheet{max-width:none} .top{padding:14px 14px 0} .cards{padding:0 14px} }
 </style>
 </head>
 <body>
@@ -99,8 +108,56 @@
           <li>Tell the Director you're live.</li>
           <li>Stay live through the ~10 min handover, then you can stop.</li>
         </ol>
+
+        <h3>In your cockpit</h3>
+        <ul>
+          <li><span class="k">Talk</span>: message the director, crew chat, Race Control notes.</li>
+          <li><span class="k">Program</span>: picture, program audio, broadcast chat. <span class="k">Timing</span> card: the delayed driver dashboard.</li>
+          <li><span class="k">Graphics</span>: <span class="k">Put on air</span> or <span class="k">Request</span> if the league allows it.</li>
+          <li><span class="k">Plan</span>: stint plan, submit your stream link.</li>
+        </ul>
       </div>
     </section>
+
+    <div class="minis">
+      <section class="mini dr">
+        <div class="bar"></div>
+        <div class="body">
+          <p class="role">Driver</p>
+          <p class="sub">Send your GT7 telemetry.</p>
+          <ul>
+            <li>Invite link: pick entry and stint, <span class="k">Get my sender command</span>, run it.</li>
+            <li>Allow inbound <span class="k">UDP 33740</span>. SimHub: <code>--forward</code>; phone app: second device.</li>
+            <li>One sender per entry, two per team in endurance. Stopped? <span class="k">No data</span>, place kept.</li>
+          </ul>
+        </div>
+      </section>
+      <section class="mini re">
+        <div class="bar"></div>
+        <div class="body">
+          <p class="role">Race Engineer</p>
+          <p class="sub">Live telemetry desk, solo POV.</p>
+          <ul>
+            <li>Crew tab <span class="k">Race Engineer</span> + producer's <span class="k">Allow Race Engineer</span>.</li>
+            <li>Compare <span class="k">Lap B</span> with <span class="k">Lap A</span>; <span class="k">Pin lap A</span> for every Engineer.</li>
+            <li>References and replays come from the producer. No broadcast controls.</li>
+          </ul>
+        </div>
+      </section>
+      <section class="mini rad">
+        <div class="bar"></div>
+        <div class="body">
+          <p class="role">Driver Radio</p>
+          <p class="sub">AI Race Engineer and AI Coach.</p>
+          <ul>
+            <li>Console card <span class="k">Driver radio</span>: Fuel status, Pace, Tyre temperatures, Short status.</li>
+            <li>Voice: wake phrase, then the question. Audio on the relay PC.</li>
+            <li><span class="k">Start training</span> for the Coach. <span class="k">Radio messages</span> for a tablet.</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
 
     <section class="card p">
       <div class="bar"></div>
@@ -114,8 +171,10 @@
           <li>Update: <code>racecast update</code>, then <code>racecast install-tools --update</code>.</li>
           <li>Update GPU driver; <span class="k">reboot</span> the PC.</li>
           <li>Refresh cookies: <code>racecast cookies firefox</code> (log into YouTube in Firefox first). If any stint uses a gated Twitch feed, also run <code>racecast cookies twitch firefox</code>.</li>
+          <li>Brand logos changed in the Sheet? <code>racecast brands</code>.</li>
           <li>Check the machine: <code>racecast preflight</code>. Fix anything it flags.</li>
           <li>Bring everything up: <span class="k">racecast event start</span>. Tailscale, Discord, relay, OBS, Companion.</li>
+          <li>Driver telemetry: pick the <span class="k">Track layout</span> on Home (<code>racecast event track</code>). Home shows the <span class="k">Driver invite</span> and the <span class="k">Public timing</span> link with Copy (<code>racecast event invite</code> / <code>timing</code>). Event start creates both.</li>
           <li>Public crew access: <span class="k">racecast funnel on</span> (one-time first: <code>racecast console setup-funnel --apply</code>). Then share each person's <span class="k">Console link</span>. <code>racecast links --post</code> drops them into crew chat, or copy them from the Control Center <span class="k">Crew Console</span>.</li>
           <li>Companion green; a Director confirms access. Test the Discord audio source.</li>
           <li>Enter the <span class="k">league's stream key</span> in OBS.</li>
@@ -166,9 +225,9 @@
 
         <h3>Handover (every 2 h)</h3>
         <ol>
-          <li>Incoming streamer goes live → their feed <span class="k">appears automatically</span>.</li>
-          <li>Switch to <span class="k">Splitscreen</span> for ~10 min.</li>
-          <li>Switch to <span class="k">Stint</span> on the new feed.</li>
+          <li>Next link in the panel's <span class="k">Schedule</span>, then <span class="k">ARM</span> the off-air feed a few minutes ahead.</li>
+          <li>Wait for <span class="k">serving</span>: NEXT turns green. Then <span class="k">SPLIT</span>.</li>
+          <li><span class="k">NEXT</span> cuts back to <span class="k">Stint</span> on the new feed. <span class="warn">Before serving it does nothing.</span></li>
         </ol>
 
         <h3>Driver POV (optional)</h3>
@@ -200,18 +259,19 @@
       <div class="bar"></div>
       <div class="body">
         <p class="role">Race Control</p>
-        <p class="sub">Monitor the race; feed the crew via chat.</p>
+        <p class="sub">Red flag, race data, crew chat. Open your <span class="k">Console link</span>, tap <span class="k">Race Control</span>.</p>
 
-        <h3>Connect</h3>
-        <ol>
-          <li>Open the personal <span class="k">Console link</span> your producer sends. Your launcher shows a <span class="k">Race Control</span> card.</li>
-        </ol>
-
-        <h3>What you see</h3>
+        <h3>On the desk</h3>
         <ul>
-          <li>Live <span class="k">program preview</span> of what's on air.</li>
-          <li>The <span class="k">schedule</span>: streamer per stint (no stream URLs).</li>
-          <li>The <span class="k">race timer</span>.</li>
+          <li><span class="k">RED FLAG</span> (two presses): Standby Cover, HUD banner, race held. <span class="k">Restart released</span> lowers them again if your RED FLAG raised them. Logged with your name.</li>
+          <li><span class="k">Race data</span> in Driver telemetry: Final lap / Finish, corrections, estimate (<span class="k">EST</span>), <span class="k">Retire (DNF)</span>, driver names, tyres, recording and disconnects (<span class="k">Confirm DC</span> / <span class="k">Dismiss</span>).</li>
+          <li>Also <span class="k">Track layout</span>, <span class="k">Note to commentator</span>, program preview, schedule without stream URLs, race timer.</li>
+        </ul>
+
+        <h3>Graphics (league setting)</h3>
+        <ul>
+          <li><code>GRAPHICS_TAKE=direct</code>: <span class="k">Put on air</span> / <span class="k">Take off air</span>. <code>request</code>: <span class="k">Request</span>, the director takes or declines.</li>
+          <li>In both modes the <span class="k">flag graphics</span> (Act tab) are yours alone and go on air directly.</li>
         </ul>
 
         <h3>Post to crew chat</h3>
@@ -219,7 +279,7 @@
           <li>Race-control facts: <span class="k">DSQ / drive-through</span>, <span class="k">rejoin time</span>, no driver for next stint, a team <span class="k">retiring</span>.</li>
           <li><span class="k">Direct the commentators</span>, e.g. "cut to car #7, P3".</li>
         </ul>
-        <p class="sub" style="margin-top:9px">Read-only on the broadcast: <span class="warn">no</span> scenes, graphics or feeds, but the chat is yours.</p>
+        <p class="sub" style="margin-top:9px">No scenes or feeds. The driver dashboard goes on air only from the director.</p>
       </div>
     </section>
 
@@ -234,7 +294,7 @@
         <div><span class="vn">Home</span>: status; Start/Stop event</div>
         <div><span class="vn">Setup</span>: first-time wizard</div>
         <div><span class="vn">Preflight</span>: machine &amp; tool check</div>
-        <div><span class="vn">Relay</span>: start/stop the feeds</div>
+        <div><span class="vn">Relay</span>: start/stop the feeds; Health Monitor history</div>
         <div><span class="vn">Static Streams</span>: public-channel fallback</div>
         <div><span class="vn">Apps</span>: OBS/Companion/Tailscale/Discord</div>
         <div><span class="vn">Tools</span>: yt-dlp/streamlink/ffmpeg/deno</div>
@@ -243,6 +303,8 @@
         <div><span class="vn">Crew Console</span>: share/revoke <code>/console</code> links</div>
         <div><span class="vn">Settings</span>: the <code>.env</code> (masked)</div>
         <div><span class="vn">Logs</span>: live service logs</div>
+        <div><span class="vn">Post-Event Report</span>: generate, download, send to Discord</div>
+        <div><span class="vn">Telemetry</span> (solo POV): recording, replay, Race Engineer access, driver radio</div>
         <div><span class="vn">Help &amp; Docs</span>: onboarding decks &amp; guides</div>
       </div>
     </div>

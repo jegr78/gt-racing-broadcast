@@ -72,7 +72,7 @@ on the list.
 The relay resolves roles from the Google Sheet's **Crew tab**. The tab header must be:
 
 ```
-Name | Commentator | Director | Producer | Race Control | Discord
+Name | Commentator | Director | Producer | Race Control | Discord | Race Engineer
 ```
 
 - **Name**, the person's display name (used in chat, tally, and links).
@@ -83,9 +83,13 @@ Name | Commentator | Director | Producer | Race Control | Discord
 - **Director**: flag; grants Director Panel + Web Buttons access.
 - **Producer**, flag; grants producer-level capabilities on `/console`, authorizing the
   step-up (irreversible broadcast-control ops) and the producer-takeover pull endpoints.
-- **Race Control**: flag; grants the read-only [Race Control](Console) monitoring desk.
+- **Race Control**: flag; grants the [Race Control desk](Console#race-control-desk):
+  the red flag, the driver race data and crew chat. It switches no scenes or feeds.
 - **Discord**, the Discord **username** (not display name, not `@mention`). Fill this
   for everyone who will log in with Discord. Case is ignored on match.
+- **Race Engineer**: flag; grants the [Race Engineer](Race-Engineer) desk once the
+  producer allows it. Producers inherit it. Redeploy the current
+  [Sheet webhook](Sheet-Webhook) before you assign it through the crew editor.
 
 A person with no Discord handle in the Crew tab cannot log in with Discord, the relay
 finds no match and returns HTTP 403.

@@ -20,7 +20,7 @@ import collections
 COMMENTATOR = "commentator"
 DIRECTOR = "director"
 PRODUCER = "producer"
-# Race Control (#244): a read-only monitoring desk. The role string is
+# Race Control (#244): the race desk (red flag, driver race data). The role string is
 # "race_control" and the director-only HUD Setup banner is "racecontrol", so the
 # two never collide.
 RACE_CONTROL = "race_control"

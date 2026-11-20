@@ -52,21 +52,72 @@ Note: Bringing everything up is essentially one click. Open the Control Center, 
 </script></section>
 
 <section data-markdown><script type="text/template">
-## ~30 min before you go live
-Plan about 30 minutes for these steps (all from the Control Center):
+## ~30 min before you go live (1/2)
+Plan about 30 minutes for these steps, all from the Control Center:
 
 1. Confirm the active league profile.
 2. Apply any available tool update; then **reboot** the PC.
 3. **Tools → Update all**: outdated tools are the #1 cause of feed failures.
-4. **Assets** → refresh **Cookies** (log into YouTube first), and **Media / Graphics** if they changed.
-5. Confirm OBS is on **your league's scene collection** (`GT Racing Endurance — <league>`).
-6. **Preflight → Run**: fix anything it flags.
-7. **Home → Start event**: confirm each feed shows up in OBS.
-8. Enter the league's **stream key** in OBS (Settings → Stream).
+4. **Assets → Cookies → Refresh** (log into YouTube in that browser first).
+5. **Assets → Media / Graphics → Download** if they changed.
+6. **Assets → Brands → Download** if the league's Brands tab changed.
 
-[Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event)
+[Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event#before-you-go-live)
 
-Note: Plan about thirty minutes before you go live, all from the Control Center. Confirm the active league profile. Apply any available tool update, then reboot the PC. Run Tools, Update all. Outdated tools are the number one cause of feed failures. Refresh your cookies after logging into YouTube, and refresh media and graphics if they changed. Confirm OBS is on your league's scene collection. Run Preflight, and fix anything it flags. Press Start event and confirm each feed shows up in OBS. Finally, enter the league's stream key in OBS, under Settings, Stream.
+Note: Plan about thirty minutes before you go live, all from the Control Center. Confirm the active league profile. Apply any available tool update, then reboot the PC. Run Tools, Update all. Outdated tools are the number one cause of feed failures. Refresh your cookies after logging into YouTube in that browser. Download the media and graphics again if they changed. And if the league keeps its own brand logos in the Brands tab of the Sheet, download them too when that tab changed. They show on the HUD and next to every entry in the timing.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## ~30 min before you go live (2/2)
+7. Confirm OBS is on **your league's scene collection** (`GT Racing Endurance — <league>`).
+8. **Preflight → Run**: fix anything it flags.
+9. **Home → Start event**: confirm each feed shows up in OBS.
+10. On **Home**, check that **Companion** is connected.
+11. Enter the league's **stream key** in OBS (**Settings → Stream**).
+
+[Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event#before-you-go-live)
+
+Note: Then confirm OBS is on your league's scene collection. Run Preflight, and fix anything it flags. Press Start event on the Home view and confirm each feed shows up in OBS. Check on Home that Companion is connected, so the director can reach the buttons. Finally, enter the league's stream key in OBS, under Settings, Stream.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Home: track layout and driver race
+- **Track layout**: the event's GT7 layout for the telemetry. A layout marked "no line" has no racing line and shows a warning.
+- **Driver race**: **Formation lap**, **Finish after laps** with the lap count or **Timed**, the **Red flag** restart rule and the **Lap time** seconds.
+
+<img src="assets/img/cc-home.png" alt="Control Center Home" style="max-height:280px">
+
+[Control Center: Home](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center#home) · *CLI: `racecast event track`, `racecast event race`*
+
+Note: When drivers send telemetry, the Home view holds the event settings for it, right under the event title. Track layout picks the event's GT seven layout. A layout marked no line has no downloaded racing line, and the row shows a warning. Driver race sets how the race order starts and finishes: a formation lap, a finish after a lap count or a timed finish, the league's red flag restart rule, and how many seconds a new lap time stays on the dashboard. The profile keeps these settings.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Driver invite and public timing link
+- **Start event** creates both links. **Stop event** ends them.
+- **Driver invite**: the link drivers open to send their telemetry.
+- **Public timing**: a page for viewers and team mates. No login, timing only, same delay as the on-air dashboard.
+- **Copy** copies a link. **New link** replaces it and the old one stops working. A new invite means every driver registers again.
+- People outside the tailnet reach both pages over the Funnel (`racecast funnel on`).
+
+[Driver telemetry: Public live timing](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#public-live-timing)
+
+Note: Start event also creates two links on the Home view, and Stop event ends them. The driver invite is the link drivers open to send their telemetry. The public timing link is a page for viewers and team mates. It needs no login, shows timing only, and runs with the same delay as the on-air dashboard. Copy copies a link. New link replaces it, the old link stops working, and after a new driver invite every driver registers again. People outside your tailnet reach both pages over the public Funnel, which racecast funnel on switches on.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Hosted timing (optional)
+If the league set up a Cloudflare timing host, the hosted page serves the viewers, so their number costs no upload.
+
+![Public timing host section in the Profile view](assets/img/cc-profile-timing-host.png)
+
+- The Home row shows the link to hand out, the viewers on the host and an estimate of today's quota.
+- **Serve Funnel** moves the viewers to the Funnel page; switching back to hosted brings them back.
+- **Check** says when the host needs a **Deploy** after a racecast update.
+
+[Driver telemetry: Hosted live timing](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#hosted-live-timing-optional)
+
+Note: A league can hand the public timing page to a Cloudflare Worker. The relay then sends one update every two seconds, and Cloudflare serves every viewer, so the number of viewers costs no upload on your line. The Home row then shows the hosted link to hand out, the viewers on the host and an estimate of today's free quota. Serve Funnel moves the viewers to the Funnel page, and switching back to hosted brings them back. In the Profile view, Check says when the host code is out of date, and Deploy updates it. Do that after a racecast update.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -85,11 +136,11 @@ Note: To go live, switch OBS to the Standby scene, then click Start Streaming. F
 
 ![Who does what](assets/img/diagrams/who-does-what.svg)
 
-The director presses **Feeds Next** at each driver change and dresses the scene.
-The producer just monitors the machine.
+At each driver change the director **arms** the incoming feed and hands over with **NEXT**.
+The producer monitors the machine.
 [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
 
-Note: Here is who does what during the race. The director presses Feeds Next at each driver change and dresses the scene. You, the producer, simply monitor the machine and step in only if something breaks.
+Note: Here is who does what during the race. At each driver change the director arms the incoming feed and hands over with NEXT. You, the producer, monitor the machine and step in only if something breaks.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -123,6 +174,40 @@ Note: For the interviews and outro: only the final-part producer joins the Disco
 </script></section>
 
 <section data-markdown><script type="text/template">
+## The machine during a long event
+- **Sleep**: while the relay runs it keeps the PC from sleeping when idle. Home shows "idle sleep blocked". `RACECAST_KEEP_AWAKE=0` in `.env` turns it off.
+- **Cookies**: set `RACECAST_COOKIES_BROWSER=firefox` in `.env` (General Settings) and the relay re-exports the YouTube and Twitch jars hourly while such a source runs. The 12 h "cookies stale" warning stays away.
+- Stay logged in to YouTube and Twitch in that browser.
+
+[Relay mode](https://github.com/jegr78/gt-racing-broadcast/wiki/Relay-Mode) · [Configuration](https://github.com/jegr78/gt-racing-broadcast/wiki/Configuration)
+
+Note: Two things keep the machine going through a long event. While the relay runs, it keeps the PC from going to sleep when idle. The Relay row on Home says idle sleep blocked. Setting RACECAST KEEP AWAKE to zero in the machine dot env turns that off. And if you set RACECAST COOKIES BROWSER, for example to firefox, in the dot env through General Settings, the relay re-exports the cookie jars from that browser once they are an hour old, while a YouTube or Twitch source runs. The twelve hour cookies stale warning then stays away. Stay logged in to YouTube and Twitch in that browser. A failed export keeps the old jar and is retried an hour later.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Health Monitor
+
+![Health Monitor](assets/img/health-monitor.png)
+
+Health badge, status bands, charts and incidents. **Live**, 1h, 6h, 24h, 7d. A takeover pulls the history along.
+
+[Health Monitor](https://github.com/jegr78/gt-racing-broadcast/wiki/Health-Monitor)
+
+Note: The Health Monitor shows how the relay is doing, live and over time. A badge on top gives the current health in green, yellow or red, with the reasons. Status bands, charts for OBS and the machine, and an incident list follow below. Pick Live or a time range such as one hour or twenty-four hours. Every signed-in crew member can open it from the Console launcher, and it is read-only. When you take over from another producer, the takeover pulls their health history along.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Telemetry view
+In a solo POV profile, the Control Center **Telemetry** view holds the live GT7 **recording**, **Broadcast replay**, **Race Engineer** access and **Open Telemetry workspace** for the archive and analysis.
+
+![Control Center Telemetry view](assets/img/cc-telemetry.png)
+
+[Control Center: Telemetry controls](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center#telemetry-controls) · [Telemetry](https://github.com/jegr78/gt-racing-broadcast/wiki/Telemetry)
+
+Note: One pointer for telemetry. In a solo POV profile, the Control Center shows a Telemetry view. It starts and stops the live GT seven recording, plays a finished recording back into the broadcast, controls access for the Race Engineer desk, and opens the separate telemetry workspace for the archive and the analysis. This deck does not go deeper. The Telemetry page in the wiki covers it.
+</script></section>
+
+<section data-markdown><script type="text/template">
 ## When things go wrong
 Run `racecast preflight` first. It names the exact fix command for anything missing.
 
@@ -137,20 +222,33 @@ Note: When things go wrong, run racecast preflight first. It names the exact fix
 </script></section>
 
 <section data-markdown><script type="text/template">
+## Post-Event Report
+**Report** view: **Generate** builds a self-contained HTML summary of the last session. Commentators per stint, Feed A / B activity, incidents and quality metrics.
+
+<img src="assets/img/cc-report.png" alt="Post-Event Report" style="max-height:300px">
+
+**Download .html** saves it. **Send to Discord** posts it to the league's webhook channel. *CLI: `racecast report`, `racecast report send`.*
+
+[Control Center: Post-Event Report](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center#post-event-report)
+
+Note: After the broadcast, the Report view builds a post-event report from the relay's health history. Press Generate. The result is one self-contained HTML file with the commentators per stint, the Feed A and Feed B activity, the incidents and the quality metrics. Download saves the file, and Send to Discord posts it as an attachment to the league's webhook channel.
+</script></section>
+
+<section data-markdown><script type="text/template">
 ## Stop + recap
-Press **Stop event**. Stops the relay and Companion; OBS, Discord and Tailscale keep running.
+Press **Stop event**. Stops the relay and Companion and ends the driver invite and timing link; OBS, Discord and Tailscale keep running.
 
 Three producer beats:
-1. **Before**: update, reboot, cookies, graphics, preflight, start.
-2. **During**: watch the machine; run `racecast preflight` at the first sign of trouble.
-3. **After**: Stop Streaming in OBS, then Stop event.
+1. **Before**: update, reboot, cookies, graphics, brands, preflight, start.
+2. **During**: watch the machine (Health Monitor); run `racecast preflight` at the first sign of trouble.
+3. **After**: Stop Streaming in OBS, then Stop event. The Report view builds the summary.
 
 Go deeper:
 [Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event) ·
 [Control Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center) ·
 [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
 
-Note: To finish, press Stop event. It stops the relay and Companion, while OBS, Discord and Tailscale keep running. Remember the three producer beats. Before: update, reboot, cookies, graphics, preflight, start. During: watch the machine, and run preflight at the first sign of trouble. After: Stop Streaming in OBS, then Stop event. That is the whole job.
+Note: To finish, press Stop event. It stops the relay and Companion and ends the driver invite and the public timing link, while OBS, Discord and Tailscale keep running. Remember the three producer beats. Before: update, reboot, cookies, graphics, brand logos, preflight, start. During: watch the machine, for example in the Health Monitor, and run preflight at the first sign of trouble. After: Stop Streaming in OBS, then Stop event. The Report view builds the post-event summary. That is the whole job.
 </script></section>
 
 </div></div>

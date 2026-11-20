@@ -1,9 +1,12 @@
 flowchart LR
-  A[Standby cover] --> B[Go live]
-  B --> C[Driver change?]
-  C -->|press Feeds Next| D[Next commentator on air]
-  D --> E[Pick scene + graphics]
-  E --> F[Send cues to commentators]
+  A["Standby cover"] --> B["Go live"]
+  B --> C["Driver change?"]
+  C -->|link early| K["ARM off-air feed"]
+  K -->|serving| S["SPLIT, then NEXT"]
+  S --> E["Scene + graphics"]
+  E --> F["Cue commentators"]
   F --> C
-  C -->|final stint| G[Interview cut + broadcast audio]
-  G --> H[Outro + end]
+  C -->|final stint| G["Interview + audio"]
+  G --> H["Outro + end"]
+  E -.-> R["RED FLAG"]
+  R -.->|Restart released| E

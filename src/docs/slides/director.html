@@ -24,10 +24,10 @@ Note: Welcome to the director onboarding. As director, you drive the entire show
 
 <section data-markdown><script type="text/template">
 ## Your job in one sentence
-Choose what viewers see, and press **Feeds Next** at every driver change.
+Choose what viewers see, and hand over at every driver change with **ARM**, **SPLIT** and **NEXT**.
 The producer only starts and stops; everything in between is yours.
 
-Note: Here is your job in one sentence. You choose what the viewers see, and you press Feeds Next at every driver change. The producer only starts and stops the show; everything in between is yours.
+Note: Here is your job in one sentence. You choose what the viewers see, and at every driver change you hand over with three keys. Arm the next feed, cut to the splitscreen, then press next. The producer only starts and stops the show. Everything in between is yours.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -44,11 +44,13 @@ Note: Before the event, open the Console link the producer sends you. It works o
 
 <section data-markdown><script type="text/template">
 ### The Director Panel
-Everything runs from one page. Details: [Director guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Director).
 
 ![Director Panel](assets/img/director-panel.png)
 
-Note: This is the Director Panel. Everything runs from this one page. For the full details, see the Director guide.
+**Navigation** (Handover, Graphics, HUD, Cues, Audio; Broadcast, Schedule, Setup, Troubleshoot) · **live column** with preview, PGM keys, **ARM**, **NEXT** · **workspace** · **chat rail**.
+[Director guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#the-director-panel)
+
+Note: This is the Director Panel. It is a fixed frame of four columns. On the left, the navigation lists the areas. Handover, Graphics, H U D, Cues and Audio are the on-air areas. Broadcast, Schedule, Setup and Troubleshoot are the operations areas. Each one carries a status dot and a short reason. The live column holds the program preview, the scene keys and the handover keys Arm and Next. The middle shows the area you picked, with a next step line above it. On the right, the chat rail shows the crew chat and the broadcast chat. On a phone the page becomes one column.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -62,12 +64,12 @@ Note: You can also drive the same actions from the Web Buttons on a tablet, powe
 
 <section data-markdown><script type="text/template">
 ## The event flow
-The show is a loop: go live, then at each driver change advance the feeds and
-re-dress the scene. The steps follow →
+The show is a loop: go live, then at each driver change arm the next feed, hand over and
+re-dress the scene. The steps follow.
 
 ![Event flow](assets/img/diagrams/director-event-flow.svg)
 
-Note: The show is a loop. You go live, and then at each driver change you advance the feeds and re-dress the scene. The individual steps follow on the next slides.
+Note: The show is a loop. You go live, and then at each driver change you arm the next feed, hand over and re-dress the scene. A red flag can interrupt the loop at any time. The individual steps follow on the next slides.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -80,14 +82,15 @@ Note: Step one is Standby to go live. Start on the Standby cover. When the produ
 
 <section data-markdown><script type="text/template">
 ### 2 · Each driver change
-1. Cut to **Splitscreen** first (both commentators on screen for the swap).
-2. Then press **Feeds Next** to complete the handover. The off-air feed has
-   already pre-rolled the next commentator, so the relay cuts cleanly back to
-   Stint on the incoming feed.
-3. Dress the scene + graphics. *Which graphic when (formation lap, final lap, red
-   flag…) → the full sequence is in the [Director guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Director).*
+1. **Enter the next link early** in the **Schedule** area. Nothing pulls yet.
+2. **ARM** the off-air feed a few minutes ahead. Wait until it is **serving** and **NEXT** turns green.
+3. Cut to **Splitscreen** with **SPLIT**.
+4. Press **NEXT** once. The relay cuts to Stint on the new feed and stops the old one.
 
-Note: Step two happens at each driver change. First, cut to Splitscreen, so both commentators are on screen for the swap. Then press Feeds Next to complete the handover. The off-air feed has already pre-rolled the next commentator, so the relay cuts cleanly back to the stint on the incoming feed. Finally, dress the scene and graphics. For which graphic to show when: the formation lap, the final lap, a red flag and so on. The full sequence is in the Director guide.
+On the Companion buttons: **ARM A** / **ARM B**, **SPLIT**, **Feeds Next**. NEXT before serving cuts nothing.
+[At a driver change](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#at-a-driver-change)
+
+Note: Step two happens at each driver change. First, enter the next link early in the Schedule area. It just sits there, and nothing pulls yet. A few minutes before the swap, press Arm. It always targets the off-air feed. The relay starts pulling that stream, which takes ten to thirty seconds. The key turns amber while the feed starts and green once it is serving, and Next turns green with it. Then cut to the splitscreen with Split. Finally press Next once. The relay cuts the program back to Stint on the new commentator, switches the audio, sets the H U D, and stops the outgoing feed. On the Companion buttons the same steps are Arm A or Arm B, Split, then Feeds Next. If you press Next before the feed is serving, nothing is cut and the current program stays on air.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -108,23 +111,129 @@ Note: Step four is the interview and the end. On the final stint, cut to the Int
 </script></section>
 
 <section data-markdown><script type="text/template">
+## Graphic requests and take modes
+- **CREW GRAPHIC TAKES** in the Graphics area sets **OFF**, **REQUEST** or **DIRECT** per role.
+- It starts from the league's `GRAPHICS_TAKE` and returns to it on a relay restart.
+- A request shows in the live column with **TAKE** and **DECLINE**. It expires after 60 s.
+- Race Control flag graphics never queue.
+
+[Graphic requests](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#graphic-requests)
+
+Note: Commentators and Race Control can put graphics on air, depending on a take mode per role. You set it in the Graphics area under crew graphic takes. Off means no takes, request means the crew asks and you decide, direct means the crew takes graphics itself. The mode starts from the league setting and returns to it when the relay restarts. In request mode each request shows in the live column with the requester's name, Take and Decline. It expires after sixty seconds. Take refuses while the graphic's scene is off air, so switch the scene and press Take again. Race Control flag graphics never queue, they go on air directly.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## RED FLAG
+- **RED FLAG** on the PGM bus shows the Standby Cover and sets the HUD banner *Red Flag - Race Suspended*.
+- When it raises the cover, the panel's key also holds the driver race.
+- A second press hides the cover and clears the banner.
+- **Restart released** in the Driver telemetry section ends the hold.
+- Race Control has the same red flag on its desk.
+
+Note: The red flag has its own key on the program bus. The first press shows the Standby Cover and sets the H U D banner that reads Red Flag, Race Suspended. When it raises the cover, the panel's key also holds the driver race. A second press hides the cover and clears the banner. Restart released in the driver telemetry section ends the hold. Race Control has the same red flag on its desk. The red flag has no keyboard shortcut.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Driver telemetry in the panel
+
+![Director Panel driver telemetry section](assets/img/director-panel-drivers.png)
+
+The **Setup** area holds the race from the drivers' own telemetry, with the same controls as the Race Control desk.
+
+Note: The Setup area has a driver telemetry section. It holds the race computed from the drivers' own telemetry, with the same controls as the Race Control desk, plus the switch that puts the dashboard on air. The next slide lists what it holds.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## What the section holds
+- Invite link, finish mode, **Final lap**, **Finish**, **Hold race (red flag)**, restart mode.
+- Race order with gaps and status, corrections with a reason, class laps.
+- Dashboard **Show** / **Hide** and delay, fastest lap and qualifying corrections.
+- Tyre compound per entry, **Show compound**, **Show fuel**.
+- Readiness per entry, every sender with **Move** and **Disconnect**.
+
+Race-wide buttons ask for a second press within four seconds.
+[Driver telemetry](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#driver-telemetry)
+
+Note: The section holds the invite link with a copy button, the finish mode with Final lap and Finish, Hold race for a red flag, and the restart mode. It shows the race order with gaps, status and pit stops. Corrections need a reason, and with several classes you set the lap count for each class after the first. The dashboard has Show and Hide and a delay, plus the fastest lap and qualifying corrections. You set the tyre compound per entry and switch the compound and fuel columns. At the bottom you see the readiness per entry and every sender, with Move and Disconnect. Buttons that change the race for everyone ask for a second press within four seconds.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## The dashboard on air
+
+![Driver dashboard overlay](assets/img/driver-dashboard.png)
+
+Only the director puts it on air, with **Show dashboard**. It runs behind by the set delay.
+
+Note: This is the driver dashboard. It shows a timing tower, the lap count or remaining time, the fastest lap and a track map. Only the director puts it on air, with Show dashboard. Race Control cannot, because it is a program change. The dashboard runs behind the live race by the set delay, up to one hundred twenty seconds, to match the commentator feed on air. Show, Hide and the display switches act at once.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Recording and disconnects
+- The relay records the race in race mode. You and Race Control can start and stop it.
+- Five seconds without data opens a **suspected** disconnect event.
+- **Confirm DC** or **Dismiss** it. **Show standings** opens the frozen standings 5 to 30 s before the last packet.
+
+[Race recording](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#race-recording-and-disconnect-events)
+
+Note: The relay records the live race once a second while it runs in race mode. You and Race Control can start and stop the recording by hand and download a C S V file. When a car sends no data for five seconds, the recording opens a suspected disconnect event. You confirm or dismiss it. Show standings opens the frozen standings from five to thirty seconds before the car's last packet.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Intermission controls
+
+![Intermission controls](assets/img/director-intermission.png)
+
+Live Chat, Webcam and Capture visibility, each **shown**, **hidden** or **unknown**. **Restore saved defaults** returns to the saved design.
+
+Note: The Intermission controls switch the chat in the Intermission scene, and in solo also the webcam and the capture. Each source shows its state, shown, hidden or unknown. An unknown control is disabled. Your choices survive scene changes, a browser reload and a relay restart. Restore saved defaults returns to the design saved in the profile.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Solo mode
+
+![Director Panel in solo POV mode](assets/img/director-panel-solo.png)
+
+No feeds A and B, no ARM or NEXT. Solo macros, **WEBCAM**, **POV**; in a POV profile **TELEMETRY** and **REC**.
+
+[Solo mode](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#solo-mode)
+
+Note: For a solo profile the panel adapts by itself. The handover area, Arm, Next and the A and B feeds are hidden. The program bus carries the solo macros, and the overlays card toggles the webcam and the P O V picture in picture. In a solo P O V profile you also get Telemetry, which shows or hides the telemetry block on the H U D, and Rec, which starts and stops the telemetry recording. The status strip names the car and the track.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Warning banners
+- **RELAY UNREACHABLE** means the panel cannot reach the relay.
+- **SHEET SYNC FAILED** means a HUD or team write did not reach the Sheet.
+- **TIMER SHEET SYNC FAILED** means the race timer does not reach the Sheet.
+- **COOKIES N H OLD** means the next YouTube handover may fail.
+
+Each one clears itself. Tell the producer while it stays.
+[Warning banners](https://github.com/jegr78/gt-racing-broadcast/wiki/Director#warning-banners)
+
+Note: Ongoing problems show as banners under the header. Relay unreachable means the panel cannot reach the producer's relay. Sheet sync failed means a H U D or team change did not reach the Sheet. Timer sheet sync failed means the race timer's state does not reach the Sheet. Cookies old means the producer's YouTube cookies are stale, so the next handover may fail. Each banner disappears once the problem is solved. While it stays, tell the producer.
+</script></section>
+
+<section data-markdown><script type="text/template">
 ## When things go wrong
 Feed black? Panel unresponsive? Work the checklist in
 [If something goes wrong](https://github.com/jegr78/gt-racing-broadcast/wiki/If-something-goes-wrong).
 Keep calm. The producer can restart the relay without losing your scene.
 
-Note: When things go wrong: a black feed, or an unresponsive panel. Work the checklist on the If something goes wrong page. Keep calm: the producer can restart the relay without losing your scene.
+Note: When things go wrong, for example a black feed or an unresponsive panel, work the checklist on the If something goes wrong page. Keep calm. The producer can restart the relay without losing your scene.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Recap
-- Press **Feeds Next** at every driver change.
-- Dress the scene: graphics, standings, weather.
+- At every driver change: link early, **ARM**, wait for serving, **SPLIT**, **NEXT**.
+- Dress the scene; take or decline crew graphic requests.
+- **RED FLAG** holds the race; **Restart released** ends the hold.
+- Only you put the driver dashboard on air.
 - Cue commentators; cut to the interview at the end.
+
 Go deeper: [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what) ·
 [Director guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Director)
 
-Note: To recap: press Feeds Next at every driver change. Dress the scene with graphics, standings and weather. Cue your commentators, and cut to the interview at the end. To go deeper, see the Who does what page and the Director guide.
+Note: To recap. At every driver change, enter the link early, arm the off-air feed, wait until it serves, cut to the splitscreen and press Next. Dress the scene, and take or decline the crew's graphic requests. The red flag holds the race, and Restart released ends the hold. Only you put the driver dashboard on air. Cue your commentators, and cut to the interview at the end. To go deeper, see the Who does what page and the Director guide.
 </script></section>
 
 </div></div>

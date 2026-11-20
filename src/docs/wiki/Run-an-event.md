@@ -143,9 +143,10 @@ panel holds no OBS credential, it also works in full over the public Funnel at
 `/console/panel`: see [Remote access](Remote-access).
 
 > **The HUD/PGM "Race Control" here is the on-screen banner** (the `RED FLAG` /
-> `Driver Swaps` overlay message, written to the Setup tab), **not** the read-only
-> [Race Control monitoring desk](Console#race-control-read-only-monitoring-desk) crew
-> role. Same name, different things: the banner is director-only; the desk only watches.
+> `Driver Swaps` overlay message, written to the Setup tab), **not** the
+> [Race Control desk](Console#race-control-desk) crew role. Same name, different things:
+> the banner's controls are director-only; the desk sets it only through its own
+> `RED FLAG`.
 
 **Ports at a glance** (the producer's machine; directors just open the links above):
 

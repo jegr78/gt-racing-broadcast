@@ -38,7 +38,7 @@ flowchart LR
   time), then the [Director guide](Director)
 - **You run the league (Sheet + Discord)?** → [League owner setup](League-Owner-Setup)
 - **Driving a Solo POV race?** → [Driver radio](Driver-Radio)
-- **Watching read-only as Race Control?** → [Console → Race Control desk](Console#race-control-read-only-monitoring-desk)
+- **Running the Race Control desk?** → [Console → Race Control desk](Console#race-control-desk)
 - **Helping over the internet without a Tailscale account?** → [Remote access & the Funnel](Remote-access)
 - **Not sure who does what?** → [Who does what](Who-does-what)
 - **New crew?** The [onboarding decks ↗](https://jegr78.github.io/gt-racing-broadcast/) are short visual walkthroughs per role.

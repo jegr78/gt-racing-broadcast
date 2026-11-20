@@ -2155,7 +2155,7 @@ def resolve_roles(crew_rows, schedule_keys, subject, crew_commentator_keys=froze
     An unknown subject (no crew row, not in the schedule) yields the empty set.
     Roles are additive (a person may be e.g. both director and race_control).
     A producer oversees the whole event, so "producer" IMPLIES "race_engineer", "director"
-    (broadcast control) and "race_control" (read-only monitoring): a producer can
+    (broadcast control) and "race_control" (the race desk): a producer can
     follow and, if needed, steer the event from the /console pages without a
     separate Crew flag. The producer-only step-up ops (set/stint, mode, takeover)
     stay independently step-up-gated in console_policy regardless.
@@ -2267,7 +2267,7 @@ CREW_NAME_HEADERS = ("name", "crew", "person")
 CREW_DIRECTOR_HEADERS = ("director",)
 CREW_PRODUCER_HEADERS = ("producer",)
 CREW_COMMENTATOR_HEADERS = ("commentator",)
-# Race Control (#244): a read-only monitoring desk role. Header-located only
+# Race Control (#244): the race desk role. Header-located only
 # (mirrors Commentator), no positional fallback. NB: the role string is
 # "race_control"; the unrelated director-only HUD banner is "racecontrol".
 CREW_RACE_CONTROL_HEADERS = ("race control", "race-control", "racecontrol", "rc")
@@ -7079,7 +7079,7 @@ def cockpit_tally(rows, live_idx, me_key):
 
 
 def race_control_schedule(rows, live_map, live_idx):
-    """Redacted schedule for the Race Control monitoring desk (#244): stint +
+    """Redacted schedule for the Race Control desk (#244): stint +
     streamer + live-feed marker per row, with NO stream URL. The redaction is the
     same boundary as /console/takeover/status. Feed URLs never leave the tailnet,
     and this desk is reachable over the public Funnel. Pure for unit testing.
@@ -13351,10 +13351,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     cookie_path="/console",
                 )
                 return None
-            # Race Control monitoring desk (#244): a read-only page + ONE new data
-            # endpoint, both gated on the race_control capability. The redacted
-            # schedule strips stream URLs (the Funnel boundary). The desk's
-            # program/timer/chat reuse the ANY cockpit endpoints (no new surface).
+            # Race Control desk (#244): the page + its schedule data endpoint, both gated
+            # on the race_control capability. The redacted schedule strips stream URLs
+            # (the Funnel boundary). The desk's program/timer/chat reuse the ANY cockpit
+            # endpoints (no new surface).
             if sub and sub[0] == "race-control":
                 if console_policy.decide(roles, sub, method, has_step_up) != console_policy.ALLOW:
                     self._send({"error": "forbidden"}, 403)
