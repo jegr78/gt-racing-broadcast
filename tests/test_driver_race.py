@@ -643,7 +643,7 @@ def t_tick_hands_the_viewer_classes_to_the_recorder():
     svc, _wall, _d = _recording_service()
     seen = []
     svc._viewer = lambda ctx: {"classes": [{"name": "GT3"}], "entries": []}
-    svc._observe = lambda standings, classes=None: seen.append(classes)
+    svc._observe = lambda standings, classes=None, **_kw: seen.append(classes)
     svc.tick()
     assert seen == [[{"name": "GT3"}]], seen
 
@@ -686,6 +686,45 @@ def t_a_confirmed_disconnect_reads_dc_on_the_dashboard_until_data_returns():
     wall[0] += 1
     svc.tick()
     assert svc.dashboard()["entries"][0]["status"] != "dc", "a returned car is no longer a DC"
+
+def t_a_race_reset_ends_the_old_races_disconnects():
+    svc, wall, _d = _recording_service()
+    svc.set_settings({"formation": False})
+    svc.recording_start("pit")
+    _two_cars(svc, wall, 1010.0)
+    _two_cars(svc, wall, 1010.0 + dr.race_distance.NO_DATA_S + 1, quiet_b=True)
+    svc.tick()
+    ev = svc.recording_status()["events"][0]
+    assert ev["entry"] == "B" and ev["state"] == "suspected", ev
+    svc.recording_decide("rc:Cy", ev["id"], "confirm")
+    reset_at = wall[0]
+    svc.reset("rc:Anna")
+    _two_cars(svc, wall, wall[0] + 1, quiet_b=True)
+    svc.tick()
+    assert svc._recorder().confirmed_silent() == set(), "the old race's DC never marks the new race"
+    old = svc.recording_status()["events"][0]
+    assert old["id"] == ev["id"] and old["reset_at"] == reset_at, \
+        f"the event stays listed and is marked as ended by the reset: {old}"
+
+
+def t_standings_taken_before_a_race_reset_open_no_event_after_it():
+    svc, wall, _d = _recording_service()
+    svc.set_settings({"formation": False})
+    svc.recording_start("pit")
+    _two_cars(svc, wall, 1010.0)
+    _two_cars(svc, wall, 1010.0 + dr.race_distance.NO_DATA_S + 1, quiet_b=True)
+    observe = svc._observe
+
+    def reset_in_the_gap(*args, **kw):
+        svc._observe = observe
+        svc.reset("rc:Anna")
+        observe(*args, **kw)
+    svc._observe = reset_in_the_gap
+    svc.tick()
+    evs = svc.recording_status()["events"]
+    assert not [e for e in evs if e.get("reset_at") is None], \
+        f"a tick that read the old race opens no event in the new one: {evs}"
+
 
 def _two_cars(svc, wall, until, quiet_b=False):
     """C ahead of B at 50 m/s until `until`; B sends nothing with quiet_b."""
@@ -941,6 +980,8 @@ def t_any_recorder_error_keeps_the_fastest_lap_save():
     svc, wall, _d = _recording_service()
 
     class _Boom:
+        generation = 0
+
         def observe(self, *a):
             raise TypeError("corrupt meta")
     svc._rec = _Boom()

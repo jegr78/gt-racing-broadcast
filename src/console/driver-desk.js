@@ -420,7 +420,7 @@
         r.ev = ev;
         var undecided = ev.state === "suspected" || ev.state === "dropout";
         if (undecided) open++;
-        if (ev.state === "suspected") {
+        if (ev.state === "suspected" && !ev.reset_at) {
           suspected[ev.entry] = true;
           if (evSeen && !evSeen[ev.id]) fresh = true;
         }
@@ -430,7 +430,8 @@
         r.who.replaceChildren(el("div", {text: ev.entry}), el("div", {cls: "muted", text: fitName(ev.driver, NAME_LIST_MAX)}));
         r.what.replaceChildren.apply(r.what, [el("span", {cls: "pill " + st[1], text: label}),
           el("div", {cls: "muted", text: "Last packet " + new Date(ev.last_packet * 1000).toLocaleTimeString()}),
-          ev.decided_by ? el("div", {cls: "muted", text: "by " + ev.decided_by}) : null].filter(Boolean));
+          ev.decided_by ? el("div", {cls: "muted", text: "by " + ev.decided_by}) : null,
+          ev.reset_at ? el("div", {cls: "muted", text: "Before the race reset"}) : null].filter(Boolean));
         r.confirm.hidden = r.dismiss.hidden = !undecided;
         return ev.id;
       });
