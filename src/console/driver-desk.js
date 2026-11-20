@@ -119,15 +119,17 @@
 
   // The named classes whose lap count the desk sets: the first runs on the race's count, the unclassed on none.
   function lapClasses(names) { return names.filter(Boolean).slice(1); }
-  // The race rows under their class: [{name, lap, laps, rows}] in class order; one group named null outside class mode.
+  // The race rows under their class: [{name, color, lap, laps, rows}] in class order; one group named null outside class mode.
   function classGroups(r) {
     var rows = r.entries || [], names = Array.isArray(r.classes) ? r.classes : [];
     if (!names.length) return [{name: null, rows: rows}];
-    var lap = r.class_lap || {}, set = r.class_laps || {}, first = names.filter(Boolean)[0];
+    var lap = r.class_lap || {}, set = r.class_laps || {}, colors = r.class_colors || {}, first = names.filter(Boolean)[0];
     var count = r.lap && typeof r.lap.count === "number" ? r.lap.count : null;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k) && typeof o[k] === "number" ? o[k] : null; }
     return names.map(function (n) {
+      var c = Object.prototype.hasOwnProperty.call(colors, n) ? colors[n] : "";
       return {name: n, lap: own(lap, n), laps: n === first ? count : own(set, n),
+              color: typeof c === "string" && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c) ? c : "",
               rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === n; })};
     });
   }
@@ -715,7 +717,9 @@
       var rows = [];
       classGroups(r).forEach(function (g) {
         if (g.name !== null) {
-          rows.push(el("tr", {cls: "cls"}, [el("td", {colspan: "9"}, [el("span", {text: g.name || "Unclassed"}),
+          var name = el("span", {text: g.name || "Unclassed"});
+          if (g.color) name.style.color = g.color;
+          rows.push(el("tr", {cls: "cls"}, [el("td", {colspan: "9"}, [name,
             g.lap !== null ? el("span", {cls: "lap", text: "Lap " + g.lap + (g.laps !== null ? " / " + g.laps : "")}) : null])]));
         }
         g.rows.forEach(function (e, k) { rows.push(raceRow(e, g.name !== null, k)); });

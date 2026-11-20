@@ -417,17 +417,19 @@ def t_the_desk_offers_a_lap_count_per_slower_class():
 DESK_RACE = {"entries": [{"entry": "A", "class": "GT3", "class_pos": 1}, {"entry": "B", "class": "GT4", "class_pos": 1},
                          {"entry": "C", "class": "GT3", "class_pos": 2}, {"entry": "D", "class": "", "class_pos": 1}],
              "classes": ["GT3", "GT4", ""], "class_lap": {"GT3": 7, "GT4": 6, "": 6},
-             "class_laps": {"GT4": 18}, "lap": {"leader": 7, "count": 20}}
+             "class_laps": {"GT4": 18}, "lap": {"leader": 7, "count": 20},
+             "class_colors": {"GT3": "#e10600", "GT4": "red;background:url(x)", "": ""}}
 
 
 def t_the_desk_groups_the_race_by_class():
     import json
     got = _desk_fn("classGroups", "classGroups(" + json.dumps(DESK_RACE) + ").map(g => "
-                   "[g.name, g.lap, g.laps, g.rows.map(e => e.entry)])")
+                   "[g.name, g.lap, g.laps, g.rows.map(e => e.entry), g.color])")
     if got is None:
         return
-    assert got == [["GT3", 7, 20, ["A", "C"]], ["GT4", 6, 18, ["B"]], ["", 6, None, ["D"]]], \
+    assert [g[:4] for g in got] == [["GT3", 7, 20, ["A", "C"]], ["GT4", 6, 18, ["B"]], ["", 6, None, ["D"]]], \
         f"every class under its header, the first with the race's lap count: {got}"
+    assert [g[4] for g in got] == ["#e10600", "", ""], f"a header takes its class colour, never a non-colour: {got}"
 
 
 def t_the_desk_renders_one_class_as_today():

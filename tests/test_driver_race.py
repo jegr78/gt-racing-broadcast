@@ -1190,6 +1190,18 @@ def _class_service(path=None, along=None, until=6.0):
     return svc, clock, path, ctx
 
 
+def t_the_desk_standings_carry_the_class_colours():
+    svc, _clock, _path, ctx = _class_service()
+    st = svc.standings()
+    assert st["classes"] == ["H", "G"], st["classes"]
+    assert st.get("class_colors") == {"H": "#c00", "G": "#0c0"}, \
+        f"each class in the colour the viewers see: {st.get('class_colors')}"
+    for info in ctx["roster"].values():
+        info["carClass"] = "H"
+    st = svc.standings()
+    assert st["classes"] == [] and "class_colors" not in st, "one class: the desk payload as before"
+
+
 def t_the_dashboard_carries_classes_in_order():
     svc, _clock, _path, _ctx = _class_service()
     svc._current().fastest_by_class = {"G": {"entry": "C", "driver": "Max C", "ms": 63000}}

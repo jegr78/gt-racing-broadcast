@@ -923,6 +923,9 @@ class Service:
             race = self._current()
             self._set_roster(race, ctx.get("roster") or {})
             out = race.standings(self._clock())
+            if out["classes"]:
+                colors = _class_colors(ctx.get("roster") or {})
+                out["class_colors"] = {name: colors.get(name, "") for name in out["classes"]}
             if out["fastest"]:
                 fl = out["fastest"]
                 out["fastest"] = dict(fl, driver=race.display_name(fl["entry"], fl["driver"]))
