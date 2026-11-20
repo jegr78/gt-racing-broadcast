@@ -304,13 +304,15 @@
     const book = pages(d.entries || [], list, MAX_ROWS);
     const page = book[book.length > 1 ? Math.floor(Date.now() / (CYCLE_MS * PHASES.length)) % book.length : 0];
     let inGroup = 0;
+    let group = null;
     rows.classList.toggle("grouped", list.length > 0);
     rows.replaceChildren(...page.map(function (item, i) {
-      if (item.header) { inGroup = 0; return classHeader(item.header); }
+      if (item.header) { inGroup = 0; group = item.header; return classHeader(item.header); }
       const e = list.length ? inClass(item) : item;
       const at = list.length ? e.pos - 1 : i;
+      const best = list.length ? group && group.fastest : fl;
       const r = row(e, at, column(e, at), "P" + (e.pit_stops || 0),
-                    fl && fl.entry === e.entry && e.last_lap_ms === fl.ms && lapShows(e));
+                    best && best.entry === e.entry && e.last_lap_ms === best.ms && lapShows(e));
       if (list.length && inGroup++ % 2) r.className += " alt";
       return r;
     }));
@@ -335,6 +337,10 @@
   function renderQualifying(d) {
     document.getElementById("dd-lap").textContent = "QUALIFYING";
     document.getElementById("dd-phase").textContent = "";
+    rows.classList.remove("grouped");
+    const label = document.getElementById("dd-fl-class");
+    label.textContent = "";
+    label.style.color = "";
     rows.replaceChildren(...(d.qualifying || []).slice(0, MAX_ROWS).map(function (e, i) {
       return row(e, i, i === 0 ? lapTime(e.best_ms) : e.gap_ms === null ? "" : "+" + (e.gap_ms / 1000).toFixed(3), "");
     }));

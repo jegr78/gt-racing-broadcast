@@ -462,7 +462,6 @@ def t_the_pages_show_names_through_the_rule():
             assert use in src, f"{os.path.basename(path)} shows names through fitName: {use}"
 
 
-
 def _cars(cls, n, start=1):
     return [dict(CAR, entry=f"{cls} #{i}", number=str(i), pos=start + i - 1, **{"class": cls},
                  class_pos=i, class_gap_s=float(i - 1), class_interval_s=1.0 if i > 1 else None,
@@ -558,14 +557,61 @@ def t_a_class_row_still_flashes_its_new_lap():
     b = [dict(x) for x in a]
     b[2]["last_lap_ms"] = 117000
     fl = {"entry": "G #2", "driver": "Ann Lind", "team": "Team B", "ms": 117000}
+    gf = dict(G, fastest=fl)
     got = _tower(_CLASS_RACE + f"""
       lastLapS = 5;
-      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([H, G])}}});
-      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([H, G])}, fastest: {json.dumps(fl)}}});""")
+      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([H, gf])}}});
+      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([H, gf])}}});""")
     if got is None:
         return
     assert got[4] == {"pos": "2", "value": "1:57.000", "fl": True}, \
-        f"a new lap shows in a class row, purple when it is the race's fastest: {got}"
+        f"a new lap shows in a class row, purple when it is its class's fastest: {got}"
+
+
+def t_purple_follows_the_class_fastest_lap():
+    a = _cars("H", 1) + _cars("G", 2, 2)
+    b = [dict(x) for x in a]
+    b[0]["last_lap_ms"], b[2]["last_lap_ms"] = 101000, 117000
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    gf = dict(G, fastest={"entry": "G #2", "driver": "Ann Lind", "team": "Team B", "ms": 117000})
+    got = _tower(_CLASS_RACE + f"""
+      lastLapS = 5;
+      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([hf, gf])}}});
+      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([hf, gf])},
+                           fastest: {json.dumps(hf["fastest"])}}});""")
+    if got is None:
+        return
+    assert [got[1]["fl"], got[4]["fl"]] == [True, True], \
+        f"each class's fastest lap shows purple, not only the overall one: {got}"
+    got = _tower(_CLASS_RACE + f"""
+      lastLapS = 5;
+      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([H, G])}}});
+      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([H, G])},
+                           fastest: {json.dumps(gf["fastest"])}}});""")
+    if got is None:
+        return
+    assert got[4]["fl"] is False, f"in class mode the overall lap alone never paints a class row: {got}"
+
+
+def t_qualifying_after_a_class_race_drops_the_class_look():
+    d = {"entries": _cars("H", 3) + _cars("G", 3, 4),
+         "classes": [dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000}), G]}
+    quali = [dict(CAR, entry=f"Q #{i}", pos=i, best_ms=100000 + i, gap_ms=i) for i in range(1, 4)]
+    got = _tower(_CLASS_RACE + f"""
+      let grouped = null;
+      rows.classList.toggle = (c, on) => {{ if (c === "grouped") grouped = !!on; }};
+      rows.classList.remove = (c) => {{ if (c === "grouped") grouped = false; }};
+      shown(1, {json.dumps(d)});
+      const before = [grouped, document.getElementById("dd-fl-class").textContent];
+      renderQualifying({{mode: "qualifying", qualifying: {json.dumps(quali)}}});
+      const label = document.getElementById("dd-fl-class");
+      return [before, grouped, label.textContent, label.style.color];""")
+    if got is None:
+        return
+    before, grouped, label, color = got
+    assert before == [True, "H"], f"the class race is grouped with a class label: {before}"
+    assert grouped is False, "qualifying keeps the position stripes after a class race"
+    assert label == "" and color == "", f"qualifying carries no class label: {got}"
 
 
 def t_a_class_page_stays_for_gap_and_interval():
@@ -688,7 +734,8 @@ def t_the_stripes_restart_in_each_class():
         css = fh.read()
     assert re.search(r"#dd-rows\.grouped \.dd-row:nth-child\(even\) \{ background: none;", css), \
         "the position stripes give way to the class stripes"
-    assert re.search(r"#dd-rows\.grouped \.dd-row\.alt \{ background: var\(--dd-row\);", css), css[:0]
+    assert re.search(r"#dd-rows\.grouped \.dd-row\.alt \{ background: var\(--dd-row\);", css), \
+        "every second car of a class takes the row stripe"
 
 
 def t_the_map_rings_the_class_and_est_wins():
