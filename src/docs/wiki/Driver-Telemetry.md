@@ -438,6 +438,11 @@ The relay records the live race for Race Control to review after the fact.
   is logged in `driver-race-audit.jsonl`. A desk can play a sound on a new suspicion
   (checkbox, per browser, off by default). The relay decides nothing about a rejoin;
   that stays with Race Control.
+- **A disconnect ends the stint for that car.** In GT7 a car that dropped out of a lobby
+  cannot rejoin it, so a confirmed DC stays on every screen until the stint ends. Data
+  that comes back in the same lobby means only the sender dropped: dismiss the event. In
+  endurance, Race Control takes the car's last gap from **Show standings** for its rejoin
+  in the next stint, the new lobby (see **Rejoin** above).
 - **Show standings** opens the frozen standings page for a moment: 5, 10, 15, 20 or 30
   seconds before the event's last packet (default 10). Its slider covers the whole
   recording, and it follows a recording that still runs. It opens through the console,
