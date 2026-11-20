@@ -1170,7 +1170,6 @@ def t_a_reference_retirement_ends_the_estimate_in_the_audit():
     assert [(r["who"], r["entry"], r["reason"]) for r in ends] == [("rc:Anna", "X", "reference_retired")], ends
 
 
-
 CLASS_ROSTER = {"A": {"number": "1", "cupTeam": "Red Bulls", "carClass": "H", "classColor": "#c00"},
                 "B": {"number": "2", "carClass": "G", "classColor": "#0c0"},
                 "C": {"number": "3", "carClass": "G", "classColor": ""}}
@@ -1524,6 +1523,23 @@ def t_schedule_class_laps_prefill_the_desk():
     assert svc.class_laps() == {"G": 40}, "each stint keeps its own desk value"
     svc.tick()
     assert _class_of(svc.dashboard(), "G")["laps"] == 40, svc.dashboard()["classes"]
+
+
+def t_a_cleared_class_lap_count_stays_cleared_at_the_next_start():
+    svc, _clock, path, ctx = _class_service()
+    ctx["stint"] = "S2"
+    svc.stint_switch(class_laps={"G": 54})
+    svc.set_class_laps("rc:Anna", "G", None)
+    svc.stint_switch(class_laps={"G": 54}, window=False)
+    assert svc.class_laps() == {}, f"the Schedule never brings back a count Race Control cleared: {svc.class_laps()}"
+    again, _c, _p = _dash_service(ctx, path)
+    again.stint_switch(class_laps={"G": 54}, window=False)
+    assert again.class_laps() == {}, "nor after a relay restart"
+    ctx["stint"] = "S3"
+    again.stint_switch(class_laps={"G": 54})
+    assert again.class_laps() == {"G": 54}, "a new stint pre-fills as before"
+    again.set_class_laps("rc:Anna", "G", 50)
+    assert again.class_laps() == {"G": 50}, "a count set after a clear shows"
 
 
 def t_a_bad_class_lap_count_in_the_actions_file_is_dropped():

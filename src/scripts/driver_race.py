@@ -434,10 +434,20 @@ def _saved_quali(path, segment):
     return out
 
 
-def _saved_class_laps(path, stint):
-    """{class: lap count} of one stint; anything malformed is dropped."""
+def _stint_class_laps(path, stint):
     raw = _read_json(path).get("class_laps")
     raw = raw.get(stint) if isinstance(raw, dict) else None
+    return raw if isinstance(raw, dict) else {}
+
+
+def _cleared_class_laps(path, stint):
+    """The classes whose count Race Control cleared in one stint."""
+    return {cls for cls, laps in _stint_class_laps(path, stint).items() if laps is None}
+
+
+def _saved_class_laps(path, stint):
+    """{class: lap count} of one stint; anything malformed is dropped."""
+    raw = _stint_class_laps(path, stint)
     out = {}
     for cls, laps in (raw.items() if isinstance(raw, dict) else ()):
         if isinstance(cls, str) and 0 < len(cls) <= MAX_CLASS and type(laps) is int \
@@ -450,7 +460,8 @@ def _store_class_laps(doc, stint, cls, laps):
     raw = doc.get("class_laps") if isinstance(doc.get("class_laps"), dict) else {}
     done = raw.get(stint) if isinstance(raw.get(stint), dict) else {}
     if laps is None:
-        done.pop(cls, None)
+        if cls in done or len(done) < MAX_QUALI:
+            done[cls] = None   # cleared: the Schedule never brings it back in this stint
     elif stint not in raw and len(raw) >= MAX_QUALI:
         raise ValueError(f"at most {MAX_QUALI} stints carry class lap counts")
     elif cls in done or len(done) < MAX_QUALI:
@@ -1176,7 +1187,8 @@ class Service:
         """The Schedule's `Laps <Class>` cells of the row on air, where no desk value is."""
         named = {c.lower(): c for c in _named_classes(ctx.get("roster") or {})}
         stint = _segment_key(ctx.get("stint"))
-        saved = _saved_class_laps(_actions_path_for(self._path), stint)
+        saved = set(_saved_class_laps(_actions_path_for(self._path), stint)) \
+            | _cleared_class_laps(_actions_path_for(self._path), stint)
         fill = {}
         for cls, laps in (defaults.items() if isinstance(defaults, dict) else ()):
             cls = named.get(cls.lower()) if isinstance(cls, str) else None
