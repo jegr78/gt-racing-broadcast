@@ -128,8 +128,10 @@ and says so. Changing the layout mid-event starts the race over.
   count on GT7's lap counter, lap 1 included, so a formation lap counts as in the
   lobby's own setting; every other car at its next crossing of the line. **Timed**: Race
   Control or the director triggers **Final lap**, and the race ends at the leader's next
-  crossing. An endurance final lobby ends on the road, see below.
-  The race timer never ends a race. **Finish** freezes the order at once. After the
+  crossing. An endurance final lobby ends on the road, see below. Each crossing is
+  timed between the car's two samples around the line, so a car that crosses right
+  after the flag finishes there even when its data reached the relay before the
+  leader's. The race timer never ends a race. **Finish** freezes the order at once. After the
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
   No car shows more laps than the leader had when the flag fell, and a finished car's
