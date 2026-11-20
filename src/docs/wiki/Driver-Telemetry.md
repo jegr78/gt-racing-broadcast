@@ -93,7 +93,9 @@ and says so. Changing the layout mid-event starts the race over.
   full lap or more down shows `+N L`.
 - **Timing tower** (the on-air `drivers.html`): the gap column shows the gap to the leader. The desks show exact gaps for lapped cars too, as `+1 L · 1:02.5`, also for a car many laps down: the relay keeps the last ten minutes at full rate and everything older at one point per second, up to 24 hours. The public timing page and the cockpit are unchanged, and exact gaps never reach the public view.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
-  while its sender has been quiet for five seconds; the entry keeps its place. Once Race
+  while its sender has been quiet for five seconds. The entry keeps its last distance,
+  so the running cars pass it and it sinks down the order; an **estimate** keeps it
+  where Race Control places it (see below). Once Race
   Control confirms the silence as a disconnect, every screen shows **DC** instead (desks,
   tower, cockpit, public timing page, the recording and its frozen standings), until the
   car sends data again. A car Race Control placed with an **estimate** shows **EST**
@@ -393,8 +395,10 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   GT7's counter: after a restart that keeps the gaps a car can lead on the road but
   not in race distance, and the flag still falls on the road.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
-  leader's distance at the stint switch, so its later departure from the box becomes
-  its deficit.
+  leader's distance where its car of the old lobby stopped, however early the stint
+  switch was pressed, so its later departure from the box becomes its deficit. A rejoin
+  car that leaves the box while the leader is still on track starts from the leader's
+  distance at that moment.
 - **Corrections** add or remove metres and pit stops per entry, always with a reason.
   A **change override** makes a team's other sender the active one at once.
 - **Estimate** keeps a car without data in the order: pick the quiet entry, **behind**
