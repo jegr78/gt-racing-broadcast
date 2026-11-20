@@ -462,6 +462,495 @@ def t_the_pages_show_names_through_the_rule():
             assert use in src, f"{os.path.basename(path)} shows names through fitName: {use}"
 
 
+def _cars(cls, n, start=1):
+    return [dict(CAR, entry=f"{cls} #{i}", number=str(i), pos=start + i - 1, **{"class": cls},
+                 class_pos=i, class_gap_s=float(i - 1), class_interval_s=1.0 if i > 1 else None,
+                 class_lapped=0, class_color="#c00")
+            for i in range(1, n + 1)]
+
+
+H = {"name": "H", "color": "#c00", "lap": 7, "laps": 20, "fastest": None}
+G = {"name": "G", "color": "#0a0", "lap": 6, "laps": None, "fastest": None}
+
+
+def _page_shape(book):
+    return [["head:" + it["header"]["name"] if "header" in it else it["entry"] for it in page] for page in book]
+
+
+def t_classes_fit_on_one_page():
+    entries = _cars("H", 6) + _cars("G", 6, 7)
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    if got is None:
+        return
+    assert _page_shape(got) == [["head:H"] + [f"H #{i}" for i in range(1, 7)]
+                                + ["head:G"] + [f"G #{i}" for i in range(1, 7)]], \
+        f"two classes that fit share one page, each under its header: {_page_shape(got)}"
+
+
+def t_classes_page_when_they_do_not_fit():
+    entries = _cars("H", 10) + _cars("G", 10, 11)
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    if got is None:
+        return
+    assert _page_shape(got) == [["head:H"] + [f"H #{i}" for i in range(1, 11)],
+                                ["head:G"] + [f"G #{i}" for i in range(1, 11)]], \
+        f"one class per page, header first: {_page_shape(got)}"
+
+
+def t_a_class_larger_than_a_page_is_cut_at_the_page():
+    entries = _cars("H", 2) + _cars("G", 20, 3)
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    if got is None:
+        return
+    shape = _page_shape(got)
+    assert len(shape) == 2 and len(shape[1]) == 15, f"the header counts toward the 15 rows: {shape}"
+    assert shape[1] == ["head:G"] + [f"G #{i}" for i in range(1, 15)], shape
+
+
+# Renders a class-mode payload at clock t and reads each row: a header's name and lap, a car's
+# position and value.
+_CLASS_RACE = """
+  function shown(t, d) {
+    Date.now = () => t;
+    renderRace(Object.assign({mode: "race"}, d));
+    return rows.children.map(function (r) {
+      if (/dd-class/.test(r.className)) {
+        return {head: r.children[0].textContent, lap: r.children[1].textContent,
+                kids: r.children[0].children.length, border: r.style.borderLeftColor};
+      }
+      const v = r.children.filter(c => /dd-val/.test(c.className))[0];
+      return {pos: r.children[0].textContent, value: text(v), fl: / fl$/.test(v.className)};
+    });
+  }
+"""
+
+
+def t_class_rows_show_class_position_and_gap():
+    lead = dict(CAR, entry="H #1", pos=1, **{"class": "H"}, class_pos=1, class_gap_s=0, class_interval_s=None,
+                class_lapped=0, lapped=0, gap_s=0)
+    g1 = dict(CAR, entry="G #1", pos=7, **{"class": "G"}, class_pos=1, class_gap_s=0, class_interval_s=None,
+              class_lapped=0, lapped=1, gap_s=95.0)
+    g2 = dict(CAR, entry="G #2", pos=8, **{"class": "G"}, class_pos=2, class_gap_s=2.34, class_interval_s=2.34,
+              class_lapped=0, lapped=1, gap_s=97.3, interval_s=2.3)
+    g3 = dict(g2, entry="G #3", pos=9, class_pos=3, class_gap_s=4.56, class_interval_s=2.22, finished=True)
+    g4 = dict(g2, entry="G #4", pos=10, class_pos=4, class_gap_s=6.78, class_interval_s=2.22, status="est")
+    d = {"entries": [lead, g1, g2, g3, g4], "classes": [H, G]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      return [shown(1, d), shown(CYCLE_MS + 1, d)];""")
+    if got is None:
+        return
+    gap, inter = got
+    assert gap[2] == {"head": "G", "lap": "LAP 6", "kids": 0, "border": "#0a0"}, \
+        f"the header names the class, its lap without a count, in its colour: {gap}"
+    assert gap[0]["lap"] == "LAP 7 / 20", f"a class with a lap count reads it: {gap}"
+    assert gap[3]["pos"] == "1" and gap[3]["value"] == "Leader", f"the class leader, not P7 at +1 L: {gap}"
+    assert [r["pos"] for r in gap[4:]] == ["2", "3", "4"], f"positions within the class: {gap}"
+    assert [r["value"] for r in gap[4:]] == ["+2.3", "+4.6", "+6.8EST"], \
+        f"class gaps, never the overall lap down, also finished and estimated: {gap}"
+    assert [r["value"] for r in inter[3:]] == ["Leader", "+2.3", "+4.6", "+6.8EST"], \
+        f"INT reads the class interval: {inter}"
+
+
+def t_a_class_row_still_flashes_its_new_lap():
+    a = _cars("H", 1) + _cars("G", 2, 2)
+    b = [dict(x) for x in a]
+    b[2]["last_lap_ms"] = 117000
+    fl = {"entry": "G #2", "driver": "Ann Lind", "team": "Team B", "ms": 117000}
+    gf = dict(G, fastest=fl)
+    got = _tower(_CLASS_RACE + f"""
+      lastLapS = 5;
+      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([H, gf])}}});
+      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([H, gf])}}});""")
+    if got is None:
+        return
+    assert got[4] == {"pos": "2", "value": "1:57.000", "fl": True}, \
+        f"a new lap shows in a class row, purple when it is its class's fastest: {got}"
+
+
+def t_purple_follows_the_class_fastest_lap():
+    a = _cars("H", 1) + _cars("G", 2, 2)
+    b = [dict(x) for x in a]
+    b[0]["last_lap_ms"], b[2]["last_lap_ms"] = 101000, 117000
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    gf = dict(G, fastest={"entry": "G #2", "driver": "Ann Lind", "team": "Team B", "ms": 117000})
+    got = _tower(_CLASS_RACE + f"""
+      lastLapS = 5;
+      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([hf, gf])}}});
+      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([hf, gf])},
+                           fastest: {json.dumps(hf["fastest"])}}});""")
+    if got is None:
+        return
+    assert [got[1]["fl"], got[4]["fl"]] == [True, True], \
+        f"each class's fastest lap shows purple, not only the overall one: {got}"
+    got = _tower(_CLASS_RACE + f"""
+      lastLapS = 5;
+      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([H, G])}}});
+      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([H, G])},
+                           fastest: {json.dumps(gf["fastest"])}}});""")
+    if got is None:
+        return
+    assert got[4]["fl"] is False, f"in class mode the overall lap alone never paints a class row: {got}"
+
+
+def t_qualifying_after_a_class_race_drops_the_class_look():
+    d = {"entries": _cars("H", 3) + _cars("G", 3, 4),
+         "classes": [dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000}), G]}
+    quali = [dict(CAR, entry=f"Q #{i}", pos=i, best_ms=100000 + i, gap_ms=i) for i in range(1, 4)]
+    got = _tower(_CLASS_RACE + f"""
+      let grouped = null;
+      rows.classList.toggle = (c, on) => {{ if (c === "grouped") grouped = !!on; }};
+      rows.classList.remove = (c) => {{ if (c === "grouped") grouped = false; }};
+      shown(1, {json.dumps(d)});
+      const before = [grouped, document.getElementById("dd-fl-class").textContent];
+      renderQualifying({{mode: "qualifying", qualifying: {json.dumps(quali)}}});
+      const label = document.getElementById("dd-fl-class");
+      return [before, grouped, label.textContent, label.style.color];""")
+    if got is None:
+        return
+    before, grouped, label, color = got
+    assert before == [True, "H"], f"the class race is grouped with a class label: {before}"
+    assert grouped is False, "qualifying keeps the position stripes after a class race"
+    assert label == "" and color == "", f"qualifying carries no class label: {got}"
+
+
+def t_a_class_page_stays_for_gap_and_interval():
+    d = {"entries": _cars("H", 10) + _cars("G", 10, 11), "classes": [H, G]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      return [0, 1, 2, 3, 4].map(function (k) {{
+        const r = shown(k * CYCLE_MS + 1, d);
+        return [r[0].head, phaseLabel(), r[2].value];
+      }});""")
+    if got is None:
+        return
+    assert got == [["H", "GAP", "+1.0"], ["H", "INT", "+1.0"], ["G", "GAP", "+1.0"], ["G", "INT", "+1.0"],
+                   ["H", "GAP", "+1.0"]], f"each class page shows GAP, then INT, then the next class: {got}"
+
+
+def t_class_names_are_text():
+    bad = dict(G, name="<b>GT3</b>", color="red;background:url(x)")
+    entries = [dict(c, **{"class": "<b>GT3</b>"}) for c in _cars("G", 2)]
+    got = _tower(_CLASS_RACE + f"""
+      return shown(1, {{entries: {json.dumps(entries)}, classes: [{json.dumps(H)}, {json.dumps(bad)}]}})[0];""")
+    if got is None:
+        return
+    assert got["head"] == "<b>GT3</b>" and got["kids"] == 0, f"the class name is plain text: {got}"
+    assert "url" not in got["border"], f"a colour that is not one never reaches the style: {got}"
+
+
+def t_one_class_renders_as_today():
+    entries = [dict(CAR, entry=f"T #{i}", number=str(i), pos=i, gap_s=float(i), lapped=0,
+                    **{"class": None}, class_pos=None, class_gap_s=None)
+               for i in range(1, 21)]
+    got = _tower(_CLASS_RACE + f"""
+      return [shown(1, {{entries: {json.dumps(entries)}, classes: []}}), shown(1, {{entries: {json.dumps(entries)}}}),
+              classes(rows)];""")
+    if got is None:
+        return
+    with_list, without, cls = got
+    assert with_list == without, "an empty class list is the tower as before"
+    assert [r["pos"] for r in without] == [str(i) for i in range(1, 16)], f"overall positions, 15 rows: {without}"
+    assert [r["value"] for r in without[:3]] == ["Leader", "+2.0", "+3.0"], f"overall gaps: {without}"
+    assert not any("dd-class" in c for c in cls), f"no class header outside class mode: {cls}"
+
+
+def t_the_fastest_lap_box_cycles_the_classes():
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    gf = dict(G, fastest={"entry": "G #1", "driver": "Ann Lind", "team": "Team G", "ms": 112500})
+    d = {"entries": _cars("H", 1) + _cars("G", 1, 2), "classes": [hf, gf],
+         "fastest": hf["fastest"]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      const out = [0, 1, 2].map(function (k) {{
+        shown(k * CYCLE_MS + 1, d);
+        const label = document.getElementById("dd-fl-class");
+        return [label.textContent, label.style.color, document.getElementById("dd-fl-who").textContent,
+                document.getElementById("dd-fl-time").textContent];
+      }});
+      shown(1, {{entries: d.entries, fastest: d.fastest}});
+      out.push(document.getElementById("dd-fl-class").textContent);
+      return out;""")
+    if got is None:
+        return
+    assert got[:3] == [["H", "#c00", "HART · Team H", "1:41.000"], ["G", "#0a0", "LIND · Team G", "1:52.500"],
+                       ["H", "#c00", "HART · Team H", "1:41.000"]], f"one class every 15 s, labelled: {got}"
+    assert got[3] == "", f"no class label outside class mode: {got}"
+
+
+def t_a_class_without_a_fastest_lap_leaves_the_box_to_the_others():
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    d = {"entries": _cars("H", 1) + _cars("G", 1, 2), "classes": [hf, G], "fastest": hf["fastest"]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      const box = document.getElementById("drivers-fastest");
+      let hidden = false;
+      box.classList.toggle = (c, on) => {{ if (c === "none") hidden = !!on; }};
+      return [0, 1].map(function (k) {{
+        shown(k * CYCLE_MS + 1, d);
+        return [document.getElementById("dd-fl-class").textContent, hidden];
+      }});""")
+    if got is None:
+        return
+    assert got == [["H", False], ["H", False]], f"the box never blanks for a class without a lap yet: {got}"
+
+
+def t_a_paged_tower_shows_the_fastest_lap_of_its_class():
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    d = {"entries": _cars("H", 10) + _cars("G", 10, 11), "classes": [hf, G], "fastest": hf["fastest"]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      const box = document.getElementById("drivers-fastest");
+      let hidden = false;
+      box.classList.toggle = (c, on) => {{ if (c === "none") hidden = !!on; }};
+      return [0, 1, 2, 3].map(function (k) {{
+        const r = shown(k * CYCLE_MS + 1, d);
+        return [r[0].head, document.getElementById("dd-fl-class").textContent, hidden];
+      }});""")
+    if got is None:
+        return
+    assert got == [["H", "H", False], ["H", "H", False], ["G", "G", True], ["G", "G", True]], \
+        f"the box follows the page's class and hides while that class has no lap: {got}"
+
+
+def t_the_stripes_restart_in_each_class():
+    d = {"entries": _cars("H", 3) + _cars("G", 3, 4), "classes": [H, G]}
+    got = _tower(_CLASS_RACE + f"""
+      let grouped = null;
+      rows.classList.toggle = (c, on) => {{ if (c === "grouped") grouped = !!on; }};
+      shown(1, {json.dumps(d)});
+      const alt = rows.children.map(r => / alt\\b/.test(r.className));
+      const inClass = grouped;
+      shown(1, {{entries: {json.dumps(d["entries"])}, classes: []}});
+      return [alt, inClass, grouped, rows.children.map(r => / alt\\b/.test(r.className))];""")
+    if got is None:
+        return
+    alt, in_class, outside, plain = got
+    assert alt == [False, False, True, False, False, False, True, False], \
+        f"each class starts unstriped under its header: {alt}"
+    assert in_class is True and outside is False, f"the grouped stripes only in class mode: {got}"
+    assert not any(plain), f"outside class mode the nth-child stripes stay: {plain}"
+    with open(TOWER, encoding="utf-8") as fh:
+        css = fh.read()
+    assert re.search(r"#dd-rows\.grouped \.dd-row:nth-child\(even\) \{ background: none;", css), \
+        "the position stripes give way to the class stripes"
+    assert re.search(r"#dd-rows\.grouped \.dd-row\.alt \{ background: var\(--dd-row\);", css), \
+        "every second car of a class takes the row stripe"
+
+
+def t_the_map_rings_the_class_and_est_wins():
+    got = _tower(f"""
+      line = {{points: [[0, 0], [100, 0], [100, 100], [0, 100]]}};
+      drawLine();
+      const base = {json.dumps(CAR)};
+      drawCars([Object.assign({{}}, base, {{entry: "a", x: 10, z: 0, class_color: "#0a0"}}),
+                Object.assign({{}}, base, {{entry: "b", x: 50, z: 0, class_color: "#0a0", status: "est"}}),
+                Object.assign({{}}, base, {{entry: "c", x: 90, z: 0}})]);
+      return els["dd-cars"].children.map(g => g.children[0].attrs).reverse();""")
+    if got is None:
+        return
+    ring, est, plain = got
+    assert ring["stroke"] == "#0a0" and ring["stroke-width"] == 0.8, f"a ring in the class colour: {ring}"
+    assert est["stroke"] == "#ffb454" and "stroke-dasharray" in est, f"the EST ring keeps its amber: {est}"
+    assert plain["stroke"] == "#fff" and plain["stroke-width"] == 0.4, f"no class, the white edge: {plain}"
+
+
+# Just enough DOM and browser for the public page's two scripts.
+_PUBLIC_DOM = r"""
+class Node {}
+function node(tag) {
+  return Object.setPrototypeOf({tag: tag, className: "", textContent: "", style: {}, children: [], dataset: {}, listeners: {},
+          hidden: false, value: "",
+          get rows() { return this.children; },
+          addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
+          appendChild(c) { this.children.push(c); return c; }, append(...c) { this.children.push(...c); },
+          prepend(...c) { this.children.unshift(...c); }, replaceChildren(...c) { this.children = c; },
+          remove() {}}, Node.prototype);
+}
+const els = {timing: Object.assign(node("table"), {tHead: node("thead"), tBodies: [node("tbody")]})};
+const document = {getElementById: id => els[id] || (els[id] = node("div")), createElement: node,
+                  createTextNode: t => Object.assign(node("#text"), {textContent: String(t)})};
+const store = STORE;
+const localStorage = {getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }};
+const window = {matchMedia: () => ({matches: false})};
+const location = {pathname: "/console/timing", search: "?l=abc", href: "https://x/console/timing?l=abc"};
+function fetch() { return new Promise(() => {}); }
+function setTimeout() {}
+function setInterval() {}
+function flat(n) { return [n].concat(...(n.children || []).map(flat)); }
+function text(n) { return flat(n).map(c => c.textContent).join(""); }
+function body() {
+  return els.timing.tBodies[0].children.map(function (r) {
+    if (r.className === "cls") return {head: text(r), kids: r.children[0].children[0].children.length,
+                                       color: r.children[0].children[0].style.color || ""};
+    const c = {};
+    r.children.forEach(td => { c[td.dataset.col] = text(td); });
+    return c;
+  });
+}
+function pick(value) {
+  const sel = document.getElementById("class-filter");
+  sel.value = value;
+  sel.listeners.change.forEach(f => f());
+}
+"""
+
+
+def _public(body, store=None):
+    with open(TIMING, encoding="utf-8") as fh:
+        html = fh.read()
+    i = html.index('<script id="timing-logic">') + len('<script id="timing-logic">')
+    logic = html[i:html.index("</script>", i)]
+    return _run(_PUBLIC_DOM.replace("STORE", json.dumps(store or {})) + logic + _script(TIMING)
+                + "\n;console.log(JSON.stringify((function () {" + body + "})()));")
+
+
+def _public_cars():
+    gt3 = [dict(CAR, entry=f"GT3 #{i}", number=str(i), driver=f"Driver {i}", pos=i, gap_s=float(i - 1),
+                interval_s=1.0, **{"class": "GT3"}, class_color="#c00", class_pos=i,
+                class_gap_s=float(i - 1), class_interval_s=1.0 if i > 1 else None, class_lapped=0)
+           for i in (1, 2)]
+    gt4 = [dict(CAR, entry=f"GT4 #{i}", number=str(10 + i), driver=f"Driver {10 + i}", pos=2 + i, lapped=1,
+                gap_s=90.0 + i, interval_s=2.0, **{"class": "GT4"}, class_color="#0a0", class_pos=i,
+                class_gap_s=float(2 * (i - 1)), class_interval_s=2.0 if i > 1 else None, class_lapped=0)
+           for i in (1, 2)]
+    classes = [{"name": "GT3", "color": "#c00", "lap": 7, "laps": 20,
+                "fastest": {"entry": "GT3 #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000}},
+               {"name": "GT4", "color": "#0a0", "lap": 6, "laps": 18, "fastest": None}]
+    return gt3 + gt4, classes
+
+
+def t_the_public_page_groups_by_class_and_filters():
+    entries, classes = _public_cars()
+    bad = dict(classes[1], name="<b>GT4</b>", color="red;background:url(x)")
+    odd = [dict(e, **{"class": "<b>GT4</b>"}) if e["class"] == "GT4" else e for e in entries]
+    got = _public(f"""
+      const d = {{mode: "race", entries: {json.dumps(entries)}, classes: {json.dumps(classes)}}};
+      render(d);
+      const out = {{all: body(), picker: document.getElementById("classpick").hidden,
+                    options: document.getElementById("class-filter").children.map(o => o.textContent)}};
+      pick(document.getElementById("class-filter").children[1].value);
+      out.gt3 = body();
+      out.stored = store["timing-class"];
+      out.fastest = text(document.getElementById("fastest"));
+      render({{mode: "race", entries: {json.dumps(odd)}, classes: [{json.dumps(classes[0])}, {json.dumps(bad)}]}});
+      pick("all");
+      out.bad = body().filter(r => r.head !== undefined)[1];
+      return out;""")
+    if got is None:
+        return
+    heads = [r for r in got["all"] if "head" in r]
+    assert [h["head"] for h in heads] == ["GT3Lap 7 / 20", "GT4Lap 6 / 18"], f"one header per class: {got['all']}"
+    assert [h["color"] for h in heads] == ["#c00", "#0a0"], f"each name in its class colour: {heads}"
+    cars = [r for r in got["all"] if "head" not in r]
+    assert [r["pos"] for r in cars] == ["1", "2", "1", "2"], f"positions within the class: {cars}"
+    assert [r["gap"] for r in cars] == ["", "+1.0", "", "+2.0"], f"class gaps, never +1 L overall: {cars}"
+    assert [r["int"] for r in cars] == ["", "+1.0", "", "+2.0"], f"class intervals: {cars}"
+    assert got["picker"] is False and got["options"] == ["All classes", "GT3", "GT4"], got
+    assert [r.get("head", r.get("drv")) for r in got["gt3"]] == ["GT3Lap 7 / 20", "Driver 1Team B", "Driver 2Team B"], \
+        f"the GT3 filter leaves only GT3: {got['gt3']}"
+    assert got["stored"] == '"GT3"', f"the choice is remembered: {got['stored']}"
+    assert got["fastest"].startswith("GT3") and "1:41.000" in got["fastest"], \
+        f"the class's fastest lap under its filter: {got['fastest']}"
+    assert got["bad"]["head"] == "<b>GT4</b>Lap 6 / 18" and got["bad"]["kids"] == 0, \
+        f"a class name is plain text: {got['bad']}"
+    assert "url" not in got["bad"]["color"], f"a colour that is not one never reaches the style: {got['bad']}"
+
+
+def t_the_public_page_remembers_the_class_and_forgets_a_gone_one():
+    entries, classes = _public_cars()
+    got = _public(f"""
+      render({{mode: "race", entries: {json.dumps(entries)}, classes: {json.dumps(classes)}}});
+      const kept = body().filter(r => r.head).map(r => r.head);
+      render({{mode: "race", entries: {json.dumps(entries)},
+               classes: [{json.dumps(classes[0])}, Object.assign({{}}, {json.dumps(classes[1])}, {{name: "GT2"}})]}});
+      return [kept, body().filter(r => r.head).length];""", store={"timing-class": '"GT4"'})
+    if got is None:
+        return
+    assert got[0] == ["GT4Lap 6 / 18"], f"a reload keeps the chosen class: {got}"
+    assert got[1] == 2, f"a class the race no longer has shows them all: {got}"
+
+
+def t_the_public_page_works_without_storage():
+    entries, classes = _public_cars()
+    got = _public(f"""
+      localStorage.getItem = localStorage.setItem = () => {{ throw new Error("blocked"); }};
+      render({{mode: "race", entries: {json.dumps(entries)}, classes: {json.dumps(classes)}}});
+      pick(document.getElementById("class-filter").children[2].value);
+      return body().filter(r => r.head).map(r => r.head);""")
+    if got is None:
+        return
+    assert got == ["GT4Lap 6 / 18"], f"a blocked store costs only the memory: {got}"
+
+
+def t_the_public_page_renders_one_class_as_today():
+    entries, _classes = _public_cars()
+    flat_rows = [{k: v for k, v in e.items() if not k.startswith("class")} for e in entries]
+    got = _public(f"""
+      render({{mode: "race", entries: {json.dumps(flat_rows)}}});
+      const before = body();
+      render({{mode: "race", entries: {json.dumps(flat_rows)}, classes: []}});
+      return [before, body(), document.getElementById("classpick").hidden, text(document.getElementById("fastest"))];""",
+                  store={"timing-class": '"GT3"'})
+    if got is None:
+        return
+    before, after, picker, fastest = got
+    assert before == after, "an empty class list is the page as before"
+    assert not any("head" in r for r in after), f"no class header outside class mode: {after}"
+    assert [r["pos"] for r in after] == ["1", "2", "3", "4"], f"overall positions: {after}"
+    assert [r["gap"] for r in after] == ["", "+1.0", "+1 L", "+1 L"], f"overall gaps: {after}"
+    assert picker is True, "no class filter outside class mode, whatever the store remembers"
+    assert fastest == "", fastest
+
+
+
+COCKPIT = os.path.join(ROOT, "src", "cockpit", "cockpit.html")
+
+
+def _cockpit(payload):
+    """The cockpit's timing card after one poll of `payload`: each body row's cell texts,
+    a class header as {head, color}."""
+    with open(COCKPIT, encoding="utf-8") as fh:
+        html = fh.read()
+    start = html.index("// Driver timing (#1115)")
+    block = html[start:html.index("\npollTiming();", start)]
+    js = (_PUBLIC_DOM.replace("STORE", "{}") + "window.RC_API = p => p; const $ = id => document.getElementById(id);\n"
+          + "const j = async () => (" + json.dumps(payload) + ");\n" + block
+          + """\n;(async function () {
+      await pollTiming();
+      return els.timing.tBodies[0].children.map(function (r) {
+        if (r.className === "cls") return {head: text(r), color: r.children[0].children[0].style.color || ""};
+        return r.children.map(text);
+      });
+    })().then(r => console.log(JSON.stringify(r)));""")
+    return _run(js)
+
+
+def t_the_cockpit_shows_class_position_and_gap():
+    entries, classes = _public_cars()
+    got = _cockpit({"mode": "race", "entries": entries, "classes": classes})
+    if got is None:
+        return
+    heads = [r for r in got if isinstance(r, dict)]
+    assert heads == [{"head": "GT3Lap 7 / 20", "color": "#c00"}, {"head": "GT4Lap 6 / 18", "color": "#0a0"}], \
+        f"one header per class in its colour: {got}"
+    cars = [r for r in got if isinstance(r, list)]
+    assert [r[0] for r in cars] == ["1", "2", "1", "2"], f"class positions: {cars}"
+    assert [r[6] for r in cars] == ["", "+1.0", "", "+2.0"], f"class gaps, not +1 L: {cars}"
+    assert [r[7] for r in cars] == ["", "+1.0", "", "+2.0"], f"class intervals: {cars}"
+
+
+def t_the_cockpit_renders_one_class_as_today():
+    entries, _classes = _public_cars()
+    flat_rows = [{k: v for k, v in e.items() if not k.startswith("class")} for e in entries]
+    got = _cockpit({"mode": "race", "entries": flat_rows})
+    if got is None:
+        return
+    assert _cockpit({"mode": "race", "entries": flat_rows, "classes": []}) == got, "an empty class list is as before"
+    assert all(isinstance(r, list) for r in got), f"no class header outside class mode: {got}"
+    assert [r[0] for r in got] == ["1", "2", "3", "4"] and [r[6] for r in got] == ["", "+1.0", "+1 L", "+1 L"], got
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

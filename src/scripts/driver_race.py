@@ -9,8 +9,8 @@ because distances along another line mean nothing.
 
 Race Control actions (#1113): red flag, restart mode and release, rejoin marks,
 corrections, change overrides, estimates for quiet cars (in memory only),
-retirements and driver names for entries without a sender.
-Corrections, rejoin marks, retirements and driver names persist in
+retirements, driver names for entries without a sender and class lap counts.
+Corrections, rejoin marks, retirements, driver names and class lap counts persist in
 `driver-race-actions.json` next to the settings and come back after a relay
 restart; every action appends a line with identity and time to
 `driver-race-audit.jsonl`. The red flag restart default is a league rule and lives
@@ -53,6 +53,8 @@ FASTEST = "driver-race-fastest.json"
 SNAPSHOT_EVERY_S = 0.5
 MAX_LAP_MS = 3_600_000
 MAX_QUALI = 200             # qualifying corrections kept
+MAX_CLASS = 24              # the roster caps a class name
+MAX_CLASSES = 64            # classes with a stored lap count or fastest lap
 LINE_POINTS = 600
 MAX_LAPS = 999
 LINE_RETRY_S = 10.0       # a pick without a downloaded line is looked up again this often
@@ -208,15 +210,42 @@ def clear_actions(runtime_dir):
             pass  # nothing recorded
 
 
-def _saved_fastest(path, track):
-    """The persisted fastest lap of this track layout, or None."""
-    doc = _read_json(path)
+def _text(value, most, empty=False):
+    """A stored string of at most `most` characters that encodes as UTF-8."""
+    if not isinstance(value, str) or len(value) > most or not (value or empty):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _saved_lap(doc):
+    """{entry, driver, ms} of a stored lap, or None when any part is invalid."""
+    if not isinstance(doc, dict):
+        return None
     entry, driver, ms = doc.get("entry"), doc.get("driver"), doc.get("ms")
-    if doc.get("track") == track and isinstance(entry, str) and isinstance(driver, str) \
-            and type(ms) is int and ms > 0 and len(entry) <= MAX_ENTRY \
+    if _text(entry, MAX_ENTRY) and _text(driver, MAX_ENTRY) and type(ms) is int and ms > 0 \
             and _valid_name(driver, rule=driver_invite.KNOWN_NAME):
         return {"entry": entry, "driver": driver, "ms": ms}
     return None
+
+
+def _saved_fastest(doc, track):
+    """The fastest lap of this track layout in the fastest-lap file's `doc`, or None."""
+    return _saved_lap(doc) if doc.get("track") == track else None
+
+
+def _saved_fastest_by_class(doc, track):
+    """The fastest lap of each class on this track layout in the fastest-lap file's `doc`."""
+    saved = doc.get("by_class") if doc.get("track") == track else None
+    out = {}
+    for cls, item in (saved.items() if isinstance(saved, dict) else ()):
+        lap = _saved_lap(item)
+        if lap and _text(cls, MAX_CLASS, empty=True) and len(out) < MAX_CLASSES:
+            out[cls] = lap
+    return out
 
 
 # The relay's ASSET_KEY_RE, capped: a brand key names a logo file, never a path.
@@ -261,10 +290,21 @@ def with_brands(standings, roster):
 
 _PUBLIC_TOP = ("v", "mode", "stint", "remaining", "remaining_running", "delay_s", "track_name", "state",
                "red_flag", "lap")
+_CLASS_ROW = ("class", "class_pos", "class_gap_s", "class_interval_s", "class_lapped")
 _PUBLIC_ROW = ("pos", "entry", "number", "driver", "team", "color", "text_color", "laps",
                "stint_laps", "gap_s", "interval_s", "lapped", "status", "pit_stops",
                "last_lap_ms", "finished", "best_ms", "gap_ms", "compound", "fuel_l", "brand",
-               "brand_name")
+               "brand_name", "class_color") + _CLASS_ROW
+_PUBLIC_LAP = ("entry", "driver", "team", "ms")
+
+
+def _class_colors(roster):
+    """Each class's colour: the first one set for it in roster order."""
+    out = {}
+    for info in roster.values():
+        if isinstance(info, dict) and not out.get(info.get("carClass") or ""):
+            out[info.get("carClass") or ""] = info.get("classColor") or ""
+    return out
 
 
 def public_view(snap):
@@ -278,9 +318,14 @@ def public_view(snap):
     out = {k: snap[k] for k in _PUBLIC_TOP if k in snap}
     fl = snap.get("fastest")
     if fl:
-        out["fastest"] = {k: fl.get(k) for k in ("entry", "driver", "team", "ms")}
+        out["fastest"] = {k: fl.get(k) for k in _PUBLIC_LAP}
     elif "fastest" in snap:
         out["fastest"] = None
+    if snap.get("classes"):
+        out["classes"] = [{"name": c.get("name"), "color": c.get("color"), "lap": c.get("lap"),
+                           "laps": c.get("laps"),
+                           "fastest": {k: c["fastest"].get(k) for k in _PUBLIC_LAP} if c.get("fastest") else None}
+                          for c in snap["classes"]]
     if "qualifying" in snap:
         out["qualifying"] = rows(snap["qualifying"])
     else:
@@ -327,14 +372,14 @@ def _saved_actions(path):
     corrections, rejoins = {}, []
     raw = doc.get("corrections")
     for entry, value in (raw.items() if isinstance(raw, dict) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and isinstance(value, list) \
+        if _text(entry, MAX_ENTRY) and isinstance(value, list) \
                 and len(value) == 2 and isinstance(value[0], (int, float)) \
                 and not isinstance(value[0], bool) and math.isfinite(value[0]) \
                 and type(value[1]) is int:
             corrections[entry] = (float(value[0]), value[1])
     raw = doc.get("rejoin")
     for entry in (raw if isinstance(raw, list) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY:
+        if _text(entry, MAX_ENTRY):
             rejoins.append(entry)
     return corrections, rejoins
 
@@ -342,7 +387,7 @@ def _saved_actions(path):
 def _saved_retired(path):
     raw = _read_json(path).get("retired")
     return [e for e in (raw if isinstance(raw, list) else ())
-            if isinstance(e, str) and 0 < len(e) <= MAX_ENTRY][:MAX_QUALI]
+            if _text(e, MAX_ENTRY)][:MAX_QUALI]
 
 
 def _valid_name(name, empty=False, rule=driver_invite.NAME):
@@ -357,8 +402,8 @@ def _saved_overrides(path):
     raw = _read_json(path).get("driver_names")
     out = []
     for item in (raw if isinstance(raw, list) else ()):
-        if isinstance(item, list) and len(item) == 3 and isinstance(item[0], str) \
-                and 0 < len(item[0]) <= MAX_ENTRY and _valid_name(item[1], True, driver_invite.KNOWN_NAME) \
+        if isinstance(item, list) and len(item) == 3 and _text(item[0], MAX_ENTRY) \
+                and _valid_name(item[1], True, driver_invite.KNOWN_NAME) \
                 and _valid_name(item[2], rule=driver_invite.KNOWN_NAME) and len(out) < MAX_QUALI:
             out.append(item)
     return out
@@ -374,8 +419,8 @@ def _saved_compounds(path):
     raw = _read_json(path).get("compounds")
     out = {}
     for entry, value in (raw.items() if isinstance(raw, dict) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and isinstance(value, dict) \
-                and value.get("code") in COMPOUNDS and isinstance(value.get("who"), str) \
+        if _text(entry, MAX_ENTRY) and isinstance(value, dict) \
+                and value.get("code") in COMPOUNDS and _text(value.get("who"), math.inf, empty=True) \
                 and isinstance(value.get("ts"), (int, float)) and math.isfinite(value["ts"]) \
                 and len(out) < MAX_QUALI:
             out[entry] = {"code": value["code"], "who": value["who"][:80], "ts": float(value["ts"])}
@@ -392,10 +437,66 @@ def _saved_quali(path, segment):
     raw = raw.get(_segment_key(segment)) if isinstance(raw, dict) else None
     out = {}
     for entry, ms in (raw.items() if isinstance(raw, dict) else ()):
-        if isinstance(entry, str) and 0 < len(entry) <= MAX_ENTRY and (
+        if _text(entry, MAX_ENTRY) and (
                 ms is None or (type(ms) is int and 0 < ms < MAX_LAP_MS)) and len(out) < MAX_QUALI:
             out[entry] = ms
     return out
+
+
+def _stint_class_laps(path, stint):
+    raw = _read_json(path).get("class_laps")
+    raw = raw.get(stint) if isinstance(raw, dict) else None
+    return raw if isinstance(raw, dict) else {}
+
+
+def _cleared_class_laps(path, stint):
+    """The classes whose count Race Control cleared in one stint."""
+    return {cls for cls, laps in _stint_class_laps(path, stint).items() if laps is None}
+
+
+def _saved_class_laps(path, stint):
+    """{class: lap count} of one stint; anything malformed is dropped."""
+    raw = _stint_class_laps(path, stint)
+    out = {}
+    for cls, laps in (raw.items() if isinstance(raw, dict) else ()):
+        if _text(cls, MAX_CLASS) and type(laps) is int \
+                and 0 < laps <= MAX_LAPS and len(out) < MAX_CLASSES:
+            out[cls] = laps
+    return out
+
+
+def _store_class_laps(doc, stint, cls, laps):
+    raw = doc.get("class_laps") if isinstance(doc.get("class_laps"), dict) else {}
+    done = raw.get(stint) if isinstance(raw.get(stint), dict) else {}
+    if stint not in raw and len(raw) >= MAX_QUALI:
+        raise ValueError(f"at most {MAX_QUALI} stints carry class lap counts")
+    if laps is None:
+        if cls in done or len(done) < MAX_CLASSES:
+            done[cls] = None   # cleared: the Schedule never brings it back in this stint
+    elif cls in done or len(done) < MAX_CLASSES:
+        done[cls] = laps
+    else:
+        raise ValueError(f"at most {MAX_CLASSES} classes per stint")
+    if done:
+        raw[stint] = done
+    else:
+        raw.pop(stint, None)
+    doc["class_laps"] = raw
+
+
+def _named_classes(roster):
+    return {info.get("carClass") for info in roster.values()
+            if isinstance(info, dict) and isinstance(info.get("carClass"), str) and info.get("carClass")}
+
+
+def _class_name(cls):
+    if not isinstance(cls, str) or not cls.strip() or len(cls) > MAX_CLASS:
+        raise ValueError(f"class is 1 to {MAX_CLASS} characters")
+    try:
+        cls.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("class is not valid text") from None
+    return cls.strip()
 
 
 def _entry_name(entry):
@@ -442,6 +543,8 @@ class Service:
         self._context = context or (lambda: {})
         self._snapshots = collections.deque(maxlen=int(MAX_DELAY_S / SNAPSHOT_EVERY_S) + 4)
         self._saved_fastest = None
+        self._saved_by_class = {}
+        self._class_map = {}       # entry -> class, from the last roster seen
         self._line_cache = None
         self._settings_cache = None
         self._league = league_path
@@ -491,44 +594,86 @@ class Service:
             race.retire(entry, True, self._clock())
         for entry, driver, name in _saved_overrides(_actions_path_for(self._path)):
             race.set_driver_name(entry, driver, name)
-        race.fastest = _saved_fastest(self._fastest_path(), pick_id)
+        race.set_classes(self._class_map)
+        saved = _read_json(self._fastest_path())
+        race.fastest = _saved_fastest(saved, pick_id)
+        race.fastest_by_class = _saved_fastest_by_class(saved, pick_id)
         self._saved_fastest = race.fastest
+        self._saved_by_class = {c: dict(f) for c, f in race.fastest_by_class.items()}
         return race
+
+    def _set_roster(self, race, roster):
+        """Give the race the Configuration entries and their classes."""
+        self._class_map = {e: info.get("carClass") or "" for e, info in roster.items()
+                           if isinstance(info, dict)}
+        race.set_roster(list(roster))
+        race.set_classes(self._class_map)
 
     def _fastest_path(self):
         return os.path.join(os.path.dirname(os.path.abspath(self._path)), FASTEST)
 
     def save_fastest(self):
-        """Persist the race's fastest lap with its layout when it changed (it survives a
-        relay restart); None removes the file. Runs outside the race lock."""
+        """Persist the race's fastest lap and each class's with its layout when they
+        changed (they survive a relay restart); none at all removes the file. Runs
+        outside the race lock."""
         with self._lock:
-            fastest = self._race.fastest if self._race is not None else None
+            race = self._race
+            fastest = race.fastest if race is not None else None
+            by_class = {c: dict(f) for c, f in race.fastest_by_class.items()} if race is not None else {}
             track = self._race_pick
-            if fastest == self._saved_fastest:
+            if fastest == self._saved_fastest and by_class == self._saved_by_class:
                 return
             self._saved_fastest = None if fastest is None else dict(fastest)
+            self._saved_by_class = by_class
         try:
-            if fastest is None:
+            if fastest is None and not by_class:
                 os.remove(self._fastest_path())
             else:
-                _write_json(self._fastest_path(), dict(fastest, track=track))
+                _write_json(self._fastest_path(), dict(fastest or {}, track=track,
+                                                       **({"by_class": by_class} if by_class else {})))
         except OSError:
             pass  # the race keeps it in memory; the next change writes it again
 
-    def set_fastest(self, who, entry=None, driver=None, ms=None):
-        """Race Control's correction: clear the fastest lap (no entry) or set it."""
+    def set_fastest(self, who, entry=None, driver=None, ms=None, cls=None):
+        """Race Control's correction: clear the fastest lap (no entry) or set it; with
+        `cls` only that class's fastest lap, never the overall one."""
         if entry is not None:
             entry = _entry_name(entry)
             if not _valid_name(driver):
                 raise ValueError("driver is 1 to 24 letters, digits, spaces, _ . or -")
             if type(ms) is not int or not 0 < ms < 3_600_000:
                 raise ValueError("ms is a lap time in milliseconds")
+        roster = self._context().get("roster") or {}
+        if cls is not None:
+            cls = _class_name(cls)
+            if cls not in _named_classes(roster):
+                raise ValueError("unknown class")
         with self._lock:
             race = self._current()
-            self._log(who, "fastest", **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
-            race.fastest = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
-        self.save_fastest()
+            self._set_roster(race, roster)
+            if cls is not None and entry is not None and race.class_of(entry) != cls:
+                raise ValueError("the entry is not in that class")
+            void = entry is None and (race.fastest_by_class.get(cls) if cls is not None else race.fastest) is None
+            if not void:
+                self._apply_fastest(who, race, cls, entry, driver, ms)
+        if not void:
+            self.save_fastest()
         return self.standings()
+
+    def _apply_fastest(self, who, race, cls, entry, driver, ms):
+        """Audit, then change the fastest lap; the caller holds the lock."""
+        self._log(who, "fastest", **({"class": cls} if cls is not None else {}),
+                  **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
+        lap = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
+        if cls is not None:
+            race.fastest_by_class.pop(cls, None)
+            if lap is not None:
+                race.fastest_by_class[cls] = lap
+        else:
+            race.fastest_by_class = {c: f for c, f in race.fastest_by_class.items() if f != race.fastest}
+            race.fastest = lap
+            if lap is not None:
+                race.fastest_by_class[race.class_of(entry)] = dict(lap)
 
     def _viewer(self, ctx):
         """The dashboard payload: an allowlist, safe for viewers and the public page."""
@@ -539,7 +684,7 @@ class Service:
                "track": pick.get("id"), "track_name": pick.get("track") or None,
                "visible": self._settings()["visible"]}
         race = self._current()
-        race.set_roster(list(roster))
+        self._set_roster(race, roster)
         settings = self._settings()
         out["delay_s"] = settings["delay_s"]
         out["show"] = self._show(settings)
@@ -555,24 +700,42 @@ class Service:
                 row["driver"] = race.display_name(row["entry"], row["driver"])
             return out
         st = race.standings(self._clock())
+        colors = _class_colors(roster)
         rows = []
         for i, r in enumerate(st["entries"]):
             row = _viewer_entry(r, roster)
             row.update({k: r[k] for k in ("laps", "stint_laps", "gap_s", "interval_s", "lapped",
                                           "status", "pit_stops", "last_lap_ms", "fuel_l",
                                           "finished", "x", "z")})
+            if st["classes"]:
+                row.update({k: r[k] for k in _CLASS_ROW})
+                row["class_color"] = colors.get(r["class"], "")
             row["pos"] = i + 1
             row["compound"] = (compounds.get(r["entry"]) or {}).get("code")
             rows.append(row)
         self._mark_dc(rows)
         fl = race.fastest
+        first = next((name for name in st["classes"] if name), None)
+        class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))) \
+            if st["classes"] else {}
         out.update({
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
-            "fastest": None if fl is None else dict(
-                fl, team=(roster.get(fl["entry"]) or {}).get("cupTeam") or "",
-                driver=race.display_name(fl["entry"], fl["driver"])),
+            "fastest": self._shown_lap(race, fl, roster),
+            "classes": [{"name": name, "color": colors.get(name, ""),
+                         "lap": st["class_lap"][name],
+                         "laps": st["lap"]["count"] if name == first else
+                                 class_laps.get(name) if name and st["class_counts"][name] else None,
+                         "fastest": self._shown_lap(race, race.fastest_by_class.get(name), roster)}
+                        for name in st["classes"]],
             "entries": rows})
         return out
+
+    @staticmethod
+    def _shown_lap(race, fl, roster):
+        """A fastest lap as viewers see it: with the team and the driver name override."""
+        return None if fl is None else dict(
+            fl, team=(roster.get(fl["entry"]) or {}).get("cupTeam") or "",
+            driver=race.display_name(fl["entry"], fl["driver"]))
 
     def _mark_dc(self, rows):
         """A quiet car whose disconnect Race Control confirmed reads "dc" instead of
@@ -620,7 +783,7 @@ class Service:
             standings = self._current().standings(self._clock()) if recording else None
         if recording:
             self._mark_dc(standings["entries"])
-            self._observe(standings)
+            self._observe(standings, snap.get("classes"))
         self.save_fastest()
 
     def open_recording(self):
@@ -629,12 +792,12 @@ class Service:
         if self._recording_dir and self._enabled():
             self._guarded(self._recorder)
 
-    def _observe(self, standings):
+    def _observe(self, standings, classes=None):
         """Feed the recorder; a recording failure never stops the tick."""
         if self._rec is None and (not self._rec_allowed or self._clock() < self._rec_retry):
             return
         self._guarded(lambda: self._recorder().observe(
-            standings, self._compound_codes, self._wall()))
+            standings, self._compound_codes, self._wall(), classes))
 
     def _guarded(self, fn):
         """Run fn; any failure is logged once and backs off RECORDING_RETRY_S."""
@@ -800,15 +963,17 @@ class Service:
             for entry in race.take_ended_estimates():
                 self._log("race", "estimate_end", entry=entry)
 
-    def _roster(self):
-        return list(self._context().get("roster") or {})
-
     def standings(self):
         ctx = self._context()
         with self._lock:
             race = self._current()
-            race.set_roster(list(ctx.get("roster") or {}))
+            self._set_roster(race, ctx.get("roster") or {})
             out = race.standings(self._clock())
+            if out["classes"]:
+                colors = _class_colors(ctx.get("roster") or {})
+                out["class_colors"] = {name: colors.get(name, "") for name in out["classes"]}
+                out["class_fastest"] = {name: self._shown_lap(race, race.fastest_by_class.get(name), ctx.get("roster") or {})
+                                        for name in out["classes"]}
             if out["fastest"]:
                 fl = out["fastest"]
                 out["fastest"] = dict(fl, driver=race.display_name(fl["entry"], fl["driver"]))
@@ -818,6 +983,7 @@ class Service:
                    compounds=_saved_compounds(_actions_path_for(self._path)),
                    driver_overrides=_override_list(_saved_overrides(_actions_path_for(self._path))),
                    quali_overrides=_saved_quali(_actions_path_for(self._path), ctx.get("segment")),
+                   class_laps=_saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))),
                    league=read_league(self._league), last_action=self._last_action)
         return out
 
@@ -939,10 +1105,10 @@ class Service:
                 or not math.isfinite(seconds) or not 0 <= seconds <= MAX_ESTIMATE_S:
             raise ValueError(f"seconds is a number from 0 to {int(MAX_ESTIMATE_S)}")
         seconds = float(seconds)
-        roster = self._roster()
+        roster = self._context().get("roster") or {}
         with self._lock:
             race = self._current()
-            race.set_roster(roster)
+            self._set_roster(race, roster)
             race.estimate(entry, ref, seconds, self._clock())
             self._log(who, "estimate", entry=entry, ref=ref, seconds=seconds)
         return self.standings()
@@ -1012,13 +1178,64 @@ class Service:
                 self._final_lobby_laps = race.lap_count = saved["lap_count"]
         return saved
 
-    def stint_switch(self, final_laps=None, window=True, final_row=None):
+    def class_laps(self, stint=None):
+        """{class: lap count} Race Control set for `stint` (default: the one on air)."""
+        stint = self._context().get("stint") if stint is None else stint
+        return _saved_class_laps(_actions_path_for(self._path), _segment_key(stint))
+
+    def set_class_laps(self, who, cls, laps, stint=None):
+        """Set the lap count of a class other than the fastest for one stint, or clear
+        it with None. Display only: it never finishes a car."""
+        cls = _class_name(cls)
+        if laps is not None and (type(laps) is not int or not 0 < laps <= MAX_LAPS):
+            raise ValueError(f"laps is a whole number from 1 to {MAX_LAPS}, or null")
+        ctx = self._context()
+        if cls not in _named_classes(ctx.get("roster") or {}):
+            raise ValueError("unknown class")
+        stint = _segment_key(ctx.get("stint") if stint is None else stint)
+
+        def update(doc):
+            _store_class_laps(doc, stint, cls, laps)
+        with self._lock:
+            self._log(who, "class_laps", stint=stint, **{"class": cls}, laps=laps)
+            self._save_actions(update)
+        return self.standings()
+
+    def _prefill_class_laps(self, defaults, ctx):
+        """The Schedule's `Laps <Class>` cells of the row on air, where no desk value is."""
+        named = {c.lower(): c for c in _named_classes(ctx.get("roster") or {})}
+        stint = _segment_key(ctx.get("stint"))
+        saved = set(_saved_class_laps(_actions_path_for(self._path), stint)) \
+            | _cleared_class_laps(_actions_path_for(self._path), stint)
+        fill = {}
+        for cls, laps in (defaults.items() if isinstance(defaults, dict) else ()):
+            cls = named.get(cls.lower()) if isinstance(cls, str) else None
+            if cls and cls not in saved and type(laps) is int and 0 < laps <= MAX_LAPS:
+                fill[cls] = laps
+        if not fill:
+            return
+
+        def update(doc):
+            for cls, laps in fill.items():
+                _store_class_laps(doc, stint, cls, laps)
+        for cls, laps in fill.items():
+            self._log("schedule", "class_laps", stint=stint, **{"class": cls}, laps=laps)
+        self._save_actions(update)
+
+    def stint_switch(self, final_laps=None, window=True, final_row=None, class_laps=None):
         """The broadcast switched stints: open the change window (unless `window` is
         False, a relay start that finds the last row on air). `final_row` (default:
         `final_laps` given) says the last row is on air; `final_laps` is its lobby's lap
-        count, None until a count is set."""
+        count, None until a count is set. `class_laps` are the row's `Laps <Class>`
+        cells; they never replace a value the desks set."""
         final_row = final_laps is not None if final_row is None else final_row
+        ctx = self._context() if class_laps else None
         with self._lock:
+            if class_laps:
+                try:
+                    self._prefill_class_laps(class_laps, ctx)
+                except (OSError, ValueError):
+                    pass  # the desks can still enter the count
             race = self._current()
             if window:
                 race.open_change_window(self._clock())

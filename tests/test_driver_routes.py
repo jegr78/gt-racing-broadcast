@@ -63,14 +63,16 @@ def _timing_server(**extra):
     return srv, port, link_path, timing_link.create(link_path)["id"], hub
 
 
-def _serve(solo=True, segments=(), clock=None, recording_dir=None, enabled=lambda: True, **extra):
+def _serve(solo=True, segments=(), clock=None, recording_dir=None, enabled=lambda: True, context=None,
+           **extra):
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo,
                                enabled=enabled, recording_dir=recording_dir,
-                               **({"clock": clock} if clock else {}))
+                               **({"clock": clock} if clock else {}),
+                               **({"context": context} if context else {}))
     race.open_recording()
     hub = driver_ingest.Hub(multi_lobby=lambda: not solo, on_sample=race.update,
                             **({"clock": clock} if clock else {}))
@@ -544,6 +546,119 @@ def t_both_desks_retire_a_car_and_name_a_driver_and_bad_input_is_refused():
         srv.shutdown()
 
 
+def t_class_laps_route_refuses_bad_input():
+    roster = {ENTRIES[0]: {"carClass": "GT3"}, ENTRIES[1]: {"carClass": "GT4"}}
+    srv, port, _path, _hub = _serve(context=lambda: {"roster": roster, "stint": "S1", "mode": "race"})
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/class-laps?t={rc}",
+                            json.dumps({"class": "GT4", "laps": 54}).encode(), hdr)
+        race = json.loads(text)["race"] if st == 200 else {}
+        assert st == 200 and race["class_laps"] == {"GT4": 54}, (st, text[:300])
+        assert race["last_action"]["who"] == "race_control:dave" and race["last_action"]["action"] == "class_laps"
+        st, text, _h = _req(port, f"/console/drivers/race/class-laps?t={director}",
+                            json.dumps({"class": "GT4", "laps": None}).encode(), hdr)
+        assert st == 200 and json.loads(text)["race"]["class_laps"] == {}, (st, text[:300])
+        assert _req(port, f"/console/drivers/race/class-laps?t={alice}",
+                    json.dumps({"class": "GT4", "laps": 5}).encode(), hdr)[0] == 403, \
+            "a commentator never sets a class lap count"
+        for bad in ({"class": "GT4", "laps": 0}, {"class": "GT4", "laps": "x"}, {"class": "GT4", "laps": 1000},
+                    {"class": "LMP", "laps": 5}, {"class": ["GT4"], "laps": 5}, {"laps": 5}, {"class": "GT4"}):
+            st, text, _h = _req(port, f"/console/race-control/drivers/race/class-laps?t={rc}",
+                                json.dumps(bad).encode(), hdr)
+            assert st == 400, (bad, st, text)
+    finally:
+        srv.shutdown()
+
+
+def t_the_fastest_lap_route_takes_a_class():
+    roster = {ENTRIES[0]: {"carClass": "GT3"}, ENTRIES[1]: {"carClass": "GT4"}}
+    srv, port, _path, _hub = _serve(context=lambda: {"roster": roster, "stint": "S1", "mode": "race"})
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc = g._tok("dave")
+        url = f"/console/race-control/drivers/race/fastest?t={rc}"
+        st, text, _h = _req(port, url, json.dumps({"entry": ENTRIES[0], "driver": "Ann", "ms": 61000}).encode(), hdr)
+        assert st == 200, (st, text[:300])
+        st, text, _h = _req(port, url, json.dumps({"entry": ENTRIES[1], "driver": "Bo", "ms": 62000,
+                                                   "class": "GT4"}).encode(), hdr)
+        race = json.loads(text)["race"] if st == 200 else {}
+        assert st == 200 and race["class_fastest"]["GT4"]["entry"] == ENTRIES[1], (st, text[:300])
+        assert race["fastest"]["entry"] == ENTRIES[0], f"a class lap never replaces the overall one: {race['fastest']}"
+        st, text, _h = _req(port, url, json.dumps({"class": "GT3"}).encode(), hdr)
+        race = json.loads(text)["race"] if st == 200 else {}
+        assert st == 200 and race["class_fastest"]["GT3"] is None and race["fastest"]["entry"] == ENTRIES[0], \
+            (st, text[:300])
+        for bad in ({"class": "LMP"}, {"class": ""}, {"class": 5},
+                    {"entry": ENTRIES[0], "driver": "Ann", "ms": 61000, "class": "GT4"}):
+            st, text, _h = _req(port, url, json.dumps(bad).encode(), hdr)
+            assert st == 400, (bad, st, text)
+    finally:
+        srv.shutdown()
+
+
+def t_schedule_laps_columns_per_class_are_parsed():
+    text = ("URL,Stint,Laps,Laps GT3,laps gt4,Laps \n"
+            "UCaaaaaaaaaaaaaaaaaaaaaa,S1,20,54,x,7\n"
+            "UCbbbbbbbbbbbbbbbbbbbbbb,S2,,0,1000,\n"
+            "UCcccccccccccccccccccccc,S3,,12,\n")
+    assert g.m.ScheduleSource._parse_laps(text) == {2: 20}, "the plain Laps column stays the fastest class's"
+    assert g.m.ScheduleSource._parse_class_laps(text) == {2: {"GT3": 54}, 4: {"GT3": 12}}, \
+        g.m.ScheduleSource._parse_class_laps(text)
+    src = g.m.ScheduleSource("", os.path.join(tempfile.mkdtemp(), "c.txt"), None)
+    src.rows = g.m.ScheduleSource._parse_rows(text)
+    src.class_laps = g.m.ScheduleSource._parse_class_laps(text)
+    assert [src.class_laps_at(i) for i in (0, 1, 2, 3)] == [{"GT3": 54}, {}, {"GT3": 12}, {}]
+
+
+def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
+    import threading, time
+    roster = {ENTRIES[0]: {"carClass": "GT3"}, ENTRIES[1]: {"carClass": "GT4"}}
+    ctx = {"roster": roster, "stint": "S1", "mode": "race"}
+    srv, _port, _path, _hub = _serve(solo=False, context=lambda: ctx)
+    srv.shutdown()
+    svc = srv.race_svc
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3), ("u", "C", "S3", 4)]
+
+        def final_laps(self):
+            return None
+
+        def class_laps_at(self, idx):
+            return [{"GT4": 40}, {"GT4": 41}, {}][idx]
+
+    class Relay:
+        solo, mode, race_source, idx = False, "race", Source(), 0
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
+
+        def on_air_row_idx(self):
+            return self.idx
+
+    relay, stop = Relay(), threading.Event()
+    worker = threading.Thread(target=g.m.stint_switch_watch,
+                              args=(relay, svc, stop, lambda: None, 0.01), daemon=True)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 2
+        while svc.class_laps("S1") != {"GT4": 40} and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert svc.class_laps("S1") == {"GT4": 40}, "a relay start pre-fills the row on air"
+        assert svc._current()._window_until is None, "a relay start opens no change window"
+        svc.set_class_laps("rc:Anna", "GT4", 33, stint="S2")
+        ctx["stint"], relay.idx = "S2", 1
+        deadline = time.monotonic() + 2
+        while svc._current()._window_until is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.05)
+        assert svc.class_laps("S2") == {"GT4": 33}, "the switch keeps the desk value"
+    finally:
+        stop.set()
+        worker.join(2)
+
+
 def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     import threading, time
 
@@ -553,6 +668,9 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
 
         def final_laps(self):
             return 24
+
+        def class_laps_at(self, idx):
+            return {}
 
     class Relay:
         solo, mode, race_source, idx = False, "race", Source(), 0
@@ -564,7 +682,7 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     calls, relay, stop = [], Relay(), threading.Event()
 
     class Svc:
-        def stint_switch(self, final_laps=None, window=True, final_row=None):
+        def stint_switch(self, final_laps=None, window=True, final_row=None, class_laps=None):
             calls.append(final_laps if window else ("start", final_laps))
             rows_seen.append(final_row)
     rows_seen = []

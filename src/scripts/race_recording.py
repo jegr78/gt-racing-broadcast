@@ -18,6 +18,7 @@ _SAMPLE_COLUMNS = ["state", "red_flag"]
 _ROW_COLUMNS = ["pos", "entry", "driver", "laps", "gap_time_s", "interval_time_s", "lapped",
                 "status", "finished", "compound", "pit_stops", "correction_m", "rejoin",
                 "gt7_position", "position_mismatch"]
+_CLASS_COLUMNS = ["class", "class_pos"]
 CSV_HEADER = ["time_utc"] + _SAMPLE_COLUMNS + _ROW_COLUMNS
 SAMPLE_EVERY_S = 1.0
 COUNTING_STATES = ("racing", "final_lap", "finishing")
@@ -147,22 +148,29 @@ class Store:
         return None if row is None else row[0]
 
     def csv_rows(self):
-        """Header, then one row per (sample, entry), oldest sample first."""
-        yield list(CSV_HEADER)
+        """Header, then one row per (sample, entry), oldest sample first; the class
+        columns only when a sample was taken in class mode."""
         with self._lock:
             cur = self._conn.execute("SELECT t, doc FROM samples ORDER BY t")
             samples = cur.fetchall()
+        columns = _ROW_COLUMNS + (_CLASS_COLUMNS if any(_classed(raw) for _t, raw in samples) else [])
+        yield ["time_utc"] + _SAMPLE_COLUMNS + columns
         for t, raw in samples:
             stamp = datetime.datetime.fromtimestamp(t, datetime.timezone.utc)
             when = stamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
             doc = json.loads(raw)
             head = [when, _cell(doc.get("state")), _red_flag_cell(doc.get("red_flag"))]
             for r in doc.get("rows") or []:
-                yield head + [_cell(r.get(c)) for c in _ROW_COLUMNS]
+                yield head + [_cell(r.get(c)) for c in columns]
 
     def close(self):
         with self._lock:
             self._conn.close()
+
+
+def _classed(raw):
+    rows = json.loads(raw).get("rows")
+    return any(isinstance(r, dict) and "class" in r for r in (rows if isinstance(rows, list) else ()))
 
 
 def _red_flag_cell(red):
@@ -288,8 +296,9 @@ class Recorder:
                 self._meta("stopped_by", who)
             return self._status_head()
 
-    def observe(self, standings, compounds, now_wall):
-        """`compounds` is {entry: code} or a callable giving it, read only when a sample is due."""
+    def observe(self, standings, compounds, now_wall, classes=None):
+        """`compounds` is {entry: code} or a callable giving it, read only when a sample is due.
+        `classes` is the viewer's [{name, color, lap, laps}], kept only in class mode."""
         with self._lock:
             state = standings.get("state")
             if state in COUNTING_STATES and not self._auto_done:
@@ -304,7 +313,7 @@ class Recorder:
                 self._meta("auto_started", "0")
             self._last_state = state
             if self._running and self._sample_due(now_wall):
-                doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {})
+                doc = _sample(standings, (compounds() if callable(compounds) else compounds) or {}, classes)
                 if self._writer.put(lambda s: s.add_sample(now_wall, doc)):
                     lo, hi = self._span or (now_wall, now_wall)
                     self._span = (min(lo, now_wall), max(hi, now_wall))
@@ -400,11 +409,19 @@ class Recorder:
         return out
 
 
-def _sample(standings, compounds):
+def _sample(standings, compounds, classes=None):
+    in_classes = bool(standings.get("classes"))
     rows = []
     for i, r in enumerate(standings.get("entries") or []):
         row = {"pos": i + 1, **{k: r.get(k) for k in SAMPLE_FIELDS}}
         row["compound"] = compounds.get(r.get("entry"))
+        if in_classes:
+            row["class"] = r.get("class")
+            for k in ("class_pos", "class_gap_s", "class_interval_s", "class_lapped"):
+                row[k] = r.get(k)
         rows.append(row)
-    return {"state": standings.get("state"), "red_flag": standings.get("red_flag"),
-            "rows": rows}
+    doc = {"state": standings.get("state"), "red_flag": standings.get("red_flag"),
+           "rows": rows}
+    if in_classes and classes:
+        doc["classes"] = [{k: c.get(k) for k in ("name", "color", "lap", "laps")} for c in classes]
+    return doc

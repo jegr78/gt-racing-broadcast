@@ -107,6 +107,8 @@ A header row (row 1) plus one row per team. Columns are located **by header text
 | `BG Color` *(or `BG Colour`/`Background Color`/`Background Colour`)* | optional | Per-team tile background colour: any plain CSS colour (`#C00000`, `rgb(0,80,160)`, `white`); implausible values are ignored |
 | `Text Color` *(or `Text Colour`/`FG Color`/`FG Colour`)* | optional | Per-team tile text colour, same rules as `BG Color` |
 | `Cup Team` | optional | Team-vs-team leagues: the team a driver's entry races for. The [driver dashboard](Driver-Telemetry#dashboard) shows it with the row's `BG Color`, so give every driver of a team the same colour |
+| `Class` | optional | Car class of the entry (e.g. `GT3`, `GT4`). With at least two named classes the [driver telemetry](Driver-Telemetry#classes) ranks each car within its class; an empty cell joins a group without a name at the end |
+| `Class Color` *(or `Class Colour`)* | optional | Colour of the entry's class on the timing screens, same rules as `BG Color`; the first entry of a class with a colour sets it |
 
 Sample:
 
@@ -144,7 +146,8 @@ are found by name; without one, fixed positions apply (**A** = URL, **B** = Stre
 | `URL` | A | The stint's live stream: a `youtube.com`/`twitch.tv` URL, or a bare YouTube channel id (`UC…`, public `/live` only), or `local:` for a stint read from the producer machine's capture card ([local capture stint](Relay-Mode#local-capture-stint)) |
 | `Streamer` *(or `Name`)* | B | Commentator name (matched to the Crew/Configuration roster) |
 | `Stint` | C | Stint label shown on the HUD (optional) |
-| `Laps` | none | Lap count of that stint lobby on GT7's counter (optional, header mode only). Only the last row's value is used: the [driver telemetry race](Driver-Telemetry#race-order-and-gaps) finishes when the leader completes it in the final lobby; empty falls back to `racecast event race --laps` |
+| `Laps` | none | Lap count of that stint lobby on GT7's counter (optional, header mode only). Only the last row's value is used: the [driver telemetry race](Driver-Telemetry#race-order-and-gaps) finishes when the leader completes it in the final lobby; empty falls back to `racecast event race --laps`. With [classes](Driver-Telemetry#classes) it is the lap count of the first class |
+| `Laps <Class>` *(e.g. `Laps GT4`)* | none | Lap count of that class in this row's lobby (optional, header mode only, 1 to 999). It fills the desk's class lap count when the row goes on air, unless Race Control already set or cleared one. Put it in the final lobby's row: like `Laps`, a class count shows only while the final lobby runs |
 
 Sample:
 

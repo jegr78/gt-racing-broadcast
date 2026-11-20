@@ -46,6 +46,9 @@
   .pill.ok { border-color: var(--accent); color: var(--accent); }
   .pill.bad { border-color: var(--bad); color: var(--bad); }
   .pill.amb { border-color: var(--amb); color: var(--amb); }
+  tr.cls th { background: var(--panel-2); color: var(--ink); font-size: 13px; font-weight: 600;
+              border-left: 4px solid var(--edge); }
+  tr.cls .lap { color: var(--muted); font-family: var(--mono); font-weight: 400; margin-left: 10px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -119,15 +122,50 @@
     } catch (e) { return {status: 0, data: null}; }
   }
 
+  // Rows under one header per class (leader's class first, unclassed last) once the sample
+  // holds two named classes; otherwise a single flat group.
+  function groupRows(s) {
+    var rows = s.rows || [], order = [], by = {};
+    rows.forEach(function (e) {
+      var c = e.class == null ? "" : String(e.class);
+      if (!by[c]) { by[c] = []; order.push(c); }
+      by[c].push(e);
+    });
+    if (order.filter(Boolean).length < 2) return [{rows: rows, grouped: false}];
+    if (order.indexOf("") >= 0) order.push(order.splice(order.indexOf(""), 1)[0]);
+    var meta = {};
+    (s.classes || []).forEach(function (c) { if (c && typeof c.name === "string") meta[c.name] = c; });
+    return order.map(function (c) {
+      var m = meta[c] || {};
+      return {name: c, color: m.color, lap: m.lap, laps: m.laps, grouped: true,
+              rows: by[c].slice().sort(function (a, b) { return (a.class_pos || 0) - (b.class_pos || 0); })};
+    });
+  }
+  function header(g) {
+    var th = el("th", "", g.name || "Unclassed");
+    th.colSpan = 9;
+    if (typeof g.color === "string" && g.color) { th.style.color = g.color; th.style.borderLeftColor = g.color; }
+    if (g.lap != null) {
+      th.append(el("span", "lap", "LAP " + g.lap + (g.laps != null ? " / " + g.laps : "")));
+    }
+    var tr = el("tr", "cls");
+    tr.append(th);
+    return tr;
+  }
+
   function render(s) {
     $("stamp").textContent = clock(s.t);
     $("state").textContent = STATES[s.state] || "";
     $("red").hidden = !s.red_flag;
-    var rows = (s.rows || []).map(function (e) {
+    function build(e, grouped) {
       var tr = el("tr");
       var st = STATUS[e.status] || [String(e.status || ""), ""];
-      var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
-                         : (e.pos > 1 ? secs(e.gap_time_s) : "");
+      var lapped = grouped ? e.class_lapped : e.lapped;
+      var first = grouped ? e.class_pos <= 1 : e.pos <= 1;
+      var gapS = grouped ? e.class_gap_s : e.gap_time_s;
+      var gap = lapped ? "+" + lapped + "\u00a0L" + (!grouped && typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
+                       : (first ? "" : secs(gapS));
+      var interval = first ? "" : secs(grouped ? e.class_interval_s : e.interval_time_s);
       var entry = el("td");
       entry.append(el("div", "", e.entry), el("div", "muted", fitName(e.driver, NAME_MAX)));
       var status = el("td");
@@ -135,12 +173,17 @@
       if (e.finished) status.append(el("span", "pill ok", "Finished"));
       if (e.rejoin) status.append(el("span", "pill amb", "Rejoin"));
       if (e.position_mismatch) status.append(el("span", "pill amb", "GT7 P" + e.gt7_position));
-      tr.append(el("td", "num", String(e.pos)), entry, el("td", "num", e.laps == null ? "" : String(e.laps)),
-                el("td", "num", gap), el("td", "num", e.pos > 1 ? secs(e.interval_time_s) : ""), status,
+      tr.append(el("td", "num", String(grouped ? e.class_pos : e.pos)), entry, el("td", "num", e.laps == null ? "" : String(e.laps)),
+                el("td", "num", gap), el("td", "num", interval), status,
                 el("td", "num", e.pit_stops == null ? "" : String(e.pit_stops)),
                 el("td", "num", e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""),
                 el("td", "mono", e.compound || ""));
       return tr;
+    }
+    var rows = [];
+    groupRows(s).forEach(function (g) {
+      if (g.grouped) rows.push(header(g));
+      g.rows.forEach(function (e) { rows.push(build(e, g.grouped)); });
     });
     if (!rows.length) {
       var td = el("td", "muted", "No cars in this sample.");

@@ -141,6 +141,53 @@ laps on GT7's counter, from the car that took over after the last stint switch: 
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
 event setting. A lap count set while the final stint is already on air applies at once.
 
+### Classes
+
+A league that runs several car classes in one lobby names each entry's class in the
+`Class` column of the [Configuration tab](Sheet-Template#configuration-tab), with an
+optional `Class Color`. With at least two named classes every screen ranks the cars
+within their class. With one class or none everything stays as described above. Entries
+with an empty `Class` cell form a group at the end, labelled **Unclassed** everywhere
+except on the tower.
+
+- **Order**: the relay keeps one overall order, and it decides when each car takes the
+  flag. Each car also gets its class position, the gap to its class leader and the
+  interval to the class car ahead, from the same timing. A car lapped by a faster class
+  is not lapped in its own. The class of the overall leader comes first, the others
+  follow by the best position each holds.
+- **Lap count per class**: the first class takes the lap count above. The first class is
+  the first named class in the current overall order (an unclassed leader does not
+  count), so the count can move to another class during the race. For
+  every other class Race Control or the director type the count into the desk's **Class
+  laps** row (1 to 999, empty clears it). It belongs to the stint on air, shows in the
+  class header and never finishes a car. It shows only while the overall count shows, so
+  never in a timed race, and in an endurance event only once the final lobby's cars are
+  on the line: it belongs to the final lobby's row. An optional Schedule column
+  `Laps <Class>` fills it when that row goes on air, unless the desk already holds a
+  value or cleared it for that stint. Until a count shows, the header shows the class
+  leader's lap only.
+- **Fastest lap**: the relay keeps one per class next to the overall one. On the desk's
+  fastest lap form a class picked in the class selector narrows **Clear fastest lap**
+  and **Set fastest lap** to that class's lap; the overall lap stays. A race reset
+  clears them all.
+- **Timing tower**: each class sits under a header with its name in the class colour and
+  its leader's lap against the class lap count. The rows show class position, gap and
+  interval. When all classes fit in 15 rows, headers included, the tower shows them
+  together and the fastest lap box cycles through the classes every 15 seconds. When
+  they do not fit, the tower shows one class per page for one gap and one interval
+  phase (30 seconds), and the box shows the fastest lap of that page's class. A class of
+  more than 14 cars shows its first 14.
+- **Track map**: each dot keeps its entry colour inside a ring in the class colour. An
+  estimate's dashed amber ring replaces it.
+- **Public timing page, desks and cockpit** group the same way with a coloured header
+  per class. The public page lists each class's fastest lap and adds a filter (all
+  classes or one), kept per browser. A [timing host](#hosted-live-timing-optional)
+  deployed before classes existed shows them only after a redeploy. The
+  desks show the class position, with the overall position on hover.
+- **Recording**: samples carry each car's class and class position, and the frozen
+  standings page groups by class with the class gaps. The CSV adds `class` and
+  `class_pos` columns only when the recording holds samples from class mode.
+
 ### Dashboard
 
 The relay keeps a viewer version of the race for the broadcast dashboard, the
@@ -159,7 +206,7 @@ It never carries connection ids, corrections or who made them.
 - **The fastest race lap** is kept across stints and survives a relay restart on the same
   track layout; the next `event start` or a race reset clears it. A lap faster than the
   line allows at 120 m/s never counts. Race Control and the director can clear or set it
-  (`POST /drivers/race/fastest`).
+  (`POST /drivers/race/fastest`, with an optional `class` for one class's lap).
 - **Delay**: the event setting holds the dashboard, and the stint it shows, back by up to
   120 seconds to match the commentator feed on air. Race Control and the director keep
   the live race. **Show dashboard**, **Hide dashboard** and the display switches act at

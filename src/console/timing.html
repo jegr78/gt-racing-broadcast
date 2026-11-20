@@ -17,7 +17,12 @@
   #session .flag { color: #ff6b6b; font-weight: 800; }
   #session .stale { color: var(--warn); }
   main { padding: 12px 16px 24px; max-width: 1100px; margin: 0 auto; }
-  .cols { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .cols { display: flex; flex-wrap: wrap; gap: 6px; }
+  #classpick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  #classpick[hidden] { display: none; }
+  #classpick select { background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 999px;
+                      padding: 3px 8px; font: inherit; font-size: 13px; }
   .cols label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted);
                 border: 1px solid var(--edge); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
   .cols input { margin: 0; }
@@ -33,6 +38,9 @@
   td.brand img { display: block; width: 36px; height: 24px; box-sizing: border-box; padding: 2px; margin: 0 auto;
                  object-fit: contain; border-radius: 4px; background: #f2f4f7; }
   td.drv small { display: block; color: var(--muted); font-size: 12px; }
+  tr.cls td { background: #1b1f25; font-weight: 800; white-space: normal; }
+  tr.cls .lap { margin-left: 10px; color: var(--muted); font-weight: 600; font-size: 13px; }
+  .flcls { font-weight: 800; margin-right: 8px; }
   tr.box td { color: var(--warn); }
   tr.off td { color: var(--muted); }
   tr.dnf td[data-col="gap"] { color: var(--accent); font-weight: 700; }
@@ -63,7 +71,10 @@
   <div id="session"></div>
 </div></header>
 <main>
-  <div class="cols" id="cols"></div>
+  <div class="tools">
+    <label id="classpick" hidden><span>Class</span><select id="class-filter"></select></label>
+    <div class="cols" id="cols"></div>
+  </div>
   <div class="wrap"><table id="timing"><thead></thead><tbody></tbody></table>
     <div id="state">Waiting for timing data…</div></div>
   <div id="fastest"></div>
@@ -169,6 +180,11 @@
     const saved = localStorage.getItem("timing-hidden");
     if (saved !== null) hidden = new Set(JSON.parse(saved));
   } catch (e) { /* defaults */ }
+  let classPick = null;   // the class the reader filters to; null shows them all
+  try {
+    const saved = JSON.parse(localStorage.getItem("timing-class"));
+    if (typeof saved === "string") classPick = saved;
+  } catch (e) { /* all classes */ }
   let last = null;
   // Poll pacing comes from the server (X-Poll-After); between polls the clock runs locally.
   let etag = null, interval = 2, got = 0, dataAge = 0;
@@ -190,6 +206,9 @@
     return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
   }
   function hex(c) { return /^#[0-9a-fA-F]{3,8}$/.test(c || "") ? c : ""; }
+  function shade(c) {
+    return typeof c === "string" && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c) ? c : "";
+  }
 
   function switches() {
     const box = $("cols");
@@ -206,6 +225,50 @@
       label.append(input, el("span", "", c[1]));
       return label;
     }));
+  }
+
+  // The class filter: All plus each named class, rebuilt only when the classes change.
+  let pickNames = [];
+  function picker(classes) {
+    const names = classes.map(function (c) { return c.name; }).filter(Boolean);
+    const sel = $("class-filter");
+    $("classpick").hidden = !names.length;
+    if (JSON.stringify(names) !== JSON.stringify(pickNames)) {
+      pickNames = names;
+      const all = el("option", "", "All classes");
+      all.value = "all";
+      sel.replaceChildren(all, ...names.map(function (n, i) {
+        const o = el("option", "", n);
+        o.value = "c" + i;
+        return o;
+      }));
+    }
+    const shown = names.indexOf(classPick) >= 0 ? classPick : null;
+    sel.value = shown === null ? "all" : "c" + names.indexOf(shown);
+    return shown;
+  }
+  $("class-filter").addEventListener("change", function () {
+    const v = $("class-filter").value;
+    classPick = v === "all" ? null : pickNames[parseInt(v.slice(1), 10)] || null;
+    try { localStorage.setItem("timing-class", JSON.stringify(classPick)); } catch (e) { /* session only */ }
+    if (last) render(last);
+  });
+  function classHead(c, span) {
+    const name = el("span", "", c.name || "Unclassed");
+    if (shade(c.color)) name.style.color = shade(c.color);
+    const td = el("td");
+    td.colSpan = span;
+    td.append(name);
+    if (typeof c.lap === "number") {
+      td.append(el("span", "lap", "Lap " + c.lap + (typeof c.laps === "number" ? " / " + c.laps : "")));
+    }
+    const tr = el("tr", "cls");
+    tr.append(td);
+    return tr;
+  }
+  function fastestText(fl) {
+    return [el("span", "fl", "Fastest lap " + lapTime(fl.ms)),
+            document.createTextNode(" · " + fitName(fl.driver, NAME_MAX) + " (" + (fl.team || fl.entry) + ")")];
   }
 
   function cell(key, value, cls) {
@@ -299,32 +362,55 @@
     cols.forEach(function (c) { $("timing").tHead.rows[0].appendChild(el("th", "", c[1])); });
     const rows = quali ? (d.qualifying || []) : (d.entries || []);
     const fl = d.fastest;
-    $("timing").tBodies[0].replaceChildren(...rows.map(function (e, i) {
-      const done = e.finished && e.status !== "est";
-      const tr = el("tr", done ? "" : e.status === "box" ? "box" : e.status === "retired" ? "off dnf"
-                    : ["no_data", "dc", "no_sender"].indexOf(e.status) >= 0 ? "off" : "");
-      const all = {
-        pos: cell("pos", e.pos, "pos"), brand: brandCell(e), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
-        laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
-        gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
-                  : e.status === "est" ? estGap(e, i)
-                  : e.finished ? finishedGap(e, i)
-                  : STATUS[e.status] || (i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
-                  : typeof e.gap_s === "number" ? "+" + e.gap_s.toFixed(1) : "")),
-        int: cell("int", i && typeof e.interval_s === "number" ? "+" + e.interval_s.toFixed(1) : ""),
-        last: cell("last", lapTime(e.last_lap_ms),
-                   fl && fl.entry === e.entry && fl.ms === e.last_lap_ms ? "fl" : ""),
-        fuel: cell("fuel", typeof e.fuel_l === "number" ? e.fuel_l.toFixed(1) + " L" : ""),
-        best: cell("best", lapTime(e.best_ms), i === 0 ? "fl" : ""),
-      };
-      cols.forEach(function (c) { tr.appendChild(all[c[0]]); });
-      return tr;
-    }));
+    // Class mode: each class under its header with positions and gaps within the class.
+    const classes = !quali && Array.isArray(d.classes)
+      ? d.classes.filter(function (c) { return c && typeof c.name === "string"; }) : [];
+    const shown = picker(classes);
+    const groups = classes.length ? classes.filter(function (c) { return shown === null || c.name === shown; })
+      .map(function (c) {
+        return {cls: c, rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === c.name; })};
+      }) : [{cls: null, rows: rows}];
+    const body = [];
+    groups.forEach(function (g) {
+      if (g.cls) body.push(classHead(g.cls, cols.length));
+      const flg = g.cls ? g.cls.fastest : fl;
+      g.rows.forEach(function (e, i) {
+        const v = g.cls ? {pos: e.class_pos, lapped: e.class_lapped, gap_s: e.class_gap_s, interval_s: e.class_interval_s} : e;
+        const done = e.finished && e.status !== "est";
+        const tr = el("tr", done ? "" : e.status === "box" ? "box" : e.status === "retired" ? "off dnf"
+                      : ["no_data", "dc", "no_sender"].indexOf(e.status) >= 0 ? "off" : "");
+        const all = {
+          pos: cell("pos", v.pos, "pos"), brand: brandCell(e), num: numCell(e), drv: driverCell(e), tyre: tyreCell(e),
+          laps: cell("laps", e.laps), pits: cell("pits", e.pit_stops || 0),
+          gap: cell("gap", quali ? (i && typeof e.gap_ms === "number" ? "+" + (e.gap_ms / 1000).toFixed(3) : "")
+                    : e.status === "est" ? estGap(v, i)
+                    : e.finished ? finishedGap(v, i)
+                    : STATUS[e.status] || (i === 0 ? "" : v.lapped ? "+" + v.lapped + " L"
+                    : typeof v.gap_s === "number" ? "+" + v.gap_s.toFixed(1) : "")),
+          int: cell("int", i && typeof v.interval_s === "number" ? "+" + v.interval_s.toFixed(1) : ""),
+          last: cell("last", lapTime(e.last_lap_ms),
+                     flg && flg.entry === e.entry && flg.ms === e.last_lap_ms ? "fl" : ""),
+          fuel: cell("fuel", typeof e.fuel_l === "number" ? e.fuel_l.toFixed(1) + " L" : ""),
+          best: cell("best", lapTime(e.best_ms), i === 0 ? "fl" : ""),
+        };
+        cols.forEach(function (c) { tr.appendChild(all[c[0]]); });
+        body.push(tr);
+      });
+    });
+    $("timing").tBodies[0].replaceChildren(...body);
     $("state").hidden = rows.length > 0;
     $("fastest").replaceChildren();
-    if (fl && !quali) {
-      $("fastest").append(el("span", "fl", "Fastest lap " + lapTime(fl.ms)),
-                          document.createTextNode(" · " + fitName(fl.driver, NAME_MAX) + " (" + (fl.team || fl.entry) + ")"));
+    if (classes.length) {
+      groups.forEach(function (g) {
+        if (!g.cls.fastest) return;
+        const name = el("span", "flcls", g.cls.name || "Unclassed");
+        if (shade(g.cls.color)) name.style.color = shade(g.cls.color);
+        const line = el("div");
+        line.append(name, ...fastestText(g.cls.fastest));
+        $("fastest").append(line);
+      });
+    } else if (fl && !quali) {
+      $("fastest").append(...fastestText(fl));
     }
   }
 

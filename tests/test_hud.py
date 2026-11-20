@@ -1244,6 +1244,20 @@ def _display(sid, classes, rule_sets):
     return best[1] if best else "inline"
 
 
+def t_config_roster_reads_class_and_class_color():
+    r = m.parse_config_roster(
+        "Teams,Number,Class,Class Color\nAlpha #1,1,HYPERCAR,#c00\n"
+        "Beta #2,2,GT3,url(x)\nGamma #3,3,,\nDelta #4,4," + "L" * 40 + ",\n")
+    assert r["Alpha #1"]["carClass"] == "HYPERCAR" and r["Alpha #1"]["classColor"] == "#c00", r
+    assert r["Beta #2"]["classColor"] == "", "an implausible colour is dropped"
+    assert r["Gamma #3"]["carClass"] == "" and r["Gamma #3"]["classColor"] == "", r
+    assert r["Delta #4"]["carClass"] == "L" * 24, "the class name is capped at 24 chars"
+    r2 = m.parse_config_roster("Teams,Class,Class Colour\nX #1,GT3,#0f0\n")
+    assert r2["X #1"]["classColor"] == "#0f0" and "carClass" in r2["X #1"], r2
+    plain = m.parse_config_roster("Teams\nX #1\n")["X #1"]
+    assert "carClass" not in plain and "classColor" not in plain, "columns are optional"
+
+
 def t_hud_slots_hidden_when_empty_even_if_visible():
     import sys as _sys
     _sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))

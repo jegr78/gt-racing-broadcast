@@ -1404,6 +1404,164 @@ def t_a_start_hold_estimate_shows_its_reference_gap_plus_the_lag():
         (rb, rx)
 
 
+def t_class_positions_and_gaps_follow_the_class():
+    race = rd.Race(TRACE, formation=False)
+    race.set_classes({"A": "H", "B": "G", "C": "G"})
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60), Car(race, "C", "c", L - 120)
+    t = _drive(race, [a, b, c], [60, 30, 30], 0.0, L / 30 * 1.2)      # A laps both
+    rb, rc = _row(race, "B", t), _row(race, "C", t)
+    assert rb["lapped"] == 1 and rb["class"] == "G", rb
+    assert rb["class_pos"] == 1 and rb["class_gap_s"] == 0 and rb["class_lapped"] == 0, rb
+    behind = (rb["distance_m"] - rc["distance_m"]) / 30
+    assert rc["class_pos"] == 2 and rc["class_lapped"] == 0 and abs(rc["class_gap_s"] - behind) < 0.05, (behind, rc)
+    assert abs(rc["class_interval_s"] - behind) < 0.05 and rb["class_interval_s"] is None, (rb, rc)
+    ra = _row(race, "A", t)
+    assert ra["class_pos"] == 1 and ra["class_gap_s"] == 0, ra
+
+
+def t_a_class_count_shows_only_where_the_overall_count_shows():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    race.set_classes({"A": "H", "B": "G"})
+    old_a, old_b = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    t = _drive(race, [old_a, old_b], [50, 40], 0.0, 3 * L / 50)
+    race.open_change_window(t)
+    race.final_lobby(9, t)
+    t = _drive(race, [old_a, old_b], [50, 40], t, 2)
+    assert race.standings(t)["class_counts"] == {"H": False, "G": False}, \
+        f"before the final lobby's cars count, no class shows a count: {race.standings(t)['class_counts']}"
+    old_a.box = old_b.box = True
+    t = _drive(race, [old_a, old_b], [None, None], t, 3)
+    new_a, new_b = Car(race, "A", "a2", L - 15, "Lea"), Car(race, "B", "b2", L - 60, "Bo")
+    t = _drive(race, [new_a, new_b], [40, 40], t, 2)
+    new_a.box = new_b.box = True
+    t = _drive(race, [new_a, new_b], [None, None], t, 3)
+    new_a.box = new_b.box = False
+    t = _drive(race, [new_a, new_b], [50, 40], t, 20)
+    st = race.standings(t)
+    assert st["lap"]["count"] == 9 and st["class_counts"] == {"H": True, "G": True}, \
+        f"with the final lobby on the line every class shows its count: {st['lap']} {st['class_counts']}"
+    single = rd.Race(TRACE, formation=False, finish_mode="laps")
+    single.set_classes({"A": "H", "B": "G"})
+    cars = [Car(single, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50))]
+    t = _drive(single, cars, [40] * 2, 0.0, 12)
+    assert single.standings(t)["class_counts"] == {"H": False, "G": False}, \
+        "a single lobby without a lap count shows no class count either"
+    single.lap_count = 20
+    assert single.standings(t)["class_counts"] == {"H": True, "G": True}, "a single lobby with a count shows them"
+    timed = rd.Race(TRACE, formation=False, finish_mode="time", lap_count=20)
+    timed.set_classes({"A": "H", "B": "G"})
+    cars = [Car(timed, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50))]
+    t = _drive(timed, cars, [40] * 2, 0.0, 12)
+    assert timed.standings(t)["class_counts"] == {"H": False, "G": False}, "a timed race shows no class count"
+    plain = rd.Race(TRACE, formation=False)
+    assert plain.standings(0.0)["class_counts"] == {}, "outside class mode there is none"
+
+
+def t_an_entry_without_a_class_forms_its_own_group():
+    race = rd.Race(TRACE, formation=False)
+    race.set_classes({"A": "H", "B": "G"})
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90))]
+    t = _drive(race, cars, [40] * 3, 0.0, 12)
+    st = race.standings(t)
+    assert st["classes"] == ["H", "G", ""], st["classes"]
+    rc = _row(race, "C", t)
+    assert rc["class"] == "" and rc["class_pos"] == 1 and rc["class_gap_s"] == 0, rc
+
+
+def t_the_unclassified_group_stays_last_when_it_leads():
+    race = rd.Race(TRACE, formation=False)
+    race.set_classes({"B": "G", "C": "H"})
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50), ("C", 90))]
+    t = _drive(race, cars, [40] * 3, 0.0, 12)
+    assert race.standings(t)["classes"] == ["G", "H", ""], race.standings(t)["classes"]
+
+
+def t_one_named_class_and_blank_cells_is_no_class_mode():
+    race = rd.Race(TRACE, formation=False)
+    race.set_classes({"A": "GT3", "B": ""})
+    race.set_roster(["A", "B", "X"])
+    a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+    t = _drive(race, [a, b], [40, 40], 0.0, 12)
+    st = race.standings(t)
+    assert st["classes"] == [], f"blank Class cells never make a second class: {st['classes']}"
+    assert all(r["class"] is None and r["class_pos"] is None for r in st["entries"]), st["entries"]
+
+
+def t_one_class_leaves_the_rows_unchanged():
+    for classes in ({"A": "GT3", "B": "GT3", "X": "GT3"}, {}, {"A": "", "B": ""}):
+        race = rd.Race(TRACE, formation=False)
+        race.set_classes(classes)
+        race.set_roster(["A", "B", "X"])
+        a, b = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50)
+        t = _drive(race, [a, b], [40, 40], 0.0, 12)
+        st = race.standings(t)
+        assert st["classes"] == [], (classes, st["classes"])
+        for r in st["entries"]:
+            assert r["class"] is None and r["class_pos"] is None and r["class_gap_s"] is None \
+                and r["class_interval_s"] is None and r["class_lapped"] is None, (classes, r)
+
+
+def t_the_fastest_lap_is_kept_per_class():
+    race = rd.Race(TRACE, formation=True)
+    race.set_classes({"A": "H", "B": "G"})
+    a, b = Car(race, "A", "a", L - 60, "Lena"), Car(race, "B", "b", L - 15, "Marco")
+    _drive(race, [a, b], [50, 60], 0.0, 3 * L / 50 + 2)       # B leads and sets the faster laps first
+    fa, fb = race.fastest_by_class.get("H"), race.fastest_by_class.get("G")
+    assert fa and fa["entry"] == "A" and fa["driver"] == "Lena" and abs(fa["ms"] - L / 50 * 1000) < 150, fa
+    assert fb and fb["entry"] == "B" and abs(fb["ms"] - L / 60 * 1000) < 150, fb
+    assert race.fastest == fb, race.fastest
+
+
+def t_a_rejected_lap_sets_no_class_fastest_lap():
+    race = rd.Race(TRACE, formation=False)
+    race.set_classes({"A": "H", "B": "G"})
+    a = Car(race, "A", "a", L - 15)
+    t = _drive(race, [a], [50], 0.0, L / 50 - 2)
+    a.forge = 1000
+    _drive(race, [a], [50], t, 5)
+    assert race.fastest_by_class == {}, race.fastest_by_class
+
+
+def t_retired_and_no_sender_cars_hold_a_class_place_but_no_class_gap():
+    race, (a, b, c, d), t = _retire_field()
+    race.set_classes({"A": "H", "C": "H", "B": "G", "D": "G", "X": "G"})
+    race.retire("B", True, t)
+    t = _drive(race, [a, b, c, d], [40] * 4, t, 3)
+    rows = {r["entry"]: r for r in race.standings(t)["entries"]}
+    assert [rows[e]["class_pos"] for e in "DXB"] == [1, 2, 3], rows
+    assert rows["D"]["class_gap_s"] == 0 and rows["D"]["class_interval_s"] is None, \
+        f"a retired car is no class reference: {rows['D']}"
+    for e in "XB":
+        assert rows[e]["class_gap_s"] is None and rows[e]["class_interval_s"] is None \
+            and rows[e]["class_lapped"] is None, rows[e]
+    assert abs(rows["C"]["class_gap_s"] - 2.0) < 0.05, rows["C"]
+
+
+def t_an_estimated_car_takes_its_class_gap_from_its_reference():
+    race, (a, b), t = _field()
+    race.set_classes({"A": "H", "B": "G", "X": "G"})
+    race.estimate("X", "B", 1.0, t)
+    t = _drive(race, [a, b], [40, 40], t, 5)
+    rx = _row(race, "X", t)
+    assert rx["status"] == "est" and rx["class_pos"] == 2 and rx["class_lapped"] == 0, rx
+    assert abs(rx["class_gap_s"] - 1.0) < 0.02 and abs(rx["class_interval_s"] - 1.0) < 0.02, rx
+
+
+def t_an_estimated_class_leader_behind_another_class_leads_its_class():
+    race = rd.Race(TRACE, formation=False)
+    race.set_roster(["A", "B", "C", "X"])
+    race.set_classes({"A": "H", "B": "H", "C": "G", "X": "G"})
+    a, b, c = Car(race, "A", "a", L - 10), Car(race, "B", "b", L - 50), Car(race, "C", "c", L - 170)
+    t = _drive(race, [a, b, c], [40, 40, 40], 0.0, 12)
+    race.estimate("X", "B", 1.0, t)
+    t = _drive(race, [a, b, c], [40, 40, 40], t, 5)
+    rx, rc = _row(race, "X", t), _row(race, "C", t)
+    assert rx["class_pos"] == 1 and rx["class_gap_s"] == 0 and rx["class_lapped"] == 0 \
+        and rx["class_interval_s"] is None, rx
+    assert rc["class_pos"] == 2 and abs(rc["class_gap_s"] - 2.0) < 0.05 \
+        and abs(rc["class_interval_s"] - 2.0) < 0.05, rc
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -39,6 +39,8 @@
   .dd-row { display: grid; grid-template-columns: 30px auto 1fr 30px 42px 96px 40px; align-items: center;
             height: 40px; padding: 0 10px; gap: 8px; }
   .dd-row:nth-child(even) { background: var(--dd-row); }
+  #dd-rows.grouped .dd-row:nth-child(even) { background: none; }
+  #dd-rows.grouped .dd-row.alt { background: var(--dd-row); }
   .dd-pos { font-weight: 800; text-align: right; }
   /* Tyre compound: a coloured letter in a ring, as GT7 broadcasts show it. */
   .dd-tyre { width: 30px; height: 30px; box-sizing: border-box; border-radius: 50%; border: 3px solid transparent;
@@ -87,7 +89,15 @@
     position: absolute; left: 48px; top: 760px; width: 500px; height: 44px; box-sizing: border-box;
     padding: 0 14px; background: var(--dd-bg); display: flex; align-items: center; gap: 12px; font-size: 18px;
   }
+  .dd-class { display: flex; align-items: center; gap: 10px; height: 32px; box-sizing: border-box; padding: 0 10px;
+              border-left: 6px solid #59626e; background: rgba(255, 255, 255, 0.08); font-size: 15px; }
+  .dd-class-name { min-width: 0; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dd-class-lap { flex: none; margin-left: auto; font-size: 13px; font-weight: 700; color: var(--dd-dim);
+                  letter-spacing: .06em; font-variant-numeric: tabular-nums; }
   #drivers-fastest b { background: var(--dd-purple); color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 14px; }
+  #dd-fl-class { flex: none; font-size: 14px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  #dd-fl-class:empty { display: none; }
   #dd-fl-who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #dd-fl-time { flex: none; margin-left: auto; color: var(--dd-purple); font-weight: 700; font-variant-numeric: tabular-nums; }
   #drivers-fastest.none { visibility: hidden; }
@@ -109,7 +119,7 @@
     <div class="dd-row"><span class="dd-pos">3</span><span class="dd-id"><span class="dd-brand"><img src="/drivers/brand/ferrari" alt=""></span><span class="dd-num" style="background:#2b8a3e">33</span></span><span class="dd-name"><span class="dd-team">Green Line</span><span class="dd-driver">KOVAC</span></span><span class="dd-tyre RM">RM</span><span class="dd-fuel"><span class="dd-fuel-bar"><i style="height:83%"></i></span><span>83%</span></span><span class="dd-val">+3.9</span><span class="dd-pit">P0</span></div>
   </div></div>
   <div id="drivers-fastest" data-edit="Fastest lap" data-edit-kind="text">
-    <b>FL</b><span id="dd-fl-who">BERG · Team Redline</span><span id="dd-fl-time">1:58.412</span>
+    <b>FL</b><span id="dd-fl-class"></span><span id="dd-fl-who">BERG · Team Redline</span><span id="dd-fl-time">1:58.412</span>
   </div>
   <div id="drivers-map" data-edit="Track map" data-edit-kind="box"><svg id="dd-svg" viewBox="0 0 100 100"></svg></div>
 <script src="/overlay-fit.js" data-fit-live></script>
@@ -256,30 +266,81 @@
     r.appendChild(el("span", "dd-pit", pits));
     return r;
   }
+  // The tower's pages: without classes one page of the first rows; with classes each class under
+  // its header, all on one page when they fit, else one class per page cut at the page.
+  function pages(entries, list, max) {
+    if (!list || !list.length) return [entries.slice(0, max)];
+    const groups = list.map(function (cls) {
+      return [{header: cls}].concat(entries.filter(function (e) { return (e.class || "") === cls.name; }));
+    }).filter(function (g) { return g.length > 1; });
+    const all = [].concat(...groups);
+    if (all.length <= max) return [all];
+    return groups.map(function (g) { return g.slice(0, max); });
+  }
+  function classHeader(cls) {
+    const color = safeColor(cls.color, "#59626e");
+    const h = el("div", "dd-class");
+    h.style.borderLeftColor = color;
+    const name = el("span", "dd-class-name", cls.name || "");
+    name.style.color = safeColor(cls.color, "var(--dd-fg)");
+    h.appendChild(name);
+    h.appendChild(el("span", "dd-class-lap",
+                     cls.lap ? "LAP " + cls.lap + (cls.laps ? " / " + cls.laps : "") : ""));
+    return h;
+  }
+  // A row as its class sees it: class position, gap, interval and laps down.
+  function inClass(e) {
+    return Object.assign({}, e, {pos: e.class_pos, gap_s: e.class_gap_s, interval_s: e.class_interval_s,
+                                 lapped: e.class_lapped || 0});
+  }
   function renderRace(d) {
     const lap = d.lap || {};
     document.getElementById("dd-lap").textContent =
       typeof d.remaining === "number" ? clock(d.remaining)
       : lap.leader ? "LAP " + lap.leader + (lap.count ? " / " + lap.count : "") : "";
     const fl = d.fastest;
+    const list = d.classes || [];
     noteLaps(d.entries || []);
-    rows.replaceChildren(...(d.entries || []).slice(0, MAX_ROWS).map(function (e, i) {
-      return row(e, i, column(e, i), "P" + (e.pit_stops || 0),
-                 fl && fl.entry === e.entry && e.last_lap_ms === fl.ms && lapShows(e));
+    const book = pages(d.entries || [], list, MAX_ROWS);
+    const page = book[book.length > 1 ? Math.floor(Date.now() / (CYCLE_MS * PHASES.length)) % book.length : 0];
+    let inGroup = 0;
+    let group = null;
+    rows.classList.toggle("grouped", list.length > 0);
+    rows.replaceChildren(...page.map(function (item, i) {
+      if (item.header) { inGroup = 0; group = item.header; return classHeader(item.header); }
+      const e = list.length ? inClass(item) : item;
+      const at = list.length ? e.pos - 1 : i;
+      const best = list.length ? group && group.fastest : fl;
+      const r = row(e, at, column(e, at), "P" + (e.pit_stops || 0),
+                    best && best.entry === e.entry && e.last_lap_ms === best.ms && lapShows(e));
+      if (list.length && inGroup++ % 2) r.className += " alt";
+      return r;
     }));
     document.getElementById("dd-phase").textContent = phaseLabel();
+    // A paged tower shows its page's class; one page cycles the classes that have a lap.
+    const timed = list.filter(function (c) { return c.fastest; });
+    const cls = book.length > 1 ? page[0].header
+      : timed.length ? timed[Math.floor(Date.now() / CYCLE_MS) % timed.length] : null;
+    const shown = list.length ? cls && cls.fastest : fl;
+    const label = document.getElementById("dd-fl-class");
+    label.textContent = cls ? cls.name || "" : "";
+    label.style.color = cls ? safeColor(cls.color, "") : "";
     const box = document.getElementById("drivers-fastest");
-    box.classList.toggle("none", !fl);
-    if (fl) {
+    box.classList.toggle("none", !shown);
+    if (shown) {
       document.getElementById("dd-fl-who").textContent =
-        surname(fl.driver) + " · " + (fl.team || String(fl.entry).replace(/\s*#\d+$/, ""));
-      document.getElementById("dd-fl-time").textContent = lapTime(fl.ms);
+        surname(shown.driver) + " · " + (shown.team || String(shown.entry).replace(/\s*#\d+$/, ""));
+      document.getElementById("dd-fl-time").textContent = lapTime(shown.ms);
     }
     drawCars(d.entries || []);
   }
   function renderQualifying(d) {
     document.getElementById("dd-lap").textContent = "QUALIFYING";
     document.getElementById("dd-phase").textContent = "";
+    rows.classList.remove("grouped");
+    const label = document.getElementById("dd-fl-class");
+    label.textContent = "";
+    label.style.color = "";
     rows.replaceChildren(...(d.qualifying || []).slice(0, MAX_ROWS).map(function (e, i) {
       return row(e, i, i === 0 ? lapTime(e.best_ms) : e.gap_ms === null ? "" : "+" + (e.gap_ms / 1000).toFixed(3), "");
     }));
@@ -363,6 +424,9 @@
       c.setAttribute("cx", p[0]); c.setAttribute("cy", p[1]); c.setAttribute("r", DOT_R);
       c.setAttribute("fill", safeColor(e.color, "#39414d"));
       c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", 0.4);
+      if (e.class_color) {
+        c.setAttribute("stroke", safeColor(e.class_color, "#fff")); c.setAttribute("stroke-width", 0.8);
+      }
       if (e.status === "est") {   // an estimated position: amber dashed ring, as the tower's EST tag
         c.setAttribute("stroke", "#ffb454"); c.setAttribute("stroke-width", 0.8);
         c.setAttribute("stroke-dasharray", "1 0.7");
