@@ -5,7 +5,7 @@ receive time on one clock, and reads `standings`. GT7's lap counter reads 0 on t
 grid and steps at each crossing of the finish line. The finish line's station on the
 picked layout's line is learned per car from its own crossings; a car that has not
 crossed yet uses the agreeing medoid of the counting cars of at least LINE_QUORUM
-entries, so one sender cannot move it for everyone.
+entries, so one sender cannot move it for everyone; once agreed it stays.
 A car's distance is `anchor + (lap - lap0) * L + frac - frac0`, with `frac` its
 position past the line:
 the counter gives whole laps, the projection the fraction. Only near the line, where
@@ -227,6 +227,7 @@ class Race:
         self._retired = set()
         self._names = {}            # (entry, registered driver or "") -> the name Race Control set
         self._ended_est = []        # entries whose estimate their returning data ended
+        self._shared_line = None    # the line station a quorum of counting cars agreed on
 
     # -- commands ------------------------------------------------------------------
     def set_roster(self, entries):
@@ -535,20 +536,28 @@ class Race:
         return min(d, self.length - d)
 
     def _line_of(self, car):
-        """This car's line station; else the medoid of the counting cars of at least
-        LINE_QUORUM entries when most of them agree within SNAP_M; else None."""
+        """This car's line station; else the field's shared one (`_agree`)."""
         if car.line_s is not None:
             return car.line_s
+        return self._agree()
+
+    def _agree(self):
+        """The medoid of the counting cars of at least LINE_QUORUM entries when most of
+        them agree within SNAP_M. Once found it stays the fallback, because a driver
+        change swaps every counting car for one without a crossing of its own; None
+        before any quorum agreed."""
         known = []
         for e in self._entries.values():
             c = self._cars.get(e.active)
             if c is not None and c.counting and c.line_s is not None:
                 known.append(c.line_s)
         if len(known) < LINE_QUORUM:
-            return None
+            return self._shared_line
         medoid = min(known, key=lambda a: sum(self._circ(a, b) for b in known))
         close = sum(1 for b in known if self._circ(medoid, b) <= SNAP_M)
-        return medoid if 2 * close > len(known) else None
+        if 2 * close > len(known):
+            self._shared_line = medoid
+        return self._shared_line
 
     def _move(self, car, entry):
         """The producer moved this connection to `entry`: it stops counting for the old
@@ -599,6 +608,7 @@ class Race:
         ent.distance, ent.since = self._raw(car, car.lap, s), t
         if from_line and frac > self.length - SNAP_M:
             ent.distance -= self.length    # the counter flipped: a few metres short is past it
+        self._agree()
         return True
 
     def _late_start_ok(self, ent, lap, lap0):

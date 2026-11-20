@@ -513,13 +513,68 @@ def t_the_line_medoid_needs_a_quorum_of_counting_entries():
     cars = [Car(race, e, e.lower(), L - 15 - 10 * i) for i, e in enumerate("ABC")]
     _drive(race, cars, [50, 50, 50], 0.0, 3)
     loner = rd._Car("z", "Z")
-    assert race._line_of(loner) is not None, "three counting entries that agree give a line"
+    agreed = race._line_of(loner)
+    assert agreed is not None, "three counting entries that agree give a line"
     race._cars["a"].line_s, race._cars["b"].line_s = L / 2, L / 4
+    assert race._line_of(loner) == agreed, "a later disagreement keeps the line the quorum agreed on"
+    race._shared_line = None
     assert race._line_of(loner) is None, "no majority within SNAP_M: no shared line"
     two = rd.Race(TRACE, formation=False)
     pair = [Car(two, e, e.lower(), L - 15 - 10 * i) for i, e in enumerate("AB")]
     _drive(two, pair, [50, 50], 0.0, 3)
     assert two._line_of(loner) is None, "two entries are no quorum"
+
+
+def t_every_car_leaving_the_next_lobbys_box_takes_over_whatever_the_others_do():
+    """The next lobby's cars connect in the box and leave it within seconds of each
+    other, before any of them crosses the line: by the last exit no counting car has a
+    line station of its own."""
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    teams = "ABCD"
+    old = [Car(race, e, e.lower() + "1", L - 15 - 20 * i, "Old" + e) for i, e in enumerate(teams)]
+    t = _drive(race, old, [50] * 4, 0.0, 60)
+    race.open_change_window(t)
+    for car in old:
+        car.box = True
+    t = _drive(race, old, [None] * 4, t, 3)
+    anchors = {e: _row(race, e, t)["distance_m"] for e in teams}
+    new = []
+    for i, e in enumerate(teams):
+        car = Car(race, e, e.lower() + "2", 0.0, "New" + e)
+        _new_lobby(car, L - 300 - 20 * i)
+        new.append(car)
+    t = _drive(race, new, [None] * 4, t, 3)
+    for car in new:
+        car.box = False
+        t = _drive(race, new, [40 if c.box is False else None for c in new], t, 1)
+    t = _drive(race, new, [40] * 4, t, 3)
+    rows = {e: _row(race, e, t) for e in teams}
+    assert all(rows[e]["driver"] == "New" + e for e in teams), \
+        f"every box exit takes its entry over: {[(e, r['driver'], r['status']) for e, r in rows.items()]}"
+    assert all(abs(rows[e]["distance_m"] - anchors[e] - 40 * (7 - i)) < 25 for i, e in enumerate(teams)), \
+        f"each continues from its anchor: {[(rows[e]['distance_m'], anchors[e]) for e in teams]}"
+
+
+def t_a_restart_lobby_of_new_connections_resumes_every_car_at_its_box_exit():
+    race = rd.Race(TRACE, formation=False)
+    teams = "ABC"
+    old = [Car(race, e, e.lower() + "1", L - 15 - 20 * i, "Old" + e) for i, e in enumerate(teams)]
+    t = _drive(race, old, [50] * 3, 0.0, 40)
+    lead = max(_row(race, e, t)["distance_m"] for e in teams)
+    race.red_flag(t, "keep")
+    new = []
+    for i, e in enumerate(teams):
+        car = Car(race, e, e.lower() + "2", 0.0, "New" + e)
+        _new_lobby(car, L - 300 - 20 * i)
+        new.append(car)
+    t = _drive(race, new, [None] * 3, t, 3)
+    for car in new:
+        car.box = False
+    t = _drive(race, new, [40] * 3, t, 3)
+    rows = {e: _row(race, e, t) for e in teams}
+    assert all(r["driver"] == "New" + e and r["status"] == "racing" for e, r in rows.items()) \
+        and all(abs(r["distance_m"] - lead - 120) < 15 for r in rows.values()), \
+        f"no car of the restart lobby has crossed yet, each resumes from the keep anchor: {rows}"
 
 
 def t_a_change_needs_a_fresh_lobby_counter():
