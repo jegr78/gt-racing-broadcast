@@ -14,8 +14,19 @@ it does not change what the PlayStation or your other apps do.
 3. Type your name (up to 24 letters, digits, spaces, `_ . -`; your PSN Online ID fits) and
    press **Get my sender command**.
 
-The page shows a command with your personal code. The code works for the whole event.
-When the producer renews the invite link, open the new link and register again.
+The page shows a command with your personal code. Your registration is a request.
+Race Control or the director compares it with the car in the GT7 lobby and approves it,
+and only then does the relay use your telemetry. Start the sender right away anyway.
+Until the approval it prints `waiting for approval by Race Control` and asks again every
+ten seconds. Once approved, it says so and starts sending. Race Control may correct your
+name, entry or stint when it approves. A rejected registration stops working, and the
+sender then says to register again. If you register twice, Race Control sees both
+requests marked as duplicates and approves the one it trusts, so keep using the newest
+code and tell Race Control.
+
+The code works for the whole event once approved, also after a relay restart. When the
+producer renews the invite link, open the new link and register again. Every approval
+starts over.
 
 ## Which setup
 
@@ -72,6 +83,48 @@ The relay accepts one sender per entry in a single-lobby race and two per team i
 endurance race (the driver on track and the one waiting for the next stint). If the
 sender says someone else sends for your entry, ask the producer. While the console is
 quiet the sender keeps its place with a short message every five seconds.
+
+### Approving drivers
+
+This part is for Race Control and the director. Every registration lands as a request
+under **Driver requests** at the top of the Driver telemetry card, on the Race Control
+desk and in the Director Panel alike. A request shows only what the driver typed and
+when: name, entry and stint. It shows no telemetry, so match it by eye against the car
+in the GT7 lobby.
+
+- **Approve** takes the request with the name, entry and stint in its fields, so fix a
+  typo or a wrong team there first. A corrected request shows what was registered.
+- **Reject** takes two presses and revokes the code for good. The sender is refused at
+  once, also while it is sending.
+- A **duplicate** pill marks requests with the same name, entry and stint. Someone may
+  have registered in another driver's name, or the driver registered twice. Approve only
+  the one the driver confirms, for example by the registration time.
+- **Reject all waiting** shows from two waiting requests and rejects every one of them,
+  for example after the invite link leaked. Approved drivers keep their approval. If
+  requests keep coming, renew the invite link: every code and request of the old one
+  ends, and the drivers register again on the new link.
+- Approved drivers sit under **Approved drivers**. **Correct** opens the same fields to
+  change the name, team or stint later, and **Reject** revokes the code. **Move** in the
+  Senders table changes the team the same way.
+
+Each device that registers keeps at most three waiting requests per entry and stint
+and eight in all. A further registration from it drops its own oldest waiting request,
+never someone else's, so a flood from one device cannot push out a real driver. A
+sender whose request was dropped says so once and stops; register again. A
+device can register at most 30 times a minute; beyond that the invite page asks it to
+try again in a minute. The relay holds at most 200 waiting requests. A new registration
+beyond that drops the oldest waiting request of the device that holds the most, so a
+newcomer always lands and a flood displaces only itself.
+
+A rejection stops new data at once. It does not erase what the driver sent before, which
+stays in the race and the recording. A rejected driver can no longer be moved or set as
+the active car of a change.
+
+Until a request is approved, nothing of that driver reaches the race, the recording,
+the dashboard or the public timing. Readiness shows a waiting driver as *pending*, and
+the Senders table lists it with a *pending* pill. Every decision is logged with the
+person's name and the time in `driver-race-audit.jsonl`. The same applies to
+single-lobby and endurance races.
 
 For other client developers: the ingest is a versioned HTTP contract,
 [`src/docs/design/driver-telemetry-ingest.md`](https://github.com/jegr78/gt-racing-broadcast/blob/main/src/docs/design/driver-telemetry-ingest.md).

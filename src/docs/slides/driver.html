@@ -35,13 +35,13 @@ Note: Welcome to the driver onboarding. As a league driver you can send your own
 2. Pick your **entry** and, in an endurance race, your **stint** or qualifying segment.
 3. Type your name and press **Get my sender command**.
 
-The command carries your **personal code**. It works for the whole event. After a renewed invite link, register again.
+The command carries your **personal code**. Race Control **approves** your registration first. Until then the sender prints *waiting for approval*. After a renewed invite link, register again.
 
 </div></div>
 
 [Driver telemetry](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#get-your-command)
 
-Note: To get your command, open the invite link the producer shares for the event. Pick your entry and, in an endurance race, your stint or your qualifying segment. Type your name and press Get my sender command. The page then shows a command with your personal code. That code works for the whole event. If the producer renews the invite link, open the new link and register again.
+Note: To get your command, open the invite link the producer shares for the event. Pick your entry and, in an endurance race, your stint or your qualifying segment. Type your name and press Get my sender command. The page then shows a command with your personal code. Your registration is a request. Race Control compares it with your car in the G T 7 lobby and approves it, and may fix your name, team or stint. Start the sender right away. Until the approval it prints waiting for approval by Race Control and asks again every ten seconds, then it starts sending. The code works for the whole event. If the producer renews the invite link, open the new link and register again.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -131,7 +131,7 @@ Note: Your team mates and the viewers can follow the race in a browser, without 
 
 <section data-markdown><script type="text/template">
 ## Recap
-- Invite link, pick entry and stint, **Get my sender command**.
+- Invite link, pick entry and stint, **Get my sender command**. Race Control approves it.
 - Pick the setup: nothing else, second device, SimHub `--forward`, or `--listen`.
 - Allow **inbound UDP 33740** once.
 - One sender per entry, two per team in endurance.
@@ -140,7 +140,7 @@ Note: Your team mates and the viewers can follow the race in a browser, without 
 Go deeper:
 [Driver telemetry](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry)
 
-Note: To recap. Open the invite link, pick your entry and stint, and press Get my sender command. Pick the setup that matches what you already run: nothing else, a second device, SimHub with the forward option, or another app with the listen option. Allow inbound UDP on port 33740 once. The relay takes one sender per entry, and two per team in an endurance race. If the sender stops, your entry shows No data and keeps its place, and your race goes on. Just run the command again.
+Note: To recap. Open the invite link, pick your entry and stint, and press Get my sender command. Race Control approves your registration before the relay uses your telemetry. Pick the setup that matches what you already run: nothing else, a second device, SimHub with the forward option, or another app with the listen option. Allow inbound UDP on port 33740 once. The relay takes one sender per entry, and two per team in an endurance race. If the sender stops, your entry shows No data and keeps its place, and your race goes on. Just run the command again.
 </script></section>
 
 </div></div>

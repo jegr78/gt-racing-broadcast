@@ -4,7 +4,7 @@
    the race recording with its disconnect events, corrections, estimates for quiet
    cars, retirements (DNF), shown driver names, rejoin and change overrides, the dashboard's delay, fastest lap and
    qualifying corrections (plus its on-air switch with dashboardToggle), and the
-   senders with readiness, reassign and disconnect. `base` prefixes every route: "/race-control" on the desk (its fetch
+   senders with readiness, reassign and disconnect, and the drivers' registrations to approve. `base` prefixes every route: "/race-control" on the desk (its fetch
    shim adds /console), "" on the panel. Every text goes in through textContent. */
 (function () {
   "use strict";
@@ -32,7 +32,7 @@
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
     ".dd td.num{font-family:var(--mono,ui-monospace,monospace);text-align:right;white-space:nowrap}",
     ".dd .tbl{overflow-x:auto}",
-    ".dd .race th,.dd .race td{padding:4px}.dd .race .pills{display:flex;flex-wrap:wrap;gap:3px}",
+    ".dd .race th,.dd .race td{padding:4px}.dd .pills{display:flex;flex-wrap:wrap;gap:3px}",
     ".dd .pill{display:inline-block;white-space:nowrap;border-radius:9px;padding:1px 7px;font-size:11px;border:1px solid var(--edge,#2a2f37)}",
     ".dd .pill.ok{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd .pill.bad{border-color:#ff4d5e;color:#ff4d5e}",
@@ -40,6 +40,10 @@
     ".dd .banner{border:1px solid #ff4d5e;color:#ff4d5e;border-radius:6px;padding:6px 9px}",
     ".dd .msg{min-height:1.2em;font-size:12px}.dd .msg.err{color:#ff4d5e}",
     ".dd .stale{opacity:.45}",
+    ".dd .req{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-bottom:1px solid var(--edge,#2a2f37)}",
+    ".dd .req .row{gap:6px}.dd .req .muted{font-size:12px}.dd .reqs-ok summary{cursor:pointer;padding:4px 0}",
+    ".dd .req.waiting{border-left:3px solid #ffb454;padding-left:8px}",
+    ".dd button.go{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd [hidden]{display:none!important}",
     ".dd select{width:auto;max-width:100%}",
     ".dd a.btn{background:var(--panel-2,#1b1f25);color:var(--ink,#e8eaed);border:1px solid var(--edge,#2a2f37);",
@@ -94,7 +98,9 @@
                  recording_start: "recording start", recording_stop: "recording stop",
                  dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed",
                  estimate: "estimate", estimate_end: "estimate ended", retire: "retirement",
-                 driver_name: "driver name", class_laps: "class lap count"};
+                 driver_name: "driver name", class_laps: "class lap count",
+                 driver_approve: "driver approved", driver_correct: "driver corrected",
+                 driver_reject: "driver rejected", driver_reject_pending: "all waiting drivers rejected"};
   var EVENT_STATES = {suspected: ["Suspected DC", "bad"], dropout: ["Dropout", "amb"],
                       confirmed: ["Confirmed DC", "bad"], dismissed: ["Dismissed", ""]};
   var OFFSETS = [5, 10, 15, 20, 30];
@@ -182,6 +188,52 @@
     img.src = (window.RC_API ? window.RC_API("/drivers/brand/" + key) : "/drivers/brand/" + key);
     td.appendChild(img);
     return td;
+  }
+
+  // Waiting requests first, each group oldest first; rejected ones leave the list.
+  function requestRows(reqs) {
+    var rank = {pending: 0, approved: 1};
+    return (reqs || []).filter(function (r) { return Object.prototype.hasOwnProperty.call(rank, r.status); })
+      .sort(function (a, b) { return rank[a.status] - rank[b.status] || a.ts - b.ts; });
+  }
+  // Requests that share name, entry and stint with another open one: {conn: true}.
+  function duplicates(reqs) {
+    var seen = Object.create(null), out = Object.create(null);
+    (reqs || []).forEach(function (r) {
+      if (r.status === "rejected") return;
+      var k = [r.name, r.entry, r.segment || ""].join("\u0000");
+      (seen[k] = seen[k] || []).push(r.conn);
+    });
+    Object.keys(seen).forEach(function (k) {
+      if (seen[k].length > 1) seen[k].forEach(function (c) { out[c] = true; });
+    });
+    return out;
+  }
+  // The approve or correct body: the desk's draft over what the request holds.
+  function requestBody(rec, draft, multi) {
+    var d = draft || {};
+    var body = {conn: rec.conn, entry: d.entry || rec.entry,
+                name: typeof d.name === "string" ? d.name.trim() : rec.name};
+    if (multi) body.segment = d.segment || rec.segment;
+    return body;
+  }
+  // A readiness cell as [text, pill class] pairs; a pending driver never counts as a sender.
+  function readyPills(senders, max) {
+    var live = senders.filter(function (s) { return s.live; });
+    var waiting = senders.filter(function (s) { return s.approval === "pending"; });
+    var pills = [];
+    if (live.length) pills.push([live.map(function (x) { return fitName(x.name, max || 16); }).join(", "), "ok"]);
+    else if (senders.some(function (s) { return s.connected; })) pills.push(["quiet", "amb"]);
+    else if (senders.some(function (s) { return s.approval === "approved"; })) pills.push(["approved, no data", "amb"]);
+    else if (!waiting.length) pills.push(["no sender", "bad"]);
+    waiting.forEach(function (s) { pills.push([fitName(s.name, max || 16) + ": pending", "amb"]); });
+    return pills;
+  }
+  // A sender row's pill.
+  function senderState(s) {
+    if (s.live) return ["live", "ok"];
+    if (s.connected) return ["quiet", "bad"];
+    return s.approval === "pending" ? ["pending", "amb"] : ["approved, no data", "amb"];
   }
 
   function mount(root, opts) {
@@ -502,7 +554,7 @@
       function add(d) { if (out.indexOf(d) < 0) out.push(d); }
       nameSrc.race.forEach(function (e) { if (e.entry === entry) add(e.driver_registered || ""); });
       nameSrc.ready.forEach(function (r) {
-        if (r.entry === entry) r.senders.forEach(function (s) { add(s.name); });
+        if (r.entry === entry) r.senders.forEach(function (s) { if (s.approval !== "pending") add(s.name); });
       });
       nameSrc.overrides.forEach(function (o) { if (o.entry === entry) add(o.driver); });
       if (!out.length) add("");
@@ -639,11 +691,108 @@
     var sendTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
       "Sender", "Entry", "", ""].map(function (h) { return el("th", {text: h}); }))]), sendBody])]);
 
+    // -- driver requests --------------------------------------------------------------
+    // A waiting request opens with its fields; an approved one opens with Correct.
+    var reqTitle = el("h3", {text: "Driver requests"});
+    var reqList = el("div", {cls: "reqs"});
+    // Clears a flood of registrations from a leaked link in one go.
+    var rejectAll = button("Reject all waiting", "warn", "rej-all", function () {
+      decide("/drivers/requests/reject-pending", {}, "Every waiting driver rejected");
+    });
+    var reqBar = el("div", {cls: "row", hidden: ""}, [rejectAll,
+      el("span", {cls: "muted", text: "Requests keep coming? Renew the invite link."})]);
+    var okSummary = el("summary", {cls: "muted", text: "Approved drivers"});
+    var okList = el("div", {cls: "reqs"});
+    var okBox = el("details", {cls: "reqs-ok"}, [okSummary, okList]);   // closed: the race controls stay in reach
+    var reqDraft = Object.create(null);   // conn -> unsaved name, entry and stint
+    var reqOpen = Object.create(null);    // approved conns open for a correction
+    var lastReq = null;
+    // A decided row re-renders only once the pressed button gives up the focus.
+    function decide(path, body, done) {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      return act(path, body, done);
+    }
+    function choices(values, cur, label) {
+      var list = values.indexOf(cur) < 0 && cur ? [cur].concat(values) : values;
+      return el("select", {"aria-label": label}, list.map(function (v) { return opt(v, v, v === cur); }));
+    }
+    function requestEditor(r, d, multi) {
+      var dr = reqDraft[r.conn] || (reqDraft[r.conn] = {});
+      var pend = r.status === "pending";
+      var name = el("input", {type: "text", maxlength: "24", "aria-label": "Driver name of " + r.name});
+      name.value = typeof dr.name === "string" ? dr.name : r.name;
+      name.addEventListener("input", function () { dr.name = name.value; });
+      var entry = choices(d.entries || [], dr.entry || r.entry, "Entry of " + r.name);
+      entry.addEventListener("change", function () { dr.entry = entry.value; });
+      var seg = null;
+      if (multi) {
+        seg = choices(d.segments, dr.segment || r.segment, "Stint of " + r.name);
+        seg.addEventListener("change", function () { dr.segment = seg.value; });
+      }
+      var save = button(pend ? "Approve" : "Save", pend ? "go" : "", null, async function () {
+        var done = await decide(pend ? "/drivers/requests/approve" : "/drivers/requests/correct",
+                             requestBody(r, dr, multi), pend ? "Driver approved" : "Driver corrected");
+        if (done) { delete reqDraft[r.conn]; delete reqOpen[r.conn]; }
+      });
+      var cancel = pend ? null : button("Cancel", "", null, function () {
+        delete reqDraft[r.conn]; delete reqOpen[r.conn];
+        if (lastReq) renderRequests(lastReq, true);
+      });
+      return el("div", {cls: "row"}, [name, entry, seg, save, cancel, pend ? rejectBtn(r) : null]);
+    }
+    function rejectBtn(r) {
+      return button("Reject", "warn", "rej-" + r.conn, function () {
+        decide("/drivers/requests/reject", {conn: r.conn}, "Driver rejected: the code is revoked");
+      });
+    }
+    function renderRequests(d, force) {
+      lastReq = d;
+      var rows = requestRows(d.requests);
+      var dup = duplicates(d.requests);
+      var waiting = rows.filter(function (r) { return r.status === "pending"; }).length;
+      reqTitle.textContent = "Driver requests" + (waiting ? " (" + waiting + " waiting)" : "");
+      reqBar.hidden = waiting < 2;
+      if (!force && (reqList.contains(document.activeElement) || okList.contains(document.activeElement))) return;
+      var multi = !!d.multi_lobby && (d.segments || []).length > 0;
+      var keep = Object.create(null);
+      var items = rows.map(function (r) {
+        keep[r.conn] = true;
+        var pend = r.status === "pending";
+        var reg = r.registered || {};
+        var changed = reg.name !== r.name || reg.entry !== r.entry || (reg.segment || null) !== (r.segment || null);
+        var meta = pend ? "registered " + new Date(r.ts * 1000).toLocaleTimeString() : "approved by " + (r.who || "");
+        if (changed) meta += "; registered as " + [reg.name, reg.entry, reg.segment].filter(Boolean).join(", ");
+        var open = pend || reqOpen[r.conn];
+        var head = el("div", {cls: "row"}, [
+          el("strong", {text: fitName(r.name, NAME_LIST_MAX), title: r.name}),
+          el("span", {cls: "pill " + (pend ? "amb" : "ok"), text: pend ? "waiting" : "approved"}),
+          dup[r.conn] ? el("span", {cls: "pill bad", text: "duplicate",
+            title: "Another request has the same name, entry and stint: approve only the driver's own"}) : null,
+          el("span", {cls: "grow", text: [r.entry, multi ? r.segment : null].filter(Boolean).join(" \u00b7 ")}),
+          open ? null : button("Correct", "", null, function () {
+            reqOpen[r.conn] = true; renderRequests(d, true);
+          }),
+          open ? null : rejectBtn(r)]);
+        return [pend, el("div", {cls: "req" + (pend ? " waiting" : "")}, [
+          head, el("div", {cls: "muted", text: meta}), open ? requestEditor(r, d, multi) : null])];
+      });
+      Object.keys(reqDraft).forEach(function (c) { if (!keep[c]) delete reqDraft[c]; });
+      var out = items.filter(function (i) { return i[0]; }).map(function (i) { return i[1]; });
+      var ok = items.filter(function (i) { return !i[0]; }).map(function (i) { return i[1]; });
+      if (!out.length) out = [el("div", {cls: "muted", text: ok.length ? "No registration waiting."
+        : "No registrations yet: drivers register on the invite link."})];
+      reqList.replaceChildren.apply(reqList, out);
+      okSummary.textContent = "Approved drivers (" + ok.length + "): correct or reject";
+      okBox.hidden = !ok.length;
+      okList.replaceChildren.apply(okList, ok);
+    }
+
     root.replaceChildren(el("div", {cls: "dd"}, [
       staleNote,
       el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
       el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
       lastChange,
+      reqTitle, reqBar, reqList, okBox,
       el("div", {cls: "row"}, [mode, laps, finalLap, finish]),
       classLapRow,
       el("div", {cls: "row"}, [redFlag, restart, release]),
@@ -797,7 +946,9 @@
       keepSelect(qEntry, entries.map(function (e) { return [e, e]; }));
       var conns = [];
       rd.rows.forEach(function (r) {
-        r.senders.forEach(function (s) { conns.push([r.entry + "\u0000" + s.conn, r.entry + ": " + s.name]); });
+        r.senders.forEach(function (s) {
+          if (s.connected) conns.push([r.entry + "\u0000" + s.conn, r.entry + ": " + s.name]);
+        });
       });
       keepSelect(changeSel, conns);
       changeBtn.disabled = !conns.length;
@@ -811,10 +962,8 @@
       var ready = entries.map(function (e) {
         return el("tr", {}, [el("td", {text: e})].concat(focus.map(function (f) {
           var r = byKey[e + "\u0000" + f];
-          var live = r ? r.senders.filter(function (x) { return x.live; }) : [];
-          return el("td", {}, [el("span", {cls: "pill " + (live.length ? "ok" : (r && r.senders.length ? "amb" : "bad")),
-            text: live.length ? live.map(function (x) { return fitName(x.name, NAME_LIST_MAX); }).join(", ")
-                  : (r && r.senders.length ? "quiet" : "no sender")})]);
+          return el("td", {}, [el("div", {cls: "pills"}, readyPills(r ? r.senders : [], NAME_LIST_MAX).map(function (p) {
+            return el("span", {cls: "pill " + p[1], text: p[0]}); }))]);
         })));
       });
       if (!ready.length) ready = [el("tr", {}, [el("td", {cls: "muted", text: "No entries known yet."})])];
@@ -824,12 +973,18 @@
       var rows = [];
       rd.rows.forEach(function (r) {
         r.senders.forEach(function (s) {
+          var state = senderState(s);
+          var who = el("td", {}, [el("div", {text: fitName(s.name, NAME_LIST_MAX), title: s.name}),
+                                  el("span", {cls: "pill " + state[1], text: state[0]})]);
+          var where = el("td", {}, [el("div", {text: r.entry}), el("div", {cls: "muted", text: r.segment || ""})]);
+          if (!s.connected) {
+            rows.push(el("tr", {}, [who, where, el("td", {colspan: "2", cls: "muted",
+              text: s.approval === "pending" ? "Approve it under Driver requests" : "Not sending"})]));
+            return;
+          }
           var to = el("select", {"aria-label": "Move " + s.name + " to another entry"},
                       entries.filter(function (e) { return e !== r.entry; }).map(function (e) { return opt(e, e); }));
-          rows.push(el("tr", {}, [
-            el("td", {}, [el("div", {text: fitName(s.name, NAME_LIST_MAX), title: s.name}), el("span", {cls: "pill " + (s.live ? "ok" : "bad"),
-                                                                 text: s.live ? "live" : "quiet"})]),
-            el("td", {}, [el("div", {text: r.entry}), el("div", {cls: "muted", text: r.segment || ""})]),
+          rows.push(el("tr", {}, [who, where,
             el("td", {}, [el("div", {cls: "row"}, [to, button("Move", "", null, function () {
               act("/drivers/reassign", {conn: s.conn, entry: to.value}, "Sender moved");
             })])]),
@@ -849,18 +1004,21 @@
       staleNote.hidden = !stale;
       if (stale) staleNote.textContent = "Relay not reachable since " + state.staleSince.toLocaleTimeString() +
         ": the tables below are not current.";
-      [raceTable, evTable, readyTable, sendTable].forEach(function (t) { t.classList.toggle("stale", stale); });
+      [raceTable, evTable, readyTable, sendTable, reqList].forEach(function (t) { t.classList.toggle("stale", stale); });
     }
     async function refresh() {
       // Both start at once; a slow recording call never holds back the race table.
       var raceCall = call("/drivers/race", undefined, true);
       var recCall = call("/drivers/race/recording", undefined, true);
+      var reqCall = call("/drivers/requests", undefined, true);
       var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
       if (renderRecording(await recCall) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
       if (rd) renderSenders(rd);
+      var rq = await reqCall;
+      if (rq) renderRequests(rq);
     }
     async function refreshInvite() {
       var d = await call("/drivers/invite", undefined, true);

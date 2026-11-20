@@ -188,6 +188,34 @@ def t_readiness_lists_every_entry_and_stint_with_its_senders():
     assert [(r["entry"], r["segment"], r["ready"]) for r in single] == [("A", None, True), ("B", None, False)]
 
 
+def t_readiness_marks_pending_and_approved_requests_without_a_sender():
+    conns = [{"conn": "c1", "entry": "A", "segment": None, "name": "Max", "live": True}]
+    reqs = [{"conn": "c1", "entry": "A", "segment": None, "name": "Max", "status": "approved"},
+            {"conn": "c2", "entry": "A", "segment": None, "name": "Ann", "status": "pending"},
+            {"conn": "c3", "entry": "B", "segment": None, "name": "Lea", "status": "approved"},
+            {"conn": "c4", "entry": "B", "segment": None, "name": "Eve", "status": "rejected"}]
+    rows = ing.readiness(["A", "B"], [], conns, multi_lobby=False, requests=reqs)
+    got = {r["entry"]: (r["ready"], [(s["name"], s["approval"], s["connected"]) for s in r["senders"]])
+           for r in rows}
+    assert got == {"A": (True, [("Max", "approved", True), ("Ann", "pending", False)]),
+                   "B": (False, [("Lea", "approved", False)])}, got
+
+
+def t_an_approval_correction_and_a_revoke_reach_the_hub():
+    got = []
+    hub = ing.Hub(multi_lobby=lambda: False, on_sample=lambda reg, s: got.append((reg["entry"], reg["name"])))
+    hub.ingest(_reg("c1"), _batch(6), None)
+    assert hub.reassign("c1", "Team C #3")
+    hub.update("c1", "Team B #2", None, "Max P")
+    assert [(c["entry"], c["name"], c["reassigned"]) for c in hub.connections()] == [("Team B #2", "Max P", False)]
+    hub.ingest(_reg("c1", entry="Team B #2", name="Max P"), _batch(12), None)
+    assert got[-1] == ("Team B #2", "Max P"), "the correction replaces an earlier Move"
+    hub.revoke("c2")
+    _refused(lambda: hub.ingest(_reg("c2"), _batch(18), None), 410, "disconnected")
+    hub.revoke("c1")
+    assert hub.connections() == []
+
+
 def t_reset_drops_every_connection():
     hub, _clock = _hub()
     hub.ingest(_reg("c1"), _batch(1), None)

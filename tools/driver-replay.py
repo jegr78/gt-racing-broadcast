@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Maintainer tool (not shipped): simulated driver senders for a running relay.
 
-Registers up to 15 cars on the event's driver invite and posts encrypted GT7 packets
+Registers up to 15 cars on the event's driver invite, approves them on the tailnet
+route and posts encrypted GT7 packets
 along the picked layout's racing line through the real ingest route, with lap times,
 best laps and fuel. Use it to see the driver dashboard, the desks and the cockpit move
 without a PS5, and with --gap to check that a dense pack on the track map stays
@@ -34,6 +35,7 @@ import telemetry_probe  # noqa: E402
 NAMES = ("Lena Hart", "Marco Vidal", "Sam Okafor", "Iris Nakamura", "Tom Becker", "Ana Ruiz",
          "Jonas Weber", "Mia Laine", "Luca Bianchi", "Noah Kim", "Eva Novak", "Ole Strand",
          "Rui Costa", "Kai Brandt", "Zoe Martin")
+WAITING = ("Finn Olsen", "Aya Mori", "Leo Brandt")
 TICK_S = 0.1
 PACKETS_PER_TICK = 6        # one sample per batch at the probe's SAMPLE_EVERY
 
@@ -77,6 +79,14 @@ def request(base, path, body=None, headers=None):
         return json.loads(resp.read() or b"{}")
 
 
+def approve(base, name):
+    """Approve the waiting registration of `name` on the relay's tailnet route."""
+    for r in request(base, "/drivers/requests")["requests"]:
+        if r["name"] == name and r["status"] == "pending":
+            request(base, "/drivers/requests/approve", json.dumps({"conn": r["conn"]}).encode(),
+                    {"Content-Type": "application/json"})
+
+
 def main():
     ap = argparse.ArgumentParser(description="Simulated driver senders for a running relay.")
     ap.add_argument("--profile", default="demo", help="profile whose runtime holds the driver invite")
@@ -85,6 +95,8 @@ def main():
     ap.add_argument("--gap", type=float, default=22.0, help="metres between cars at the start")
     ap.add_argument("--seconds", type=float, default=600.0, help="how long to drive")
     ap.add_argument("--relay", default="http://127.0.0.1:8088", help="relay base URL")
+    ap.add_argument("--pending", type=int, default=0,
+                    help="register this many more drivers and leave them waiting for approval")
     ap.add_argument("--force", action="store_true", help="allow a profile other than demo")
     args = ap.parse_args()
     if args.profile != "demo" and not args.force:
@@ -108,8 +120,14 @@ def main():
         body = {"entry": entry, "name": NAMES[k]} | ({"segment": segment} if segment else {})
         code = request(args.relay, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
                        {"Content-Type": "application/json"})["code"]
+        approve(args.relay, NAMES[k])
         cars.append({"code": code, "along": -20.0 - args.gap * k, "v": 100.0 - 1.2 * k - (k % 3) * 0.4,
                      "pid": 0, "lap": None, "line_t": None, "last": -1, "best": -1, "fuel": 60.0 - k})
+    later = data["segments"][1] if len(data["segments"]) > 1 else segment    # the next stint's drivers
+    for k, entry in enumerate(data["entries"][:args.pending]):
+        body = {"entry": entry, "name": WAITING[k % len(WAITING)]} | ({"segment": later} if later else {})
+        request(args.relay, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
+                {"Content-Type": "application/json"})
     end = time.monotonic() + args.seconds
     while time.monotonic() < end:
         now = time.monotonic()

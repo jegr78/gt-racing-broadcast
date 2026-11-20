@@ -405,6 +405,49 @@ def t_refused_posts_drop_or_wait_instead_of_retrying_forever():
     assert up.post_once() == 0.05 and up.pending() == 0
 
 
+def t_a_pending_code_waits_quietly_and_announces_the_approval():
+    import io
+    import urllib.error
+    said, replies = [], [423, 423, 423, 200]
+
+    def opener(req, timeout):
+        code = replies.pop(0)
+        if code != 200:
+            body = io.BytesIO(json.dumps({"ok": False, "pending": True,
+                                          "error": "waiting for approval by Race Control"}).encode())
+            raise urllib.error.HTTPError(req.full_url, code, "Locked", {}, body)
+        return _Reply(b'{"ok": true}')
+    up = snd.Uploader("https://h/console/drive/ingest", code="D1:abc.def", opener=opener, say=said.append)
+    for _ in range(3):
+        up.put(b"p")
+        assert up.post_once() == snd.PENDING_WAIT_S, "a pending code is asked again every few seconds"
+    assert up.pending() == 0 and up.stats["dropped"] == 0 and up.stats["post_failed"] == 0, \
+        ("packets the relay will not take are no upload failure", up.stats)
+    assert len(said) == 1 and "waiting for approval by Race Control" in said[0], said
+    assert all(ord(ch) < 128 for ch in said[0]), "the console text stays ASCII"
+    up.put(b"p")
+    up.post_once()
+    assert len(said) == 2 and "approved" in said[1], said
+
+
+def t_a_dropped_registration_stops_the_sender_once():
+    import io
+    import threading
+    import urllib.error
+    said, calls = [], []
+
+    def opener(req, timeout):
+        calls.append(1)
+        body = io.BytesIO(json.dumps({"error": "your registration was dropped: register again on the invite page"}).encode())
+        raise urllib.error.HTTPError(req.full_url, 410, "Gone", {}, body)
+    up = snd.Uploader("https://h/console/drive/ingest", code="D1:abc.def", opener=opener, say=said.append)
+    up.put(b"p")
+    stop = threading.Event()
+    up.run(stop)
+    assert stop.is_set() and len(calls) == 1, "a code the relay dropped is never tried again"
+    assert len(said) == 1 and "register again" in said[0], said
+
+
 def t_receiver_survives_windows_udp_errors_and_skips_oversized_packets():
     class Sock:
         def __init__(self, events):

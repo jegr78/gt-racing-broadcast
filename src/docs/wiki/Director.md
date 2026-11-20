@@ -308,6 +308,11 @@ desk:
 - the invite link with **Copy** (on the public Funnel address while Funnel serves the
   console, even when you opened the panel over the tailnet), and who made the last
   change and when
+- **Driver requests**, where each registration waits until you or Race Control approve
+  it, with name, entry and stint to correct first. **Reject** revokes its code, and
+  **Reject all waiting** clears every waiting request at once. The approved drivers fold
+  away under **Approved drivers** with **Correct** and **Reject**. See
+  [approving drivers](Driver-Telemetry#approving-drivers).
 - the finish mode and lap count, **Final lap** and **Finish**
 - **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
   `RED FLAG` button holds the race as well when it raises the cover.
@@ -326,10 +331,11 @@ desk:
   switches
 - readiness per entry (in endurance for the stint on air and the next one) and every
   sender with **Move** (to another entry; moving it back resumes the team with its
-  distance and corrections) and **Disconnect**
+  distance and corrections) and **Disconnect**. Drivers still waiting for approval show
+  as *pending* in both.
 
 Buttons that change the race for everyone (Final lap, Finish, the red flag, a change,
-a disconnect) ask for a second press within four seconds.
+a disconnect, a rejection) ask for a second press within four seconds.
 
 ![Director Panel: driver telemetry section](images/director-panel-drivers.png)
 

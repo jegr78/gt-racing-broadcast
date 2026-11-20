@@ -202,6 +202,7 @@ import gt7_tracks      # GT7 track recognition from lap positions (#787)
 import gt7_track_pick  # the event's picked GT7 layout (#1129)
 import telemetry_probe  # the driver telemetry probe ingest (#1110)
 import driver_invite    # event invite link and driver codes (#1111)
+import driver_requests  # registrations waiting for Race Control's approval
 import timing_link      # the event's public live timing link (#1128)
 import timing_feed      # its shared body and upload budget
 import timing_host      # optional external fan-out of the public timing (#1161)
@@ -12016,6 +12017,21 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
 # The largest request body the control server reads (a parsed POST, or one drained
 # after the /console gate answered it).
 MAX_POST_BODY = 65536
+DRIVE_REGISTER_PER_MIN = 30   # registrations per client and minute
+
+
+def drive_client_key(peer, headers):
+    """The registering client: behind Funnel the address the local proxy appended to
+    X-Forwarded-For, from any other peer its own address, so nobody picks a bucket.
+    An IPv6 client counts by its /64, the block one subscriber usually holds."""
+    client = peer
+    if peer in ("127.0.0.1", "::1"):
+        client = (headers.get("X-Forwarded-For") or "").split(",")[-1].strip()[:64] or peer
+    try:
+        ip = ipaddress.ip_address(client)
+    except ValueError:
+        return client
+    return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else client
 
 
 def _funnel_watch(max_age_s=60.0, poll=None):
@@ -12148,8 +12164,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # minute and must not lock console logins out of the shared one.
     _drive_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)
     _timing_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)   # public scans spare the drivers
+    _drive_register_rl = console_auth.RateLimiter(limit=DRIVE_REGISTER_PER_MIN, window_s=60)
     _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
+    _requests = driver_requests.Store(
+        driver_requests.path_in(os.path.dirname(os.path.abspath(driver_invite_path))),
+        invite_id=lambda: (_invite_cache.get() or {}).get("id")) if driver_invite_path else None
     _timing_cache = timing_link.Cache(timing_link_path) if timing_link_path else None
     # Public timing (#1128): one body per tick for every viewer, and the poll interval
     # stretches with the crowd so the page stays within its share of the upload.
@@ -14334,7 +14354,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         "multi_lobby": not relay.solo, "focus": focus,
                         "rows": driver_ingest.readiness(
                             roster, driver_segments() if driver_segments else [],
-                            driver_hub.connections(), not relay.solo)}, no_store=True)
+                            driver_hub.connections(), not relay.solo,
+                            _requests.all() if _requests else ())}, no_store=True)
+                if p == ["drivers", "requests"] and _requests is not None:
+                    # Registrations to approve: what the driver typed, never telemetry.
+                    multi = not relay.solo
+                    return self._send({
+                        "multi_lobby": multi,
+                        "entries": hud_source.roster_names() if hud_source else [],
+                        "segments": (driver_segments() if driver_segments else []) if multi else [],
+                        "requests": [{k: v for k, v in r.items() if k != "client"}
+                                     for r in _requests.all()]}, no_store=True)
                 if p == ["drivers", "invite"]:
                     # `base` is the public Funnel address; without it the desks use their origin.
                     invite = self._drive_invite()
@@ -14468,6 +14498,61 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         def _drive_invite(self):
             return _invite_cache.get() if _invite_cache else None
 
+        def _rejected(self, conn):
+            rec = _requests.get(conn) if _requests and isinstance(conn, str) else None
+            return bool(rec) and rec["status"] == "rejected"
+
+        def _driver_request(self, action, body, who):
+            """Approve, correct or reject a driver's registration from a desk."""
+            if action == "reject-pending":
+                try:
+                    gone = _requests.reject_pending(who)     # never in the hub: nothing to revoke there
+                except OSError:
+                    return self._send({"ok": False, "error": "the decision could not be saved"}, 500)
+                if gone and driver_race_svc is not None:
+                    driver_race_svc.log(who, "driver_reject_pending", conns=[r["conn"] for r in gone],
+                                        names=[r["name"] for r in gone])
+                return self._send({"ok": True, "rejected": len(gone)})
+            if action not in ("approve", "correct", "reject"):
+                return self._send({"error": "not found"}, 404)
+            conn = body.get("conn")
+            rec = _requests.get(conn) if isinstance(conn, str) else None
+            if rec is None:
+                return self._send({"ok": False, "error": "unknown request"}, 404)
+            fields = {}
+            if action != "reject":
+                fields = {k: body.get(k, rec[k]) for k in ("entry", "segment", "name")}
+                roster = hud_source.roster_names() if hud_source else []
+                segments = driver_segments() if (driver_segments and not relay.solo) else []
+                if not isinstance(fields["entry"], str) or (roster and fields["entry"] not in roster):
+                    return self._send({"ok": False, "error": "pick an entry from the list"}, 400)
+                if segments and fields["segment"] not in segments:
+                    return self._send({"ok": False, "error": "pick a stint or segment from the list"}, 400)
+                if not segments:
+                    fields["segment"] = None
+            try:
+                if action == "reject":
+                    _requests.reject(conn, who)
+                    driver_hub.revoke(conn)
+                else:
+                    decide = _requests.approve if action == "approve" else _requests.correct
+                    decide(conn, who, **fields)
+                    driver_hub.update(conn, **fields)
+            except KeyError:
+                return self._send({"ok": False, "error": "this request is gone: the invite link was renewed"}, 404)
+            except OSError:
+                return self._send({"ok": False, "error": "the decision could not be saved"}, 500)
+            except driver_requests.Decided as exc:
+                return self._send({"ok": False, "error": str(exc)}, 409)
+            except ValueError as exc:
+                return self._send({"ok": False, "error": str(exc)}, 400)
+            after = _requests.get(conn)
+            if driver_race_svc is not None:
+                driver_race_svc.log(who, "driver_" + action, conn=conn, entry=after["entry"],
+                                    segment=after["segment"], name=after["name"],
+                                    before={k: rec[k] for k in ("entry", "segment", "name")})
+            return self._send({"ok": True, "request": after})
+
         def _drive_refuse(self, status, message):
             client = self.client_address[0] if self.client_address else "?"
             if status in (401, 403) and not _drive_authfail_rl.allow(client):
@@ -14586,6 +14671,19 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 reg = driver_invite.verify(invite, self.headers.get("X-Driver-Code"))
                 if reg is None:
                     return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
+                req = _requests.get(reg["conn"])
+                if req is None and _requests.was_evicted(reg["conn"]):
+                    return self._drive_refuse(410, "your registration was dropped: register again on the invite page")
+                if req is None:
+                    return self._drive_refuse(403, "unknown registration: register again on the invite page")
+                if req["status"] == "rejected":
+                    return self._drive_refuse(403, "Race Control rejected this registration: "
+                                                   "register again on the invite page")
+                if req["status"] == "pending":
+                    # Its own status outside the failed-auth bucket: the sender polls it.
+                    return self._send({"ok": False, "v": driver_ingest.CONTRACT, "pending": True,
+                                       "error": "waiting for approval by Race Control"}, 423)
+                reg = dict(reg, entry=req["entry"], segment=req["segment"], name=req["name"])
                 roster = hud_source.roster_names() if hud_source else []
                 if roster and hub.entry_for(reg["conn"], reg["entry"]) not in roster:   # an unread roster blocks nobody
                     return self._drive_refuse(403, "this entry is no longer in the league's list: register again")
@@ -14625,6 +14723,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if rest == ["sender.py"] and method == "GET":
                 return self._send_file(sender_script_path, "text/x-python; charset=utf-8")
             if rest == ["register"] and method == "POST":
+                client = drive_client_key(self.client_address[0] if self.client_address else "?", self.headers)
+                if not _drive_register_rl.allow(client):
+                    return self._send({"error": "too many registrations: try again in a minute"}, 429)
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
                 except ValueError:
@@ -14653,9 +14754,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 try:
                     issued = driver_invite.issue(invite, entry=body["entry"],
                                                  name=body.get("name"), segment=segment)
+                    _requests.add(driver_invite.verify(invite, issued), client=client)
+                except OSError:
+                    return self._send({"error": "the registration could not be saved: try again"}, 500)
+                except driver_requests.Full as exc:
+                    return self._send({"error": f"{exc}: ask Race Control"}, 429)
                 except ValueError as exc:
                     return self._send({"error": str(exc)}, 400)
-                return self._send({"ok": True, "code": issued, "v": driver_ingest.CONTRACT}, no_store=True)
+                return self._send({"ok": True, "code": issued, "pending": True,
+                                   "v": driver_ingest.CONTRACT}, no_store=True)
             return self._drive_refuse(404, "not found")
 
         def _probe_ingest(self, method):
@@ -14949,6 +15056,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 who = getattr(self, "_race_who", None) or "tailnet"
                 if p[:2] == ["drivers", "race"] and driver_race_svc is not None:
                     action = p[2] if len(p) == 3 else None
+                    if action == "change" and self._rejected(body.get("conn")):
+                        return self._send({"ok": False, "error": "this driver was rejected"}, 409)
                     if action in ("quali", "fastest", "compound", "estimate", "retire",
                                   "driver-name") and hud_source:
                         roster = hud_source.roster_names()
@@ -15005,6 +15114,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # Tailnet only: deploy, settings and the path switch nudge the publisher.
                     _timing_pub[0].reload()
                     return self._send({"ok": True})
+                if len(p) == 3 and p[:2] == ["drivers", "requests"] and _requests is not None \
+                        and driver_hub is not None:
+                    return self._driver_request(p[2], body, who)
                 if p == ["drivers", "disconnect"] and driver_hub is not None:
                     conn = str(body.get("conn") or "")
                     done = driver_hub.disconnect(conn)
@@ -15013,12 +15125,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"ok": done})
                 if p == ["drivers", "reassign"] and driver_hub is not None:
                     conn, entry = str(body.get("conn") or ""), body.get("entry")
+                    if self._rejected(conn):
+                        return self._send({"ok": False, "error": "this driver was rejected"}, 409)
                     roster = hud_source.roster_names() if hud_source else []
                     if not isinstance(entry, str) or not 0 < len(entry) <= driver_invite.MAX_ENTRY \
                             or (roster and entry not in roster):
                         return self._send({"ok": False, "error": "unknown entry"}, 400)
                     if not driver_hub.reassign(conn, entry):
                         return self._send({"ok": False, "error": "unknown sender"}, 400)
+                    req = _requests.get(conn) if _requests else None
+                    if req and req["status"] == "approved":     # a Move persists like a correction
+                        _requests.correct(conn, who, entry=entry, segment=req["segment"], name=req["name"])
                     if driver_race_svc is not None:
                         driver_race_svc.log(who, "reassign", conn=conn, entry=entry)
                     return self._send({"ok": True})

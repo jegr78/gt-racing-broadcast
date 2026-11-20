@@ -6917,8 +6917,12 @@ def t_driver_invite_follows_the_event_and_regenerates():
     assert m.event_timing_data(path=timing, links=tlinks)["funnel"] == pub["funnel"], "a takeover keeps it"
     renewed = m.event_timing_data(new=True, path=timing, links=tlinks)
     assert renewed["funnel"] != pub["funnel"], "the producer replaces it"
+    requests = os.path.join(d, "driver-requests.json")
+    with open(requests, "w", encoding="utf-8") as fh:
+        fh.write('{"invite": "x", "requests": []}')
     m._stop_driver_invite(path=path)
     assert m.event_invite_data(path=path, links=links)["active"] is False, "event stop ends the link"
+    assert not os.path.exists(requests), "event stop drops the drivers' requests with their names"
     assert m.event_timing_data(path=timing, links=tlinks)["active"] is False, "and the timing link"
     for fn, p, ln in ((m.event_invite_data, path, links), (m.event_timing_data, timing, tlinks)):
         refused = fn(new=True, path=p, links=ln)
