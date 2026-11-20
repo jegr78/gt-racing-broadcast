@@ -767,10 +767,12 @@ class Race:
     def _rejoin_anchor(self, ent):
         """The leader's distance where its car of the old lobby stopped: the stint end
         of a team that changed, else where the team's car is now (standing in the box,
-        or still on track); None before any car counts."""
+        or still on track); estimated cars move with another team and never count. None
+        before any car counts."""
         return max((e.stint_end if e.stint_end is not None else self._shown(e)
                     for e in self._entries.values()
-                    if e is not ent and e.distance is not None and not self._out(e)), default=None)
+                    if e is not ent and e.distance is not None and not self._out(e)
+                    and not self._estimated(e)), default=None)
 
     def _changed(self, ent, t):
         ent.stint_end = ent.distance + ent.adjust

@@ -668,8 +668,10 @@ def t_a_rejoin_starts_the_team_at_the_leaders_distance():
 def t_a_rejoin_starts_where_the_leaders_old_car_stopped_even_after_an_early_switch():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     lead, gone = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 115, "Ann")
-    t = _drive(race, [lead, gone], [50, 50], 0.0, 30)
-    t = _drive(race, [lead], [50], t, 30)                               # B disconnected
+    quiet = Car(race, "X", "x1", L - 65, "Xen")
+    t = _drive(race, [lead, gone, quiet], [50, 50, 50], 0.0, 30)
+    t = _drive(race, [lead], [50], t, 30)                               # B disconnected, X quiet
+    race.estimate("X", "A", 1.0, t)                                     # X follows A's next car too
     race.rejoin("B", True)
     race.open_change_window(t)                                          # the leader is still on its lap
     t = _drive(race, [lead], [50], t, 5)
@@ -681,7 +683,10 @@ def t_a_rejoin_starts_where_the_leaders_old_car_stopped_even_after_an_early_swit
     nxt.box = back.box = True
     t = _drive(race, [nxt, back], [None, None], t, 3)
     nxt.box = False
-    t = _drive(race, [nxt, back], [40, None], t, 10)                   # B departs 10 s later
+    for _ in range(10):                                                 # B departs 10 s later
+        t = _drive(race, [nxt, back], [40, None], t, 1)
+        race.standings(t)
+    assert _row(race, "X", t)["distance_m"] > stop, "the estimate runs past A's stint end"
     back.box = False
     t = _drive(race, [nxt, back], [40, 40], t, 5)
     rb = _row(race, "B", t)
