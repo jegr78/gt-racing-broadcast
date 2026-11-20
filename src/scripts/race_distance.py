@@ -1081,7 +1081,7 @@ class Race:
             if self._estimated(e):
                 est = self._est[e.entry]
                 ref = by_entry.get(est["ref"]) or {}
-                lapped = math.floor((lead - est["held"]) / self.length) if i and lead is not None else 0
+                lapped = self._laps_behind(ents[0], e) if i and lead is not None else 0
                 gap = None if lapped or ref.get("gap_s") is None else ref["gap_s"] + est["lag"]
                 gap_time = None if ref.get("gap_time_s") is None else ref["gap_time_s"] + est["lag"]
                 row.update(lapped=max(0, lapped), gap_s=None if gap is None else round(gap, 2),
