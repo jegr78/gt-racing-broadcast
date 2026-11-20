@@ -22,6 +22,7 @@ button{font:inherit;cursor:pointer;color:var(--ink);background:#1b2533;border:1p
 button.primary{background:#234d79;border-color:var(--accent);margin-top:14px}
 button:disabled{opacity:.5;cursor:default}
 .err{color:var(--bad);margin-top:10px}
+.note{border-left:3px solid var(--warn);padding:4px 0 4px 10px}
 .cmd{display:flex;gap:8px;align-items:flex-start;margin:6px 0 12px}
 .cmd code{flex:1;min-width:0;display:block;font:13px/1.45 var(--mono);background:#0e141b;border:1px solid var(--edge);border-radius:6px;padding:9px 10px;overflow-wrap:anywhere;white-space:pre-wrap}
 a{color:#8ac6ff}
@@ -52,6 +53,9 @@ li{margin-bottom:6px}
 
   <section id="runSec" hidden>
     <h2>2. Start the sender</h2>
+    <p class="note">Race Control approves your registration before the broadcast uses your
+      telemetry. Start the sender anyway: until then it prints <code>waiting for approval by
+      Race Control</code> and asks again every 10 seconds.</p>
     <p>With Python 3.8 or newer: download
       <a id="script" download="racecast-sender.py">racecast-sender.py</a>, open a terminal in
       that folder and run, on macOS, Linux, Termux (Android) or a-Shell (iOS)</p>

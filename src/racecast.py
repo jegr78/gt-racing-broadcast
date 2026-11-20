@@ -6081,11 +6081,13 @@ def _start_driver_invite(fresh, path=None):
 
 
 def _stop_driver_invite(path=None):
-    """Event stop ends the invite and the public timing link."""
+    """Event stop ends the invite, the drivers' requests and the public timing link."""
     import driver_invite
+    import driver_requests
     import timing_link
     path = path or _driver_invite_path()
     driver_invite.clear(path)
+    driver_requests.clear(driver_requests.path_in(os.path.dirname(os.path.abspath(path))))
     timing_link.clear(timing_link.path_in(os.path.dirname(os.path.abspath(path))))
 
 

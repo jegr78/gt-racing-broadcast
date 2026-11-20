@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the /console authorization policy (#216 phase 2).
 Run: python3 tests/test_console.py"""
-import importlib.util, os
+import importlib.util, json, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -19,6 +19,21 @@ cp = _load("console_policy", os.path.join("src", "scripts", "console_policy.py")
 def _cap(segs, method="GET"):
     r = cp.min_capability(segs, method)
     return None if r is None else (r.capability, r.step_up)
+
+
+def t_driver_requests_are_desk_routes_only():
+    for segs in (["drivers", "requests"], ["race-control", "drivers", "requests"]):
+        assert _cap(segs) is not None, segs
+    assert _cap(["drivers", "requests"]) == (cp.DIRECTOR, False)
+    assert _cap(["race-control", "drivers", "requests"]) == (cp.RACE_CONTROL, False)
+    for act in ("approve", "correct", "reject"):
+        assert _cap(["drivers", "requests", act], "POST") == (cp.DIRECTOR, False), act
+        assert _cap(["race-control", "drivers", "requests", act], "POST") == (cp.RACE_CONTROL, False), act
+        assert _cap(["drivers", "requests", act]) is None, "GET never decides"
+    for segs, cap in ((["drivers", "requests", "reject-pending"], cp.DIRECTOR),
+                      (["race-control", "drivers", "requests", "reject-pending"], cp.RACE_CONTROL)):
+        assert _cap(segs, "POST") == (cap, False), segs
+    assert _cap(["drivers", "requests", "delete"], "POST") is None
 
 
 def t_any_authenticated_reads():
@@ -401,6 +416,66 @@ def _desk_fn(name, call):
     desk = os.path.join(ROOT, "src", "console", "driver-desk.js")
     src = "\n".join(tower._function(desk, n) for n in name.split(","))
     return tower._run(src + "\n;console.log(JSON.stringify(" + call + "));")
+
+
+def t_the_desk_lists_waiting_requests_first_and_hides_rejected_ones():
+    reqs = [{"conn": "a", "status": "approved", "ts": 1}, {"conn": "b", "status": "rejected", "ts": 2},
+            {"conn": "c", "status": "pending", "ts": 4}, {"conn": "d", "status": "pending", "ts": 3}]
+    got = _desk_fn("requestRows", "requestRows(" + json.dumps(reqs) + ").map(function (r) { return r.conn; })")
+    if got is None:
+        return
+    assert got == ["d", "c", "a"], got
+
+
+def t_the_desk_marks_requests_with_the_same_name_entry_and_stint():
+    reqs = [{"conn": "a", "name": "Max", "entry": "A", "segment": "S1", "status": "pending"},
+            {"conn": "b", "name": "Max", "entry": "A", "segment": "S1", "status": "pending"},
+            {"conn": "c", "name": "Max", "entry": "A", "segment": "S2", "status": "approved"},
+            {"conn": "d", "name": "Ann", "entry": "A", "segment": "S2", "status": "pending"},
+            {"conn": "e", "name": "Ann", "entry": "A", "segment": "S2", "status": "rejected"}]
+    got = _desk_fn("duplicates", "Object.keys(duplicates(" + json.dumps(reqs) + ")).sort()")
+    if got is None:
+        return
+    assert got == ["a", "b"], got
+
+
+def t_the_desk_marks_pending_and_approved_senders_apart():
+    senders = [{"name": "Max", "live": True, "connected": True, "approval": "approved"},
+               {"name": "Ann", "live": False, "connected": False, "approval": "pending"}]
+    got = _desk_fn("fitName,readyPills", "[readyPills(" + json.dumps(senders) + "), readyPills(" +
+                   json.dumps(senders[1:]) + "), readyPills([{name: 'Lea', live: false, connected: false, "
+                   "approval: 'approved'}]), readyPills([{name: 'Ole', live: false, connected: true, "
+                   "approval: 'approved'}]), readyPills([])]")
+    if got is None:
+        return
+    assert got == [[["Max", "ok"], ["Ann: pending", "amb"]], [["Ann: pending", "amb"]],
+                   [["approved, no data", "amb"]], [["quiet", "amb"]], [["no sender", "bad"]]], got
+    got = _desk_fn("senderState", "[" + ",".join("senderState(" + json.dumps(x) + ")" for x in (
+        {"live": True, "connected": True, "approval": "approved"},
+        {"live": False, "connected": True, "approval": "approved"},
+        {"live": False, "connected": False, "approval": "pending"},
+        {"live": False, "connected": False, "approval": "approved"})) + "]")
+    assert got == [["live", "ok"], ["quiet", "bad"], ["pending", "amb"], ["approved, no data", "amb"]], got
+
+
+def t_the_desk_sends_the_corrected_request():
+    rec = {"conn": "c1", "entry": "Team A #1", "segment": "Stint 1", "name": "Max"}
+    got = _desk_fn("requestBody", "[requestBody(" + json.dumps(rec) + ", {name: 'Max P', entry: 'Team B #2'}, true),"
+                   " requestBody(" + json.dumps(rec) + ", null, false)]")
+    if got is None:
+        return
+    assert got == [{"conn": "c1", "entry": "Team B #2", "segment": "Stint 1", "name": "Max P"},
+                   {"conn": "c1", "entry": "Team A #1", "name": "Max"}], got
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    for route in ('"/drivers/requests/approve"', '"/drivers/requests/correct"', '"/drivers/requests/reject"',
+                  '"/drivers/requests/reject-pending"',
+                  '"/drivers/requests"'):
+        assert route in desk, route
+    for call in ('decide(pend ? "/drivers/requests/approve"', 'decide("/drivers/requests/reject"',
+                 'decide("/drivers/requests/reject-pending"'):
+        assert call in desk, f"a decision drops the focus so its row re-renders: {call}"
+    assert "document.activeElement.blur()" in desk
 
 
 def t_the_desk_offers_a_lap_count_per_slower_class():

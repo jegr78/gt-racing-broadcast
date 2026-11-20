@@ -175,17 +175,29 @@ class Hub:
             self._conns[conn]["entry"] = entry
             return True
 
+    def update(self, conn, entry, segment, name):
+        """Count `conn` under an approved request's values from now on."""
+        with self._lock:
+            self._reassigned.pop(conn, None)
+            if conn in self._conns:
+                self._conns[conn].update(entry=entry, segment=segment, name=name)
+
     def disconnect(self, conn):
         with self._lock:
             if conn not in self._conns:
                 return False
-            del self._conns[conn]
+        self.revoke(conn)
+        return True
+
+    def revoke(self, conn):
+        """Refuse `conn` from now on, also before its first batch."""
+        with self._lock:
+            self._conns.pop(conn, None)
             self._reassigned.pop(conn, None)
             self._dropped[conn] = None
             while len(self._dropped) > 4 * self._max:
                 del self._dropped[next(iter(self._dropped))]
         self._counts.forget(conn)
-        return True
 
     def _clear(self):
         self._conns.clear()
@@ -224,14 +236,25 @@ class Hub:
         return sorted(out, key=lambda c: (c["entry"], c["name"]))
 
 
-def readiness(roster, segments, connections, multi_lobby):
+def readiness(roster, segments, connections, multi_lobby, requests=()):
     """One row per entry (in endurance per entry and stint label) with its senders:
-    {entry, segment, ready, senders: [{conn, name, live}]}. Senders registered for an
-    entry or label outside the roster get their own rows, so nobody is hidden."""
+    {entry, segment, ready, senders: [{conn, name, live, approval, connected}]}. A
+    request (`driver_requests`) without a connection is a sender that never sent:
+    `approval` pending or approved. Senders registered for an entry or label outside
+    the roster get their own rows, so nobody is hidden."""
     slots = [(e, s) for e in roster for s in (segments if multi_lobby and segments else [None])]
     rows = {slot: [] for slot in slots}
+    known = set()
     for c in connections:
+        known.add(c["conn"])
         key = (c["entry"], c["segment"] if multi_lobby and segments else None)
-        rows.setdefault(key, []).append({"conn": c["conn"], "name": c["name"], "live": c["live"]})
+        rows.setdefault(key, []).append({"conn": c["conn"], "name": c["name"], "live": c["live"],
+                                         "approval": "approved", "connected": True})
+    for r in requests:
+        if r["conn"] in known or r["status"] == "rejected":
+            continue
+        key = (r["entry"], r["segment"] if multi_lobby and segments else None)
+        rows.setdefault(key, []).append({"conn": r["conn"], "name": r["name"], "live": False,
+                                         "approval": r["status"], "connected": False})
     return [{"entry": e, "segment": s, "ready": any(x["live"] for x in senders),
              "senders": senders} for (e, s), senders in rows.items()]

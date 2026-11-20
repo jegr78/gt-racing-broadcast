@@ -64,9 +64,9 @@ def _timing_server(**extra):
 
 
 def _serve(solo=True, segments=(), clock=None, recording_dir=None, enabled=lambda: True, context=None,
-           **extra):
+           invite_path=None, **extra):
     d = tempfile.mkdtemp()
-    path = os.path.join(d, "driver-invite.json")
+    path = invite_path or os.path.join(d, "driver-invite.json")
     from test_race_distance import TRACE
     race = driver_race.Service(os.path.join(d, "driver-race.json"), pick=lambda: {"id": "t"},
                                trace_for=lambda _i: TRACE, multi_lobby=lambda: not solo,
@@ -269,6 +269,21 @@ def _register(port, invite, **body):
                 {"Content-Type": "application/json"})
 
 
+def _conn_of(path, issued):
+    return driver_invite.verify(driver_invite.current(path), issued)["conn"]
+
+
+def _approved(port, path, invite, **body):
+    """A registration Race Control approved on the tailnet: its code."""
+    code, text, _h = _register(port, invite, **body)
+    assert code == 200, (code, text)
+    issued = json.loads(text)["code"]
+    st, text, _h = _req(port, "/drivers/requests/approve", json.dumps({"conn": _conn_of(path, issued)}).encode(),
+                        {"Content-Type": "application/json"})
+    assert st == 200, (st, text)
+    return issued
+
+
 def t_invite_page_data_register_and_ingest_in_a_single_lobby():
     srv, port, path, hub = _serve()
     try:
@@ -283,9 +298,8 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         assert "https://" not in text, "the invite data carries no stream URLs"
         code, text, _h = _req(port, f"/console/drive/sender.py?i={invite}")
         assert code == 200 and "racecast relay" in text, code
-        code, text, _h = _register(port, invite, entry="Team A #1", name="Max")
-        issued = json.loads(text)["code"]
-        assert code == 200 and issued.startswith("D1:"), text
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        assert issued.startswith("D1:"), issued
         for bad in ({"entry": "Nobody", "name": "Max"}, {"entry": "Team A #1", "name": "Car #7"}):
             assert _register(port, invite, **bad)[0] == 400, bad
         batch = tp.encode_batch([_wire(1), _wire(2)])
@@ -299,7 +313,7 @@ def t_invite_page_data_register_and_ingest_in_a_single_lobby():
         assert [(c["entry"], c["name"], c["packets"]["received"]) for c in conns] == [("Team A #1", "Max", 2)], conns
         ENTRIES.append("Team C #3")
         try:
-            late = json.loads(_register(port, invite, entry="Team C #3", name="Lea")[1])["code"]
+            late = _approved(port, path, invite, entry="Team C #3", name="Lea")
         finally:
             ENTRIES.remove("Team C #3")                               # the league dropped the entry
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": late})
@@ -319,7 +333,7 @@ def t_endurance_asks_for_the_stint_and_allows_two_per_team():
         data = json.loads(_req(port, f"/console/drive/data?i={invite}")[1])
         assert data["multi_lobby"] is True and data["segments"] == ["Stint 1", "Stint 2", "Q1"], data
         assert _register(port, invite, entry="Team A #1", name="Max")[0] == 400, "endurance needs the stint"
-        codes = [json.loads(_register(port, invite, entry="Team A #1", name=n, segment=s)[1])["code"]
+        codes = [_approved(port, path, invite, entry="Team A #1", name=n, segment=s)
                  for n, s in (("Max", "Stint 1"), ("Ann", "Stint 2"), ("Lea", "Q1"))]
         batch = tp.encode_batch([_wire(1)])
         replies = [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0] for c in codes]
@@ -336,6 +350,362 @@ def t_endurance_without_stint_labels_registers_by_entry():
         assert code == 200, (code, text)
         reg = driver_invite.verify(driver_invite.current(path), json.loads(text)["code"])
         assert reg["segment"] is None, reg
+    finally:
+        srv.shutdown()
+
+
+JSON_HDR = {"Content-Type": "application/json"}
+
+
+def _post(port, route, body):
+    return _req(port, route, json.dumps(body).encode(), JSON_HDR)
+
+
+def t_an_unapproved_code_waits_and_its_telemetry_reaches_nothing():
+    srv, port, path, hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        code, text, _h = _register(port, invite, entry="Team A #1", name="Max")
+        issued = json.loads(text)["code"]
+        assert code == 200 and issued.startswith("D1:"), text
+        batch = tp.encode_batch([_wire(1), _wire(2)])
+        for _ in range(130):
+            code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
+            body = json.loads(text)
+            assert code == 423 and body["pending"] is True and "waiting for approval" in body["error"], \
+                ("a pending code is refused with its own status, never the failed-auth bucket", code, text)
+        assert hub.connections() == [], "a pending sender never reaches the hub"
+        assert json.loads(_req(port, "/drivers/data")[1])["connections"] == []
+        assert not any(e.get("driver") for e in srv.race_svc.standings()["entries"]), \
+            "a pending sender never reaches the race"
+        assert _register(port, invite, entry="Team A #1", name="Ann")[0] == 200, \
+            "a pending request holds no entry slot"
+        rows = json.loads(_req(port, "/drivers/readiness")[1])["rows"]
+        team_a = next(r for r in rows if r["entry"] == "Team A #1")
+        assert not team_a["ready"] and sorted((s["name"], s["approval"]) for s in team_a["senders"]) == \
+            [("Ann", "pending"), ("Max", "pending")], team_a
+        conn = _conn_of(path, issued)
+        code, text, _h = _post(port, "/drivers/requests/approve", {"conn": conn, "entry": "Team B #2", "name": "Max P"})
+        assert code == 200 and json.loads(text)["request"]["status"] == "approved", text
+        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
+        assert code == 200, (code, text)
+        assert [(c["entry"], c["name"]) for c in hub.connections()] == [("Team B #2", "Max P")], \
+            "the approval's corrections replace what the code names"
+        rows = json.loads(_req(port, "/drivers/readiness")[1])["rows"]
+        team_b = next(r for r in rows if r["entry"] == "Team B #2")
+        assert team_b["ready"] and [(s["name"], s["approval"]) for s in team_b["senders"]] == [("Max P", "approved")]
+        forged = driver_invite.issue(driver_invite.current(path), entry="Team A #1", name="Eve")
+        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": forged})
+        assert code == 403 and "register again" in text, ("a code without a request is refused", code, text)
+    finally:
+        srv.shutdown()
+
+
+def t_a_rejected_code_is_revoked_even_while_it_sends():
+    srv, port, path, hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        batch = tp.encode_batch([_wire(1)])
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})[0] == 200
+        conn = _conn_of(path, issued)
+        code, text, _h = _post(port, "/drivers/requests/reject", {"conn": conn})
+        assert code == 200 and json.loads(text)["request"]["status"] == "rejected", text
+        assert hub.connections() == [], "a rejection drops the live sender"
+        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
+        assert code == 403 and "rejected" in text, (code, text)
+        for route in ("approve", "correct", "reject"):
+            code, text, _h = _post(port, f"/drivers/requests/{route}", {"conn": conn})
+            assert code == 409, (route, code, text)
+        pending = json.loads(_register(port, invite, entry="Team A #1", name="Ann")[1])["code"]
+        assert _post(port, "/drivers/requests/reject", {"conn": _conn_of(path, pending)})[0] == 200
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": pending})[0] == 403, \
+            "a request rejected before it sent never sends"
+    finally:
+        srv.shutdown()
+
+
+def _next_tick():
+    """Wait until the relay's arrival clock moves on: Windows' monotonic clock steps by about 15.6 ms."""
+    start = time.monotonic()
+    while time.monotonic() - start < 0.05:
+        time.sleep(0.01)
+
+
+def t_approval_corrections_are_checked_like_a_registration():
+    srv, port, path, hub = _serve(solo=False, segments=["Stint 1", "Stint 2"])
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = json.loads(_register(port, invite, entry="Team A #1", name="Max", segment="Stint 1")[1])["code"]
+        conn = _conn_of(path, issued)
+        for bad in ({"entry": "Nobody #0"}, {"segment": "Stint 9"}, {"name": "Car;7"}, {"name": ""},
+                    {"entry": 5}, {"segment": None}):
+            code, text, _h = _post(port, "/drivers/requests/approve", dict(bad, conn=conn))
+            assert code == 400, (bad, code, text)
+        assert _post(port, "/drivers/requests/approve", {"conn": "nobody00"})[0] == 404
+        assert _post(port, "/drivers/requests/correct", {"conn": conn, "name": "Max"})[0] == 409, \
+            "only an approved request is corrected"
+        code, text, _h = _post(port, "/drivers/requests/approve", {"conn": conn, "segment": "Stint 2"})
+        assert code == 200, text
+        batch = tp.encode_batch([_wire_at(6, -20.0, 0)])
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})[0] == 200
+        assert [(c["entry"], c["segment"]) for c in hub.connections()] == [("Team A #1", "Stint 2")]
+        code, text, _h = _post(port, "/drivers/requests/correct",
+                               {"conn": conn, "entry": "Team B #2", "segment": "Stint 1", "name": "Max P"})
+        assert code == 200, text
+        assert [(c["entry"], c["segment"], c["name"]) for c in hub.connections()] == \
+            [("Team B #2", "Stint 1", "Max P")], "a correction moves the live sender at once"
+        _next_tick()
+        batch = tp.encode_batch([_wire_at(12, -10.0, 0)])
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})[0] == 200
+        assert [c["entry"] for c in hub.connections()] == ["Team B #2"], "and keeps it there"
+        assert [e.get("driver") for e in srv.race_svc.standings()["entries"] if e["entry"] == "Team B #2"] \
+            == ["Max P"], "the race shows the corrected name"
+        code, text, _h = _post(port, "/drivers/reassign", {"conn": conn, "entry": "Team A #1"})
+        assert code == 200, text
+        req = next(r for r in json.loads(_req(port, "/drivers/requests")[1])["requests"] if r["conn"] == conn)
+        assert req["entry"] == "Team A #1", ("a Move is a correction of the approval", req)
+        actions = [(r["action"], r.get("entry"), r.get("before", {}).get("entry")) for r in _audit_of(srv)]
+        assert actions == [("driver_approve", "Team A #1", "Team A #1"),
+                           ("driver_correct", "Team B #2", "Team A #1"),
+                           ("reassign", "Team A #1", None)], actions
+        first = _audit_of(srv)[0]
+        assert first["who"] == "tailnet" and first["segment"] == "Stint 2" and first["before"]["segment"] == "Stint 1", first
+    finally:
+        srv.shutdown()
+
+
+def t_requests_reach_both_desks_and_never_the_driver_routes():
+    srv, port, path, _hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = json.loads(_register(port, invite, entry="Team A #1", name="Max")[1])["code"]
+        conn = _conn_of(path, issued)
+        rc, director, alice = g._tok("dave"), g._tok("bob"), g._tok("alice")
+        st, text, _h = _req(port, f"/console/race-control/drivers/requests?t={rc}")
+        data = json.loads(text)
+        assert st == 200 and [(r["conn"], r["status"]) for r in data["requests"]] == [(conn, "pending")], text
+        assert data["entries"] == ENTRIES and data["multi_lobby"] is False, data
+        assert set(data["requests"][0]) == {"conn", "entry", "segment", "name", "status", "ts", "registered",
+                                            "who", "decided"}, "a request shows no telemetry"
+        for route in (f"/console/drivers/requests?t={alice}", f"/console/race-control/drivers/requests?t={alice}",
+                      f"/console/race-control/drivers/requests?t={director}"):
+            assert _req(port, route)[0] == 403, route
+        for route in (f"/console/drive/requests?i={invite}", f"/console/drive/requests/approve?i={invite}",
+                      f"/console/drive/approve?i={invite}"):
+            st, _t, _h = _req(port, route, json.dumps({"conn": conn}).encode(),
+                              dict(JSON_HDR, **{"X-Driver-Code": issued}))
+            assert st == 404, (route, st)
+        st, _t, _h = _req(port, f"/console/drivers/requests/approve?t={alice}", json.dumps({"conn": conn}).encode(),
+                          JSON_HDR)
+        assert st == 403, "a commentator never approves"
+        st, text, _h = _req(port, f"/console/race-control/drivers/requests/approve?t={rc}",
+                            json.dumps({"conn": conn}).encode(), JSON_HDR)
+        assert st == 200 and json.loads(text)["request"]["who"] == "race_control:dave", text
+        st, text, _h = _req(port, f"/console/drivers/requests/correct?t={director}",
+                            json.dumps({"conn": conn, "name": "Max P"}).encode(), JSON_HDR)
+        assert st == 200, text
+        st, text, _h = _req(port, f"/console/drivers/requests/reject?t={director}",
+                            json.dumps({"conn": conn}).encode(), JSON_HDR)
+        assert st == 200, text
+        assert [(r["action"], r["who"]) for r in _audit_of(srv)] == [
+            ("driver_approve", "race_control:dave"), ("driver_correct", "director:bob"),
+            ("driver_reject", "director:bob")], _audit_of(srv)
+    finally:
+        srv.shutdown()
+
+
+def t_a_full_batch_of_a_waiting_code_gets_its_answer():
+    srv, port, path, _hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = json.loads(_register(port, invite, entry="Team A #1", name="Max")[1])["code"]
+        full = tp.encode_batch([_wire(i) for i in range(1, tp.MAX_BATCH + 1)])
+        for _ in range(3):
+            code, text, _h = _req(port, "/console/drive/ingest", full, {"X-Driver-Code": issued})
+            assert code == 423 and json.loads(text)["pending"] is True, (code, text)
+    finally:
+        srv.shutdown()
+
+
+def t_registration_is_rate_limited_per_client():
+    srv, port, path, _hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        extra = [f"Team Z{i}" for i in range(g.m.DRIVE_REGISTER_PER_MIN + 1)]
+        ENTRIES.extend(extra)
+        replies = [_register(port, invite, entry=e, name="Max") for e in extra]
+        codes = [r[0] for r in replies]
+        assert codes[:-1] == [200] * g.m.DRIVE_REGISTER_PER_MIN and codes[-1] == 429, codes
+        assert "try again in a minute" in replies[-1][1], replies[-1]
+    finally:
+        del ENTRIES[2:]
+        srv.shutdown()
+
+
+def t_the_register_limit_keys_on_the_funnel_client():
+    srv, port, path, _hub = _serve()
+    extra = [f"Team Z{i}" for i in range(g.m.DRIVE_REGISTER_PER_MIN + 3)]
+    ENTRIES.extend(extra)
+    try:
+        invite = driver_invite.create(path)["id"]
+
+        def reg(entry, client):
+            return _req(port, f"/console/drive/register?i={invite}",
+                        json.dumps({"entry": entry, "name": "Max"}).encode(),
+                        dict(JSON_HDR, **{"X-Forwarded-For": f"198.51.100.9, {client}"}))[0]
+        codes = [reg(e, "203.0.113.5") for e in extra[:g.m.DRIVE_REGISTER_PER_MIN + 1]]
+        assert codes[-1] == 429 and set(codes[:-1]) == {200}, codes
+        assert reg(extra[-2], "203.0.113.6") == 200, "another Funnel client keeps its own bucket"
+        assert _post(port, "/drivers/requests/reject-pending", {})[0] == 200
+        assert reg(extra[-1], "203.0.113.5") == 429, "Reject all waiting leaves the flooding client limited"
+    finally:
+        del ENTRIES[2:]
+        srv.shutdown()
+
+
+def t_wrong_invites_never_count_toward_the_register_limit():
+    srv, port, path, _hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        for _ in range(g.m.DRIVE_REGISTER_PER_MIN + 5):
+            assert _register(port, "wrong", entry="Team A #1", name="Max")[0] == 403
+        assert _register(port, invite, entry="Team A #1", name="Max")[0] == 200, \
+            "the invite is checked before the registration counts"
+    finally:
+        srv.shutdown()
+
+
+def t_a_flood_for_one_slot_never_blocks_the_real_driver():
+    srv, port, path, _hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+
+        def reg(name, client):
+            return _req(port, f"/console/drive/register?i={invite}",
+                        json.dumps({"entry": "Team A #1", "name": name}).encode(),
+                        dict(JSON_HDR, **{"X-Forwarded-For": client}))[0]
+        assert [reg(f"Bot {i}", "198.51.100.1") for i in range(8)] == [200] * 8
+        assert reg("Max", "203.0.113.7") == 200, "another client registers for the same entry"
+        data = json.loads(_req(port, "/drivers/requests")[1])
+        assert sum(r["name"].startswith("Bot") for r in data["requests"]) == 3, data["requests"]
+        assert all("client" not in r for r in data["requests"]), "the desk gets no client address"
+    finally:
+        srv.shutdown()
+
+
+def t_an_evicted_registration_is_told_to_register_again():
+    srv, port, path, _hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        codes = [json.loads(_req(port, f"/console/drive/register?i={invite}",
+                                 json.dumps({"entry": "Team A #1", "name": f"Bot {i}"}).encode(),
+                                 dict(JSON_HDR, **{"X-Forwarded-For": "198.51.100.1"}))[1])["code"] for i in range(4)]
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": codes[0]})
+        assert code == 410 and "dropped" in text and "register again" in text, (code, text)
+        assert _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": codes[1]})[0] == 423
+    finally:
+        srv.shutdown()
+
+
+def t_only_the_local_funnel_proxy_names_the_client():
+    fwd = {"X-Forwarded-For": "198.51.100.9, 203.0.113.5"}
+    assert g.m.drive_client_key("127.0.0.1", fwd) == "203.0.113.5", "the proxy appends the real client last"
+    assert g.m.drive_client_key("::1", fwd) == "203.0.113.5"
+    assert g.m.drive_client_key("100.64.0.7", fwd) == "100.64.0.7", "a tailnet peer cannot pick its bucket"
+    assert g.m.drive_client_key("127.0.0.1", {}) == "127.0.0.1"
+    assert g.m.drive_client_key("127.0.0.1", {"X-Forwarded-For": "2001:db8:1:2:aaaa::1"}) == \
+        g.m.drive_client_key("2001:db8:1:2:bbbb::9", {}) == "2001:db8:1:2::/64", "IPv6 counts per /64"
+
+
+def t_a_rejected_driver_cannot_be_moved_or_made_the_active_car():
+    srv, port, path, _hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        _req(port, "/console/drive/ingest", tp.encode_batch([_wire_at(6, -20.0, 0)]), {"X-Driver-Code": issued})
+        conn = _conn_of(path, issued)
+        assert _post(port, "/drivers/requests/reject", {"conn": conn})[0] == 200
+        for route, body in (("/drivers/reassign", {"conn": conn, "entry": "Team B #2"}),
+                            ("/drivers/race/change", {"entry": "Team A #1", "conn": conn})):
+            code, text, _h = _post(port, route, body)
+            assert code == 409 and "rejected" in text, (route, code, text)
+    finally:
+        srv.shutdown()
+
+
+def t_a_decision_survives_a_renewed_invite_and_a_failed_write_cleanly():
+    import driver_requests
+    srv, port, path, _hub = _serve()
+    real_approve, real_save = driver_requests.Store.approve, driver_requests.Store._save
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = json.loads(_register(port, invite, entry="Team A #1", name="Max")[1])["code"]
+        conn = _conn_of(path, issued)
+
+        def gone(self, *a, **k):
+            raise KeyError(conn)
+        driver_requests.Store.approve = gone
+        code, text, _h = _post(port, "/drivers/requests/approve", {"conn": conn})
+        assert code == 404 and "renewed" in text, (code, text)
+        driver_requests.Store.approve = real_approve
+
+        def broken(self):
+            raise OSError("disk full")
+        driver_requests.Store._save = broken
+        for route in ("approve", "reject", "reject-pending"):
+            code, text, _h = _post(port, f"/drivers/requests/{route}", {"conn": conn})
+            assert code == 500 and "could not be saved" in text and "disk full" not in text, (route, code, text)
+        code, text, _h = _register(port, invite, entry="Team B #2", name="Ann")
+        assert code == 500 and "could not be saved" in text, (code, text)
+        driver_requests.Store._save = real_save
+        reqs = json.loads(_req(port, "/drivers/requests")[1])["requests"]
+        assert [(r["conn"], r["status"]) for r in reqs] == [(conn, "pending")], \
+            ("a failed write leaves memory as it was", reqs)
+    finally:
+        driver_requests.Store.approve, driver_requests.Store._save = real_approve, real_save
+        srv.shutdown()
+
+
+def t_both_desks_reject_every_waiting_request_at_once():
+    srv, port, path, hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        kept = _approved(port, path, invite, entry="Team A #1", name="Max")
+        waiting = [json.loads(_register(port, invite, entry="Team B #2", name=n)[1])["code"] for n in ("Ann", "Lea")]
+        rc, alice = g._tok("dave"), g._tok("alice")
+        for route in (f"/console/drive/requests/reject-pending?i={invite}",
+                      f"/console/drivers/requests/reject-pending?t={alice}"):
+            assert _post(port, route, {})[0] in (403, 404), route
+        st, text, _h = _post(port, f"/console/race-control/drivers/requests/reject-pending?t={rc}", {})
+        assert st == 200 and json.loads(text)["rejected"] == 2, text
+        batch = tp.encode_batch([_wire(1)])
+        assert [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0] for c in waiting] == [403, 403]
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": kept})[0] == 200, "approvals stay"
+        last = _audit_of(srv)[-1]
+        assert last["action"] == "driver_reject_pending" and last["who"] == "race_control:dave" \
+            and len(last["conns"]) == 2, last
+    finally:
+        srv.shutdown()
+
+
+def t_approvals_survive_a_relay_restart_and_a_new_invite_resets_them():
+    path = os.path.join(tempfile.mkdtemp(), "driver-invite.json")
+    srv, port, _p, _hub = _serve(invite_path=path)
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        waiting = json.loads(_register(port, invite, entry="Team B #2", name="Ann")[1])["code"]
+    finally:
+        srv.shutdown()
+    srv, port, _p, hub = _serve(invite_path=path)
+    try:
+        batch = tp.encode_batch([_wire(1)])
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})[0] == 200, \
+            "an approval holds across a restart"
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": waiting})[0] == 423
+        driver_invite.create(path)
+        assert json.loads(_req(port, "/drivers/requests")[1])["requests"] == [], "a renewed link resets them"
     finally:
         srv.shutdown()
 
@@ -384,7 +754,7 @@ def t_a_reassigned_sender_keeps_uploading_after_its_typo_entry_leaves():
         invite = driver_invite.create(path)["id"]
         ENTRIES.append("Team Typo")
         try:
-            issued = json.loads(_register(port, invite, entry="Team Typo", name="Max")[1])["code"]
+            issued = _approved(port, path, invite, entry="Team Typo", name="Max")
             _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
             assert hub.reassign(hub.connections()[0]["conn"], "Team B #2")
         finally:
@@ -400,7 +770,7 @@ def t_the_producer_disconnects_a_sender_on_the_tailnet():
     srv, port, path, hub = _serve()
     try:
         invite = driver_invite.create(path)["id"]
-        issued = json.loads(_register(port, invite, entry="Team A #1", name="Max")[1])["code"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
         _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
         conn = hub.connections()[0]["conn"]
         code, text, _h = _req(port, "/drivers/disconnect", json.dumps({"conn": conn}).encode(),
@@ -427,7 +797,7 @@ def t_ingested_telemetry_becomes_the_race_order_on_the_tailnet():
         invite = driver_invite.create(path)["id"]
         _req(port, "/drivers/race/settings", json.dumps({"formation": False}).encode(),
              {"Content-Type": "application/json"})
-        codes = {e: json.loads(_register(port, invite, entry=e, name="N")[1])["code"] for e in ENTRIES}
+        codes = {e: _approved(port, path, invite, entry=e, name="N") for e in ENTRIES}
         for i in range(0, 600, 6):                      # ten seconds at 60 Hz, sampled at 10 Hz
             sim[0] = 100.0 + i / 60
             for entry, behind in ((ENTRIES[0], 20.0), (ENTRIES[1], 60.0)):
@@ -474,7 +844,7 @@ def t_both_desks_set_and_clear_an_estimate_and_bad_input_is_refused():
     try:
         invite = driver_invite.create(path)["id"]
         _req(port, "/drivers/race/settings", json.dumps({"formation": False}).encode(), hdr)
-        codes = {e: json.loads(_register(port, invite, entry=e, name="N")[1])["code"] for e in ENTRIES}
+        codes = {e: _approved(port, path, invite, entry=e, name="N") for e in ENTRIES}
         for i in range(0, 600, 6):
             sim[0] = 100.0 + i / 60
             for entry, behind in ((ENTRIES[0], 20.0), (ENTRIES[1], 60.0)):
@@ -744,7 +1114,7 @@ def t_both_desks_act_with_their_identity():
     hdr = {"Content-Type": "application/json"}
     try:
         invite = driver_invite.create(path)["id"]
-        code = _json.loads(_register(port, invite, entry=ENTRIES[0], name="Max")[1])["code"]
+        code = _approved(port, path, invite, entry=ENTRIES[0], name="Max")
         _req(port, "/console/drive/ingest", tp.encode_batch([_wire_at(6, -20.0, 0)]),
              {"X-Driver-Code": code})
         conn = hub.connections()[0]["conn"]
@@ -802,7 +1172,7 @@ def t_both_desks_act_with_their_identity():
             "one red flag change per person in 2 s"
         assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
         actions = [r["action"] for r in _audit_of(srv)]
-        assert actions == ["correct", "final_lap", "settings", "quali", "compound", "settings",
+        assert actions == ["driver_approve", "correct", "final_lap", "settings", "quali", "compound", "settings",
             "reassign", "red_flag_cover_down", "red_flag"], actions
         carol = g._tok("carol")                                   # producer: every role
         assert _req(port, f"/console/race-control/drivers/data?t={carol}")[0] == 403
@@ -1271,8 +1641,7 @@ def t_a_magicdns_name_learned_after_start_is_a_browser_host():
     funnel_host.magicdns = lambda: known["name"]
     srv, port, path, _hub = _serve(funnel_host=funnel_host)
     try:
-        issued = json.loads(_register(port, driver_invite.create(path)["id"],
-                                      entry="Team A #1", name="Max")[1])["code"]
+        issued = _approved(port, path, driver_invite.create(path)["id"], entry="Team A #1", name="Max")
         code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]),
                               {"X-Driver-Code": issued, "Host": FUNNEL_HOST})
         assert code == 200, ("a sender authenticates by header, so the Host check never blocks it", code, text)

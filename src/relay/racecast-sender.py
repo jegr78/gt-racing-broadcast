@@ -7,8 +7,9 @@ telemetry keeps working, and posts the encrypted packets unchanged to the relay.
 
   python3 racecast-sender.py --url https://<host>/console/drive/ingest --code CODE
 
-The invite page of the event prints that line with your code. A maintainer probe
-run takes --key and --name instead of --code.
+The invite page of the event prints that line with your code. Until Race Control
+approves the registration the sender prints that it waits and asks again every 10 s.
+A maintainer probe run takes --key and --name instead of --code.
 
 Modes:
   default     heartbeat the console, receive on UDP 33740
@@ -44,6 +45,7 @@ RECEIVE_PORT = 33740
 MIN_PACKET = 0x94         # shorter datagrams are not GT7 telemetry
 MAX_PACKET = 512          # the relay refuses longer ones; GT7 sends at most 344 bytes
 REFUSED_WAIT_S = 60.0     # a refused link or key is retried once a minute
+PENDING_WAIT_S = 10.0     # a registration waiting for Race Control's approval
 KEEPALIVE_S = 5.0         # an empty post while the console is quiet keeps the entry slot
 RELATCH_S = 30.0          # a discovered console silent this long is searched again
 QUIET_S = 2.0             # no packet for this long is an interruption
@@ -82,7 +84,6 @@ REFUSED = {   # what the driver does about a refusal; the sender retries once a 
     403: "Register again on the invite page",
     404: "Check the link: the event may not run yet",
     409: "Someone else sends for this entry: ask the producer",
-    410: "Register again on the invite page",
     429: "Retrying in a minute",
 }
 
@@ -121,6 +122,7 @@ class Uploader:
         self.stats = dict.fromkeys(("posted", "dropped", "post_failed", "rejected"), 0)
         self.extra_stats = lambda: {}
         self._failing_since = None
+        self._waiting = False
         self._failures = 0                       # consecutive, for the backoff
         self._last_post = clock()
         self.latencies = collections.deque(maxlen=2000)
@@ -170,6 +172,18 @@ class Uploader:
                 self._remove_through(last)
                 self.stats["rejected"] += len(batch)
                 return self._failed("the relay refused a batch (400)", wait=1.0 / self.rate_hz)
+            if exc.code == 410:              # this code never works again
+                self._failed(f"the relay answered 410 ({_reason(exc)}). Start the sender again "
+                             "with the new code", repeat=True)
+                return None
+            if exc.code == 423:              # the relay takes nothing before the approval
+                self._settle(delivered=True)
+                if last is not None:
+                    self._remove_through(last)
+                if not self._waiting:
+                    self._waiting = True
+                    self._say("%s. Trying again every %.0f s" % (_reason(exc), PENDING_WAIT_S))
+                return PENDING_WAIT_S
             if exc.code in REFUSED:
                 return self._failed(f"the relay answered {exc.code} ({_reason(exc)}). "
                                     + REFUSED[exc.code], wait=REFUSED_WAIT_S, repeat=True)
@@ -184,6 +198,9 @@ class Uploader:
         self._failures = 0
         with self._lock:
             self.stats["posted"] += 1
+        if self._waiting:
+            self._waiting = False
+            self._say("approved: sending telemetry")
         if self._failing_since is not None:
             self._say("upload works again after %.0f s" % (self._clock() - self._failing_since))
             self._failing_since = None
@@ -209,7 +226,11 @@ class Uploader:
 
     def run(self, stop):
         while not stop.is_set():
-            stop.wait(self.post_once())
+            wait = self.post_once()
+            if wait is None:
+                stop.set()                   # the relay dropped this code for good
+                return
+            stop.wait(wait)
 
 
 class Sender:

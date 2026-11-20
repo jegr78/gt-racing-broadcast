@@ -105,6 +105,17 @@ def t_rate_limiter_fixed_window():
     assert rl.allow("ip", now=61) is True       # window reset
 
 
+def t_rate_limiter_key_map_stays_bounded():
+    rl = ca.RateLimiter(limit=1, window_s=60, max_keys=3)
+    for i in range(3):
+        assert rl.allow(f"k{i}", now=0)
+    assert not rl.allow("k2", now=1), "a live window still counts"
+    assert rl.allow("new", now=61) and len(rl._hits) == 1, "expired windows leave the map first"
+    for i in range(10):
+        rl.allow(f"x{i}", now=62)
+    assert len(rl._hits) == 3, f"never more than max_keys: {len(rl._hits)}"
+
+
 def t_versions_default_and_bump():
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "console-versions.json")

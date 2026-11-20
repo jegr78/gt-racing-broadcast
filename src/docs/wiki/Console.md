@@ -83,6 +83,12 @@ it says when the cover or the banner could not be set. **Restart released** lowe
 cover and clears the banner again when this desk raised them; a cover or banner the
 director raised stays until the director lowers it. Every action is logged with the person's name.
 
+On top of the card, **Driver requests** lists the drivers who registered on the invite
+link and wait for approval. Compare each with the car in the GT7 lobby, correct the
+name, team or stint if needed and press **Approve**, or **Reject** it. The relay uses no
+telemetry of a driver before the approval. Details are in
+[Driver telemetry](Driver-Telemetry#approving-drivers).
+
 The card also holds the **race recording** and its disconnect events: start and stop
 recording, a CSV download, the event list with **Confirm DC** and **Dismiss**, and **Show
 standings** with a choice of 5 to 30 seconds before the last packet, which opens the frozen
