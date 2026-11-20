@@ -93,7 +93,9 @@ and says so. Changing the layout mid-event starts the race over.
   full lap or more down shows `+N L`.
 - **Timing tower** (the on-air `drivers.html`): the gap column shows the gap to the leader. The desks show exact gaps for lapped cars too, as `+1 L · 1:02.5`, also for a car many laps down: the relay keeps the last ten minutes at full rate and everything older at one point per second, up to 24 hours. The public timing page and the cockpit are unchanged, and exact gaps never reach the public view.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
-  while its sender has been quiet for five seconds; the entry keeps its place. Once Race
+  while its sender has been quiet for five seconds. The entry keeps its last distance,
+  so the running cars pass it and it sinks down the order; an **estimate** keeps it
+  where Race Control places it (see below). Once Race
   Control confirms the silence as a disconnect, every screen shows **DC** instead (desks,
   tower, cockpit, public timing page, the recording and its frozen standings), until the
   car sends data again. A car Race Control placed with an **estimate** shows **EST**
