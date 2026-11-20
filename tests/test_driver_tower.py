@@ -76,7 +76,7 @@ def t_the_value_column_cycles_gap_and_interval():
     assert [g[0] for g in got] == ["+1.4", "+0.5", "+1.4"], \
         f"two phases, gap to the leader and interval to the car ahead: {got}"
     assert [g[1] for g in got] == ["Leader"] * 3, f"the leader reads Leader in both phases: {got}"
-    assert [g[2] for g in got] == ["GAP", "INT", "GAP"], f"the header names the phase: {got}"
+    assert [g[2] for g in got] == ["GAP TO LEADER", "INTERVAL", "GAP TO LEADER"], f"the header names the phase: {got}"
 
 
 # Feeds payloads behind a fixed leader to renderRace at the given clock and reads each
@@ -440,6 +440,31 @@ def t_the_tower_shows_the_surname_and_leaves_the_cut_to_css():
     assert re.search(r"\.dd-driver \{[^}]*text-overflow: ellipsis", css), "the column cuts what does not fit"
 
 
+def t_the_header_badge_follows_the_value_column():
+    got = _tower(_RACE + f"""
+      const badge = document.getElementById("dd-phase");
+      const out = [0, 1].map(function (k) {{
+        race(k * CYCLE_MS + 1, [{json.dumps(CAR)}]);
+        return [badge.textContent, badge.attrs["data-phase"]];
+      }});
+      renderQualifying({{mode: "qualifying", qualifying: []}});
+      return out.concat([[badge.textContent, badge.attrs["data-phase"]]]);""")
+    if got is None:
+        return
+    assert got == [["GAP TO LEADER", "gap"], ["INTERVAL", "interval"], ["", ""]], \
+        f"the badge names the column's phase for the override CSS and is empty in qualifying: {got}"
+
+
+def t_the_header_badge_is_readable_on_stream():
+    with open(TOWER, encoding="utf-8") as fh:
+        html = fh.read()
+    rule = re.search(r"#dd-phase \{([^}]*)\}", html).group(1)
+    size = int(re.search(r"font-size: (\d+)px", rule).group(1))
+    assert size >= 14, f"the badge is at least as large as the 14 px session line: {rule}"
+    assert "background" in rule, f"the badge is a filled pill, not dim corner text: {rule}"
+    assert '<span id="dd-phase" data-phase="gap">GAP TO LEADER</span>' in html, "the builder sample shows the full badge"
+
+
 def t_the_interval_phase_falls_back_to_the_gap():
     got = _tower(f"""
       Date.now = () => CYCLE_MS + 1;
@@ -447,7 +472,7 @@ def t_the_interval_phase_falls_back_to_the_gap():
       return [phaseLabel(), column(e, 1)];""")
     if got is None:
         return
-    assert got == ["INT", "+3.2"], f"a running car without an interval shows its gap: {got}"
+    assert got == ["INTERVAL", "+3.2"], f"a running car without an interval shows its gap: {got}"
 
 
 def t_the_pages_show_names_through_the_rule():
@@ -735,8 +760,9 @@ def t_a_class_page_stays_for_gap_and_interval():
       }});""")
     if got is None:
         return
-    assert got == [["H", "GAP", "+1.0"], ["H", "INT", "+1.0"], ["G", "GAP", "+1.0"], ["G", "INT", "+1.0"],
-                   ["H", "GAP", "+1.0"]], f"each class page shows GAP, then INT, then the next class: {got}"
+    gap, it = "GAP TO LEADER", "INTERVAL"
+    assert got == [["H", gap, "+1.0"], ["H", it, "+1.0"], ["G", gap, "+1.0"], ["G", it, "+1.0"],
+                   ["H", gap, "+1.0"]], f"each class page shows the gap, then the interval, then the next class: {got}"
 
 
 def t_class_names_are_text():

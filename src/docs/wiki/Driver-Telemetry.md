@@ -248,9 +248,11 @@ It never carries connection ids, corrections or who made them.
   its entry colour. Dots sit on the racing line; in a close pack a dot slides back
   along the line to stay readable, never past the car behind, and otherwise lies under
   the dot ahead. The value column switches every 15 seconds between the gap to the
-  leader and the interval to the car ahead, and a small label in the header (`GAP`,
-  `INT`) names the current one. When a car completes a lap, its row shows the new lap
-  time for 5 seconds, purple if it is the fastest lap of the race, then returns to the
+  leader and the interval to the car ahead, and a white badge on the header's lap line,
+  right above the value column, names the current one: `GAP TO LEADER` or `INTERVAL`. On class pages
+  the gap is to the class leader. The badge is `#dd-phase` with `data-phase="gap"` or
+  `"interval"`, so a league's overlay CSS can restyle each phase. When a car completes a
+  lap, its row shows the new lap time for 5 seconds, purple if it is the fastest lap of the race, then returns to the
   gap; a lap that does not count shows nothing. The seconds are a league setting
   (Control Center Home, **Lap time**, or `racecast event race --last-lap-seconds N`,
   1 to 30) that the relay applies at once. A reloaded overlay does not replay the laps

@@ -29,8 +29,12 @@
   }
   #dd-session { font-size: 14px; font-weight: 600; color: var(--dd-dim); letter-spacing: .08em;
                 text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #dd-phase { position: absolute; right: 16px; top: 12px; font-size: 12px; font-weight: 700;
-              color: var(--dd-dim); letter-spacing: .08em; }
+  #dd-lap { margin-right: 214px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* On the lap line, right-aligned over the value column; a fixed width keeps it still when the phase changes. */
+  #dd-phase { position: absolute; right: 58px; top: 10px; width: 160px; box-sizing: border-box;
+              padding: 3px 0; border-radius: 4px; background: var(--dd-fg); color: #0a0d12; text-align: center;
+              font-size: 15px; font-weight: 800; letter-spacing: .06em; line-height: 18px; white-space: nowrap; }
+  #dd-phase:empty { display: none; }
   #drivers-header.flag { border-left-color: #ff2a2a; }
   #drivers-tower {
     position: absolute; left: 48px; top: 136px; width: 500px; box-sizing: border-box;
@@ -111,7 +115,7 @@
 </head>
 <body>
   <div id="drivers-header" data-edit="Lap and session" data-edit-kind="text">
-    <span id="dd-lap">LAP 7 / 20</span><span id="dd-session">Suzuka · Stint 2</span><span id="dd-phase">GAP</span>
+    <span id="dd-lap">LAP 7 / 20</span><span id="dd-session">Suzuka · Stint 2</span><span id="dd-phase" data-phase="gap">GAP TO LEADER</span>
   </div>
   <div id="drivers-tower" data-edit="Timing tower" data-edit-kind="text" data-edit-props="showBrands"><div id="dd-rows">
     <div class="dd-row"><span class="dd-pos">1</span><span class="dd-id"><span class="dd-brand"><img src="/drivers/brand/bmw" alt=""></span><span class="dd-num" style="background:#c00000">7</span></span><span class="dd-name"><span class="dd-team">Team Redline</span><span class="dd-driver">BERG</span></span><span class="dd-tyre RM">RM</span><span class="dd-fuel"><span class="dd-fuel-bar"><i style="height:56%"></i></span><span>56%</span></span><span class="dd-val">Leader</span><span class="dd-pit">P1</span></div>
@@ -162,9 +166,14 @@
     return /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., ]+\)|[a-zA-Z]+)$/.test(c || "") ? c : fallback;
   }
   let showFuel = true, showTyre = true, lastLapS = 5;
-  const PHASES = ["GAP", "INT"];
+  const PHASES = ["GAP TO LEADER", "INTERVAL"];
   function phase() { return Math.floor(Date.now() / CYCLE_MS) % PHASES.length; }
   function phaseLabel() { return PHASES[phase()]; }
+  function showPhase(label, key) {
+    const badge = document.getElementById("dd-phase");
+    badge.textContent = label;
+    badge.setAttribute("data-phase", key);
+  }
   const laps = {};   // entry -> {ms, until}: its last lap and when that lap stops showing
   function noteLaps(entries) {
     const now = Date.now();
@@ -362,7 +371,7 @@
       return r;
     }));
     placeFastest();
-    document.getElementById("dd-phase").textContent = phaseLabel();
+    showPhase(phaseLabel(), ["gap", "interval"][phase()]);
     // A paged tower shows its page's class; one page cycles the classes that have a lap.
     const timed = list.filter(function (c) { return c.fastest; });
     const cls = book.length > 1 ? page[0].header
@@ -382,7 +391,7 @@
   }
   function renderQualifying(d) {
     document.getElementById("dd-lap").textContent = "QUALIFYING";
-    document.getElementById("dd-phase").textContent = "";
+    showPhase("", "");
     rows.classList.remove("grouped");
     const label = document.getElementById("dd-fl-class");
     label.textContent = "";

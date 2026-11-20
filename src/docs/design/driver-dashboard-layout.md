@@ -29,7 +29,9 @@ viewer payload of `driver_race.Service.dashboard`.
 column it needs exists in our data except the compound, which is optional by design.
 
 - Header: `LAP n / N` from the leader (or the remaining time in a timed race) and the
-  session line (track, stint label in endurance).
+  session line (track, stint label in endurance). A badge on the lap line, right-aligned
+  over the value column, names the column's phase, `GAP TO LEADER` or `INTERVAL`, large enough to read on
+  a 1080p stream; it has a fixed width so it does not jump when the phase changes.
 - Rows: position, number on the entry's tile colour (`BG Color`), driver surname with
   the entry or cup team small above, interval (the leader shows the gap column's
   title), pit stops `P`, and the optional compound letter.
