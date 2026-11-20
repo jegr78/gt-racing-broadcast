@@ -53,5 +53,6 @@ fastest lap, and later an event feed. Same delayed payload as the overlay.
 - The Configuration column that names a driver's team in team-vs-team leagues is
   **`Cup Team`**. Its colour is the entry row's `BG Color`, which such leagues already
   set per team; no second colour column.
-- The overlay shows at most 15 rows; the track map draws every car with data.
+- The overlay shows as many rows as fit the tower's box (up to 20 by default); the track
+  map draws every car with data.
 - Gaps show to a tenth of a second, lap times to the thousandth.
