@@ -14982,7 +14982,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                        b.get("pit_stops", 0), b.get("reason", "")),
                         "change": lambda: svc.override_change(who, b.get("entry"), b.get("conn")),
                         "fastest": lambda: svc.set_fastest(who, b.get("entry"), b.get("driver"),
-                                                           b.get("ms")),
+                                                           b.get("ms"), b.get("class")),
                         "quali": lambda: svc.set_quali(who, b.get("entry"), b.get("ms"),
                                                        b.get("clear") is True),
                         "compound": lambda: svc.set_compound(who, b.get("entry"), b.get("code")),
@@ -14993,6 +14993,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                                    b.get("driver", "")),
                         "class-laps": lambda: svc.set_class_laps(who, b.get("class"), b.get("laps")),
                     }
+                    if action == "class-laps" and "laps" not in body:
+                        return self._send({"ok": False, "error": "laps is a number or null"}, 400)
                     if action in actions:
                         try:
                             return self._send({"ok": True, "race": actions[action]()})

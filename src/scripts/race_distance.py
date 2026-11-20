@@ -222,6 +222,10 @@ class Race:
         """Each entry's class name; an entry missing or mapped to "" has none."""
         self._classes = {e: c for e, c in classes.items() if isinstance(e, str) and isinstance(c, str) and c}
 
+    def class_of(self, entry):
+        """The entry's class name, "" without one."""
+        return self._classes.get(entry, "")
+
     def set_driver_name(self, entry, driver, name):
         """Show `name` for the driver registered as `driver` ("" for an entry without a
         sender); a falsy name removes it."""
@@ -980,14 +984,17 @@ class Race:
                 "class_lapped": None})
         self._estimate_gaps(ents, rows)
         classes = self._class_pass(ents, rows, ranked, now)
-        class_lap = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
-                     ["leader"] for name in classes}
+        shown = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
+                 for name in classes}
+        class_lap = {name: d["leader"] for name, d in shown.items()}
+        # Endurance: a class count, like the overall one, needs the final lobby's lap counter.
+        class_counts = {name: not self.multi_lobby or d["count"] is not None for name, d in shown.items()}
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
                 "restart_mode": self._restart_mode,
                 "change_window": self._window_until is not None and now <= self._window_until,
                 "fastest": self.fastest,
-                "lap": lap, "classes": classes, "class_lap": class_lap, "entries": rows}
+                "lap": lap, "classes": classes, "class_lap": class_lap, "class_counts": class_counts, "entries": rows}
 
     def _estimate_gaps(self, ents, rows):
         """An estimated car's gaps are its reference's plus the seconds; the intervals

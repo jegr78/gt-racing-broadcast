@@ -400,7 +400,8 @@ def _desk_fn(name, call):
     sys.path.insert(0, HERE)
     import test_driver_tower as tower
     desk = os.path.join(ROOT, "src", "console", "driver-desk.js")
-    return tower._run(tower._function(desk, name) + "\n;console.log(JSON.stringify(" + call + "));")
+    src = "\n".join(tower._function(desk, n) for n in name.split(","))
+    return tower._run(src + "\n;console.log(JSON.stringify(" + call + "));")
 
 
 def t_the_desk_offers_a_lap_count_per_slower_class():
@@ -418,7 +419,8 @@ DESK_RACE = {"entries": [{"entry": "A", "class": "GT3", "class_pos": 1}, {"entry
                          {"entry": "C", "class": "GT3", "class_pos": 2}, {"entry": "D", "class": "", "class_pos": 1}],
              "classes": ["GT3", "GT4", ""], "class_lap": {"GT3": 7, "GT4": 6, "": 6},
              "class_laps": {"GT4": 18}, "lap": {"leader": 7, "count": 20},
-             "class_colors": {"GT3": "#e10600", "GT4": "red;background:url(x)", "": ""}}
+             "class_colors": {"GT3": "#e10600", "GT4": "red;background:url(x)", "": ""},
+             "class_counts": {"GT3": True, "GT4": True, "": True}}
 
 
 def t_the_desk_groups_the_race_by_class():
@@ -441,6 +443,43 @@ def t_the_desk_renders_one_class_as_today():
         return
     assert got == [{"name": None, "rows": [{"entry": "A"}, {"entry": "B"}]}], \
         f"outside class mode one group without a header, in overall order: {got}"
+
+
+def t_the_desk_fastest_lap_form_takes_a_class():
+    import json
+    r = {"fastest": {"entry": "A", "ms": 60000}, "classes": ["GT3", "GT4", ""],
+         "class_fastest": {"GT3": {"entry": "A", "ms": 60000}, "GT4": None, "": None}}
+    got = _desk_fn("scopedFastest,fastestBody,flClasses",
+                   "[scopedFastest(R, ''), scopedFastest(R, 'GT3'), scopedFastest(R, 'GT4'), scopedFastest(R, 'X'),"
+                   " fastestBody('', {ms: 1}), fastestBody('GT4', {ms: 1}), flClasses(R), flClasses({classes: []})]"
+                   .replace("R", json.dumps(r)))
+    if got is None:
+        return
+    assert got[:4] == [{"entry": "A", "ms": 60000}, {"entry": "A", "ms": 60000}, None, None], \
+        f"overall reads the race's lap, a class only its own: {got[:4]}"
+    assert got[4:6] == [{"ms": 1}, {"class": "GT4", "ms": 1}], f"only a class scope sends the class: {got[4:6]}"
+    assert got[6:] == [["GT3", "GT4"], []], f"the named classes, none outside class mode: {got[6:]}"
+
+
+def t_the_desk_class_header_count_follows_the_overall_rule():
+    import json
+    race = dict(DESK_RACE, class_counts={"GT3": True, "GT4": False, "": False})
+    got = _desk_fn("classGroups", "classGroups(" + json.dumps(race) + ").map(g => g.laps)")
+    if got is None:
+        return
+    assert got == [20, None, None], f"outside the final lobby a class count stays off the header: {got}"
+
+
+def t_the_desk_class_gap_reads_laps_down_in_the_class():
+    got = _desk_fn("secs,gapCell",
+                   "[gapCell({lapped: 1, class_lapped: 0, class_gap_s: 2.5, gap_time_s: 90}, true, 4, 1),"
+                   " gapCell({lapped: 0, class_lapped: 1, class_gap_s: null}, true, 4, 1),"
+                   " gapCell({lapped: 1, gap_time_s: 90}, false, 4, 1)]")
+    if got is None:
+        return
+    assert got[0] == {"text": "2.5", "lap": False}, f"a car lapped overall but not in its class: {got[0]}"
+    assert got[1] == {"text": "+1\u00a0L", "lap": True}, f"a car lapped in its class: {got[1]}"
+    assert got[2] == {"text": "+1\u00a0L\u00a0\u00b7 1:30.0", "lap": True}, f"overall as before: {got[2]}"
 
 
 if __name__ == "__main__":

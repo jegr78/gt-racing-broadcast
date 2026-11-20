@@ -564,9 +564,35 @@ def t_class_laps_route_refuses_bad_input():
                     json.dumps({"class": "GT4", "laps": 5}).encode(), hdr)[0] == 403, \
             "a commentator never sets a class lap count"
         for bad in ({"class": "GT4", "laps": 0}, {"class": "GT4", "laps": "x"}, {"class": "GT4", "laps": 1000},
-                    {"class": "LMP", "laps": 5}, {"class": ["GT4"], "laps": 5}, {"laps": 5}):
+                    {"class": "LMP", "laps": 5}, {"class": ["GT4"], "laps": 5}, {"laps": 5}, {"class": "GT4"}):
             st, text, _h = _req(port, f"/console/race-control/drivers/race/class-laps?t={rc}",
                                 json.dumps(bad).encode(), hdr)
+            assert st == 400, (bad, st, text)
+    finally:
+        srv.shutdown()
+
+
+def t_the_fastest_lap_route_takes_a_class():
+    roster = {ENTRIES[0]: {"carClass": "GT3"}, ENTRIES[1]: {"carClass": "GT4"}}
+    srv, port, _path, _hub = _serve(context=lambda: {"roster": roster, "stint": "S1", "mode": "race"})
+    hdr = {"Content-Type": "application/json"}
+    try:
+        rc = g._tok("dave")
+        url = f"/console/race-control/drivers/race/fastest?t={rc}"
+        st, text, _h = _req(port, url, json.dumps({"entry": ENTRIES[0], "driver": "Ann", "ms": 61000}).encode(), hdr)
+        assert st == 200, (st, text[:300])
+        st, text, _h = _req(port, url, json.dumps({"entry": ENTRIES[1], "driver": "Bo", "ms": 62000,
+                                                   "class": "GT4"}).encode(), hdr)
+        race = json.loads(text)["race"] if st == 200 else {}
+        assert st == 200 and race["class_fastest"]["GT4"]["entry"] == ENTRIES[1], (st, text[:300])
+        assert race["fastest"]["entry"] == ENTRIES[0], f"a class lap never replaces the overall one: {race['fastest']}"
+        st, text, _h = _req(port, url, json.dumps({"class": "GT3"}).encode(), hdr)
+        race = json.loads(text)["race"] if st == 200 else {}
+        assert st == 200 and race["class_fastest"]["GT3"] is None and race["fastest"]["entry"] == ENTRIES[0], \
+            (st, text[:300])
+        for bad in ({"class": "LMP"}, {"class": ""}, {"class": 5},
+                    {"entry": ENTRIES[0], "driver": "Ann", "ms": 61000, "class": "GT4"}):
+            st, text, _h = _req(port, url, json.dumps(bad).encode(), hdr)
             assert st == 400, (bad, st, text)
     finally:
         srv.shutdown()

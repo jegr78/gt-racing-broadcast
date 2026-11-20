@@ -612,21 +612,37 @@ class Service:
         except OSError:
             pass  # the race keeps it in memory; the next change writes it again
 
-    def set_fastest(self, who, entry=None, driver=None, ms=None):
-        """Race Control's correction: clear the fastest lap (no entry) or set it."""
+    def set_fastest(self, who, entry=None, driver=None, ms=None, cls=None):
+        """Race Control's correction: clear the fastest lap (no entry) or set it; with
+        `cls` only that class's fastest lap, never the overall one."""
         if entry is not None:
             entry = _entry_name(entry)
             if not _valid_name(driver):
                 raise ValueError("driver is 1 to 24 letters, digits, spaces, _ . or -")
             if type(ms) is not int or not 0 < ms < 3_600_000:
                 raise ValueError("ms is a lap time in milliseconds")
+        roster = self._context().get("roster") or {}
+        if cls is not None:
+            cls = _class_name(cls)
+            if cls not in _named_classes(roster):
+                raise ValueError("unknown class")
         with self._lock:
             race = self._current()
-            self._log(who, "fastest", **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
-            race.fastest_by_class = {c: f for c, f in race.fastest_by_class.items() if f != race.fastest}
-            race.fastest = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
-            if entry is not None:
-                race.fastest_by_class[race._classes.get(entry, "")] = dict(race.fastest)
+            self._set_roster(race, roster)
+            if cls is not None and entry is not None and race.class_of(entry) != cls:
+                raise ValueError("the entry is not in that class")
+            self._log(who, "fastest", **({"class": cls} if cls is not None else {}),
+                      **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
+            lap = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
+            if cls is not None:
+                race.fastest_by_class.pop(cls, None)
+                if lap is not None:
+                    race.fastest_by_class[cls] = lap
+            else:
+                race.fastest_by_class = {c: f for c, f in race.fastest_by_class.items() if f != race.fastest}
+                race.fastest = lap
+                if lap is not None:
+                    race.fastest_by_class[race.class_of(entry)] = dict(lap)
         self.save_fastest()
         return self.standings()
 
@@ -678,7 +694,8 @@ class Service:
             "fastest": self._shown_lap(race, fl, roster),
             "classes": [{"name": name, "color": colors.get(name, ""),
                          "lap": st["class_lap"][name],
-                         "laps": st["lap"]["count"] if name == first else class_laps.get(name) if name else None,
+                         "laps": st["lap"]["count"] if name == first else
+                                 class_laps.get(name) if name and st["class_counts"][name] else None,
                          "fastest": self._shown_lap(race, race.fastest_by_class.get(name), roster)}
                         for name in st["classes"]],
             "entries": rows})
@@ -926,6 +943,8 @@ class Service:
             if out["classes"]:
                 colors = _class_colors(ctx.get("roster") or {})
                 out["class_colors"] = {name: colors.get(name, "") for name in out["classes"]}
+                out["class_fastest"] = {name: self._shown_lap(race, race.fastest_by_class.get(name), ctx.get("roster") or {})
+                                        for name in out["classes"]}
             if out["fastest"]:
                 fl = out["fastest"]
                 out["fastest"] = dict(fl, driver=race.display_name(fl["entry"], fl["driver"]))

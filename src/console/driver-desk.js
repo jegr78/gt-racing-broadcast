@@ -119,16 +119,37 @@
 
   // The named classes whose lap count the desk sets: the first runs on the race's count, the unclassed on none.
   function lapClasses(names) { return names.filter(Boolean).slice(1); }
+  // The named classes whose fastest lap the desk can set or clear; none outside class mode.
+  function flClasses(r) { return (Array.isArray(r.classes) ? r.classes : []).filter(Boolean); }
+  // The fastest lap of a desk scope: the race's, or with a class only that class's.
+  function scopedFastest(r, cls) {
+    if (!cls) return r.fastest || null;
+    var f = r.class_fastest || {};
+    return Object.prototype.hasOwnProperty.call(f, cls) && f[cls] ? f[cls] : null;
+  }
+  function fastestBody(cls, body) { return cls ? Object.assign({class: cls}, body) : body; }
+  // A race row's Gap cell; grouped rows read laps down within the class.
+  function gapCell(e, grouped, i, k) {
+    if (grouped) {
+      return {text: e.class_lapped ? "+" + e.class_lapped + "\u00a0L" : (k ? secs(e.class_gap_s) : ""),
+              lap: !!e.class_lapped};
+    }
+    // No-break spaces: a narrow desk wraps only between the lap count and the time.
+    return {text: e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
+                           : (i ? secs(e.gap_s) : ""),
+            lap: !!e.lapped};
+  }
   // The race rows under their class: [{name, color, lap, laps, rows}] in class order; one group named null outside class mode.
   function classGroups(r) {
     var rows = r.entries || [], names = Array.isArray(r.classes) ? r.classes : [];
     if (!names.length) return [{name: null, rows: rows}];
     var lap = r.class_lap || {}, set = r.class_laps || {}, colors = r.class_colors || {}, first = names.filter(Boolean)[0];
+    var counted = r.class_counts || {};
     var count = r.lap && typeof r.lap.count === "number" ? r.lap.count : null;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k) && typeof o[k] === "number" ? o[k] : null; }
     return names.map(function (n) {
       var c = Object.prototype.hasOwnProperty.call(colors, n) ? colors[n] : "";
-      return {name: n, lap: own(lap, n), laps: n === first ? count : own(set, n),
+      return {name: n, lap: own(lap, n), laps: n === first ? count : counted[n] === true ? own(set, n) : null,
               color: typeof c === "string" && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c) ? c : "",
               rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === n; })};
     });
@@ -250,7 +271,7 @@
       act("/drivers/race/release", {}, "Restart released");
     });
     var redBanner = el("div", {cls: "banner", hidden: ""});
-    // Lap counts of the slower classes for the stint on air; display only.
+    // Lap counts of the slower classes for the stint on air; they never finish a car.
     var classLapRow = el("div", {cls: "row", hidden: ""});
     var classLapIn = Object.create(null);
     var classLapKey = null;
@@ -510,8 +531,12 @@
       act("/drivers/race/settings", {delay_s: isFinite(n) ? n : 0}, "Delay saved");
     });
     var flText = el("span", {cls: "grow"});
+    var flClass = el("select", {"aria-label": "Fastest lap class", hidden: ""});
+    var lastRace = {};
+    flClass.addEventListener("change", function () { renderFastest(lastRace); });
     var flClear = button("Clear fastest lap", "warn", "fl-clear", function () {
-      act("/drivers/race/fastest", {}, "Fastest lap cleared");
+      act("/drivers/race/fastest", fastestBody(flClass.value, {}),
+          (flClass.value ? flClass.value + " fastest lap" : "Fastest lap") + " cleared");
     });
     var flEntry = el("select", {"aria-label": "Fastest lap entry"});
     var flDriver = el("input", {type: "text", maxlength: "24", placeholder: "driver", cls: "wide",
@@ -520,8 +545,9 @@
     var flSet = button("Set fastest lap", "", null, async function () {
       var ms = parseLap(flTime.value);
       if (!isFinite(ms) || ms <= 0) return say("Lap time as m:ss.mmm", true);
-      var d = await act("/drivers/race/fastest", {entry: flEntry.value, driver: flDriver.value.trim(), ms: ms},
-                        "Fastest lap set");
+      var d = await act("/drivers/race/fastest",
+                        fastestBody(flClass.value, {entry: flEntry.value, driver: flDriver.value.trim(), ms: ms}),
+                        (flClass.value ? flClass.value + " fastest lap" : "Fastest lap") + " set");
       if (d) { flDriver.value = ""; flTime.value = ""; }
     });
     var qEntry = el("select", {"aria-label": "Qualifying entry"});
@@ -620,7 +646,7 @@
       evTable,
       el("h3", {text: "Dashboard"}),
       el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
-      el("div", {cls: "row"}, [flText, flClear]),
+      el("div", {cls: "row"}, [flClass, flText, flClear]),
       el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet]),
       el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qDelete, qRestore]),
       qList,
@@ -637,6 +663,18 @@
       sel.replaceChildren.apply(sel, items.map(function (i) { return opt(i[0], i[1], i[0] === cur); }));
     }
 
+    // Overall, or in class mode one class: the lap shown is the one the form clears.
+    function renderFastest(r) {
+      lastRace = r;
+      var names = flClasses(r);
+      flClass.hidden = !names.length;
+      keepSelect(flClass, [["", "Overall"]].concat(names.map(function (n) { return [n, n]; })));
+      var cls = names.indexOf(flClass.value) >= 0 ? flClass.value : "";
+      var fl = scopedFastest(r, cls);
+      flText.textContent = fl ? (cls ? cls + " fastest lap " : "Fastest lap ") + lapTime(fl.ms) + " · " +
+        fitName(fl.driver, NAME_LIST_MAX) + " (" + fl.entry + ")" : "No fastest lap yet.";
+      flClear.disabled = !fl;
+    }
     function renderRace(r) {
       var s = r.settings || {};
       onAir.dataset.on = s.visible ? "1" : "";
@@ -648,10 +686,7 @@
       tyreSrc.race = (r.entries || []).map(function (e) { return e.entry; });
       tyreSrc.compounds = r.compounds || {};
       syncTyres();
-      var fl = r.fastest;
-      flText.textContent = fl ? "Fastest lap " + lapTime(fl.ms) + " · " + fitName(fl.driver, NAME_LIST_MAX) + " (" + fl.entry + ")"
-                              : "No fastest lap yet.";
-      flClear.disabled = !fl;
+      renderFastest(r);
       var q = r.quali_overrides || {};
       qList.textContent = Object.keys(q).length ? "Corrected: " + Object.keys(q).map(function (e) {
         return e + " " + (q[e] === null ? "deleted" : lapTime(q[e]));
@@ -692,17 +727,14 @@
         if (e.status === "est" && e.estimate) {
           stPill.title = "Estimated " + e.estimate.seconds + " s behind " + e.estimate.ref + " until its data returns";
         }
-        // No-break spaces: a narrow desk wraps only between the lap count and the time.
-        var gap = grouped ? (e.class_lapped ? "+" + e.class_lapped + "\u00a0L" : (k ? secs(e.class_gap_s) : ""))
-          : e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
-                           : (i ? secs(e.gap_s) : "");
+        var gap = gapCell(e, grouped, i, k);
         var cells = [el("td", grouped ? {cls: "num", text: String(e.class_pos), title: "P" + (i + 1) + " overall"}
                                       : {cls: "num", text: String(i + 1)}), logoCell(e),
           el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted nowrap", text: fitName(e.driver, NAME_MAX),
             title: e.driver + (e.driver_registered && e.driver !== e.driver_registered ? " (registered as " +
                                e.driver_registered + ")" : "")})]),
           el("td", {cls: "num", text: String(e.laps)}),
-          el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}),
+          el("td", {cls: "num" + (gap.lap ? " lap" : ""), text: gap.text}),
           el("td", {cls: "num", text: secs(grouped ? e.class_interval_s : e.interval_time_s)}),
           el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
                         st[0] ? el("span", stPill) : null,

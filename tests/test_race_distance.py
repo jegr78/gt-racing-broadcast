@@ -1419,6 +1419,36 @@ def t_class_positions_and_gaps_follow_the_class():
     assert ra["class_pos"] == 1 and ra["class_gap_s"] == 0, ra
 
 
+def t_a_class_count_shows_only_where_the_overall_count_shows():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    race.set_classes({"A": "H", "B": "G"})
+    old_a, old_b = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
+    t = _drive(race, [old_a, old_b], [50, 40], 0.0, 3 * L / 50)
+    race.open_change_window(t)
+    race.final_lobby(9, t)
+    t = _drive(race, [old_a, old_b], [50, 40], t, 2)
+    assert race.standings(t)["class_counts"] == {"H": False, "G": False}, \
+        f"before the final lobby's cars count, no class shows a count: {race.standings(t)['class_counts']}"
+    old_a.box = old_b.box = True
+    t = _drive(race, [old_a, old_b], [None, None], t, 3)
+    new_a, new_b = Car(race, "A", "a2", L - 15, "Lea"), Car(race, "B", "b2", L - 60, "Bo")
+    t = _drive(race, [new_a, new_b], [40, 40], t, 2)
+    new_a.box = new_b.box = True
+    t = _drive(race, [new_a, new_b], [None, None], t, 3)
+    new_a.box = new_b.box = False
+    t = _drive(race, [new_a, new_b], [50, 40], t, 20)
+    st = race.standings(t)
+    assert st["lap"]["count"] == 9 and st["class_counts"] == {"H": True, "G": True}, \
+        f"with the final lobby on the line every class shows its count: {st['lap']} {st['class_counts']}"
+    single = rd.Race(TRACE, formation=False, finish_mode="laps")
+    single.set_classes({"A": "H", "B": "G"})
+    cars = [Car(single, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50))]
+    t = _drive(single, cars, [40] * 2, 0.0, 12)
+    assert single.standings(t)["class_counts"] == {"H": True, "G": True}, "a single lobby always shows them"
+    plain = rd.Race(TRACE, formation=False)
+    assert plain.standings(0.0)["class_counts"] == {}, "outside class mode there is none"
+
+
 def t_an_entry_without_a_class_forms_its_own_group():
     race = rd.Race(TRACE, formation=False)
     race.set_classes({"A": "H", "B": "G"})
