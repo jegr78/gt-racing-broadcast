@@ -393,8 +393,10 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   GT7's counter: after a restart that keeps the gaps a car can lead on the road but
   not in race distance, and the flag still falls on the road.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
-  leader's distance at the stint switch, so its later departure from the box becomes
-  its deficit.
+  leader's distance where its car of the old lobby stopped, however early the stint
+  switch was pressed, so its later departure from the box becomes its deficit. A rejoin
+  car that leaves the box while the leader is still on track starts from the leader's
+  distance at that moment.
 - **Corrections** add or remove metres and pit stops per entry, always with a reason.
   A **change override** makes a team's other sender the active one at once.
 - **Estimate** keeps a car without data in the order: pick the quiet entry, **behind**

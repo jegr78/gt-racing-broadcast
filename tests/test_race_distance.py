@@ -665,6 +665,30 @@ def t_a_rejoin_starts_the_team_at_the_leaders_distance():
         "a consumed rejoin is reported once, so the service can drop the saved mark"
 
 
+def t_a_rejoin_starts_where_the_leaders_old_car_stopped_even_after_an_early_switch():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    lead, gone = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 115, "Ann")
+    t = _drive(race, [lead, gone], [50, 50], 0.0, 30)
+    t = _drive(race, [lead], [50], t, 30)                               # B disconnected
+    race.rejoin("B", True)
+    race.open_change_window(t)                                          # the leader is still on its lap
+    t = _drive(race, [lead], [50], t, 5)
+    lead.box = True
+    t = _drive(race, [lead], [None], t, 3)
+    stop = _row(race, "A", t)["distance_m"]
+    nxt, back = Car(race, "A", "a2", L - 15, "Lea"), Car(race, "B", "b2", L - 15, "Ben")
+    t = _drive(race, [nxt, back], [40, 40], t, 2)
+    nxt.box = back.box = True
+    t = _drive(race, [nxt, back], [None, None], t, 3)
+    nxt.box = False
+    t = _drive(race, [nxt, back], [40, None], t, 10)                   # B departs 10 s later
+    back.box = False
+    t = _drive(race, [nxt, back], [40, 40], t, 5)
+    rb = _row(race, "B", t)
+    assert abs(rb["distance_m"] - (stop + 200)) < 25, f"B starts where A's old car stopped: {rb} {stop}"
+    assert abs(rb["gap_s"] - 10.0) < 0.5, f"only the later departure is the deficit: {rb}"
+
+
 def t_a_change_override_switches_the_team_now():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     old = Car(race, "A", "a1", L - 15, "Max")
@@ -1466,7 +1490,7 @@ def t_a_retired_car_does_not_level_a_neutralised_restart():
         f"B restarts from its own distance, not the retired car's: {db} {_row(race, 'B', t)}"
 
 
-def t_a_rejoin_starts_at_the_leader_still_running():
+def t_a_rejoin_before_the_leader_stops_starts_at_the_leaders_distance_then():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     out = Car(race, "R", "r1", L - 12, "Rex")
     lead, gone = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 115, "Ann")
@@ -1475,15 +1499,15 @@ def t_a_rejoin_starts_at_the_leader_still_running():
     race.retire("R", True, t)
     race.rejoin("B", True)
     race.open_change_window(t)
-    start = _row(race, "A", t)["distance_m"]
     back = Car(race, "B", "b2", L - 15, "Ben")
     t = _drive(race, [lead, back], [50, 40], t, 2)                     # lap 1 of the next lobby
     back.box = True
     t = _drive(race, [lead, back], [50, None], t, 3)
     back.box = False
     t = _drive(race, [lead, back], [50, 40], t, 1)
-    rb = _row(race, "B", t)
-    assert abs(rb["distance_m"] - (start + 40)) < 15, f"B joins at A's distance, not R's: {start} {rb}"
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert abs(rb["distance_m"] - (ra["distance_m"] - 10)) < 15, \
+        f"B joins at A's distance when it leaves the box, not R's: {ra} {rb}"
 
 
 def t_corrections_reach_a_car_without_a_sender():
