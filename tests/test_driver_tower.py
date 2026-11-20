@@ -462,6 +462,209 @@ def t_the_pages_show_names_through_the_rule():
             assert use in src, f"{os.path.basename(path)} shows names through fitName: {use}"
 
 
+
+def _cars(cls, n, start=1):
+    return [dict(CAR, entry=f"{cls} #{i}", number=str(i), pos=start + i - 1, **{"class": cls},
+                 class_pos=i, class_gap_s=float(i - 1), class_interval_s=1.0 if i > 1 else None,
+                 class_lapped=0, class_color="#c00")
+            for i in range(1, n + 1)]
+
+
+H = {"name": "H", "color": "#c00", "lap": 7, "laps": 20, "fastest": None}
+G = {"name": "G", "color": "#0a0", "lap": 6, "laps": None, "fastest": None}
+
+
+def _page_shape(book):
+    return [["head:" + it["header"]["name"] if "header" in it else it["entry"] for it in page] for page in book]
+
+
+def t_classes_fit_on_one_page():
+    entries = _cars("H", 6) + _cars("G", 6, 7)
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    if got is None:
+        return
+    assert _page_shape(got) == [["head:H"] + [f"H #{i}" for i in range(1, 7)]
+                                + ["head:G"] + [f"G #{i}" for i in range(1, 7)]], \
+        f"two classes that fit share one page, each under its header: {_page_shape(got)}"
+
+
+def t_classes_page_when_they_do_not_fit():
+    entries = _cars("H", 10) + _cars("G", 10, 11)
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    if got is None:
+        return
+    assert _page_shape(got) == [["head:H"] + [f"H #{i}" for i in range(1, 11)],
+                                ["head:G"] + [f"G #{i}" for i in range(1, 11)]], \
+        f"one class per page, header first: {_page_shape(got)}"
+
+
+def t_a_class_larger_than_a_page_is_cut_at_the_page():
+    entries = _cars("H", 2) + _cars("G", 20, 3)
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    if got is None:
+        return
+    shape = _page_shape(got)
+    assert len(shape) == 2 and len(shape[1]) == 15, f"the header counts toward the 15 rows: {shape}"
+    assert shape[1] == ["head:G"] + [f"G #{i}" for i in range(1, 15)], shape
+
+
+# Renders a class-mode payload at clock t and reads each row: a header's name and lap, a car's
+# position and value.
+_CLASS_RACE = """
+  function shown(t, d) {
+    Date.now = () => t;
+    renderRace(Object.assign({mode: "race"}, d));
+    return rows.children.map(function (r) {
+      if (/dd-class/.test(r.className)) {
+        return {head: r.children[0].textContent, lap: r.children[1].textContent,
+                kids: r.children[0].children.length, border: r.style.borderLeftColor};
+      }
+      const v = r.children.filter(c => /dd-val/.test(c.className))[0];
+      return {pos: r.children[0].textContent, value: text(v), fl: / fl$/.test(v.className)};
+    });
+  }
+"""
+
+
+def t_class_rows_show_class_position_and_gap():
+    lead = dict(CAR, entry="H #1", pos=1, **{"class": "H"}, class_pos=1, class_gap_s=0, class_interval_s=None,
+                class_lapped=0, lapped=0, gap_s=0)
+    g1 = dict(CAR, entry="G #1", pos=7, **{"class": "G"}, class_pos=1, class_gap_s=0, class_interval_s=None,
+              class_lapped=0, lapped=1, gap_s=95.0)
+    g2 = dict(CAR, entry="G #2", pos=8, **{"class": "G"}, class_pos=2, class_gap_s=2.34, class_interval_s=2.34,
+              class_lapped=0, lapped=1, gap_s=97.3, interval_s=2.3)
+    g3 = dict(g2, entry="G #3", pos=9, class_pos=3, class_gap_s=4.56, class_interval_s=2.22, finished=True)
+    g4 = dict(g2, entry="G #4", pos=10, class_pos=4, class_gap_s=6.78, class_interval_s=2.22, status="est")
+    d = {"entries": [lead, g1, g2, g3, g4], "classes": [H, G]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      return [shown(1, d), shown(CYCLE_MS + 1, d)];""")
+    if got is None:
+        return
+    gap, inter = got
+    assert gap[2] == {"head": "G", "lap": "LAP 6", "kids": 0, "border": "#0a0"}, \
+        f"the header names the class, its lap without a count, in its colour: {gap}"
+    assert gap[0]["lap"] == "LAP 7 / 20", f"a class with a lap count reads it: {gap}"
+    assert gap[3]["pos"] == "1" and gap[3]["value"] == "Leader", f"the class leader, not P7 at +1 L: {gap}"
+    assert [r["pos"] for r in gap[4:]] == ["2", "3", "4"], f"positions within the class: {gap}"
+    assert [r["value"] for r in gap[4:]] == ["+2.3", "+4.6", "+6.8EST"], \
+        f"class gaps, never the overall lap down, also finished and estimated: {gap}"
+    assert [r["value"] for r in inter[3:]] == ["Leader", "+2.3", "+4.6", "+6.8EST"], \
+        f"INT reads the class interval: {inter}"
+
+
+def t_a_class_row_still_flashes_its_new_lap():
+    a = _cars("H", 1) + _cars("G", 2, 2)
+    b = [dict(x) for x in a]
+    b[2]["last_lap_ms"] = 117000
+    fl = {"entry": "G #2", "driver": "Ann Lind", "team": "Team B", "ms": 117000}
+    got = _tower(_CLASS_RACE + f"""
+      lastLapS = 5;
+      shown(1000, {{entries: {json.dumps(a)}, classes: {json.dumps([H, G])}}});
+      return shown(2000, {{entries: {json.dumps(b)}, classes: {json.dumps([H, G])}, fastest: {json.dumps(fl)}}});""")
+    if got is None:
+        return
+    assert got[4] == {"pos": "2", "value": "1:57.000", "fl": True}, \
+        f"a new lap shows in a class row, purple when it is the race's fastest: {got}"
+
+
+def t_a_class_page_stays_for_gap_and_interval():
+    d = {"entries": _cars("H", 10) + _cars("G", 10, 11), "classes": [H, G]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      return [0, 1, 2, 3, 4].map(function (k) {{
+        const r = shown(k * CYCLE_MS + 1, d);
+        return [r[0].head, phaseLabel(), r[2].value];
+      }});""")
+    if got is None:
+        return
+    assert got == [["H", "GAP", "+1.0"], ["H", "INT", "+1.0"], ["G", "GAP", "+1.0"], ["G", "INT", "+1.0"],
+                   ["H", "GAP", "+1.0"]], f"each class page shows GAP, then INT, then the next class: {got}"
+
+
+def t_class_names_are_text():
+    bad = dict(G, name="<b>GT3</b>", color="red;background:url(x)")
+    entries = [dict(c, **{"class": "<b>GT3</b>"}) for c in _cars("G", 2)]
+    got = _tower(_CLASS_RACE + f"""
+      return shown(1, {{entries: {json.dumps(entries)}, classes: [{json.dumps(H)}, {json.dumps(bad)}]}})[0];""")
+    if got is None:
+        return
+    assert got["head"] == "<b>GT3</b>" and got["kids"] == 0, f"the class name is plain text: {got}"
+    assert "url" not in got["border"], f"a colour that is not one never reaches the style: {got}"
+
+
+def t_one_class_renders_as_today():
+    entries = [dict(CAR, entry=f"T #{i}", number=str(i), pos=i, gap_s=float(i), lapped=0,
+                    **{"class": None}, class_pos=None, class_gap_s=None)
+               for i in range(1, 21)]
+    got = _tower(_CLASS_RACE + f"""
+      return [shown(1, {{entries: {json.dumps(entries)}, classes: []}}), shown(1, {{entries: {json.dumps(entries)}}}),
+              classes(rows)];""")
+    if got is None:
+        return
+    with_list, without, cls = got
+    assert with_list == without, "an empty class list is the tower as before"
+    assert [r["pos"] for r in without] == [str(i) for i in range(1, 16)], f"overall positions, 15 rows: {without}"
+    assert [r["value"] for r in without[:3]] == ["Leader", "+2.0", "+3.0"], f"overall gaps: {without}"
+    assert not any("dd-class" in c for c in cls), f"no class header outside class mode: {cls}"
+
+
+def t_the_fastest_lap_box_cycles_the_classes():
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    gf = dict(G, fastest={"entry": "G #1", "driver": "Ann Lind", "team": "Team G", "ms": 112500})
+    d = {"entries": _cars("H", 1) + _cars("G", 1, 2), "classes": [hf, gf],
+         "fastest": hf["fastest"]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      const out = [0, 1, 2].map(function (k) {{
+        shown(k * CYCLE_MS + 1, d);
+        const label = document.getElementById("dd-fl-class");
+        return [label.textContent, label.style.color, document.getElementById("dd-fl-who").textContent,
+                document.getElementById("dd-fl-time").textContent];
+      }});
+      shown(1, {{entries: d.entries, fastest: d.fastest}});
+      out.push(document.getElementById("dd-fl-class").textContent);
+      return out;""")
+    if got is None:
+        return
+    assert got[:3] == [["H", "#c00", "HART · Team H", "1:41.000"], ["G", "#0a0", "LIND · Team G", "1:52.500"],
+                       ["H", "#c00", "HART · Team H", "1:41.000"]], f"one class every 15 s, labelled: {got}"
+    assert got[3] == "", f"no class label outside class mode: {got}"
+
+
+def t_a_class_without_a_fastest_lap_leaves_the_box_to_the_others():
+    hf = dict(H, fastest={"entry": "H #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000})
+    d = {"entries": _cars("H", 1) + _cars("G", 1, 2), "classes": [hf, G], "fastest": hf["fastest"]}
+    got = _tower(_CLASS_RACE + f"""
+      const d = {json.dumps(d)};
+      const box = document.getElementById("drivers-fastest");
+      let hidden = false;
+      box.classList.toggle = (c, on) => {{ if (c === "none") hidden = !!on; }};
+      return [0, 1].map(function (k) {{
+        shown(k * CYCLE_MS + 1, d);
+        return [document.getElementById("dd-fl-class").textContent, hidden];
+      }});""")
+    if got is None:
+        return
+    assert got == [["H", False], ["H", False]], f"the box never blanks for a class without a lap yet: {got}"
+
+
+def t_the_map_rings_the_class_and_est_wins():
+    got = _tower(f"""
+      line = {{points: [[0, 0], [100, 0], [100, 100], [0, 100]]}};
+      drawLine();
+      const base = {json.dumps(CAR)};
+      drawCars([Object.assign({{}}, base, {{entry: "a", x: 10, z: 0, class_color: "#0a0"}}),
+                Object.assign({{}}, base, {{entry: "b", x: 50, z: 0, class_color: "#0a0", status: "est"}}),
+                Object.assign({{}}, base, {{entry: "c", x: 90, z: 0}})]);
+      return els["dd-cars"].children.map(g => g.children[0].attrs).reverse();""")
+    if got is None:
+        return
+    ring, est, plain = got
+    assert ring["stroke"] == "#0a0" and ring["stroke-width"] == 0.8, f"a ring in the class colour: {ring}"
+    assert est["stroke"] == "#ffb454" and "stroke-dasharray" in est, f"the EST ring keeps its amber: {est}"
+    assert plain["stroke"] == "#fff" and plain["stroke-width"] == 0.4, f"no class, the white edge: {plain}"
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
