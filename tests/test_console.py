@@ -494,6 +494,15 @@ def t_the_desk_class_gap_reads_laps_down_in_the_class():
     assert got[3] == {"text": "+1\u00a0L\u00a0\u00b7 1:30.0", "lap": True}, f"overall as before: {got[3]}"
 
 
+def t_the_desk_class_interval_keeps_the_exact_time():
+    got = _desk_fn("intervalTime",
+                   "[intervalTime({class_interval_s: null, class_interval_time_s: 153.7, interval_time_s: 9}, true),"
+                   " intervalTime({class_interval_s: 1.5, interval_time_s: 9}, false)]")
+    if got is None:
+        return
+    assert got == [153.7, 9], f"grouped rows read the exact class interval, a lap down too: {got}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

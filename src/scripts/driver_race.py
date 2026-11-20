@@ -699,7 +699,8 @@ class Service:
                 row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
                 row["driver"] = race.display_name(row["entry"], row["driver"])
             return out
-        class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint")))
+        class_laps = _saved_class_laps(_actions_path_for(self._path), _segment_key(ctx.get("stint"))) \
+            if len(_named_classes(roster)) >= 2 else {}
         race.set_class_laps(class_laps)
         st = race.standings(self._clock())
         colors = _class_colors(roster)

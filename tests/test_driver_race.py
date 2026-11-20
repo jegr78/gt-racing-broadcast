@@ -1269,8 +1269,9 @@ def t_the_public_view_keeps_the_class_fields():
     desk = _rows(svc.standings())
     assert all(isinstance(desk[e]["class_gap_time_s"], float) for e in "ABC"), \
         f"the desks get the exact class gap: {desk}"
+    assert isinstance(desk["C"]["class_interval_time_s"], float), f"the desks get the exact class interval: {desk['C']}"
     for row in d["entries"] + pub["entries"]:
-        assert "class_gap_time_s" not in row and "gap_time_s" not in row, \
+        assert not {"class_gap_time_s", "class_interval_time_s", "gap_time_s", "interval_time_s"} & set(row), \
             f"an exact gap never reaches the dashboard or the public page: {row}"
     assert pub["classes"][0] == {"name": "H", "color": "#c00", "lap": d["classes"][0]["lap"],
                                  "laps": d["classes"][0]["laps"],
@@ -1524,6 +1525,23 @@ def t_a_class_lap_stops_at_the_class_count_once_the_flag_is_out():
     ctx["stint"] = "S3"
     st = svc.standings()
     assert st["class_lap"] == {"H": 3, "G": 2}, f"the desks read the class lap of the stint on air: {st['class_lap']}"
+
+
+def t_the_dashboard_reads_class_laps_only_in_class_mode():
+    svc, _clock, _path, ctx = _class_service()
+    calls = []
+    real = dr._saved_class_laps
+    dr._saved_class_laps = lambda *a: calls.append(a) or real(*a)
+    try:
+        for info in ctx["roster"].values():
+            info["carClass"] = "H"
+        svc.tick()
+        assert calls == [], f"outside class mode a tick never reads the class lap counts: {calls}"
+        ctx["roster"]["B"]["carClass"] = "G"
+        svc.tick()
+        assert calls, "in class mode a tick reads them"
+    finally:
+        dr._saved_class_laps = real
 
 
 def t_the_schedule_laps_belong_to_the_first_named_class():

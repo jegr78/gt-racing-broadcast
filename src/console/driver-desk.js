@@ -138,6 +138,8 @@
   function lappedText(laps, time) {
     return "+" + laps + "\u00a0L" + (typeof time === "number" ? "\u00a0\u00b7 " + secs(time) : "");
   }
+  // A race row's exact interval, also for a car a lap behind the car ahead.
+  function intervalTime(e, grouped) { return grouped ? e.class_interval_time_s : e.interval_time_s; }
   // A race row's Gap cell; grouped rows read laps down within the class.
   function gapCell(e, grouped, i, k) {
     if (grouped) {
@@ -744,7 +746,7 @@
                                e.driver_registered + ")" : "")})]),
           el("td", {cls: "num", text: String(e.laps)}),
           el("td", {cls: "num" + (gap.lap ? " lap" : ""), text: gap.text}),
-          el("td", {cls: "num", text: secs(grouped ? e.class_interval_s : e.interval_time_s)}),
+          el("td", {cls: "num", text: secs(intervalTime(e, grouped))}),
           el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
                         st[0] ? el("span", stPill) : null,
                         e.finished ? el("span", {cls: "pill ok", text: "Finished"}) : null,

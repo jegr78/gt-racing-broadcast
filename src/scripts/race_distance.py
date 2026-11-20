@@ -987,7 +987,7 @@ class Race:
                 "position_mismatch": e.entry in mismatch,
                 "estimate": None if est is None else {"ref": est["ref"], "seconds": est["seconds"]},
                 "class": None, "class_pos": None, "class_gap_s": None, "class_interval_s": None,
-                "class_lapped": None, "class_gap_time_s": None})
+                "class_lapped": None, "class_gap_time_s": None, "class_interval_time_s": None})
         self._estimate_gaps(ents, rows)
         classes = self._class_pass(ents, rows, ranked, now)
         shown = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
@@ -1072,13 +1072,18 @@ class Race:
                     gap_time = self._time_behind(lead, e, now)
                 gap = None if lapped or gap is None else round(gap, 2)
                 row["class_gap_time_s"] = None if gap_time is None else round(gap_time, 2)
+                interval_time = None
                 if k and (self._estimated(e) or self._estimated(prev)):
                     ahead = rows[refs[k - 1]]["class_gap_s"]
                     interval = None if gap is None or ahead is None else round(max(0.0, gap - ahead), 2)
+                    a, b = rows[refs[k - 1]]["class_gap_time_s"], row["class_gap_time_s"]
+                    interval_time = None if a is None or b is None else max(0.0, b - a)
                 elif k and live:
                     interval = self._behind(prev, e)[1]
                     interval = None if interval is None else round(interval, 2)
-                row.update(class_lapped=lapped or 0, class_gap_s=gap, class_interval_s=interval)
+                    interval_time = self._time_behind(prev, e, now)
+                row.update(class_lapped=lapped or 0, class_gap_s=gap, class_interval_s=interval,
+                           class_interval_time_s=None if interval_time is None else round(interval_time, 2))
         return names
 
     def _class_gap_from_rows(self, lead_row, row, lead, e):

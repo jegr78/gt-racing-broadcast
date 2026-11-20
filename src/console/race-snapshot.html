@@ -166,7 +166,9 @@
       var lappedTime = grouped ? e.class_gap_time_s : e.gap_time_s;
       var gap = lapped ? "+" + lapped + "\u00a0L" + (typeof lappedTime === "number" ? "\u00a0\u00b7 " + secs(lappedTime) : "")
                        : (first ? "" : secs(gapS));
-      var interval = first ? "" : secs(grouped ? e.class_interval_s : e.interval_time_s);
+      // A recording from before the exact class interval falls back to the rounded one.
+      var classInterval = typeof e.class_interval_time_s === "number" ? e.class_interval_time_s : e.class_interval_s;
+      var interval = first ? "" : secs(grouped ? classInterval : e.interval_time_s);
       var entry = el("td");
       entry.append(el("div", "", e.entry), el("div", "muted", fitName(e.driver, NAME_MAX)));
       var status = el("td");

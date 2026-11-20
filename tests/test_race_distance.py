@@ -1468,6 +1468,10 @@ def t_a_car_lapped_in_its_class_keeps_the_time_to_its_class_leader():
     assert rc["class_gap_time_s"] is not None and abs(rc["class_gap_time_s"] - behind) < 0.2, \
         f"a car lapped in its class keeps the time its class leader took to its distance: {behind} {rc}"
     assert rb["class_gap_time_s"] == 0 and _row(race, "A", t)["class_gap_time_s"] == 0, (rb, _row(race, "A", t))
+    assert rc["class_interval_s"] is None and rc["class_interval_time_s"] is not None \
+        and abs(rc["class_interval_time_s"] - behind) < 0.2, \
+        f"a car a lap behind the class car ahead keeps the exact interval: {behind} {rc}"
+    assert rb["class_interval_time_s"] is None, f"a class leader has no interval: {rb}"
 
 
 def _class_flag_race(class_laps):
@@ -1496,6 +1500,19 @@ def t_a_class_lap_stops_at_its_class_count_once_the_flag_is_out():
     assert other["class_lap"]["G"] == 3, f"without a class count the class lap is not capped: {other['class_lap']}"
     assert [r["finished"] for r in st["entries"]] == [r["finished"] for r in other["entries"]], \
         "a class count never finishes a car"
+
+
+def t_a_hidden_class_count_never_caps_the_class_lap():
+    race = rd.Race(TRACE, formation=False, finish_mode="time")
+    race.set_classes({"A": "H", "B": "G", "C": "G"})
+    race.set_class_laps({"G": 1})
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 30), ("C", 50))]
+    t = _drive(race, cars, [60, 40, 35], 0.0, 3 * L / 60 - 1)
+    race.final_lap(t)
+    t = _drive(race, cars, [60, 40, 35], t, 2)
+    st = race.standings(t)
+    assert st["state"] == "finishing" and st["class_counts"]["G"] is False, (st["state"], st["class_counts"])
+    assert st["class_lap"]["G"] == 3, f"a class count that does not show caps nothing: {st['class_lap']}"
 
 
 def t_an_entry_without_a_class_forms_its_own_group():
@@ -1540,7 +1557,7 @@ def t_one_class_leaves_the_rows_unchanged():
         for r in st["entries"]:
             assert r["class"] is None and r["class_pos"] is None and r["class_gap_s"] is None \
                 and r["class_interval_s"] is None and r["class_lapped"] is None \
-                and r["class_gap_time_s"] is None, (classes, r)
+                and r["class_gap_time_s"] is None and r["class_interval_time_s"] is None, (classes, r)
 
 
 def t_the_fastest_lap_is_kept_per_class():
@@ -1575,7 +1592,8 @@ def t_retired_and_no_sender_cars_hold_a_class_place_but_no_class_gap():
         f"a retired car is no class reference: {rows['D']}"
     for e in "XB":
         assert rows[e]["class_gap_s"] is None and rows[e]["class_interval_s"] is None \
-            and rows[e]["class_lapped"] is None and rows[e]["class_gap_time_s"] is None, rows[e]
+            and rows[e]["class_lapped"] is None and rows[e]["class_gap_time_s"] is None \
+            and rows[e]["class_interval_time_s"] is None, rows[e]
     assert abs(rows["C"]["class_gap_s"] - 2.0) < 0.05, rows["C"]
 
 
@@ -1589,6 +1607,8 @@ def t_an_estimated_car_takes_its_class_gap_from_its_reference():
     assert abs(rx["class_gap_s"] - 1.0) < 0.02 and abs(rx["class_interval_s"] - 1.0) < 0.02, rx
     assert rx["class_gap_time_s"] is not None and abs(rx["class_gap_time_s"] - 1.0) < 0.02, \
         f"the exact class gap follows the reference too: {rx}"
+    assert rx["class_interval_time_s"] is not None and abs(rx["class_interval_time_s"] - 1.0) < 0.02, \
+        f"the exact class interval follows the reference too: {rx}"
 
 
 def t_an_estimated_class_leader_behind_another_class_leads_its_class():

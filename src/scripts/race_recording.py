@@ -417,7 +417,8 @@ def _sample(standings, compounds, classes=None):
         row["compound"] = compounds.get(r.get("entry"))
         if in_classes:
             row["class"] = r.get("class")
-            for k in ("class_pos", "class_gap_s", "class_interval_s", "class_lapped", "class_gap_time_s"):
+            for k in ("class_pos", "class_gap_s", "class_interval_s", "class_lapped", "class_gap_time_s",
+                      "class_interval_time_s"):
                 row[k] = r.get(k)
         rows.append(row)
     doc = {"state": standings.get("state"), "red_flag": standings.get("red_flag"),
