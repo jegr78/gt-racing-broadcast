@@ -238,7 +238,7 @@ def t_a_racing_row_carries_tyre_and_fuel_columns():
 def t_the_builder_sample_rows_have_the_live_columns():
     with open(TOWER, encoding="utf-8") as fh:
         html = fh.read()
-    sample = html[html.index('<div id="dd-rows">'):html.index('<div id="drivers-fastest"')]
+    sample = html[html.index('<div id="dd-rows"'):html.index('<div id="drivers-fastest"')]
     rows = sample.split('<div class="dd-row">')[1:]
     assert len(rows) == 3, len(rows)
     for r in rows:
@@ -479,7 +479,7 @@ def _page_shape(book):
 
 def t_classes_fit_on_one_page():
     entries = _cars("H", 6) + _cars("G", 6, 7)
-    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, DEFAULT_ROWS);")
     if got is None:
         return
     assert _page_shape(got) == [["head:H"] + [f"H #{i}" for i in range(1, 7)]
@@ -489,7 +489,7 @@ def t_classes_fit_on_one_page():
 
 def t_classes_page_when_they_do_not_fit():
     entries = _cars("H", 10) + _cars("G", 10, 11)
-    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, DEFAULT_ROWS);")
     if got is None:
         return
     assert _page_shape(got) == [["head:H"] + [f"H #{i}" for i in range(1, 11)],
@@ -499,12 +499,123 @@ def t_classes_page_when_they_do_not_fit():
 
 def t_a_class_larger_than_a_page_is_cut_at_the_page():
     entries = _cars("H", 2) + _cars("G", 20, 3)
-    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, MAX_ROWS);")
+    got = _tower(f"return pages({json.dumps(entries)}, {json.dumps([H, G])}, DEFAULT_ROWS);")
     if got is None:
         return
     shape = _page_shape(got)
-    assert len(shape) == 2 and len(shape[1]) == 15, f"the header counts toward the 15 rows: {shape}"
+    assert len(shape) == 2 and len(shape[1]) == 15, f"the header counts toward the default 15 rows: {shape}"
     assert shape[1] == ["head:G"] + [f"G #{i}" for i in range(1, 15)], shape
+
+
+def _px(css, sel, prop):
+    return int(re.search(sel + r" \{[^}]*?" + prop + r": (\d+)px", css).group(1))
+
+
+def _const(html, name):
+    return int(re.search(rf"const {name} = (\d+);", html).group(1))
+
+
+def t_an_untouched_builder_save_leaves_the_tower_without_a_height():
+    with open(TOWER, encoding="utf-8") as fh:
+        html = fh.read()
+    sample = html[html.index('<div id="dd-rows">'):html.index('<div id="drivers-fastest"')]
+    canvas = sample.count('<div class="dd-row">') * _px(html, r"\.dd-row", "height") \
+        + 2 * _px(html, "#drivers-tower", "padding")
+    assert canvas == _const(html, "LEGACY_PX"), \
+        f"the builder saves the canvas height {canvas}, which the page reads as no height of its own"
+
+
+# The default tower measured empty: top 136, 4 px padding, 40 px rows, the 44 px fastest lap box below.
+AUTO = {"box": 8, "inner": 0, "top": 136, "rowH": 40, "below": 60}
+
+
+def t_the_default_tower_grows_down_the_page():
+    with open(TOWER, encoding="utf-8") as fh:
+        html = fh.read()
+    page_bottom, gap = _const(html, "PAGE_BOTTOM"), _const(html, "FL_GAP")
+    assert (page_bottom, gap) == (1016, 16), "64 px margin at the bottom as at the top, 16 px to the fastest lap box"
+    got = _tower(f"""
+      const m = {json.dumps(AUTO)};
+      return [capacity(m), capacity(Object.assign({{}}, m, {{below: 0}})),
+              capacity(Object.assign({{}}, m, {{box: 128, inner: 120}})),
+              capacity(Object.assign({{}}, m, {{top: 800}}))];""")
+    if got is None:
+        return
+    assert got[0] == 20, f"20 rows end at 944, the fastest lap box at 960 to 1004 stays above 1016: {got}"
+    assert 136 + 8 + 20 * 40 + gap + 44 <= page_bottom < 136 + 8 + 21 * 40 + gap + 44
+    assert got[1] == 21, f"with the fastest lap box elsewhere the tower reaches the bottom margin: {got}"
+    assert got[2] == 20, f"a saved height of the old 128 px canvas is no height of its own: {got}"
+    assert got[3] == 5, f"low on the page the tower keeps the floor of 5 rows: {got}"
+
+
+def t_a_set_tower_height_holds_the_rows_it_fits():
+    got = _tower(f"""
+      const m = {json.dumps(AUTO)};
+      const set = (box, rowH) => capacity(Object.assign({{}}, m, {{box: box, inner: box - 8, rowH: rowH || 40}}));
+      return [set(129), set(300), set(608), set(808), set(608, 30), set(608, 0)];""")
+    if got is None:
+        return
+    assert got[:4] == [5, 7, 15, 20], f"a height over 128 px holds the whole rows it fits, at least 5: {got}"
+    assert got[4] == 20 and got[5] == 15, f"the row height comes from the page, unmeasurable is 15: {got}"
+
+
+def t_the_fastest_lap_box_follows_only_from_under_the_tower():
+    tower = {"left": 48, "top": 136, "width": 500}
+    got = _tower(f"""
+      const t = {json.dumps(tower)};
+      return [follows(t, {{left: 48, top: 760, width: 500}}), follows(t, {{left: 300, top: 900, width: 500}}),
+              follows(t, {{left: 1400, top: 760, width: 400}}), follows(t, {{left: 48, top: 40, width: 500}})];""")
+    if got is None:
+        return
+    assert got == [True, True, False, False], f"only a box below the tower, in its column, follows it: {got}"
+
+
+def t_more_classes_share_a_page_in_a_taller_box():
+    entries = _cars("H", 9) + _cars("G", 9, 10)
+    got = _tower(f"return [pages({json.dumps(entries)}, {json.dumps([H, G])}, 20), "
+                 f"pages({json.dumps(entries)}, {json.dumps([H, G])}, 5)];")
+    if got is None:
+        return
+    tall, short = (_page_shape(b) for b in got)
+    assert len(tall) == 1 and len(tall[0]) == 20, f"20 rows fit both classes with their headers: {tall}"
+    assert [len(p) for p in short] == [5, 5], f"a 5-row box pages each class, cut at 5: {short}"
+
+
+# Gives the stub DOM the measurements of a tower whose own (border-box) height is `box`,
+# with the fastest lap box at its default spot.
+_BOX = """
+  function measured(box) {
+    const tower = document.getElementById("drivers-tower"), fl = document.getElementById("drivers-fastest");
+    globalThis.getComputedStyle = n => n === tower ? {paddingTop: "4px", paddingBottom: "4px"} : {height: "40px"};
+    Object.assign(tower, {offsetHeight: box, clientHeight: box, offsetTop: 136, offsetLeft: 48, offsetWidth: 500,
+                          getClientRects: () => [1]});
+    Object.assign(fl, {offsetTop: 760, offsetLeft: 48, offsetWidth: 500, offsetHeight: 44});
+  }
+"""
+
+
+def t_the_rendered_tower_follows_its_box():
+    entries = [dict(CAR, entry=f"T #{i}", number=str(i), pos=i, gap_s=float(i)) for i in range(1, 31)]
+    quali = [{"pos": i, "entry": f"T #{i}", "best_ms": 100000 + i, "gap_ms": i} for i in range(1, 31)]
+    got = _tower(_BOX + f"""
+      const out = [];
+      const tower = document.getElementById("drivers-tower"), fl = document.getElementById("drivers-fastest");
+      [null, 8, 128, 808, 300].forEach(function (box) {{
+        if (box !== null) measured(box);
+        renderRace({{mode: "race", entries: {json.dumps(entries)}}});
+        const race = [rows.children.length, tower.style.height || "", fl.style.top || ""];
+        renderQualifying({{mode: "qualifying", qualifying: {json.dumps(quali)}}});
+        out.push(race.concat([rows.children.length]));
+      }});
+      return out;""")
+    if got is None:
+        return
+    assert got[0] == [15, "", "", 15], f"unmeasured (hidden), the tower shows 15 and moves nothing: {got}"
+    assert got[1][0] == 20 and got[1][3] == 20 and got[1][1] == "auto", f"no height: rows down the page: {got}"
+    assert got[1][2] == f"{136 + 8 + 16}px", f"the fastest lap box sits 16 px under the tower: {got}"
+    assert got[2][:2] == [20, "auto"], f"the old canvas height of 128 px is dropped for the default: {got}"
+    assert got[3] == [20, "", "", 20], f"a set height of 808 px holds 20 rows and the box stays put: {got}"
+    assert got[4] == [7, "", "", 7], f"a set height of 300 px holds 7: {got}"
 
 
 # Renders a class-mode payload at clock t and reads each row: a header's name and lap, a car's

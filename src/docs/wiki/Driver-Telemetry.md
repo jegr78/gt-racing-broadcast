@@ -174,11 +174,12 @@ except on the tower.
   clears them all.
 - **Timing tower**: each class sits under a header with its name in the class colour and
   its leader's lap against the class lap count. The rows show class position, gap and
-  interval. When all classes fit in 15 rows, headers included, the tower shows them
+  interval. When all classes fit in the tower's rows, headers included, the tower shows them
   together and the fastest lap box cycles through the classes every 15 seconds. When
   they do not fit, the tower shows one class per page for one gap and one interval
-  phase (30 seconds), and the box shows the fastest lap of that page's class. A class of
-  more than 14 cars shows its first 14.
+  phase (30 seconds), and the box shows the fastest lap of that page's class. A class
+  with more cars than the tower has rows below its header shows its first cars (19 in
+  the default 20 rows).
 - **Track map**: each dot keeps its entry colour inside a ring in the class colour. An
   estimate's dashed amber ring replaces it.
 - **Public timing page, desks and cockpit** group the same way with a coloured header
@@ -230,7 +231,7 @@ It never carries connection ids, corrections or who made them.
 
 - **OBS overlay** `http://127.0.0.1:8088/drivers`: the browser source **Driver
   Dashboard** in the Stint scene (Program in the solo collections). It shows a timing
-  tower of up to 15 entries, the lap against the lap count (or the race timer's
+  tower of up to 20 entries (see **Tower rows** below), the lap against the lap count (or the race timer's
   remaining time), the fastest lap and a track map with each car as a numbered dot in
   its entry colour. Dots sit on the racing line; in a close pack a dot slides back
   along the line to stay readable, never past the car behind, and otherwise lies under
@@ -253,6 +254,17 @@ It never carries connection ids, corrections or who made them.
   **Brand logos** switch on the Timing tower hides the column and the rows close up; it
   is on by default. The desks, the cockpit and the public timing page always show the
   logos (the public page lets each reader fold them away like any column).
+- **Tower rows**: without a height of its own the tower grows down the page, one row
+  per car, and the fastest lap box follows 16 px under its last row. On 1080p it holds
+  up to 20 rows, so the fastest lap box keeps a 64 px bottom margin. The fastest lap box
+  follows only while it sits under the tower; moved elsewhere in the overlay builder it
+  stays put, and the tower may reach the bottom margin (21 rows). Set the Timing tower's
+  height in the builder (Driver dashboard scene) and the tower holds the rows that height
+  fits, never less than 5, and the fastest lap box stays where the layout puts it. A
+  height up to 128 px, the builder's sample tower, counts as no height, so an untouched
+  Save, or a layout saved by an older version, keeps the growing tower. A class header
+  takes one row, so on a paged class tower the fastest lap box moves with each page. The
+  page measures on every update; a new layout applies once **Apply in OBS** reloads it.
 - **On air only when switched on.** The page stays empty until the race settings say
   `visible`; a new install starts off air. The director puts it on air with **Show
   dashboard** in the panel's Driver telemetry section; Race Control cannot, because it
