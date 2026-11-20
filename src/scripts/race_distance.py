@@ -38,7 +38,8 @@ nearest the predicted distance decides.
   (each took over after the final stint switch) to pass `lap_count` on that lobby's
   counter, or after `final_lap` the first to cross on the lobby's leading counter,
   takes the flag, whoever leads in race distance. Every other car finishes at its
-  next crossing; `finish` freezes everything at once. The race timer never ends a race.
+  next crossing, timed between its samples around the line, so a crossing after the
+  flag that arrived before it still counts; `finish` freezes everything at once. The race timer never ends a race.
   From the first flag on the order is laps, then who reached that lap count first,
   so a lapped car taking the flag stays behind a lead-lap car still running. The first
   flag's car stays first when it led in race distance; no car counts more laps than
@@ -176,6 +177,7 @@ class _Entry:
         self.stint_laps = 0        # race laps since the active car began counting
         self.parked = None         # (conn, counting state) of the car moved away from it
         self.resume = False        # an undone retirement: count on from `distance`
+        self.crossed = None        # (interpolated time, sample time) of its last crossing
 
     def restart(self):
         self.distance, self.ts, self.ds = None, [], []
@@ -667,7 +669,7 @@ class Race:
                 return
         if not active or ent.finished_at is not None or ent.held:
             return
-        before = ent.distance
+        before, before_t = ent.distance, ent.ts[-1] if ent.ts else None
         if not car.counting and ent.resume:
             if not self._start(ent, car, t, ent.distance, lap, s, from_line=False):
                 return
@@ -693,7 +695,18 @@ class Race:
             crossed = before is not None and ent.distance is not None and \
                 math.floor(ent.distance / self.length) > math.floor(before / self.length)
         if crossed:
-            self._crossing(ent, car, t)
+            self._crossing(ent, car, t, self._crossed_at(ent, car, s, before, before_t, t))
+
+    def _crossed_at(self, ent, car, s, before, before_t, t):
+        """When the car passed the line between its previous sample and this one."""
+        if before is None or before_t is None or ent.distance is None or ent.distance <= before:
+            return t
+        if self.multi_lobby:
+            frac = self._frac(car, s)
+            line = ent.distance - frac if frac < self.length / 2 else ent.distance + self.length - frac
+        else:
+            line = math.floor(ent.distance / self.length) * self.length
+        return before_t + (t - before_t) * min(1.0, max(0.0, (line - before) / (ent.distance - before)))
 
     def min_lap_s(self):
         """The shortest believable lap: the line at MAX_SPEED_MPS."""
@@ -786,7 +799,9 @@ class Race:
     def _final_car(self, ent):
         return self._final_at is not None and ent.since is not None and ent.since >= self._final_at
 
-    def _crossing(self, ent, car, t):
+    def _crossing(self, ent, car, t, at):
+        """`at`: when the car passed the line, between its previous sample and `t`."""
+        ent.crossed = (at, t)
         if self._finished:
             return
         if self._finishing_at is not None:
@@ -802,7 +817,7 @@ class Race:
             by_flag = self._final_lap_at is not None and t > self._final_lap_at \
                 and car.lap >= self._lobby_lead_lap(t)
             if by_laps or by_flag:
-                self._flag(ent, t)
+                self._flag(ent, t, at)
             return
         # The order Race Control's corrections set is the order that takes the flag.
         shown, leader = self._shown(ent), self._race_lead(real=True)
@@ -812,7 +827,7 @@ class Race:
             and shown >= (self.lap_count - (1 if self.formation else 0)) * self.length - SNAP_M
         by_flag = self._final_lap_at is not None and t > self._final_lap_at
         if by_laps or by_flag:
-            self._flag(ent, t)
+            self._flag(ent, t, at)
 
     def _race_lead(self, real=False):
         """The leading shown distance, None before any car counts; `real` leaves out
@@ -821,15 +836,24 @@ class Race:
                     if e.distance is not None and not self._out(e)
                     and not (real and self._estimated(e))), default=None)
 
-    def _flag(self, ent, t):
-        """`ent` takes the first flag. It is the winner when it leads in race distance;
-        no car is classified with more race laps than the leader has now."""
+    def _flag(self, ent, t, at=None):
+        """`ent` takes the first flag, passing the line at `at`. It is the winner when it
+        leads in race distance; no car is classified with more race laps than the leader
+        has now. A car whose crossing after `at` arrived first finishes there."""
         lead, shown = self._race_lead(), self._shown(ent)
         self._winner_entry = ent if shown is not None and shown >= lead else None
         self._flag_laps = math.floor(lead / self.length) if lead is not None else math.inf
         ent.finished_at = self._finishing_at = t
+        at = t if at is None else at
+        late = [e for e in self._entries.values()
+                if e is not ent and e.finished_at is None and not self._out(e)
+                and e.crossed is not None and e.crossed[0] > at]
+        for e in late:
+            e.finished_at = e.crossed[1]
         self._finished = sum(1 for e in self._entries.values()
-                             if e.active is not None and not self._out(e)) == 1
+                             if e.active is not None and not self._out(e)) == 1 \
+            or bool(late) and all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
+                                  for e in self._entries.values())
 
     def _lobby_lead_lap(self, now, entries=None):
         """The highest GT7 counter among the final lobby's running cars (of `entries`)."""
