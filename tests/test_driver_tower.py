@@ -707,6 +707,203 @@ def t_the_map_rings_the_class_and_est_wins():
     assert est["stroke"] == "#ffb454" and "stroke-dasharray" in est, f"the EST ring keeps its amber: {est}"
     assert plain["stroke"] == "#fff" and plain["stroke-width"] == 0.4, f"no class, the white edge: {plain}"
 
+
+# Just enough DOM and browser for the public page's two scripts.
+_PUBLIC_DOM = r"""
+class Node {}
+function node(tag) {
+  return Object.setPrototypeOf({tag: tag, className: "", textContent: "", style: {}, children: [], dataset: {}, listeners: {},
+          hidden: false, value: "",
+          get rows() { return this.children; },
+          addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
+          appendChild(c) { this.children.push(c); return c; }, append(...c) { this.children.push(...c); },
+          prepend(...c) { this.children.unshift(...c); }, replaceChildren(...c) { this.children = c; },
+          remove() {}}, Node.prototype);
+}
+const els = {timing: Object.assign(node("table"), {tHead: node("thead"), tBodies: [node("tbody")]})};
+const document = {getElementById: id => els[id] || (els[id] = node("div")), createElement: node,
+                  createTextNode: t => Object.assign(node("#text"), {textContent: String(t)})};
+const store = STORE;
+const localStorage = {getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }};
+const window = {matchMedia: () => ({matches: false})};
+const location = {pathname: "/console/timing", search: "?l=abc", href: "https://x/console/timing?l=abc"};
+function fetch() { return new Promise(() => {}); }
+function setTimeout() {}
+function setInterval() {}
+function flat(n) { return [n].concat(...(n.children || []).map(flat)); }
+function text(n) { return flat(n).map(c => c.textContent).join(""); }
+function body() {
+  return els.timing.tBodies[0].children.map(function (r) {
+    if (r.className === "cls") return {head: text(r), kids: r.children[0].children[0].children.length,
+                                       color: r.children[0].children[0].style.color || ""};
+    const c = {};
+    r.children.forEach(td => { c[td.dataset.col] = text(td); });
+    return c;
+  });
+}
+function pick(value) {
+  const sel = document.getElementById("class-filter");
+  sel.value = value;
+  sel.listeners.change.forEach(f => f());
+}
+"""
+
+
+def _public(body, store=None):
+    with open(TIMING, encoding="utf-8") as fh:
+        html = fh.read()
+    i = html.index('<script id="timing-logic">') + len('<script id="timing-logic">')
+    logic = html[i:html.index("</script>", i)]
+    return _run(_PUBLIC_DOM.replace("STORE", json.dumps(store or {})) + logic + _script(TIMING)
+                + "\n;console.log(JSON.stringify((function () {" + body + "})()));")
+
+
+def _public_cars():
+    gt3 = [dict(CAR, entry=f"GT3 #{i}", number=str(i), driver=f"Driver {i}", pos=i, gap_s=float(i - 1),
+                interval_s=1.0, **{"class": "GT3"}, class_color="#c00", class_pos=i,
+                class_gap_s=float(i - 1), class_interval_s=1.0 if i > 1 else None, class_lapped=0)
+           for i in (1, 2)]
+    gt4 = [dict(CAR, entry=f"GT4 #{i}", number=str(10 + i), driver=f"Driver {10 + i}", pos=2 + i, lapped=1,
+                gap_s=90.0 + i, interval_s=2.0, **{"class": "GT4"}, class_color="#0a0", class_pos=i,
+                class_gap_s=float(2 * (i - 1)), class_interval_s=2.0 if i > 1 else None, class_lapped=0)
+           for i in (1, 2)]
+    classes = [{"name": "GT3", "color": "#c00", "lap": 7, "laps": 20,
+                "fastest": {"entry": "GT3 #1", "driver": "Lena Hart", "team": "Team H", "ms": 101000}},
+               {"name": "GT4", "color": "#0a0", "lap": 6, "laps": 18, "fastest": None}]
+    return gt3 + gt4, classes
+
+
+def t_the_public_page_groups_by_class_and_filters():
+    entries, classes = _public_cars()
+    bad = dict(classes[1], name="<b>GT4</b>", color="red;background:url(x)")
+    odd = [dict(e, **{"class": "<b>GT4</b>"}) if e["class"] == "GT4" else e for e in entries]
+    got = _public(f"""
+      const d = {{mode: "race", entries: {json.dumps(entries)}, classes: {json.dumps(classes)}}};
+      render(d);
+      const out = {{all: body(), picker: document.getElementById("classpick").hidden,
+                    options: document.getElementById("class-filter").children.map(o => o.textContent)}};
+      pick(document.getElementById("class-filter").children[1].value);
+      out.gt3 = body();
+      out.stored = store["timing-class"];
+      out.fastest = text(document.getElementById("fastest"));
+      render({{mode: "race", entries: {json.dumps(odd)}, classes: [{json.dumps(classes[0])}, {json.dumps(bad)}]}});
+      pick("all");
+      out.bad = body().filter(r => r.head !== undefined)[1];
+      return out;""")
+    if got is None:
+        return
+    heads = [r for r in got["all"] if "head" in r]
+    assert [h["head"] for h in heads] == ["GT3Lap 7 / 20", "GT4Lap 6 / 18"], f"one header per class: {got['all']}"
+    assert [h["color"] for h in heads] == ["#c00", "#0a0"], f"each name in its class colour: {heads}"
+    cars = [r for r in got["all"] if "head" not in r]
+    assert [r["pos"] for r in cars] == ["1", "2", "1", "2"], f"positions within the class: {cars}"
+    assert [r["gap"] for r in cars] == ["", "+1.0", "", "+2.0"], f"class gaps, never +1 L overall: {cars}"
+    assert [r["int"] for r in cars] == ["", "+1.0", "", "+2.0"], f"class intervals: {cars}"
+    assert got["picker"] is False and got["options"] == ["All classes", "GT3", "GT4"], got
+    assert [r.get("head", r.get("drv")) for r in got["gt3"]] == ["GT3Lap 7 / 20", "Driver 1Team B", "Driver 2Team B"], \
+        f"the GT3 filter leaves only GT3: {got['gt3']}"
+    assert got["stored"] == '"GT3"', f"the choice is remembered: {got['stored']}"
+    assert got["fastest"].startswith("GT3") and "1:41.000" in got["fastest"], \
+        f"the class's fastest lap under its filter: {got['fastest']}"
+    assert got["bad"]["head"] == "<b>GT4</b>Lap 6 / 18" and got["bad"]["kids"] == 0, \
+        f"a class name is plain text: {got['bad']}"
+    assert "url" not in got["bad"]["color"], f"a colour that is not one never reaches the style: {got['bad']}"
+
+
+def t_the_public_page_remembers_the_class_and_forgets_a_gone_one():
+    entries, classes = _public_cars()
+    got = _public(f"""
+      render({{mode: "race", entries: {json.dumps(entries)}, classes: {json.dumps(classes)}}});
+      const kept = body().filter(r => r.head).map(r => r.head);
+      render({{mode: "race", entries: {json.dumps(entries)},
+               classes: [{json.dumps(classes[0])}, Object.assign({{}}, {json.dumps(classes[1])}, {{name: "GT2"}})]}});
+      return [kept, body().filter(r => r.head).length];""", store={"timing-class": '"GT4"'})
+    if got is None:
+        return
+    assert got[0] == ["GT4Lap 6 / 18"], f"a reload keeps the chosen class: {got}"
+    assert got[1] == 2, f"a class the race no longer has shows them all: {got}"
+
+
+def t_the_public_page_works_without_storage():
+    entries, classes = _public_cars()
+    got = _public(f"""
+      localStorage.getItem = localStorage.setItem = () => {{ throw new Error("blocked"); }};
+      render({{mode: "race", entries: {json.dumps(entries)}, classes: {json.dumps(classes)}}});
+      pick(document.getElementById("class-filter").children[2].value);
+      return body().filter(r => r.head).map(r => r.head);""")
+    if got is None:
+        return
+    assert got == ["GT4Lap 6 / 18"], f"a blocked store costs only the memory: {got}"
+
+
+def t_the_public_page_renders_one_class_as_today():
+    entries, _classes = _public_cars()
+    flat_rows = [{k: v for k, v in e.items() if not k.startswith("class")} for e in entries]
+    got = _public(f"""
+      render({{mode: "race", entries: {json.dumps(flat_rows)}}});
+      const before = body();
+      render({{mode: "race", entries: {json.dumps(flat_rows)}, classes: []}});
+      return [before, body(), document.getElementById("classpick").hidden, text(document.getElementById("fastest"))];""",
+                  store={"timing-class": '"GT3"'})
+    if got is None:
+        return
+    before, after, picker, fastest = got
+    assert before == after, "an empty class list is the page as before"
+    assert not any("head" in r for r in after), f"no class header outside class mode: {after}"
+    assert [r["pos"] for r in after] == ["1", "2", "3", "4"], f"overall positions: {after}"
+    assert [r["gap"] for r in after] == ["", "+1.0", "+1 L", "+1 L"], f"overall gaps: {after}"
+    assert picker is True, "no class filter outside class mode, whatever the store remembers"
+    assert fastest == "", fastest
+
+
+
+COCKPIT = os.path.join(ROOT, "src", "cockpit", "cockpit.html")
+
+
+def _cockpit(payload):
+    """The cockpit's timing card after one poll of `payload`: each body row's cell texts,
+    a class header as {head, color}."""
+    with open(COCKPIT, encoding="utf-8") as fh:
+        html = fh.read()
+    start = html.index("// Driver timing (#1115)")
+    block = html[start:html.index("\npollTiming();", start)]
+    js = (_PUBLIC_DOM.replace("STORE", "{}") + "window.RC_API = p => p; const $ = id => document.getElementById(id);\n"
+          + "const j = async () => (" + json.dumps(payload) + ");\n" + block
+          + """\n;(async function () {
+      await pollTiming();
+      return els.timing.tBodies[0].children.map(function (r) {
+        if (r.className === "cls") return {head: text(r), color: r.children[0].children[0].style.color || ""};
+        return r.children.map(text);
+      });
+    })().then(r => console.log(JSON.stringify(r)));""")
+    return _run(js)
+
+
+def t_the_cockpit_shows_class_position_and_gap():
+    entries, classes = _public_cars()
+    got = _cockpit({"mode": "race", "entries": entries, "classes": classes})
+    if got is None:
+        return
+    heads = [r for r in got if isinstance(r, dict)]
+    assert heads == [{"head": "GT3Lap 7 / 20", "color": "#c00"}, {"head": "GT4Lap 6 / 18", "color": "#0a0"}], \
+        f"one header per class in its colour: {got}"
+    cars = [r for r in got if isinstance(r, list)]
+    assert [r[0] for r in cars] == ["1", "2", "1", "2"], f"class positions: {cars}"
+    assert [r[6] for r in cars] == ["", "+1.0", "", "+2.0"], f"class gaps, not +1 L: {cars}"
+    assert [r[7] for r in cars] == ["", "+1.0", "", "+2.0"], f"class intervals: {cars}"
+
+
+def t_the_cockpit_renders_one_class_as_today():
+    entries, _classes = _public_cars()
+    flat_rows = [{k: v for k, v in e.items() if not k.startswith("class")} for e in entries]
+    got = _cockpit({"mode": "race", "entries": flat_rows})
+    if got is None:
+        return
+    assert _cockpit({"mode": "race", "entries": flat_rows, "classes": []}) == got, "an empty class list is as before"
+    assert all(isinstance(r, list) for r in got), f"no class header outside class mode: {got}"
+    assert [r[0] for r in got] == ["1", "2", "3", "4"] and [r[6] for r in got] == ["", "+1.0", "+1 L", "+1 L"], got
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

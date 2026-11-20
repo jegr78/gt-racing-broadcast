@@ -49,6 +49,8 @@
     ".dd .rec.on{background:#ff4d5e}",
     ".dd td.logo{width:30px;padding-right:0}.dd td.logo img{display:block;width:28px;height:20px;box-sizing:border-box;",
     "padding:1px;border-radius:3px;background:#f2f4f7;object-fit:contain}",
+    ".dd tr.cls td{background:var(--panel-2,#1b1f25);font-weight:600}",
+    ".dd tr.cls .lap{margin-left:8px;color:var(--muted,#9aa0a6);font-weight:400;font-family:var(--mono,ui-monospace,monospace)}",
     ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}"
   ].join("");
 
@@ -93,7 +95,7 @@
                  recording_start: "recording start", recording_stop: "recording stop",
                  dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed",
                  estimate: "estimate", estimate_end: "estimate ended", retire: "retirement",
-                 driver_name: "driver name"};
+                 driver_name: "driver name", class_laps: "class lap count"};
   var EVENT_STATES = {suspected: ["Suspected DC", "bad"], dropout: ["Dropout", "amb"],
                       confirmed: ["Confirmed DC", "bad"], dismissed: ["Dismissed", ""]};
   var OFFSETS = [5, 10, 15, 20, 30];
@@ -113,6 +115,21 @@
     var t = String(text || "").trim().match(/^(?:(\d{1,2}):)?(\d{1,2}(?:\.\d{1,3})?)$/);
     if (!t) return NaN;
     return Math.round(((t[1] ? parseInt(t[1], 10) : 0) * 60 + parseFloat(t[2])) * 1000);
+  }
+
+  // The named classes whose lap count the desk sets: the first runs on the race's count, the unclassed on none.
+  function lapClasses(names) { return names.filter(Boolean).slice(1); }
+  // The race rows under their class: [{name, lap, laps, rows}] in class order; one group named null outside class mode.
+  function classGroups(r) {
+    var rows = r.entries || [], names = Array.isArray(r.classes) ? r.classes : [];
+    if (!names.length) return [{name: null, rows: rows}];
+    var lap = r.class_lap || {}, set = r.class_laps || {}, first = names.filter(Boolean)[0];
+    var count = r.lap && typeof r.lap.count === "number" ? r.lap.count : null;
+    function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k) && typeof o[k] === "number" ? o[k] : null; }
+    return names.map(function (n) {
+      return {name: n, lap: own(lap, n), laps: n === first ? count : own(set, n),
+              rows: rows.filter(function (e) { return (e.class == null ? "" : e.class) === n; })};
+    });
   }
 
   var logoFailed = {};   // brand key -> when its logo last failed to load
@@ -231,6 +248,37 @@
       act("/drivers/race/release", {}, "Restart released");
     });
     var redBanner = el("div", {cls: "banner", hidden: ""});
+    // Lap counts of the slower classes for the stint on air; display only.
+    var classLapRow = el("div", {cls: "row", hidden: ""});
+    var classLapIn = Object.create(null);
+    var classLapKey = null;
+    function classLapInput(name) {
+      var input = el("input", {type: "number", min: "1", max: "999", placeholder: "laps", "aria-label": "Lap count of " + name});
+      input.addEventListener("change", function () {
+        var n = parseInt(input.value, 10);
+        act("/drivers/race/class-laps", {class: name, laps: isFinite(n) ? n : null}, name + " lap count saved");
+      });
+      return classLapIn[name] = input;
+    }
+    function renderClassLaps(r) {
+      var names = lapClasses(Array.isArray(r.classes) ? r.classes : []);
+      classLapRow.hidden = !names.length;
+      var key = JSON.stringify(names);
+      if (key !== classLapKey && !classLapRow.contains(document.activeElement)) {
+        classLapKey = key;
+        classLapRow.replaceChildren.apply(classLapRow, [el("span", {cls: "muted", text: "Class laps"})].concat(
+          names.map(function (n) {
+            return el("label", {cls: "check"}, [el("span", {text: n}), classLapIn[n] || classLapInput(n)]);
+          })));
+      }
+      var set = r.class_laps || {};
+      names.forEach(function (n) {
+        var input = classLapIn[n];
+        if (input && document.activeElement !== input) {
+          input.value = Object.prototype.hasOwnProperty.call(set, n) && typeof set[n] === "number" ? set[n] : "";
+        }
+      });
+    }
 
     // -- race table -----------------------------------------------------------------
     var raceBody = el("tbody");
@@ -550,6 +598,7 @@
       el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
       lastChange,
       el("div", {cls: "row"}, [mode, laps, finalLap, finish]),
+      classLapRow,
       el("div", {cls: "row"}, [redFlag, restart, release]),
       redBanner,
       el("h3", {text: "Race"}),
@@ -632,21 +681,27 @@
         return e.entry + " " + e.estimate.seconds + " s behind " + e.estimate.ref +
           (e.status === "est" ? "" : " (waiting for its data to stop)");
       }).join(", ") : "";
-      var rows = (r.entries || []).map(function (e, i) {
+      renderClassLaps(r);
+      var all = r.entries || [];
+      function raceRow(e, grouped, k) {
+        var i = all.indexOf(e);
         var st = STATUS[e.status] || [e.status, ""];
         var stPill = {cls: "pill " + st[1], text: st[0]};
         if (e.status === "est" && e.estimate) {
           stPill.title = "Estimated " + e.estimate.seconds + " s behind " + e.estimate.ref + " until its data returns";
         }
         // No-break spaces: a narrow desk wraps only between the lap count and the time.
-        var gap = e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
+        var gap = grouped ? (e.class_lapped ? "+" + e.class_lapped + "\u00a0L" : (k ? secs(e.class_gap_s) : ""))
+          : e.lapped ? "+" + e.lapped + "\u00a0L" + (typeof e.gap_time_s === "number" ? "\u00a0\u00b7 " + secs(e.gap_time_s) : "")
                            : (i ? secs(e.gap_s) : "");
-        var cells = [el("td", {cls: "num", text: String(i + 1)}), logoCell(e),
+        var cells = [el("td", grouped ? {cls: "num", text: String(e.class_pos), title: "P" + (i + 1) + " overall"}
+                                      : {cls: "num", text: String(i + 1)}), logoCell(e),
           el("td", {}, [el("div", {text: e.entry}), el("div", {cls: "muted nowrap", text: fitName(e.driver, NAME_MAX),
             title: e.driver + (e.driver_registered && e.driver !== e.driver_registered ? " (registered as " +
                                e.driver_registered + ")" : "")})]),
           el("td", {cls: "num", text: String(e.laps)}),
-          el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}), el("td", {cls: "num", text: secs(e.interval_time_s)}),
+          el("td", {cls: "num" + (e.lapped ? " lap" : ""), text: gap}),
+          el("td", {cls: "num", text: secs(grouped ? e.class_interval_s : e.interval_time_s)}),
           el("td", {}, [el("div", {cls: "pills"}, [suspected[e.entry] ? el("span", {cls: "pill bad", text: "Suspected DC"}) : null,
                         st[0] ? el("span", stPill) : null,
                         e.finished ? el("span", {cls: "pill ok", text: "Finished"}) : null,
@@ -656,6 +711,14 @@
           el("td", {cls: "num", text: String(e.pit_stops), title: PIT_HINT}),
           el("td", {cls: "num", text: e.correction_m ? (e.correction_m > 0 ? "+" : "") + e.correction_m + " m" : ""})];
         return el("tr", {}, cells);
+      }
+      var rows = [];
+      classGroups(r).forEach(function (g) {
+        if (g.name !== null) {
+          rows.push(el("tr", {cls: "cls"}, [el("td", {colspan: "9"}, [el("span", {text: g.name || "Unclassed"}),
+            g.lap !== null ? el("span", {cls: "lap", text: "Lap " + g.lap + (g.laps !== null ? " / " + g.laps : "")}) : null])]));
+        }
+        g.rows.forEach(function (e, k) { rows.push(raceRow(e, g.name !== null, k)); });
       });
       if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "9", cls: "muted", text: "No driver data yet."})])];
       raceBody.replaceChildren.apply(raceBody, rows);

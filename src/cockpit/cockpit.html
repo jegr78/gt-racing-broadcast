@@ -84,6 +84,9 @@
                         border-radius: 3px; background: #f2f4f7; object-fit: contain; }
   #timing td.drv small { display: block; opacity: .6; }
   #timing tr.box td { color: #ffd361; }
+  #timing tr.cls td { background: #1b1f25; font-weight: 700; white-space: normal; }
+  #timing tr.cls .lap { margin-left: 8px; opacity: .7; font-weight: 600; }
+  #timingFl .flcls { font-weight: 700; margin-right: 6px; }
   #timing .est { display: inline-block; margin-left: 4px; padding: 0 4px; border: 1px solid #ffb454;
                  border-radius: 3px; color: #ffb454; font-size: 10px; font-weight: 700; line-height: 1.4; }
   #timing .fl { color: #c49bff; font-weight: 700; }
@@ -888,6 +891,28 @@ function timingEst(text) {
   s.appendChild(tag);
   return s;
 }
+function timingColor(c) {
+  return typeof c === 'string' && /^(#[0-9a-fA-F]{3,8}|(rgb|hsl)a?\([0-9a-zA-Z.,%\s\/]+\)|[a-zA-Z]{3,20})$/.test(c) ? c : '';
+}
+// A class header row: the name in its colour and the class's lap.
+function timingClassHead(c, span) {
+  const tr = document.createElement('tr');
+  tr.className = 'cls';
+  const td = document.createElement('td');
+  td.colSpan = span;
+  const name = document.createElement('span');
+  name.textContent = c.name || 'Unclassed';
+  if (timingColor(c.color)) name.style.color = timingColor(c.color);
+  td.appendChild(name);
+  if (typeof c.lap === 'number') {
+    const lap = document.createElement('span');
+    lap.className = 'lap';
+    lap.textContent = 'Lap ' + c.lap + (typeof c.laps === 'number' ? ' / ' + c.laps : '');
+    td.appendChild(lap);
+  }
+  tr.appendChild(td);
+  return tr;
+}
 function timingTyre(e) {
   const s = document.createElement('span');
   const code = ['RS', 'RM', 'RH', 'I', 'W'].indexOf(e.compound) >= 0 ? e.compound : '';
@@ -925,34 +950,60 @@ async function pollTiming() {
   const body = $('timing').tBodies[0];
   body.textContent = '';
   const fl = d.fastest;
-  rows.forEach(function (e, i) {
-    const tr = document.createElement('tr');
-    if (quali) {
-      timingCells(tr, [e.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), lapTime(e.best_ms),
-                       e.gap_ms ? '+' + (e.gap_ms / 1000).toFixed(3) : '']);
-    } else {
-      if (e.status === 'box') tr.className = 'box';
-      const laps = e.stint_laps !== undefined && e.stint_laps !== e.laps ? e.laps + ' (' + e.stint_laps + ')' : e.laps;
-      const gapText = i === 0 ? '' : e.lapped ? '+' + e.lapped + ' L'
-                      : typeof e.gap_s === 'number' ? '+' + e.gap_s.toFixed(1) : '';
-      const gap = e.status === 'est' ? {node: timingEst(gapText)} : TIMING_STATUS[e.status] || gapText;
-      const last = document.createElement('span');
-      last.textContent = lapTime(e.last_lap_ms);
-      if (fl && fl.entry === e.entry && fl.ms === e.last_lap_ms) last.className = 'fl';
-      timingCells(tr, [e.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), laps, gap,
-                       typeof e.interval_s === 'number' && i ? '+' + e.interval_s.toFixed(1) : '',
-                       {node: last}, typeof e.fuel_l === 'number' ? e.fuel_l.toFixed(1) + ' L' : '',
-                       e.pit_stops || 0]);
-    }
-    body.appendChild(tr);
+  // Class mode: each class under its header with positions and gaps within the class.
+  const classes = !quali && Array.isArray(d.classes)
+    ? d.classes.filter(function (c) { return c && typeof c.name === 'string'; }) : [];
+  const groups = classes.length ? classes.map(function (c) {
+    return {cls: c, rows: rows.filter(function (e) { return (e.class == null ? '' : e.class) === c.name; })};
+  }) : [{cls: null, rows: rows}];
+  groups.forEach(function (g) {
+    if (g.cls) body.appendChild(timingClassHead(g.cls, cols.length));
+    const flg = g.cls ? g.cls.fastest : fl;
+    g.rows.forEach(function (e, i) {
+      const tr = document.createElement('tr');
+      if (quali) {
+        timingCells(tr, [e.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), lapTime(e.best_ms),
+                         e.gap_ms ? '+' + (e.gap_ms / 1000).toFixed(3) : '']);
+      } else {
+        const v = g.cls ? {pos: e.class_pos, lapped: e.class_lapped, gap_s: e.class_gap_s, interval_s: e.class_interval_s} : e;
+        if (e.status === 'box') tr.className = 'box';
+        const laps = e.stint_laps !== undefined && e.stint_laps !== e.laps ? e.laps + ' (' + e.stint_laps + ')' : e.laps;
+        const gapText = i === 0 ? '' : v.lapped ? '+' + v.lapped + ' L'
+                        : typeof v.gap_s === 'number' ? '+' + v.gap_s.toFixed(1) : '';
+        const gap = e.status === 'est' ? {node: timingEst(gapText)} : TIMING_STATUS[e.status] || gapText;
+        const last = document.createElement('span');
+        last.textContent = lapTime(e.last_lap_ms);
+        if (flg && flg.entry === e.entry && flg.ms === e.last_lap_ms) last.className = 'fl';
+        timingCells(tr, [v.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), laps, gap,
+                         typeof v.interval_s === 'number' && i ? '+' + v.interval_s.toFixed(1) : '',
+                         {node: last}, typeof e.fuel_l === 'number' ? e.fuel_l.toFixed(1) + ' L' : '',
+                         e.pit_stops || 0]);
+      }
+      body.appendChild(tr);
+    });
   });
   const flBox = $('timingFl');
   flBox.textContent = '';
-  if (fl && !quali) {
+  function flLine(box, fl) {
     const s = document.createElement('span');
     s.className = 'fl'; s.textContent = 'Fastest lap ' + lapTime(fl.ms);
-    flBox.appendChild(s);
-    flBox.appendChild(document.createTextNode(' · ' + fitName(fl.driver, NAME_MAX) + ' (' + (fl.team || fl.entry) + ')'));
+    box.appendChild(s);
+    box.appendChild(document.createTextNode(' · ' + fitName(fl.driver, NAME_MAX) + ' (' + (fl.team || fl.entry) + ')'));
+  }
+  if (classes.length) {
+    classes.forEach(function (c) {
+      if (!c.fastest) return;
+      const line = document.createElement('div');
+      const name = document.createElement('span');
+      name.className = 'flcls';
+      name.textContent = c.name || 'Unclassed';
+      if (timingColor(c.color)) name.style.color = timingColor(c.color);
+      line.appendChild(name);
+      flLine(line, c.fastest);
+      flBox.appendChild(line);
+    });
+  } else if (fl && !quali) {
+    flLine(flBox, fl);
   }
   setTimeout(pollTiming, 2000);
 }

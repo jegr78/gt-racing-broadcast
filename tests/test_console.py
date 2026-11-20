@@ -393,6 +393,54 @@ def t_recording_routes_are_desk_routes():
     assert cp.decide({"director"}, ["drivers", "snapshot"], "POST") == cp.NOT_FOUND
 
 
+
+def _desk_fn(name, call):
+    """Runs one top-level function of driver-desk.js under node; None without node."""
+    import sys
+    sys.path.insert(0, HERE)
+    import test_driver_tower as tower
+    desk = os.path.join(ROOT, "src", "console", "driver-desk.js")
+    return tower._run(tower._function(desk, name) + "\n;console.log(JSON.stringify(" + call + "));")
+
+
+def t_the_desk_offers_a_lap_count_per_slower_class():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    assert '"/drivers/race/class-laps", {class: ' in desk, "the inputs post to the class lap route"
+    got = _desk_fn("lapClasses", '[lapClasses(["GT3", "GT4", "GT2", ""]), lapClasses(["", "GT3", "GT4"]), lapClasses([])]')
+    if got is None:
+        return
+    assert got == [["GT4", "GT2"], ["GT4"], []], \
+        f"one input per named class after the first, which runs on the Schedule laps, none for the unclassed: {got}"
+
+
+DESK_RACE = {"entries": [{"entry": "A", "class": "GT3", "class_pos": 1}, {"entry": "B", "class": "GT4", "class_pos": 1},
+                         {"entry": "C", "class": "GT3", "class_pos": 2}, {"entry": "D", "class": "", "class_pos": 1}],
+             "classes": ["GT3", "GT4", ""], "class_lap": {"GT3": 7, "GT4": 6, "": 6},
+             "class_laps": {"GT4": 18}, "lap": {"leader": 7, "count": 20}}
+
+
+def t_the_desk_groups_the_race_by_class():
+    import json
+    got = _desk_fn("classGroups", "classGroups(" + json.dumps(DESK_RACE) + ").map(g => "
+                   "[g.name, g.lap, g.laps, g.rows.map(e => e.entry)])")
+    if got is None:
+        return
+    assert got == [["GT3", 7, 20, ["A", "C"]], ["GT4", 6, 18, ["B"]], ["", 6, None, ["D"]]], \
+        f"every class under its header, the first with the race's lap count: {got}"
+
+
+def t_the_desk_renders_one_class_as_today():
+    import json
+    race = {"entries": [{"entry": "A"}, {"entry": "B"}], "classes": [], "class_lap": {}, "class_laps": {},
+            "lap": {"leader": 3, "count": 20}}
+    got = _desk_fn("classGroups", "classGroups(" + json.dumps(race) + ")")
+    if got is None:
+        return
+    assert got == [{"name": None, "rows": [{"entry": "A"}, {"entry": "B"}]}], \
+        f"outside class mode one group without a header, in overall order: {got}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
