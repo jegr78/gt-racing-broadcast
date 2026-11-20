@@ -146,8 +146,9 @@ event setting. A lap count set while the final stint is already on air applies a
 The final lobby's flag follows the road, as in GT7: the first of its cars to complete
 the count takes it, or after **Final lap** the first car to cross the line on the
 lobby's leading lap, even when another car leads in race distance. Every other car
-finishes at its next crossing, and the order after the flag stays laps first, then who
-completed them first.
+finishes at its next crossing, a car a lap down on the road too, and the order after
+the flag stays laps first, then who completed them first. The header's lap shows the
+same leading lap on the road, never past the count.
 
 ### Classes
 

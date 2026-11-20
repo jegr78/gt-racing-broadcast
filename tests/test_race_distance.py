@@ -778,6 +778,19 @@ def t_after_a_keep_restart_the_first_car_past_the_lobby_count_starts_the_finish(
     assert gaps[0] == 0.0 and 0 < gaps[1] < gaps[2] < 30, f"gaps in tower order: {gaps}"
 
 
+def t_after_a_keep_restart_the_lap_display_follows_the_lobby_leader_on_the_road():
+    race, (a, b, c), t = _keep_restart_final_lobby("laps")
+    seen = None
+    while race.standings(t)["state"] == "racing":
+        t = _drive(race, [a, b, c], [50, 50.8, 50], t, 1.0 / HZ)
+        if b.lap() > a.lap() and race.standings(t)["state"] == "racing":
+            seen = (b.lap(), race.standings(t)["lap"])
+    assert seen is not None and seen[1] == {"leader": seen[0], "count": 3}, \
+        f"the header shows the counter of B, which leads on the road: {seen}"
+    t = _drive(race, [a, b, c], [50, 50.8, 50], t, 5)
+    assert race.standings(t)["lap"]["leader"] == 3, "never past the count once the flag is out"
+
+
 def t_after_a_keep_restart_a_timed_finish_ends_at_the_first_lead_lap_crossing():
     race, cars, t = _keep_restart_final_lobby("time")
     t = _drive(race, list(cars), [50, 50.8, 50], t, 100)

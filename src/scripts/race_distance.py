@@ -813,9 +813,9 @@ class Race:
         self._finished = sum(1 for e in self._entries.values()
                              if e.active is not None and not self._out(e)) == 1
 
-    def _lobby_lead_lap(self, now):
-        """The highest GT7 counter among the final lobby's running cars."""
-        laps = [c.lap for e in self._entries.values()
+    def _lobby_lead_lap(self, now, entries=None):
+        """The highest GT7 counter among the final lobby's running cars (of `entries`)."""
+        laps = [c.lap for e in (self._entries.values() if entries is None else entries)
                 if not self._out(e) and not e.waiting and self._final_car(e) and not self._quiet(e, now)
                 for c in [self._cars.get(e.active)] if c.counting and c.lap is not None]
         return max(laps, default=0)
@@ -994,7 +994,7 @@ class Race:
             return (0, -laps, reached, -dist, e.entry)
         ents.sort(key=key)
         mismatch = self._mismatches(ents)
-        lap = self._lap_display(ents)
+        lap = self._lap_display(ents, now)
         ranked = len(ents)
         ents += idle + out
         rows = []
@@ -1044,7 +1044,7 @@ class Race:
                 "class_lapped": None, "class_gap_time_s": None, "class_interval_time_s": None})
         self._estimate_gaps(ents, rows)
         classes = self._class_pass(ents, rows, ranked, now)
-        shown = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
+        shown = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name], now)
                  for name in classes}
         # A class count shows only with the overall one; in endurance on the class leader's final lobby counter.
         class_counts = {name: lap["count"] is not None and (not self.multi_lobby or d["count"] is not None)
@@ -1157,17 +1157,18 @@ class Race:
         t0, t1 = lead_row["gap_time_s"], row["gap_time_s"]
         return None if t0 is None or t1 is None else max(0.0, t1 - t0)
 
-    def _lap_display(self, ordered):
+    def _lap_display(self, ordered, now):
         """{leader, count}: the leader's running lap against the lap count. In endurance
-        the count belongs to the final lobby, so it shows only with that lobby's car and
-        its lobby counter; never a lap past the count once the flag is out."""
+        the count belongs to the final lobby, so it shows only with that lobby's car, on
+        the lobby's leading counter on the road like the flag; never a lap past the count
+        once the flag is out."""
         count = self.lap_count if self.finish_mode == "laps" else None
         lead = ordered[0] if ordered and ordered[0].distance is not None else None
         if lead is None:
             return {"leader": None, "count": count}
         car = self._cars.get(lead.active)
         if self.multi_lobby and count and self._final_car(lead) and car is not None and car.lap is not None:
-            leader = car.lap
+            leader = self._lobby_lead_lap(now, ordered) or car.lap
         else:
             leader = max(0, math.floor(self._shown(lead) / self.length)) + (2 if self.formation else 1)
             if self.multi_lobby:
