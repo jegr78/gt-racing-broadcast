@@ -386,16 +386,25 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
 - **Red flag** freezes every entry's distance. In the restart lobby each car
   continues from its anchor when it leaves the box; lap 1 there does not count. The
   league's rule (Control Center Home, **Red flag**, or `racecast event race
-  --restart`) says whether a restart keeps the gaps or neutralises them: order and
-  laps stay, cars on the same lap start level. Race Control or the director can
-  switch it for one restart. **Restart released** ends the mode. A car still in the
+  --restart`) says whether a restart keeps the gaps or neutralises them.
+  - **Keep** is a release staggered by the gaps: Race Control releases each car from
+    the restart lobby's box its frozen gap after the leader. Every car starts from
+    the leader's frozen distance (an estimated leader's too), a car laps down that many whole laps behind it, so
+    its lap count stays right. The gap after the restart is the release delay.
+  - **Neutralise**: order and laps stay, cars on the same lap start level.
+
+  Gaps count racing time only: the stoppage from the red flag until the first car
+  leaves the restart lobby's box never counts, also not in a lapped car's exact time
+  (`+1 L · 1:02.5`) or an estimate. Race Control or the director can switch the rule
+  for one restart. **Restart released** ends the mode. A car still in the
   lobby it raced in (a red flag pressed by mistake, or a suspension the lobby drove
   through) counts on from where it is; a car in a restart lobby still resumes when it
   leaves the box. In a single lobby a lap count is counted in race distance, so a
   restart from the box does not shift it, and each car finishes where its race laps
   end, not on the restart lobby's line. In an endurance final lobby the count stays on
   GT7's counter: after a restart that keeps the gaps a car can lead on the road but
-  not in race distance, and the flag still falls on the road.
+  not in race distance (a correction, or a box further up the pit lane), and the
+  flag still falls on the road.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
   leader's distance where its car of the old lobby stopped, however early the stint
   switch was pressed, so its later departure from the box becomes its deficit. A rejoin
@@ -421,7 +430,7 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   again to change it, **Clear estimate** removes it, and the estimate ends by itself
   when the car sends data again; the car then continues from its real distance. An
   estimate set on a car that still sends data waits until it goes quiet. It holds still
-  under a red flag (the restart anchor is the estimated distance) and after the car or
+  under a red flag (the estimated distance counts as its frozen distance) and after the car or
   its reference took the flag. An estimated car never takes the flag by itself and
   never holds it back: with an estimated car in the lead, the first real car past the
   count takes the flag, and the estimated car keeps its place in the classification.
