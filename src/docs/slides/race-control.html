@@ -87,10 +87,11 @@ Note: Corrections add or remove metres and pit stops for one entry, and each one
 - A car with no data for five seconds opens a **suspected** event. Data back makes it a **dropout**.
 - **Confirm DC** or **Dismiss** it. A sound on a new suspicion is optional.
 - **Show standings** opens the frozen standings 5 to 30 seconds before the last packet.
+- A DC car cannot rejoin its lobby. Its last gap from **Show standings** feeds the rejoin in the next stint.
 
 [Race recording](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#race-recording-and-disconnect-events)
 
-Note: The relay records the live race once a second while it runs in race mode. You can start and stop the recording by hand and download it as a C S V file. When a car sends no data for five seconds, the recording opens a suspected disconnect event. If data comes back, the event turns into a dropout. You confirm the disconnect or dismiss the event, and the decision is logged. The desk can play a sound on a new suspicion, off by default. Show standings opens the frozen standings from five to thirty seconds before the car's last packet. The relay decides nothing about a rejoin. That stays with you.
+Note: The relay records the live race once a second while it runs in race mode. You can start and stop the recording by hand and download it as a C S V file. When a car sends no data for five seconds, the recording opens a suspected disconnect event. If data comes back, the event turns into a dropout. You confirm the disconnect or dismiss the event, and the decision is logged. The desk can play a sound on a new suspicion, off by default. Show standings opens the frozen standings from five to thirty seconds before the car's last packet. In G T 7 a disconnected car cannot rejoin the lobby it raced in, so a confirmed disconnect holds until the stint ends. Data that comes back in the same lobby means only the sender dropped, so you dismiss the event. In endurance you take the car's last gap from the frozen standings for its rejoin in the next stint. The relay decides nothing about a rejoin. That stays with you.
 </script></section>
 
 <section data-markdown><script type="text/template">
