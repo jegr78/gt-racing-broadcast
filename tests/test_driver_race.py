@@ -750,7 +750,7 @@ def t_an_estimated_car_reads_est_everywhere_and_is_audited():
     race = svc.estimate("rc:Cy", "B", "C", 2.0)
     row = race["entries"][1]
     assert row["entry"] == "B" and row["status"] == "est" and row["gap_s"] == 2.0, row
-    assert row["estimate"] == {"ref": "C", "seconds": 2.0}, "the desks see the estimate"
+    assert row["estimate"] == {"ref": "C", "seconds": 2.0, "ahead": False}, "the desks see the estimate"
     svc.tick()
     dash = svc.dashboard()["entries"][1]
     assert dash["status"] == "est" and dash["gap_s"] == 2.0, f"EST wins over DC on the tower: {dash}"
@@ -772,6 +772,29 @@ def t_an_estimated_car_reads_est_everywhere_and_is_audited():
                    ("race", "estimate_end", "B", None, None, None)], got
 
 
+def t_an_estimate_ahead_places_the_quiet_car_in_front_and_is_audited():
+    svc, wall, d = _recording_service()
+    svc.set_settings({"formation": False})
+    _two_cars(svc, wall, 1010.0)
+    _two_cars(svc, wall, 1010.0 + dr.race_distance.NO_DATA_S + 1, quiet_b=True)
+    for bad in ("yes", 1, None):
+        try:
+            svc.estimate("rc:Cy", "B", "C", 2.0, ahead=bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"ahead={bad!r} must be refused, not read as a direction")
+    race = svc.estimate("rc:Cy", "B", "C", 2.0, ahead=True)
+    rows = race["entries"]
+    assert [r["entry"] for r in rows[:2]] == ["B", "C"] and rows[0]["status"] == "est", rows[:2]
+    assert rows[0]["estimate"] == {"ref": "C", "seconds": 2.0, "ahead": True}, rows[0]["estimate"]
+    assert rows[1]["gap_s"] == 2.0, f"the reference reads the seconds behind the estimated leader: {rows[1]}"
+    svc.tick()
+    assert svc.dashboard()["entries"][0]["status"] == "est", "the tower shows EST on the leader"
+    got = [(r["entry"], r.get("ref"), r.get("seconds"), r.get("ahead"))
+           for r in _audit(os.path.join(d, "driver-race.json")) if r["action"] == "estimate"]
+    assert got == [("B", "C", 2.0, True)], got
+
+
 def t_an_estimate_validates_its_input():
     svc, clock, path, _league = _ctl()
     svc.update({"entry": "A", "conn": "a", "name": "Max"}, _sample(0.1, -5, 1))
@@ -785,7 +808,9 @@ def t_an_estimate_validates_its_input():
                  lambda: svc.estimate("rc:A", "B", "B", 1.0),
                  lambda: svc.estimate("rc:A", "B", "", 1.0),
                  lambda: svc.estimate("rc:A", "Nobody", "A", 1.0),
-                 lambda: svc.estimate("rc:A", "B", clear=True)):
+                 lambda: svc.estimate("rc:A", "B", clear=True),
+                 lambda: svc.estimate("rc:A", "B", "A", 1.0, ahead="yes"),
+                 lambda: svc.estimate("rc:A", "B", "A", 1.0, ahead=1)):
         try:
             call()
         except ValueError:
@@ -1038,7 +1063,7 @@ def t_an_estimate_places_a_roster_entry_that_never_sent():
     svc, clock, path, _ctx = _roster_service()
     st = svc.estimate("rc:Cy", "X", "A", 1.0)
     x = _rows(st)["X"]
-    assert x["status"] == "est" and x["estimate"] == {"ref": "A", "seconds": 1.0}, x
+    assert x["status"] == "est" and x["estimate"] == {"ref": "A", "seconds": 1.0, "ahead": False}, x
 
 
 def t_race_control_overrides_driver_names():

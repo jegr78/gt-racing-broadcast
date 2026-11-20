@@ -1095,9 +1095,9 @@ class Service:
                       reason=reason.strip())
         return self.standings()
 
-    def estimate(self, who, entry, ref=None, seconds=None, clear=False):
-        """Show the quiet `entry` `seconds` behind `ref` until its data returns, or
-        `clear` it. Not persisted: a relay restart drops it."""
+    def estimate(self, who, entry, ref=None, seconds=None, clear=False, ahead=False):
+        """Show the quiet `entry` `seconds` behind `ref`, or `ahead` of it, until its
+        data returns, or `clear` it. Not persisted: a relay restart drops it."""
         entry = _entry_name(entry)
         if clear:
             with self._lock:
@@ -1109,13 +1109,15 @@ class Service:
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) \
                 or not math.isfinite(seconds) or not 0 <= seconds <= MAX_ESTIMATE_S:
             raise ValueError(f"seconds is a number from 0 to {int(MAX_ESTIMATE_S)}")
+        if not isinstance(ahead, bool):
+            raise ValueError("ahead is true or false")
         seconds = float(seconds)
         roster = self._context().get("roster") or {}
         with self._lock:
             race = self._current()
             self._set_roster(race, roster)
-            race.estimate(entry, ref, seconds, self._clock())
-            self._log(who, "estimate", entry=entry, ref=ref, seconds=seconds)
+            race.estimate(entry, ref, seconds, self._clock(), ahead=ahead)
+            self._log(who, "estimate", entry=entry, ref=ref, seconds=seconds, ahead=ahead)
         return self.standings()
 
     def retire(self, who, entry, on):

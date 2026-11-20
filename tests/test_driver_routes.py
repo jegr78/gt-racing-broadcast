@@ -487,7 +487,13 @@ def t_both_desks_set_and_clear_an_estimate_and_bad_input_is_refused():
         st, text, _h = _req(port, f"/console/race-control/drivers/race/estimate?t={rc}", body, hdr)
         race = json.loads(text)["race"] if st == 200 else {}
         assert st == 200 and race["last_action"]["who"] == "race_control:dave", (st, text[:300])
-        assert race["entries"][1]["estimate"] == {"ref": ENTRIES[0], "seconds": 1.5}, race["entries"][1]
+        assert race["entries"][1]["estimate"] == {"ref": ENTRIES[0], "seconds": 1.5, "ahead": False}, \
+            race["entries"][1]
+        ahead = json.dumps({"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": 1.5, "ahead": True}).encode()
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/estimate?t={rc}", ahead, hdr)
+        est = [e["estimate"] for e in json.loads(text)["race"]["entries"] if e["entry"] == ENTRIES[1]] \
+            if st == 200 else None
+        assert est == [{"ref": ENTRIES[0], "seconds": 1.5, "ahead": True}], (st, text[:300])
         st, text, _h = _req(port, f"/console/drivers/race/estimate?t={director}",
                             json.dumps({"entry": ENTRIES[1], "clear": True}).encode(), hdr)
         assert st == 200 and json.loads(text)["race"]["entries"][1]["estimate"] is None, (st, text[:300])
@@ -497,7 +503,9 @@ def t_both_desks_set_and_clear_an_estimate_and_bad_input_is_refused():
                     {"entry": ENTRIES[1], "ref": "Invented Team", "seconds": 1},
                     {"entry": ENTRIES[1], "ref": ENTRIES[1], "seconds": 1},
                     {"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": -1},
-                    {"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": "1"}):
+                    {"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": "1"},
+                    {"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": 1, "ahead": "yes"},
+                    {"entry": ENTRIES[1], "ref": ENTRIES[0], "seconds": 1, "ahead": 1}):
             st, text, _h = _req(port, f"/console/race-control/drivers/race/estimate?t={rc}",
                                 json.dumps(bad).encode(), hdr)
             assert st == 400, (bad, st, text)

@@ -14987,7 +14987,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                        b.get("clear") is True),
                         "compound": lambda: svc.set_compound(who, b.get("entry"), b.get("code")),
                         "estimate": lambda: svc.estimate(who, b.get("entry"), b.get("ref"), b.get("seconds"),
-                                                         b.get("clear") is True),
+                                                         b.get("clear") is True, b.get("ahead", False)),
                         "retire": lambda: svc.retire(who, b.get("entry"), b.get("on", True)),
                         "driver-name": lambda: svc.set_driver_name(who, b.get("entry"), b.get("name"),
                                                                    b.get("driver", "")),
