@@ -1387,6 +1387,29 @@ def t_race_control_sets_one_class_fastest_lap():
     assert svc._current().fastest_by_class["G"]["entry"] == "C", "a refused change leaves the lap"
 
 
+def t_voiding_a_class_without_a_fastest_lap_changes_nothing():
+    svc, path, _ctx = _fastest_service()
+    svc.set_fastest("rc:Anna", cls="G")
+    before = len(_audit(path))
+    svc.set_fastest("rc:Anna", cls="G")
+    assert len(_audit(path)) == before, f"no lap to void, no audit line: {_audit(path)[before:]}"
+    svc.set_fastest("rc:Anna")
+    svc.set_fastest("rc:Anna")
+    assert [r.get("cleared") for r in _audit(path)[before:]] == [True], \
+        f"the overall void works the same way: {_audit(path)[before:]}"
+
+
+def t_a_class_lap_clear_respects_the_stint_cap():
+    doc = {"class_laps": {f"S{i}": {"G": 5} for i in range(dr.MAX_QUALI)}}
+    try:
+        dr._store_class_laps(doc, "new", "G", None)
+    except ValueError:
+        pass  # refused: the stint cap holds
+    assert "new" not in doc["class_laps"], "a clear never adds a stint past the cap"
+    dr._store_class_laps(doc, "S1", "G", None)
+    assert doc["class_laps"]["S1"] == {"G": None}, "a clear in a stored stint still works"
+
+
 def t_a_class_fastest_lap_audit_is_written_first():
     svc, _path, _ctx = _fastest_service()
     svc._log = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("audit failed"))
@@ -1419,6 +1442,7 @@ def t_race_control_sets_a_class_lap_count():
     rec = _audit(path)[-1]
     assert (rec["who"], rec["action"], rec["class"], rec["laps"], rec["stint"]) == \
         ("race_control:rc", "class_laps", "G", 54, ""), rec
+    svc.set_settings({"lap_count": 60})
     svc.tick()
     assert _class_of(svc.dashboard(), "G")["laps"] == 54, svc.dashboard()["classes"]
     again, _c, _p = _dash_service(ctx, path)
@@ -1445,6 +1469,7 @@ def t_a_class_lap_count_below_the_leader_lap_is_kept():
     svc.correct("rc:Anna", "A", 28 * L, 0, "test")
     svc.correct("rc:Anna", "B", 27 * L, 0, "test")
     svc.correct("rc:Anna", "B", 27 * L, 0, "test")
+    svc.set_settings({"lap_count": 99})
     svc.tick()
     before = svc.dashboard()
     assert _class_of(before, "G")["lap"] >= 55, before["classes"]
@@ -1522,6 +1547,7 @@ def t_schedule_class_laps_prefill_the_desk():
     ctx["stint"] = "S1"
     svc.stint_switch(class_laps={"G": 54})
     assert svc.class_laps() == {"G": 40}, "each stint keeps its own desk value"
+    svc.set_settings({"lap_count": 60})
     svc.tick()
     assert _class_of(svc.dashboard(), "G")["laps"] == 40, svc.dashboard()["classes"]
 

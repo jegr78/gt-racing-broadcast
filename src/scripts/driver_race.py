@@ -468,11 +468,11 @@ def _saved_class_laps(path, stint):
 def _store_class_laps(doc, stint, cls, laps):
     raw = doc.get("class_laps") if isinstance(doc.get("class_laps"), dict) else {}
     done = raw.get(stint) if isinstance(raw.get(stint), dict) else {}
+    if stint not in raw and len(raw) >= MAX_QUALI:
+        raise ValueError(f"at most {MAX_QUALI} stints carry class lap counts")
     if laps is None:
         if cls in done or len(done) < MAX_CLASSES:
             done[cls] = None   # cleared: the Schedule never brings it back in this stint
-    elif stint not in raw and len(raw) >= MAX_QUALI:
-        raise ValueError(f"at most {MAX_QUALI} stints carry class lap counts")
     elif cls in done or len(done) < MAX_CLASSES:
         done[cls] = laps
     else:
@@ -653,20 +653,27 @@ class Service:
             self._set_roster(race, roster)
             if cls is not None and entry is not None and race.class_of(entry) != cls:
                 raise ValueError("the entry is not in that class")
-            self._log(who, "fastest", **({"class": cls} if cls is not None else {}),
-                      **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
-            lap = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
-            if cls is not None:
-                race.fastest_by_class.pop(cls, None)
-                if lap is not None:
-                    race.fastest_by_class[cls] = lap
-            else:
-                race.fastest_by_class = {c: f for c, f in race.fastest_by_class.items() if f != race.fastest}
-                race.fastest = lap
-                if lap is not None:
-                    race.fastest_by_class[race.class_of(entry)] = dict(lap)
-        self.save_fastest()
+            void = entry is None and (race.fastest_by_class.get(cls) if cls is not None else race.fastest) is None
+            if not void:
+                self._apply_fastest(who, race, cls, entry, driver, ms)
+        if not void:
+            self.save_fastest()
         return self.standings()
+
+    def _apply_fastest(self, who, race, cls, entry, driver, ms):
+        """Audit, then change the fastest lap; the caller holds the lock."""
+        self._log(who, "fastest", **({"class": cls} if cls is not None else {}),
+                  **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
+        lap = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
+        if cls is not None:
+            race.fastest_by_class.pop(cls, None)
+            if lap is not None:
+                race.fastest_by_class[cls] = lap
+        else:
+            race.fastest_by_class = {c: f for c, f in race.fastest_by_class.items() if f != race.fastest}
+            race.fastest = lap
+            if lap is not None:
+                race.fastest_by_class[race.class_of(entry)] = dict(lap)
 
     def _viewer(self, ctx):
         """The dashboard payload: an allowlist, safe for viewers and the public page."""

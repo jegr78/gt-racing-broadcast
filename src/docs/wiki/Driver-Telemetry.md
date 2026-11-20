@@ -156,12 +156,13 @@ except on the tower.
   is not lapped in its own. The class of the overall leader comes first, the others
   follow by the best position each holds.
 - **Lap count per class**: the first class takes the lap count above. The first class is
-  the class of the current overall leader, so the count moves with the overall lead. For
+  the first named class in the current overall order (an unclassed leader does not
+  count), so the count can move to another class during the race. For
   every other class Race Control or the director type the count into the desk's **Class
   laps** row (1 to 999, empty clears it). It belongs to the stint on air, shows in the
-  class header and never finishes a car. Like the overall count it shows only where the
-  overall count shows: in an endurance event only once the final lobby's cars are on
-  the line, so it belongs to the final lobby's row. An optional Schedule column
+  class header and never finishes a car. It shows only while the overall count shows, so
+  never in a timed race, and in an endurance event only once the final lobby's cars are
+  on the line: it belongs to the final lobby's row. An optional Schedule column
   `Laps <Class>` fills it when that row goes on air, unless the desk already holds a
   value or cleared it for that stint. Until a count shows, the header shows the class
   leader's lap only.

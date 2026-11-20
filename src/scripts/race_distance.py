@@ -987,8 +987,9 @@ class Race:
         shown = {name: self._lap_display([e for e in ents[:ranked] if self._classes.get(e.entry, "") == name])
                  for name in classes}
         class_lap = {name: d["leader"] for name, d in shown.items()}
-        # Endurance: a class count, like the overall one, needs the final lobby's lap counter.
-        class_counts = {name: not self.multi_lobby or d["count"] is not None for name, d in shown.items()}
+        # A class count shows only with the overall one; in endurance on the class leader's final lobby counter.
+        class_counts = {name: lap["count"] is not None and (not self.multi_lobby or d["count"] is not None)
+                        for name, d in shown.items()}
         red = None if self._red is None else dict(self._red)
         return {"state": self._state(), "line_length_m": self.length, "red_flag": red,
                 "restart_mode": self._restart_mode,

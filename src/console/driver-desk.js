@@ -127,6 +127,11 @@
     var f = r.class_fastest || {};
     return Object.prototype.hasOwnProperty.call(f, cls) && f[cls] ? f[cls] : null;
   }
+  // The entries the fastest-lap form offers: a class only its own.
+  function flEntries(r, cls) {
+    return (r.entries || []).filter(function (e) { return !cls || e.class === cls; })
+      .map(function (e) { return e.entry; });
+  }
   function fastestBody(cls, body) { return cls ? Object.assign({class: cls}, body) : body; }
   // A race row's Gap cell; grouped rows read laps down within the class.
   function gapCell(e, grouped, i, k) {
@@ -670,6 +675,7 @@
       flClass.hidden = !names.length;
       keepSelect(flClass, [["", "Overall"]].concat(names.map(function (n) { return [n, n]; })));
       var cls = names.indexOf(flClass.value) >= 0 ? flClass.value : "";
+      keepSelect(flEntry, flEntries(r, cls).map(function (e) { return [e, e]; }));
       var fl = scopedFastest(r, cls);
       flText.textContent = fl ? (cls ? cls + " fastest lap " : "Fastest lap ") + lapTime(fl.ms) + " · " +
         fitName(fl.driver, NAME_LIST_MAX) + " (" + fl.entry + ")" : "No fastest lap yet.";
@@ -774,7 +780,6 @@
       keepSelect(nameDriver, nameDrivers());
       multiRow.hidden = !multi;
       keepSelect(rejoinEntry, entries.map(function (e) { return [e, e]; }));
-      keepSelect(flEntry, entries.map(function (e) { return [e, e]; }));
       keepSelect(qEntry, entries.map(function (e) { return [e, e]; }));
       var conns = [];
       rd.rows.forEach(function (r) {

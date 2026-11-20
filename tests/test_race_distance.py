@@ -1444,7 +1444,15 @@ def t_a_class_count_shows_only_where_the_overall_count_shows():
     single.set_classes({"A": "H", "B": "G"})
     cars = [Car(single, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50))]
     t = _drive(single, cars, [40] * 2, 0.0, 12)
-    assert single.standings(t)["class_counts"] == {"H": True, "G": True}, "a single lobby always shows them"
+    assert single.standings(t)["class_counts"] == {"H": False, "G": False}, \
+        "a single lobby without a lap count shows no class count either"
+    single.lap_count = 20
+    assert single.standings(t)["class_counts"] == {"H": True, "G": True}, "a single lobby with a count shows them"
+    timed = rd.Race(TRACE, formation=False, finish_mode="time", lap_count=20)
+    timed.set_classes({"A": "H", "B": "G"})
+    cars = [Car(timed, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 50))]
+    t = _drive(timed, cars, [40] * 2, 0.0, 12)
+    assert timed.standings(t)["class_counts"] == {"H": False, "G": False}, "a timed race shows no class count"
     plain = rd.Race(TRACE, formation=False)
     assert plain.standings(0.0)["class_counts"] == {}, "outside class mode there is none"
 

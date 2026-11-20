@@ -460,6 +460,15 @@ def t_the_desk_fastest_lap_form_takes_a_class():
     assert got[6:] == [["GT3", "GT4"], []], f"the named classes, none outside class mode: {got[6:]}"
 
 
+def t_the_desk_fastest_lap_entries_follow_the_class():
+    import json
+    r = {"entries": [{"entry": "A", "class": "GT3"}, {"entry": "B", "class": "GT4"}, {"entry": "C", "class": "GT3"}]}
+    got = _desk_fn("flEntries", "[flEntries(R, ''), flEntries(R, 'GT3'), flEntries(R, 'GT4')]".replace("R", json.dumps(r)))
+    if got is None:
+        return
+    assert got == [["A", "B", "C"], ["A", "C"], ["B"]], f"a class picks from its own entries, Overall from all: {got}"
+
+
 def t_the_desk_class_header_count_follows_the_overall_rule():
     import json
     race = dict(DESK_RACE, class_counts={"GT3": True, "GT4": False, "": False})
