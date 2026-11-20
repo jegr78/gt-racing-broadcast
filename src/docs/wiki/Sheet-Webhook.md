@@ -88,11 +88,12 @@ relay (`/crew/data`) and writes changes back through the `crew` webhook action
 forwards to the webhook). The script responds `{"ok":true,"action":"crew","v":7}`,
 accepted by the relay's `check_webhook_response`.
 
-The **Race Control** column flags a person for the read-only [Race Control](Console)
-monitoring desk (`/console/race-control`: program preview, redacted schedule, timer,
-chat). It is unrelated to the director-only HUD **Race Control** banner (the Setup-tab
-`Race Control` field, see [Director](Director)); the role string is `race_control`, the
-banner is `racecontrol`, and they never collide.
+The **Race Control** column flags a person for the [Race Control desk](Console#race-control-desk)
+(`/console/race-control`: red flag, driver race data, program preview, redacted schedule,
+timer, chat). It is a different thing from the HUD **Race Control** banner (the Setup-tab
+`Race Control` field, see [Director](Director)): the role string is `race_control`, the
+banner is `racecontrol`, and they never collide. The desk sets that banner only through
+its `RED FLAG`.
 
 **Tab structure:** one header row
 (`Name | Commentator | Director | Producer | Race Control | Discord | Race Engineer`) at row 1; data rows

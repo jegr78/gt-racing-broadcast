@@ -110,10 +110,10 @@ Everything that belongs to a **league**, gathered in one view (the model behind 
   a profile that had no `overlay/` yet needs one `racecast relay restart` to activate; later
   edits apply live.
 - **Crew editor**: reads the league Sheet's `Crew` tab
-  (`Name | Commentator | Director | Producer | Race Control | Discord`) via the relay and
+  (`Name | Commentator | Director | Producer | Race Control | Discord | Race Engineer`) via the relay and
   lets the producer set the per-person role flags; changes are written back to the Sheet
-  via the `crew` webhook action. **Race Control** flags a person for the read-only
-  [Race Control](Console) monitoring desk. The Crew tab and the redeployed Apps Script
+  via the `crew` webhook action. **Race Control** flags a person for the
+  [Race Control desk](Console#race-control-desk). The Crew tab and the redeployed Apps Script
   `crew` action are a league Sheet-side coordination item (see [Sheet-Webhook](Sheet-Webhook));
   without them roles degrade gracefully.
 

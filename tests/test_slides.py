@@ -99,6 +99,9 @@ _DECK_ROLES = {
     "producer-setup.html": "producer",
     "league-admin-setup.html": "league-admin",
     "overlay-designer.html": "overlay-designer",
+    "driver.html": "driver",
+    "race-engineer.html": "race-engineer",
+    "driver-radio.html": "driver-radio",
 }
 
 

@@ -88,7 +88,12 @@ THUMBS = {
     "overlay-designer.html": ("overlay-designer", "Overlay Designer",
                               "Style the broadcast look"),
     "race-control.html": ("race-control", "Race Control",
-                          "Monitor the broadcast"),
+                          "Red flag and race data"),
+    "driver.html": ("driver", "Driver", "Send your telemetry"),
+    "race-engineer.html": ("race-engineer", "Race Engineer",
+                           "Live telemetry desk"),
+    "driver-radio.html": ("driver-radio", "Driver Radio",
+                          "AI Race Engineer and Coach"),
 }
 SLIDE_W, SLIDE_H = 1280, 720
 _TEMPLATE_RE = re.compile(

@@ -1,16 +1,16 @@
 flowchart LR
-  subgraph P[At the PC - Producer]
-    P1[Set up and start the PC]
-    P2[Start and stop the broadcast]
-    P3[Join Discord for interviews]
+  subgraph P["At the PC: Producer"]
+    P1["Set up and start the PC"]
+    P2["Start and stop the broadcast"]
+    P3["Join Discord for interviews"]
   end
-  subgraph D[Remote - Director]
-    D1[Choose scenes and graphics]
-    D2[Press Feeds Next at driver changes]
-    D3[Cut to interviews + broadcast audio]
+  subgraph D["Remote: Director"]
+    D1["Choose scenes and graphics"]
+    D2["ARM, SPLIT, NEXT at driver changes"]
+    D3["Cut to interviews + broadcast audio"]
   end
-  subgraph RC[Remote - Race Control read-only]
-    RC1[Watch program + schedule]
-    RC2[Monitor the race timer]
-    RC3[No broadcast actions]
+  subgraph RC["Remote: Race Control"]
+    RC1["Red flag and race data"]
+    RC2["Corrections, DNF, estimates"]
+    RC3["Crew chat and notes"]
   end

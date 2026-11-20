@@ -10,6 +10,7 @@
   --paper:#f4f1ea; --ink:#16181c; --soft:#5b6168; --line:#d8d2c6;
   --producer:#d62828; --director:#e08a00; --commentator:#1f7a8c;
   --race-control:#5b7186; --league-admin:#7a4fb5; --overlay-designer:#b5359c;
+  --driver:#2f7d32; --race-engineer:#8a5a2b; --driver-radio:#3949ab;
   --mono:'IBM Plex Mono',ui-monospace,monospace;
   --head:'Saira Condensed',system-ui,sans-serif;
   --accent:var(--director); /* overridden per role below */
@@ -20,6 +21,9 @@ body[data-role="commentator"]{--accent:var(--commentator)}
 body[data-role="race-control"]{--accent:var(--race-control)}
 body[data-role="league-admin"]{--accent:var(--league-admin)}
 body[data-role="overlay-designer"]{--accent:var(--overlay-designer)}
+body[data-role="driver"]{--accent:var(--driver)}
+body[data-role="race-engineer"]{--accent:var(--race-engineer)}
+body[data-role="driver-radio"]{--accent:var(--driver-radio)}
 
 .reveal{font-family:var(--mono);color:var(--ink);font-size:30px}
 .reveal .slides{text-align:left}

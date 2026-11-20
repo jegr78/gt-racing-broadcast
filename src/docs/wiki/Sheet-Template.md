@@ -300,14 +300,15 @@ The roster behind the `/console` crew roles. Header row in row 1, located **by t
 | `Commentator` | Can use the Commentator Cockpit (also implied by a Schedule entry) |
 | `Director` | Reaches the Director Panel via `/console` |
 | `Producer` | Can take over / produce |
-| `Race Control` *(or `RC`)* | Reaches the read-only race-control desk |
+| `Race Control` *(or `RC`)* | Reaches the Race Control desk (red flag, driver race data, crew chat) |
 | `Discord` | Discord username for the `/console` login match |
+| `Race Engineer` | Reaches the Race Engineer desk once the producer allows it (producers inherit it) |
 
 ```
-Name               | Commentator | Director | Producer | Race Control | Discord
-Sample Commentator | TRUE        | FALSE    | FALSE    | FALSE        | sample_caster
-Sample Director    | FALSE       | TRUE     | TRUE     | FALSE        | sample_director
-Sample Marshal     | FALSE       | FALSE    | FALSE    | TRUE         | sample_marshal
+Name               | Commentator | Director | Producer | Race Control | Discord         | Race Engineer
+Sample Commentator | TRUE        | FALSE    | FALSE    | FALSE        | sample_caster   | FALSE
+Sample Director    | FALSE       | TRUE     | TRUE     | FALSE        | sample_director | FALSE
+Sample Marshal     | FALSE       | FALSE    | FALSE    | TRUE         | sample_marshal  | FALSE
 ```
 
 Roles are additive (a person can hold several). Without a Crew tab, commentators still

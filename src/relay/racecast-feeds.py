@@ -2155,7 +2155,7 @@ def resolve_roles(crew_rows, schedule_keys, subject, crew_commentator_keys=froze
     An unknown subject (no crew row, not in the schedule) yields the empty set.
     Roles are additive (a person may be e.g. both director and race_control).
     A producer oversees the whole event, so "producer" IMPLIES "race_engineer", "director"
-    (broadcast control) and "race_control" (read-only monitoring): a producer can
+    (broadcast control) and "race_control" (the race desk): a producer can
     follow and, if needed, steer the event from the /console pages without a
     separate Crew flag. The producer-only step-up ops (set/stint, mode, takeover)
     stay independently step-up-gated in console_policy regardless.
@@ -2267,7 +2267,7 @@ CREW_NAME_HEADERS = ("name", "crew", "person")
 CREW_DIRECTOR_HEADERS = ("director",)
 CREW_PRODUCER_HEADERS = ("producer",)
 CREW_COMMENTATOR_HEADERS = ("commentator",)
-# Race Control (#244): a read-only monitoring desk role. Header-located only
+# Race Control (#244): the race desk role. Header-located only
 # (mirrors Commentator), no positional fallback. NB: the role string is
 # "race_control"; the unrelated director-only HUD banner is "racecontrol".
 CREW_RACE_CONTROL_HEADERS = ("race control", "race-control", "racecontrol", "rc")

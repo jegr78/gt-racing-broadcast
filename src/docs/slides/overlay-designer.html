@@ -16,10 +16,10 @@
 <section data-markdown><script type="text/template">
 <span class="role-tag">Overlay Package Designer · Onboarding</span>
 # Overlay Package Designer
-Restyle the on-screen HUD. Including the race timer and POV frame. Per league.
+Restyle the on-screen HUD, the break and split screens and the driver dashboard. Per league.
 Visually, no CSS required.
 
-Note: Welcome to the Overlay Package Designer onboarding. Your role is to restyle the on-screen HUD for each league, including the race timer and the POV frame. The best part is that you can do all of this visually, with no CSS required.
+Note: Welcome to the Overlay Package Designer onboarding. Your role is to restyle the on-screen graphics for each league: the H U D with the race timer and the POV frame, the intermission and splitscreen layouts, and the driver dashboard. The best part is that you can do all of this visually, with no CSS required.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -63,6 +63,90 @@ Note: With a running relay you get a live preview. Save writes the generated CSS
 </script></section>
 
 <section data-markdown><script type="text/template">
+## One builder, four scenes
+The **scene selector** in the builder header picks what you design:
+
+- **HUD / Program**: the lower third, race timer and POV frame.
+- **Intermission**: the break screen with chat and, in solo profiles, video frames.
+- **Splitscreen** (Endurance): the two feeds side by side.
+- **Driver dashboard**: the telemetry timing tower and track map.
+
+Each scene has its own CSS and `layout-<page>.json`. Unsaved drafts survive a scene switch; **Save** writes only the selected scene.
+
+[HUD Overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays)
+
+Note: The builder edits more than the H U D. The scene selector in its header picks the scene you design. H U D and Program is the lower third with the race timer and the POV frame. Intermission is the break screen with the broadcast chat, and in solo profiles the webcam and capture frames. Splitscreen, in endurance profiles, places the two feeds side by side. And Driver dashboard styles the telemetry timing tower and track map. Each scene keeps its own CSS and its own layout file. Switching scenes keeps your unsaved drafts in the browser session, and Save writes only the scene you have selected.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Keep proportions, undo, starter layouts
+- **Lock aspect ratio** links width and height. On by default for Webcam and Capture frames.
+- **Aspect ratio** presets: 16:9, 4:3, 1:1 or a custom ratio. **Keep current ratio** locks the shape as it is.
+- Hold **Shift** while dragging to switch the lock for that drag.
+- **Undo** / **Redo** (Ctrl/Cmd-Z) cover every layout change.
+- **Starter layout** (Intermission): Background + chat, Break + goals; solo adds Webcam + chat and Capture + webcam + chat.
+
+[HUD Overlays: Keep proportions](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays#keep-proportions-while-resizing)
+
+Note: A few tools keep the work quick. Lock aspect ratio links width and height, for the handles and the number fields. It starts on for webcam and capture frames. The aspect ratio presets repair a stretched frame with sixteen by nine, four by three, one by one, or a custom ratio, and Keep current ratio locks the shape as it is. Hold Shift while dragging to switch the lock for that one drag. Undo and Redo cover every layout change. On the Intermission scene, the Starter layout picker gives you a starting point: background with chat, or break with goals, and in solo profiles also webcam with chat, and capture with webcam and chat. A starter layout changes only positions and visibility, and Undo takes it back.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Splitscreen
+![Splitscreen builder](assets/img/cc-splitscreen-builder.png)
+
+Move and resize **Feed A video** and **Feed B video**; style or hide each CURRENT/NEXT label. **Apply in OBS** updates only the A/B bounds and keeps the scene, feeds and audio.
+
+[HUD Overlays: Splitscreen layouts](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays#splitscreen-layouts)
+
+Note: In an endurance profile, the Splitscreen scene places Feed A and Feed B. Move and resize each video box with the mouse or by numbers. O B S fits each video inside its box and keeps its aspect ratio. Each feed has its own CURRENT or NEXT label, which you can style, offset or hide. Equal side by side and Large A with secondary B give you a starting point. Apply in O B S updates only the two video bounds and the browser sources. It keeps the current scene, the feeds and the audio as they are. An older scene collection needs an updated import first, and Apply says so when a source is missing.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Intermission
+![Intermission builder](assets/img/cc-intermission-builder.png)
+
+Place, style or hide the broadcast chat over `Intermission.png`. Solo profiles add **Webcam** and **Capture** frames. **Apply in OBS** sets the saved positions and visibility; it never switches scenes or unmutes audio.
+
+[HUD Overlays: Intermission layouts](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays#intermission-layouts)
+
+Note: The Intermission scene places the public broadcast chat over the league's Intermission picture. Solo profiles also offer webcam and capture frames. The builder shows labelled placeholders and never opens the camera. Apply in O B S applies the saved positions and visibility and refreshes the browser source. It does not switch scenes and does not unmute any audio. During the show, the director can still show or hide parts of the break screen live, separately from your design.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Driver dashboard
+<img src="assets/img/driver-dashboard.png" alt="Driver dashboard overlay" style="max-height:300px">
+
+Place and style the lap header, the **timing tower**, the fastest lap row and the **track map** (`drivers.css`). The **Brand logos** switch on the timing tower hides the logo column; it is on by default.
+
+[HUD Overlays: Driver dashboard](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays#driver-dashboard-layout) · [Driver telemetry](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#on-air-and-in-the-cockpit)
+
+Note: When drivers send telemetry, the driver dashboard overlay shows a timing tower, the lap count, the fastest lap and a track map. Pick Driver dashboard in the scene selector to place and style its parts. It has its own CSS file. On the timing tower, the Brand logos switch hides the logo column, and the rows close up. It is on by default. The switch changes only the on-air overlay. The cockpit and the public timing page always show the logos. Whether the dashboard is on air is the director's choice, not part of the design.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Team names that fit
+![Team names fitted in left, center and right aligned slots](assets/img/hud-team-name-fit.png)
+
+Team names shrink between **Name max (px)** and **Name min (px)** (30 / 16) to fit the box, in any alignment. Other text boxes fit the same way when you set **Auto-fit max (px)** and **Auto-fit min (px)**.
+
+[HUD Overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays)
+
+Note: Long team names shrink to fit their box, between a maximum and a minimum font size, thirty and sixteen pixels by default. That works with left, center and right alignment. Text that cannot fit at the minimum stays clipped. Any other single-line text box can fit the same way. Set Auto-fit max and Auto-fit min on the box in the builder. Without an Auto-fit max, a box keeps its fixed font size.
+</script></section>
+
+<section data-markdown><script type="text/template">
+## Audience widgets
+![Audience widget editor](assets/img/cc-audience-widgets.png)
+
+**Overlay Builder → Audience widgets**: a manual counter or goal, or YouTube and Twitch metrics. Style it as a number, number with target or progress bar. **Place in this scene** reuses a widget; **Delete shared widget** removes it everywhere.
+
+[HUD Overlays: Audience counters and goals](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays#audience-counters-and-goals)
+
+Note: Audience widgets put counters and goals on screen. Open Audience widgets in the Overlay Builder. A manual counter needs no platform account, for example a community challenge of eighteen out of twenty-four hours. Automatic sources read YouTube likes, viewers and subscribers, or Twitch viewers and paid subscriptions, once the platform is connected. Choose a number, a number with target, or a labelled progress bar, then style it like any slot. Place in this scene reuses a widget in another scene with its own design. Delete shared widget removes it from every scene. A new placement needs Save and Apply in O B S before it shows on air.
+</script></section>
+
+<section data-markdown><script type="text/template">
 ## Fonts
 A curated set of broadcast-friendly Google Fonts **ships with every install**,
 available in the Overlay Builder's font pickers with no download step.
@@ -98,8 +182,8 @@ Note: One important caveat about the first override. The relay only loads the ov
 
 <section data-markdown><script type="text/template">
 ## Recap / go deeper
-1. Drag the slots, resize, set colors. **Save**.
-2. **Apply in OBS** to reload the browser source.
+1. Pick the scene. Drag the slots, resize, set colors. **Save**.
+2. **Apply in OBS** to reload the browser source (and the video bounds).
 3. **Preview ↗** to confirm it looks right against your `Overlay.png`.
 4. Ship it: Control Center **Profile → Export** keeps fonts + CSS self-contained.
 
@@ -108,7 +192,7 @@ Go deeper:
 [Control Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center) ·
 [League profiles](https://github.com/jegr78/gt-racing-broadcast/wiki/Profiles)
 
-Note: To recap the workflow. Drag the slots, resize them, set your colors, and Save. Use Apply in O B S to reload the browser source. Use Preview to confirm it looks right against your Overlay image. And when you are happy, ship it. Control Center, Profile, Export keeps the fonts and CSS self-contained.
+Note: To recap the workflow. Pick the scene, drag the slots, resize them, set your colors, and Save. Use Apply in O B S to reload the browser source, and for Splitscreen and Intermission the video positions too. Use Preview to confirm it looks right against your Overlay image. And when you are happy, ship it. Control Center, Profile, Export keeps the fonts and CSS self-contained.
 </script></section>
 
 </div></div>

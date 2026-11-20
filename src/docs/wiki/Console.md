@@ -1,6 +1,6 @@
 # The Console launcher
 
-> Run the read-only desk? See the visual [Race Control onboarding deck ↗](https://jegr78.github.io/gt-racing-broadcast/race-control.html). All crew decks: the [onboarding decks ↗](https://jegr78.github.io/gt-racing-broadcast/).
+> Run the Race Control desk? See the visual [Race Control onboarding deck ↗](https://jegr78.github.io/gt-racing-broadcast/race-control.html). All crew decks: the [onboarding decks ↗](https://jegr78.github.io/gt-racing-broadcast/).
 
 `/console` is the **single page** every crew member opens. There are no separate URLs per
 surface: one page adapts to the signed-in person's role and shows only the cards they are
@@ -35,6 +35,7 @@ security model.
 | **Race Control** | `/console/race-control` | crew flagged **Race Control**, and every **producer** |
 | **Director Panel** | `/console/panel` | directors: and every **producer** |
 | **Web Buttons** | `/console/buttons` | directors / producers (requires Companion ≥ v4.1.0) |
+| **Race Engineer** | `/console/race-engineer` | crew flagged **Race Engineer**, and every **producer**; it opens once the producer allows it ([below](#race-engineer-access)) |
 | **Health Monitor** | `/console/health-monitor` | any authenticated person |
 
 A **producer oversees the whole event**, so the **Producer** crew flag automatically
@@ -49,12 +50,15 @@ the Companion Web Buttons board at `:8000/tablet` respectively, but reached thro
 the role-gated `/console` mirror, with API calls transparently routed to the correct
 endpoints.
 
-### Race Control (read-only monitoring desk)
+### Race Control desk
 
-**Race Control** is a monitoring desk: a live **program preview**, the **streamer / stint
-schedule**, the **race timer**, and **crew chat**. It switches **no scenes or feeds**; the
-**director keeps full control of the Panel**. When the league allows graphic takes, the
-desk can put graphics and flag graphics on air (see [Graphics](#graphics) below). The **crew chat is two-way**, though, and is the desk's working channel: the
+**Race Control** is the race desk: it raises the full **RED FLAG**, maintains the driver
+race data (corrections, estimates, retirements, driver names, tyres) and shows a live
+**program preview**, the **streamer / stint schedule**, the **race timer** and **crew
+chat**. It switches **no scenes or feeds**; the director keeps every other program
+control, including the driver dashboard's on-air switch. When the league allows graphic
+takes, the desk can put graphics and flag graphics on air (see [Graphics](#graphics)
+below). The **crew chat is two-way** and is the desk's working channel: the
 operator is expected to **post race-control information** for the crew (e.g. a
 drive-through / DSQ for a team, a car's rejoin time, a team that can't field a driver for
 the next stint, a team retiring from the race) and to **direct the commentators** through
@@ -64,7 +68,7 @@ editor); the role string is `race_control`. The schedule it shows is **redacted*
 URLs never leave the tailnet, the same boundary as the producer-takeover status, so the
 desk is safe over the public Funnel.
 
-![Race Control desk: program preview, redacted streamer/stint schedule with an on-air marker, race timer and crew chat](images/console-race-control.png)
+![Race Control desk: note to commentator, track layout, driver telemetry with RED FLAG and the race order, program preview, redacted schedule, race timer and crew chat](images/console-race-control.png)
 
 The schedule marks the stint on air with **ON AIR** and the stint already loaded on the
 other feed with **NEXT**, each with its feed letter. The **Track layout** card shows the
@@ -92,7 +96,7 @@ the top while you scroll. A tab bar at the bottom shows one part of the page at 
 
 | Page | Tabs |
 |---|---|
-| Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (stint plan, stream-link submission) |
+| Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (timing, stint plan, stream-link submission) |
 | Race Control | **Act** (note to commentator, flag graphic, track layout, driver telemetry), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
 
 The page remembers the last tab. On a wider screen both pages keep their multi-column
@@ -131,10 +135,11 @@ With `GRAPHICS_TAKE=request`:
 
 The director keeps every control in the Panel and can take any graphic off air.
 
-> **Naming note:** the role shares its label with the director-only HUD **Race Control**
-> banner (the Setup-tab `Race Control` field shown on the lower third). They are
-> unrelated: the role is `race_control` (Crew tab), the banner is `racecontrol` (Setup
-> tab). This role never writes to that banner.
+> **Naming note:** the role shares its label with the HUD **Race Control** banner (the
+> Setup-tab `Race Control` field shown on the lower third, set by hand only by the
+> director). They are different things: the role is `race_control` (Crew tab), the
+> banner is `racecontrol` (Setup tab). The role sets that banner only through its `RED FLAG`, to *Red Flag - Race
+> Suspended*, and clears it again with **Restart released**.
 
 Every card opens **in the same tab**. Every destination carries a **`← Console`**
 back link in its header that returns to this launcher, so there is clean
@@ -148,24 +153,6 @@ A person can hold multiple roles (e.g. a commentator who is also a director); al
 their cards appear on one landing page. Roles are resolved live from the Crew tab and
 the active schedule on every request, so a role change takes effect immediately without
 re-issuing the link.
-
-## Further reading
-
-- [League-Owner Setup](League-Owner-Setup): how to configure Discord OAuth, register
-  redirect URIs, and maintain the Crew tab so crew members can log in with Discord.
-- [Remote access & the Funnel boundary](Remote-access): security model, the Funnel
-  mount, and how roles are authorised.
-- [Commentator Cockpit](Commentator-Cockpit), the commentator-facing cockpit in detail.
-- [Director guide](Director): the full Director Panel reference.
-- [Companion (button config)](Companion): the Web Buttons board and how to configure
-  Companion buttons.
-
----
-
-> This page is generated from `src/docs/wiki/` in the
-> [main repository](https://github.com/jegr78/gt-racing-broadcast): don't edit it
-> here by hand. See [Build & maintenance](Build-and-maintenance).
-
 
 ## Race Engineer access
 
@@ -211,3 +198,20 @@ values, version-aware history, asynchronous lap/reference detail and shared A/B 
 See the [Engineer guide](Race-Engineer) for selection, reconnect and compact-phone behavior, and the
 [analysis API contract](https://github.com/jegr78/gt-racing-broadcast/blob/main/src/docs/design/race-engineer-api.md)
 for identities, states and limits.
+
+## Further reading
+
+- [League-Owner Setup](League-Owner-Setup): how to configure Discord OAuth, register
+  redirect URIs, and maintain the Crew tab so crew members can log in with Discord.
+- [Remote access & the Funnel boundary](Remote-access): security model, the Funnel
+  mount, and how roles are authorised.
+- [Commentator Cockpit](Commentator-Cockpit), the commentator-facing cockpit in detail.
+- [Director guide](Director): the full Director Panel reference.
+- [Companion (button config)](Companion): the Web Buttons board and how to configure
+  Companion buttons.
+
+---
+
+> This page is generated from `src/docs/wiki/` in the
+> [main repository](https://github.com/jegr78/gt-racing-broadcast): don't edit it
+> here by hand. See [Build & maintenance](Build-and-maintenance).
