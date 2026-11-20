@@ -456,7 +456,7 @@ def t_the_final_lobby_count_waits_for_the_final_lobbys_car():
     assert race.standings(t)["state"] in ("finishing", "finished") and _row(race, "A", t)["finished"]
 
 
-def t_the_lap_display_follows_the_lobby_that_counts_and_stops_at_the_count():
+def t_the_lap_display_shows_race_laps_and_the_final_lobbys_count_in_race_laps():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     old, rival = Car(race, "A", "a1", L - 15, "Max"), Car(race, "B", "b1", L - 60, "Ann")
     t = _drive(race, [old, rival], [50, 50], 0.0, 3 * L / 50)
@@ -473,15 +473,34 @@ def t_the_lap_display_follows_the_lobby_that_counts_and_stops_at_the_count():
     t = _drive(race, [new, rival], [None, 40], t, 3)
     new.box = False
     t = _drive(race, [new, rival], [50, 40], t, 20)
-    assert race.standings(t)["lap"] == {"leader": 1, "count": 2}, race.standings(t)["lap"]
+    st = race.standings(t)
+    assert st["lap"] == {"leader": 5, "count": 6} and st["lobby_lap"] == new.lap() == 1, \
+        f"race lap 5 on the final lobby's lap 1 of 2 ends after race lap 6: {st['lap']} {st['lobby_lap']}"
     t = _drive(race, [new, rival], [50, 40], t, (2 * L) / 50 + 2)
-    assert race.standings(t)["lap"] == {"leader": 2, "count": 2}, \
-        f"the final lobby's lap, never past the count: {race.standings(t)['lap']}"
+    st = race.standings(t)
+    assert st["lap"] == {"leader": 6, "count": 6} and _row(race, "A", t)["laps"] == 6, \
+        f"the flag falls on the count, which the desk's laps reach: {st['lap']} {_row(race, 'A', t)['laps']}"
     single = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
     a = Car(single, "A", "a", L - 15)
-    t = _drive(single, [a], [50], 0.0, (3 * L + 15) / 50 + 1)
-    assert _row(single, "A", t)["finished"] and single.standings(t)["lap"] == {"leader": 3, "count": 3}, \
-        single.standings(t)["lap"]
+    t = _drive(single, [a], [50], 0.0, (1.5 * L) / 50)
+    st = single.standings(t)
+    assert st["lap"] == {"leader": 1, "count": 2} and st["lobby_lap"] == 2, \
+        f"GT7's lap 2 is race lap 1 of 2: the formation lap is no race lap: {st['lap']} {st['lobby_lap']}"
+    t = _drive(single, [a], [50], t, (1.5 * L + 15) / 50 + 1)
+    assert _row(single, "A", t)["finished"] and single.standings(t)["lap"] == {"leader": 2, "count": 2} \
+        and _row(single, "A", t)["laps"] == 2, (single.standings(t)["lap"], _row(single, "A", t)["laps"])
+
+
+def t_after_a_timed_flag_the_header_reads_the_winners_race_laps():
+    race = rd.Race(TRACE, formation=True, finish_mode="time")
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
+    t = _drive(race, [a, b], [50, 45], 0.0, 3.5 * L / 50)
+    race.final_lap(t)
+    t = _drive(race, [a, b], [50, 45], t, 0.6 * L / 50)
+    st = race.standings(t)
+    lead = st["entries"][0]
+    assert st["state"] == "finishing" and lead["finished"] and st["lap"] == {"leader": lead["laps"], "count": None}, \
+        f"the winner's race laps, never one more: {st['lap']} {lead['laps']}"
 
 
 def t_a_timed_endurance_keeps_race_laps_on_the_display_in_the_final_lobby():
@@ -961,17 +980,22 @@ def t_after_a_keep_restart_the_first_car_past_the_lobby_count_starts_the_finish(
     assert gaps[0] == 0.0 and 0 < gaps[1] < gaps[2] < 30, f"gaps in tower order: {gaps}"
 
 
-def t_after_a_keep_restart_the_lap_display_follows_the_lobby_leader_on_the_road():
+def t_after_a_keep_restart_the_lap_count_in_race_laps_falls_with_the_flag():
+    """After the keep restart the race distance's lap lines no longer sit on the lobby's
+    line; the count in race laps still meets the leader's laps at the flag."""
     race, (a, b, c), t = _keep_restart_final_lobby("laps")
-    seen = None
+    counts, over = set(), []
     while race.standings(t)["state"] == "racing":
         t = _drive(race, [a, b, c], [50, 50.8, 50], t, 1.0 / HZ)
-        if b.lap() > a.lap() and race.standings(t)["state"] == "racing":
-            seen = (b.lap(), race.standings(t)["lap"])
-    assert seen is not None and seen[1] == {"leader": seen[0], "count": 3}, \
-        f"the header shows the counter of B, which leads on the road: {seen}"
+        lap = race.standings(t)["lap"]
+        counts.add(lap["count"])
+        if lap["leader"] > lap["count"]:
+            over.append(lap)
+    assert len(counts) == 1 and not over, f"one count, never passed: {counts} {over[:2]}"
     t = _drive(race, [a, b, c], [50, 50.8, 50], t, 5)
-    assert race.standings(t)["lap"]["leader"] == 3, "never past the count once the flag is out"
+    st = race.standings(t)
+    assert st["lap"]["leader"] == st["lap"]["count"] == st["entries"][0]["laps"], \
+        f"the header ends on the leader's race laps: {st['lap']} {st['entries'][0]['laps']}"
 
 
 def t_after_a_keep_restart_a_timed_finish_ends_at_the_first_lead_lap_crossing():
@@ -2014,7 +2038,7 @@ def t_a_class_count_shows_only_where_the_overall_count_shows():
     new_a.box = new_b.box = False
     t = _drive(race, [new_a, new_b], [50, 40], t, 20)
     st = race.standings(t)
-    assert st["lap"]["count"] == 9 and st["class_counts"] == {"H": True, "G": True}, \
+    assert st["lap"]["count"] is not None and st["class_counts"] == {"H": True, "G": True}, \
         f"with the final lobby on the line every class shows its count: {st['lap']} {st['class_counts']}"
     single = rd.Race(TRACE, formation=False, finish_mode="laps")
     single.set_classes({"A": "H", "B": "G"})
@@ -2073,9 +2097,22 @@ def t_a_class_lap_stops_at_its_class_count_once_the_flag_is_out():
     plain, plain_cars = _class_flag_race({})
     t = _drive(plain, plain_cars, [60, 40, 35], 0.0, 3 * L / 60 + 1)
     other = plain.standings(t)
-    assert other["class_lap"]["G"] == 3, f"without a class count the class lap is not capped: {other['class_lap']}"
+    assert other["class_lap"]["G"] == 2 == _row(plain, "B", t)["laps"] and _row(plain, "B", t)["finished"], \
+        f"without a class count the finished class leader reads its own race laps: {other['class_lap']}"
     assert [r["finished"] for r in st["entries"]] == [r["finished"] for r in other["entries"]], \
         "a class count never finishes a car"
+
+
+def t_a_class_count_reads_race_laps_like_the_overall_one():
+    race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=4)
+    race.set_classes({"A": "H", "B": "G"})
+    race.set_class_laps({"G": 3})
+    cars = [Car(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 30))]
+    t = _drive(race, cars, [60, 40], 0.0, 4 * L / 60 + 1)
+    st = race.standings(t)
+    assert st["state"] == "finishing" and st["class_count"] == {"H": 3, "G": 2}, \
+        f"GT7's counts less the formation lap: {st['class_count']}"
+    assert st["class_lap"] == {"H": 3, "G": 2}, f"each class lap in race laps, capped: {st['class_lap']}"
 
 
 def t_a_finisher_with_fewer_laps_reads_lapped_overall_and_in_its_class():
@@ -2130,7 +2167,8 @@ def t_a_hidden_class_count_never_caps_the_class_lap():
     t = _drive(race, cars, [60, 40, 35], t, 2)
     st = race.standings(t)
     assert st["state"] == "finishing" and st["class_counts"]["G"] is False, (st["state"], st["class_counts"])
-    assert st["class_lap"]["G"] == 3, f"a class count that does not show caps nothing: {st['class_lap']}"
+    assert st["class_lap"]["G"] == 2 == _row(race, "B", t)["laps"], \
+        f"a class count that does not show caps nothing below the class leader's laps: {st['class_lap']}"
 
 
 def t_an_entry_without_a_class_forms_its_own_group():
@@ -2389,8 +2427,8 @@ def t_a_never_seen_estimated_leader_keeps_the_final_lobby_header():
     t = _drive(race, [a, b], [40, 40], 0.0, 12)
     race.estimate("X", "A", 1.0, t, ahead=True)
     snap = race.standings(t)
-    assert _order(race, t)[0] == "X" and snap["lap"] == {"leader": a.lap(), "count": 3}, \
-        f"the header follows the final lobby's counter: {snap['lap']}"
+    assert _order(race, t)[0] == "X" and snap["lap"] == {"leader": _row(race, "A", t)["laps"] + 1, "count": 3}, \
+        f"the header reads the race lap; a final lobby that started with the race counts race laps: {snap['lap']}"
 
 def t_an_estimated_leader_past_the_count_never_lifts_the_lap_header_past_it():
     race, (a, b, c, d), t = _quiet_a(seconds=2.0, finish_mode="laps", lap_count=2)

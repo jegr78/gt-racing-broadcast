@@ -718,14 +718,13 @@ class Service:
             rows.append(row)
         self._mark_dc(rows)
         fl = race.fastest
-        first = next((name for name in st["classes"] if name), None)
         out.update({
             "state": st["state"], "red_flag": st["red_flag"] is not None, "lap": st["lap"],
+            "lobby_lap": st["lobby_lap"],
             "fastest": self._shown_lap(race, fl, roster),
             "classes": [{"name": name, "color": colors.get(name, ""),
                          "lap": st["class_lap"][name],
-                         "laps": st["lap"]["count"] if name == first else
-                                 class_laps.get(name) if name and st["class_counts"][name] else None,
+                         "laps": st["class_count"][name],
                          "fastest": self._shown_lap(race, race.fastest_by_class.get(name), roster)}
                         for name in st["classes"]],
             "entries": rows})

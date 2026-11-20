@@ -930,6 +930,7 @@ async function pollTiming() {
   const parts = [];
   if (d.mode === 'qualifying') parts.push('Qualifying');
   else if (d.lap && d.lap.leader) parts.push('Lap ' + d.lap.leader + (d.lap.count ? ' / ' + d.lap.count : ''));
+  if (d.mode !== 'qualifying' && typeof d.lobby_lap === 'number') parts.push('Lobby lap ' + d.lobby_lap);
   if (typeof d.remaining === 'number') {
     const r = d.remaining;
     parts.push(Math.floor(r / 3600) + ':' + String(Math.floor(r % 3600 / 60)).padStart(2, '0') + ':' +

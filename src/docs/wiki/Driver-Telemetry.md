@@ -205,8 +205,20 @@ The final lobby's flag follows the road, as in GT7: the first of its cars to com
 the count takes it, or after **Final lap** the first car to cross the line on the
 lobby's leading lap, even when another car leads in race distance. Every other car
 finishes at its next crossing, a car a lap down on the road too, and the order after
-the flag stays laps first, then who completed them first. The header's lap shows the
-same leading lap on the road, never past the count.
+the flag stays laps first, then who completed them first.
+
+The header's lap (tower, desks, cockpit, public page) is the leader's running race lap:
+the race laps really driven plus one, the formation lap excluded, across every stint, so
+it is the desk's `Laps` of the leader plus one. A lap count shows in race laps too: in a
+single lobby the count less the formation lap, in the final lobby the race laps the
+leader will have completed when its lobby counter passes the count, which is where the
+flag falls. A count of 20 with a formation lap therefore reads `/ 19`; the desk's lap
+count, the class lap inputs and the Schedule `Laps` cells stay GT7 counts. The header never
+reads a lap past the count, and once the leader has taken the flag it reads the leader's
+race laps, also in a timed race. GT7's own lap of the lobby on
+air (**Lobby lap**, the lobby's counter on the road) shows only to the crew: next to the
+race lap on the Race Control and director desks and in the cockpit's Timing card. The
+tower, the public timing page and the league timing host never carry it.
 
 ### Classes
 
@@ -231,7 +243,8 @@ except on the tower.
   never in a timed race, and in an endurance event only once the final lobby's cars are
   on the line: it belongs to the final lobby's row. An optional Schedule column
   `Laps <Class>` fills it when that row goes on air, unless the desk already holds a
-  value or cleared it for that stint. Until a count shows, the header shows the class
+  value or cleared it for that stint. Like the overall count it is GT7's lobby count and
+  shows converted to race laps for the class leader. Until a count shows, the header shows the class
   leader's lap only. Once the overall leader has taken the flag, the class header on the
   tower, the desks, the public page and the cockpit never reads a lap past the class
   count, the same rule as the overall lap.
@@ -272,9 +285,9 @@ The relay keeps a viewer version of the race for the broadcast dashboard, the
 Commentator Cockpit and later the public live timing page: order, entry number and
 colour, driver, the `Cup Team` from the [Configuration tab](Sheet-Template), gaps, status,
 pit stops, race laps (in endurance also the laps of the current stint lobby), the last
-completed lap time, fuel, each car's position for the track map, the leader's lap
-against the lap count (in endurance the final lobby's lap, once the final lobby's car
-counts; never past the count after the flag), the remaining time of the race timer and the fastest race lap.
+completed lap time, fuel, each car's position for the track map, the leader's race lap
+against the lap count in race laps (in endurance once the final lobby's car counts; never
+past the count), the remaining time of the race timer and the fastest race lap.
 It never carries connection ids, corrections or who made them.
 
 - **Lap times** are timed by the relay between two crossings of the line and taken
