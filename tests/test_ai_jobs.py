@@ -479,8 +479,8 @@ def t_a_terminated_parent_still_ends_its_provider_tree():
         import ai_jobs
         ai_jobs.interrupt_on_termination()
         p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
-        print(p.pid, flush=True)
         try:
+            print(p.pid, flush=True)
             p.wait()
         except KeyboardInterrupt:
             ai_jobs.terminate_tree(p)
