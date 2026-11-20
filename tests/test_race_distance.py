@@ -1268,6 +1268,106 @@ def t_a_keep_restart_released_by_the_gaps_counts_each_gap_once():
     assert rc["finished"] and abs(rc["gap_time_s"] - (L / 50 + 3.0)) < 0.5, f"C's final gap: {rc}"
 
 
+def _pit_lane_restart(mode="keep", lead_speed=50, seconds=200, on_step=None):
+    """As `_staggered_keep_restart`, but every car leaves the restart box down a 150 m
+    pit lane at 15 m/s; A and B then run at `lead_speed`. `on_step(race, cars, step, t)`
+    runs after each tick from the last release on; returns its results."""
+    race = rd.Race(TRACE, formation=False)
+    cars = a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115), Car(race, "C", "c", L - 215)
+    t = _drive(race, list(cars), [50, 50, 20], 0.0, 140)
+    race.red_flag(t, mode)
+    for car in cars:
+        _new_lobby(car, L - 15)
+    t = _drive(race, list(cars), [None] * 3, t, 60)
+    out, seen = {}, []
+    for step in range(int(seconds * HZ)):
+        for car, at in zip(cars, (0, 20, 30), strict=True):
+            if car.entry not in out and step >= at:
+                car.box, out[car.entry] = False, car.along
+        speeds = [None if car.box else 15 if car.along - out[car.entry] < 150 else v
+                  for car, v in zip(cars, (lead_speed, lead_speed, 50), strict=True)]
+        t = _drive(race, list(cars), speeds, t, 1.0 / HZ)
+        if step >= 30 and on_step is not None:
+            seen.append(on_step(race, cars, step, t))
+    return race, [x for x in seen if x is not None]
+
+
+def _plain_gap(race, ahead, entry, now):
+    """`entry`'s time behind `ahead` from `ahead`'s pass of the same distance."""
+    a, e = race._entries[ahead], race._entries[entry]
+    reached = race._time_at(a, e.distance + e.adjust - a.adjust)
+    return race._racing(race._cars[e.active].t) - race._racing(reached)
+
+
+def t_a_lapped_car_released_at_its_gap_keeps_it_through_the_pit_lane():
+    def sample(race, cars, step, t):
+        if step % 5 == 0:
+            rb, rc = _row(race, "B", t), _row(race, "C", t)
+            return rb["gap_time_s"], rc["gap_time_s"], rc["interval_time_s"], rc["lapped"]
+        return None
+    _, seen = _pit_lane_restart(on_step=sample)
+    assert all(abs(g - 2.0) < 0.3 for g, _, _, _ in seen), f"B's gap: {sorted({s[0] for s in seen})}"
+    assert all(lap == 1 and abs(g - (L / 50 + 3.0)) < 0.5 for _, g, _, lap in seen), \
+        f"C reads A's lap plus its 3 s from the box exit on: {sorted({s[1] for s in seen})}"
+    assert all(abs(i - (L / 50 + 1.0)) < 0.5 for _, _, i, _ in seen), \
+        f"and B's lap plus 1 s behind B: {sorted({s[2] for s in seen})}"
+
+
+def t_a_correction_after_a_keep_restart_moves_the_gaps_once():
+    def sample(race, cars, step, t):
+        if step == 40:
+            race.correct("A", 100.0)                      # 2 s at 50 m/s
+        if step > 40 and step % 5 == 0:
+            return _row(race, "B", t)["gap_time_s"], _row(race, "C", t)["gap_time_s"]
+        return None
+    _, seen = _pit_lane_restart(on_step=sample)
+    assert all(abs(b - 4.0) < 0.3 for b, _ in seen), f"B's 2 s plus A's 100 m: {sorted({s[0] for s in seen})}"
+    assert all(abs(c - (L / 50 + 5.0)) < 0.5 for _, c in seen), \
+        f"C's lap and 3 s plus A's 100 m, counted once: {sorted({s[1] for s in seen})}"
+
+
+def t_a_neutralised_restart_keeps_the_lapped_gap_through_the_pit_lane():
+    def sample(race, cars, step, t):
+        if step % 5 == 0:
+            return _row(race, "C", t)["gap_time_s"]
+        return None
+    _, seen = _pit_lane_restart(mode="neutralise", on_step=sample)
+    assert max(seen) - min(seen) < 0.5, f"C's gap holds from its box exit on: {min(seen)} to {max(seen)}"
+
+
+def t_a_lapped_car_hands_back_to_the_plain_gap_a_lap_past_the_leaders_restart():
+    """A and B run 55 m/s after the restart: past the window the gap is the plain one."""
+    def sample(race, cars, step, t):
+        a, c = race._entries["A"], race._entries["C"]
+        past = c.distance + c.adjust - (a.resumed[2] + a.adjust) - L
+        if past > 0:
+            return past, _row(race, "C", t)["gap_time_s"], _plain_gap(race, "A", "C", t)
+        return None
+    _, seen = _pit_lane_restart(lead_speed=55, seconds=260, on_step=sample)
+    assert seen and all(abs(g - plain) < 0.05 for _, g, plain in seen), \
+        f"a lap past A's restart point C reads its plain gap: {seen[:3]}"
+
+
+def t_a_second_red_flag_resets_the_restart_reference():
+    """After the first restart a second red flag sends only C to a restart lobby; A
+    and B race on. C's restart point and A's then come from different red flags."""
+    def sample(race, cars, step, t):
+        a, b, c = cars
+        if step == 60:
+            race.red_flag(t, "keep")
+            _new_lobby(c, L - 15)
+        if step == 70:
+            race.release(t)
+        if step == 90:
+            c.box = False
+        if step >= 120 and step % 5 == 0 and race._entries["C"].resumed[0] == 2:
+            return _row(race, "C", t)["gap_time_s"], _plain_gap(race, "A", "C", t)
+        return None
+    _, seen = _pit_lane_restart(seconds=60, on_step=sample)
+    assert seen and all(abs(g - plain) < 0.05 for g, plain in seen), \
+        f"no reference across two red flags: {seen[:3]}"
+
+
 def t_a_finish_by_hand_after_a_keep_restart_leaves_out_the_stoppage():
     race = rd.Race(TRACE, formation=False)
     a, c = Car(race, "A", "a", L - 15), Car(race, "C", "c", L - 25)
@@ -1284,6 +1384,55 @@ def t_a_finish_by_hand_after_a_keep_restart_leaves_out_the_stoppage():
     rc = _row(race, "C", t)
     assert rc["finished"] and rc["laps"] == 0 and abs(rc["gap_time_s"] - (L / 50 + 3.0)) < 0.5, \
         f"C's final gap is A's lap plus the 3 s stagger, without the stoppage: {rc}"
+
+
+def t_a_reference_inside_the_restart_jump_never_lands_in_the_stoppage():
+    """B stood 300 m behind A at the red flag, so keep moves its anchor 300 m ahead; E
+    ran 50 m behind B and Race Control takes 100 m off E after the restart. E's
+    restart point then lies inside B's jump from its frozen distance to its anchor."""
+    race = rd.Race(TRACE, formation=False)
+    cars = a, b, e = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 315), Car(race, "E", "e", L - 365)
+    t = _drive(race, list(cars), [50] * 3, 0.0, 40)
+    race.red_flag(t, "keep")
+    for car in cars:
+        _new_lobby(car, L - 15)
+    t = _drive(race, list(cars), [None] * 3, t, 60)
+    seen = []
+    for step in range(int(40 * HZ)):
+        for car, at in zip(cars, (0, 60, 70), strict=True):
+            if step == at:
+                car.box = False
+        t = _drive(race, list(cars), [None if c.box else 50 for c in cars], t, 1.0 / HZ)
+        if step == 80:
+            race.correct("E", -100.0)                       # 2 s at 50 m/s
+        if step > 80 and step % 5 == 0:
+            re = _row(race, "E", t)
+            seen.append((re["gap_time_s"], re["interval_time_s"]))
+    assert all(abs(g - 9.0) < 0.3 for g, _ in seen), f"E's 7 s release plus 2 s: {sorted({s[0] for s in seen})}"
+    assert all(abs(i - 3.0) < 0.3 for _, i in seen), \
+        f"1 s after B plus 2 s, B's way to its anchor on the racing clock: {sorted({s[1] for s in seen})}"
+
+
+def t_a_lapped_finish_before_its_restart_point_compares_the_laps_it_drove_before():
+    """C finishes right after its keep restart, so its lap count lies behind its restart
+    point: both cars passed it before the red flag, A at changing pace."""
+    race = rd.Race(TRACE, formation=False)
+    a, c = Car(race, "A", "a", L - 15), Car(race, "C", "c", L - 25)
+    t = _drive(race, [a, c], [50, 22], 0.0, 1.75 * L / 50)
+    t = _drive(race, [a, c], [40, 22], t, 0.75 * L / 40)
+    race.red_flag(t, "keep")
+    for car in (a, c):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, c], [None, None], t, 60)
+    a.box = False
+    t = _drive(race, [a, c], [50, None], t, 3)
+    c.box = False
+    t = _drive(race, [a, c], [50, 50], t, 2)
+    race.finish(t)
+    rc, ea, ec = _row(race, "C", t), race._entries["A"], race._entries["C"]
+    plain = race._racing(race._time_at(ec, L)) - race._racing(race._time_at(ea, L))
+    assert rc["finished"] and rc["laps"] == 1 and abs(rc["gap_time_s"] - plain) < 0.05, \
+        f"C's final gap at its lap count: {rc['gap_time_s']} vs {plain}"
 
 
 def t_a_quiet_car_ahead_gives_no_exact_gap():

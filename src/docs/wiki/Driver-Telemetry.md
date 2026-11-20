@@ -443,7 +443,10 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   - **Keep** is a release staggered by the gaps: Race Control releases each car from
     the restart lobby's box its frozen gap after the leader. Every car starts from
     the leader's frozen distance (an estimated leader's too), a car laps down that many whole laps behind it, so
-    its lap count stays right. The gap after the restart is the release delay.
+    its lap count stays right. The gap after the restart is the release delay. A
+    lapped car's exact time is its release delay plus the leader's last lap before
+    the red flag, and its own way out of the box is compared with the leader's way out,
+    never with a flying lap.
   - **Neutralise**: order and laps stay, cars on the same lap start level.
 
   Gaps count racing time only: the stoppage from the red flag until the first car
