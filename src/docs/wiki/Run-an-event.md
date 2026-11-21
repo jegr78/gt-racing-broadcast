@@ -168,7 +168,8 @@ no producer machine access needed:
    ([new or continued event](Driver-Telemetry#new-event-or-continued-event)): it
    resumes the Part and the race stint the relay last had on air and keeps the driver
    codes and the timing link. `racecast event start --part N` or `--stint N` sets
-   one of them by hand; the other is still resumed.
+   one of them by hand; the other is still resumed. After an upgrade, the first
+   continued event resumes Part 1, since the older Part pointer has no mode.
 2. In the panel, click **Start Part N** → type the confirmation phrase
    (`START PART N`) → the relay sets that Part's stream key and goes live.
 3. **End Part N** (type `END PART N`) stops the broadcast. If a next Part exists the

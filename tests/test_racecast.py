@@ -3205,7 +3205,8 @@ def t_event_start_and_stop_drive_the_invite():
     class _Reached(Exception):
         pass
 
-    def _start(rest, running, new_session=True, seed=None, out=None, relay_args=None, after=None):
+    def _start(rest, running, new_session=True, seed=None, out=None, relay_args=None, after=None,
+               race=None):
         ev = m._event_modules()[0]
         calls = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
@@ -3220,7 +3221,8 @@ def t_event_start_and_stop_drive_the_invite():
             m._runtime_dir = lambda: tmp
             m._sync_live_telemetry_record = lambda: None
             m._wait_for_obs_ready = lambda timeout=0, early=False: False
-            m._start_driver_invite = calls.append
+            m._start_driver_invite = lambda fresh, race_data=True: (
+                calls.append(fresh), race is not None and race.append(race_data))
             m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")
             if seed:
                 seed(tmp)
@@ -3245,7 +3247,9 @@ def t_event_start_and_stop_drive_the_invite():
         raise AssertionError("expected to reach relay_start")
 
     assert _start([], running=False) == [True], "a new event gets a new invite link"
-    assert _start([], running=True) == [False], "Start event on a running event keeps the drivers' codes"
+    race = []
+    assert _start([], running=True, race=race) == [True] and race == [False], \
+        "a running relay without an unstopped event gets new codes and keeps its race in memory"
     assert _start(["--stint", "3"], running=False) == [False], "a recovery restart keeps the link"
     assert _start([], running=False, new_session=False) == [False], "a takeover keeps or creates one"
 
@@ -3324,7 +3328,8 @@ def t_event_start_and_stop_drive_the_invite():
         assert "continuing today's event" in out.getvalue(), out.getvalue()
         assert "resuming" not in out.getvalue(), "a running relay keeps its own position"
         out = io.StringIO()
-        assert _start([], running=True, out=out) == [False], "a running relay keeps the codes"
+        assert _start([], running=True, seed=_invite(40 * 3600), out=out) == [True], \
+            "a running relay never keeps an expired invite"
     finally:
         m._write_session_start = saved
     assert session == [True], "a running relay without an unstopped event opens a new report window"
@@ -7101,6 +7106,12 @@ def t_driver_invite_follows_the_event_and_regenerates():
     assert m.event_invite_data(path=path, links=links)["funnel"] == first["funnel"], \
         "a takeover or recovery restart keeps the invite the drivers hold"
     assert os.path.exists(actions), "a takeover keeps the race's corrections"
+    before = m.event_invite_data(path=path, links=links)["funnel"]
+    m._start_driver_invite(True, path=path, race_data=False)
+    assert os.path.exists(actions) and os.path.exists(pointer), \
+        "a running relay keeps its race data, which it would write back anyway"
+    assert m.event_invite_data(path=path, links=links)["funnel"] != before, \
+        "a new event on a running relay still gets a new invite"
     m._start_driver_invite(True, path=path)
     assert not os.path.exists(actions), "a new event drops the last event's corrections"
     assert not os.path.exists(pointer), "a new event rotates the recording"

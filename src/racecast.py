@@ -6132,17 +6132,18 @@ def event_invite_data(new=False, path=None, links=None):
                 **(links or _invite_links)(invite["id"]))
 
 
-def _start_driver_invite(fresh, path=None):
+def _start_driver_invite(fresh, path=None, race_data=True):
     """A fresh event gets a new invite, a new public timing link and a driver race
     without the last event's corrections; a takeover, recovery restart or continued
-    event keeps them."""
+    event keeps them. `race_data` False leaves the corrections and the recording to a
+    running relay, which holds them in memory and writes them back."""
     import driver_invite
     import driver_race
     import race_recording
     import timing_link
     path = path or _driver_invite_path()
     runtime = os.path.dirname(os.path.abspath(path))
-    if fresh:
+    if fresh and race_data:
         driver_race.clear_actions(runtime)
         race_recording.rotate(runtime)
     if fresh or driver_invite.current(path) is None:
@@ -6864,15 +6865,16 @@ def event_start(rest, _autojoin=True, _new_session=True):
     try:
         # Start event again on a running event (OBS or Companion back up) keeps the
         # drivers' codes; only a new event gets a new link.
-        _start_driver_invite(fresh and not relay_was_running)
+        _start_driver_invite(fresh, race_data=not relay_was_running)
         if continuing:
             print("event: continuing today's event: driver codes and timing link kept "
                   "(Stop event first to start a new one).")
         elif fresh and not relay_was_running:
             print("event: new event: new driver codes and timing link.")
         elif fresh:
-            print("event: relay already running: driver codes and timing link kept, "
-                  "a new report window starts here.")
+            print("event: relay already running: new event: new driver codes and timing link, "
+                  "a new report window starts here. The running relay keeps the last "
+                  "race's corrections and recording until Stop event.")
         elif _new_session:
             print("event: mid-event start: driver codes and timing link kept.")
     except OSError as exc:
