@@ -304,6 +304,10 @@ class Race:
     def _out(self, ent):
         return ent.entry in self._retired
 
+    def _restarting(self, ent):
+        """A new session now is the restart lobby; a car retired under the red flag may be undone."""
+        return ent.waiting or (self._out(ent) and self._red is not None)
+
     def _ghost(self, entry):
         """A row for a roster entry the race has not seen, with its preset corrections."""
         ent = _Entry(entry, None)
@@ -670,7 +674,7 @@ class Race:
         if car is None:
             car = self._cars[conn] = _Car(conn, name)
             car.entry = entry
-            car.restart_ready = ent.waiting                # it joined the restart lobby
+            car.restart_ready = self._restarting(ent)      # it joined the restart lobby
         if entry in self._est and conn == ent.active and (car.t is None or t - car.t > NO_DATA_S):
             del self._est[entry]                           # the car is back: its own distance
             self._ended_est.append(entry)
@@ -684,7 +688,7 @@ class Race:
         _i, lateral, s = self._line.locate(x, z)
         active = conn == ent.active
         prev_lap = car.lap
-        if prev_lap is not None and lap < prev_lap and ent.waiting:
+        if prev_lap is not None and lap < prev_lap and self._restarting(ent):
             car.restart_ready = True              # the restart lobby after a red flag
         elif active and prev_lap is not None and lap < prev_lap and ent.finished_at is None \
                 and not self._out(ent):

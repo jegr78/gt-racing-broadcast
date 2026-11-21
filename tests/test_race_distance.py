@@ -2328,6 +2328,41 @@ def t_undoing_a_retirement_under_a_red_flag_waits_for_the_restart_like_every_car
         assert _row(race, "B", t)["distance_m"] > db, f"B resumes from its anchor: {_row(race, 'B', t)}"
 
 
+def _undo_in_the_restart_lobby(new_console):
+    """B retires, the red flag falls, B's console reaches the restart lobby while
+    retired (the same console, or `new_console` connecting there), then Undo DNF."""
+    race = rd.Race(TRACE, formation=False)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 35)
+    t = _drive(race, [a, b, c], [50, 50, 50], 0.0, 90)
+    race.retire("B", True, t)
+    t = _drive(race, [a, b, c], [50, 50, 50], t, 2)
+    db = _row(race, "B", t)["distance_m"]
+    race.red_flag(t, "keep")
+    if new_console:
+        b = Car(race, "B", "b2", 0.0)
+    for car in (a, b, c):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b, c], [None] * 3, t, 3)
+    race.retire("B", False, t)
+    a.box = b.box = c.box = False
+    t = _drive(race, [a, b, c], [40] * 3, t, 5)
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert rb["status"] == "racing" and abs(rb["distance_m"] - ra["distance_m"]) < 15, \
+        f"B restarts from the keep anchor beside A, not from {db}: {ra['distance_m']} {rb}"
+    race.release(t)
+    t = _drive(race, [a, b, c], [40] * 3, t, 5)
+    gap = _row(race, "A", t)["distance_m"] - _row(race, "B", t)["distance_m"]
+    assert abs(gap) < 15, f"B keeps racing beside A after the release: {gap}"
+
+
+def t_an_undone_retirement_restarts_from_a_restart_lobby_it_joined_while_retired():
+    _undo_in_the_restart_lobby(new_console=False)
+
+
+def t_an_undone_retirement_restarts_with_a_console_that_joined_the_restart_lobby_while_retired():
+    _undo_in_the_restart_lobby(new_console=True)
+
+
 def t_a_retired_car_keeps_its_distance_when_its_console_leaves_the_session():
     race, (a, b, c, d), t = _retire_field()
     race.retire("B", True, t)
