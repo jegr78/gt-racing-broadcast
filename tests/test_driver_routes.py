@@ -1192,8 +1192,12 @@ def t_the_stint_watch_records_the_race_stint_on_air():
 def t_a_failed_on_air_write_is_retried_on_the_next_tick():
     import tempfile
 
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3)]
+
     class Relay:
-        solo, mode = False, "race"
+        solo, mode, race_source = False, "race", Source()
 
         def on_air_row_idx(self):
             return 1
@@ -1207,6 +1211,35 @@ def t_a_failed_on_air_write_is_retried_on_the_next_tick():
         g.m._on_air_tick(Relay(), path, state, lambda: 101.0)
         with open(path, encoding="utf-8") as fh:
             assert json.load(fh) == {"stint": 2, "alive": 101.0}, "the next tick retries a failed write"
+
+
+def t_the_on_air_record_waits_for_the_schedule():
+    import tempfile
+
+    class Source:
+        rows = []
+
+        def get_rows(self):
+            return self.rows
+
+    class Relay:
+        solo, mode, race_source = False, "race", Source()
+
+        def on_air_row_idx(self):
+            return 0
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        state = {"stint": 5, "at": None}
+        relay = Relay()
+        g.m._on_air_tick(relay, path, state, lambda: 100.0)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 5, "alive": 100.0}, \
+                "an empty schedule cache keeps the recorded stint, never stint 1"
+        relay.race_source.rows = [("u", "A", "S1", 2)]
+        g.m._on_air_tick(relay, path, state, lambda: 101.0)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 1, "alive": 101.0}, "a loaded schedule records its row"
 
 
 def t_only_an_event_relay_records_the_stint_and_its_stamp():

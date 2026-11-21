@@ -15695,7 +15695,8 @@ def _on_air_tick(relay, path, state, clock):
     """Refresh the on-air record when the race stint changes or the stamp is due."""
     now = clock()
     stint = state["stint"]
-    if not relay.solo and relay.mode == "race":
+    if (not relay.solo and relay.mode == "race" and relay.race_source
+            and relay.race_source.get_rows()):   # an empty cache would read as stint 1
         stint = relay.on_air_row_idx() + 1
     if stint != state["stint"] or state["at"] is None or now - state["at"] >= ON_AIR_ALIVE_S:
         if write_on_air_record(path, stint, now):
