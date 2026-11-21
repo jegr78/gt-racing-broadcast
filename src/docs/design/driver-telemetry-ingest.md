@@ -154,8 +154,9 @@ color}]` instead of the race fields; with classes a row adds `class, class_pos,
 class_gap_ms, class_interval_ms, class_color`. `GET /drivers/line` returns the picked
 layout's line `{track, length_m, points [[x, z]]}`. `lap.leader` is the leader's running
 race lap (the formation lap is none) and `count` the lap count in race laps; `leader`
-never passes `count`. In endurance `count` is the final lobby's count, so it stays null
-until the leading car runs in the final lobby. `lobby_lap` is GT7's own counter of the
+never passes `count`. A timed race (`finish_mode` `time`) has no `count`, it stays null.
+In endurance `count` is the final lobby's count, so it stays null until the leading car
+runs in the final lobby. `lobby_lap` is GT7's own counter of the
 lobby on air, null until a car there counts. The public live timing page (#1128) gets
 this payload cut by `driver_race.public_view`: `v, mode, stint, remaining,
 remaining_running, delay_s, track_name, state, red_flag, lap, fastest, classes` and the
@@ -167,8 +168,8 @@ clears the fastest lap, with `{entry, driver, ms}` sets it. `POST /drivers/race/
 GT7's time back; `GET /drivers/race` lists them as `quali_overrides`. `POST
 /drivers/race/compound {entry, code}` sets a roster entry's tyre compound (`RS`, `RM`,
 `RH`, `I`, `W`, or null to clear), listed as `compounds {entry: {code, who, ts}}`; the
-dashboard rows carry `compound`, and `show {compound, fuel}` follows the settings
-`show_compound` and `show_fuel`.
+dashboard rows carry `compound`, and `show {compound, fuel, last_lap_s}` follows the
+settings `show_compound` and `show_fuel` and the profile's `last_lap_s`.
 `state` is `no_line`, `waiting`, `racing`, `final_lap`, `finishing` or `finished`;
 each entry carries `distance_m`, `laps`, `gap_s`, `interval_s`, `lapped`, `status`
 (`waiting`, `racing`, `box`, `red_flag`, `no_data`, `no_sender`, `est`, `retired`),
