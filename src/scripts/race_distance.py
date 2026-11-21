@@ -118,6 +118,8 @@ MAX_CHANGE_LAP = 2          # a car leaving a fresh lobby's box has driven at mo
 LINE_QUORUM = 3
 GAP_SPEED_MPS = 10.0        # below this a gap from distance and speed means nothing
 PIT_ROW_M = 400.0           # a car this far past the station where the car ahead stopped drove past its box
+PACE_S = 30.0               # a car's racing pace is its average over this long
+PIT_PACE = 0.6              # below this share of its racing pace a car runs the pit lane
 SYNC_S = 1.0                # cars' samples this far apart compare at the older one's time
 
 
@@ -1170,10 +1172,20 @@ class Race:
             held = None if a is None or b is None else \
                 math.floor((a + ahead.adjust - b - ent.adjust) / self.length)
             # Past its box without standing, the stand of the car ahead was its gain.
+            near = held is not None and a + ahead.adjust - shown > held * self.length - PIT_ROW_M
             if held is not None and held > laps and (ent.changed or ent.change_anchor is not None
-                                                     or a + ahead.adjust - shown > held * self.length - PIT_ROW_M):
+                                                     or near or self._pit_pace(ent, stop)):
                 laps = held
         return laps
+
+    def _pit_pace(self, ent, at):
+        """Whether `ent` now runs well below its racing pace before `at`: in the pit lane."""
+        car = self._cars.get(ent.active)
+        d0, d1 = self._distance_at(ent, at - PACE_S), self._distance_at(ent, at)
+        if car is None or d0 is None or d1 is None:
+            return False
+        pace = (d1 - d0) / PACE_S
+        return pace > GAP_SPEED_MPS and car.speed < PIT_PACE * pace
 
     def _change_stop(self, ahead, ent):
         """When `ahead` began standing for its change, while the window is open and not
