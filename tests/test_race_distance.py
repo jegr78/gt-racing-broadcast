@@ -295,6 +295,20 @@ def t_a_late_crossing_short_of_the_cars_line_keeps_its_lap():
         f"B crossed the same line as A: {ra['laps']} {rb['laps']} ({rb['distance_m']})"
 
 
+def t_a_flag_outside_the_final_lobby_short_of_the_cars_line_keeps_its_lap():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 300)
+    t = _drive(race, [a, b], [50, 50], 0.0, 30)
+    race.final_lap(t)
+    car_a = race._cars["a"]
+    car_a.line = (car_a.line + 12.0) % race.length       # A's line station 12 m past the real line
+    while not _row(race, "A", t)["finished"]:
+        t = _drive(race, [a, b], [50, 50], t, 0.1)
+    ra = _row(race, "A", t)
+    assert ra["laps"] == 1 and race.standings(t)["state"] in ("finishing", "finished"), \
+        f"A took the flag at the end of its first lap: {ra['laps']} ({ra['distance_m']})"
+
+
 def t_gt7_position_disagreeing_with_the_distance_is_flagged():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)

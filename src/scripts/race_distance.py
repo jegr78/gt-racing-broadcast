@@ -904,6 +904,7 @@ class Race:
             and shown >= (self.lap_count - (1 if self.formation else 0)) * self.length - SNAP_M
         by_flag = self._final_lap_at is not None and t > self._final_lap_at
         if by_laps or by_flag:
+            self._to_line(ent)
             self._flag(ent, t, at)
 
     @staticmethod
