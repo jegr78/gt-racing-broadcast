@@ -479,6 +479,18 @@ def t_qualifying_rows_carry_the_interval_and_the_last_lap():
     assert "class" not in rows[0], "one class: no class fields"
 
 
+def t_a_faster_lap_of_another_driver_of_the_entry_names_the_row():
+    seen = {}
+    alice = {"entry": "A", "segment": "Q1", "name": "Alice", "latest": {"best_ms": 96000, "last_ms": 96000}}
+    bob = {"entry": "A", "segment": "Q1", "name": "Bob", "latest": {"best_ms": 95000, "last_ms": 95000}}
+    dr.qualifying([alice], "Q1", ROSTER, seen=seen, now=1.0)
+    row = dr.qualifying([alice, bob], "Q1", ROSTER, seen=seen, now=2.0)[0]
+    assert (row["driver"], row["best_ms"]) == ("Bob", 95000), f"the best lap carries its own driver: {row}"
+    row = dr.qualifying([alice, dict(bob, latest={"best_ms": 95000, "last_ms": 97000})], "Q1", ROSTER,
+                        seen=seen, now=3.0)[0]
+    assert row["driver"] == "Bob", f"a slower lap keeps the best lap's driver: {row}"
+
+
 QUALI_CLASSES = {"A": {"number": "1", "carClass": "GT3", "classColor": "#f00"},
                  "B": {"number": "2", "carClass": "GT4", "classColor": "#0f0"},
                  "C": {"number": "3", "carClass": "GT3", "classColor": "#f00"},

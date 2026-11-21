@@ -366,7 +366,7 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
         if cur is None:
             cur = (ms, c.get("name") or "", last, 0.0)   # sent before the relay saw it
         elif ms is not None and (cur[0] is None or ms < cur[0]):
-            cur = (ms, cur[1], cur[2], cur[3])
+            cur = (ms, c.get("name") or "", cur[2], cur[3])
         if last is not None and last != cur[2]:
             cur = (cur[0], cur[1], last, now)
         best[c["entry"]] = cur
