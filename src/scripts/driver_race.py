@@ -515,7 +515,12 @@ def _saved_quali(path, segment):
 
 def _saved_quali_laps(path, segment):
     """{entry: {best, last, ts}} of the laps Race Control added in one qualifying segment."""
-    raw = _read_json(path).get("quali_laps")
+    return _quali_laps_of(_read_json(path), segment)
+
+
+def _quali_laps_of(doc, segment):
+    """_saved_quali_laps of an actions file already read."""
+    raw = doc.get("quali_laps")
     raw = raw.get(_segment_key(segment)) if isinstance(raw, dict) else None
     out = {}
 
@@ -1250,7 +1255,7 @@ class Service:
         def update(doc):
             raw = doc.get("quali_laps") if isinstance(doc.get("quali_laps"), dict) else {}
             done = raw.get(segment) if isinstance(raw.get(segment), dict) else {}
-            cur = _saved_quali_laps(_actions_path_for(self._path), segment).get(entry)
+            cur = _quali_laps_of(doc, segment).get(entry)
             if cur is None and len(done) >= MAX_QUALI:
                 raise ValueError(f"at most {MAX_QUALI} entries with added laps per segment")
             done[entry] = {"best": ms if cur is None else min(cur["best"], ms), "last": ms, "ts": now}
