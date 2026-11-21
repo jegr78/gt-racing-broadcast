@@ -3248,10 +3248,13 @@ def t_event_start_and_stop_drive_the_invite():
     assert _start(["--stint", "3"], running=False) == [False], "a recovery restart keeps the link"
     assert _start([], running=False, new_session=False) == [False], "a takeover keeps or creates one"
 
-    def _invite(age_s, health_age_s=None):
+    def _invite(age_s, health_age_s=None, alive_age_s=None):
         def seed(tmp):
             import driver_invite
             driver_invite.create(driver_invite.path_in(tmp), now=time.time() - age_s)
+            if alive_age_s is not None:
+                with open(os.path.join(tmp, "on-air.json"), "w", encoding="utf-8") as fh:
+                    json.dump({"alive": time.time() - alive_age_s}, fh)
             if health_age_s is not None:
                 import sqlite3
                 conn = sqlite3.connect(os.path.join(tmp, "health-history.db"))
@@ -3269,10 +3272,14 @@ def t_event_start_and_stop_drive_the_invite():
     assert _start([], running=False, seed=_invite(13 * 3600), out=out) == [True], \
         "an unstopped invite older than the limit is a new event"
     assert "new event: new driver codes and timing link" in out.getvalue(), out.getvalue()
-    assert _start([], running=False, seed=_invite(20 * 3600, health_age_s=60)) == [False], \
-        "a relay that sampled health a minute ago keeps a long race going"
-    assert _start([], running=False, seed=_invite(20 * 3600, health_age_s=13 * 3600)) == [True], \
-        "old health samples do not revive an old invite, however fresh the file's mtime"
+    assert _start([], running=False, seed=_invite(20 * 3600, alive_age_s=60)) == [False], \
+        "an event relay alive a minute ago keeps a long race going"
+    assert _start([], running=False, seed=_invite(20 * 3600, health_age_s=60)) == [True], \
+        "health samples of any relay never extend an event"
+    assert _start([], running=False, seed=_invite(3 * 86400, health_age_s=60)) == [True], \
+        "an invite days old plus a fresh sample from a standalone relay run is a new event"
+    assert _start([], running=False, seed=_invite(40 * 3600, alive_age_s=60)) == [True], \
+        "an event older than EVENT_MAX_AGE_S is new however recently its relay ran"
     def _stopped(tmp):
         _invite(60)(tmp)
         m._stop_driver_invite(os.path.join(tmp, "driver-invite.json"))
@@ -3312,22 +3319,22 @@ def t_event_start_and_stop_drive_the_invite():
 
     args, state, out = [], [], io.StringIO()
     _start([], running=False, seed=_broadcast(60), out=out, relay_args=args, after=_files)
-    assert args == [["--stint", "5"]], f"a continuation resumes the stint on air: {args}"
+    assert args == [["--stint", "5", "--event-run"]], f"a continuation resumes the stint on air: {args}"
     assert state[0][0] == {"index": 2, "live": False}, f"a continuation keeps the Part: {state}"
     assert "resuming stint 5, Part 2" in out.getvalue(), out.getvalue()
     args, state = [], []
     _start(["--stint", "3", "--part", "1"], running=False, seed=_broadcast(60),
            relay_args=args, after=_files)
-    assert args == [["--stint", "3"]] and state[0][0] == {"index": 1, "live": False}, \
+    assert args == [["--stint", "3", "--event-run"]] and state[0][0] == {"index": 1, "live": False}, \
         f"explicit --stint/--part win: {args} {state}"
     args, state = [], []
     _start([], running=False, seed=_broadcast(13 * 3600), relay_args=args, after=_files)
-    assert args == [[]], f"a new event starts at stint 1: {args}"
+    assert args == [["--event-run"]], f"a new event starts at stint 1: {args}"
     assert state[0] == ({"index": 1, "live": False}, None), \
         f"a new event resets the Part and drops the last stint record: {state}"
     args = []
     _start(["--qualifying"], running=False, seed=_broadcast(60), relay_args=args)
-    assert args == [["--qualifying"]], f"the race stint is not forced onto qualifying: {args}"
+    assert args == [["--qualifying", "--event-run"]], f"the race stint is not forced onto qualifying: {args}"
 
 
 def t_event_continues_bounds():
@@ -3338,7 +3345,13 @@ def t_event_continues_bounds():
     assert m._event_continues(None, now, now) is False, "an invite without a creation time is a new event"
     assert m._event_continues("x", None, now) is False
     assert m._event_continues(now + 3600, None, now) is False, "a creation time in the future is a new event"
-    assert m._event_continues(now - 2 * limit, now - 60, now) is True, "a recent health sample extends it"
+    assert m._event_continues(now - 2 * limit, now - 60, now) is True, "a recent relay stamp extends it"
+    total = m.EVENT_MAX_AGE_S
+    assert m._event_continues(now - total + 1, now - 60, now) is True
+    assert m._event_continues(now - total, now - 60, now) is False, "no stamp extends an event past its total age"
+
+
+def t_event_stop_ends_the_invite_without_a_relay():
     stopped = []
     saved = (m._stop_driver_invite, m._relay_is_alive)
     try:

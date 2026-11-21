@@ -1589,17 +1589,19 @@ def _is_continuation_start(rest):
     return False
 
 
-# A plain `event start` continues an unstopped event whose invite or last health
-# sample is younger than this.
+# A plain `event start` continues an unstopped event when its invite or the event
+# relay's last-alive stamp is younger than the first, and the invite younger than the second.
 EVENT_CONTINUE_MAX_AGE_S = 12 * 3600
+EVENT_MAX_AGE_S = 36 * 3600
 
 
 def _event_continues(created, last_alive, now):
-    """Whether an unstopped event's invite (`created`) or the relay's last health sample
-    (`last_alive`) lies less than EVENT_CONTINUE_MAX_AGE_S before `now`. Pure."""
+    """Whether an unstopped event's invite (`created`) or its relay's last-alive stamp
+    lies less than EVENT_CONTINUE_MAX_AGE_S before `now`, with the invite less than
+    EVENT_MAX_AGE_S old. Pure."""
     def _stamp(t):
         return isinstance(t, (int, float)) and not isinstance(t, bool) and t <= now
-    if not _stamp(created):
+    if not _stamp(created) or now - created >= EVENT_MAX_AGE_S:
         return False
     newest = max([created] + ([last_alive] if _stamp(last_alive) else []))
     return now - newest < EVENT_CONTINUE_MAX_AGE_S
@@ -1611,32 +1613,22 @@ def _unstopped_event_continues():
     invite = driver_invite.current(_driver_invite_path())
     if invite is None:
         return False
-    return _event_continues(invite.get("created"), _last_health_sample_ts(), time.time())
-
-
-def _last_health_sample_ts():
-    """The newest relay health sample's ts, read only, or None. The file's mtime is no
-    signal: any opener may checkpoint the WAL."""
-    import sqlite3
-    from urllib.parse import quote
-    path = _health_db_path()
-    if not os.path.isfile(path):
-        return None
-    posix = os.path.abspath(path).replace("\\", "/")
-    uri = "file://" + quote(posix if posix.startswith("/") else "/" + posix, safe="/:")
-    try:
-        conn = sqlite3.connect(uri + "?mode=ro", uri=True, timeout=2.0)
-        try:
-            return conn.execute("SELECT MAX(ts) FROM samples").fetchone()[0]
-        finally:
-            conn.close()
-    except sqlite3.Error:
-        return None
+    alive = _read_on_air(_on_air_record_path()).get("alive")
+    return _event_continues(invite.get("created"), alive, time.time())
 
 
 def _on_air_record_path():
-    """The race stint on air, written by the running relay's stint watch."""
+    """The race stint on air and the last-alive stamp an event relay writes."""
     return os.path.join(_runtime_dir(), "on-air.json")
+
+
+def _read_on_air(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
 
 
 def _read_positive(path, key):
@@ -6878,7 +6870,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         if was_running:   # same relay, same profile: it won't re-read the file itself
             _sync_live_telemetry_record()
     stint_args = _stint_args(rest) or (["--stint", str(resume_stint)] if resume_stint else [])
-    relay_start(stint_args + _qualifying_args(rest) + _title_args(rest))
+    relay_start(stint_args + _qualifying_args(rest) + _title_args(rest) + ["--event-run"])
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())
         if _mm:

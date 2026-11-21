@@ -15659,34 +15659,68 @@ def dashboard_ticks(relay, race_svc, stop_evt, every):
             relay._warn_tick_error("driver dashboard", e)
 
 
-def write_on_air_record(path, stint):
-    """Record the race stint on air, which a plain `event start` resumes after a relay
-    death. Best effort."""
+ON_AIR_ALIVE_S = 60.0   # how often an event relay refreshes its last-alive stamp
+
+
+def on_air_record_path(runtime, event_run):
+    """Where a relay started by `event start` records the race stint on air and its
+    last-alive stamp, which a plain `event start` resumes from; None for any other relay."""
+    return os.path.join(runtime, "on-air.json") if event_run else None
+
+
+def _read_on_air_stint(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            stint = json.load(fh).get("stint")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return stint if isinstance(stint, int) and not isinstance(stint, bool) else None
+
+
+def write_on_air_record(path, stint, alive):
+    """Write {"stint", "alive"} (no stint while none is known). True on success."""
+    doc = {"alive": float(alive)} if stint is None else {"stint": int(stint), "alive": float(alive)}
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"stint": int(stint)}, fh)
+            json.dump(doc, fh)
         os.replace(tmp, path)
+        return True
     except OSError as e:
-        LOG.warning("on-air stint not recorded: %s", e)
+        LOG.warning("on-air record not written: %s", e)
+        return False
 
 
-def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None):
+def _on_air_tick(relay, path, state, clock):
+    """Refresh the on-air record when the race stint changes or the stamp is due."""
+    now = clock()
+    stint = state["stint"]
+    if not relay.solo and relay.mode == "race":
+        stint = relay.on_air_row_idx() + 1
+    if stint != state["stint"] or state["at"] is None or now - state["at"] >= ON_AIR_ALIVE_S:
+        write_on_air_record(path, stint, now)
+        state["stint"], state["at"] = stint, now
+
+
+def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None,
+                       clock=time.time):
     """Tell the driver race when the broadcast switches stints: that opens the driver
     change window, and the switch onto the last schedule row brings the final lobby's
     lap count (the row's `Laps` cell, else the event setting). The row's `Laps <Class>`
     cells pre-fill the class lap counts, at a switch and at a start. Endurance only.
-    `on_air_path` records the race stint on air (`write_on_air_record`)."""
+    `on_air_path` keeps the on-air record (`on_air_record_path`)."""
     last = None
-    recorded = None
+    record = {"stint": _read_on_air_stint(on_air_path) if on_air_path else None, "at": None}
     while not stop_evt.wait(interval):
+        if on_air_path:
+            try:
+                _on_air_tick(relay, on_air_path, record, clock)
+            except Exception as e:  # noqa: BLE001  a record error must never touch the broadcast
+                relay._warn_tick_error("on-air record", e)
         if relay.solo:
             continue
         try:
             idx = relay.on_air_row_idx()
-            if on_air_path and relay.mode == "race" and idx != recorded:
-                write_on_air_record(on_air_path, idx + 1)
-                recorded = idx
             rows = relay.race_source.get_rows() if relay.race_source else []
             switched = last is not None and idx != last
             if (switched or last is None) and relay.mode == "race":
@@ -16092,6 +16126,9 @@ def main():
     ap.add_argument("--stint", type=int, default=1,
                     help="1-based stint that is ON AIR right now (producer takeover): "
                          "Feed A serves it, Feed B preloads the next one. Default 1.")
+    ap.add_argument("--event-run", action="store_true",
+                    help="Started by `racecast event start`: record the race stint on air "
+                         "and a last-alive stamp in runtime on-air.json.")
     ap.add_argument("--event-title", default=None,
                     help="Free-text event title shown in the Director Panel, the "
                          "Commentator Cockpit and Discord messages (#207). When given, "
@@ -16653,7 +16690,7 @@ def main():
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),
-        kwargs={"on_air_path": os.path.join(runtime, "on-air.json")}).start()
+        kwargs={"on_air_path": on_air_record_path(runtime, args.event_run)}).start()
     sender_script_path = os.path.join(here, "racecast-sender.py")
     drive_page_path = None
     for cand in (os.path.join(here, "drive.html"), os.path.join(here, "..", "drive.html"),

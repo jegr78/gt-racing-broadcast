@@ -1172,18 +1172,26 @@ def t_the_stint_watch_records_the_race_stint_on_air():
         relay, stop = Relay(), threading.Event()
         worker = threading.Thread(target=g.m.stint_switch_watch,
                                   args=(relay, Svc(), stop, lambda: None, 0.01),
-                                  kwargs={"on_air_path": path}, daemon=True)
+                                  kwargs={"on_air_path": path, "clock": lambda: 1000.0},
+                                  daemon=True)
         worker.start()
         try:
-            assert _wait(path, {"stint": 1}) == {"stint": 1}, "the start row is recorded"
+            want = {"stint": 1, "alive": 1000.0}
+            assert _wait(path, want) == want, "the start row is recorded with the relay's stamp"
             relay.idx = 2
-            assert _wait(path, {"stint": 3}) == {"stint": 3}, "a stint switch is recorded"
+            want = {"stint": 3, "alive": 1000.0}
+            assert _wait(path, want) == want, "a stint switch is recorded"
             relay.mode, relay.idx = "qualifying", 0
             time.sleep(0.1)
-            assert _read(path) == {"stint": 3}, "qualifying never overwrites the race stint"
+            assert _read(path)["stint"] == 3, "qualifying never overwrites the race stint"
         finally:
             stop.set()
             worker.join(2)
+
+
+def t_only_an_event_relay_records_the_stint_and_its_stamp():
+    assert g.m.on_air_record_path("/rt", False) is None, "a standalone relay writes no stamp"
+    assert g.m.on_air_record_path("/rt", True) == os.path.join("/rt", "on-air.json")
 
 
 def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
