@@ -59,8 +59,9 @@ nearest the predicted distance decides.
   `release` ends the mode: a car still in its old session counts on from where it
   is, one in a restart lobby still resumes at its box exit. In an endurance final
   lobby the cars a keep restart started rank at the flag by their crossing moments,
-  each later by its corrections since the restart at its speed on the line, and count
-  the flag car's race laps less the whole laps between their lines.
+  each later by its corrections since the restart, short of whole laps, at its speed
+  on the line, and count the flag car's race laps less the whole laps between their
+  lines and those of their corrections since the restart.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
   window starts from the leader's distance where its old lobby's car stopped (where
   the leader is, while it still runs).
@@ -958,11 +959,18 @@ class Race:
 
     def _road_finish(self, ent):
         """When a car a keep restart started took the flag at a final lobby's line, its
-        corrections since the restart counted at its speed there; None otherwise."""
+        corrections since the restart short of whole laps counted at its speed there;
+        None otherwise."""
         if not self.multi_lobby or ent.road is None or ent.finished_at is None \
                 or ent.crossed is None or ent.crossed[1] != ent.finished_at:
             return None
-        return ent.crossed[0] - (ent.adjust - ent.road) / max(ent.cross_v, GAP_SPEED_MPS)
+        part = ent.adjust - ent.road - self._road_laps(ent) * self.length
+        return ent.crossed[0] - part / max(ent.cross_v, GAP_SPEED_MPS)
+
+    def _road_laps(self, ent):
+        """The whole laps of a keep-restarted car's corrections since the restart."""
+        post = ent.adjust - ent.road
+        return math.trunc((post + math.copysign(SNAP_M, post)) / self.length)
 
     def _race_lead(self, real=False):
         """The leading shown distance, None before any car counts; `real` leaves out
@@ -1272,9 +1280,12 @@ class Race:
             return laps
         ref = self._flag_entry
         if ref is not ent and self._road_finish(ent) is not None and self._road_finish(ref) is not None:
-            # Both lines sit on the road: the whole laps between them, whatever the box offsets.
+            # Both lines sit on the road: the whole laps between them, whatever the box
+            # offsets; corrections since the restart count only by their whole laps.
             lead = self._shown(ref)
-            laps = math.floor(lead / self.length) - round((lead - shown) / self.length)
+            between = (lead - (ref.adjust - ref.road)) - (shown - (ent.adjust - ent.road))
+            laps = math.floor(lead / self.length) - round(between / self.length) \
+                - self._road_laps(ref) + self._road_laps(ent)
         winner = self._winner()
         cap = math.floor(self._shown(winner) / self.length) if winner is not None else self._flag_laps
         return min(laps, cap)

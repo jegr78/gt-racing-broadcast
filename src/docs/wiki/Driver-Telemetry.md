@@ -563,7 +563,8 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   flag still falls on the road. The classification follows the road there too: a car
   that left the restart lobby's box ranks by the moment it crossed the line, and its
   gap is that moment after the leader's. A correction made after the restart still
-  counts, as the time the car needs for those metres at the line. A car that crosses
+  counts: its whole laps as laps, the rest as the time the car needs for those metres
+  at the line. A car that crosses
   on the leader's lap on the road keeps the leader's race laps, even when its box
   put its race lap line just past the lobby's.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the

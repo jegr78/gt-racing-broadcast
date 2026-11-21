@@ -1696,6 +1696,18 @@ def t_after_a_keep_restart_a_running_lead_lap_car_stays_ahead_of_a_lapped_finish
     assert _order(race, t) == ["A", "R", "D"] and _row(race, "D", t)["lapped"] == 1, race.standings(t)["entries"]
 
 
+def t_after_a_keep_restart_a_correction_short_of_a_lap_counts_as_time_only():
+    for metres in (-0.4 * L, -0.55 * L, -0.6 * L):
+        race, (a, b, c), t = _keep_restart_boxes_apart(40)
+        race.correct("C", metres)
+        t = _drive(race, [a, b, c], [50] * 3, t, 1)
+        flags, t = _flags(race, [a, b, c], t, 2 * L / 50, speeds=(50, 50, 50))
+        rc = _row(race, "C", t)
+        assert set(flags) == {"A", "B", "C"} and rc["lapped"] == 0 and rc["laps"] == _row(race, "A", t)["laps"] \
+            and abs(rc["gap_time_s"] - (1.0 - metres / 50)) < 0.3, \
+            f"{metres:.0f} m after the restart cost C time, not a lap: {race.standings(t)['entries']}"
+
+
 def t_an_endurance_winner_stays_first_when_its_race_lap_ends_past_the_line():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     race.final_lobby(2, 0.0)
