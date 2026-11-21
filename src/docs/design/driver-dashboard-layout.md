@@ -35,7 +35,9 @@ column it needs exists in our data except the compound, which is optional by des
 - Rows: position, number on the entry's tile colour (`BG Color`), driver surname with
   the entry or cup team small above, interval (the leader shows the gap column's
   title), pit stops `P`, and the optional compound letter.
-- Alternating columns as in LMU, every ~15 s: interval, then last lap, then fuel.
+- The value column alternates every 15 s between gap to leader and interval. A new lap
+  time replaces it for a few seconds (the **Lap time** setting, default 5). Fuel is a permanent
+  level bar.
   A row in the box shows `Box` instead.
 - Footer row `FL` with the fastest lap's entry, driver and time, as in GT7's monitor.
 - Track map beside the tower: the picked layout's line, a dot per car with its number
