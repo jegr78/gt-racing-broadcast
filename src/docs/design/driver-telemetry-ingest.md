@@ -121,7 +121,9 @@ single decisions with the new values and `before`.
   sender script sends one every 5 s.
 - A league without stint labels registers by entry alone, in endurance too.
 - The producer sees every connection on the tailnet (`GET /drivers/data`) and
-  disconnects one with `POST /drivers/disconnect {"conn": "..."}`. A connection quiet
+  disconnects one with `POST /drivers/disconnect {"conn": "..."}`. The ingest answers
+  that code 410 from then on, also after a relay restart; the relay remembers the last
+  500 disconnected codes of the invite. A connection quiet
   for 10 minutes leaves that list, the readiness rows and the dashboard; it comes back
   as a new sender if it posts again, still under the entry the producer reassigned it to. A new invite drops every connection.
 

@@ -21,7 +21,7 @@ FILENAME = "driver-requests.json"
 MAX_PENDING = 200             # a safety bound; the per-client caps keep a flood to itself
 MAX_PENDING_PER_SLOT = 3      # waiting requests of one client for one entry and stint
 MAX_PENDING_PER_CLIENT = 8
-MAX_EVICTED = 500             # dropped conns remembered, so their sender hears why
+MAX_EVICTED = 500             # dropped conns remembered, so their sender hears why (each kind)
 STATES = ("pending", "approved", "rejected")
 
 
@@ -86,6 +86,7 @@ class Store:
         self._invite = None
         self._reqs = {}          # conn -> record, oldest first
         self._evicted = {}       # conn -> None, oldest first
+        self._disconnected = {}  # conns the producer disconnected, oldest first
 
     def _current(self):
         """Bind to the current invite (caller holds the lock); False without one."""
@@ -100,11 +101,12 @@ class Store:
             if isinstance(doc, dict) and isinstance(doc.get("requests"), list):
                 self._invite = doc.get("invite")
                 self._reqs = {r["conn"]: _record(r) for r in doc["requests"] if _valid(r)}
-                gone = doc.get("evicted")
-                self._evicted = dict.fromkeys(c for c in (gone if isinstance(gone, list) else [])
-                                              if isinstance(c, str) and len(c) <= 32)
+                self._evicted, self._disconnected = (
+                    dict.fromkeys(c for c in (gone if isinstance(gone, list) else [])
+                                  if isinstance(c, str) and len(c) <= 32)
+                    for gone in (doc.get("evicted"), doc.get("disconnected")))
         if invite != self._invite:
-            self._invite, self._reqs, self._evicted = invite, {}, {}
+            self._invite, self._reqs, self._evicted, self._disconnected = invite, {}, {}, {}
         return invite is not None
 
     def _commit(self, snapshot, evicted=None):
@@ -129,6 +131,30 @@ class Store:
         with self._lock:
             return self._current() and conn in self._evicted
 
+    def disconnect(self, conn):
+        """Refuse `conn` under the current invite from now on, also after a restart (the
+        producer's disconnect). False for an unknown request; raises OSError when the
+        file cannot be written, leaving memory as it was."""
+        with self._lock:
+            if not self._current() or conn not in self._reqs:
+                return False
+            before = dict(self._disconnected)
+            self._disconnected.pop(conn, None)
+            self._disconnected[conn] = None
+            while len(self._disconnected) > MAX_EVICTED:
+                del self._disconnected[next(iter(self._disconnected))]
+            try:
+                self._save()
+            except OSError:
+                self._disconnected = before
+                raise
+            return True
+
+    def was_disconnected(self, conn):
+        """True for a code the producer disconnected under the current invite."""
+        with self._lock:
+            return self._current() and conn in self._disconnected
+
     def _save(self):
         folder = os.path.dirname(os.path.abspath(self.path))
         os.makedirs(folder, exist_ok=True)
@@ -136,7 +162,8 @@ class Store:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump({"invite": self._invite, "requests": list(self._reqs.values()),
-                           "evicted": list(self._evicted)}, fh)
+                           "evicted": list(self._evicted),
+                           "disconnected": list(self._disconnected)}, fh)
             atomic_replace.replace(tmp, self.path)
         finally:
             if os.path.exists(tmp):

@@ -811,6 +811,48 @@ def t_the_producer_disconnects_a_sender_on_the_tailnet():
         srv.shutdown()
 
 
+def t_a_disconnect_holds_across_a_relay_restart():
+    path = os.path.join(tempfile.mkdtemp(), "driver-invite.json")
+    srv, port, _p, hub = _serve(invite_path=path)
+    batch = tp.encode_batch([_wire(1)])
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})[0] == 200
+        assert _post(port, "/drivers/disconnect", {"conn": _conn_of(path, issued)})[0] == 200
+    finally:
+        srv.shutdown()
+    srv, port, _p, hub = _serve(invite_path=path)
+    try:
+        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
+        assert code == 410 and "disconnected" in text, ("a restart never lets a disconnected code back", code, text)
+        assert hub.connections() == []
+    finally:
+        srv.shutdown()
+
+
+def t_a_disconnect_that_cannot_be_saved_says_so_without_a_path():
+    import driver_requests
+    srv, port, path, _hub = _serve()
+    real_save = driver_requests.Store._save
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
+
+        def broken(self):
+            raise OSError("disk full at /home/producer/runtime")
+        driver_requests.Store._save = broken
+        code, text, _h = _post(port, "/drivers/disconnect", {"conn": _conn_of(path, issued)})
+        assert code == 500 and "could not be saved" in text and "disk full" not in text, (code, text)
+        driver_requests.Store._save = real_save
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(2)]), {"X-Driver-Code": issued})
+        assert code == 410, ("the hub still refuses it until the relay restarts", code, text)
+    finally:
+        driver_requests.Store._save = real_save
+        srv.shutdown()
+
+
 def _wire_at(pid, along, lap):
     from test_race_distance import _pos
     x, z = _pos(along)

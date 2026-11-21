@@ -14679,6 +14679,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if reg is None:
                     return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
                 req = _requests.get(reg["conn"])
+                if _requests.was_disconnected(reg["conn"]):     # still approved in the store
+                    return self._drive_refuse(410, "disconnected by the producer: register again on the invite page")
                 if req is None and _requests.was_evicted(reg["conn"]):
                     return self._drive_refuse(410, "your registration was dropped: register again on the invite page")
                 if req is None:
@@ -15129,6 +15131,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     done = driver_hub.disconnect(conn)
                     if done and driver_race_svc is not None:
                         driver_race_svc.log(who, "disconnect", conn=conn)
+                    if done and _requests is not None:
+                        try:
+                            _requests.disconnect(conn)      # so a restart keeps refusing it
+                        except OSError:
+                            return self._send({"ok": False, "error": "the disconnect could not be saved: "
+                                               "it holds until the relay restarts"}, 500)
                     return self._send({"ok": done})
                 if p == ["drivers", "reassign"] and driver_hub is not None:
                     conn, entry = str(body.get("conn") or ""), body.get("entry")

@@ -212,6 +212,33 @@ def t_an_evicted_request_is_remembered_for_its_invite():
     assert len(small._evicted) == dr.MAX_EVICTED and not small.was_evicted("bulk00000"), "the memory is bounded"
 
 
+
+def t_a_disconnected_request_is_remembered_for_its_invite():
+    store, inv, _clock = _store()
+    store.add(_reg())
+    store.approve("conn0001", "race_control:dave", entry="Team A #1", segment=None, name="Max")
+    assert not store.disconnect("nobody00"), "only a known request is disconnected"
+    assert store.disconnect("conn0001") and store.was_disconnected("conn0001")
+    again = dr.Store(store.path, lambda: inv[0])
+    assert again.was_disconnected("conn0001") and not again.was_disconnected("nobody00"), "it survives a restart"
+    inv[0] = "inv-2"
+    assert not again.was_disconnected("conn0001"), "a renewed invite forgets it"
+    small, _inv, _clock = _store()
+    for i in range(dr.MAX_EVICTED + 2):
+        small.add(_reg(conn=f"bulk{i:05d}", name=f"N{i}"), client=f"198.51.100.{i % 200}")
+        small.disconnect(f"bulk{i:05d}")
+    assert len(small._disconnected) == dr.MAX_EVICTED and not small.was_disconnected("bulk00000"), \
+        "the memory is bounded"
+    broken, _inv, _clock = _store()
+    broken.add(_reg())
+    broken._save = lambda: (_ for _ in ()).throw(OSError("disk full"))
+    try:
+        broken.disconnect("conn0001")
+        raise AssertionError("a failed write raises")
+    except OSError:
+        pass  # the route answers it with 500
+    assert not broken.was_disconnected("conn0001"), "a failed write leaves memory as it was"
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
