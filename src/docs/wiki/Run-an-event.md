@@ -164,10 +164,11 @@ own stream key, from the Sheet **Producer** tab). The Director Panel drives them
 no producer machine access needed:
 
 1. `racecast event start` resets to **Part 1** (offline). Recovery after a mid-event
-   restart: `racecast event start --part N`. A plain Start event on an event that was not
-   stopped keeps the driver codes and the timing link
-   ([new or continued event](Driver-Telemetry#new-event-or-continued-event)) but still
-   resets to Part 1.
+   restart: a plain Start event on an event that was not stopped continues it
+   ([new or continued event](Driver-Telemetry#new-event-or-continued-event)): it
+   resumes the Part and the race stint the relay last had on air and keeps the driver
+   codes and the timing link. `racecast event start --part N` (and `--stint N`) set
+   them by hand and win over the resumed values.
 2. In the panel, click **Start Part N** → type the confirmation phrase
    (`START PART N`) → the relay sets that Part's stream key and goes live.
 3. **End Part N** (type `END PART N`) stops the broadcast. If a next Part exists the

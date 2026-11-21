@@ -36,7 +36,10 @@ profile's event and the invite, or the relay's last health sample, is younger th
 12 hours. That covers a relay that died mid-race and a plain Start event afterwards. A
 continued event keeps the invite with every driver code and approval, the public timing
 link, the race corrections, the race recording and the report window, the same as
-`--stint` or `--part`. Otherwise it is a new event: a new invite and timing link, the
+`--stint` or `--part`. It also resumes the broadcast where the relay left it: the
+race stint that was on air and the broadcast Part (`resuming stint 5, Part 2`).
+Explicit `--stint` and `--part` win, and with `--qualifying` it resumes neither.
+Otherwise it is a new event: a new invite and timing link, the
 last event's corrections cleared and a new race recording. The command output and the
 Control Center job log say which one applied (`continuing today's event: driver codes
 and timing link kept` or `new event: new driver codes and timing link`). To start a new

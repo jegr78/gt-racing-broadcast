@@ -801,8 +801,8 @@ def _write_part_reset(index):
     is the one reliable reset point (every event begins with it; a clean
     last-Part-stop / event stop can't be detected). A fresh relay adopts this on
     construction; writing while a relay already runs is inert (PartStore loads
-    once at start): so a mid-event re-run does not disturb the live pointer, and
-    recovery is `event start --part N` + a relay restart. Best-effort."""
+    once at start): so a mid-event re-run does not disturb the live pointer. A
+    continued event writes the saved index back (`_resume_point`). Best-effort."""
     path = _part_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1632,6 +1632,34 @@ def _last_health_sample_ts():
             conn.close()
     except sqlite3.Error:
         return None
+
+
+def _on_air_record_path():
+    """The race stint on air, written by the running relay's stint watch."""
+    return os.path.join(_runtime_dir(), "on-air.json")
+
+
+def _read_positive(path, key):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            value = json.load(fh).get(key)
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+
+
+def _resume_point():
+    """(stint, part) a continued event resumes: the last recorded race stint or None,
+    and the persisted Part pointer (1 when unknown)."""
+    return (_read_positive(_on_air_record_path(), "stint"),
+            _read_positive(_part_path(), "index") or 1)
+
+
+def _clear_on_air_record():
+    try:
+        os.remove(_on_air_record_path())
+    except OSError:
+        pass  # nothing recorded
 
 
 def _read_session_start():
@@ -6775,7 +6803,8 @@ def event_start(rest, _autojoin=True, _new_session=True):
     `event_takeover` passes False so a handover continues A's report window on B
     rather than resetting it; a mid-event recovery restart (--stint/--part) keeps
     it too (see `_is_continuation_start`), and so does a plain start on an unstopped,
-    recent event (`_unstopped_event_continues`)."""
+    recent event (`_unstopped_event_continues`), which also resumes its Part and race
+    stint (`_resume_point`)."""
     ev, pf = _event_modules()
     # 0. Pre-flight gate: refuse to bring the stack up when a static
     # precondition is broken (missing SHEET_ID, missing graphics): those never
@@ -6812,11 +6841,19 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # start at the stint on air right now, --qualifying brings the stack up in
     # qualifying mode, and --title sets the event title. Reset the broadcast-Part
     # pointer before the relay starts, so its PartStore comes up on the right Part.
-    _write_part_reset(_part_index(rest))
+    part = _part_index(rest)
     fresh = _new_session and not _is_continuation_start(rest)
     relay_was_running = _relay_already_running_for_active_profile() if fresh else False
     continuing = fresh and not relay_was_running and _unstopped_event_continues()
     fresh = fresh and not continuing
+    resume_stint = None
+    if continuing and not _qualifying_args(rest):
+        resume_stint, part = _resume_point()
+        print(f"event: resuming stint {resume_stint}, Part {part}." if resume_stint else
+              f"event: resuming Part {part}; no stint recorded, the feeds start at stint 1.")
+    if fresh and not relay_was_running:
+        _clear_on_air_record()
+    _write_part_reset(part)
     try:
         # Start event again on a running event (OBS or Companion back up) keeps the
         # drivers' codes; only a new event gets a new link.
@@ -6840,7 +6877,8 @@ def event_start(rest, _autojoin=True, _new_session=True):
         _reset_telemetry_record()
         if was_running:   # same relay, same profile: it won't re-read the file itself
             _sync_live_telemetry_record()
-    relay_start(_stint_args(rest) + _qualifying_args(rest) + _title_args(rest))
+    stint_args = _stint_args(rest) or (["--stint", str(resume_stint)] if resume_stint else [])
+    relay_start(stint_args + _qualifying_args(rest) + _title_args(rest))
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())
         if _mm:

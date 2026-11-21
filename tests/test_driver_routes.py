@@ -1130,6 +1130,62 @@ def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
         worker.join(2)
 
 
+def t_the_stint_watch_records_the_race_stint_on_air():
+    import json, tempfile, threading, time
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3), ("u", "C", "S3", 4)]
+
+        def final_laps(self):
+            return None
+
+        def class_laps_at(self, idx):
+            return {}
+
+    class Relay:
+        solo, mode, race_source, idx = False, "race", Source(), 0
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
+
+        def on_air_row_idx(self):
+            return self.idx
+
+    class Svc:
+        def stint_switch(self, **_kw):
+            pass
+
+    def _read(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return None
+
+    def _wait(path, want):
+        deadline = time.monotonic() + 2
+        while _read(path) != want and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return _read(path)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        relay, stop = Relay(), threading.Event()
+        worker = threading.Thread(target=g.m.stint_switch_watch,
+                                  args=(relay, Svc(), stop, lambda: None, 0.01),
+                                  kwargs={"on_air_path": path}, daemon=True)
+        worker.start()
+        try:
+            assert _wait(path, {"stint": 1}) == {"stint": 1}, "the start row is recorded"
+            relay.idx = 2
+            assert _wait(path, {"stint": 3}) == {"stint": 3}, "a stint switch is recorded"
+            relay.mode, relay.idx = "qualifying", 0
+            time.sleep(0.1)
+            assert _read(path) == {"stint": 3}, "qualifying never overwrites the race stint"
+        finally:
+            stop.set()
+            worker.join(2)
+
+
 def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     import threading, time
 

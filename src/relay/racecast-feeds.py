@@ -15659,17 +15659,34 @@ def dashboard_ticks(relay, race_svc, stop_evt, every):
             relay._warn_tick_error("driver dashboard", e)
 
 
-def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
+def write_on_air_record(path, stint):
+    """Record the race stint on air, which a plain `event start` resumes after a relay
+    death. Best effort."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"stint": int(stint)}, fh)
+        os.replace(tmp, path)
+    except OSError as e:
+        LOG.warning("on-air stint not recorded: %s", e)
+
+
+def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None):
     """Tell the driver race when the broadcast switches stints: that opens the driver
     change window, and the switch onto the last schedule row brings the final lobby's
     lap count (the row's `Laps` cell, else the event setting). The row's `Laps <Class>`
-    cells pre-fill the class lap counts, at a switch and at a start. Endurance only."""
+    cells pre-fill the class lap counts, at a switch and at a start. Endurance only.
+    `on_air_path` records the race stint on air (`write_on_air_record`)."""
     last = None
+    recorded = None
     while not stop_evt.wait(interval):
         if relay.solo:
             continue
         try:
             idx = relay.on_air_row_idx()
+            if on_air_path and relay.mode == "race" and idx != recorded:
+                write_on_air_record(on_air_path, idx + 1)
+                recorded = idx
             rows = relay.race_source.get_rows() if relay.race_source else []
             switched = last is not None and idx != last
             if (switched or last is None) and relay.mode == "race":
@@ -16635,7 +16652,8 @@ def main():
                      args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
-        lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"])).start()
+        lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),
+        kwargs={"on_air_path": os.path.join(runtime, "on-air.json")}).start()
     sender_script_path = os.path.join(here, "racecast-sender.py")
     drive_page_path = None
     for cand in (os.path.join(here, "drive.html"), os.path.join(here, "..", "drive.html"),
