@@ -969,8 +969,11 @@ class Race:
         if not self._flag_road or ent.finished_at is None \
                 or ent.crossed is None or ent.crossed[1] != ent.finished_at:
             return None
-        part = self._road_post(ent) - self._road_laps(ent) * self.length
-        return ent.crossed[0] - part / max(ent.cross_v, GAP_SPEED_MPS)
+        return ent.crossed[0] - self._road_part(ent) / max(ent.cross_v, GAP_SPEED_MPS)
+
+    def _road_part(self, ent):
+        """`_road_post` short of its whole laps: the metres that count as time."""
+        return self._road_post(ent) - self._road_laps(ent) * self.length
 
     def _road_field(self):
         """Every car on track in a final lobby was started by a keep restart, so the road
@@ -1354,7 +1357,7 @@ class Race:
                     and self._flag_entry is not None and laps == self._ranked_laps(self._flag_entry):
                 # On the road it completes the flag car's laps at its flag, not before now.
                 car = self._cars.get(e.active) or _NO_CAR
-                reached = now - self._road_post(e) / max(car.speed or 0.0, GAP_SPEED_MPS)
+                reached = now - self._road_part(e) / max(car.speed or 0.0, GAP_SPEED_MPS)
             if reached is None:
                 reached = e.finished_at if e.finished_at is not None else math.inf
             return (0, -laps, reached, -dist, e.entry)

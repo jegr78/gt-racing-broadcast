@@ -1756,6 +1756,16 @@ def t_after_a_keep_restart_an_undone_dnf_or_an_override_during_the_finish_keeps_
                 f"{action} leaves the road rule of the finish alone: {[(r['entry'], r['gap_time_s']) for r in rows]}"
 
 
+def t_after_a_keep_restart_a_whole_lap_correction_never_moves_a_running_car_ahead():
+    race, (a, b, c), t = _keep_restart_boxes_apart(40)
+    for entry in "ABC":
+        race.correct(entry, L)                                # every car a lap up
+    while not _row(race, "C", t)["finished"]:
+        t = _drive(race, [a, b, c], [50] * 3, t, 1.0 / HZ)
+    assert not _row(race, "B", t)["finished"] and _order(race, t) == ["A", "C", "B"], \
+        f"B, still running, stays behind C, which finished ahead of it on the road: {race.standings(t)['entries']}"
+
+
 def t_an_endurance_winner_stays_first_when_its_race_lap_ends_past_the_line():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     race.final_lobby(2, 0.0)
