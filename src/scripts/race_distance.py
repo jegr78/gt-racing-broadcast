@@ -1362,6 +1362,13 @@ class Race:
                 groups.setdefault(k[1], []).append(e)
         for group in groups.values():
             group.sort(key=lambda e: keys[e.entry][3])
+            # Finished cars keep their flag order: they swap road places among themselves.
+            done = [e for e in group if e.finished_at is not None]
+            places = [keys[e.entry][3] for e in done]
+            for e, d in zip(sorted(done, key=lambda e: e.finished_at), places, strict=True):
+                k = keys[e.entry]
+                keys[e.entry] = (k[0], k[1], k[2], d, k[4])
+            group.sort(key=lambda e: keys[e.entry][3])
             earliest = math.inf
             for e in reversed(group):
                 k = keys[e.entry]

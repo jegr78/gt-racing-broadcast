@@ -282,6 +282,22 @@ def t_after_the_flag_a_running_car_stays_behind_a_car_that_finished_ahead_on_the
     assert _order(race, t) == ["A", "F", "R", "S"], f"F took its flag ahead of R and S on the road: {_order(race, t)}"
 
 
+def t_after_the_flag_finished_cars_of_one_lap_keep_their_flag_order():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    cars = [Car(race, e, e.lower(), L - 15 - 10 * i) for i, e in enumerate(["A", "F1", "F2", "S"])]
+    t = _drive(race, cars, [50] * 4, 0.0, 40)
+    ea, f1, f2, es = (race._entries[k] for k in ["A", "F1", "F2", "S"])
+    ea.distance = 2 * L + 900.0
+    race._flag(ea, t - 20)
+    f1.distance, f1.finished_at = L + 180.0, t - 4          # the team anchors put F1's line short of F2's
+    f1.ts, f1.ds = [t - 30, t - 9, t - 4], [L - 300.0, L, f1.distance]
+    f2.distance, f2.finished_at = L + 200.0, t - 2
+    f2.ts, f2.ds = [t - 30, t - 8, t - 2], [L - 300.0, L, f2.distance]
+    es.distance = L + 120.0
+    es.ts, es.ds = [t - 30, t - 15, t - 1], [L - 300.0, L, es.distance]
+    assert _order(race, t) == ["A", "F1", "F2", "S"], f"F1 took the flag before F2: {_order(race, t)}"
+
+
 def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
