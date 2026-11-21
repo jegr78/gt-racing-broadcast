@@ -491,6 +491,19 @@ def t_a_faster_lap_of_another_driver_of_the_entry_names_the_row():
     assert row["driver"] == "Bob", f"a slower lap keeps the best lap's driver: {row}"
 
 
+def t_a_sender_without_a_sample_yet_makes_its_first_lap_no_new_one():
+    conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": None}]
+    svc, _ctx, wall, _path = _lap_service(conns)
+    row = svc.standings()["qualifying"][0]
+    assert (row["entry"], row["best_ms"], row["last_lap_ms"]) == ("A", None, None), \
+        f"a sender that connected but has not sent yet has a row without a time: {row}"
+    wall[0] += 1
+    conns[0]["latest"] = {"best_ms": 90000, "last_ms": 91000}     # driven before the relay restart
+    row = svc.standings()["qualifying"][0]
+    assert row["last_lap_ms"] == 91000 and row["lap_fresh"] is False, \
+        f"the first sample's lap is old, not one driven now: {row}"
+
+
 QUALI_CLASSES = {"A": {"number": "1", "carClass": "GT3", "classColor": "#f00"},
                  "B": {"number": "2", "carClass": "GT4", "classColor": "#0f0"},
                  "C": {"number": "3", "carClass": "GT3", "classColor": "#f00"},

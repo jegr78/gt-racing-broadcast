@@ -358,19 +358,23 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
             continue
         if segment is not None and c.get("segment") not in (segment, None):
             continue
-        latest = c.get("latest") or {}
-        ms, last = lap(latest.get("best_ms")), lap(latest.get("last_ms"))
+        latest = c.get("latest")
         cur = best.get(c["entry"])
         if cur is None and len(best) >= MAX_QUALI:
             continue
-        if cur is None:
+        if not latest:
+            if cur is None:
+                best[c["entry"]] = (None, c.get("name") or "", None, None)   # no sample yet
+            continue
+        ms, last = lap(latest.get("best_ms")), lap(latest.get("last_ms"))
+        if cur is None or cur[3] is None:
             cur = (ms, c.get("name") or "", last, 0.0)   # sent before the relay saw it
         elif ms is not None and (cur[0] is None or ms < cur[0]):
             cur = (ms, c.get("name") or "", cur[2], cur[3])
         if last is not None and last != cur[2]:
             cur = (cur[0], cur[1], last, now)
         best[c["entry"]] = cur
-    ranked = {e: (lap(ms), name, lap(last), at) for e, (ms, name, last, at) in best.items()}
+    ranked = {e: (lap(ms), name, lap(last), at or 0.0) for e, (ms, name, last, at) in best.items()}
     for entry, added in (laps or {}).items():
         ms, name, last, at = ranked.get(entry, (None, "", None, 0.0))
         ms = added["best"] if ms is None else min(ms, added["best"])
