@@ -15173,6 +15173,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     on = body.get("on") is not False
                     now = time.monotonic()
                     cover, note, banner = False, "obs unavailable", {"error": "not raised here"}
+                    hud = getattr(setup_ctl, "hud", None)
+                    if not on and getattr(relay, "rc_red_flag_banner", False) and hasattr(hud, "refresh"):
+                        hud.refresh(timeout=5)      # the Sheet now, not the last poll
                     with _red_flag_lock:
                         if now - _red_flag_last.get(who, -RED_FLAG_MIN_S) < RED_FLAG_MIN_S:
                             return self._send({"ok": False, "error": "one red flag change per 2 s"}, 429)
@@ -15183,7 +15186,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         # The banner has its own claim: the cover may be the director's or
                         # unreachable while this desk's banner is on air.
                         banner_owned = getattr(relay, "rc_red_flag_banner", False)
-                        hud = getattr(setup_ctl, "hud", None)
                         if not on and banner_owned and hud is not None \
                                 and hud.data().get("raceControl") != RED_FLAG_BANNER:
                             banner_owned = relay.rc_red_flag_banner = False    # changed in the Sheet

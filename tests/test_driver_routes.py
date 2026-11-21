@@ -1344,19 +1344,23 @@ def t_race_control_lowers_only_a_cover_it_raised():
 
 
 class _Setup:
-    """The Setup tab control: records the banner."""
+    """The Setup tab control: `banner` is the Sheet, the HUD shows its last poll."""
     def __init__(self):
-        self.banner = ""
+        self.banner = self.polled = ""
         self.hud = self
 
     def data(self):
-        return {"raceControl": self.banner}
+        return {"raceControl": self.polled}
+
+    def refresh(self, timeout=10):
+        self.polled = self.banner
+        return True
 
     def set_field(self, key, value):
         if value not in ("", g.m.RED_FLAG_BANNER, "Driver Swaps"):
             return {"error": "not in the Configuration vocabulary"}
         if key == "racecontrol":
-            self.banner = value
+            self.banner = self.polled = value
         return {"ok": True, "field": key, "value": value}
 
 
@@ -1380,9 +1384,9 @@ def t_race_control_clears_the_banner_its_red_flag_set_whoever_owns_the_cover():
         flag(False)
         assert setup.banner == "Driver Swaps", "a banner the director set afterwards stays"
         flag(True)
-        setup.banner = "Driver Swaps"                    # typed into the Setup tab
+        setup.banner = "Driver Swaps"                    # typed into the Setup tab, not polled yet
         flag(False)
-        assert setup.banner == "Driver Swaps", "a banner changed in the Sheet stays too"
+        assert setup.banner == "Driver Swaps", "a banner changed in the Sheet stays, even before the next poll"
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()
