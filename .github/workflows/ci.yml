@@ -6,9 +6,8 @@ name: CI
 # catches version-specific stdlib drift), while the OS axis (Windows/macOS,
 # the binary ships for all three) runs on the pinned ship version (3.12) only,
 # catching OS-specific path/process bugs (#97). macOS runners are the slow,
-# scarce ones, so they get exactly one job, not three. NB: the matrix job names
-# below ("test (<os>, <ver>)") are the ruleset's required status checks: if you
-# change a combo, update Protect main's required checks to match or PRs deadlock.
+# scarce ones, so they get exactly one job, not three. The ruleset requires ci-ok,
+# not the matrix job names, so changing a combo needs no ruleset change.
 # A PR whose diff touches only CHANGELOG.md, version.txt and the manifest (the
 # release-please PR) skips every job but lint: no code changed, and main's push run
 # already tested it. ci-ok is the one fixed-name result: a skipped matrix job
