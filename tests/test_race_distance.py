@@ -711,6 +711,65 @@ def t_a_quiet_car_does_not_hold_the_field_back_in_time():
     assert order[:3] == ["L", "B", "A"], f"B passed A half a second ago, every sample is fresh: {order}"
 
 
+def t_a_car_going_quiet_keeps_its_place_until_it_shows_no_data():
+    race = rd.Race(TRACE, formation=False)
+    ld, a, b = Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300), Car(race, "B", "b", L - 400)
+    t = _drive(race, [ld, a, b], [50, 50, 50], 0.0, 30)
+    t = _drive(race, [ld, b], [50, 50], t, 3.5)                          # A's sender stops
+    t = _drive(race, [ld, b], [50, 50], t, 0.1)
+    assert b.along > a.along + 50 and _row(race, "A", t)["status"] == "racing", "B drove past A's last point"
+    rows = race.standings(t)["entries"]
+    assert [r["entry"] for r in rows] == ["L", "A", "B"], f"A has not shown No data yet: {[r['entry'] for r in rows]}"
+    assert rows[1]["gap_time_s"] < rows[2]["gap_time_s"], f"gaps grow down the order: {rows}"
+    assert abs(rows[2]["interval_time_s"] - 2.0) <= 0.2, f"B ran 2 s behind A: {rows[2]['interval_time_s']}"
+
+
+def t_a_car_going_quiet_fast_stays_behind_a_car_ahead_that_slows():
+    race = rd.Race(TRACE, formation=False)
+    ld, f, s, b = (Car(race, "L", "l", L - 15), Car(race, "F", "f", L - 300),
+                   Car(race, "S", "s", L - 315), Car(race, "B", "b", L - 330))
+    t = _drive(race, [ld, f, s, b], [50, 50, 50, 50], 0.0, 30)
+    t = _drive(race, [ld, f, b], [20, 20, 50], t, 3)                     # S's sender stops; L and F slow
+    rows = {r["entry"]: r for r in race.standings(t)["entries"]}
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order.index("F") < order.index("S"), f"S was behind F when it fell silent: {order}"
+    assert rows["F"]["interval_time_s"] > 1, f"F's interval to L stays: {rows['F']['interval_time_s']}"
+    assert rows["S"]["interval_time_s"] > 0.1, f"S trails F: {rows['S']['interval_time_s']}"
+
+
+def t_a_leader_going_quiet_keeps_the_lead():
+    race = rd.Race(TRACE, formation=False)
+    ld, a = Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 50)
+    t = _drive(race, [ld, a], [50, 50], 0.0, 30)
+    t = _drive(race, [a], [70], t, 3)                                    # L falls silent, A speeds up
+    assert [r["entry"] for r in race.standings(t)["entries"]] == ["L", "A"], "L has not shown No data yet"
+
+
+def t_a_car_going_quiet_does_not_hold_the_field_back_in_time():
+    race = rd.Race(TRACE, formation=False)
+    ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),
+                   Car(race, "B", "b", L - 310), Car(race, "C", "c", L - 600))
+    t = _drive(race, [ld, a, b, c], [50, 50, 50, 50], 0.0, 30)
+    t = _drive(race, [ld, a, b], [50, 50, 50], t, 2)                     # C's sender stops
+    while _row(race, "B", t)["distance_m"] < _row(race, "A", t)["distance_m"] + 5:
+        t = _drive(race, [ld, a, b], [50, 50, 60], t, 0.1)               # B passes A
+    assert _row(race, "C", t)["status"] == "racing", "C has not shown No data yet"
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order[:3] == ["L", "B", "A"], f"B passed A half a second ago, a silent car pins no moment: {order}"
+
+
+def t_gaps_to_a_winner_whose_sender_stops_at_the_flag_stay_current():
+    race = rd.Race(TRACE, formation=False, finish_mode="laps", lap_count=2)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 100), Car(race, "C", "c", L - 105)
+    t = _drive(race, [a, b, c], [80, 50, 50], 0.0, (2 * L + 15) / 80 - 0.5)
+    while not _row(race, "A", t)["finished"]:
+        t = _drive(race, [a, b, c], [80, 50, 50], t, 0.1)
+    t = _drive(race, [b, c], [50, 65], t, 3)                             # A's sender stops; C passes B
+    rows = race.standings(t)["entries"]
+    assert [r["entry"] for r in rows] == ["A", "C", "B"], [r["entry"] for r in rows]
+    assert rows[1]["gap_time_s"] < rows[2]["gap_time_s"], f"C's gap is the current one: {[r['gap_time_s'] for r in rows]}"
+
+
 def t_a_held_car_does_not_hold_the_field_back_in_time():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),

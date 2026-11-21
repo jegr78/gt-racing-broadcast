@@ -145,7 +145,8 @@ and says so. Changing the layout mid-event starts the race over.
 - **Gap and interval** are the time the car ahead needed from the same point. A car a
   full lap or more down shows `+N L`. Senders post a moment apart, so the order and the
   intervals compare the cars where they were at the older of their last samples (up to
-  one second back): a fresher sample never ranks a car ahead of one it trails.
+  one second back): a fresher sample never ranks a car ahead of one it trails. A car
+  whose sender falls silent keeps its place and its gap until it shows **No data**.
 - **Timing tower** (the on-air `drivers.html`): the gap column shows the gap to the leader. The desks show exact gaps for lapped cars too, as `+1 L · 1:02.5`, also for a car many laps down: the relay keeps the last ten minutes at full rate and everything older at one point per second, up to 24 hours. The public timing page and the cockpit are unchanged, and exact gaps never reach the public view.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
   while its sender has been quiet for five seconds. The entry keeps its last distance,

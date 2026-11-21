@@ -970,6 +970,12 @@ class Race:
         est = self._est.get(ent.entry)
         return est is not None and est["on"]
 
+    def _silent(self, ent):
+        """True while `ent`'s running car has sent nothing since its last distance."""
+        car, last = self._cars.get(ent.active), self._last(ent)
+        return ent.finished_at is None and car is not None and last is not None \
+            and car.t is not None and car.t <= last[0]
+
     def _quiet(self, ent, now):
         car = self._cars.get(ent.active)
         return car is None or car.t is None or now - car.t > NO_DATA_S
@@ -1094,7 +1100,7 @@ class Race:
                 return max(0.0, self._racing(mine) - self._racing(last[0]))
         mine_t, dist = self._cars[ent.active].t, ent.distance
         theirs = self._last(ahead)
-        if theirs is not None and 0.0 < mine_t - theirs[0] <= SYNC_S:
+        if theirs is not None and 0.0 < mine_t - theirs[0] and (mine_t - theirs[0] <= SYNC_S or self._silent(ahead)):
             # `ahead`'s last sample is older: compare where this car was at that moment.
             then = self._distance_at(ent, theirs[0])
             if then is not None:
@@ -1105,9 +1111,11 @@ class Race:
         return max(0.0, self._racing(mine_t) - reached)
 
     def _synced(self, ents, now):
-        """Each running car's shown distance at one moment: the oldest last sample among
-        them, at most SYNC_S before the newest, so a fresher sample does not rank a car
-        ahead of one it trails on the road. Quiet and held cars keep their last distance."""
+        """Each running car's shown distance at one moment: the oldest last sample of
+        the cars within SYNC_S of the newest, so a fresher sample does not rank a car
+        ahead of one it trails on the road. A car silent for longer keeps its distance to
+        the nearest running car, the one ahead first, until it is quiet; quiet and held
+        cars keep their last distance."""
         lasts = {e.entry: self._last(e) for e in ents
                  if e.distance is not None and not e.waiting and not e.held and not self._estimated(e)
                  and e.finished_at is None and not self._quiet(e, now)}
@@ -1115,7 +1123,7 @@ class Race:
         if len(lasts) < 2:
             return {}
         newest = max(v[0] for v in lasts.values())
-        at = max(min(v[0] for v in lasts.values()), newest - SYNC_S)
+        at = min(v[0] for v in lasts.values() if v[0] >= newest - SYNC_S)
         out = {}
         for e in ents:
             last = lasts.get(e.entry)
@@ -1123,6 +1131,17 @@ class Race:
                 d = self._distance_at(e, at)
                 if d is not None:
                     out[e.entry] = d + e.adjust
+        silent = [e for e in ents if e.entry in lasts and lasts[e.entry][0] < at and self._silent(e)]
+        running = [e for e in ents if e.entry in lasts and e not in silent]
+        for e in silent:
+            then, mine = lasts[e.entry][0], lasts[e.entry][1] + e.adjust
+            near = []
+            for r in running:
+                d, now_d = self._distance_at(r, then), out.get(r.entry, self._shown(r))
+                if d is not None and now_d is not None:
+                    near.append((d + r.adjust - mine < 0, abs(d + r.adjust - mine), now_d - (d + r.adjust)))
+            if near:
+                out[e.entry] = mine + min(near)[2]
         for e in ents:
             # An estimate moves back with its reference.
             ref = self._entries.get(self._est[e.entry]["ref"]) if self._estimated(e) else None
