@@ -88,6 +88,20 @@ def t_two_classes_group_under_coloured_headers():
     assert "|C|" in got[2]["cells"][1], "C is GT3's second car"
 
 
+def t_a_class_gap_reads_the_exact_time_like_the_overall_gap():
+    got = _render({"t": 100, "state": "racing",
+                   "rows": [_row("A", 1, "GT3", 1), _row("B", 2, "GT4", 1),
+                            _row("C", 3, "GT3", 2, class_gap_s=4.5, class_gap_time_s=4.2),
+                            _row("D", 4, "GT4", 2, class_gap_s=6.0)],
+                   "classes": [{"name": "GT3", "color": "#ff0000", "lap": 5, "laps": None},
+                               {"name": "GT4", "color": "#00ff00", "lap": 5, "laps": None}]})
+    if got is None:
+        return
+    gaps = {r["cells"][1].split("|")[1]: r["cells"][3] for r in got if not r["cls"]}
+    assert gaps["C"] == "4.2", "the exact class gap, not the rounded 4.5: %r" % gaps
+    assert gaps["D"] == "6.0", "a recording without the exact class gap falls back to the rounded one: %r" % gaps
+
+
 def t_the_lapped_gap_cell_stays_on_one_line():
     with open(PAGE, encoding="utf-8") as f:
         page = f.read()

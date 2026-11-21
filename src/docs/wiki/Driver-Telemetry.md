@@ -183,7 +183,8 @@ and says so. Changing the layout mid-event starts the race over.
   retired cars rank by the distance they covered. A retired car raises no disconnect
   event, ends its estimate and cannot be an estimate's reference; an estimate that
   followed it ends too, so Race Control attaches that car to another one. **Undo DNF** takes
-  back a mis-press: the car counts on from its last distance.
+  back a mis-press: the car counts on from its last distance. Under a red flag it
+  stays frozen there and restarts with the field.
 - **Pit stops** count every box stop the car drives out of. In an endurance race the
   driver change at a stint switch counts as one pit stop too: the team's car that
   leaves the next lobby's box and takes over adds one, whether a new driver takes
@@ -199,9 +200,9 @@ and says so. Changing the layout mid-event starts the race over.
   lobby's own setting; every other car at its next crossing of the line. **Timed**: Race
   Control or the director triggers **Final lap**, and the race ends at the leader's next
   crossing. An endurance final lobby ends on the road, see below. Each crossing is
-  timed between the car's two samples around the line, so a car that crosses right
-  after the flag finishes there even when its data reached the relay before the
-  leader's. The race timer never ends a race. **Finish** freezes the order at once. After the
+  timed between the car's two samples around the line, and the flag goes to every car
+  that crosses after the leader's crossing moment, in whatever order the data reaches
+  the relay. A car that crossed just before the leader runs one more lap. The race timer never ends a race. **Finish** freezes the order at once. After the
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
   Cars still running on the same lap keep following the road until each finishes,

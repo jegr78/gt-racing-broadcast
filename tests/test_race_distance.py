@@ -351,10 +351,11 @@ def t_final_lap_by_time_and_finish_by_hand():
     assert other.standings(t)["state"] == "finished" and _row(other, "C", t)["distance_m"] == d
 
 
-def _batched_finish(multi_lobby):
+def _batched_finish(multi_lobby, b_first=True):
     """A leads B by 10 m on the road and by 210 m in race distance (as after a keep
-    restart); one 0.4 s batch carries both crossings, and B's sender posts first, so B's
-    crossing reaches the relay before A's."""
+    restart); one 0.4 s batch carries both crossings. With `b_first` B's sender posts
+    first, so B's crossing reaches the relay before A's; else A's batch arrives first
+    and B's sample is stamped earlier than A's."""
     race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby, finish_mode="time")
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
     t = _drive(race, [a, b], [50, 50], 0.0, 30)
@@ -367,7 +368,7 @@ def _batched_finish(multi_lobby):
             car.along += step
             car.send(t if car is b else t + 0.01)
     t += 0.4                                                  # A 15 m, B 5 m past the line
-    for car in (b, a):
+    for car in (b, a) if b_first else (a, b):
         car.along += 20.0
         car.send(t if car is b else t + 0.01)
     t += 0.01
@@ -376,11 +377,39 @@ def _batched_finish(multi_lobby):
 
 def t_a_car_crossing_right_after_the_flag_finishes_there_whatever_order_its_data_arrives():
     for multi_lobby in (False, True):
-        race, (a, b), t = _batched_finish(multi_lobby)
-        assert b.lap() == 2, "the batch carries both crossings"
-        assert _row(race, "A", t)["finished"] and _order(race, t) == ["A", "B"], race.standings(t)
-        assert _row(race, "B", t)["finished"] and race.standings(t)["state"] == "finished", \
-            f"B crossed the line after A took the flag, so it finishes there (multi_lobby={multi_lobby})"
+        for b_first in (True, False):
+            race, (a, b), t = _batched_finish(multi_lobby, b_first)
+            assert b.lap() == 2, "the batch carries both crossings"
+            assert _row(race, "A", t)["finished"] and _order(race, t) == ["A", "B"], race.standings(t)
+            assert _row(race, "B", t)["finished"] and race.standings(t)["state"] == "finished", \
+                f"B crossed the line after A took the flag, so it finishes there " \
+                f"(multi_lobby={multi_lobby}, b_first={b_first})"
+
+
+def t_a_car_crossing_just_before_the_flag_does_not_finish_there():
+    race = rd.Race(TRACE, formation=False, multi_lobby=False, finish_mode="time")
+    a, c = Car(race, "A", "a", L - 15), Car(race, "C", "c", L - 25)
+    t = _drive(race, [a, c], [50, 50], 0.0, 30)
+    race.correct("C", -L)
+    race.final_lap(t)
+    c.along = a.along + 3.0                                  # C a lap down, 3 m ahead on the road
+    while a.along < L - 5:
+        step = min(20.0, L - 5 - a.along)
+        t += step / 50
+        for car in (a, c):
+            car.along += step
+            car.send(t if car is a else t + 0.01)
+    t += 0.4
+    for car in (a, c):                                       # A's batch first, C's sample stamped later
+        car.along += 20.0
+        car.send(t if car is a else t + 0.01)
+    t += 0.01
+    ea, ec = race._entries["A"], race._entries["C"]
+    assert _row(race, "A", t)["finished"] and ec.crossed[0] < ea.crossed[0], (ea.crossed, ec.crossed)
+    assert not _row(race, "C", t)["finished"], "C crossed the line before A took the flag, so it runs one more lap"
+    while not _row(race, "C", t)["finished"]:
+        t = _drive(race, [a, c], [50, 50], t, 0.5)
+    assert race.standings(t)["state"] == "finished", race.standings(t)
 
 
 def t_a_late_crossing_short_of_the_cars_line_keeps_its_lap():
@@ -2275,6 +2304,169 @@ def t_undoing_a_retirement_counts_on_from_the_last_distance():
     t = _drive(race, [a, b, c, d], [40] * 4, t, 2)
     rb = _row(race, "B", t)
     assert rb["status"] == "racing" and abs(rb["distance_m"] - (held + 80)) < 5, (held, rb)
+
+
+def t_undoing_a_retirement_under_a_red_flag_waits_for_the_restart_like_every_car():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
+        t = _drive(race, [a, b], [50, 50], 0.0, 90)
+        race.retire("B", True, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        db = _row(race, "B", t)["distance_m"]
+        race.red_flag(t, "keep")
+        race.retire("B", False, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        assert _row(race, "B", t)["distance_m"] == db, "the undone car stays frozen while the red flag holds"
+        for car in (a, b):
+            _new_lobby(car, L - 15)
+        t = _drive(race, [a, b], [None, None], t, 3)
+        assert _row(race, "B", t)["distance_m"] == db, \
+            f"the restart lobby keeps the undone car's laps: {_row(race, 'B', t)}"
+        a.box = b.box = False
+        t = _drive(race, [a, b], [40, 40], t, 5)
+        assert _row(race, "B", t)["distance_m"] > db, f"B resumes from its anchor: {_row(race, 'B', t)}"
+
+
+def t_an_undone_retirement_under_a_mis_pressed_red_flag_counts_on_from_the_undo():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
+        t = _drive(race, [a, b], [50, 50], 0.0, 90)
+        race.retire("B", True, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        db = _row(race, "B", t)["distance_m"]
+        race.red_flag(t, "keep")
+        race.retire("B", False, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        race.release(t)
+        t = _drive(race, [a, b], [50, 50], t, 4)
+        rb = _row(race, "B", t)
+        assert abs(rb["distance_m"] - (db + 300)) < 30, \
+            f"B counts the metres from the undo on, none driven while retired: {db} {rb['distance_m']}"
+
+
+def t_an_undone_retirement_of_a_finished_car_under_a_red_flag_stays_finished():
+    race = rd.Race(TRACE, formation=False, finish_mode="time")
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 300)
+    t = _drive(race, [a, b, c], [50, 50, 50], 0.0, 30)
+    race.final_lap(t)
+    while not _row(race, "B", t)["finished"]:
+        t = _drive(race, [a, b, c], [50, 50, 50], t, 0.2)
+    race.retire("B", True, t)
+    race.red_flag(t, "keep")
+    race.retire("B", False, t)
+    rb = _row(race, "B", t)
+    assert rb["finished"] and not rb["waiting"] and rb["status"] != "red_flag", \
+        f"a finished car does not wait for the restart: {rb}"
+
+
+def _undo_in_the_restart_lobby(new_console):
+    """B retires, the red flag falls, B's console reaches the restart lobby while
+    retired (the same console, or `new_console` connecting there), then Undo DNF."""
+    race = rd.Race(TRACE, formation=False)
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 35)
+    t = _drive(race, [a, b, c], [50, 50, 50], 0.0, 90)
+    race.retire("B", True, t)
+    t = _drive(race, [a, b, c], [50, 50, 50], t, 2)
+    db = _row(race, "B", t)["distance_m"]
+    race.red_flag(t, "keep")
+    if new_console:
+        b = Car(race, "B", "b2", 0.0)
+    for car in (a, b, c):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b, c], [None] * 3, t, 3)
+    race.retire("B", False, t)
+    a.box = b.box = c.box = False
+    t = _drive(race, [a, b, c], [40] * 3, t, 5)
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert rb["status"] == "racing" and abs(rb["distance_m"] - ra["distance_m"]) < 15, \
+        f"B restarts from the keep anchor beside A, not from {db}: {ra['distance_m']} {rb}"
+    race.release(t)
+    t = _drive(race, [a, b, c], [40] * 3, t, 5)
+    gap = _row(race, "A", t)["distance_m"] - _row(race, "B", t)["distance_m"]
+    assert abs(gap) < 15, f"B keeps racing beside A after the release: {gap}"
+
+
+def t_an_undone_retirement_counts_from_a_restart_box_exit_made_while_retired():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        cars = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 35)
+        t = _drive(race, list(cars), [50] * 3, 0.0, 90)
+        race.retire("B", True, t)
+        t = _drive(race, list(cars), [50] * 3, t, 2)
+        race.red_flag(t, "keep")
+        for car in cars:
+            _new_lobby(car, L - 15)
+        t = _drive(race, list(cars), [None] * 3, t, 3)
+        for car in cars:
+            car.box = False
+        t = _drive(race, list(cars), [40] * 3, t, 3)
+        race.retire("B", False, t)
+        ra, rb = _row(race, "A", t), _row(race, "B", t)
+        assert rb["status"] == "racing" and abs(rb["distance_m"] - ra["distance_m"]) < 15, \
+            f"B counts from its box exit beside A: {ra['distance_m']} {rb}"
+        race.release(t)
+        t = _drive(race, list(cars), [40] * 3, t, 10)
+        gap = _row(race, "A", t)["distance_m"] - _row(race, "B", t)["distance_m"]
+        assert abs(gap) < 15, f"B keeps racing beside A after the release: {gap}"
+
+
+def t_a_second_undo_under_the_same_red_flag_does_not_count_the_box_exit_again():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        cars = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 35)
+        t = _drive(race, list(cars), [50] * 3, 0.0, 90)
+        race.retire("B", True, t)
+        race.red_flag(t, "keep")
+        for car in cars:
+            _new_lobby(car, L - 15)
+        t = _drive(race, list(cars), [None] * 3, t, 3)
+        for car in cars:
+            car.box = False
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", False, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", True, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", False, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        gap = _row(race, "B", t)["distance_m"] - _row(race, "A", t)["distance_m"]
+        assert gap < 15, f"B does not count the metres since its box exit twice: {gap}"
+
+
+def t_undoing_a_retirement_after_the_restart_under_the_red_flag_counts_on_from_the_last_distance():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        cars = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 35)
+        t = _drive(race, list(cars), [50] * 3, 0.0, 90)
+        race.red_flag(t, "keep")
+        for car in cars:
+            _new_lobby(car, L - 15)
+        t = _drive(race, list(cars), [None] * 3, t, 3)
+        for car in cars:
+            car.box = False
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", True, t)
+        db = _row(race, "B", t)["distance_m"]
+        t = _drive(race, list(cars), [40] * 3, t, 2)
+        race.retire("B", False, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        rb = _row(race, "B", t)
+        assert rb["status"] == "racing" and abs(rb["distance_m"] - (db + 200)) < 15, \
+            f"a car that already restarted counts on from its last distance: {db} {rb}"
+        race.release(t)
+        t = _drive(race, list(cars), [40] * 3, t, 20)
+        assert abs(_row(race, "B", t)["distance_m"] - (db + 1000)) < 15, \
+            f"B keeps counting after the release: {db} {_row(race, 'B', t)}"
+
+
+def t_an_undone_retirement_restarts_from_a_restart_lobby_it_joined_while_retired():
+    _undo_in_the_restart_lobby(new_console=False)
+
+
+def t_an_undone_retirement_restarts_with_a_console_that_joined_the_restart_lobby_while_retired():
+    _undo_in_the_restart_lobby(new_console=True)
 
 
 def t_a_retired_car_keeps_its_distance_when_its_console_leaves_the_session():

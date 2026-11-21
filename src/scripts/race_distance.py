@@ -128,6 +128,7 @@ class _Car:
         self.line_s = None         # the finish line's station, from this car's own crossing
         self.entry = None
         self.restart_ready = False # red flag: this car is in the restart lobby
+        self.retired_exit = None   # red flag: (t, lap, s) of a restart box exit while retired
         self.fuel = self.x = self.z = None
         self.line_t = None         # relay time of the last counter step while counting
         self.lap_ok = False        # the running lap has been counted from its line
@@ -218,6 +219,7 @@ class Race:
         self._final_at = None       # endurance: when the final stint lobby went on air
         self._final_lap_at = None
         self._finishing_at = None
+        self._flag_at = None        # when the first flag's car passed the line
         self._winner_entry = None   # the first flag's car when it led in race distance
         self._flag_laps = math.inf
         self._finished = False
@@ -274,7 +276,7 @@ class Race:
 
     def retire(self, entry, on, now):
         """Mark a car retired (DNF), or undo it: the car then counts on from its last
-        distance. Returns the entries whose estimate followed the retired car and ended."""
+        distance, under a red flag from the restart like every other car. Returns the entries whose estimate followed the retired car and ended."""
         self._advance(now)
         ent = self._entries.get(entry)
         ended = []
@@ -293,6 +295,23 @@ class Race:
             self._retired.discard(entry)
             if ent is not None and self._finished and ent.finished_at is None:
                 ent.finished_at = now              # a finish by hand classifies it where it stopped
+            elif ent is not None and ent.distance is not None and self._red is not None \
+                    and ent.finished_at is None \
+                    and (ent.resumed is None or ent.resumed[0] != self._red_flags):   # not restarted yet
+                ent.frozen, ent.waiting = ent.distance, True
+                out = next((c for c in self._cars.values() if c.entry == entry
+                            and c.restart_ready and c.retired_exit is not None), None)
+                car = self._cars.get(ent.active)
+                exit_ = None
+                if out is not None:
+                    exit_, out.retired_exit = out.retired_exit, None   # one exit restarts the car once
+                if exit_ is not None and self._restart(ent, out, *exit_):
+                    ent.distance = self._raw(out, out.lap, out.s)   # the metres since the box exit
+                    ent.ts.append(out.t)
+                    ent.ds.append(ent.distance)
+                elif car is not None and car.lap is not None and car.s is not None \
+                        and self._start(ent, car, car.t, ent.distance, car.lap, car.s, from_line=False):
+                    car.counting = False           # a release counts on from here
             elif ent is not None and ent.distance is not None:
                 ent.resume = True
         self._settle_stoppage()
@@ -300,6 +319,27 @@ class Race:
 
     def _out(self, ent):
         return ent.entry in self._retired
+
+    def _restart(self, ent, car, t, lap, s):
+        """Start a waiting entry from its anchor with `car` leaving the restart box at `t`."""
+        old = self._cars.get(ent.active)
+        if old is not None and old is not car:
+            old.counting = False
+        if not self._start(ent, car, t, self._anchor_of(ent), lap, s, from_line=False):
+            return False
+        ent.distance = self._raw(car, lap, s)      # at the exit, though the car may have crossed since
+        ent.active, ent.waiting, ent.held = car.conn, False, False
+        ent.resumed = (self._red_flags, t, ent.distance)
+        if self._stopped is not None:              # the first car out ends the stoppage
+            self._close_stoppage(t)
+            self._lobby_at = t
+        ent.ts.append(t)
+        ent.ds.append(ent.distance)
+        return True
+
+    def _restarting(self, ent):
+        """A new session now is the restart lobby; a car retired under the red flag may be undone."""
+        return ent.waiting or (self._out(ent) and self._red is not None)
 
     def _ghost(self, entry):
         """A row for a roster entry the race has not seen, with its preset corrections."""
@@ -335,7 +375,7 @@ class Race:
             if car is not None:
                 car.counting = False
         for car in self._cars.values():
-            car.restart_ready = False
+            car.restart_ready, car.retired_exit = False, None
             car.lap_ok, car.pending = False, None
 
     def set_restart_mode(self, mode):
@@ -667,7 +707,7 @@ class Race:
         if car is None:
             car = self._cars[conn] = _Car(conn, name)
             car.entry = entry
-            car.restart_ready = ent.waiting                # it joined the restart lobby
+            car.restart_ready = self._restarting(ent)      # it joined the restart lobby
         if entry in self._est and conn == ent.active and (car.t is None or t - car.t > NO_DATA_S):
             del self._est[entry]                           # the car is back: its own distance
             self._ended_est.append(entry)
@@ -681,7 +721,7 @@ class Race:
         _i, lateral, s = self._line.locate(x, z)
         active = conn == ent.active
         prev_lap = car.lap
-        if prev_lap is not None and lap < prev_lap and ent.waiting:
+        if prev_lap is not None and lap < prev_lap and self._restarting(ent):
             car.restart_ready = True              # the restart lobby after a red flag
         elif active and prev_lap is not None and lap < prev_lap and ent.finished_at is None \
                 and not self._out(ent):
@@ -716,20 +756,12 @@ class Race:
             if self._window_until is not None and t <= self._window_until:
                 ent.switch_pit = True
         if self._out(ent):
+            if car.restart_ready and car.left_box and lap <= MAX_CHANGE_LAP and car.retired_exit is None:
+                car.retired_exit = (t, lap, s)
             return
         if ent.waiting:
             if car.restart_ready and car.left_box and lap <= MAX_CHANGE_LAP:
-                old = self._cars.get(ent.active)
-                if old is not None and old is not car:
-                    old.counting = False
-                if self._start(ent, car, t, self._anchor_of(ent), lap, s, from_line=False):
-                    ent.active, ent.waiting, ent.held = conn, False, False
-                    ent.resumed = (self._red_flags, t, ent.distance)
-                    if self._stopped is not None:  # the first car out ends the stoppage
-                        self._close_stoppage(t)
-                        self._lobby_at = t
-                    ent.ts.append(t)
-                    ent.ds.append(ent.distance)
+                self._restart(ent, car, t, lap, s)
             return
         if self.multi_lobby:
             self._change(ent, car, t)
@@ -880,7 +912,7 @@ class Race:
         if self._finished:
             return
         if self._finishing_at is not None:
-            if ent.finished_at is None and t > self._finishing_at:
+            if ent.finished_at is None and at > self._flag_at:
                 self._to_line(ent)
                 ent.finished_at = t
                 self._finished = all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
@@ -931,7 +963,7 @@ class Race:
         self._winner_entry = ent if shown is not None and shown >= lead else None
         self._flag_laps = math.floor(lead / self.length) if lead is not None else math.inf
         ent.finished_at = self._finishing_at = t
-        at = t if at is None else at
+        at = self._flag_at = t if at is None else at
         late = [e for e in self._entries.values()
                 if e is not ent and e.finished_at is None and not self._out(e)
                 and e.crossed is not None and e.crossed[0] > at]

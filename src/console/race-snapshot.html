@@ -162,7 +162,7 @@
       var st = STATUS[e.status] || [String(e.status || ""), ""];
       var lapped = grouped ? e.class_lapped : e.lapped;
       var first = grouped ? e.class_pos <= 1 : e.pos <= 1;
-      var gapS = grouped ? e.class_gap_s : e.gap_time_s;
+      var gapS = grouped ? (typeof e.class_gap_time_s === "number" ? e.class_gap_time_s : e.class_gap_s) : e.gap_time_s;
       var lappedTime = grouped ? e.class_gap_time_s : e.gap_time_s;
       var gap = lapped ? "+" + lapped + "\u00a0L" + (typeof lappedTime === "number" ? "\u00a0\u00b7\u00a0" + secs(lappedTime) : "")
                        : (first ? "" : secs(gapS));
