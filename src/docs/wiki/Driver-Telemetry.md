@@ -567,9 +567,10 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   at the line. A car that crosses
   on the leader's lap on the road keeps the leader's race laps, even when its box
   put its race lap line just past the lobby's. When a car on track did not restart
-  from the restart lobby's box (a change override, an undone retirement, a car still
-  in the lobby it raced in), its race no longer matches the road, and the whole finish
-  compares race distance again.
+  from the restart lobby's box (a change override, a car still in the lobby it raced
+  in), its race no longer matches the road, and the whole finish compares race
+  distance again. The flag settles which rule applies; a car retired after the restart
+  and undone keeps its restart.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
   leader's distance where its car of the old lobby stopped, however early the stint
   switch was pressed, so its later departure from the box becomes its deficit. A rejoin

@@ -1721,6 +1721,41 @@ def t_after_a_keep_restart_a_car_counting_on_from_an_override_keeps_one_rule_for
         f"one rule for every car, race distance: {[(r['entry'], r['gap_time_s']) for r in rows]}"
 
 
+def t_after_a_keep_restart_an_undone_dnf_or_an_override_during_the_finish_keeps_the_road_rule():
+    for action in ("undo_dnf", "undo_dnf_before_the_call", "override"):
+        race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+        race.final_lobby(None, 0.0)
+        cars = [Car(race, e, e.lower(), L - 15 - 100 * i) for i, e in enumerate("ABCD")]
+        t = _drive(race, cars, [50] * 4, 0.0, 40)
+        race.red_flag(t, "keep")
+        for car, box in zip(cars, (L - 400, L - 400, L - 250, L - 400), strict=True):
+            _new_lobby(car, box)
+        t = _drive(race, cars, [None] * 4, t, 3)
+        for k in range(4):
+            cars[k].box = False
+            t = _drive(race, cars, [50 if i <= k else None for i in range(4)], t, 2)
+        race.release(t)
+        t = _drive(race, cars, [50] * 4, t, 50)
+        race.retire("D", True, t)
+        if action == "undo_dnf_before_the_call":
+            t = _drive(race, cars, [50] * 4, t, 2)
+            race.retire("D", False, t)
+            t = _drive(race, cars, [50] * 4, t, 2)
+        race.final_lap(t)
+        while not _row(race, "C", t)["finished"]:
+            t = _drive(race, cars, [50] * 4, t, 1.0 / HZ)
+        if action == "undo_dnf":
+            race.retire("D", False, t)
+        elif action == "override":
+            assert race.override_change("B", "b", t)
+        while race.standings(t)["state"] != "finished" and t < 400:
+            t = _drive(race, cars, [50] * 4, t, 1.0 / HZ)
+            rows = race.standings(t)["entries"]
+            assert [r["entry"] for r in rows][:3] == ["A", "C", "B"] \
+                and abs(_row(race, "C", t)["gap_time_s"] - 1.0) < 0.15, \
+                f"{action} leaves the road rule of the finish alone: {[(r['entry'], r['gap_time_s']) for r in rows]}"
+
+
 def t_an_endurance_winner_stays_first_when_its_race_lap_ends_past_the_line():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     race.final_lobby(2, 0.0)
