@@ -948,7 +948,10 @@ async function pollTiming() {
   let d;
   try { d = await j('/drivers/dashboard'); } catch (e) { setTimeout(pollTiming, 5000); return; }
   const rows = d.mode === 'qualifying' ? (d.qualifying || []) : (d.entries || []);
-  $('timingCard').hidden = !rows.length;
+  // A roster of entries that never sent data stays hidden; a car that sent some keeps the card.
+  $('timingCard').hidden = !rows.some(function (e) {
+    return d.mode === 'qualifying' || e.finished || e.laps > 0 || ['no_sender', 'no_data'].indexOf(e.status) < 0;
+  });
   const head = $('timingHead');
   head.textContent = '';
   const parts = [];

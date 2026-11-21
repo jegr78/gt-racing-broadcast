@@ -28,7 +28,8 @@ Panel, but for the **commentators**. Each commentator opens the Console and sign
 - **Race timer**, the live remaining-time clock.
 - **Timing**, the driver race when drivers send telemetry: the same delayed data as the
   on-air driver dashboard, with every column at once and the brand logos. The card stays
-  hidden while there is no data. See
+  hidden until a car sends telemetry: the entries of the Configuration tab alone do not
+  show it. See
   [Driver telemetry](Driver-Telemetry#on-air-and-in-the-cockpit).
 - **Stint plan**, every stint with its streamer; your own stints are marked and the stint
   on air is highlighted.

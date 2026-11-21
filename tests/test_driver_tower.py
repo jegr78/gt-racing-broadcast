@@ -1075,14 +1075,14 @@ def _cockpit(payload, head=False, probe=None):
           + "const j = async () => (" + json.dumps(payload) + ");\n" + block
           + """\n;(async function () {
       await pollTiming();
-      if (__PROBE__) return (__PROBE__);
+      if (__HASPROBE__) return (__PROBE__);
       if (__HEAD__) return els.timingHead.children.map(text);
       return els.timing.tBodies[0].children.map(function (r) {
         if (r.className === "cls") return {head: text(r), color: r.children[0].children[0].style.color || ""};
         return r.children.map(text);
       });
     })().then(r => console.log(JSON.stringify(r)));""").replace("__HEAD__", json.dumps(head)).replace(
-        "__PROBE__", probe or "null")
+        "__HASPROBE__", json.dumps(probe is not None)).replace("__PROBE__", probe or "null")
     return _run(js)
 
 
@@ -1121,6 +1121,30 @@ def t_the_cockpit_flags_a_finished_row_with_its_final_gap():
     assert [g["flag"] for g in got] == [True, True, True, False], f"a finish shows the flag, an estimate its tag: {got}"
     assert got[3]["est"], f"an estimate keeps its EST tag: {got}"
     assert got[0]["row"] == "", f"a finished car in the box is not marked as boxed: {got}"
+
+
+def t_the_cockpit_hides_the_timing_card_until_a_car_has_data():
+    def card(payload):
+        return _cockpit(payload, probe="els.timingCard.hidden")
+
+    def race(*rows):
+        return {"mode": "race", "entries": [dict(CAR, entry=f"E #{i}", pos=i + 1, **{"laps": 0, "finished": False, **r})
+                                            for i, r in enumerate(rows)]}
+    if card({"mode": "race", "entries": []}) is None:
+        return
+    quali_row = {k: v for k, v in _q("A #1", 1, 90000, 0, None, 90000).items() if k not in ("status", "finished")}
+    got = {
+        "empty": card({"mode": "race", "entries": []}),
+        "roster only": card(race({"status": "no_sender"}, {"status": "no_sender"})),
+        "never sent": card(race({"status": "no_sender"}, {"status": "no_data"})),
+        "waiting": card(race({"status": "no_sender"}, {"status": "waiting"})),
+        "quiet after laps": card(race({"status": "no_data", "laps": 3}, {"status": "no_sender"})),
+        "finished and quiet": card(race({"status": "no_data", "finished": True}, {"status": "no_sender"})),
+        "qualifying": card({"mode": "qualifying", "qualifying": [quali_row]}),
+    }
+    assert got == {"empty": True, "roster only": True, "never sent": True, "waiting": False,
+                   "quiet after laps": False, "finished and quiet": False, "qualifying": False}, \
+        f"the card shows once a car sent data, and a roster of no-data rows keeps it hidden: {got}"
 
 
 def t_the_cockpit_renders_one_class_as_today():
