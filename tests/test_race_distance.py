@@ -270,6 +270,31 @@ def t_a_car_crossing_right_after_the_flag_finishes_there_whatever_order_its_data
             f"B crossed the line after A took the flag, so it finishes there (multi_lobby={multi_lobby})"
 
 
+def t_a_late_crossing_short_of_the_cars_line_keeps_its_lap():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
+    t = _drive(race, [a, b], [50, 50], 0.0, 30)
+    race.final_lap(t)
+    while a.along < L - 5:
+        step = min(20.0, L - 5 - a.along)
+        t += step / 50
+        for car in (b, a):
+            car.along += step
+            car.send(t if car is b else t + 0.01)
+    car_b = race._cars["b"]
+    car_b.line = (car_b.line + 12.0) % race.length      # B's line station 12 m past the real line
+    t += 0.4
+    for car in (b, a):                                 # B's crossing reaches the relay first
+        car.along += 20.0
+        car.send(t if car is b else t + 0.01)
+    t += 0.01
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert rb["finished"] and race._entries["B"].crossed[0] > race._entries["A"].crossed[0], \
+        "B finishes as the late car of A's flag"
+    assert (rb["laps"], rb["lapped"]) == (ra["laps"], 0), \
+        f"B crossed the same line as A: {ra['laps']} {rb['laps']} ({rb['distance_m']})"
+
+
 def t_gt7_position_disagreeing_with_the_distance_is_flagged():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)
