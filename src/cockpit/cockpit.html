@@ -884,6 +884,8 @@ function timingLogo(e) {
   span.appendChild(img);
   return {cls: 'logo', node: span};
 }
+// A car without live data: its last fuel reading is stale.
+const TIMING_QUIET = ['est', 'no_data', 'dc', 'no_sender', 'retired'];
 const TIMING_STATUS = {box: 'Box', no_data: 'No data', dc: 'DC', red_flag: 'Red flag', no_sender: 'No data', retired: 'DNF'};
 // An estimated position: the gap Race Control set, marked EST.
 function timingEst(text) {
@@ -1007,7 +1009,8 @@ async function pollTiming() {
         if (flg && flg.entry === e.entry && flg.ms === e.last_lap_ms) last.className = 'fl';
         timingCells(tr, [v.pos, timingLogo(e), timingNum(e), timingDriver(e), timingTyre(e), laps, gap,
                          typeof v.interval_s === 'number' && i ? '+' + v.interval_s.toFixed(1) : '',
-                         {node: last}, typeof e.fuel_l === 'number' ? e.fuel_l.toFixed(1) + ' L' : '',
+                         {node: last}, typeof e.fuel_l === 'number' && TIMING_QUIET.indexOf(e.status) < 0
+                           ? e.fuel_l.toFixed(1) + ' L' : '',
                          e.pit_stops || 0]);
       }
       body.appendChild(tr);

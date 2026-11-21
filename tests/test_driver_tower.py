@@ -1024,6 +1024,21 @@ def t_the_public_page_works_without_storage():
     assert got == ["GT4Lap 6 / 18"], f"a blocked store costs only the memory: {got}"
 
 
+QUIET = ["est", "no_data", "dc", "no_sender", "retired"]
+
+
+def t_the_public_page_and_the_cockpit_show_no_fuel_for_a_quiet_car():
+    cars = [dict(CAR, entry=f"E #{i}", pos=i + 1, status=s) for i, s in enumerate(["racing"] + QUIET)]
+    public = _public(f"""render({{mode: "race", entries: {json.dumps(cars)}}});
+      return body().map(r => r.fuel);""")
+    if public is None:
+        return
+    cockpit = _cockpit({"mode": "race", "entries": cars})
+    assert public == ["56.4 L", "", "", "", "", ""], f"public page: a quiet car's last fuel reading is stale: {public}"
+    assert [r[9] for r in cockpit] == ["56.4 L", "", "", "", "", ""], \
+        f"cockpit: a quiet car's last fuel reading is stale: {cockpit}"
+
+
 def t_the_public_page_renders_one_class_as_today():
     entries, _classes = _public_cars()
     flat_rows = [{k: v for k, v in e.items() if not k.startswith("class")} for e in entries]
