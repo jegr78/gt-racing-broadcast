@@ -529,10 +529,10 @@ def t_the_desk_arms_one_button_at_a_time():
       function look(b) { return [b.textContent, !!b.cls.armed]; }
       var armed = arming();
       var a = btn("Final lap"), b = btn("Finish"), r1 = btn("Reject"), r2 = btn("Reject");
-      armed(a, function () { fired.push("a"); });
-      armed(b, function () { fired.push("b"); });
-      armed(r1, function () { fired.push("r1"); });
-      armed(r2, function () { fired.push("r2"); });
+      armed(a, "final", function () { fired.push("a"); });
+      armed(b, "finish", function () { fired.push("b"); });
+      armed(r1, "rej-c1", function () { fired.push("r1"); });
+      armed(r2, "rej-c2", function () { fired.push("r2"); });
       a.click(); b.click();
       var afterB = [look(a), look(b)];
       a.click();
@@ -541,16 +541,32 @@ def t_the_desk_arms_one_button_at_a_time():
       timers.forEach(function (f) { if (f) f(); });
       var timedOut = [look(a), look(b)];
       r1.click(); r2.click();
-      return {afterB: afterB, aOnce: aOnce, fired: fired, timedOut: timedOut, rebuilt: look(r2)};
+      var other = look(r2);
+      var r2b = btn("Reject"), r3 = btn("Reject");
+      armed(r2b, "rej-c2", function () { fired.push("r2b"); });
+      armed(r3, "rej-c3", function () { fired.push("r3"); });
+      var rebuilt = [look(r2b), look(r3)];
+      var pending = timers.filter(Boolean).length;
+      r2b.click();
+      var r2c = btn("Reject");
+      r2b.click();
+      armed(r2c, "rej-c2", function () { fired.push("r2c"); });
+      timers.forEach(function (f) { if (f) f(); });
+      return {afterB: afterB, aOnce: aOnce, fired: fired, timedOut: timedOut, other: other,
+              rebuilt: rebuilt, pending: pending, expired: [look(r2b), look(r2c)]};
     })()""")
     if got is None:
         return
     assert got["afterB"] == [["Final lap", False], ["Confirm Finish", True]], \
         f"arming a second button resets the first: {got}"
     assert got["aOnce"] == [], f"the reset button needs two clicks again: {got}"
-    assert got["fired"] == ["b"] and got["timedOut"] == [["Final lap", False], ["Finish", False]], \
+    assert got["fired"][:1] == ["b"] and got["timedOut"] == [["Final lap", False], ["Finish", False]], \
         f"a confirmed button fires once, and a timer resets only its own button: {got}"
-    assert got["rebuilt"] == ["Confirm Reject", True], f"a rebuilt button never inherits the armed state: {got}"
+    assert got["other"] == ["Confirm Reject", True], f"another row's button never confirms the first: {got}"
+    assert got["rebuilt"] == [["Confirm Reject", True], ["Reject", False]] and got["pending"] == 1, \
+        f"a button rebuilt with the same key stays armed on the same timer, a new key does not: {got}"
+    assert got["fired"] == ["b", "r2b"], f"the rebuilt button confirms with one more click: {got}"
+    assert got["expired"] == [["Reject", False], ["Reject", False]], f"the timer disarms the rebuilt button: {got}"
 
 
 def t_the_desk_offers_a_lap_count_per_slower_class():

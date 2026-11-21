@@ -264,23 +264,33 @@
     return pills;
   }
   // Two clicks for anything that changes the race for everyone: the first arms the button
-  // for 4 s and disarms any other, the second on the same button runs `fn`.
+  // for 4 s and disarms any other, the second on the same key runs `fn`. A button rebuilt
+  // with the armed key takes over the armed state, so a row re-render keeps the confirm.
   function arming() {
-    var cur = null;   // {btn, timer}
+    var cur = null;   // {key, btn, timer}
+    function show(btn, on) {
+      if (on) btn.classList.add("armed"); else btn.classList.remove("armed");
+      btn.textContent = (on ? "Confirm " : "") + btn.dataset.label;
+    }
     function disarm() {
       if (!cur) return;
       clearTimeout(cur.timer);
-      cur.btn.classList.remove("armed");
-      cur.btn.textContent = cur.btn.dataset.label;
+      show(cur.btn, false);
       cur = null;
     }
-    return function (btn, fn) {
+    return function (btn, key, fn) {
+      if (cur && cur.key === key) {
+        show(cur.btn, false);
+        cur.btn = btn;
+        show(btn, true);
+      }
       btn.addEventListener("click", function () {
-        if (cur && cur.btn === btn) { disarm(); fn(); return; }
+        if (cur && cur.key === key) { disarm(); fn(); return; }
         disarm();
-        btn.classList.add("armed");
-        btn.textContent = "Confirm " + btn.dataset.label;
-        cur = {btn: btn, timer: setTimeout(function () { if (cur && cur.btn === btn) disarm(); }, 4000)};
+        show(btn, true);
+        var mine = {key: key, btn: btn, timer: 0};
+        mine.timer = setTimeout(function () { if (cur === mine) disarm(); }, 4000);
+        cur = mine;
       });
     };
   }
@@ -337,7 +347,7 @@
     function button(label, cls, key, fn) {
       var b = el("button", {type: "button", cls: cls || "", text: label});
       b.dataset.label = label;
-      if (key) armed(b, fn); else b.addEventListener("click", fn);
+      if (key) armed(b, key, fn); else b.addEventListener("click", fn);
       return b;
     }
 
