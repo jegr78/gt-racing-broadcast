@@ -106,6 +106,9 @@ in the GT7 lobby.
 - Approved drivers sit under **Approved drivers**. **Correct** opens the same fields to
   change the name, team or stint later, and **Reject** revokes the code. **Move** in the
   Senders table changes the team the same way.
+- **Disconnect** in the Senders table refuses the code until the driver registers again,
+  also after a relay restart. The request stays under **Approved drivers** with a
+  *disconnected* pill, and Readiness and the Senders table show it as *disconnected*.
 
 Each device that registers keeps at most three waiting requests per entry and stint
 and eight in all. A further registration from it drops its own oldest waiting request,

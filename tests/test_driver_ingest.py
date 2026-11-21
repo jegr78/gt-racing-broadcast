@@ -193,12 +193,13 @@ def t_readiness_marks_pending_and_approved_requests_without_a_sender():
     reqs = [{"conn": "c1", "entry": "A", "segment": None, "name": "Max", "status": "approved"},
             {"conn": "c2", "entry": "A", "segment": None, "name": "Ann", "status": "pending"},
             {"conn": "c3", "entry": "B", "segment": None, "name": "Lea", "status": "approved"},
-            {"conn": "c4", "entry": "B", "segment": None, "name": "Eve", "status": "rejected"}]
+            {"conn": "c4", "entry": "B", "segment": None, "name": "Eve", "status": "rejected"},
+            {"conn": "c5", "entry": "B", "segment": None, "name": "Ole", "status": "approved", "disconnected": True}]
     rows = ing.readiness(["A", "B"], [], conns, multi_lobby=False, requests=reqs)
     got = {r["entry"]: (r["ready"], [(s["name"], s["approval"], s["connected"]) for s in r["senders"]])
            for r in rows}
     assert got == {"A": (True, [("Max", "approved", True), ("Ann", "pending", False)]),
-                   "B": (False, [("Lea", "approved", False)])}, got
+                   "B": (False, [("Lea", "approved", False), ("Ole", "disconnected", False)])}, got
 
 
 def t_an_approval_correction_and_a_revoke_reach_the_hub():

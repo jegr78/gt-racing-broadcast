@@ -243,7 +243,7 @@ def readiness(roster, segments, connections, multi_lobby, requests=()):
     """One row per entry (in endurance per entry and stint label) with its senders:
     {entry, segment, ready, senders: [{conn, name, live, approval, connected}]}. A
     request (`driver_requests`) without a connection is a sender that never sent:
-    `approval` pending or approved. Senders registered for an entry or label outside
+    `approval` pending, approved or disconnected (by the producer). Senders registered for an entry or label outside
     the roster get their own rows, so nobody is hidden."""
     slots = [(e, s) for e in roster for s in (segments if multi_lobby and segments else [None])]
     rows = {slot: [] for slot in slots}
@@ -258,6 +258,7 @@ def readiness(roster, segments, connections, multi_lobby, requests=()):
             continue
         key = (r["entry"], r["segment"] if multi_lobby and segments else None)
         rows.setdefault(key, []).append({"conn": r["conn"], "name": r["name"], "live": False,
-                                         "approval": r["status"], "connected": False})
+                                         "approval": "disconnected" if r.get("disconnected") else r["status"],
+                                         "connected": False})
     return [{"entry": e, "segment": s, "ready": any(x["live"] for x in senders),
              "senders": senders} for (e, s), senders in rows.items()]

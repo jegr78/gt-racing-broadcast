@@ -219,6 +219,7 @@ def t_a_disconnected_request_is_remembered_for_its_invite():
     store.approve("conn0001", "race_control:dave", entry="Team A #1", segment=None, name="Max")
     assert not store.disconnect("nobody00"), "only a known request is disconnected"
     assert store.disconnect("conn0001") and store.was_disconnected("conn0001")
+    assert [r.get("disconnected") for r in store.all()] == [True], "the listing marks it for the desks"
     again = dr.Store(store.path, lambda: inv[0])
     assert again.was_disconnected("conn0001") and not again.was_disconnected("nobody00"), "it survives a restart"
     inv[0] = "inv-2"

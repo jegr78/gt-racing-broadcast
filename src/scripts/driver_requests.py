@@ -177,10 +177,12 @@ class Store:
             return copy.deepcopy(rec) if rec else None
 
     def all(self):
+        """Every request, each with `disconnected` true once the producer disconnected it."""
         with self._lock:
             if not self._current():
                 return []
-            return copy.deepcopy(list(self._reqs.values()))
+            return [dict(copy.deepcopy(r), disconnected=r["conn"] in self._disconnected)
+                    for r in self._reqs.values()]
 
     def add(self, reg, client=""):
         """The request of a verified code (`driver_invite.verify`) from `client`; an

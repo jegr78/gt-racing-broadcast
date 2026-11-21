@@ -93,7 +93,8 @@ correct the entry, the stint and the name. The relay then uses the corrected val
 place of the ones signed into the code. These routes are on the tailnet, for directors
 also under `/console/drivers/*` and for Race Control under
 `/console/race-control/drivers/*`. `GET /drivers/requests` returns `{multi_lobby, entries, segments, requests: [{conn,
-entry, segment, name, status, ts, registered {entry, segment, name}, who, decided}]}`;
+entry, segment, name, status, ts, registered {entry, segment, name}, who, decided, disconnected}]}`,
+where `disconnected` is true for an approved code the producer disconnected;
 `POST /drivers/requests/approve` and `/correct` take `{conn, entry?, segment?, name?}`,
 where a missing field keeps the request's value, and `/reject` takes `{conn}`. They answer
 `{ok, request}`, 400 for a value outside the roster, the stint labels or the name rule,

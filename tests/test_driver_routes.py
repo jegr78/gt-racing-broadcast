@@ -505,7 +505,7 @@ def t_requests_reach_both_desks_and_never_the_driver_routes():
         assert st == 200 and [(r["conn"], r["status"]) for r in data["requests"]] == [(conn, "pending")], text
         assert data["entries"] == ENTRIES and data["multi_lobby"] is False, data
         assert set(data["requests"][0]) == {"conn", "entry", "segment", "name", "status", "ts", "registered",
-                                            "who", "decided"}, "a request shows no telemetry"
+                                            "who", "decided", "disconnected"}, "a request shows no telemetry"
         for route in (f"/console/drivers/requests?t={alice}", f"/console/race-control/drivers/requests?t={alice}",
                       f"/console/race-control/drivers/requests?t={director}"):
             assert _req(port, route)[0] == 403, route
@@ -825,6 +825,10 @@ def t_the_producer_disconnects_a_sender_on_the_tailnet():
         assert code == 200 and json.loads(text) == {"ok": True}, (code, text)
         code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(2)]), {"X-Driver-Code": issued})
         assert code == 410 and "disconnected" in text, (code, text)
+        req = json.loads(_req(port, "/drivers/requests")[1])["requests"][0]
+        assert req["status"] == "approved" and req["disconnected"] is True, ("the desks see the disconnect", req)
+        senders = [s for r in json.loads(_req(port, "/drivers/readiness")[1])["rows"] for s in r["senders"]]
+        assert [s["approval"] for s in senders] == ["disconnected"], ("readiness says disconnected", senders)
     finally:
         srv.shutdown()
 
