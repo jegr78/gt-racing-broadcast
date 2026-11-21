@@ -351,10 +351,11 @@ def t_final_lap_by_time_and_finish_by_hand():
     assert other.standings(t)["state"] == "finished" and _row(other, "C", t)["distance_m"] == d
 
 
-def _batched_finish(multi_lobby):
+def _batched_finish(multi_lobby, b_first=True):
     """A leads B by 10 m on the road and by 210 m in race distance (as after a keep
-    restart); one 0.4 s batch carries both crossings, and B's sender posts first, so B's
-    crossing reaches the relay before A's."""
+    restart); one 0.4 s batch carries both crossings. With `b_first` B's sender posts
+    first, so B's crossing reaches the relay before A's; else A's batch arrives first
+    and B's sample is stamped earlier than A's."""
     race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby, finish_mode="time")
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
     t = _drive(race, [a, b], [50, 50], 0.0, 30)
@@ -367,7 +368,7 @@ def _batched_finish(multi_lobby):
             car.along += step
             car.send(t if car is b else t + 0.01)
     t += 0.4                                                  # A 15 m, B 5 m past the line
-    for car in (b, a):
+    for car in (b, a) if b_first else (a, b):
         car.along += 20.0
         car.send(t if car is b else t + 0.01)
     t += 0.01
@@ -376,11 +377,39 @@ def _batched_finish(multi_lobby):
 
 def t_a_car_crossing_right_after_the_flag_finishes_there_whatever_order_its_data_arrives():
     for multi_lobby in (False, True):
-        race, (a, b), t = _batched_finish(multi_lobby)
-        assert b.lap() == 2, "the batch carries both crossings"
-        assert _row(race, "A", t)["finished"] and _order(race, t) == ["A", "B"], race.standings(t)
-        assert _row(race, "B", t)["finished"] and race.standings(t)["state"] == "finished", \
-            f"B crossed the line after A took the flag, so it finishes there (multi_lobby={multi_lobby})"
+        for b_first in (True, False):
+            race, (a, b), t = _batched_finish(multi_lobby, b_first)
+            assert b.lap() == 2, "the batch carries both crossings"
+            assert _row(race, "A", t)["finished"] and _order(race, t) == ["A", "B"], race.standings(t)
+            assert _row(race, "B", t)["finished"] and race.standings(t)["state"] == "finished", \
+                f"B crossed the line after A took the flag, so it finishes there " \
+                f"(multi_lobby={multi_lobby}, b_first={b_first})"
+
+
+def t_a_car_crossing_just_before_the_flag_does_not_finish_there():
+    race = rd.Race(TRACE, formation=False, multi_lobby=False, finish_mode="time")
+    a, c = Car(race, "A", "a", L - 15), Car(race, "C", "c", L - 25)
+    t = _drive(race, [a, c], [50, 50], 0.0, 30)
+    race.correct("C", -L)
+    race.final_lap(t)
+    c.along = a.along + 3.0                                  # C a lap down, 3 m ahead on the road
+    while a.along < L - 5:
+        step = min(20.0, L - 5 - a.along)
+        t += step / 50
+        for car in (a, c):
+            car.along += step
+            car.send(t if car is a else t + 0.01)
+    t += 0.4
+    for car in (a, c):                                       # A's batch first, C's sample stamped later
+        car.along += 20.0
+        car.send(t if car is a else t + 0.01)
+    t += 0.01
+    ea, ec = race._entries["A"], race._entries["C"]
+    assert _row(race, "A", t)["finished"] and ec.crossed[0] < ea.crossed[0], (ea.crossed, ec.crossed)
+    assert not _row(race, "C", t)["finished"], "C crossed the line before A took the flag, so it runs one more lap"
+    while not _row(race, "C", t)["finished"]:
+        t = _drive(race, [a, c], [50, 50], t, 0.5)
+    assert race.standings(t)["state"] == "finished", race.standings(t)
 
 
 def t_a_late_crossing_short_of_the_cars_line_keeps_its_lap():

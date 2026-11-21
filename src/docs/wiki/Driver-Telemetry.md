@@ -196,9 +196,9 @@ and says so. Changing the layout mid-event starts the race over.
   lobby's own setting; every other car at its next crossing of the line. **Timed**: Race
   Control or the director triggers **Final lap**, and the race ends at the leader's next
   crossing. An endurance final lobby ends on the road, see below. Each crossing is
-  timed between the car's two samples around the line, so a car that crosses right
-  after the flag finishes there even when its data reached the relay before the
-  leader's. The race timer never ends a race. **Finish** freezes the order at once. After the
+  timed between the car's two samples around the line, and the flag goes to every car
+  that crosses after the leader's crossing moment, in whatever order the data reaches
+  the relay. A car that crossed just before the leader runs one more lap. The race timer never ends a race. **Finish** freezes the order at once. After the
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
   Cars still running on the same lap keep following the road until each finishes,

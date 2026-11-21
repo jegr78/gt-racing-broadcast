@@ -218,6 +218,7 @@ class Race:
         self._final_at = None       # endurance: when the final stint lobby went on air
         self._final_lap_at = None
         self._finishing_at = None
+        self._flag_at = None        # when the first flag's car passed the line
         self._winner_entry = None   # the first flag's car when it led in race distance
         self._flag_laps = math.inf
         self._finished = False
@@ -880,7 +881,7 @@ class Race:
         if self._finished:
             return
         if self._finishing_at is not None:
-            if ent.finished_at is None and t > self._finishing_at:
+            if ent.finished_at is None and at > self._flag_at:
                 self._to_line(ent)
                 ent.finished_at = t
                 self._finished = all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
@@ -931,7 +932,7 @@ class Race:
         self._winner_entry = ent if shown is not None and shown >= lead else None
         self._flag_laps = math.floor(lead / self.length) if lead is not None else math.inf
         ent.finished_at = self._finishing_at = t
-        at = t if at is None else at
+        at = self._flag_at = t if at is None else at
         late = [e for e in self._entries.values()
                 if e is not ent and e.finished_at is None and not self._out(e)
                 and e.crossed is not None and e.crossed[0] > at]
