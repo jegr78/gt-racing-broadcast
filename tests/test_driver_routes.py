@@ -1411,6 +1411,23 @@ def t_restart_released_brings_back_the_banner_the_red_flag_replaced():
         srv.shutdown()
 
 
+def t_a_rate_limited_lower_never_reads_the_sheet():
+    hdr = {"Content-Type": "application/json"}
+    setup, reads = _Setup(), []
+    setup.refresh = lambda timeout=10: reads.append(timeout)
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, None, 60.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: _req(port, f"/console/race-control/red-flag?t={rc}", json.dumps({"on": on}).encode(), hdr)[0]
+    try:
+        assert flag(True) == 200
+        assert [flag(False) for _ in range(3)] == [429] * 3
+        assert reads == [], ("a refused lower costs no outbound Sheet fetch", reads)
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
 def t_a_refused_banner_write_keeps_the_desk_claim():
     hdr = {"Content-Type": "application/json"}
     setup = _Setup()

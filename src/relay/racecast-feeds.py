@@ -12171,6 +12171,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _timing_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)   # public scans spare the drivers
     _drive_register_rl = console_auth.RateLimiter(limit=DRIVE_REGISTER_PER_MIN, window_s=60)
     _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
+    _red_flag_read, _red_flag_read_at = threading.Lock(), [float("-inf")]   # one Sheet read for concurrent lowers
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _requests = driver_requests.Store(
         driver_requests.path_in(os.path.dirname(os.path.abspath(driver_invite_path))),
@@ -15174,12 +15175,16 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     now = time.monotonic()
                     cover, note, banner = False, "obs unavailable", {"error": "not raised here"}
                     hud = getattr(setup_ctl, "hud", None)
-                    if not on and getattr(relay, "rc_red_flag_banner", False) and hasattr(hud, "refresh"):
-                        hud.refresh(timeout=5)      # the Sheet now, not the last poll
                     with _red_flag_lock:
                         if now - _red_flag_last.get(who, -RED_FLAG_MIN_S) < RED_FLAG_MIN_S:
                             return self._send({"ok": False, "error": "one red flag change per 2 s"}, 429)
                         _red_flag_last[who] = now
+                    if not on and getattr(relay, "rc_red_flag_banner", False) and hasattr(hud, "refresh"):
+                        with _red_flag_read:
+                            if _red_flag_read_at[0] < now:     # else a read began after this request
+                                _red_flag_read_at[0] = time.monotonic()
+                                hud.refresh(timeout=5)      # the Sheet now, not the last poll
+                    with _red_flag_lock:
                         # Lowering undoes only a cover this route turned on: never an
                         # auto-cover over a dead feed (#495) or the director's own.
                         owned = getattr(relay, "rc_red_flag_raised", False)
