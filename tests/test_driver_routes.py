@@ -1353,6 +1353,8 @@ class _Setup:
         return {"raceControl": self.banner}
 
     def set_field(self, key, value):
+        if value not in ("", g.m.RED_FLAG_BANNER, "Driver Swaps"):
+            return {"error": "not in the Configuration vocabulary"}
         if key == "racecontrol":
             self.banner = value
         return {"ok": True, "field": key, "value": value}
@@ -1381,6 +1383,24 @@ def t_race_control_clears_the_banner_its_red_flag_set_whoever_owns_the_cover():
         setup.banner = "Driver Swaps"                    # typed into the Setup tab
         flag(False)
         assert setup.banner == "Driver Swaps", "a banner changed in the Sheet stays too"
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
+def t_a_refused_banner_write_keeps_the_desk_claim():
+    hdr = {"Content-Type": "application/json"}
+    setup = _Setup()
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, None, 0.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: _req(port, f"/console/race-control/red-flag?t={rc}", json.dumps({"on": on}).encode(), hdr)
+    try:
+        flag(True)
+        assert _req(port, "/setup/set/racecontrol")[0] == 404
+        assert "error" in json.loads(_req(port, "/setup/set/racecontrol/Not%20Listed")[1])
+        flag(False)
+        assert setup.banner == "", "a write that changed nothing leaves Restart released its banner to clear"
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()
