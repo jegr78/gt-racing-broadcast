@@ -1488,6 +1488,34 @@ class _FakePublisher:
         self.reloads += 1
 
 
+def t_the_timing_publisher_waits_for_the_control_port():
+    import inspect
+    runs = []
+
+    class _Pub:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def run(self, stop):
+            runs.append(stop)
+    real, g.m.timing_publish.Publisher = g.m.timing_publish.Publisher, _Pub
+    try:
+        go, stop = threading.Event(), threading.Event()
+        g.m._start_timing_publisher(go=go, stop=stop, link_fn=lambda: None)
+        time.sleep(0.2)
+        assert runs == [], "a relay that may still lose the port bind never opens the host socket"
+        go.set()
+        deadline = time.monotonic() + 5
+        while not runs and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runs == [stop], "the publisher runs once the port is bound"
+    finally:
+        g.m.timing_publish.Publisher = real
+    src = inspect.getsource(g.m.main)
+    assert src.index("Could not bind the control server") < src.index("timing_go.set()"), \
+        "main releases the publisher only after the bind succeeded"
+
+
 FUNNEL_HOST = "relay.example.ts.net"
 
 

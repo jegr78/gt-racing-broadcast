@@ -12072,13 +12072,18 @@ def _funnel_watch(max_age_s=60.0, poll=None):
     return get
 
 
-def _start_timing_publisher(**fns):
+def _start_timing_publisher(go, stop, **fns):
     """The timing host publisher thread (#1161); idle until the league has a host. It
-    re-reads the host keys from the league's profile.env, so a deploy needs no restart."""
+    re-reads the host keys from the league's profile.env, so a deploy needs no restart.
+    It starts once `go` is set: a relay that loses the port bind must not take the
+    host's link over from the running one."""
     env_file = os.environ.get("RACECAST_PROFILE_ENV_FILE", "")
     pub = timing_publish.Publisher(lambda: timing_host.read_settings(env_file), **fns)
-    threading.Thread(target=pub.run, args=(threading.Event(),), name="timing-host",
-                     daemon=True).start()
+
+    def run():
+        go.wait()
+        pub.run(stop)
+    threading.Thread(target=run, name="timing-host", daemon=True).start()
     return pub
 
 
@@ -16626,6 +16631,7 @@ def main():
     twitch_service = (audience_twitch_connection.Service(
         os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)
         if args.overlay_dir else None)
+    timing_go = threading.Event()   # set once the control port is bound
     handler = make_handler(
         relay,
         panel_path,
@@ -16683,7 +16689,8 @@ def main():
         driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
-        timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(poll=stop_evt),
+        timing_publisher=lambda **fns: _start_timing_publisher(timing_go, stop_evt, **fns),
+        funnel_host=_funnel_watch(poll=stop_evt),
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,
@@ -16714,6 +16721,7 @@ def main():
     relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
     relay.keep_awake.start()
     race_svc.open_recording()   # the port is ours, so the recording file is too
+    timing_go.set()             # ... and the timing host's link
     radio_service.start()
     if coach_service is not None:coach_service.start()
     radio_enricher.start()
