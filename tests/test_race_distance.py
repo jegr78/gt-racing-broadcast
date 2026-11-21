@@ -266,6 +266,22 @@ def t_after_the_flag_running_cars_past_the_count_keep_the_order_they_reached_it(
     assert _order(race, t) == ["A", "B", "C"], f"B reached the winner's lap count before C: {_order(race, t)}"
 
 
+def t_after_the_flag_a_running_car_stays_behind_a_car_that_finished_ahead_on_the_road():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+    a, f, r, s = (Car(race, "A", "a", L - 15), Car(race, "F", "f", L - 60),
+                  Car(race, "R", "r", L - 80), Car(race, "S", "s", L - 90))
+    t = _drive(race, [a, f, r, s], [50, 50, 50, 50], 0.0, 40)
+    ea, ef, er, es = (race._entries[k] for k in "AFRS")
+    ea.distance = 2 * L + 900.0                              # the final lobby's line sits 200 m past a race lap
+    race._flag(ea, t - 20)
+    ef.distance, ef.finished_at = L + 200.0, t - 2           # F crossed the race lap after S, passed both, finished
+    ef.ts, ef.ds = [t - 30, t - 10, t - 2], [L - 300.0, L, ef.distance]
+    er.distance, es.distance = L + 150.0, L + 140.0
+    er.ts, er.ds = [t - 30, t - 5, t - 1], [L - 300.0, L, er.distance]
+    es.ts, es.ds = [t - 30, t - 15, t - 1], [L - 300.0, L, es.distance]
+    assert _order(race, t) == ["A", "F", "R", "S"], f"F took its flag ahead of R and S on the road: {_order(race, t)}"
+
+
 def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 60)

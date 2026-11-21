@@ -1350,22 +1350,24 @@ class Race:
                 "class_counts": class_counts, "class_count": class_count, "entries": rows}
 
     def _road_order(self, ents, keys):
-        """After the flag, cars still running on one ranked lap follow the road: each
-        takes the earliest time at that lap of the running cars behind it."""
-        runners = {}
+        """After the flag, cars still running on one ranked lap follow the road: each car
+        of that lap, a finished one at its frozen distance too, takes the earliest time
+        at that lap of the running cars behind it."""
+        groups = {}
         for e in ents:
             k = keys[e.entry]
             shown = self._shown(e)
-            if k[0] == 0 and e.finished_at is None and not self._estimated(e) and shown is not None \
+            if k[0] == 0 and not self._estimated(e) and shown is not None \
                     and math.floor(shown / self.length) == -k[1]:
-                runners.setdefault(k[1], []).append(e)
-        for group in runners.values():
+                groups.setdefault(k[1], []).append(e)
+        for group in groups.values():
             group.sort(key=lambda e: keys[e.entry][3])
             earliest = math.inf
             for e in reversed(group):
                 k = keys[e.entry]
-                earliest = min(earliest, k[2])
-                keys[e.entry] = (k[0], k[1], earliest, k[3], k[4])
+                if e.finished_at is None:
+                    earliest = min(earliest, k[2])
+                keys[e.entry] = (k[0], k[1], min(k[2], earliest), k[3], k[4])
 
     def _estimate_gaps(self, ents, rows, now):
         """An estimated car's gaps are its reference's plus the seconds behind, minus
