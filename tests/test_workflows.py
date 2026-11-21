@@ -120,6 +120,15 @@ def t_preview_publish_only_touches_preview_tags():
     assert guard < step.index("gh release delete"), "the guard must run before any delete"
 
 
+def t_preview_publish_waits_for_every_build():
+    with open(os.path.join(WF_DIR, "preview.yml"), encoding="utf-8") as fh:
+        text = fh.read()
+    job = text[text.index("\n  publish:"):text.index("\n  comment:")]
+    cond = next(line for line in job.splitlines() if line.strip().startswith("if:"))
+    assert "needs.build.result == 'success'" in cond, \
+        "a failed matrix build must keep the old pre-release, whose assets the PR comment links"
+
+
 def t_preview_comment_lists_the_sender_assets():
     step = _preview_step("Post/refresh the download-links comment")
     for asset in ("racecast-sender-windows.exe", "racecast-sender-macos"):

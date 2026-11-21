@@ -6025,12 +6025,14 @@ def _driver_invite_path():
 _INVITE_HOSTS = {"at": None, "magic": "", "ip": None}
 
 
-def _invite_hosts(now=None):
+def _invite_hosts(clock=time.monotonic):
     """MagicDNS name and Tailscale IP, looked up at most once a minute: the Control
-    Center polls the invite every few seconds and each lookup runs `tailscale`."""
-    now = time.monotonic() if now is None else now
-    if _INVITE_HOSTS["at"] is None or now - _INVITE_HOSTS["at"] > 60:
-        _INVITE_HOSTS.update(at=now, magic=_tailscale_magicdns(), ip=_tailscale_ip())
+    Center polls the invite every few seconds and each lookup runs `tailscale`. A
+    lookup that found neither is retried 5 s after it ended. `clock` is a test seam."""
+    ttl = 60 if _INVITE_HOSTS["magic"] or _INVITE_HOSTS["ip"] else 5
+    if _INVITE_HOSTS["at"] is None or clock() - _INVITE_HOSTS["at"] > ttl:
+        magic, ip = _tailscale_magicdns(), _tailscale_ip()
+        _INVITE_HOSTS.update(at=clock(), magic=magic, ip=ip)   # a hanging lookup takes seconds
     return _INVITE_HOSTS["magic"], _INVITE_HOSTS["ip"]
 
 
@@ -6860,7 +6862,8 @@ def event_stop(rest):
     the operator then clicks Control Center "Stop Event" too. Regenerating the report
     now would resolve NO commentator names and drop the qualifying marker (both need
     the live relay), overwriting/re-sending a strictly worse report. So a stop with no
-    live relay is a no-op. The good report stands."""
+    live relay only ends the driver invite, the drivers' requests and the public timing
+    link, and nudges the relay's timing host. The good report stands."""
     try:
         _stop_driver_invite()          # the invite link dies with the event
     except OSError as exc:

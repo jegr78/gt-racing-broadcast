@@ -44,7 +44,7 @@ def state_frame(seq, age_s, body, fallback):
 
 
 def brand_frame(key, png):
-    """One brand logo for the room to serve at /t/<link id>/brand/<key>."""
+    """One brand logo for the room to store and push to its viewers over their socket."""
     return json.dumps({"t": "brand", "key": key, "png": base64.b64encode(png).decode("ascii")})
 
 

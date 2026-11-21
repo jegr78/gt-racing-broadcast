@@ -2079,11 +2079,11 @@ function runOpAndWait(name, params) {
 }
 
 // A quiet job: start it without the job console. Resolves to {job_id} or {error, job_id?}.
-async function startJob(name, params) {
+async function startJob(name, params, profile) {
   try {
     const r = await (await fetch('/api/op/' + name, {method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({params: params || {}})})).json();
+        body: JSON.stringify({params: params || {}, profile})})).json();
     // A refused start names the job that already runs, when there is one.
     return r.ok ? {job_id: r.job_id} : {error: r.error || name + ' could not start', job_id: r.job_id};
   } catch (e) { return {error: 'Control Center not reachable.'}; }
@@ -3023,7 +3023,7 @@ async function loadTimingHost() {
 async function deployTimingHost() {
   const b = $('th-deploy'); b.disabled = true;
   $('th-status').textContent = 'deploying…';
-  const job = await startJob('timing-host-deploy');
+  const job = await startJob('timing-host-deploy', {}, activeProfile);
   const r = job.error ? job : await jobResult(job.job_id, 60);
   b.disabled = false;
   await loadTimingHost();          // refreshes the status first; it would hide a deploy error

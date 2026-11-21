@@ -262,6 +262,8 @@ Choose **Driver dashboard** in the builder's scene selector to place and style t
 header, the timing tower, the fastest lap row and the track map. It has its own
 `drivers.css` and `layout-drivers.json`; **Apply in OBS** reloads the page.
 
+![Driver dashboard builder with the timing tower selected and its Brand logos toggle](images/cc-drivers-builder.png)
+
 ### Fonts: a machine-wide library
 
 A curated set of broadcast-friendly Google Fonts **ships with every install** and is

@@ -71,6 +71,33 @@ def t_live_http_jobs_freeze_profile_and_reject_bad_or_stale_requests():
     finally:server.shutdown();server.server_close()
 
 
+def t_timing_host_deploy_runs_only_against_the_profile_the_view_shows():
+    import test_ui_server as fixture
+    calls=[];active={'name':'demo'}
+    class Jobs:
+        def start(self,name,argv):calls.append((name,argv));return 'synthetic',None
+    ctx=fixture._ctx();ctx.update(ops=ui_ops.OPS,build_argv=ui_ops.build_argv,
+        profile_ops=ui_ops.PROFILE_OPS,active_profile=lambda:active['name'],jobs=Jobs())
+    server,port=fixture._serve(ctx)
+    try:
+        status,raw=fixture._post_json(port,'/api/op/timing-host-deploy',{'profile':'demo','params':{}})
+        assert status==200 and calls==[('timing-host-deploy',['--profile','demo','timing-host','deploy'])],(status,raw,calls)
+        active['name']='other'
+        status,raw=fixture._post_json(port,'/api/op/timing-host-deploy',{'profile':'demo','params':{}})
+        assert status==409 and len(calls)==1,"a deploy from a stale view must not write the other league's profile.env"
+    finally:server.shutdown();server.server_close()
+    page=(ROOT/'src/ui/control-center.html').read_text(encoding='utf-8')
+    out=fixture._run_js(fixture._page_fn(page,'startJob')+fixture._page_fn(page,'deployTimingHost')+"""
+let activeProfile='demo',sent=null;
+const elements={};const $=id=>elements[id]||(elements[id]={});
+globalThis.fetch=async(url,opts)=>{sent=JSON.parse(opts.body);return {json:async()=>({ok:false,error:'stop'})}};
+async function loadTimingHost(){}
+(async()=>{await deployTimingHost();console.log(JSON.stringify(sent));})();
+""",attempts=1)
+    if out is not None:
+        assert json.loads(out).get('profile')=='demo',f"deploy must send the view's profile: {out}"
+
+
 def t_opaque_browser_origin_cannot_launch_operator_jobs_with_simple_json_post():
     import http.client
     import test_ui_server as fixture
