@@ -6155,6 +6155,20 @@ def _start_driver_invite(fresh, path=None, race_data=True):
         timing_link.create(timing)
 
 
+def _relay_new_event():
+    """Ask the running relay to drop the last event's race data and start a new
+    recording; returns what the output line says about it."""
+    try:
+        reply = _relay_post_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/race/new-event", {})
+        if reply.get("ok"):
+            return "race data cleared and a new race recording"
+        note = reply.get("error") or "refused"
+    except Exception as exc:  # noqa: BLE001  best effort, the start goes on
+        note = str(exc)
+    return (f"the running relay kept the last race's data ({note}): Stop event and Start "
+            "event clear it")
+
+
 def _stop_driver_invite(path=None):
     """Event stop ends the invite, the drivers' requests and the public timing link."""
     import driver_invite
@@ -6873,8 +6887,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
             print("event: new event: new driver codes and timing link.")
         elif fresh:
             print("event: relay already running: new event: new driver codes and timing link, "
-                  "a new report window starts here. The running relay keeps the last "
-                  "race's corrections and recording until Stop event.")
+                  + _relay_new_event() + ", a new report window starts here.")
         elif _new_session:
             print("event: mid-event start: driver codes and timing link kept.")
     except OSError as exc:

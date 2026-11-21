@@ -1436,6 +1436,13 @@ def t_both_desks_act_with_their_identity():
         assert (st, _json.loads(text)) == (403, {"error": "forbidden"}), \
             f"Race Control cannot reset the race: {st} {text}"
         assert "reset" not in [r["action"] for r in _audit_of(srv)], "a refused reset changes nothing"
+        assert _req(port, f"/console/drivers/race/new-event?t={carol}", b"{}", hdr)[0] == 404, \
+            "the new event reset stays on the tailnet"
+        assert _req(port, f"/console/race-control/drivers/race/new-event?t={rc}", b"{}", hdr)[0] == 403
+        assert "new_event" not in [r["action"] for r in _audit_of(srv)], "a refused new event changes nothing"
+        st, text, _h = _req(port, "/drivers/race/new-event", b"{}", hdr)
+        assert st == 200 and _json.loads(text)["ok"], (st, text)
+        assert _audit_of(srv)[-1]["action"] == "new_event", "the tailnet starts a new event"
         srv.race_svc.tick()
         alice = g._tok("alice")                                   # a commentator
         st, text, _h = _req(port, f"/console/drivers/dashboard?t={alice}")

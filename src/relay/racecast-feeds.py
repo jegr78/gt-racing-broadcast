@@ -15096,7 +15096,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if action == "recording" or p[2:] == ["recording", "event"]:
                         return self._recording_post(p[3] if len(p) == 4 else None, body, who)
                     commands = {"final-lap": driver_race_svc.final_lap,
-                                "finish": driver_race_svc.finish, "reset": driver_race_svc.reset}
+                                "finish": driver_race_svc.finish, "reset": driver_race_svc.reset,
+                                "new-event": driver_race_svc.new_event}
                     if action in commands:
                         commands[action](who)
                         return self._send({"ok": True, "state": driver_race_svc.standings()["state"]})

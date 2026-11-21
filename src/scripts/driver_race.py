@@ -1309,6 +1309,24 @@ class Service:
             self._current().finish(self._clock())
             self._log(who, "finish")
 
+    def new_event(self, who="tailnet"):
+        """A new event while the relay runs: drop every action and the fastest lap like
+        `clear_actions`, start the race over and close the recording, so the next one
+        opens a new file."""
+        with self._lock:
+            self._log(who, "new_event")
+            with self._rec_lock:
+                rec, self._rec = self._rec, None
+            if rec is not None:
+                rec._writer.flush()
+                rec._writer.stop()
+                rec._store.close()
+            if self._recording_dir:
+                race_recording.rotate(self._recording_dir)
+            clear_actions(os.path.dirname(_actions_path_for(self._path)))
+            self._final_lobby_laps, self._final_on_air = None, False
+            self._race = self._build(self._pick()["id"] if self._pick() else None)
+
     def reset(self, who="tailnet"):
         """Start the race over: its corrections, rejoin marks, retirements, fastest lap
         and open disconnects go with it; tyre compounds, driver names, qualifying

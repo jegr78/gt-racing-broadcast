@@ -3206,12 +3206,12 @@ def t_event_start_and_stop_drive_the_invite():
         pass
 
     def _start(rest, running, new_session=True, seed=None, out=None, relay_args=None, after=None,
-               race=None):
+               race=None, posts=None):
         ev = m._event_modules()[0]
         calls = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
-                 m._start_driver_invite, m._driver_invite_path)
+                 m._start_driver_invite, m._driver_invite_path, m._relay_post_json)
         restore = _stub_relay_signals((4242,) if running else (), 4242 if running else None,
                                       running, "demo" if running else "", "demo")
         with tempfile.TemporaryDirectory() as tmp:
@@ -3224,6 +3224,8 @@ def t_event_start_and_stop_drive_the_invite():
             m._start_driver_invite = lambda fresh, race_data=True: (
                 calls.append(fresh), race is not None and race.append(race_data))
             m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")
+            m._relay_post_json = lambda url, payload, timeout=3: (
+                posts is not None and posts.append(url)) or {"ok": True}
             if seed:
                 seed(tmp)
 
@@ -3243,13 +3245,17 @@ def t_event_start_and_stop_drive_the_invite():
                 restore()
                 (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
-                 m._start_driver_invite, m._driver_invite_path) = saved
+                 m._start_driver_invite, m._driver_invite_path, m._relay_post_json) = saved
         raise AssertionError("expected to reach relay_start")
 
     assert _start([], running=False) == [True], "a new event gets a new invite link"
-    race = []
-    assert _start([], running=True, race=race) == [True] and race == [False], \
-        "a running relay without an unstopped event gets new codes and keeps its race in memory"
+    race, posts, out = [], [], io.StringIO()
+    assert _start([], running=True, race=race, posts=posts, out=out) == [True] and race == [False], \
+        "a running relay without an unstopped event gets new codes; it clears its own race data"
+    assert posts == [f"http://127.0.0.1:{m.RELAY_PORT}/drivers/race/new-event"], \
+        f"the running relay is asked to start the new event's race: {posts}"
+    assert "race data cleared and a new race recording" in out.getvalue(), out.getvalue()
+
     assert _start(["--stint", "3"], running=False) == [False], "a recovery restart keeps the link"
     assert _start([], running=False, new_session=False) == [False], "a takeover keeps or creates one"
 
@@ -3289,6 +3295,10 @@ def t_event_start_and_stop_drive_the_invite():
         _invite(60)(tmp)
         m._stop_driver_invite(os.path.join(tmp, "driver-invite.json"))
     assert _start([], running=False, seed=_stopped) == [True], "Stop event then Start event is a new event"
+    posts = []
+    _start([], running=False, posts=posts)
+    _start([], running=True, seed=_invite(60), posts=posts)
+    assert posts == [], f"a stopped relay or a continued event needs no reset call: {posts}"
 
     def _broadcast(age_s, stint=5, part=2, mode="race"):
         def seed(tmp):
@@ -3388,6 +3398,21 @@ def t_event_continues_bounds():
     total = m.EVENT_MAX_AGE_S
     assert m._event_continues(now - total + 1, now - 60, now) is True
     assert m._event_continues(now - total, now - 60, now) is False, "no stamp extends an event past its total age"
+
+
+def t_relay_new_event_says_when_the_relay_kept_its_race():
+    saved = m._relay_post_json
+    try:
+        def _down(*_a, **_k):
+            raise OSError("connection refused")
+        m._relay_post_json = _down
+        assert "Stop event and Start event clear it" in m._relay_new_event()
+        m._relay_post_json = lambda *_a, **_k: {"ok": False, "error": "not found"}
+        assert "(not found)" in m._relay_new_event(), "an older relay without the route says so"
+        m._relay_post_json = lambda *_a, **_k: {"ok": True}
+        assert m._relay_new_event() == "race data cleared and a new race recording"
+    finally:
+        m._relay_post_json = saved
 
 
 def t_event_stop_ends_the_invite_without_a_relay():

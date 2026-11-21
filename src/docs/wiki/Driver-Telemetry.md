@@ -47,8 +47,8 @@ so `--qualifying` resumes a qualifying Part and never a race stint. A Start even
 while the event's relay still runs keeps all of this as well and leaves the relay's
 stint and Part alone. On a relay that runs without an unstopped event (none, or one
 past the limits above) Start event begins a new event: a new invite and timing link
-and a new report window. That relay keeps the last race's corrections and recording
-in memory until Stop event. The first continued event after upgrading to this version
+and a new report window. It also asks that relay to drop the last race's data, as a
+new event does, and to start a new race recording. The first continued event after upgrading to this version
 resumes Part 1, because the Part pointer saved by an older version has no mode.
 Otherwise it is a new event: a new invite and timing link, the
 last event's corrections cleared and a new race recording. The command output and the
