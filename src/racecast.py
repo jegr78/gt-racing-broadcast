@@ -7401,6 +7401,8 @@ def fonts_cmd(rest):
 
 
 def _radio_tts_key():
+    if simulation.active():
+        return ""
     value = os.environ.get("RACECAST_GCLOUD_TTS_KEY", "")
     if value:
         return value
@@ -11533,6 +11535,8 @@ def _smoke_finish(results, tools, sources, minutes, as_json, lines, cleared=None
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] and argv[0].startswith("_radio-"):
+        simulation.install_network_guard()   # private workers return before _bootstrap
     if argv[:1] == ["_radio-model-check"]:
         from driver_radio_models import main as model_check
         return model_check(argv[1:])

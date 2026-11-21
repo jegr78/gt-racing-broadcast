@@ -159,6 +159,13 @@ never the real one.
   export does not. The machine `.env` never supplies it. A subcommand's own `--force`
   keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
+- Driver Radio and AI: `env_overrides` blanks `RACECAST_GCLOUD_TTS_KEY`/`STT_KEY` and
+  `RACECAST_TS_API_KEY`, `_radio_tts_key` never falls back to the `.env` file,
+  `ai_agents.Adapter.probe` reports `simulation` and `invocation` raises, and
+  `driver_radio_models.download` refuses. `ai_agents.execution_env` keeps
+  `RACECAST_SIMULATION`, and `driver_radio_process.run_process` and
+  `driver_radio_voice_process.Owned` start Python workers through `guard_python_argv`; the
+  frozen `_radio-*` entrypoints install the guard before they dispatch.
 - `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`.
   `relay_start_plan` answers `refuse` (no kill, no reuse) when the port holder runs in the
   other mode, and a simulation start never kills an unstamped holder;

@@ -6,6 +6,7 @@ import subprocess
 import threading
 
 import ai_jobs
+import simulation
 from driver_radio_process import ProviderError
 
 
@@ -18,7 +19,7 @@ class Owned:
         try:
             self.tree=ai_jobs.WindowsTree()
             flags={'creationflags':0x08000204} if os.name=='nt' else {'start_new_session':True}
-            self.proc=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE if events else subprocess.DEVNULL,
+            self.proc=subprocess.Popen(simulation.guard_python_argv(argv,env),stdin=subprocess.PIPE,stdout=subprocess.PIPE if events else subprocess.DEVNULL,
                                        stderr=subprocess.DEVNULL,env=env,**flags)
             self.tree.attach(self.proc)
             def write():

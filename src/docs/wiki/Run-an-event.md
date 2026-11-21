@@ -79,11 +79,15 @@ start.
   | `RACECAST_SIM_DISCORD_WEBHOOK_URL` | the league `DISCORD_WEBHOOK_URL` | no |
 
   Each value must point at `127.0.0.1` or `localhost`, and it replaces the league value
-  whichever file or shell set that. The league's Discord login, voice channel, timing
-  host, the Director's Companion buttons and the update check are off. The racecast
-  Python processes (CLI, Control Center, relay and the scripts they start) refuse any
-  connection that is not loopback; external programs such as ffmpeg and the stream
-  stand-ins are outside that guard.
+  whichever file or shell set that.
+- Off in simulation mode: the league's Discord login and voice channel, the timing
+  host, the Director's Companion buttons, the update check, Driver Radio's cloud speech
+  (the Google text-to-speech and speech-to-text keys are blanked), the AI agent CLIs
+  (analysis, Race Engineer and Live AI answers) and every model download.
+- The racecast Python processes (CLI, Control Center, relay, the scripts they start and
+  the Driver Radio workers) refuse any connection that is not loopback. External programs
+  such as ffmpeg, the stream stand-ins and the local speech models are outside that
+  guard and get no network endpoint from racecast.
 - A simulation relay and a live relay never replace each other: `relay start` and
   `event start` refuse while the other kind holds the control port, and a simulated
   `relay stop` or `event stop` refuses a live relay. Stop the other one first.

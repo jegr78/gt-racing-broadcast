@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import ai_jobs
+import simulation
 
 STREAM_MAX = 65536
 INPUT_MAX = 32768
@@ -97,7 +98,7 @@ def run_process(invocation,prompt,stopped,budget,env,output_limit=STREAM_MAX,ext
         for name,value in (extra_env or {}).items():
             if name in ('SSL_CERT_FILE','SSL_CERT_DIR','PYINSTALLER_RESET_ENVIRONMENT') and isinstance(value,str):
                 safe_env[name]=value
-        proc=subprocess.Popen(invocation.argv,cwd=invocation.cwd,env=safe_env,
+        proc=subprocess.Popen(simulation.guard_python_argv(invocation.argv,safe_env),cwd=invocation.cwd,env=safe_env,
                               stdin=subprocess.PIPE if prompt is not None else subprocess.DEVNULL,
                               stdout=subprocess.PIPE,stderr=subprocess.PIPE,**flags)
         if tree is not None:tree.attach(proc)

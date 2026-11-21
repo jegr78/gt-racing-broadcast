@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import socket
+import sys
 from urllib.parse import quote, urlparse
 
 FLAG = "RACECAST_SIMULATION"
@@ -192,7 +193,9 @@ def env_overrides(environ=None):
     return {"RACECAST_SHEET_PUSH_URL": endpoint(SHEET_PUSH_URL, environ),
             "RACECAST_DISCORD_WEBHOOK_URL": endpoint(DISCORD_WEBHOOK_URL, environ),
             "RACECAST_DISCORD_CLIENT_ID": "", "RACECAST_DISCORD_CLIENT_SECRET": "",
-            "RACECAST_DISCORD_VOICE_URL": "", "RACECAST_TIMING_HOST_URL": ""}
+            "RACECAST_DISCORD_VOICE_URL": "", "RACECAST_TIMING_HOST_URL": "",
+            "RACECAST_GCLOUD_TTS_KEY": "", "RACECAST_GCLOUD_STT_KEY": "",
+            "RACECAST_TS_API_KEY": ""}
 
 
 def profile_refusal(name, values, forced=None):
@@ -244,6 +247,16 @@ def loopback_name_ok(host, lookup=None):
     except OSError:
         return False
     return bool(infos) and all(is_loopback_host(info[4][0]) for info in infos)
+
+
+def guard_python_argv(argv, environ=None):
+    """In simulation, `[python, script.py, ...]` becomes the guarded form; anything else
+    (a native tool, a frozen entrypoint that installs the guard itself) is unchanged."""
+    argv = list(argv)
+    if (active(environ) and len(argv) >= 2 and argv[0] == sys.executable
+            and str(argv[1]).endswith(".py")):
+        return guarded_argv(argv[0], str(argv[1]), argv[2:])
+    return argv
 
 
 def _refuse(host, what="connection to"):
