@@ -45,7 +45,7 @@
   racecast status                            # aggregate health of all services
   racecast profile   list | show [<name>] | use <name> | new <name> [--from <source>] | export <name> [--no-assets] [--out PATH] | import <file> [--force]
   racecast --profile <name> <command>        # run one command against a non-active profile
-  racecast --simulation <command>            # rehearse against simulated parties (RACECAST_SIM_*): no OBS, Discord, Companion, Tailscale or Funnel
+  racecast --simulation [--force] <command>  # rehearse against simulated parties (RACECAST_SIM_*): no OBS, Discord, Companion, Tailscale or Funnel
   racecast chat      clear | pull <ip> [--port N] | import <file> | export [--out PATH]
   racecast report                            # generate the post-event report (last session) -> runtime/<profile>/reports/
   racecast report send [FILE]                # send the newest (or given) report to the league Discord as an attachment
@@ -10558,7 +10558,9 @@ SIMULATION_EXEMPT = ("profile", "help", "-h", "--help", "--version", "-V")
 
 def _apply_simulation_flag(argv, environ=None):
     """Consume a global `--simulation` and turn the mode on for this process and its
-    children; the machine .env may set RACECAST_SIMULATION and RACECAST_SIM_* too."""
+    children; the machine .env may set RACECAST_SIMULATION and RACECAST_SIM_* too.
+    In the mode, a `--force` before the command is the profile override. Returns
+    (argv, force)."""
     environ = os.environ if environ is None else environ
     machine = pcfg.load_machine_env(_env_base(IS_FROZEN, _real_executable(), HERE))
     for key, value in machine.items():
@@ -10567,7 +10569,14 @@ def _apply_simulation_flag(argv, environ=None):
     out = [a for a in argv if a != "--simulation"]
     if len(out) != len(argv):
         environ[simulation.FLAG] = "1"
-    return out
+    force = False
+    if simulation.active(environ):
+        head = 0
+        while head < len(out) and out[head].startswith("-"):
+            head += 1
+        force = "--force" in out[:head]
+        out = [a for a in out[:head] if a != "--force"] + out[head:]
+    return out, force
 
 
 def _simulation_profile_values(name):
@@ -10577,9 +10586,10 @@ def _simulation_profile_values(name):
         return {}
 
 
-def _simulation_gate(argv, environ=None, profile=None, values=None):
-    """In simulation mode: None when this command may run, else why not. A `--force`
-    run records the profile it allowed, so its children run there too."""
+def _simulation_gate(argv, environ=None, profile=None, values=None, force=False):
+    """In simulation mode: None when this command may run, else why not. A forced run
+    (`racecast --simulation --force ...`) records the profile it allowed, so its
+    children run there too. A subcommand's own `--force` does not count."""
     environ = os.environ if environ is None else environ
     if not simulation.active(environ) or argv[:1] and argv[0] in SIMULATION_EXEMPT:
         return None
@@ -10587,7 +10597,7 @@ def _simulation_gate(argv, environ=None, profile=None, values=None):
     if problems:
         return "simulation mode: " + "; ".join(problems) + "."
     name = _active_profile_name() if profile is None else profile
-    if name and "--force" in argv:
+    if name and force:
         environ[simulation.FORCE] = name
     values = _simulation_profile_values(name) if values is None and name else (values or {})
     return simulation.profile_refusal(name, values, environ.get(simulation.FORCE))
@@ -10615,13 +10625,13 @@ def _bootstrap(argv):
     _ensure_ssl_certs()
     _ensure_tool_path()    # Finder/Dock launch truncates PATH past Homebrew (#38)
     argv, profile = pa.split_profile_flag(argv)
-    argv = _apply_simulation_flag(argv)
+    argv, sim_force = _apply_simulation_flag(argv)
     global _telemetry_launch_profile
     _telemetry_launch_profile = profile if argv[:2] == ["telemetry", "ui"] else None
     if profile and _telemetry_launch_profile is None:
         os.environ["RACECAST_PROFILE"] = profile   # M3 consumers read this
     _apply_active_profile_env()   # inject the active profile's sheet config for children
-    refusal = _simulation_gate(argv)
+    refusal = _simulation_gate(argv, force=sim_force)
     if refusal:
         raise ValueError(refusal)
     if simulation.install_network_guard():

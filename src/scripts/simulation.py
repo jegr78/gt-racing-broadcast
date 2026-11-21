@@ -190,7 +190,8 @@ def profile_refusal(name, values, forced=None):
     if (values.get(PROFILE_MARK) or "").strip().lower() in _TRUE:
         return None
     return (f"simulation mode runs on the '{DEMO_PROFILE}' profile or a profile with "
-            f"{PROFILE_MARK}=1, not on '{name}'. Pass --force to run it on '{name}' anyway.")
+            f"{PROFILE_MARK}=1, not on '{name}'. Run `racecast --simulation --force ...` to "
+            f"use '{name}' anyway.")
 
 
 def is_channel(value, environ=None):

@@ -151,8 +151,10 @@ never the real one.
   WebSocket, and `_event_sections` lists OBS/Discord/Tailscale/Companion as INFO. A
   takeover in simulation accepts only a loopback host, never `--funnel`.
 - `_simulation_gate` refuses a missing endpoint and a profile other than `demo` or one
-  with `SIMULATION=1` in its `profile.env`; `--force` passes and records the profile in
-  `RACECAST_SIM_FORCE` so the run's children pass for that profile only. `profile`, `help`
+  with `SIMULATION=1` in its `profile.env`. Only a `--force` before the command
+  (`racecast --simulation --force <group> ...`, consumed by `_apply_simulation_flag`)
+  passes it and records the profile in `RACECAST_SIM_FORCE`, so the run's children pass
+  for that profile only; a subcommand's own `--force` keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
   getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).

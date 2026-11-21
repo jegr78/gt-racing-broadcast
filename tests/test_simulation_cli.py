@@ -189,8 +189,16 @@ def t_readiness_reports_skips_not_failures():
 def t_simulation_flag_and_gate():
     env = {}
     with _patched((m.pcfg, "load_machine_env", lambda start: {})):
-        assert m._apply_simulation_flag(["--simulation", "event", "start"], env) == ["event", "start"]
+        assert m._apply_simulation_flag(["--simulation", "event", "start"], env) == \
+            (["event", "start"], False)
     assert sim.active(env)
+    with _patched((m.pcfg, "load_machine_env", lambda start: {})):
+        assert m._apply_simulation_flag(["--simulation", "--force", "event", "start"], {}) == \
+            (["event", "start"], True), "a global --force is the simulation profile override"
+        assert m._apply_simulation_flag(["--simulation", "event", "start", "--force"], {}) == \
+            (["event", "start", "--force"], False), "a subcommand --force keeps its own meaning"
+        assert m._apply_simulation_flag(["--force", "event", "start"], {}) == \
+            (["--force", "event", "start"], False), "outside simulation nothing is consumed"
     env = {}
     with _patched((m.pcfg, "load_machine_env",
                    lambda start: {"RACECAST_SIMULATION": "1", "RACECAST_SIM_SHEET_URL": "x",
@@ -207,12 +215,14 @@ def t_simulation_flag_and_gate():
     assert m._simulation_gate([], dict(ok), "league", {}), \
         "the windowed Control Center launcher passes no arguments and must be gated too"
     refused = m._simulation_gate(["event", "start"], dict(ok), "league", {})
-    assert refused and "--force" in refused, refused
+    assert refused and "racecast --simulation --force" in refused, refused
     assert "RACECAST_SIM_SHEET_URL" in m._simulation_gate(["relay", "start"], dict(SIM_ENV), "demo", {})
     assert m._simulation_gate(["profile", "use", "demo"], dict(SIM_ENV), "league", {}) is None, \
         "switching to the demo profile must stay possible"
+    assert m._simulation_gate(["event", "start", "--force"], dict(ok), "league", {}), \
+        "event start --force skips the pre-flight gate, it must not pass the profile guard"
     forced = dict(ok)
-    assert m._simulation_gate(["event", "start", "--force"], forced, "league", {}) is None
+    assert m._simulation_gate(["event", "start"], forced, "league", {}, force=True) is None
     assert forced[sim.FORCE] == "league", "the children of a forced run need the same pass"
     assert m._simulation_gate(["relay", "start"], dict(forced), "league", {}) is None
     assert m._simulation_gate(["relay", "start"], dict(forced), "other", {}), \
