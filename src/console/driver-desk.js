@@ -28,7 +28,8 @@
     ".dd input[type=checkbox]{width:auto;margin:0;padding:0}",
     ".dd label.check{display:inline-flex;align-items:center;gap:6px;cursor:pointer}",
     ".dd table{width:100%;border-collapse:collapse}",
-    ".dd th,.dd td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--edge,#2a2f37);vertical-align:middle}",
+    ".dd th,.dd td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--edge,#2a2f37);vertical-align:middle;",
+    "color:var(--ink,#e8eaed)}",
     ".dd th{color:var(--muted,#9aa0a6);font-weight:500;font-size:12px}",
     ".dd td.num{font-family:var(--mono,ui-monospace,monospace);text-align:right;white-space:nowrap}",
     ".dd .tbl{overflow-x:auto}",
@@ -46,6 +47,7 @@
     ".dd button.go{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd [hidden]{display:none!important}",
     ".dd select{width:auto;max-width:100%}",
+    ".dd .send select{width:100%;min-width:0}",
     ".dd a.btn{background:var(--panel-2,#1b1f25);color:var(--ink,#e8eaed);border:1px solid var(--edge,#2a2f37);",
     "border-radius:6px;padding:5px 9px;text-decoration:none}.dd a.btn:hover{border-color:var(--ink,#e8eaed)}",
     ".dd .rec{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--muted,#9aa0a6)}",
@@ -165,7 +167,10 @@
   }
   // The race laps driven against the count, and GT7's lap of the lobby on air; in qualifying the segment.
   function lapText(r) {
-    if (r.mode === "qualifying") return "Qualifying" + (r.segment ? " \u00b7 " + r.segment : "");
+    if (r.mode === "qualifying") {
+      if (/qualifying/i.test(r.segment || "")) return r.segment;   // the segment names it already
+      return "Qualifying" + (r.segment ? " \u00b7 " + r.segment : "");
+    }
     var lap = r.lap || {}, parts = [];
     if (typeof lap.leader === "number") parts.push("Race lap " + lap.leader + (typeof lap.count === "number" ? " / " + lap.count : ""));
     if (typeof r.lobby_lap === "number") parts.push("Lobby lap " + r.lobby_lap);
@@ -722,7 +727,7 @@
     var readyBody = el("tbody");
     var readyTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [readyHead]), readyBody])]);
     var sendBody = el("tbody");
-    var sendTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
+    var sendTable = el("div", {cls: "tbl send"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
       "Sender", "Entry", "", ""].map(function (h) { return el("th", {text: h}); }))]), sendBody])]);
 
     // -- driver requests --------------------------------------------------------------

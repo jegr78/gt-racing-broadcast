@@ -143,7 +143,9 @@ and says so. Changing the layout mid-event starts the race over.
   the same lobby are dropped when GT7 resets the lap counter, and nothing counts while
   the relay is in qualifying mode.
 - **Gap and interval** are the time the car ahead needed from the same point. A car a
-  full lap or more down shows `+N L`.
+  full lap or more down shows `+N L`. Senders post a moment apart, so the order and the
+  intervals compare the cars where they were at the older of their last samples (up to
+  one second back): a fresher sample never ranks a car ahead of one it trails.
 - **Timing tower** (the on-air `drivers.html`): the gap column shows the gap to the leader. The desks show exact gaps for lapped cars too, as `+1 L · 1:02.5`, also for a car many laps down: the relay keeps the last ten minutes at full rate and everything older at one point per second, up to 24 hours. The public timing page and the cockpit are unchanged, and exact gaps never reach the public view.
 - **Box** shows while a car stands off the racing line for a moment. **No data** shows
   while its sender has been quiet for five seconds. The entry keeps its last distance,
@@ -531,7 +533,9 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
 
 Corrections, rejoin marks and retirements survive a relay restart; a race reset and
 the next `event start` drop them. Driver name changes survive a race reset too and go
-with the next `event start`. Every action is logged with who
+with the next `event start`. The race reset itself (`POST /drivers/race/reset`) is a
+call on the tailnet only: neither desk offers it, and the console refuses it for every
+role. Every action is logged with who
 and when in `runtime/<profile>/driver-race-audit.jsonl`. Race Control and the director
 use them from the Race Control desk ([Console](Console)) and the Director Panel
 ([Director](Director#driver-telemetry)).

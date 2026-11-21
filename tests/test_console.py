@@ -576,6 +576,39 @@ def t_the_desk_lap_line_shows_the_race_lap_and_the_lobby_lap():
         f"the race lap against the count, then GT7's lap of the lobby on air: {got}"
 
 
+def t_the_desk_tables_keep_their_own_text_colour_in_the_panel():
+    import re
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        block = fh.read().split("var CSS = [", 1)[1].split("].join", 1)[0]
+    css = "".join(re.findall(r'"([^"]*)"', block))
+    with open(os.path.join(ROOT, "src", "director", "director-panel.html"), encoding="utf-8") as fh:
+        panel = fh.read()
+    assert re.search(r"\.urls td\{[^}]*color:", panel), "the panel greys the cells of its .urls sections"
+    cells = re.search(r"\.dd th,\.dd td\{([^}]*)\}", css)
+    assert cells and "color:" in cells.group(1), \
+        f"desk cells set their own colour, else the panel's .urls td greys them: {cells and cells.group(1)}"
+
+
+def t_the_senders_table_shrinks_its_move_choice_to_the_column():
+    import re
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        src = fh.read()
+    css = "".join(re.findall(r'"([^"]*)"', src.split("var CSS = [", 1)[1].split("].join", 1)[0]))
+    assert 'var sendTable = el("div", {cls: "tbl send"}' in src, "the senders table carries its own class"
+    rule = re.search(r"\.dd \.send select\{([^}]*)\}", css)
+    assert rule and "width:100%" in rule.group(1) and "min-width:0" in rule.group(1), \
+        f"a long entry list must not widen the senders table past the panel column: {rule and rule.group(1)}"
+
+
+def t_the_desk_names_a_qualifying_segment_once():
+    got = _desk_fn("lapText", '["Qualifying", "qualifying 2", "Q1", ""].map(function (s) {'
+                              ' return lapText({mode: "qualifying", segment: s}); })')
+    if got is None:
+        return
+    assert got == ["Qualifying", "qualifying 2", "Qualifying \u00b7 Q1", "Qualifying"], \
+        f"a segment that names qualifying itself shows alone: {got}"
+
+
 def t_the_desk_shows_qualifying_per_class_with_every_column():
     rows = [{"entry": "A", "pos": 1, "best_ms": 90000, "gap_ms": 0, "interval_ms": None, "last_lap_ms": 90000,
              "class": "GT3", "class_pos": 1, "class_gap_ms": 0, "class_interval_ms": None},

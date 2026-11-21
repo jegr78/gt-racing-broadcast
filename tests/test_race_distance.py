@@ -197,6 +197,20 @@ def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
     assert order == ["A", "B"], f"the car that took the flag first is the winner: {order}"
 
 
+def t_a_final_lobby_finish_a_few_metres_short_of_its_line_counts_the_lap():
+    # These grids put B's (then also A's) finishing sample a few metres short of its own line.
+    for grid_a in (L - 15, L - 15.2):
+        race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+        race.final_lobby(3, 0.0)
+        a, b = Car(race, "A", "a", grid_a), Car(race, "B", "b", L - 300)
+        t = _drive(race, [a, b], [50, 49], 0.0, (3 * L + 400) / 49 + 5)
+        assert race.standings(t)["state"] == "finished", race.standings(t)["state"]
+        ra, rb = _row(race, "A", t), _row(race, "B", t)
+        assert (ra["laps"], rb["laps"]) == (3, 3), \
+            f"both crossed the line of GT7's lap 3: {ra['laps']} {rb['laps']} ({ra['distance_m']}, {rb['distance_m']})"
+        assert rb["lapped"] == 0 and rb["gap_time_s"] > 5, f"B finished on the lead lap behind A: {rb}"
+
+
 def t_the_lap_count_follows_gt7s_counter_including_the_formation_lap():
     race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)
@@ -254,6 +268,45 @@ def t_a_car_crossing_right_after_the_flag_finishes_there_whatever_order_its_data
         assert _row(race, "A", t)["finished"] and _order(race, t) == ["A", "B"], race.standings(t)
         assert _row(race, "B", t)["finished"] and race.standings(t)["state"] == "finished", \
             f"B crossed the line after A took the flag, so it finishes there (multi_lobby={multi_lobby})"
+
+
+def t_a_late_crossing_short_of_the_cars_line_keeps_its_lap():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
+    t = _drive(race, [a, b], [50, 50], 0.0, 30)
+    race.final_lap(t)
+    while a.along < L - 5:
+        step = min(20.0, L - 5 - a.along)
+        t += step / 50
+        for car in (b, a):
+            car.along += step
+            car.send(t if car is b else t + 0.01)
+    car_b = race._cars["b"]
+    car_b.line = (car_b.line + 12.0) % race.length      # B's line station 12 m past the real line
+    t += 0.4
+    for car in (b, a):                                 # B's crossing reaches the relay first
+        car.along += 20.0
+        car.send(t if car is b else t + 0.01)
+    t += 0.01
+    ra, rb = _row(race, "A", t), _row(race, "B", t)
+    assert rb["finished"] and race._entries["B"].crossed[0] > race._entries["A"].crossed[0], \
+        "B finishes as the late car of A's flag"
+    assert (rb["laps"], rb["lapped"]) == (ra["laps"], 0), \
+        f"B crossed the same line as A: {ra['laps']} {rb['laps']} ({rb['distance_m']})"
+
+
+def t_a_flag_outside_the_final_lobby_short_of_the_cars_line_keeps_its_lap():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 300)
+    t = _drive(race, [a, b], [50, 50], 0.0, 30)
+    race.final_lap(t)
+    car_a = race._cars["a"]
+    car_a.line = (car_a.line + 12.0) % race.length       # A's line station 12 m past the real line
+    while not _row(race, "A", t)["finished"]:
+        t = _drive(race, [a, b], [50, 50], t, 0.1)
+    ra = _row(race, "A", t)
+    assert ra["laps"] == 1 and race.standings(t)["state"] in ("finishing", "finished"), \
+        f"A took the flag at the end of its first lap: {ra['laps']} ({ra['distance_m']})"
 
 
 def t_gt7_position_disagreeing_with_the_distance_is_flagged():
@@ -520,6 +573,75 @@ def t_history_and_quiet_connections_stay_bounded():
         race.update("A", f"gone{i}", "X", {"t": t, "lap": 1, "x": 0.0, "z": 0.0, "speed_kmh": 0})
     _drive(race, [a], [50], t, rd.CAR_FORGET_S + rd.PRUNE_EVERY_S + 1)
     assert set(race._cars) == {"a"}, f"quiet connections no entry follows are dropped: {set(race._cars)}"
+
+
+def t_order_and_interval_compare_two_cars_at_the_same_moment():
+    race = rd.Race(TRACE, formation=False)
+    lead, a, b = Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300), Car(race, "B", "b", L - 302)
+    t = _drive(race, [lead, a, b], [50, 50, 50], 0.0, 30)
+    for _ in range(5):                       # A runs ahead of B; B's sample is 0.2 s fresher
+        t += 0.2
+        for car in (lead, a, b):
+            car.along += 10.0
+        lead.send(t)
+        a.send(t)
+        b.along += 10.0
+        b.send(t + 0.2)
+        b.along -= 10.0
+    now = t + 0.2
+    rows = race.standings(now)["entries"]
+    assert [r["entry"] for r in rows] == ["L", "A", "B"], f"A leads B on the road: {[r['entry'] for r in rows]}"
+    ra, rb = rows[1], rows[2]
+    assert rb["gap_time_s"] > ra["gap_time_s"], f"gaps grow down the order: {ra['gap_time_s']} {rb['gap_time_s']}"
+    assert rb["interval_time_s"] > 0 and abs(rb["interval_time_s"] - (rb["gap_time_s"] - ra["gap_time_s"])) <= 0.02, \
+        f"B's interval to A is the difference of their gaps: {ra} {rb}"
+    assert ra["interval_time_s"] > 5, f"A's interval is to the leader: {ra['interval_time_s']}"
+
+
+def t_an_estimate_stays_behind_its_reference_when_the_field_compares_back():
+    race = rd.Race(TRACE, formation=False)
+    ld, a, x = Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300), Car(race, "X", "x", L - 330)
+    t = _drive(race, [ld, a, x], [50, 50, 50], 0.0, 30)
+    for _ in range(8 * HZ):                  # X goes quiet; L's samples lag A's by 0.8 s
+        t += 1.0 / HZ
+        for car in (ld, a):
+            car.speed = 50.0
+            car.along += 50.0 / HZ
+        a.send(t)
+        ld.along -= 40.0
+        if t - 0.8 > 30:
+            ld.send(t - 0.8)
+        ld.along += 40.0
+    race.estimate("X", "A", 0.5, t)
+    rows = race.standings(t)["entries"]
+    assert [r["entry"] for r in rows] == ["L", "A", "X"], f"X is estimated behind A: {[r['entry'] for r in rows]}"
+    assert abs(rows[2]["interval_time_s"] - 0.5) <= 0.05, f"X is 0.5 s behind A: {rows[2]}"
+
+
+def t_a_quiet_car_does_not_hold_the_field_back_in_time():
+    race = rd.Race(TRACE, formation=False)
+    ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),
+                   Car(race, "B", "b", L - 310), Car(race, "C", "c", L - 600))
+    t = _drive(race, [ld, a, b, c], [50, 50, 50, 50], 0.0, 30)
+    t = _drive(race, [ld, a, b], [50, 50, 50], t, rd.NO_DATA_S + 2)      # C's sender drops
+    while _row(race, "B", t)["distance_m"] < _row(race, "A", t)["distance_m"] + 5:
+        t = _drive(race, [ld, a, b], [50, 50, 60], t, 0.1)               # B passes A
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order[:3] == ["L", "B", "A"], f"B passed A half a second ago, every sample is fresh: {order}"
+
+
+def t_a_held_car_does_not_hold_the_field_back_in_time():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),
+                   Car(race, "B", "b", L - 310), Car(race, "C", "c", L - 600))
+    t = _drive(race, [ld, a, b, c], [50, 50, 50, 50], 0.0, 30)
+    c.along = -50.0                                                      # C's console starts a new session
+    t = _drive(race, [ld, a, b, c], [50, 50, 50, None], t, 3)
+    assert race._entries["C"].held and not race._quiet(race._entries["C"], t), "C is held but still sends"
+    while _row(race, "B", t)["distance_m"] < _row(race, "A", t)["distance_m"] + 5:
+        t = _drive(race, [ld, a, b, c], [50, 50, 60, None], t, 0.1)      # B passes A
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order[:3] == ["L", "B", "A"], f"B passed A half a second ago; a held car's old history does not count: {order}"
 
 
 def t_a_car_far_behind_keeps_its_exact_gap_to_the_leader():

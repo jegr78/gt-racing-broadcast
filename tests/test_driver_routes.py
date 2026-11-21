@@ -1179,6 +1179,10 @@ def t_both_desks_act_with_their_identity():
         assert _req(port, f"/console/drivers/data?t={carol}")[0] == 404
         assert _req(port, f"/console/drivers/race/reset?t={carol}", b"{}", hdr)[0] == 404, \
             "the race reset stays on the tailnet"
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/reset?t={rc}", b"{}", hdr)
+        assert (st, _json.loads(text)) == (403, {"error": "forbidden"}), \
+            f"Race Control cannot reset the race: {st} {text}"
+        assert "reset" not in [r["action"] for r in _audit_of(srv)], "a refused reset changes nothing"
         srv.race_svc.tick()
         alice = g._tok("alice")                                   # a commentator
         st, text, _h = _req(port, f"/console/drivers/dashboard?t={alice}")
