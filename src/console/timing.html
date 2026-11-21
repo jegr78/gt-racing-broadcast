@@ -130,7 +130,7 @@
     LOGO_RETRY_MS: 60000,
     LOGO_MAX_B64: 349528,       // base64 of the relay's 256 KiB cap
     LOGO_RETRY_MAX_MS: 1800000,
-    // A brand logo beside the page: /t/<id>/brand/<key> on the host, ?l=<id> on Funnel.
+    // A brand logo beside the Funnel page (?l=<id>); the host sends logos over the viewer socket.
     brandUrl: function (pathname, search, key) {
       if (typeof key !== "string" || !/^[a-z0-9-]{1,64}$/.test(key)) return null;
       const url = pathname.replace(/\/?$/, "/brand/") + key;
