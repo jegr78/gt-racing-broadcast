@@ -147,7 +147,8 @@
   rows.textContent = "";
   document.body.setAttribute("data-hidden", "");   // off air until the relay says otherwise
   document.getElementById("drivers-fastest").classList.add("none");
-  let line = null, lineTrack = null, view = null;
+  let line = null, lineTrack = null, lineRetryAt = 0, view = null;
+  const LINE_RETRY_MS = 10000;   // the relay may download the line later
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -540,11 +541,15 @@
   async function loadLine(track) {
     lineTrack = track;
     line = null;
+    lineRetryAt = Date.now() + LINE_RETRY_MS;
     try {
       const res = await fetch("/drivers/line", {cache: "no-store"});
       if (res.ok) line = await res.json();
-    } catch (e) { /* the map stays empty until the next track change */ }
+    } catch (e) { /* the map stays empty until the retry */ }
     drawLine();
+  }
+  function lineDue(track) {
+    return track !== lineTrack || (track !== null && !line && Date.now() >= lineRetryAt);
   }
   async function poll() {
     try {
@@ -555,7 +560,7 @@
         document.getElementById("drivers-header").classList.toggle("flag", !!d.red_flag);
         document.getElementById("dd-session").textContent =
           [d.track_name, d.stint, d.red_flag ? "Red flag" : ""].filter(Boolean).join(" · ");
-        if ((d.track || null) !== lineTrack) await loadLine(d.track || null);
+        if (lineDue(d.track || null)) await loadLine(d.track || null);
         const show = d.show || {};
         showFuel = show.fuel !== false && d.mode !== "qualifying";
         showTyre = show.compound !== false;

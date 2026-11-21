@@ -59,6 +59,12 @@ def _tower(body):
                 + body + "})()));")
 
 
+def _tower_async(body):
+    """Like _tower, for a body that returns a promise."""
+    return _run(_DOM + _script(TOWER) + "\n;(async function () {" + body
+                + "})().then(r => console.log(JSON.stringify(r)));")
+
+
 CAR = {"pos": 2, "entry": "Team B #2", "number": "2", "driver": "Ann Lind", "team": "Team B",
        "status": "racing", "gap_s": 1.44, "lapped": 0, "last_lap_ms": 118412, "fuel_l": 56.4,
        "finished": False, "compound": "RM", "pit_stops": 1, "brand": "bmw", "brand_name": "BMW"}
@@ -287,6 +293,38 @@ def t_the_desks_and_the_cockpit_show_logos_through_the_console_route():
         assert re.search(r"RC_API\(['\"]/drivers/brand/", src), f"{rel[-1]}: the logo goes through /console like its data"
         at = re.search(r"['\"]/drivers/brand/", src).start()
         assert ".remove()" in src[at - 400:at + 200], f"{rel[-1]}: a missing logo shows nothing"
+
+
+def t_the_map_fetches_a_missing_line_again_after_a_while():
+    got = _tower_async("""
+      return (async function () {
+        let lines = 0, answer = "404";
+        const dash = {visible: true, mode: "race", track: "suzuka", entries: []};
+        fetch = async function (url) {
+          if (url !== "/drivers/line") return {ok: true, json: async () => dash};
+          lines++;
+          if (answer === "down") throw new Error("relay down");
+          return answer === "ok" ? {ok: true, json: async () => ({points: [[0, 0], [10, 0], [10, 10]]})}
+                                 : {ok: false, status: 404};
+        };
+        const seen = [];
+        async function at(t) { Date.now = () => t; await poll(); seen.push(lines); }
+        await at(1000);            // 404: the line is not there yet
+        await at(2000);            // too soon to ask again
+        answer = "down";
+        await at(12000);           // asks again, the fetch fails
+        await at(13000);
+        answer = "ok";
+        await at(23000);           // asks again and gets it
+        await at(60000);           // kept, never asked again
+        dash.track = "spa";
+        await at(61000);           // a new track asks at once
+        return {seen: seen, drawn: !!view};
+      })();""")
+    if got is None:
+        return
+    assert got["seen"] == [1, 1, 2, 2, 3, 3, 4], f"a missing line is asked for again every 10 s, a loaded one never: {got}"
+    assert got["drawn"], f"the line the retry got is drawn: {got}"
 
 
 def t_stale_rows_show_no_fuel():
@@ -1024,6 +1062,21 @@ def t_the_public_page_works_without_storage():
     assert got == ["GT4Lap 6 / 18"], f"a blocked store costs only the memory: {got}"
 
 
+QUIET = ["est", "no_data", "dc", "no_sender", "retired"]
+
+
+def t_the_public_page_and_the_cockpit_show_no_fuel_for_a_quiet_car():
+    cars = [dict(CAR, entry=f"E #{i}", pos=i + 1, status=s) for i, s in enumerate(["racing"] + QUIET)]
+    public = _public(f"""render({{mode: "race", entries: {json.dumps(cars)}}});
+      return body().map(r => r.fuel);""")
+    if public is None:
+        return
+    cockpit = _cockpit({"mode": "race", "entries": cars})
+    assert public == ["56.4 L", "", "", "", "", ""], f"public page: a quiet car's last fuel reading is stale: {public}"
+    assert [r[9] for r in cockpit] == ["56.4 L", "", "", "", "", ""], \
+        f"cockpit: a quiet car's last fuel reading is stale: {cockpit}"
+
+
 def t_the_public_page_renders_one_class_as_today():
     entries, _classes = _public_cars()
     flat_rows = [{k: v for k, v in e.items() if not k.startswith("class")} for e in entries]
@@ -1048,9 +1101,10 @@ def t_the_public_page_renders_one_class_as_today():
 COCKPIT = os.path.join(ROOT, "src", "cockpit", "cockpit.html")
 
 
-def _cockpit(payload, head=False):
+def _cockpit(payload, head=False, probe=None):
     """The cockpit's timing card after one poll of `payload`: each body row's cell texts,
-    a class header as {head, color}; with `head` the header line's parts."""
+    a class header as {head, color}; with `head` the header line's parts; with `probe`
+    the value of that JS expression."""
     with open(COCKPIT, encoding="utf-8") as fh:
         html = fh.read()
     start = html.index("// Driver timing (#1115)")
@@ -1059,12 +1113,14 @@ def _cockpit(payload, head=False):
           + "const j = async () => (" + json.dumps(payload) + ");\n" + block
           + """\n;(async function () {
       await pollTiming();
+      if (__HASPROBE__) return (__PROBE__);
       if (__HEAD__) return els.timingHead.children.map(text);
       return els.timing.tBodies[0].children.map(function (r) {
         if (r.className === "cls") return {head: text(r), color: r.children[0].children[0].style.color || ""};
         return r.children.map(text);
       });
-    })().then(r => console.log(JSON.stringify(r)));""").replace("__HEAD__", json.dumps(head))
+    })().then(r => console.log(JSON.stringify(r)));""").replace("__HEAD__", json.dumps(head)).replace(
+        "__HASPROBE__", json.dumps(probe is not None)).replace("__PROBE__", probe or "null")
     return _run(js)
 
 
@@ -1087,6 +1143,46 @@ def t_the_cockpit_shows_class_position_and_gap():
     assert [r[0] for r in cars] == ["1", "2", "1", "2"], f"class positions: {cars}"
     assert [r[6] for r in cars] == ["", "+1.0", "", "+2.0"], f"class gaps, not +1 L: {cars}"
     assert [r[7] for r in cars] == ["", "+1.0", "", "+2.0"], f"class intervals: {cars}"
+
+
+def t_the_cockpit_flags_a_finished_row_with_its_final_gap():
+    cars = [dict(CAR, entry="A #1", pos=1, gap_s=0.0, finished=True, status="box"),
+            dict(CAR, finished=True, status="no_data"), dict(CAR, entry="C #3", pos=3, finished=True, status="dc"),
+            dict(CAR, entry="D #4", pos=4, gap_s=3.0, finished=True, status="est")]
+    got = _cockpit({"mode": "race", "entries": cars}, probe="""els.timing.tBodies[0].children.map(r => ({
+        row: r.className, gap: text(r.children[6]),
+        flag: flat(r.children[6]).some(c => /chequer/.test(c.className)),
+        est: flat(r.children[6]).some(c => c.className === "est")}))""")
+    if got is None:
+        return
+    assert [g["gap"] for g in got] == ["", "+1.4", "+1.4", "+3.0EST"], f"the final gap, not the status: {got}"
+    assert [g["flag"] for g in got] == [True, True, True, False], f"a finish shows the flag, an estimate its tag: {got}"
+    assert got[3]["est"], f"an estimate keeps its EST tag: {got}"
+    assert got[0]["row"] == "", f"a finished car in the box is not marked as boxed: {got}"
+
+
+def t_the_cockpit_hides_the_timing_card_until_a_car_has_data():
+    def card(payload):
+        return _cockpit(payload, probe="els.timingCard.hidden")
+
+    def race(*rows):
+        return {"mode": "race", "entries": [dict(CAR, entry=f"E #{i}", pos=i + 1, **{"laps": 0, "finished": False, **r})
+                                            for i, r in enumerate(rows)]}
+    if card({"mode": "race", "entries": []}) is None:
+        return
+    quali_row = {k: v for k, v in _q("A #1", 1, 90000, 0, None, 90000).items() if k not in ("status", "finished")}
+    got = {
+        "empty": card({"mode": "race", "entries": []}),
+        "roster only": card(race({"status": "no_sender"}, {"status": "no_sender"})),
+        "never sent": card(race({"status": "no_sender"}, {"status": "no_data"})),
+        "waiting": card(race({"status": "no_sender"}, {"status": "waiting"})),
+        "quiet after laps": card(race({"status": "no_data", "laps": 3}, {"status": "no_sender"})),
+        "finished and quiet": card(race({"status": "no_data", "finished": True}, {"status": "no_sender"})),
+        "qualifying": card({"mode": "qualifying", "qualifying": [quali_row]}),
+    }
+    assert got == {"empty": True, "roster only": True, "never sent": True, "waiting": False,
+                   "quiet after laps": False, "finished and quiet": False, "qualifying": False}, \
+        f"the card shows once a car sent data, and a roster of no-data rows keeps it hidden: {got}"
 
 
 def t_the_cockpit_renders_one_class_as_today():

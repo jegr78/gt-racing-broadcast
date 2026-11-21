@@ -478,6 +478,101 @@ def t_the_desk_sends_the_corrected_request():
     assert "document.activeElement.blur()" in desk
 
 
+def t_the_desk_keeps_tyre_rows_in_place_so_a_focused_select_keeps_its_focus():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    fn = desk[desk.index("function renderTyres("):desk.index("function syncTyres(")]
+    assert "replaceChildren" not in fn and "placeRows(tyreBody," in fn, \
+        f"re-inserting every row blurs the focused compound select on each poll: {fn}"
+    got = _desk_fn("placeRows", """(function () {
+      var moves = 0;
+      function tr(n) { return {n: n}; }
+      var body = {children: [], insertBefore: function (node, ref) {
+        var i = this.children.indexOf(node);
+        if (i >= 0) { this.children.splice(i, 1); moves++; }
+        var at = ref ? this.children.indexOf(ref) : -1;
+        this.children.splice(at < 0 ? this.children.length : at, 0, node);
+      }, removeChild: function (node) { this.children.splice(this.children.indexOf(node), 1); }};
+      Object.defineProperty(body, "lastChild", {get: function () { return this.children[this.children.length - 1]; }});
+      var a = tr("a"), b = tr("b"), c = tr("c");
+      placeRows(body, [a, b, c]);
+      moves = 0;
+      placeRows(body, [a, b, c]);
+      var same = moves;
+      placeRows(body, [a, c]);
+      var trimmed = body.children.map(function (x) { return x.n; });
+      placeRows(body, [c, a, b]);
+      var order = body.children.map(function (x) { return x.n; });
+      moves = 0;
+      placeRows(body, [a, b]);
+      return [same, trimmed, order, moves, body.children.map(function (x) { return x.n; })];
+    })()""")
+    if got is None:
+        return
+    assert got[0] == 0, f"an unchanged table moves no row: {got}"
+    assert got[1] == ["a", "c"] and got[2] == ["c", "a", "b"], f"rows follow the new order and extras go: {got}"
+    assert got[3:] == [0, ["a", "b"]], f"a row whose neighbour goes keeps its node, so its focus stays: {got}"
+
+
+def t_the_desk_arms_one_button_at_a_time():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    assert "state.armTimer" not in desk and "var armed = arming();" in desk, \
+        "one shared timer lets a second armed button cancel the first one's reset"
+    got = _desk_fn("arming", """(function () {
+      var timers = [], fired = [];
+      setTimeout = function (f) { timers.push(f); return timers.length; };
+      clearTimeout = function (id) { if (id) timers[id - 1] = null; };
+      function btn(label) {
+        var b = {dataset: {label: label}, textContent: label, cls: {}, handlers: [],
+                 classList: {add: function (c) { b.cls[c] = true; }, remove: function (c) { delete b.cls[c]; }},
+                 addEventListener: function (t, f) { b.handlers.push(f); }};
+        b.click = function () { b.handlers.forEach(function (f) { f(); }); };
+        return b;
+      }
+      function look(b) { return [b.textContent, !!b.cls.armed]; }
+      var armed = arming();
+      var a = btn("Final lap"), b = btn("Finish"), r1 = btn("Reject"), r2 = btn("Reject");
+      armed(a, "final", function () { fired.push("a"); });
+      armed(b, "finish", function () { fired.push("b"); });
+      armed(r1, "rej-c1", function () { fired.push("r1"); });
+      armed(r2, "rej-c2", function () { fired.push("r2"); });
+      a.click(); b.click();
+      var afterB = [look(a), look(b)];
+      a.click();
+      var aOnce = fired.slice();
+      b.click(); b.click();
+      timers.forEach(function (f) { if (f) f(); });
+      var timedOut = [look(a), look(b)];
+      r1.click(); r2.click();
+      var other = look(r2);
+      var r2b = btn("Reject"), r3 = btn("Reject");
+      armed(r2b, "rej-c2", function () { fired.push("r2b"); });
+      armed(r3, "rej-c3", function () { fired.push("r3"); });
+      var rebuilt = [look(r2b), look(r3)];
+      var pending = timers.filter(Boolean).length;
+      r2b.click();
+      var r2c = btn("Reject");
+      r2b.click();
+      armed(r2c, "rej-c2", function () { fired.push("r2c"); });
+      timers.forEach(function (f) { if (f) f(); });
+      return {afterB: afterB, aOnce: aOnce, fired: fired, timedOut: timedOut, other: other,
+              rebuilt: rebuilt, pending: pending, expired: [look(r2b), look(r2c)]};
+    })()""")
+    if got is None:
+        return
+    assert got["afterB"] == [["Final lap", False], ["Confirm Finish", True]], \
+        f"arming a second button resets the first: {got}"
+    assert got["aOnce"] == [], f"the reset button needs two clicks again: {got}"
+    assert got["fired"][:1] == ["b"] and got["timedOut"] == [["Final lap", False], ["Finish", False]], \
+        f"a confirmed button fires once, and a timer resets only its own button: {got}"
+    assert got["other"] == ["Confirm Reject", True], f"another row's button never confirms the first: {got}"
+    assert got["rebuilt"] == [["Confirm Reject", True], ["Reject", False]] and got["pending"] == 1, \
+        f"a button rebuilt with the same key stays armed on the same timer, a new key does not: {got}"
+    assert got["fired"] == ["b", "r2b"], f"the rebuilt button confirms with one more click: {got}"
+    assert got["expired"] == [["Reject", False], ["Reject", False]], f"the timer disarms the rebuilt button: {got}"
+
+
 def t_the_desk_offers_a_lap_count_per_slower_class():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()
