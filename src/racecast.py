@@ -796,6 +796,10 @@ def _part_path():
     return os.path.join(_runtime_dir(), "part.json")
 
 
+def _has_part_flag(rest):
+    return any(tok == "--part" or tok.startswith("--part=") for tok in rest)
+
+
 def _write_part_reset(index, mode="race"):
     """Reset the broadcast-Part pointer to Part `index`, not-live. `event start`
     is the one reliable reset point (every event begins with it; a clean
@@ -6837,18 +6841,22 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # pointer before the relay starts, so its PartStore comes up on the right Part.
     part = _part_index(rest)
     fresh = _new_session and not _is_continuation_start(rest)
-    relay_was_running = _relay_already_running_for_active_profile() if fresh else False
-    continuing = fresh and not relay_was_running and _unstopped_event_continues()
+    relay_was_running = _relay_already_running_for_active_profile() if _new_session else False
+    continuing = _new_session and not relay_was_running and _unstopped_event_continues()
     fresh = fresh and not continuing
     mode = "qualifying" if _qualifying_args(rest) else "race"
     resume_stint = None
-    if continuing:
+    if continuing:   # resume whatever --stint/--part did not set
         resume_stint, saved_part = _resume_point(mode)
+        resume_stint = None if _stint_args(rest) else resume_stint
+        saved_part = None if _has_part_flag(rest) else saved_part
         part = saved_part or part
         resumed = ([f"stint {resume_stint}"] if resume_stint else []) + \
             ([f"Part {saved_part}"] if saved_part else [])
-        print("event: resuming " + ", ".join(resumed) + "." if resumed else
-              "event: nothing recorded to resume: stint and Part start at 1.")
+        if resumed:
+            print("event: resuming " + ", ".join(resumed) + ".")
+        elif not (_stint_args(rest) and _has_part_flag(rest)):
+            print("event: nothing recorded to resume: the unset stint or Part starts at 1.")
     if fresh and not relay_was_running:
         _clear_on_air_record()
     _write_part_reset(part, mode)

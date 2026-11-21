@@ -40,7 +40,8 @@ continued event keeps the invite with every driver code and approval, the public
 link, the race corrections, the race recording and the report window, the same as
 `--stint` or `--part`. It also resumes the broadcast where the relay left it: the
 race stint that was on air and the broadcast Part (`resuming stint 5, Part 2`).
-Explicit `--stint` and `--part` win. A Part resumes only in the mode it was saved in,
+`--stint` or `--part` sets that value by hand and the start still resumes the other
+one, so a stint typed into the Control Center's Start event field keeps the Part. A Part resumes only in the mode it was saved in,
 so `--qualifying` resumes a qualifying Part and never a race stint.
 Otherwise it is a new event: a new invite and timing link, the
 last event's corrections cleared and a new race recording. The command output and the

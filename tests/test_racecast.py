@@ -3328,6 +3328,16 @@ def t_event_start_and_stop_drive_the_invite():
            relay_args=args, after=_files)
     assert args == [["--stint", "3", "--event-run"]] and state[0][0]["index"] == 1, \
         f"explicit --stint/--part win: {args} {state}"
+    args, state, out = [], [], io.StringIO()
+    _start(["--stint", "7"], running=False, seed=_broadcast(60), out=out, relay_args=args, after=_files)
+    assert args == [["--stint", "7", "--event-run"]] and state[0][0]["index"] == 2, \
+        f"--stint alone still resumes the Part: {args} {state}"
+    assert "resuming Part 2." in out.getvalue(), out.getvalue()
+    assert "continuing today's event" in out.getvalue(), out.getvalue()
+    args, state = [], []
+    _start(["--part", "3"], running=False, seed=_broadcast(60), relay_args=args, after=_files)
+    assert args == [["--stint", "5", "--event-run"]] and state[0][0]["index"] == 3, \
+        f"--part alone still resumes the stint: {args} {state}"
     args, state = [], []
     _start([], running=False, seed=_broadcast(13 * 3600), relay_args=args, after=_files)
     assert args == [["--event-run"]], f"a new event starts at stint 1: {args}"
