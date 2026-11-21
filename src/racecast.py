@@ -1589,6 +1589,51 @@ def _is_continuation_start(rest):
     return False
 
 
+# A plain `event start` continues an unstopped event whose invite or last health
+# sample is younger than this.
+EVENT_CONTINUE_MAX_AGE_S = 12 * 3600
+
+
+def _event_continues(created, last_alive, now):
+    """Whether an unstopped event's invite (`created`) or the relay's last health sample
+    (`last_alive`) lies less than EVENT_CONTINUE_MAX_AGE_S before `now`. Pure."""
+    def _stamp(t):
+        return isinstance(t, (int, float)) and not isinstance(t, bool) and t <= now
+    if not _stamp(created):
+        return False
+    newest = max([created] + ([last_alive] if _stamp(last_alive) else []))
+    return now - newest < EVENT_CONTINUE_MAX_AGE_S
+
+
+def _unstopped_event_continues():
+    """True when `event stop` has not ended this profile's event and it is recent."""
+    import driver_invite
+    invite = driver_invite.current(_driver_invite_path())
+    if invite is None:
+        return False
+    return _event_continues(invite.get("created"), _last_health_sample_ts(), time.time())
+
+
+def _last_health_sample_ts():
+    """The newest relay health sample's ts, read only, or None. The file's mtime is no
+    signal: any opener may checkpoint the WAL."""
+    import sqlite3
+    from urllib.parse import quote
+    path = _health_db_path()
+    if not os.path.isfile(path):
+        return None
+    posix = os.path.abspath(path).replace("\\", "/")
+    uri = "file://" + quote(posix if posix.startswith("/") else "/" + posix, safe="/:")
+    try:
+        conn = sqlite3.connect(uri + "?mode=ro", uri=True, timeout=2.0)
+        try:
+            return conn.execute("SELECT MAX(ts) FROM samples").fetchone()[0]
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
 def _read_session_start():
     """The current event's start ts (float) from session.json, or None."""
     try:
@@ -6063,7 +6108,8 @@ def event_invite_data(new=False, path=None, links=None):
 
 def _start_driver_invite(fresh, path=None):
     """A fresh event gets a new invite, a new public timing link and a driver race
-    without the last event's corrections; a takeover or recovery restart keeps them."""
+    without the last event's corrections; a takeover, recovery restart or continued
+    event keeps them."""
     import driver_invite
     import driver_race
     import race_recording
@@ -6728,7 +6774,8 @@ def event_start(rest, _autojoin=True, _new_session=True):
     broadcast (record a new session start), False keeps the existing window.
     `event_takeover` passes False so a handover continues A's report window on B
     rather than resetting it; a mid-event recovery restart (--stint/--part) keeps
-    it too (see `_is_continuation_start`)."""
+    it too (see `_is_continuation_start`), and so does a plain start on an unstopped,
+    recent event (`_unstopped_event_continues`)."""
     ev, pf = _event_modules()
     # 0. Pre-flight gate: refuse to bring the stack up when a static
     # precondition is broken (missing SHEET_ID, missing graphics): those never
@@ -6768,10 +6815,19 @@ def event_start(rest, _autojoin=True, _new_session=True):
     _write_part_reset(_part_index(rest))
     fresh = _new_session and not _is_continuation_start(rest)
     relay_was_running = _relay_already_running_for_active_profile() if fresh else False
+    continuing = fresh and not relay_was_running and _unstopped_event_continues()
+    fresh = fresh and not continuing
     try:
         # Start event again on a running event (OBS or Companion back up) keeps the
         # drivers' codes; only a new event gets a new link.
         _start_driver_invite(fresh and not relay_was_running)
+        if continuing:
+            print("event: continuing today's event: driver codes and timing link kept "
+                  "(Stop event first to start a new one).")
+        elif fresh and not relay_was_running:
+            print("event: new event: new driver codes and timing link.")
+        elif _new_session:
+            print("event: continuing the running event: driver codes and timing link kept.")
     except OSError as exc:
         print(f"driver invite: not created ({exc}).")
     # Mark THIS event's start so the report window begins here: a restart within

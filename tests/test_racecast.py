@@ -3204,12 +3204,12 @@ def t_event_start_and_stop_drive_the_invite():
     class _Reached(Exception):
         pass
 
-    def _start(rest, running, new_session=True):
+    def _start(rest, running, new_session=True, seed=None, out=None):
         ev = m._event_modules()[0]
         calls = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
-                 m._start_driver_invite)
+                 m._start_driver_invite, m._driver_invite_path)
         restore = _stub_relay_signals((4242,) if running else (), 4242 if running else None,
                                       running, "demo" if running else "", "demo")
         with tempfile.TemporaryDirectory() as tmp:
@@ -3220,25 +3220,84 @@ def t_event_start_and_stop_drive_the_invite():
             m._sync_live_telemetry_record = lambda: None
             m._wait_for_obs_ready = lambda timeout=0, early=False: False
             m._start_driver_invite = calls.append
+            m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")
+            if seed:
+                seed(tmp)
 
             def _boom(_rest):
                 raise _Reached()
             m.relay_start = _boom
             try:
-                m.event_start(rest, _new_session=new_session)
+                with contextlib.redirect_stdout(out or io.StringIO()):
+                    m.event_start(rest, _new_session=new_session)
             except _Reached:
                 return calls
             finally:
                 restore()
                 (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
-                 m._start_driver_invite) = saved
+                 m._start_driver_invite, m._driver_invite_path) = saved
         raise AssertionError("expected to reach relay_start")
 
     assert _start([], running=False) == [True], "a new event gets a new invite link"
     assert _start([], running=True) == [False], "Start event on a running event keeps the drivers' codes"
     assert _start(["--stint", "3"], running=False) == [False], "a recovery restart keeps the link"
     assert _start([], running=False, new_session=False) == [False], "a takeover keeps or creates one"
+
+    def _invite(age_s, health_age_s=None):
+        def seed(tmp):
+            import driver_invite
+            driver_invite.create(driver_invite.path_in(tmp), now=time.time() - age_s)
+            if health_age_s is not None:
+                import sqlite3
+                conn = sqlite3.connect(os.path.join(tmp, "health-history.db"))
+                conn.execute("CREATE TABLE samples (ts REAL NOT NULL)")
+                conn.execute("INSERT INTO samples VALUES (?)", (time.time() - health_age_s,))
+                conn.commit()
+                conn.close()
+        return seed
+
+    out = io.StringIO()
+    assert _start([], running=False, seed=_invite(3600), out=out) == [False], \
+        "a plain Start event after a relay death keeps the unstopped event's codes"
+    assert "continuing today's event: driver codes and timing link kept" in out.getvalue(), out.getvalue()
+    out = io.StringIO()
+    assert _start([], running=False, seed=_invite(13 * 3600), out=out) == [True], \
+        "an unstopped invite older than the limit is a new event"
+    assert "new event: new driver codes and timing link" in out.getvalue(), out.getvalue()
+    assert _start([], running=False, seed=_invite(20 * 3600, health_age_s=60)) == [False], \
+        "a relay that sampled health a minute ago keeps a long race going"
+    assert _start([], running=False, seed=_invite(20 * 3600, health_age_s=13 * 3600)) == [True], \
+        "old health samples do not revive an old invite, however fresh the file's mtime"
+    def _stopped(tmp):
+        _invite(60)(tmp)
+        m._stop_driver_invite(os.path.join(tmp, "driver-invite.json"))
+    assert _start([], running=False, seed=_stopped) == [True], "Stop event then Start event is a new event"
+    session = []
+    saved = m._write_session_start
+    m._write_session_start = lambda: session.append(True)
+    try:
+        _start([], running=False, seed=_invite(3600))
+    finally:
+        m._write_session_start = saved
+    assert session == [], "a continuation keeps the report window like --stint"
+    m._write_session_start = lambda: session.append(True)
+    try:
+        assert _start([], running=True, seed=_invite(60)) == [False], "a running relay keeps the codes"
+    finally:
+        m._write_session_start = saved
+    assert session == [True], "Start event on a running relay still opens a new report window"
+
+
+def t_event_continues_bounds():
+    limit = m.EVENT_CONTINUE_MAX_AGE_S
+    now = 1_000_000.0
+    assert m._event_continues(now - limit + 1, None, now) is True
+    assert m._event_continues(now - limit, None, now) is False, "the limit itself is a new event"
+    assert m._event_continues(None, now, now) is False, "an invite without a creation time is a new event"
+    assert m._event_continues("x", None, now) is False
+    assert m._event_continues(now + 3600, None, now) is False, "a creation time in the future is a new event"
+    assert m._event_continues(now - 2 * limit, now - 60, now) is True, "a recent health sample extends it"
     stopped = []
     saved = (m._stop_driver_invite, m._relay_is_alive)
     try:
