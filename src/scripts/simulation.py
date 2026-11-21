@@ -33,6 +33,7 @@ PROFILE_MARK = "SIMULATION"                         # profile.env key of a tool-
 SKIPPED = "skipped (simulation)"
 CHANNEL_RE = re.compile(r"^sim://[A-Za-z0-9_-]{1,64}$")
 _TRUE = ("1", "true", "yes", "on")
+_FALSE = ("", "0", "false", "no", "off")
 
 
 class OutboundRefused(ConnectionRefusedError):
@@ -42,6 +43,17 @@ class OutboundRefused(ConnectionRefusedError):
 def active(environ=None):
     environ = os.environ if environ is None else environ
     return (environ.get(FLAG) or "").strip().lower() in _TRUE
+
+
+def flag_problem(environ=None):
+    """Why the RACECAST_SIMULATION value is unusable, or "". A mistyped value must not
+    quietly mean a real run."""
+    environ = os.environ if environ is None else environ
+    value = (environ.get(FLAG) or "").strip().lower()
+    if value in _TRUE or value in _FALSE:
+        return ""
+    return (f"{FLAG}={environ.get(FLAG)!r} is neither on (1, true, yes, on) "
+            f"nor off (0, false, no, off)")
 
 
 def skipped(what):
@@ -127,6 +139,8 @@ def _stream_bin_problem(path):
 def problems(environ=None):
     """Why simulation mode cannot run with this environment; [] outside the mode."""
     environ = os.environ if environ is None else environ
+    if flag_problem(environ):
+        return [flag_problem(environ)]
     if not active(environ):
         return []
     out = []

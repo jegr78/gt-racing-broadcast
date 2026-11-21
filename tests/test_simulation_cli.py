@@ -267,6 +267,13 @@ def t_control_center_shows_the_simulation_badge():
         "the header badge must follow /api/status"
 
 
+def t_bootstrap_gate_refuses_an_unrecognised_flag():
+    refused = m._simulation_gate(["event", "start"], {"RACECAST_SIMULATION": "y"}, "demo", {})
+    assert refused and "RACECAST_SIMULATION" in refused, refused
+    assert m._simulation_gate(["help"], {"RACECAST_SIMULATION": "y"}, "demo", {}), \
+        "no command runs for real on a mistyped flag"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

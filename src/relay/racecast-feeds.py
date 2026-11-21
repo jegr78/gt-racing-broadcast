@@ -12076,7 +12076,7 @@ def _funnel_watch(max_age_s=60.0, poll=None):
 def simulation_startup(environ):
     """None when the relay may start. In simulation it first checks the RACECAST_SIM_*
     endpoints and puts the stream stand-ins at the front of PATH."""
-    if not simulation.active(environ):
+    if not (simulation.active(environ) or simulation.flag_problem(environ)):
         return None
     problems = simulation.problems(environ)
     if problems:

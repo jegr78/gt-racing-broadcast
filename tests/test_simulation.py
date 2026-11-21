@@ -436,6 +436,19 @@ def t_localhost_counts_only_when_it_resolves_to_loopback():
     assert not sim.loopback_name_ok("example.com", good)
 
 
+def t_an_unrecognised_flag_value_refuses_instead_of_running_for_real():
+    for v in ("2", "y", "enabled", "sim"):
+        msg = sim.flag_problem({"RACECAST_SIMULATION": v})
+        assert msg and "RACECAST_SIMULATION" in msg, v
+        assert sim.problems({"RACECAST_SIMULATION": v}), v
+    for v in ("", "0", "off", "false", "no", "1", "on", "TRUE"):
+        assert sim.flag_problem({"RACECAST_SIMULATION": v}) == "", v
+    assert sim.flag_problem({}) == ""
+    m = _relay()
+    err = m.simulation_startup({"RACECAST_SIMULATION": "enabled"})
+    assert err and "RACECAST_SIMULATION" in err, "the relay would start for real"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

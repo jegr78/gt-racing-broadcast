@@ -10592,6 +10592,8 @@ def _simulation_gate(argv, environ=None, profile=None, values=None, force=False)
     (`racecast --simulation --force ...`) records the profile it allowed, so its
     children run there too. A subcommand's own `--force` does not count."""
     environ = os.environ if environ is None else environ
+    if simulation.flag_problem(environ):
+        return "simulation mode: " + simulation.flag_problem(environ) + "."
     if not simulation.active(environ) or argv[:1] and argv[0] in SIMULATION_EXEMPT:
         return None
     problems = simulation.problems(environ)
