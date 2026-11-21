@@ -59,6 +59,11 @@ against simulated parties instead of the real ones. A Control Center started wit
 `racecast --simulation ui` passes the mode on to its Start event, Stop event and
 Takeover buttons.
 
+A rehearsal needs the simulated parties as well: the event-sim tool under
+`tools/event-sim/` in a source checkout of the repository provides them. The tool does
+not ship in the release package, and without its endpoints simulation mode refuses to
+start.
+
 - Event start, stop and takeover do not launch OBS, Discord or Companion and do not
   touch Tailscale or the Funnel. Each step prints `skipped (simulation)` in the job log,
   and the readiness report lists those rows as INFO.
