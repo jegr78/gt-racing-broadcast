@@ -165,7 +165,10 @@
   }
   // The race laps driven against the count, and GT7's lap of the lobby on air; in qualifying the segment.
   function lapText(r) {
-    if (r.mode === "qualifying") return "Qualifying" + (r.segment ? " \u00b7 " + r.segment : "");
+    if (r.mode === "qualifying") {
+      if (/qualifying/i.test(r.segment || "")) return r.segment;   // the segment names it already
+      return "Qualifying" + (r.segment ? " \u00b7 " + r.segment : "");
+    }
     var lap = r.lap || {}, parts = [];
     if (typeof lap.leader === "number") parts.push("Race lap " + lap.leader + (typeof lap.count === "number" ? " / " + lap.count : ""));
     if (typeof r.lobby_lap === "number") parts.push("Lobby lap " + r.lobby_lap);

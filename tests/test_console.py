@@ -576,6 +576,15 @@ def t_the_desk_lap_line_shows_the_race_lap_and_the_lobby_lap():
         f"the race lap against the count, then GT7's lap of the lobby on air: {got}"
 
 
+def t_the_desk_names_a_qualifying_segment_once():
+    got = _desk_fn("lapText", '["Qualifying", "qualifying 2", "Q1", ""].map(function (s) {'
+                              ' return lapText({mode: "qualifying", segment: s}); })')
+    if got is None:
+        return
+    assert got == ["Qualifying", "qualifying 2", "Qualifying \u00b7 Q1", "Qualifying"], \
+        f"a segment that names qualifying itself shows alone: {got}"
+
+
 def t_the_desk_shows_qualifying_per_class_with_every_column():
     rows = [{"entry": "A", "pos": 1, "best_ms": 90000, "gap_ms": 0, "interval_ms": None, "last_lap_ms": 90000,
              "class": "GT3", "class_pos": 1, "class_gap_ms": 0, "class_interval_ms": None},
