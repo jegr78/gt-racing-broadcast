@@ -719,10 +719,31 @@ def t_an_added_lap_and_gt7_laps_count_together():
     conns[0]["latest"] = {"best_ms": 89000, "last_ms": 89000}
     wall[0] += 10
     assert _quali_rows(svc)["A"] == (89000, 89000), "GT7 keeps counting"
-    again, _c, later, _p = _lap_service([dict(conns[0], latest={"best_ms": 90500, "last_ms": 92000})], path)
-    later[0] = 5000.0
-    assert _quali_rows(again)["A"] == (90000, 90000), \
-        "after a restart the stored lap is newer than the one GT7 sent before it"
+
+
+def _restarted(path, latest):
+    svc, _c, wall, _p = _lap_service([{"entry": "A", "segment": "Q1", "name": "Max", "latest": latest}], path)
+    wall[0] = 5000.0
+    return svc
+
+
+def t_the_newer_of_an_added_and_a_gt7_lap_stays_the_last_after_a_restart():
+    conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "last_ms": 90500}}]
+    svc, _ctx, wall, path = _lap_service(conns)
+    svc.standings()
+    wall[0] += 10
+    svc.add_quali_lap("rc:Anna", "A", 91500)
+    assert _quali_rows(_restarted(path, conns[0]["latest"]))["A"] == (90500, 91500), \
+        "a lap added after GT7's stays the last lap"
+    wall[0] += 10
+    conns[0]["latest"] = {"best_ms": 90500, "last_ms": 92000}
+    svc.standings()
+    again = _restarted(path, conns[0]["latest"])
+    assert _quali_rows(again)["A"] == (90500, 92000), "a GT7 lap after the added one stays the last lap"
+    assert again.standings()["qualifying"][0]["lap_fresh"] is False, "and it is no new lap"
+    moved = _restarted(path, {"best_ms": 90500, "last_ms": 93000})
+    assert _quali_rows(moved)["A"] == (90500, 93000), "a GT7 lap driven while the relay was down is newer"
+    assert moved.standings()["qualifying"][0]["lap_fresh"] is False, "and old"
 
 
 def t_set_delete_and_gt7_time_work_with_added_laps():
@@ -2087,6 +2108,12 @@ def t_an_added_qualifying_lap_without_valid_values_is_dropped():
     path = _file({"quali_laps": {"": {BAD: ok, "A": ok, "B": dict(ok, best=0), "C": dict(ok, last="1:30"),
                                       "D": dict(ok, ts=True), "E": "x"}}})
     assert dr._saved_quali_laps(path, None) == {"A": ok}, dr._saved_quali_laps(path, None)
+
+
+def t_a_stored_gt7_lap_without_valid_values_is_dropped():
+    path = _file({"quali_gt7": {"Q1": {BAD: [90000, 5.0], "A": [90000, 5.0], "B": [0, 5.0], "C": [90000, True],
+                                       "D": [90000], "E": "x"}}})
+    assert dr._saved_quali_gt7(path, "Q1") == {"A": (90000, 5.0)}, dr._saved_quali_gt7(path, "Q1")
 
 
 def t_a_tyre_compound_without_valid_text_is_dropped():

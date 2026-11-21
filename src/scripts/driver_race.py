@@ -338,7 +338,8 @@ def public_view(snap):
     return out
 
 
-def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None, laps=None, now=0.0):
+def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None, laps=None, now=0.0,
+               known=None):
     """Rank the running segment's entries by GT7 best lap: [{pos, entry, number,
     driver, team, color, text_color, best_ms, gap_ms, interval_ms, last_lap_ms}];
     entries without a lap last. Only live senders count, and a lap under `min_ms`
@@ -348,7 +349,9 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
     corrections: a set time replaces the best lap, None deletes it. `seen` {entry:
     (best ms, name, last ms, wall time GT7's last lap changed)} carries earlier calls
     and is updated in place at wall time `now`, so a lap stays after its sender goes
-    quiet or GT7 starts a new session."""
+    quiet or GT7 starts a new session. `known` {entry: (last ms, changed at)} is what
+    `seen` held before a relay restart: a sender's first lap dates from it, or from
+    after the restart's last known moment when GT7's last lap changed meanwhile."""
     best = seen if seen is not None else {}
 
     def lap(ms):
@@ -368,7 +371,7 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
             continue
         ms, last = lap(latest.get("best_ms")), lap(latest.get("last_ms"))
         if cur is None or cur[3] is None:
-            cur = (ms, c.get("name") or "", last, 0.0)   # sent before the relay saw it
+            cur = (ms, c.get("name") or "", last, _first_at(c["entry"], last, known, laps))
         elif ms is not None and (cur[0] is None or ms < cur[0]):
             cur = (ms, c.get("name") or "", cur[2], cur[3])
         if last is not None and last != cur[2]:
@@ -394,6 +397,18 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
                          interval_ms=None if ms is None or ahead is None else ms - ahead,
                          last_lap_ms=last, last_lap_at=at))
     return rows
+
+
+def _first_at(entry, last, known, laps):
+    """When a sender's first last lap was driven: 0.0 (before anything the relay saw)
+    unless the relay knew the entry's GT7 lap before a restart."""
+    rec = (known or {}).get(entry)
+    if rec is None or last is None:
+        return 0.0
+    if rec[0] == last:
+        return rec[1]
+    added = (laps or {}).get(entry)
+    return max(rec[1], added["ts"] if added else 0.0) + 0.001   # driven while the relay was down
 
 
 def quali_classes(rows, roster):
@@ -511,6 +526,19 @@ def _saved_quali_laps(path, segment):
                 and isinstance(v.get("ts"), (int, float)) and not isinstance(v["ts"], bool) \
                 and math.isfinite(v["ts"]) and len(out) < MAX_QUALI:
             out[entry] = {"best": v["best"], "last": v["last"], "ts": float(v["ts"])}
+    return out
+
+
+def _saved_quali_gt7(path, segment):
+    """{entry: (last ms, changed at)} of the GT7 last laps seen in one qualifying segment."""
+    raw = _read_json(path).get("quali_gt7")
+    raw = raw.get(_segment_key(segment)) if isinstance(raw, dict) else None
+    out = {}
+    for entry, v in (raw.items() if isinstance(raw, dict) else ()):
+        if _text(entry, MAX_ENTRY) and isinstance(v, list) and len(v) == 2 and type(v[0]) is int \
+                and 0 < v[0] < MAX_LAP_MS and isinstance(v[1], (int, float)) and not isinstance(v[1], bool) \
+                and math.isfinite(v[1]) and len(out) < MAX_QUALI:
+            out[entry] = (v[0], float(v[1]))
     return out
 
 
@@ -823,11 +851,13 @@ class Service:
         pick = self._pick() or {}
         path = _actions_path_for(self._path)
         seen = self._quali_seen.setdefault((pick.get("id"), _segment_key(ctx.get("segment"))), {})
+        known = _saved_quali_gt7(path, ctx.get("segment"))
         rows = qualifying(
             ctx.get("connections") or [], ctx.get("segment"), roster,
             min_ms=0 if race.length is None else int(race.min_lap_s() * 1000),
             overrides=_saved_quali(path, ctx.get("segment")), seen=seen,
-            laps=_saved_quali_laps(path, ctx.get("segment")), now=self._wall())
+            laps=_saved_quali_laps(path, ctx.get("segment")), now=self._wall(), known=known)
+        self._keep_gt7_laps(seen, known, _segment_key(ctx.get("segment")))
         named = self._request_names(ctx.get("segment"))
         window = read_league(self._league)["last_lap_s"]
         for row in rows:
@@ -843,6 +873,27 @@ class Service:
                 own = race.display_name(row["entry"], reg) if reg else ""
                 row["driver"] = own if own != reg else race.display_name(row["entry"], "") or reg
         return quali_classes(rows, roster)
+
+    def _keep_gt7_laps(self, seen, known, segment):
+        """Store each sender's last GT7 lap and when it changed, so their order against
+        added laps survives a relay restart; under the lock, written only on a change."""
+        fresh = {e: (cur[2], cur[3]) for e, cur in seen.items()
+                 if type(cur[2]) is int and cur[3] is not None and known.get(e) != (cur[2], cur[3])}
+        if not fresh:
+            return
+
+        def update(doc):
+            raw = doc.get("quali_gt7") if isinstance(doc.get("quali_gt7"), dict) else {}
+            done = raw.get(segment) if isinstance(raw.get(segment), dict) else {}
+            for entry, (last, at) in fresh.items():
+                if entry in done or len(done) < MAX_QUALI:
+                    done[entry] = [last, at]
+            raw[segment] = done
+            doc["quali_gt7"] = raw
+        try:
+            self._save_actions(update)
+        except OSError:
+            pass  # the order falls back to "GT7's lap is older" after a restart
 
     @staticmethod
     def _shown_lap(race, fl, roster):
