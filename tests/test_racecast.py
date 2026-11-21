@@ -3332,33 +3332,33 @@ def t_event_start_and_stop_drive_the_invite():
 
     args, state, out = [], [], io.StringIO()
     _start([], running=False, seed=_broadcast(60), out=out, relay_args=args, after=_files)
-    assert args == [["--stint", "5", "--event-run"]], f"a continuation resumes the stint on air: {args}"
+    assert args == [["--stint", "5"]], f"a continuation resumes the stint on air: {args}"
     assert state[0][0] == {"index": 2, "live": False, "mode": "race"}, \
         f"a continuation keeps the Part: {state}"
     assert "resuming stint 5, Part 2" in out.getvalue(), out.getvalue()
     args, state = [], []
     _start(["--stint", "3", "--part", "1"], running=False, seed=_broadcast(60),
            relay_args=args, after=_files)
-    assert args == [["--stint", "3", "--event-run"]] and state[0][0]["index"] == 1, \
+    assert args == [["--stint", "3"]] and state[0][0]["index"] == 1, \
         f"explicit --stint/--part win: {args} {state}"
     args, state, out = [], [], io.StringIO()
     _start(["--stint", "7"], running=False, seed=_broadcast(60), out=out, relay_args=args, after=_files)
-    assert args == [["--stint", "7", "--event-run"]] and state[0][0]["index"] == 2, \
+    assert args == [["--stint", "7"]] and state[0][0]["index"] == 2, \
         f"--stint alone still resumes the Part: {args} {state}"
     assert "resuming Part 2." in out.getvalue(), out.getvalue()
     assert "continuing today's event" in out.getvalue(), out.getvalue()
     args, state = [], []
     _start(["--part", "3"], running=False, seed=_broadcast(60), relay_args=args, after=_files)
-    assert args == [["--stint", "5", "--event-run"]] and state[0][0]["index"] == 3, \
+    assert args == [["--stint", "5"]] and state[0][0]["index"] == 3, \
         f"--part alone still resumes the stint: {args} {state}"
     args, state = [], []
     _start([], running=False, seed=_broadcast(13 * 3600), relay_args=args, after=_files)
-    assert args == [["--event-run"]], f"a new event starts at stint 1: {args}"
+    assert args == [[]], f"a new event starts at stint 1: {args}"
     assert state[0] == ({"index": 1, "live": False, "mode": "race"}, None), \
         f"a new event resets the Part and drops the last stint record: {state}"
     args, state = [], []
     _start(["--qualifying"], running=False, seed=_broadcast(60), relay_args=args, after=_files)
-    assert args == [["--qualifying", "--event-run"]], f"the race stint is not forced onto qualifying: {args}"
+    assert args == [["--qualifying"]], f"the race stint is not forced onto qualifying: {args}"
     assert state[0][0] == {"index": 1, "live": False, "mode": "qualifying"}, \
         f"a race Part is not resumed in qualifying: {state}"
     state = []

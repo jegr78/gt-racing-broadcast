@@ -32,10 +32,11 @@ starts over.
 
 **Start event** (`racecast event start`) decides whether it starts a new event or
 continues the current one. It continues when **Stop event** has not ended the
-profile's event, the invite or the last sign of life of the relay that Start event
-brought up is younger than 12 hours, and the invite is younger than 36 hours. That
-relay refreshes its sign of life every minute; a relay started on its own (`racecast
-relay start`) never does. That covers a relay that died mid-race and a plain Start event afterwards. A
+profile's event, the invite or the relay's last sign of life is younger than 12 hours,
+and the invite is younger than 36 hours. While the event's invite exists, the relay
+refreshes its sign of life every minute and records the race stint on air, also after
+a `racecast relay restart`. That covers a relay that died mid-race and a plain Start
+event afterwards. A
 continued event keeps the invite with every driver code and approval, the public timing
 link, the race corrections, the race recording and the report window, the same as
 `--stint` or `--part`. It also resumes the broadcast where the relay left it: the

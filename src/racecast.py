@@ -6888,7 +6888,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         if was_running:   # same relay, same profile: it won't re-read the file itself
             _sync_live_telemetry_record()
     stint_args = _stint_args(rest) or (["--stint", str(resume_stint)] if resume_stint else [])
-    relay_start(stint_args + _qualifying_args(rest) + _title_args(rest) + ["--event-run"])
+    relay_start(stint_args + _qualifying_args(rest) + _title_args(rest))
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())
         if _mm:

@@ -1242,9 +1242,51 @@ def t_the_on_air_record_waits_for_the_schedule():
             assert json.load(fh) == {"stint": 1, "alive": 101.0}, "a loaded schedule records its row"
 
 
-def t_only_an_event_relay_records_the_stint_and_its_stamp():
-    assert g.m.on_air_record_path("/rt", False) is None, "a standalone relay writes no stamp"
-    assert g.m.on_air_record_path("/rt", True) == os.path.join("/rt", "on-air.json")
+def t_any_relay_of_an_unstopped_event_records_the_stint_and_its_stamp():
+    import tempfile, threading, time
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S%d" % i, i) for i in range(1, 9)]
+
+        def final_laps(self):
+            return None
+
+        def class_laps_at(self, idx):
+            return {}
+
+    class Relay:
+        solo, mode, race_source, idx = False, "race", Source(), 6
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
+
+        def on_air_row_idx(self):
+            return self.idx
+
+    class Svc:
+        def stint_switch(self, **_kw):
+            pass
+
+    def _run(path, active):
+        stop = threading.Event()
+        worker = threading.Thread(target=g.m.stint_switch_watch,
+                                  args=(Relay(), Svc(), stop, lambda: None, 0.01),
+                                  kwargs={"on_air_path": path, "clock": lambda: 500.0,
+                                          "invite_active": lambda: active}, daemon=True)
+        worker.start()
+        deadline = time.monotonic() + (2 if active else 0.2)
+        while not os.path.exists(path) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        stop.set()
+        worker.join(2)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        _run(path, active=False)
+        assert not os.path.exists(path), "no invite, no event: the relay writes no record"
+        _run(path, active=True)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 7, "alive": 500.0}, \
+                "a relay restarted by hand mid-event records the latest stint and its stamp"
 
 
 def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
