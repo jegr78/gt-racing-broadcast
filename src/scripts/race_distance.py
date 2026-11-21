@@ -59,7 +59,8 @@ nearest the predicted distance decides.
   `release` ends the mode: a car still in its old session counts on from where it
   is, one in a restart lobby still resumes at its box exit. In an endurance final
   lobby the cars a keep restart started rank at the flag by their crossing moments,
-  each later by its corrections since the restart at its speed on the line.
+  each later by its corrections since the restart at its speed on the line, and count
+  the flag car's race laps less the whole laps between their lines.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
   window starts from the leader's distance where its old lobby's car stopped (where
   the leader is, while it still runs).
@@ -225,6 +226,7 @@ class Race:
         self._finishing_at = None
         self._flag_at = None        # when the first flag's car passed the line
         self._winner_entry = None   # the first flag's car when it led in race distance
+        self._flag_entry = None     # the first flag's car
         self._flag_laps = math.inf
         self._finished = False
         self._pruned_at = None
@@ -975,6 +977,7 @@ class Race:
         has now. A car whose crossing after `at` arrived first finishes there."""
         lead, shown = self._race_lead(), self._shown(ent)
         self._winner_entry = ent if shown is not None and shown >= lead else None
+        self._flag_entry = ent
         self._flag_laps = math.floor(lead / self.length) if lead is not None else math.inf
         ent.finished_at = self._finishing_at = t
         at = self._flag_at = t if at is None else at
@@ -1267,6 +1270,11 @@ class Race:
         laps = math.floor(shown / self.length)
         if self._finishing_at is None:
             return laps
+        ref = self._flag_entry
+        if ref is not ent and self._road_finish(ent) is not None and self._road_finish(ref) is not None:
+            # Both lines sit on the road: the whole laps between them, whatever the box offsets.
+            lead = self._shown(ref)
+            laps = math.floor(lead / self.length) - round((lead - shown) / self.length)
         winner = self._winner()
         cap = math.floor(self._shown(winner) / self.length) if winner is not None else self._flag_laps
         return min(laps, cap)
