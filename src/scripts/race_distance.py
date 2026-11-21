@@ -296,7 +296,8 @@ class Race:
             if ent is not None and self._finished and ent.finished_at is None:
                 ent.finished_at = now              # a finish by hand classifies it where it stopped
             elif ent is not None and ent.distance is not None and self._red is not None \
-                    and ent.finished_at is None:
+                    and ent.finished_at is None \
+                    and (ent.resumed is None or ent.resumed[0] != self._red_flags):   # not restarted yet
                 ent.frozen, ent.waiting = ent.distance, True
                 out = next((c for c in self._cars.values() if c.entry == entry
                             and c.restart_ready and c.retired_exit is not None), None)

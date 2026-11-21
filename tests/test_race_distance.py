@@ -2435,6 +2435,32 @@ def t_a_second_undo_under_the_same_red_flag_does_not_count_the_box_exit_again():
         assert gap < 15, f"B does not count the metres since its box exit twice: {gap}"
 
 
+def t_undoing_a_retirement_after_the_restart_under_the_red_flag_counts_on_from_the_last_distance():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        cars = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 35)
+        t = _drive(race, list(cars), [50] * 3, 0.0, 90)
+        race.red_flag(t, "keep")
+        for car in cars:
+            _new_lobby(car, L - 15)
+        t = _drive(race, list(cars), [None] * 3, t, 3)
+        for car in cars:
+            car.box = False
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", True, t)
+        db = _row(race, "B", t)["distance_m"]
+        t = _drive(race, list(cars), [40] * 3, t, 2)
+        race.retire("B", False, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        rb = _row(race, "B", t)
+        assert rb["status"] == "racing" and abs(rb["distance_m"] - (db + 200)) < 15, \
+            f"a car that already restarted counts on from its last distance: {db} {rb}"
+        race.release(t)
+        t = _drive(race, list(cars), [40] * 3, t, 20)
+        assert abs(_row(race, "B", t)["distance_m"] - (db + 1000)) < 15, \
+            f"B keeps counting after the release: {db} {_row(race, 'B', t)}"
+
+
 def t_an_undone_retirement_restarts_from_a_restart_lobby_it_joined_while_retired():
     _undo_in_the_restart_lobby(new_console=False)
 
