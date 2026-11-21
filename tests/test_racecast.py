@@ -6884,18 +6884,49 @@ def t_event_race_takes_the_lap_time_seconds():
 
 def t_invite_hosts_retry_a_failed_tailscale_lookup_soon():
     answers = [("", None), ("box.tailnet.ts.net", "100.64.0.7"), ("other.ts.net", "100.64.0.8")]
+    clock = [100.0]
     old = m._tailscale_magicdns, m._tailscale_ip, dict(m._INVITE_HOSTS)
     m._tailscale_magicdns = lambda: answers[0][0]
     m._tailscale_ip = lambda: answers[0][1]
     m._INVITE_HOSTS.update(at=None, magic="", ip=None)
     try:
-        assert m._invite_hosts(now=100.0) == ("", None)
+        assert m._invite_hosts(clock=lambda: clock[0]) == ("", None)
         answers.pop(0)
-        assert m._invite_hosts(now=110.0) == ("box.tailnet.ts.net", "100.64.0.7"), \
+        clock[0] = 110.0
+        assert m._invite_hosts(clock=lambda: clock[0]) == ("box.tailnet.ts.net", "100.64.0.7"), \
             "after `tailscale up` the link must appear within seconds, not a minute"
         answers.pop(0)
-        assert m._invite_hosts(now=150.0) == ("box.tailnet.ts.net", "100.64.0.7"), \
+        clock[0] = 150.0
+        assert m._invite_hosts(clock=lambda: clock[0]) == ("box.tailnet.ts.net", "100.64.0.7"), \
             "a found host stays cached for a minute"
+    finally:
+        m._tailscale_magicdns, m._tailscale_ip = old[0], old[1]
+        m._INVITE_HOSTS.clear(); m._INVITE_HOSTS.update(old[2])
+
+
+def t_invite_hosts_cache_expiry_counts_from_the_end_of_a_slow_lookup():
+    clock = [100.0]
+    lookups = []
+
+    def slow(answer):
+        def lookup():
+            lookups.append(clock[0])
+            clock[0] += 3.0                 # a hanging tailscale binary times out after 3 s
+            return answer
+        return lookup
+
+    old = m._tailscale_magicdns, m._tailscale_ip, dict(m._INVITE_HOSTS)
+    m._tailscale_magicdns, m._tailscale_ip = slow(""), slow(None)
+    m._INVITE_HOSTS.update(at=None, magic="", ip=None)
+    try:
+        assert m._invite_hosts(clock=lambda: clock[0]) == ("", None)
+        assert clock[0] == 106.0, clock
+        clock[0] = 109.0
+        m._invite_hosts(clock=lambda: clock[0])
+        assert len(lookups) == 2, "a poll 3 s after a 6 s failed lookup must not run tailscale again"
+        clock[0] = 111.5
+        m._invite_hosts(clock=lambda: clock[0])
+        assert len(lookups) == 4, "a failed lookup is retried 5 s after it ended"
     finally:
         m._tailscale_magicdns, m._tailscale_ip = old[0], old[1]
         m._INVITE_HOSTS.clear(); m._INVITE_HOSTS.update(old[2])
