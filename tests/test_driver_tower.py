@@ -1048,9 +1048,9 @@ def t_the_public_page_renders_one_class_as_today():
 COCKPIT = os.path.join(ROOT, "src", "cockpit", "cockpit.html")
 
 
-def _cockpit(payload):
+def _cockpit(payload, head=False):
     """The cockpit's timing card after one poll of `payload`: each body row's cell texts,
-    a class header as {head, color}."""
+    a class header as {head, color}; with `head` the header line's parts."""
     with open(COCKPIT, encoding="utf-8") as fh:
         html = fh.read()
     start = html.index("// Driver timing (#1115)")
@@ -1059,12 +1059,20 @@ def _cockpit(payload):
           + "const j = async () => (" + json.dumps(payload) + ");\n" + block
           + """\n;(async function () {
       await pollTiming();
+      if (__HEAD__) return els.timingHead.children.map(text);
       return els.timing.tBodies[0].children.map(function (r) {
         if (r.className === "cls") return {head: text(r), color: r.children[0].children[0].style.color || ""};
         return r.children.map(text);
       });
-    })().then(r => console.log(JSON.stringify(r)));""")
+    })().then(r => console.log(JSON.stringify(r)));""").replace("__HEAD__", json.dumps(head))
     return _run(js)
+
+
+def t_the_cockpit_names_a_qualifying_segment_once():
+    got = [_cockpit({"mode": "qualifying", "qualifying": [], "track_name": "Suzuka Circuit", "stint": s}, head=True)
+           for s in ("Qualifying", "qualifying 2", "Q1")]
+    assert got == [["Qualifying", "Suzuka Circuit"], ["qualifying 2", "Suzuka Circuit"],
+                   ["Qualifying", "Suzuka Circuit", "Q1"]], f"a segment that names qualifying shows once: {got}"
 
 
 def t_the_cockpit_shows_class_position_and_gap():

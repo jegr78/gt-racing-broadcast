@@ -937,7 +937,8 @@ async function pollTiming() {
   const head = $('timingHead');
   head.textContent = '';
   const parts = [];
-  if (d.mode === 'qualifying') parts.push('Qualifying');
+  const named = d.mode === 'qualifying' && /qualifying/i.test(d.stint || '');   // the segment names it already
+  if (d.mode === 'qualifying') parts.push(named ? d.stint : 'Qualifying');
   else if (d.lap && d.lap.leader) parts.push('Lap ' + d.lap.leader + (d.lap.count ? ' / ' + d.lap.count : ''));
   if (d.mode !== 'qualifying' && typeof d.lobby_lap === 'number') parts.push('Lobby lap ' + d.lobby_lap);
   if (typeof d.remaining === 'number') {
@@ -946,7 +947,7 @@ async function pollTiming() {
                String(Math.floor(r % 60)).padStart(2, '0') + ' left');
   }
   if (d.track_name) parts.push(d.track_name);
-  if (d.stint) parts.push(d.stint);
+  if (d.stint && !named) parts.push(d.stint);
   parts.forEach(function (p) { const s = document.createElement('span'); s.textContent = p; head.appendChild(s); });
   if (d.red_flag) { const s = document.createElement('span'); s.className = 'flag'; s.textContent = 'RED FLAG'; head.appendChild(s); }
   const quali = d.mode === 'qualifying';
