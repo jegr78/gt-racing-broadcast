@@ -248,10 +248,13 @@ laps on GT7's counter, from the car that took over after the last stint switch: 
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
 event setting. A lap count set while the final stint is already on air applies at once.
 The final lobby's flag follows the road, as in GT7: the first of its cars to complete
-the count takes it, or after **Final lap** the first car to cross the line on the
-lobby's leading lap, even when another car leads in race distance. Every other car
+the count takes it, or after **Final lap** the leader on the road at its next crossing,
+even when another car leads in race distance. A car behind that crosses onto the
+leader's lap after the call does not take the flag. Every other car
 finishes at its next crossing, a car a lap down on the road too, and the order after
-the flag stays laps first, then who completed them first.
+the flag stays laps first, then who completed them first. After a restart that keeps
+the gaps, who completed them first is who crossed the line first (see
+[Red flag](#red-flag-rejoin-and-corrections)).
 
 The header's lap (tower, desks, cockpit, public page) is the leader's running race lap:
 the race laps really driven plus one, the formation lap excluded, across every stint, so
@@ -557,7 +560,17 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   end, not on the restart lobby's line. In an endurance final lobby the count stays on
   GT7's counter: after a restart that keeps the gaps a car can lead on the road but
   not in race distance (a correction, or a box further up the pit lane), and the
-  flag still falls on the road.
+  flag still falls on the road. The classification follows the road there too: a car
+  that left the restart lobby's box ranks by the moment it crossed the line, and its
+  gap is that moment after the leader's. A correction made after the restart still
+  counts: its whole laps as laps, the rest as the time the car needs for those metres
+  at the line. A car that crosses
+  on the leader's lap on the road keeps the leader's race laps, even when its box
+  put its race lap line just past the lobby's. When a car on track did not restart
+  from the restart lobby's box (a change override, a car still in the lobby it raced
+  in), its race no longer matches the road, and the whole finish compares race
+  distance again. The flag settles which rule applies; a car retired after the restart
+  and undone keeps its restart.
 - **Rejoin** (endurance): a team marked for rejoin starts its next stint from the
   leader's distance where its car of the old lobby stopped, however early the stint
   switch was pressed, so its later departure from the box becomes its deficit. A rejoin
