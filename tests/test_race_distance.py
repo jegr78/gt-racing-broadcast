@@ -2412,6 +2412,29 @@ def t_an_undone_retirement_counts_from_a_restart_box_exit_made_while_retired():
         assert abs(gap) < 15, f"B keeps racing beside A after the release: {gap}"
 
 
+def t_a_second_undo_under_the_same_red_flag_does_not_count_the_box_exit_again():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        cars = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 35)
+        t = _drive(race, list(cars), [50] * 3, 0.0, 90)
+        race.retire("B", True, t)
+        race.red_flag(t, "keep")
+        for car in cars:
+            _new_lobby(car, L - 15)
+        t = _drive(race, list(cars), [None] * 3, t, 3)
+        for car in cars:
+            car.box = False
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", False, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", True, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        race.retire("B", False, t)
+        t = _drive(race, list(cars), [40] * 3, t, 5)
+        gap = _row(race, "B", t)["distance_m"] - _row(race, "A", t)["distance_m"]
+        assert gap < 15, f"B does not count the metres since its box exit twice: {gap}"
+
+
 def t_an_undone_retirement_restarts_from_a_restart_lobby_it_joined_while_retired():
     _undo_in_the_restart_lobby(new_console=False)
 

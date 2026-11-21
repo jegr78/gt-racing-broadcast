@@ -301,7 +301,10 @@ class Race:
                 out = next((c for c in self._cars.values() if c.entry == entry
                             and c.restart_ready and c.retired_exit is not None), None)
                 car = self._cars.get(ent.active)
-                if out is not None and self._restart(ent, out, *out.retired_exit):
+                exit_ = None
+                if out is not None:
+                    exit_, out.retired_exit = out.retired_exit, None   # one exit restarts the car once
+                if exit_ is not None and self._restart(ent, out, *exit_):
                     ent.distance = self._raw(out, out.lap, out.s)   # the metres since the box exit
                     ent.ts.append(out.t)
                     ent.ds.append(ent.distance)
