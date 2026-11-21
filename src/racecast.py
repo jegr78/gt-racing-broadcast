@@ -6842,11 +6842,11 @@ def event_start(rest, _autojoin=True, _new_session=True):
     part = _part_index(rest)
     fresh = _new_session and not _is_continuation_start(rest)
     relay_was_running = _relay_already_running_for_active_profile() if _new_session else False
-    continuing = _new_session and not relay_was_running and _unstopped_event_continues()
+    continuing = _new_session and _unstopped_event_continues()
     fresh = fresh and not continuing
     mode = "qualifying" if _qualifying_args(rest) else "race"
     resume_stint = None
-    if continuing:   # resume whatever --stint/--part did not set
+    if continuing and not relay_was_running:   # resume whatever --stint/--part did not set
         resume_stint, saved_part = _resume_point(mode)
         resume_stint = None if _stint_args(rest) else resume_stint
         saved_part = None if _has_part_flag(rest) else saved_part
@@ -6859,7 +6859,8 @@ def event_start(rest, _autojoin=True, _new_session=True):
             print("event: nothing recorded to resume: the unset stint or Part starts at 1.")
     if fresh and not relay_was_running:
         _clear_on_air_record()
-    _write_part_reset(part, mode)
+    if not relay_was_running:   # a running relay owns the live pointer
+        _write_part_reset(part, mode)
     try:
         # Start event again on a running event (OBS or Companion back up) keeps the
         # drivers' codes; only a new event gets a new link.
@@ -6869,8 +6870,11 @@ def event_start(rest, _autojoin=True, _new_session=True):
                   "(Stop event first to start a new one).")
         elif fresh and not relay_was_running:
             print("event: new event: new driver codes and timing link.")
+        elif fresh:
+            print("event: relay already running: driver codes and timing link kept, "
+                  "a new report window starts here.")
         elif _new_session:
-            print("event: continuing the running event: driver codes and timing link kept.")
+            print("event: mid-event start: driver codes and timing link kept.")
     except OSError as exc:
         print(f"driver invite: not created ({exc}).")
     # Mark THIS event's start so the report window begins here: a restart within

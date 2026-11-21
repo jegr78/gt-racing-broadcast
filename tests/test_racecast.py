@@ -3169,10 +3169,11 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
         calls = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running,
                  m._runtime_dir, m._sync_live_telemetry_record, m.relay_start,
-                 m._wait_for_obs_ready)
+                 m._wait_for_obs_ready, m._driver_invite_path)
         restore = _stub_relay_signals((4242,) if http_ok else (), 4242 if http_ok else None,
                                       http_ok, running_profile, active_profile)
         with tempfile.TemporaryDirectory() as tmp:
+            m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")   # no event yet
             m._event_gate_results = lambda e, p: []
             m._tailscale_connect = lambda e: "ok"
             ev.app_running = lambda app, platform=None: True
@@ -3192,7 +3193,7 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
                 restore()
                 (m._event_gate_results, m._tailscale_connect, ev.app_running,
                  m._runtime_dir, m._sync_live_telemetry_record, m.relay_start,
-                 m._wait_for_obs_ready) = saved
+                 m._wait_for_obs_ready, m._driver_invite_path) = saved
 
     assert _drive(True, "demo", "demo") == ["sync"], "same relay, same profile: push it"
     assert _drive(False, "", "demo") == [], "no relay yet: relay_start seeds state from scratch"
@@ -3284,20 +3285,6 @@ def t_event_start_and_stop_drive_the_invite():
         _invite(60)(tmp)
         m._stop_driver_invite(os.path.join(tmp, "driver-invite.json"))
     assert _start([], running=False, seed=_stopped) == [True], "Stop event then Start event is a new event"
-    session = []
-    saved = m._write_session_start
-    m._write_session_start = lambda: session.append(True)
-    try:
-        _start([], running=False, seed=_invite(3600))
-    finally:
-        m._write_session_start = saved
-    assert session == [], "a continuation keeps the report window like --stint"
-    m._write_session_start = lambda: session.append(True)
-    try:
-        assert _start([], running=True, seed=_invite(60)) == [False], "a running relay keeps the codes"
-    finally:
-        m._write_session_start = saved
-    assert session == [True], "Start event on a running relay still opens a new report window"
 
     def _broadcast(age_s, stint=5, part=2, mode="race"):
         def seed(tmp):
@@ -3316,6 +3303,32 @@ def t_event_start_and_stop_drive_the_invite():
             except OSError:
                 return None
         state.append((read("part.json"), read("on-air.json")))
+
+    state = []
+    session = []
+    saved = m._write_session_start
+    m._write_session_start = lambda: session.append(True)
+    try:
+        _start([], running=False, seed=_invite(3600))
+    finally:
+        m._write_session_start = saved
+    assert session == [], "a continuation keeps the report window like --stint"
+    m._write_session_start = lambda: session.append(True)
+    out = io.StringIO()
+    try:
+        assert _start([], running=True, seed=_broadcast(60), out=out, after=_files) == [False], \
+            "a running relay keeps the codes"
+        assert session == [], "Start event on the running event's relay keeps the report window"
+        assert state[0][0] == {"index": 2, "live": True, "mode": "race"}, \
+            f"the running relay's Part pointer is left alone: {state}"
+        assert "continuing today's event" in out.getvalue(), out.getvalue()
+        assert "resuming" not in out.getvalue(), "a running relay keeps its own position"
+        out = io.StringIO()
+        assert _start([], running=True, out=out) == [False], "a running relay keeps the codes"
+    finally:
+        m._write_session_start = saved
+    assert session == [True], "a running relay without an unstopped event opens a new report window"
+    assert "a new report window starts here" in out.getvalue(), out.getvalue()
 
     args, state, out = [], [], io.StringIO()
     _start([], running=False, seed=_broadcast(60), out=out, relay_args=args, after=_files)
