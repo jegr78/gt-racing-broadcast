@@ -1708,6 +1708,19 @@ def t_after_a_keep_restart_a_correction_short_of_a_lap_counts_as_time_only():
             f"{metres:.0f} m after the restart cost C time, not a lap: {race.standings(t)['entries']}"
 
 
+def t_after_a_keep_restart_a_car_counting_on_from_an_override_keeps_one_rule_for_the_finish():
+    """An override after the keep restart starts B from its distance at that moment, so
+    its race no longer matches the road; the finish then compares every car by race
+    distance, as before a keep restart."""
+    race, (a, b, c), t = _keep_restart_boxes_apart(40)
+    assert race.override_change("B", "b", t)
+    flags, t = _flags(race, [a, b, c], t, 1.6 * L / 50, speeds=(50, 50, 50))
+    rows = race.standings(t)["entries"]
+    assert set(flags) == {"A", "B", "C"} and [r["entry"] for r in rows] == ["A", "B", "C"] \
+        and abs(rows[1]["gap_time_s"] - 2.0) < 0.15 and abs(rows[2]["gap_time_s"] - 4.0) < 0.15, \
+        f"one rule for every car, race distance: {[(r['entry'], r['gap_time_s']) for r in rows]}"
+
+
 def t_an_endurance_winner_stays_first_when_its_race_lap_ends_past_the_line():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     race.final_lobby(2, 0.0)

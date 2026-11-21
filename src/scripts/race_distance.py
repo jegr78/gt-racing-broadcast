@@ -61,7 +61,8 @@ nearest the predicted distance decides.
   lobby the cars a keep restart started rank at the flag by their crossing moments,
   each later by its corrections since the restart, short of whole laps, at its speed
   on the line, and count the flag car's race laps less the whole laps between their
-  lines and those of their corrections since the restart.
+  lines and those of their corrections since the restart. Once one car on track counts
+  on from elsewhere, every car compares by race distance again.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
   window starts from the leader's distance where its old lobby's car stopped (where
   the leader is, while it still runs).
@@ -961,11 +962,20 @@ class Race:
         """When a car a keep restart started took the flag at a final lobby's line, its
         corrections since the restart short of whole laps counted at its speed there;
         None otherwise."""
-        if not self.multi_lobby or ent.road is None or ent.finished_at is None \
+        if not self._road_field() or ent.road is None or ent.finished_at is None \
                 or ent.crossed is None or ent.crossed[1] != ent.finished_at:
             return None
         part = ent.adjust - ent.road - self._road_laps(ent) * self.length
         return ent.crossed[0] - part / max(ent.cross_v, GAP_SPEED_MPS)
+
+    def _road_field(self):
+        """Every car on track in a final lobby was started by a keep restart, so the road
+        matches the race; one that counts on from elsewhere puts the whole finish back
+        on race distance."""
+        return self.multi_lobby and all(
+            e.road is not None for e in self._entries.values()
+            if e.distance is not None and e.active is not None and not e.waiting
+            and not self._out(e) and not self._estimated(e))
 
     def _road_laps(self, ent):
         """The whole laps of a keep-restarted car's corrections since the restart."""
@@ -1330,7 +1340,7 @@ class Race:
             road = self._road_finish(e)
             if road is not None:
                 reached = road
-            elif self.multi_lobby and e.road is not None and e.finished_at is None and est is None \
+            elif self._road_field() and e.road is not None and e.finished_at is None and est is None \
                     and self._flag_entry is not None and laps == self._ranked_laps(self._flag_entry):
                 # On the road it completes the flag car's laps at its flag, not before now.
                 car = self._cars.get(e.active) or _NO_CAR
