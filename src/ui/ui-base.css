@@ -33,6 +33,9 @@
   .pflogo { max-height:24px; max-width:90px; height:auto; width:auto;
             border-radius:3px; margin-right:6px; vertical-align:middle; }
   .ver { display:block; color:var(--faint); font:11px var(--mono); margin-top:1px; }
+  .sim-badge { display:inline-block; margin:2px 0 4px; padding:1px 7px; border-radius:999px;
+               border:1px solid var(--warn); color:var(--warn); font:600 10px var(--mono);
+               letter-spacing:.08em; }
   .nav { display:flex; flex-direction:column; gap:3px; }
   .navfoot { margin-top:auto; display:flex; flex-direction:column; gap:3px;
              padding-top:12px; border-top:1px solid var(--line); }

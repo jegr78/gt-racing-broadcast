@@ -7865,7 +7865,8 @@ def ui_status_payload(relay=None, companion=None, streams=None, tailscale=None,
             "streams": (streams or streams_status_data)(),
             "tailscale_ip": (tailscale or _tailscale_ip)(),
             "cookies": (cookies or cookies_status_data)(),
-            "apps_running": (apps_running or running_apps_data)()}
+            "apps_running": (apps_running or running_apps_data)(),
+            "simulation": simulation.active()}
 
 
 _resource_monitor = None

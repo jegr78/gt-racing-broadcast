@@ -255,6 +255,18 @@ def t_profile_env_injection_never_hands_out_real_endpoints():
         "a shell or machine .env value survived the simulation override"
 
 
+def t_control_center_shows_the_simulation_badge():
+    with _env(**SIM_ENV):
+        payload = m.ui_status_payload(
+            relay=lambda: {}, companion=lambda: {}, streams=lambda: [], tailscale=lambda: None,
+            cookies=lambda: {}, apps_running=lambda: {})
+    assert payload["simulation"] is True, "the Control Center cannot tell it runs simulated"
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    assert 'id="sim-badge"' in page and "$('sim-badge').hidden = !s.simulation" in page, \
+        "the header badge must follow /api/status"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -129,7 +129,8 @@ def t_ui_status_payload_shape():
                        "companion": {"running": False}, "streams": [],
                        "tailscale_ip": None,
                        "cookies": {"level": "WARN", "detail": "x"},
-                       "apps_running": {"obs": False, "discord": False}}
+                       "apps_running": {"obs": False, "discord": False},
+                       "simulation": False}
 
 
 def t_running_apps_data_probe():

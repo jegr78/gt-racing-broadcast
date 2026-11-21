@@ -57,7 +57,7 @@ their scene goes active.
 the machine `.env`) runs the same bring-up, relay, Control Center and console pages
 against simulated parties instead of the real ones. A Control Center started with
 `racecast --simulation ui` passes the mode on to its Start event, Stop event and
-Takeover buttons.
+Takeover buttons, and shows a SIMULATION badge under its title while the mode is on.
 
 A rehearsal needs the simulated parties as well: the event-sim tool under
 `tools/event-sim/` in a source checkout of the repository provides them. The tool does
