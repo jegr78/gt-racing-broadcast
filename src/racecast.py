@@ -6027,9 +6027,11 @@ _INVITE_HOSTS = {"at": None, "magic": "", "ip": None}
 
 def _invite_hosts(now=None):
     """MagicDNS name and Tailscale IP, looked up at most once a minute: the Control
-    Center polls the invite every few seconds and each lookup runs `tailscale`."""
+    Center polls the invite every few seconds and each lookup runs `tailscale`. A
+    lookup that found neither is retried after 5 s."""
     now = time.monotonic() if now is None else now
-    if _INVITE_HOSTS["at"] is None or now - _INVITE_HOSTS["at"] > 60:
+    ttl = 60 if _INVITE_HOSTS["magic"] or _INVITE_HOSTS["ip"] else 5
+    if _INVITE_HOSTS["at"] is None or now - _INVITE_HOSTS["at"] > ttl:
         _INVITE_HOSTS.update(at=now, magic=_tailscale_magicdns(), ip=_tailscale_ip())
     return _INVITE_HOSTS["magic"], _INVITE_HOSTS["ip"]
 

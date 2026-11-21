@@ -6882,6 +6882,25 @@ def t_event_race_takes_the_lap_time_seconds():
     assert "new lap shows 7 s" in out.getvalue(), out.getvalue()
 
 
+def t_invite_hosts_retry_a_failed_tailscale_lookup_soon():
+    answers = [("", None), ("box.tailnet.ts.net", "100.64.0.7"), ("other.ts.net", "100.64.0.8")]
+    old = m._tailscale_magicdns, m._tailscale_ip, dict(m._INVITE_HOSTS)
+    m._tailscale_magicdns = lambda: answers[0][0]
+    m._tailscale_ip = lambda: answers[0][1]
+    m._INVITE_HOSTS.update(at=None, magic="", ip=None)
+    try:
+        assert m._invite_hosts(now=100.0) == ("", None)
+        answers.pop(0)
+        assert m._invite_hosts(now=110.0) == ("box.tailnet.ts.net", "100.64.0.7"), \
+            "after `tailscale up` the link must appear within seconds, not a minute"
+        answers.pop(0)
+        assert m._invite_hosts(now=150.0) == ("box.tailnet.ts.net", "100.64.0.7"), \
+            "a found host stays cached for a minute"
+    finally:
+        m._tailscale_magicdns, m._tailscale_ip = old[0], old[1]
+        m._INVITE_HOSTS.clear(); m._INVITE_HOSTS.update(old[2])
+
+
 def t_driver_invite_follows_the_event_and_regenerates():
     d = tempfile.mkdtemp()
     path = os.path.join(d, "driver-invite.json")
