@@ -74,26 +74,27 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 | Status | Meaning | Client action |
 |---|---|---|
 | 400 | malformed batch | drop that batch |
-| 403 | invalid, revoked or rejected code | register again (the sender script retries once a minute and tells the driver) |
+| 403 | invalid or revoked code, or a code without a request | register again (the sender script retries once a minute and tells the driver) |
 | 409 | the entry already has its live senders | retry rarely; the producer can disconnect the other one |
-| 410 | the producer disconnected this sender, or a cap dropped this waiting registration | register again and use the new code; the sender script says so once and stops |
+| 410 | Race Control rejected this registration, the producer disconnected this sender, or a cap dropped this waiting registration | register again and use the new code; the sender script says so once and stops |
 | 423 | the registration waits for approval, the body carries `"pending": true` | keep the code, tell the driver it waits, retry every few seconds, the sender script every 10 s |
 | 413 | body too large | send smaller batches |
-| 429 | too many failed attempts or senders | retry after a minute |
+| 429 | too many failed attempts from this client, or too many senders | retry after a minute |
 
 ## Approval
 
 Every registration lands as a pending request in `runtime/<profile>/driver-requests.json`,
 bound to the invite. A new invite starts with none, a relay restart keeps them and
 `racecast event stop` deletes the file. The
-ingest answers 423 for a pending request, 403 for a rejected one and for a code without a
-request, and only an approved request reaches the hub, so nothing of an unapproved code
+ingest answers 423 for a pending request, 410 for a rejected one (so the sender stops),
+403 for a code without a request, and only an approved request reaches the hub, so nothing of an unapproved code
 reaches the race, the recording, the dashboard or the public timing. An approval may
 correct the entry, the stint and the name. The relay then uses the corrected values in
 place of the ones signed into the code. These routes are on the tailnet, for directors
 also under `/console/drivers/*` and for Race Control under
 `/console/race-control/drivers/*`. `GET /drivers/requests` returns `{multi_lobby, entries, segments, requests: [{conn,
-entry, segment, name, status, ts, registered {entry, segment, name}, who, decided}]}`;
+entry, segment, name, status, ts, registered {entry, segment, name}, who, decided, disconnected}]}`,
+where `disconnected` is true for an approved code the producer disconnected;
 `POST /drivers/requests/approve` and `/correct` take `{conn, entry?, segment?, name?}`,
 where a missing field keeps the request's value, and `/reject` takes `{conn}`. They answer
 `{ok, request}`, 400 for a value outside the roster, the stint labels or the name rule,
@@ -103,8 +104,9 @@ pending request is approved, only an approved one corrected, and a rejection is 
 rejected}` with their count; if requests keep coming, renew the invite. A rejection
 stops new data and leaves what the code sent before in the race and the recording;
 `/drivers/reassign` and `/drivers/race/change` answer 409 for a rejected connection.
-A decision answers 404 when the invite was renewed meanwhile and 500 when the file
-could not be written, which leaves the request as it was. Each decision appends `driver_approve`, `driver_correct`,
+A decision or a Move (`/drivers/reassign`) answers 404 when the invite was renewed
+meanwhile and 500 when the file could not be written, which leaves the request, and for
+a Move the sender's entry, as it was. Each decision appends `driver_approve`, `driver_correct`,
 `driver_reject` or `driver_reject_pending` with `who` to `driver-race-audit.jsonl`, the
 single decisions with the new values and `before`.
 
@@ -120,7 +122,9 @@ single decisions with the new values and `before`.
   sender script sends one every 5 s.
 - A league without stint labels registers by entry alone, in endurance too.
 - The producer sees every connection on the tailnet (`GET /drivers/data`) and
-  disconnects one with `POST /drivers/disconnect {"conn": "..."}`. A connection quiet
+  disconnects one with `POST /drivers/disconnect {"conn": "..."}`. The ingest answers
+  that code 410 from then on, also after a relay restart; the relay remembers the last
+  500 disconnected codes of the invite. A connection quiet
   for 10 minutes leaves that list, the readiness rows and the dashboard; it comes back
   as a new sender if it posts again, still under the entry the producer reassigned it to. A new invite drops every connection.
 
@@ -181,4 +185,5 @@ and `position_mismatch` (single lobby: GT7's position contradicts the distance o
 `v` in every reply is the contract version. A change that an existing client cannot
 follow raises it, and the relay then states which versions it accepts. The approval
 stayed in v1. A client that does not know 423 treats it as a failed post and keeps
-retrying, which is what a waiting client has to do.
+retrying, which is what a waiting client has to do. A rejection answering 410 instead
+of 403 stayed in v1 too: both tell the client to register again, and 410 already stops it.

@@ -90,32 +90,35 @@ class Hub:
         except telemetry_probe.ProbeError as exc:
             raise IngestError(str(exc), exc.status) from None
         del packets
-        with self._lock:
-            forgotten = self._forget_quiet(now)
-            if conn in self._dropped:
-                raise IngestError("disconnected by the producer: register again on the invite page", 410)
-            entry = self._reassigned.get(conn, reg["entry"])
-            live = self._live(now)
-            if conn not in live:
-                # A known sender that went quiet competes for its slot like a new one.
-                if conn not in self._conns and len(self._conns) >= self._max:
-                    for stale in [c for c in self._conns if c not in self._live(now)]:
-                        del self._conns[stale]
-                        self._counts.forget(stale)
-                if conn not in self._conns and len(self._conns) >= self._max:
-                    raise IngestError("too many senders for this event", 429)
-                allowed = 2 if self._multi_lobby() else 1
-                peers = [m for c, m in live.items() if m["entry"] == entry and c != conn]
-                if len(peers) >= allowed:
-                    raise IngestError(
-                        "this team already has two senders" if allowed == 2
-                        else "this entry already has a sender", 409)
-            # Hold the slot now; decryption runs outside the lock (see Probe.ingest).
-            held = self._conns.get(conn)
-            self._conns[conn] = {"entry": entry, "segment": reg.get("segment"),
-                                 "name": reg["name"], "last": now}
-        for stale in forgotten:
-            self._counts.forget(stale)
+        forgotten = []
+        try:
+            with self._lock:
+                forgotten = self._forget_quiet(now)
+                if conn in self._dropped:
+                    raise IngestError("disconnected by the producer: register again on the invite page", 410)
+                entry = self._reassigned.get(conn, reg["entry"])
+                live = self._live(now)
+                if conn not in live:
+                    # A known sender that went quiet competes for its slot like a new one.
+                    if conn not in self._conns and len(self._conns) >= self._max:
+                        for stale in [c for c in self._conns if c not in self._live(now)]:
+                            del self._conns[stale]
+                            self._counts.forget(stale)
+                    if conn not in self._conns and len(self._conns) >= self._max:
+                        raise IngestError("too many senders for this event", 429)
+                    allowed = 2 if self._multi_lobby() else 1
+                    peers = [m for c, m in live.items() if m["entry"] == entry and c != conn]
+                    if len(peers) >= allowed:
+                        raise IngestError(
+                            "this team already has two senders" if allowed == 2
+                            else "this entry already has a sender", 409)
+                # Hold the slot now; decryption runs outside the lock (see Probe.ingest).
+                held = self._conns.get(conn)
+                self._conns[conn] = {"entry": entry, "segment": reg.get("segment"),
+                                     "name": reg["name"], "last": now}
+        finally:
+            for stale in forgotten:     # also when the batch is refused
+                self._counts.forget(stale)
         try:
             reply = self._counts.ingest(conn, body, sender_stats)
         except telemetry_probe.ProbeError as exc:
@@ -240,7 +243,7 @@ def readiness(roster, segments, connections, multi_lobby, requests=()):
     """One row per entry (in endurance per entry and stint label) with its senders:
     {entry, segment, ready, senders: [{conn, name, live, approval, connected}]}. A
     request (`driver_requests`) without a connection is a sender that never sent:
-    `approval` pending or approved. Senders registered for an entry or label outside
+    `approval` pending, approved or disconnected (by the producer). Senders registered for an entry or label outside
     the roster get their own rows, so nobody is hidden."""
     slots = [(e, s) for e in roster for s in (segments if multi_lobby and segments else [None])]
     rows = {slot: [] for slot in slots}
@@ -255,6 +258,7 @@ def readiness(roster, segments, connections, multi_lobby, requests=()):
             continue
         key = (r["entry"], r["segment"] if multi_lobby and segments else None)
         rows.setdefault(key, []).append({"conn": r["conn"], "name": r["name"], "live": False,
-                                         "approval": r["status"], "connected": False})
+                                         "approval": "disconnected" if r.get("disconnected") else r["status"],
+                                         "connected": False})
     return [{"entry": e, "segment": s, "ready": any(x["live"] for x in senders),
              "senders": senders} for (e, s), senders in rows.items()]
