@@ -151,8 +151,7 @@ def _refused(call):
 
 
 def t_network_guard_refuses_everything_but_loopback():
-    saved = (socket.socket.connect, socket.socket.connect_ex, socket.socket.sendto,
-             socket.getaddrinfo)
+    saved = {(o, n): getattr(o, n) for o, n in sim.GUARDED}
     srv = _loopback_server()
     try:
         assert not sim.install_network_guard({}), "outside simulation no guard"
@@ -180,14 +179,30 @@ def t_network_guard_refuses_everything_but_loopback():
                     ("socket.connect to a non-loopback IP", lambda: tcp.connect(("192.0.2.1", 443))),
                     ("socket.connect_ex to a non-loopback IP",
                      lambda: tcp.connect_ex(("192.0.2.1", 443))),
-                    ("a DNS lookup", lambda: socket.getaddrinfo("docs.google.com", 443))):
+                    ("a DNS lookup", lambda: socket.getaddrinfo("docs.google.com", 443)),
+                    ("gethostbyname", lambda: socket.gethostbyname("example.com")),
+                    ("gethostbyname_ex", lambda: socket.gethostbyname_ex("example.com")),
+                    ("a reverse lookup", lambda: socket.gethostbyaddr("192.0.2.1")),
+                    ("a connect by name", lambda: tcp.connect_ex(("example.com", 443)))):
                 assert _refused(call), f"{what} left the machine in simulation"
+            if hasattr(udp, "sendmsg"):
+                assert _refused(lambda: udp.sendmsg([b"x"], [], 0, ("192.0.2.1", 33739))), \
+                    "UDP sendmsg left the machine in simulation"
+            assert socket.gethostbyname("localhost").startswith("127."), "localhost still resolves"
+            lookups = []
+            orig = sim._original_getaddrinfo
+            sim._original_getaddrinfo = lambda *a, **k: lookups.append(a) or orig(*a, **k)
+            try:
+                assert socket.getfqdn("example.com") == "example.com" and not lookups, \
+                    "getfqdn resolved a name in simulation"
+            finally:
+                sim._original_getaddrinfo = orig
         finally:
             udp.close(); tcp.close()
     finally:
         srv.shutdown(); srv.server_close()
-        (socket.socket.connect, socket.socket.connect_ex, socket.socket.sendto,
-         socket.getaddrinfo) = saved
+        for (o, n), v in saved.items():
+            setattr(o, n, v)
         socket._racecast_sim_guard = False
 
 
@@ -410,6 +425,15 @@ def t_relay_bind_auto_stays_off_the_tailnet_in_simulation():
         assert m.resolve_bind_addresses("0.0.0.0", None) == ["0.0.0.0"], "an explicit bind stays"
     finally:
         restore()
+
+
+def t_localhost_counts_only_when_it_resolves_to_loopback():
+    good = lambda *a, **k: [(2, 1, 6, "", ("127.0.0.1", 0)), (10, 1, 6, "", ("::1", 0, 0, 0))]
+    bad = lambda *a, **k: [(2, 1, 6, "", ("192.0.2.9", 0))]
+    assert sim.loopback_name_ok("localhost", good)
+    assert not sim.loopback_name_ok("localhost", bad), "a remapped localhost must not pass"
+    assert sim.loopback_name_ok("127.0.0.1", bad), "a literal needs no lookup"
+    assert not sim.loopback_name_ok("example.com", good)
 
 
 if __name__ == "__main__":

@@ -209,9 +209,38 @@ def guarded_argv(python, script, args):
     return [python, "-c", boot, os.path.dirname(os.path.abspath(__file__)), script, *args]
 
 
-def _refuse(address):
-    if isinstance(address, tuple) and address and not is_loopback_host(address[0]):
-        raise OutboundRefused(f"simulation mode: connection to {address[0]} refused")
+GUARDED = ((socket.socket, "connect"), (socket.socket, "connect_ex"),
+           (socket.socket, "sendto"), (socket.socket, "sendmsg"), (socket, "getaddrinfo"),
+           (socket, "gethostbyname"), (socket, "gethostbyname_ex"),
+           (socket, "gethostbyaddr"))   # getfqdn resolves through gethostbyaddr
+GUARDED = tuple((owner, name) for owner, name in GUARDED if hasattr(owner, name))   # no sendmsg on Windows
+_original_getaddrinfo = socket.getaddrinfo
+
+
+def loopback_name_ok(host, lookup=None):
+    """A literal loopback address, or `localhost` when every address it resolves to
+    is loopback (a hosts file may point it elsewhere)."""
+    name = host.decode() if isinstance(host, bytes) else host
+    if not name:
+        return False
+    if str(name).strip("[]").lower() != "localhost":
+        return is_loopback_host(name)
+    try:
+        infos = (lookup or _original_getaddrinfo)("localhost", None)
+    except OSError:
+        return False
+    return bool(infos) and all(is_loopback_host(info[4][0]) for info in infos)
+
+
+def _refuse(host, what="connection to"):
+    if not loopback_name_ok(host):
+        shown = host.decode() if isinstance(host, bytes) else host
+        raise OutboundRefused(f"simulation mode: {what} {shown} refused")
+
+
+def _refuse_address(address):
+    if isinstance(address, tuple) and address:
+        _refuse(address[0])
 
 
 def install_network_guard(environ=None):
@@ -221,28 +250,46 @@ def install_network_guard(environ=None):
         return False
     if getattr(socket, "_racecast_sim_guard", False):
         return True
-    connect, connect_ex = socket.socket.connect, socket.socket.connect_ex
-    sendto, getaddrinfo = socket.socket.sendto, socket.getaddrinfo
+    orig = {name: getattr(owner, name) for owner, name in GUARDED}
 
-    def guarded_connect(self, address):
-        _refuse(address)
-        return connect(self, address)
+    def connect(self, address):
+        _refuse_address(address)
+        return orig["connect"](self, address)
 
-    def guarded_connect_ex(self, address):
-        _refuse(address)
-        return connect_ex(self, address)
+    def connect_ex(self, address):
+        _refuse_address(address)
+        return orig["connect_ex"](self, address)
 
-    def guarded_sendto(self, data, *args):
-        _refuse(args[-1] if args else None)
-        return sendto(self, data, *args)
+    def sendto(self, data, *args):
+        _refuse_address(args[-1] if args else None)
+        return orig["sendto"](self, data, *args)
 
-    def guarded_getaddrinfo(host, *args, **kwargs):
-        name = host.decode() if isinstance(host, bytes) else host
-        if name is not None and not is_loopback_host(name):
-            raise OutboundRefused(f"simulation mode: lookup of {name} refused")
-        return getaddrinfo(host, *args, **kwargs)
+    def sendmsg(self, buffers, *args, **kwargs):
+        _refuse_address(args[2] if len(args) > 2 else kwargs.get("address"))
+        return orig["sendmsg"](self, buffers, *args, **kwargs)
 
-    socket.socket.connect, socket.socket.connect_ex = guarded_connect, guarded_connect_ex
-    socket.socket.sendto, socket.getaddrinfo = guarded_sendto, guarded_getaddrinfo
+    def getaddrinfo(host, *args, **kwargs):
+        if host is not None:
+            _refuse(host, "lookup of")
+        return orig["getaddrinfo"](host, *args, **kwargs)
+
+    def gethostbyname(name):
+        _refuse(name, "lookup of")
+        return orig["gethostbyname"](name)
+
+    def gethostbyname_ex(name):
+        _refuse(name, "lookup of")
+        return orig["gethostbyname_ex"](name)
+
+    def gethostbyaddr(address):
+        _refuse(address, "reverse lookup of")
+        return orig["gethostbyaddr"](address)
+
+    replacements = {"connect": connect, "connect_ex": connect_ex, "sendto": sendto,
+                    "sendmsg": sendmsg, "getaddrinfo": getaddrinfo,
+                    "gethostbyname": gethostbyname, "gethostbyname_ex": gethostbyname_ex,
+                    "gethostbyaddr": gethostbyaddr}
+    for owner, name in GUARDED:
+        setattr(owner, name, replacements[name])
     socket._racecast_sim_guard = True
     return True
