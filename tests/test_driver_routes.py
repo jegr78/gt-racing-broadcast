@@ -1130,6 +1130,186 @@ def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
         worker.join(2)
 
 
+def t_the_stint_watch_records_the_race_stint_on_air():
+    import json, tempfile, threading, time
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3), ("u", "C", "S3", 4)]
+
+        def final_laps(self):
+            return None
+
+        def class_laps_at(self, idx):
+            return {}
+
+    class Relay:
+        solo, mode, race_source, idx = False, "race", Source(), 0
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
+
+        def on_air_row_idx(self):
+            return self.idx
+
+    class Svc:
+        def stint_switch(self, **_kw):
+            pass
+
+    def _read(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return None
+
+    def _wait(path, want):
+        deadline = time.monotonic() + 2
+        while _read(path) != want and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return _read(path)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        relay, stop = Relay(), threading.Event()
+        worker = threading.Thread(target=g.m.stint_switch_watch,
+                                  args=(relay, Svc(), stop, lambda: None, 0.01),
+                                  kwargs={"on_air_path": path, "clock": lambda: 1000.0},
+                                  daemon=True)
+        worker.start()
+        try:
+            want = {"stint": 1, "alive": 1000.0}
+            assert _wait(path, want) == want, "the start row is recorded with the relay's stamp"
+            relay.idx = 2
+            want = {"stint": 3, "alive": 1000.0}
+            assert _wait(path, want) == want, "a stint switch is recorded"
+            relay.mode, relay.idx = "qualifying", 0
+            time.sleep(0.1)
+            assert _read(path)["stint"] == 3, "qualifying never overwrites the race stint"
+        finally:
+            stop.set()
+            worker.join(2)
+
+
+def t_a_failed_on_air_write_is_retried_on_the_next_tick():
+    import tempfile
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3)]
+
+    class Relay:
+        solo, mode, race_source = False, "race", Source()
+
+        def on_air_row_idx(self):
+            return 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = os.path.join(tmp, "later")
+        path = os.path.join(folder, "on-air.json")
+        state = {"stint": None, "at": None}
+        g.m._on_air_tick(Relay(), path, state, lambda: 100.0)
+        os.makedirs(folder)
+        g.m._on_air_tick(Relay(), path, state, lambda: 101.0)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 2, "alive": 101.0}, "the next tick retries a failed write"
+
+
+def t_the_on_air_record_waits_for_the_schedule():
+    import tempfile
+
+    class Source:
+        rows = []
+
+        def get_rows(self):
+            return self.rows
+
+    class Relay:
+        solo, mode, race_source = False, "race", Source()
+
+        def on_air_row_idx(self):
+            return 0
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        state = {"stint": 5, "at": None}
+        relay = Relay()
+        g.m._on_air_tick(relay, path, state, lambda: 100.0)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 5, "alive": 100.0}, \
+                "an empty schedule cache keeps the recorded stint, never stint 1"
+        relay.race_source.rows = [("u", "A", "S1", 2)]
+        g.m._on_air_tick(relay, path, state, lambda: 101.0)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 1, "alive": 101.0}, "a loaded schedule records its row"
+
+
+def t_main_hands_the_profiles_invite_to_the_stint_watch():
+    import inspect
+
+    class Cache:
+        invite = None
+
+        def get(self):
+            return self.invite
+
+    cache = Cache()
+    kw = g.m._on_air_watch_kwargs("/rt", cache)
+    assert kw["on_air_path"] == os.path.join("/rt", "on-air.json")
+    assert kw["invite_active"]() is False, "no invite: no record"
+    cache.invite = {"id": "x"}
+    assert kw["invite_active"]() is True, "the watch follows the invite file through the cache"
+    src = inspect.getsource(g.m.main)
+    assert "_hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))" in src
+    assert "kwargs=_on_air_watch_kwargs(runtime, _hub_invite)" in src, \
+        "main gives the stint watch the profile's invite cache"
+
+
+def t_any_relay_of_an_unstopped_event_records_the_stint_and_its_stamp():
+    import tempfile, threading, time
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S%d" % i, i) for i in range(1, 9)]
+
+        def final_laps(self):
+            return None
+
+        def class_laps_at(self, idx):
+            return {}
+
+    class Relay:
+        solo, mode, race_source, idx = False, "race", Source(), 6
+        _warn_tick_error, _tick_ok = g.m.Relay._warn_tick_error, g.m.Relay._tick_ok
+
+        def on_air_row_idx(self):
+            return self.idx
+
+    class Svc:
+        def stint_switch(self, **_kw):
+            pass
+
+    def _run(path, active):
+        stop = threading.Event()
+        worker = threading.Thread(target=g.m.stint_switch_watch,
+                                  args=(Relay(), Svc(), stop, lambda: None, 0.01),
+                                  kwargs={"on_air_path": path, "clock": lambda: 500.0,
+                                          "invite_active": lambda: active}, daemon=True)
+        worker.start()
+        deadline = time.monotonic() + (2 if active else 0.2)
+        while not os.path.exists(path) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        stop.set()
+        worker.join(2)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        _run(path, active=False)
+        assert not os.path.exists(path), "no invite, no event: the relay writes no record"
+        _run(path, active=True)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 7, "alive": 500.0}, \
+                "a relay restarted by hand mid-event records the latest stint and its stamp"
+
+
 def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     import threading, time
 
@@ -1277,6 +1457,13 @@ def t_both_desks_act_with_their_identity():
         assert (st, _json.loads(text)) == (403, {"error": "forbidden"}), \
             f"Race Control cannot reset the race: {st} {text}"
         assert "reset" not in [r["action"] for r in _audit_of(srv)], "a refused reset changes nothing"
+        assert _req(port, f"/console/drivers/race/new-event?t={carol}", b"{}", hdr)[0] == 404, \
+            "the new event reset stays on the tailnet"
+        assert _req(port, f"/console/race-control/drivers/race/new-event?t={rc}", b"{}", hdr)[0] == 403
+        assert "new_event" not in [r["action"] for r in _audit_of(srv)], "a refused new event changes nothing"
+        st, text, _h = _req(port, "/drivers/race/new-event", b"{}", hdr)
+        assert st == 200 and _json.loads(text)["ok"], (st, text)
+        assert _audit_of(srv)[-1]["action"] == "new_event", "the tailnet starts a new event"
         srv.race_svc.tick()
         alice = g._tok("alice")                                   # a commentator
         st, text, _h = _req(port, f"/console/drivers/dashboard?t={alice}")

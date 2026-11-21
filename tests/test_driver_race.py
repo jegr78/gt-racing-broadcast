@@ -770,6 +770,66 @@ def t_a_confirmed_disconnect_reads_dc_on_the_dashboard_until_data_returns():
     svc.tick()
     assert svc.dashboard()["entries"][0]["status"] != "dc", "a returned car is no longer a DC"
 
+def t_a_new_event_on_a_running_relay_drops_every_action_and_rotates_the_recording():
+    ctx = {"roster": ROSTER, "stint": "Q1", "remaining": None, "mode": "race", "segment": "Q1"}
+    svc, wall, d = _recording_service(context=lambda: ctx)
+    svc.set_compound("rc:Anna", "A", "RS")
+    svc.set_quali("rc:Anna", "B", 90000)
+    svc.correct("rc:Anna", "A", metres=10.0, reason="x")
+    svc.retire("rc:Anna", "B", True)
+    svc.set_fastest("rc:Anna", "A", "Max", 61000)
+    svc.recording_start("pit")
+    _flush(svc)
+    old = svc._recorder()._store.path
+    wall[0] += 5
+    svc.new_event("tailnet")
+    st = svc.standings()
+    assert st["compounds"] == {} and st["quali_overrides"] == {}, \
+        f"a new event drops tyres and qualifying too: {st['compounds']} {st['quali_overrides']}"
+    assert dr._read_json(dr._actions_path_for(svc._path)) == {}, "the actions file is empty"
+    assert all(e["correction_m"] == 0.0 and e["status"] != "retired" for e in st["entries"]), st["entries"]
+    assert st.get("fastest") is None, st.get("fastest")
+    assert svc._recorder()._store.path != old, "the next recording is a new file"
+    assert os.path.exists(old), "the old recording stays on disk"
+    assert _audit(svc._path)[-1]["action"] == "new_event", "the new event is audited"
+
+
+def t_a_new_event_never_reopens_the_old_recording_or_takes_old_standings():
+    import threading, time
+    svc, wall, d = _recording_service()
+    svc.set_settings({"formation": False})
+    svc.recording_start("pit")
+    _two_cars(svc, wall, 1010.0)
+    svc.tick()
+    _flush(svc)
+    old = svc._recorder()._store.path
+    assert svc._snapshots, "the tick kept a delayed viewer frame"
+    stale = svc.standings()
+    epoch = svc._event_epoch
+    real_rotate, seen = dr.race_recording.rotate, []
+
+    def rotate(runtime_dir):
+        racer = threading.Thread(target=lambda: seen.append(svc._recorder()._store.path), daemon=True)
+        racer.start()
+        racer.join(0.3)       # a racer that is not blocked opens a recording right now
+        real_rotate(runtime_dir)
+    dr.race_recording.rotate = rotate
+    try:
+        wall[0] += 5
+        svc.new_event("tailnet")
+    finally:
+        dr.race_recording.rotate = real_rotate
+    deadline = time.monotonic() + 2
+    while not seen and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert seen and seen[0] != old, f"a recorder opened during the swap is a new file: {seen} {old}"
+    assert svc._recorder()._store.path != old, "the new event records into a new file"
+    assert not svc._snapshots, "the last event's delayed viewer frames go with it"
+    svc._observe(stale, None, epoch=epoch)
+    _flush(svc)
+    assert svc._recorder()._store.span() is None, "standings read before the new event are dropped"
+
+
 def t_a_race_reset_ends_the_old_races_disconnects():
     svc, wall, _d = _recording_service()
     svc.set_settings({"formation": False})

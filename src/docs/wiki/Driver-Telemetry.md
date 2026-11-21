@@ -28,6 +28,34 @@ The code works for the whole event once approved, also after a relay restart. Wh
 producer renews the invite link, open the new link and register again. Every approval
 starts over.
 
+## New event or continued event
+
+**Start event** (`racecast event start`) decides whether it starts a new event or
+continues the current one. It continues when **Stop event** has not ended the
+profile's event, the invite or the relay's last sign of life is younger than 12 hours,
+and the invite is younger than 36 hours. While the event's invite exists, the relay
+refreshes its sign of life every minute and records the race stint on air, also after
+a `racecast relay restart`. That covers a relay that died mid-race and a plain Start
+event afterwards. A
+continued event keeps the invite with every driver code and approval, the public timing
+link, the race corrections, the race recording and the report window, the same as
+`--stint` or `--part`. It also resumes the broadcast where the relay left it: the
+race stint that was on air and the broadcast Part (`resuming stint 5, Part 2`).
+`--stint` or `--part` sets that value by hand and the start still resumes the other
+one, so a stint typed into the Control Center's Start event field keeps the Part. A Part resumes only in the mode it was saved in,
+so `--qualifying` resumes a qualifying Part and never a race stint. A Start event
+while the event's relay still runs keeps all of this as well and leaves the relay's
+stint and Part alone. On a relay that runs without an unstopped event (none, or one
+past the limits above) Start event begins a new event: a new invite and timing link
+and a new report window. It also asks that relay to drop the last race's data, as a
+new event does, and to start a new race recording. The first continued event after upgrading to this version
+resumes Part 1, because the Part pointer saved by an older version has no mode.
+Otherwise it is a new event: a new invite and timing link, the
+last event's corrections cleared and a new race recording. The command output and the
+Control Center job log say which one applied (`continuing today's event: driver codes
+and timing link kept` or `new event: new driver codes and timing link`). To start a new
+event within the 12 hours, press Stop event first.
+
 ## Which setup
 
 GT7 sends telemetry to every device that asks for it, but on one device only one
@@ -313,7 +341,7 @@ It never carries connection ids, corrections or who made them.
   lap 1 of a follow-up lobby and any lap with a start, red flag, change or move in it
   do not count.
 - **The fastest race lap** is kept across stints and survives a relay restart on the same
-  track layout; the next `event start` or a race reset clears it. A lap faster than the
+  track layout; the next [new event](#new-event-or-continued-event) or a race reset clears it. A lap faster than the
   line allows at 120 m/s never counts. Race Control and the director can clear or set it
   (`POST /drivers/race/fastest`, with an optional `class` for one class's lap).
 - **Delay**: the event setting holds the dashboard, and the stint it shows, back by up to
@@ -398,7 +426,7 @@ It never carries connection ids, corrections or who made them.
 - **Corrections** from both desks: clear or set the fastest lap, and set or delete an
   entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart.
   A race reset clears the fastest lap; qualifying times and tyre compounds stay until
-  the next `event start`.
+  the next [new event](#new-event-or-continued-event).
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every
@@ -409,7 +437,8 @@ It never carries connection ids, corrections or who made them.
 
 Viewers and team mates can follow the race in a browser without the stream. Each event
 gets a public timing link, separate from the drivers' invite: `racecast event start`
-creates it and `racecast event stop` ends it. The Control Center's Home view shows it
+creates it for a [new event](#new-event-or-continued-event) and `racecast event stop`
+ends it. The Control Center's Home view shows it
 under **Public timing** with **Copy** and **New link**, and both desks show it
 next to the invite. From the command line, `racecast event timing` prints it and
 `--new` replaces it; the old link then stops working.
@@ -545,8 +574,8 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
   Estimates are not saved: a relay restart drops them.
 
 Corrections, rejoin marks and retirements survive a relay restart; a race reset and
-the next `event start` drop them. Driver name changes survive a race reset too and go
-with the next `event start`. The race reset itself (`POST /drivers/race/reset`) is a
+the next [new event](#new-event-or-continued-event) drop them. Driver name changes
+survive a race reset too and go with the next new event. The race reset itself (`POST /drivers/race/reset`) is a
 call on the tailnet only: neither desk offers it, and the console refuses it for every
 role. Every action is logged with who
 and when in `runtime/<profile>/driver-race-audit.jsonl`. Race Control and the director

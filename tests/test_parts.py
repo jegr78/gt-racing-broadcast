@@ -158,6 +158,18 @@ def t_partstore_default_and_transitions():
     assert ps2.get() == {"index": 2, "live": False}
 
 
+def t_partstore_records_the_mode_of_its_index():
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "part.json")
+    ps = R.PartStore(p)
+    ps.mode = lambda: "qualifying"
+    ps.mark_live(2)
+    with open(p, encoding="utf-8") as fh:
+        assert json.load(fh) == {"index": 2, "live": True, "mode": "qualifying"}, \
+            "the file names the mode its Part index belongs to"
+    assert ps.get() == {"index": 2, "live": True}, "the state stays index and live"
+
+
 def t_partstore_ignores_corrupt_file():
     d = tempfile.mkdtemp(); p = os.path.join(d, "part.json")
     with open(p, "w", encoding="utf-8") as fh:

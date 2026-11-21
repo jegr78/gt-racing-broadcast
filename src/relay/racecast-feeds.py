@@ -3021,8 +3021,9 @@ class PartStore:
     state from OBS. Same best-effort, lock-guarded, type-checked-load contract as
     TimerStore/EventTitleStore (a hand-edited file must never crash later)."""
 
-    def __init__(self, path):
+    def __init__(self, path, mode=lambda: None):
         self.path = path
+        self.mode = mode   # the relay's mode, saved with the index so a resume can match it
         self.lock = threading.Lock()
         self.state = default_part_state()
         try:
@@ -3049,7 +3050,7 @@ class PartStore:
     def _save_file(self):
         try:
             with open(self.path, "w", encoding="utf-8") as fh:
-                json.dump(self.state, fh)
+                json.dump(dict(self.state, mode=self.mode()), fh)
         except OSError:
             pass  # best-effort, same contract as the timer/event caches
 
@@ -15095,7 +15096,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if action == "recording" or p[2:] == ["recording", "event"]:
                         return self._recording_post(p[3] if len(p) == 4 else None, body, who)
                     commands = {"final-lap": driver_race_svc.final_lap,
-                                "finish": driver_race_svc.finish, "reset": driver_race_svc.reset}
+                                "finish": driver_race_svc.finish, "reset": driver_race_svc.reset,
+                                "new-event": driver_race_svc.new_event}
                     if action in commands:
                         commands[action](who)
                         return self._send({"ok": True, "state": driver_race_svc.standings()["state"]})
@@ -15659,13 +15661,66 @@ def dashboard_ticks(relay, race_svc, stop_evt, every):
             relay._warn_tick_error("driver dashboard", e)
 
 
-def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0):
+ON_AIR_ALIVE_S = 60.0   # how often an event relay refreshes its last-alive stamp
+
+
+def _read_on_air_stint(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            stint = json.load(fh).get("stint")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return stint if isinstance(stint, int) and not isinstance(stint, bool) else None
+
+
+def write_on_air_record(path, stint, alive):
+    """Write {"stint", "alive"} (no stint while none is known). True on success."""
+    doc = {"alive": float(alive)} if stint is None else {"stint": int(stint), "alive": float(alive)}
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        os.replace(tmp, path)
+        return True
+    except OSError as e:
+        LOG.warning("on-air record not written: %s", e)
+        return False
+
+
+def _on_air_tick(relay, path, state, clock):
+    """Refresh the on-air record when the race stint changes or the stamp is due."""
+    now = clock()
+    stint = state["stint"]
+    if (not relay.solo and relay.mode == "race" and relay.race_source
+            and relay.race_source.get_rows()):   # an empty cache would read as stint 1
+        stint = relay.on_air_row_idx() + 1
+    if stint != state["stint"] or state["at"] is None or now - state["at"] >= ON_AIR_ALIVE_S:
+        if write_on_air_record(path, stint, now):
+            state["stint"], state["at"] = stint, now
+
+
+def _on_air_watch_kwargs(runtime, invite_cache):
+    """The stint watch keeps runtime on-air.json while the profile's invite exists."""
+    return {"on_air_path": os.path.join(runtime, "on-air.json"),
+            "invite_active": lambda: invite_cache.get() is not None}
+
+
+def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None,
+                       clock=time.time, invite_active=lambda: True):
     """Tell the driver race when the broadcast switches stints: that opens the driver
     change window, and the switch onto the last schedule row brings the final lobby's
     lap count (the row's `Laps` cell, else the event setting). The row's `Laps <Class>`
-    cells pre-fill the class lap counts, at a switch and at a start. Endurance only."""
+    cells pre-fill the class lap counts, at a switch and at a start. Endurance only.
+    `on_air_path` keeps the race stint on air and a last-alive stamp, which a plain
+    `event start` resumes from, while `invite_active()` says an event is unstopped."""
     last = None
+    record = {"stint": _read_on_air_stint(on_air_path) if on_air_path else None, "at": None}
     while not stop_evt.wait(interval):
+        if on_air_path and invite_active():
+            try:
+                _on_air_tick(relay, on_air_path, record, clock)
+            except Exception as e:  # noqa: BLE001  a record error must never touch the broadcast
+                relay._warn_tick_error("on-air record", e)
         if relay.solo:
             continue
         try:
@@ -16429,6 +16484,7 @@ def main():
                   league_name=args.league_name,
                   producer_name=os.environ.get("RACECAST_PRODUCER_NAME", ""),
                   solo=args.solo)
+    part_store.mode = lambda: relay.mode
     if cookies:
         # After the Relay exists: only a YouTube feed source makes old cookies matter (#1091).
         _ch = cookie_health(cookies, needed=relay.cookies_needed())
@@ -16635,7 +16691,8 @@ def main():
                      args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
-        lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"])).start()
+        lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),
+        kwargs=_on_air_watch_kwargs(runtime, _hub_invite)).start()
     sender_script_path = os.path.join(here, "racecast-sender.py")
     drive_page_path = None
     for cand in (os.path.join(here, "drive.html"), os.path.join(here, "..", "drive.html"),

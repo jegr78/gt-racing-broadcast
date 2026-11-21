@@ -796,18 +796,22 @@ def _part_path():
     return os.path.join(_runtime_dir(), "part.json")
 
 
-def _write_part_reset(index):
+def _has_part_flag(rest):
+    return any(tok == "--part" or tok.startswith("--part=") for tok in rest)
+
+
+def _write_part_reset(index, mode="race"):
     """Reset the broadcast-Part pointer to Part `index`, not-live. `event start`
     is the one reliable reset point (every event begins with it; a clean
     last-Part-stop / event stop can't be detected). A fresh relay adopts this on
     construction; writing while a relay already runs is inert (PartStore loads
-    once at start): so a mid-event re-run does not disturb the live pointer, and
-    recovery is `event start --part N` + a relay restart. Best-effort."""
+    once at start): so a mid-event re-run does not disturb the live pointer. A
+    continued event writes the saved index back (`_resume_point`). Best-effort."""
     path = _part_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"index": int(index), "live": False}, fh)
+            json.dump({"index": int(index), "live": False, "mode": mode}, fh)
     except OSError as exc:
         print("note: could not reset part.json ({}). Continuing.".format(exc))
 
@@ -1587,6 +1591,73 @@ def _is_continuation_start(rest):
         if tok in ("--stint", "--part") or tok.startswith(("--stint=", "--part=")):
             return True
     return False
+
+
+# A plain `event start` continues an unstopped event when its invite or the event
+# relay's last-alive stamp is younger than the first, and the invite younger than the second.
+EVENT_CONTINUE_MAX_AGE_S = 12 * 3600
+EVENT_MAX_AGE_S = 36 * 3600
+
+
+def _event_continues(created, last_alive, now):
+    """Whether an unstopped event's invite (`created`) or its relay's last-alive stamp
+    lies less than EVENT_CONTINUE_MAX_AGE_S before `now`, with the invite less than
+    EVENT_MAX_AGE_S old. Pure."""
+    def _stamp(t):
+        return isinstance(t, (int, float)) and not isinstance(t, bool) and t <= now
+    if not _stamp(created) or now - created >= EVENT_MAX_AGE_S:
+        return False
+    newest = max([created] + ([last_alive] if _stamp(last_alive) else []))
+    return now - newest < EVENT_CONTINUE_MAX_AGE_S
+
+
+def _unstopped_event_continues():
+    """True when `event stop` has not ended this profile's event and it is recent."""
+    import driver_invite
+    invite = driver_invite.current(_driver_invite_path())
+    if invite is None:
+        return False
+    alive = _read_on_air(_on_air_record_path()).get("alive")
+    return _event_continues(invite.get("created"), alive, time.time())
+
+
+def _on_air_record_path():
+    """The race stint on air and the last-alive stamp an event relay writes."""
+    return os.path.join(_runtime_dir(), "on-air.json")
+
+
+def _read_on_air(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _read_positive(path, key):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            value = json.load(fh).get(key)
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+
+
+def _resume_point(mode):
+    """(stint, part) a continued event in `mode` resumes, each None when unknown: the
+    last recorded race stint (race only) and the Part pointer saved in the same mode."""
+    stint = _read_positive(_on_air_record_path(), "stint") if mode == "race" else None
+    part = (_read_positive(_part_path(), "index")
+            if _read_on_air(_part_path()).get("mode") == mode else None)
+    return stint, part
+
+
+def _clear_on_air_record():
+    try:
+        os.remove(_on_air_record_path())
+    except OSError:
+        pass  # nothing recorded
 
 
 def _read_session_start():
@@ -6061,16 +6132,18 @@ def event_invite_data(new=False, path=None, links=None):
                 **(links or _invite_links)(invite["id"]))
 
 
-def _start_driver_invite(fresh, path=None):
+def _start_driver_invite(fresh, path=None, race_data=True):
     """A fresh event gets a new invite, a new public timing link and a driver race
-    without the last event's corrections; a takeover or recovery restart keeps them."""
+    without the last event's corrections; a takeover, recovery restart or continued
+    event keeps them. `race_data` False leaves the corrections and the recording to a
+    running relay, which holds them in memory and writes them back."""
     import driver_invite
     import driver_race
     import race_recording
     import timing_link
     path = path or _driver_invite_path()
     runtime = os.path.dirname(os.path.abspath(path))
-    if fresh:
+    if fresh and race_data:
         driver_race.clear_actions(runtime)
         race_recording.rotate(runtime)
     if fresh or driver_invite.current(path) is None:
@@ -6080,6 +6153,20 @@ def _start_driver_invite(fresh, path=None):
         timing_link.clear(timing)       # a new event also starts on the default served path
     if fresh or timing_link.current(timing) is None:
         timing_link.create(timing)
+
+
+def _relay_new_event():
+    """Ask the running relay to drop the last event's race data and start a new
+    recording; returns what the output line says about it."""
+    try:
+        reply = _relay_post_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/race/new-event", {})
+        if reply.get("ok"):
+            return "race data cleared and a new race recording"
+        note = reply.get("error") or "refused"
+    except Exception as exc:  # noqa: BLE001  best effort, the start goes on
+        note = str(exc)
+    return (f"the running relay kept the last race's data ({note}): Stop event and Start "
+            "event clear it")
 
 
 def _stop_driver_invite(path=None):
@@ -6728,7 +6815,9 @@ def event_start(rest, _autojoin=True, _new_session=True):
     broadcast (record a new session start), False keeps the existing window.
     `event_takeover` passes False so a handover continues A's report window on B
     rather than resetting it; a mid-event recovery restart (--stint/--part) keeps
-    it too (see `_is_continuation_start`)."""
+    it too (see `_is_continuation_start`), and so does a plain start on an unstopped,
+    recent event (`_unstopped_event_continues`), which also resumes its Part and race
+    stint (`_resume_point`)."""
     ev, pf = _event_modules()
     # 0. Pre-flight gate: refuse to bring the stack up when a static
     # precondition is broken (missing SHEET_ID, missing graphics): those never
@@ -6765,13 +6854,42 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # start at the stint on air right now, --qualifying brings the stack up in
     # qualifying mode, and --title sets the event title. Reset the broadcast-Part
     # pointer before the relay starts, so its PartStore comes up on the right Part.
-    _write_part_reset(_part_index(rest))
+    part = _part_index(rest)
     fresh = _new_session and not _is_continuation_start(rest)
-    relay_was_running = _relay_already_running_for_active_profile() if fresh else False
+    relay_was_running = _relay_already_running_for_active_profile() if _new_session else False
+    continuing = _new_session and _unstopped_event_continues()
+    fresh = fresh and not continuing
+    mode = "qualifying" if _qualifying_args(rest) else "race"
+    resume_stint = None
+    if continuing and not relay_was_running:   # resume whatever --stint/--part did not set
+        resume_stint, saved_part = _resume_point(mode)
+        resume_stint = None if _stint_args(rest) else resume_stint
+        saved_part = None if _has_part_flag(rest) else saved_part
+        part = saved_part or part
+        resumed = ([f"stint {resume_stint}"] if resume_stint else []) + \
+            ([f"Part {saved_part}"] if saved_part else [])
+        if resumed:
+            print("event: resuming " + ", ".join(resumed) + ".")
+        elif not (_stint_args(rest) and _has_part_flag(rest)):
+            print("event: nothing recorded to resume: the unset stint or Part starts at 1.")
+    if fresh and not relay_was_running:
+        _clear_on_air_record()
+    if not relay_was_running:   # a running relay owns the live pointer
+        _write_part_reset(part, mode)
     try:
         # Start event again on a running event (OBS or Companion back up) keeps the
         # drivers' codes; only a new event gets a new link.
-        _start_driver_invite(fresh and not relay_was_running)
+        _start_driver_invite(fresh, race_data=not relay_was_running)
+        if continuing:
+            print("event: continuing today's event: driver codes and timing link kept "
+                  "(Stop event first to start a new one).")
+        elif fresh and not relay_was_running:
+            print("event: new event: new driver codes and timing link.")
+        elif fresh:
+            print("event: relay already running: new event: new driver codes and timing link, "
+                  + _relay_new_event() + ", a new report window starts here.")
+        elif _new_session:
+            print("event: mid-event start: driver codes and timing link kept.")
     except OSError as exc:
         print(f"driver invite: not created ({exc}).")
     # Mark THIS event's start so the report window begins here: a restart within
@@ -6784,7 +6902,8 @@ def event_start(rest, _autojoin=True, _new_session=True):
         _reset_telemetry_record()
         if was_running:   # same relay, same profile: it won't re-read the file itself
             _sync_live_telemetry_record()
-    relay_start(_stint_args(rest) + _qualifying_args(rest) + _title_args(rest))
+    stint_args = _stint_args(rest) or (["--stint", str(resume_stint)] if resume_stint else [])
+    relay_start(stint_args + _qualifying_args(rest) + _title_args(rest))
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())
         if _mm:

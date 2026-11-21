@@ -593,6 +593,7 @@ class Service:
         self._lock = threading.Lock()
         self._recording_dir = recording_dir
         self._rec_lock = threading.Lock()
+        self._event_epoch = 0   # bumped by new_event; standings carry the one they were read under
         self._rec = None
         self._rec_retry = 0.0
         self._rec_failing = False
@@ -829,9 +830,10 @@ class Service:
             standings = self._current().standings(self._clock()) if recording else None
             rec = self._rec
             generation = rec.generation if rec is not None else None
+            epoch = self._event_epoch
         if recording:
             self._mark_dc(standings["entries"])
-            self._observe(standings, snap.get("classes"), generation=generation)
+            self._observe(standings, snap.get("classes"), generation=generation, epoch=epoch)
         self.save_fastest()
 
     def open_recording(self):
@@ -840,12 +842,17 @@ class Service:
         if self._recording_dir and self._enabled():
             self._guarded(self._recorder)
 
-    def _observe(self, standings, classes=None, generation=None):
-        """Feed the recorder; a recording failure never stops the tick."""
+    def _observe(self, standings, classes=None, generation=None, epoch=None):
+        """Feed the recorder; a recording failure never stops the tick. Standings read
+        before a new event (`epoch`) never reach its recorder."""
         if self._rec is None and (not self._rec_allowed or self._clock() < self._rec_retry):
             return
-        self._guarded(lambda: self._recorder().observe(
-            standings, self._compound_codes, self._wall(), classes, generation))
+
+        def feed():
+            rec = self._recorder()
+            if epoch is None or epoch == self._event_epoch:
+                rec.observe(standings, self._compound_codes, self._wall(), classes, generation)
+        self._guarded(feed)
 
     def _guarded(self, fn):
         """Run fn; any failure is logged once and backs off RECORDING_RETRY_S."""
@@ -1308,6 +1315,26 @@ class Service:
         with self._lock:
             self._current().finish(self._clock())
             self._log(who, "finish")
+
+    def new_event(self, who="tailnet"):
+        """A new event while the relay runs: drop every action and the fastest lap like
+        `clear_actions`, start the race over and close the recording, so the next one
+        opens a new file."""
+        with self._lock:
+            self._log(who, "new_event")
+            with self._rec_lock:   # no recorder can reopen the old pointer in between
+                rec, self._rec = self._rec, None
+                if self._recording_dir:
+                    race_recording.rotate(self._recording_dir)
+            self._event_epoch += 1
+            self._snapshots.clear()
+            clear_actions(os.path.dirname(_actions_path_for(self._path)))
+            self._final_lobby_laps, self._final_on_air = None, False
+            self._race = self._build(self._pick()["id"] if self._pick() else None)
+        if rec is not None:   # outside the locks: a flush can take seconds
+            rec._writer.flush()
+            rec._writer.stop()
+            rec._store.close()
 
     def reset(self, who="tailnet"):
         """Start the race over: its corrections, rejoin marks, retirements, fastest lap

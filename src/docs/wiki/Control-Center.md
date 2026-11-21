@@ -65,8 +65,9 @@ and copy the director / Web Buttons links. Under the event title, **Track layout
 the event's GT7 layout for the telemetry (see [Telemetry](Telemetry)); a layout marked
 "no line" has no downloaded racing line and shows a warning. **Driver invite** shows the
 link drivers open to send their telemetry ([driver guide](Driver-Telemetry)): **Start
-event** creates it, **Stop event** ends it, **Copy** copies it and **New link** replaces
-it, after which every driver registers again.
+event** creates it or keeps it for a
+[continued event](Driver-Telemetry#new-event-or-continued-event), **Stop event** ends
+it, **Copy** copies it and **New link** replaces it, after which every driver registers again.
 **Driver race** sets how the telemetry race order starts and finishes: **Formation
 lap** (distance starts on lap 2), and **Finish after laps** with the lap count or
 **Timed**, where Race Control or the director triggers Final lap
