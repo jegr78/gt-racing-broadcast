@@ -294,7 +294,8 @@ class Race:
             self._retired.discard(entry)
             if ent is not None and self._finished and ent.finished_at is None:
                 ent.finished_at = now              # a finish by hand classifies it where it stopped
-            elif ent is not None and ent.distance is not None and self._red is not None:
+            elif ent is not None and ent.distance is not None and self._red is not None \
+                    and ent.finished_at is None:
                 ent.frozen, ent.waiting = ent.distance, True
                 car = self._cars.get(ent.active)
                 if car is not None and car.lap is not None and car.s is not None \

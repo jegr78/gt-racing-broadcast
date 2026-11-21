@@ -2346,6 +2346,21 @@ def t_an_undone_retirement_under_a_mis_pressed_red_flag_counts_on_from_the_undo(
             f"B counts the metres from the undo on, none driven while retired: {db} {rb['distance_m']}"
 
 
+def t_an_undone_retirement_of_a_finished_car_under_a_red_flag_stays_finished():
+    race = rd.Race(TRACE, formation=False, finish_mode="time")
+    a, b, c = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25), Car(race, "C", "c", L - 300)
+    t = _drive(race, [a, b, c], [50, 50, 50], 0.0, 30)
+    race.final_lap(t)
+    while not _row(race, "B", t)["finished"]:
+        t = _drive(race, [a, b, c], [50, 50, 50], t, 0.2)
+    race.retire("B", True, t)
+    race.red_flag(t, "keep")
+    race.retire("B", False, t)
+    rb = _row(race, "B", t)
+    assert rb["finished"] and not rb["waiting"] and rb["status"] != "red_flag", \
+        f"a finished car does not wait for the restart: {rb}"
+
+
 def _undo_in_the_restart_lobby(new_console):
     """B retires, the red flag falls, B's console reaches the restart lobby while
     retired (the same console, or `new_console` connecting there), then Undo DNF."""
