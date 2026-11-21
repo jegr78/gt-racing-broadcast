@@ -14561,7 +14561,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return self._send({"ok": True, "request": after})
 
         def _drive_refuse(self, status, message):
-            client = self.client_address[0] if self.client_address else "?"
+            client = drive_client_key(self.client_address[0] if self.client_address else "?", self.headers)
             if status in (401, 403) and not _drive_authfail_rl.allow(client):
                 status, message = 429, "too many attempts"
             self._send({"error": message}, status)
@@ -14576,7 +14576,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return None
             if not link or not hmac.compare_digest(presented.encode("utf-8", "replace"),
                                                    link["id"].encode("utf-8")):
-                client = self.client_address[0] if self.client_address else "?"
+                client = drive_client_key(self.client_address[0] if self.client_address else "?", self.headers)
                 if not _timing_authfail_rl.allow(client):
                     return self._send({"error": "too many attempts"}, 429)
                 return self._send({"error": "this timing link is not valid (any more)"}, 403)

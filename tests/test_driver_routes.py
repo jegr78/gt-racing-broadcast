@@ -264,6 +264,24 @@ def t_cross_site_clicks_open_the_public_pages_and_timing_failures_spare_the_driv
         srv.shutdown()
 
 
+def t_failure_caps_behind_funnel_count_each_client():
+    link_path = os.path.join(tempfile.mkdtemp(), "timing-link.json")
+    srv, port, path, _hub = _serve(timing_link_path=link_path,
+                                   timing_page_path=os.path.join(ROOT, "src", "console", "timing.html"))
+    scanner, driver = {"X-Forwarded-For": "198.51.100.7"}, {"X-Forwarded-For": "203.0.113.5"}
+    batch = tp.encode_batch([_wire(1)])
+    try:
+        driver_invite.create(path)
+        timing_link.create(link_path)
+        for route, data in (("/console/drive/ingest", batch), ("/console/timing?l=wrong", None)):
+            codes = [_req(port, route, data, dict(scanner, **{"X-Driver-Code": "D1:x.y"}))[0] for _ in range(125)]
+            assert 429 in codes, (route, "a scanner behind the Funnel proxy is capped")
+            st = _req(port, route, data, dict(driver, **{"X-Driver-Code": "D1:x.y"}))[0]
+            assert st == 403, (route, f"another client still hears why it failed, not 429: {st}")
+    finally:
+        srv.shutdown()
+
+
 def _register(port, invite, **body):
     return _req(port, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
                 {"Content-Type": "application/json"})

@@ -79,7 +79,7 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 | 410 | Race Control rejected this registration, the producer disconnected this sender, or a cap dropped this waiting registration | register again and use the new code; the sender script says so once and stops |
 | 423 | the registration waits for approval, the body carries `"pending": true` | keep the code, tell the driver it waits, retry every few seconds, the sender script every 10 s |
 | 413 | body too large | send smaller batches |
-| 429 | too many failed attempts or senders | retry after a minute |
+| 429 | too many failed attempts from this client, or too many senders | retry after a minute |
 
 ## Approval
 
