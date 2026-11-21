@@ -589,6 +589,17 @@ def t_the_desk_tables_keep_their_own_text_colour_in_the_panel():
         f"desk cells set their own colour, else the panel's .urls td greys them: {cells and cells.group(1)}"
 
 
+def t_the_senders_table_shrinks_its_move_choice_to_the_column():
+    import re
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        src = fh.read()
+    css = "".join(re.findall(r'"([^"]*)"', src.split("var CSS = [", 1)[1].split("].join", 1)[0]))
+    assert 'var sendTable = el("div", {cls: "tbl send"}' in src, "the senders table carries its own class"
+    rule = re.search(r"\.dd \.send select\{([^}]*)\}", css)
+    assert rule and "width:100%" in rule.group(1) and "min-width:0" in rule.group(1), \
+        f"a long entry list must not widen the senders table past the panel column: {rule and rule.group(1)}"
+
+
 def t_the_desk_names_a_qualifying_segment_once():
     got = _desk_fn("lapText", '["Qualifying", "qualifying 2", "Q1", ""].map(function (s) {'
                               ' return lapText({mode: "qualifying", segment: s}); })')

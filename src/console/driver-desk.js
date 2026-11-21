@@ -47,6 +47,7 @@
     ".dd button.go{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd [hidden]{display:none!important}",
     ".dd select{width:auto;max-width:100%}",
+    ".dd .send select{width:100%;min-width:0}",
     ".dd a.btn{background:var(--panel-2,#1b1f25);color:var(--ink,#e8eaed);border:1px solid var(--edge,#2a2f37);",
     "border-radius:6px;padding:5px 9px;text-decoration:none}.dd a.btn:hover{border-color:var(--ink,#e8eaed)}",
     ".dd .rec{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--muted,#9aa0a6)}",
@@ -726,7 +727,7 @@
     var readyBody = el("tbody");
     var readyTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [readyHead]), readyBody])]);
     var sendBody = el("tbody");
-    var sendTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
+    var sendTable = el("div", {cls: "tbl send"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
       "Sender", "Entry", "", ""].map(function (h) { return el("th", {text: h}); }))]), sendBody])]);
 
     // -- driver requests --------------------------------------------------------------
