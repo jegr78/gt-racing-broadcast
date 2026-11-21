@@ -413,13 +413,13 @@ def t_a_rejected_code_is_revoked_even_while_it_sends():
         assert code == 200 and json.loads(text)["request"]["status"] == "rejected", text
         assert hub.connections() == [], "a rejection drops the live sender"
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
-        assert code == 403 and "rejected" in text, (code, text)
+        assert code == 410 and "rejected" in text, ("a rejection stops the sender", code, text)
         for route in ("approve", "correct", "reject"):
             code, text, _h = _post(port, f"/drivers/requests/{route}", {"conn": conn})
             assert code == 409, (route, code, text)
         pending = json.loads(_register(port, invite, entry="Team A #1", name="Ann")[1])["code"]
         assert _post(port, "/drivers/requests/reject", {"conn": _conn_of(path, pending)})[0] == 200
-        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": pending})[0] == 403, \
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": pending})[0] == 410, \
             "a request rejected before it sent never sends"
     finally:
         srv.shutdown()
@@ -709,7 +709,7 @@ def t_both_desks_reject_every_waiting_request_at_once():
         st, text, _h = _post(port, f"/console/race-control/drivers/requests/reject-pending?t={rc}", {})
         assert st == 200 and json.loads(text)["rejected"] == 2, text
         batch = tp.encode_batch([_wire(1)])
-        assert [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0] for c in waiting] == [403, 403]
+        assert [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0] for c in waiting] == [410, 410]
         assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": kept})[0] == 200, "approvals stay"
         last = _audit_of(srv)[-1]
         assert last["action"] == "driver_reject_pending" and last["who"] == "race_control:dave" \

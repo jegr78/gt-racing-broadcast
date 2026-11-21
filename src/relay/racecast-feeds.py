@@ -14683,8 +14683,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._drive_refuse(410, "your registration was dropped: register again on the invite page")
                 if req is None:
                     return self._drive_refuse(403, "unknown registration: register again on the invite page")
-                if req["status"] == "rejected":
-                    return self._drive_refuse(403, "Race Control rejected this registration: "
+                if req["status"] == "rejected":     # 410 stops the sender: a rejection is final
+                    return self._drive_refuse(410, "Race Control rejected this registration: "
                                                    "register again on the invite page")
                 if req["status"] == "pending":
                     # Its own status outside the failed-auth bucket: the sender polls it.

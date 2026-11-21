@@ -74,9 +74,9 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 | Status | Meaning | Client action |
 |---|---|---|
 | 400 | malformed batch | drop that batch |
-| 403 | invalid, revoked or rejected code | register again (the sender script retries once a minute and tells the driver) |
+| 403 | invalid or revoked code, or a code without a request | register again (the sender script retries once a minute and tells the driver) |
 | 409 | the entry already has its live senders | retry rarely; the producer can disconnect the other one |
-| 410 | the producer disconnected this sender, or a cap dropped this waiting registration | register again and use the new code; the sender script says so once and stops |
+| 410 | Race Control rejected this registration, the producer disconnected this sender, or a cap dropped this waiting registration | register again and use the new code; the sender script says so once and stops |
 | 423 | the registration waits for approval, the body carries `"pending": true` | keep the code, tell the driver it waits, retry every few seconds, the sender script every 10 s |
 | 413 | body too large | send smaller batches |
 | 429 | too many failed attempts or senders | retry after a minute |
@@ -86,8 +86,8 @@ Reply `200`: `{"ok": true, "v": 1, "rate_hz": 20, "accepted": N}`. A client foll
 Every registration lands as a pending request in `runtime/<profile>/driver-requests.json`,
 bound to the invite. A new invite starts with none, a relay restart keeps them and
 `racecast event stop` deletes the file. The
-ingest answers 423 for a pending request, 403 for a rejected one and for a code without a
-request, and only an approved request reaches the hub, so nothing of an unapproved code
+ingest answers 423 for a pending request, 410 for a rejected one (so the sender stops),
+403 for a code without a request, and only an approved request reaches the hub, so nothing of an unapproved code
 reaches the race, the recording, the dashboard or the public timing. An approval may
 correct the entry, the stint and the name. The relay then uses the corrected values in
 place of the ones signed into the code. These routes are on the tailnet, for directors
@@ -182,4 +182,5 @@ and `position_mismatch` (single lobby: GT7's position contradicts the distance o
 `v` in every reply is the contract version. A change that an existing client cannot
 follow raises it, and the relay then states which versions it accepts. The approval
 stayed in v1. A client that does not know 423 treats it as a failed post and keeps
-retrying, which is what a waiting client has to do.
+retrying, which is what a waiting client has to do. A rejection answering 410 instead
+of 403 stayed in v1 too: both tell the client to register again, and 410 already stops it.

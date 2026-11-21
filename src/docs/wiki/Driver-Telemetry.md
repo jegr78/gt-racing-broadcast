@@ -19,8 +19,8 @@ Race Control or the director compares it with the car in the GT7 lobby and appro
 and only then does the relay use your telemetry. Start the sender right away anyway.
 Until the approval it prints `waiting for approval by Race Control` and asks again every
 ten seconds. Once approved, it says so and starts sending. Race Control may correct your
-name, entry or stint when it approves. A rejected registration stops working, and the
-sender then says to register again. If you register twice, Race Control sees both
+name, entry or stint when it approves. A rejected registration stops working: the
+sender says to register again and stops. If you register twice, Race Control sees both
 requests marked as duplicates and approves the one it trusts, so keep using the newest
 code and tell Race Control.
 
