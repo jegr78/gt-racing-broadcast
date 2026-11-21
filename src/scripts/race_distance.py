@@ -1100,7 +1100,7 @@ class Race:
                 return max(0.0, self._racing(mine) - self._racing(last[0]))
         mine_t, dist = self._cars[ent.active].t, ent.distance
         theirs = self._last(ahead)
-        if theirs is not None and 0.0 < mine_t - theirs[0] and (mine_t - theirs[0] <= SYNC_S or self._silent(ahead)):
+        if theirs is not None and 0.0 < mine_t - theirs[0] <= (NO_DATA_S if self._silent(ahead) else SYNC_S):
             # `ahead`'s last sample is older: compare where this car was at that moment.
             then = self._distance_at(ent, theirs[0])
             if then is not None:

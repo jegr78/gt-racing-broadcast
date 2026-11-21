@@ -745,6 +745,18 @@ def t_a_leader_going_quiet_keeps_the_lead():
     assert [r["entry"] for r in race.standings(t)["entries"]] == ["L", "A"], "L has not shown No data yet"
 
 
+def t_gaps_behind_a_dead_sender_follow_the_road_after_no_data():
+    race = rd.Race(TRACE, formation=False)
+    ld, c = Car(race, "L", "l", L - 15), Car(race, "C", "c", L - 1015)
+    t = _drive(race, [ld, c], [50, 50], 0.0, 40)
+    t = _drive(race, [c], [50], t, rd.NO_DATA_S + 1)                     # L's sender stops for good
+    before = _row(race, "C", t)["gap_s"]
+    t = _drive(race, [c], [80], t, 4)
+    after = _row(race, "C", t)["gap_s"]
+    assert _row(race, "L", t)["status"] == "no_data" and before - after > 1, \
+        f"C closes on L's last point, its gap does not freeze at L's silent moment: {before} -> {after}"
+
+
 def t_a_car_going_quiet_does_not_hold_the_field_back_in_time():
     race = rd.Race(TRACE, formation=False)
     ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),
