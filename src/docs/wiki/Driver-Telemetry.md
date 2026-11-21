@@ -180,7 +180,8 @@ and says so. Changing the layout mid-event starts the race over.
   retired cars rank by the distance they covered. A retired car raises no disconnect
   event, ends its estimate and cannot be an estimate's reference; an estimate that
   followed it ends too, so Race Control attaches that car to another one. **Undo DNF** takes
-  back a mis-press: the car counts on from its last distance.
+  back a mis-press: the car counts on from its last distance. Under a red flag it
+  stays frozen there and restarts with the field.
 - **Pit stops** count every box stop the car drives out of. In an endurance race the
   driver change at a stint switch counts as one pit stop too: the team's car that
   leaves the next lobby's box and takes over adds one, whether a new driver takes

@@ -2306,6 +2306,28 @@ def t_undoing_a_retirement_counts_on_from_the_last_distance():
     assert rb["status"] == "racing" and abs(rb["distance_m"] - (held + 80)) < 5, (held, rb)
 
 
+def t_undoing_a_retirement_under_a_red_flag_waits_for_the_restart_like_every_car():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
+        t = _drive(race, [a, b], [50, 50], 0.0, 90)
+        race.retire("B", True, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        db = _row(race, "B", t)["distance_m"]
+        race.red_flag(t, "keep")
+        race.retire("B", False, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        assert _row(race, "B", t)["distance_m"] == db, "the undone car stays frozen while the red flag holds"
+        for car in (a, b):
+            _new_lobby(car, L - 15)
+        t = _drive(race, [a, b], [None, None], t, 3)
+        assert _row(race, "B", t)["distance_m"] == db, \
+            f"the restart lobby keeps the undone car's laps: {_row(race, 'B', t)}"
+        a.box = b.box = False
+        t = _drive(race, [a, b], [40, 40], t, 5)
+        assert _row(race, "B", t)["distance_m"] > db, f"B resumes from its anchor: {_row(race, 'B', t)}"
+
+
 def t_a_retired_car_keeps_its_distance_when_its_console_leaves_the_session():
     race, (a, b, c, d), t = _retire_field()
     race.retire("B", True, t)
