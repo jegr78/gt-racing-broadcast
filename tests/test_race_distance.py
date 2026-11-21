@@ -630,6 +630,20 @@ def t_a_quiet_car_does_not_hold_the_field_back_in_time():
     assert order[:3] == ["L", "B", "A"], f"B passed A half a second ago, every sample is fresh: {order}"
 
 
+def t_a_held_car_does_not_hold_the_field_back_in_time():
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),
+                   Car(race, "B", "b", L - 310), Car(race, "C", "c", L - 600))
+    t = _drive(race, [ld, a, b, c], [50, 50, 50, 50], 0.0, 30)
+    c.along = -50.0                                                      # C's console starts a new session
+    t = _drive(race, [ld, a, b, c], [50, 50, 50, None], t, 3)
+    assert race._entries["C"].held and not race._quiet(race._entries["C"], t), "C is held but still sends"
+    while _row(race, "B", t)["distance_m"] < _row(race, "A", t)["distance_m"] + 5:
+        t = _drive(race, [ld, a, b, c], [50, 50, 60, None], t, 0.1)      # B passes A
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order[:3] == ["L", "B", "A"], f"B passed A half a second ago; a held car's old history does not count: {order}"
+
+
 def t_a_car_far_behind_keeps_its_exact_gap_to_the_leader():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 30)

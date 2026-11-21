@@ -1107,9 +1107,9 @@ class Race:
     def _synced(self, ents, now):
         """Each running car's shown distance at one moment: the oldest last sample among
         them, at most SYNC_S before the newest, so a fresher sample does not rank a car
-        ahead of one it trails on the road. Quiet cars keep their last distance."""
+        ahead of one it trails on the road. Quiet and held cars keep their last distance."""
         lasts = {e.entry: self._last(e) for e in ents
-                 if e.distance is not None and not e.waiting and not self._estimated(e)
+                 if e.distance is not None and not e.waiting and not e.held and not self._estimated(e)
                  and not self._quiet(e, now)}
         lasts = {k: v for k, v in lasts.items() if v is not None}
         if len(lasts) < 2:
