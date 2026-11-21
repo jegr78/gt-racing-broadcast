@@ -29,7 +29,8 @@ nearest the predicted distance decides.
   the connection: its counter drops in the new lobby, and leaving that lobby's box
   continues from the anchor too. Lap 1 of the follow-up lobby, driven before that car
   leaves the box, never counts. Once both took over, a gap leaves out the stand of the
-  car ahead from its stop to its box exit; until then laps down count from that stop.
+  car ahead from its stop to its box exit; until then laps down are at least those at
+  that stop, while the car still stops for its change.
 - Plausibility: every field comes from a driver's machine. A sample with a non-finite
   value, a position far off the line's area or a time before the car's last sample is
   dropped; one whose distance step is faster than MAX_SPEED_MPS only keeps the
@@ -116,6 +117,7 @@ PRUNE_EVERY_S = 10.0
 MAX_CHANGE_LAP = 2          # a car leaving a fresh lobby's box has driven at most lap 1
 LINE_QUORUM = 3
 GAP_SPEED_MPS = 10.0        # below this a gap from distance and speed means nothing
+PIT_ROW_M = 400.0           # a car this far past the station where the car ahead stopped drove past its box
 SYNC_S = 1.0                # cars' samples this far apart compare at the older one's time
 
 
@@ -181,6 +183,7 @@ class _Entry:
         self.stint_end = None      # change window: the shown distance where its old car stopped
         self.change_stop = None    # change window: when its old car began standing at the anchor
         self.stall = None          # (stop, box exit) of its change in the current switch
+        self.drove_on = False      # change window: its car left the box without a change
         self.changed = False
         self.held = False          # endurance: the counter dropped, waiting for a rejoin
         self.relobby = False       # endurance: the same driver moved on to the next lobby
@@ -369,6 +372,7 @@ class Race:
             for ent in self._entries.values():
                 ent.changed, ent.stint_end, ent.switch_pit = False, None, False
                 ent.change_stop = ent.stall = None
+                ent.drove_on = False
 
     def red_flag(self, now, mode):
         """Freeze every entry; each continues from its anchor in the restart lobby."""
@@ -381,7 +385,7 @@ class Race:
         for ent in self._entries.values():
             if ent.waiting or self._out(ent):
                 continue                           # a second red flag keeps the first anchor
-            ent.frozen = None
+            ent.frozen, ent.change_stop = None, None    # the restart decides the laps down
             est = self._est.get(ent.entry)
             if est is not None and est["on"] and ent.finished_at is None:
                 ent.frozen, ent.waiting = est["held"] - ent.adjust, True
@@ -887,6 +891,7 @@ class Race:
                     self._changed(ent, t)
             elif car.left_box:
                 ent.change_anchor = ent.change_stop = None   # it drove on: a pit stop, not a change
+                ent.drove_on = True
             return
         if car.left_box and ent.change_anchor is not None and window \
                 and car.lap <= MAX_CHANGE_LAP \
@@ -1162,15 +1167,19 @@ class Race:
         if stop is not None:
             # A car driving on to its box while `ahead` stands closes in by distance only.
             a, b = self._distance_at(ahead, stop), self._distance_at(ent, stop)
-            if a is not None and b is not None:
-                laps = max(laps, math.floor((a + ahead.adjust - b - ent.adjust) / self.length))
+            held = None if a is None or b is None else \
+                math.floor((a + ahead.adjust - b - ent.adjust) / self.length)
+            # Past its box without standing, the stand of the car ahead was its gain.
+            if held is not None and held > laps and (ent.changed or ent.change_anchor is not None
+                                                     or a + ahead.adjust - shown > held * self.length - PIT_ROW_M):
+                laps = held
         return laps
 
     def _change_stop(self, ahead, ent):
         """When `ahead` began standing for its change, while the window is open and not
         both of them have taken over in the next lobby; None otherwise."""
         car = self._cars.get(ent.active)
-        if ahead.change_stop is None or (ahead.changed and ent.changed) or self._estimated(ent) \
+        if ahead.change_stop is None or (ahead.changed and ent.changed) or ent.drove_on or self._estimated(ent) \
                 or car is None or car.t is None or self._window_until is None \
                 or car.t > self._window_until:
             return None

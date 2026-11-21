@@ -247,7 +247,8 @@ never counts. Gaps leave out the time the car ahead stood for its change. A lapp
 car's own pit lane shows in its gap until it passes where the car ahead lost the same,
 as at any pit stop. Until both cars have taken over, a car's laps down count from the
 moment the car ahead stopped, so a lapped car driving on to its box while the leader
-stands stays `+1 L`. The lap count applies to the final lobby only and counts that
+stands stays `+1 L`. A car that drives past its box, leaves it without a change or
+waits under a red flag counts its laps down by distance again. The lap count applies to the final lobby only and counts that
 lobby's laps on GT7's counter, from the car that took over after the last stint
 switch: the last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab),
 else the event setting. A lap count set while the final stint is already on air applies at once.
