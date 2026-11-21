@@ -531,7 +531,9 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
 
 Corrections, rejoin marks and retirements survive a relay restart; a race reset and
 the next `event start` drop them. Driver name changes survive a race reset too and go
-with the next `event start`. Every action is logged with who
+with the next `event start`. The race reset itself (`POST /drivers/race/reset`) is a
+call on the tailnet only: neither desk offers it, and the console refuses it for every
+role. Every action is logged with who
 and when in `runtime/<profile>/driver-race-audit.jsonl`. Race Control and the director
 use them from the Race Control desk ([Console](Console)) and the Director Panel
 ([Director](Director#driver-telemetry)).
