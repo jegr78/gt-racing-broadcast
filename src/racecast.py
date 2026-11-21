@@ -6860,7 +6860,8 @@ def event_stop(rest):
     the operator then clicks Control Center "Stop Event" too. Regenerating the report
     now would resolve NO commentator names and drop the qualifying marker (both need
     the live relay), overwriting/re-sending a strictly worse report. So a stop with no
-    live relay is a no-op. The good report stands."""
+    live relay only ends the driver invite, the drivers' requests and the public timing
+    link, and nudges the relay's timing host. The good report stands."""
     try:
         _stop_driver_invite()          # the invite link dies with the event
     except OSError as exc:
