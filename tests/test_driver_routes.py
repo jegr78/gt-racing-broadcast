@@ -1131,8 +1131,6 @@ def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
 
 
 def t_the_stint_watch_records_the_race_stint_on_air():
-    import json, tempfile, threading, time
-
     class Source:
         def get_rows(self):
             return [("u", "A", "S1", 2), ("u", "B", "S2", 3), ("u", "C", "S3", 4)]
