@@ -1663,6 +1663,39 @@ def t_after_a_keep_restart_the_final_lobby_classifies_by_the_crossings():
             f"finish gaps are the crossing times after the leader's flag ({case})"
 
 
+def t_after_a_keep_restart_a_running_lead_lap_car_stays_ahead_of_a_lapped_finisher():
+    """R runs 30 s behind A on A's lap; D, a lap down on the road, crosses 10 s after A's
+    flag. Frozen at 60 s, R's race lap line lies past the lobby's, so until R crosses
+    it shows the laps D finished with."""
+    race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="time")
+    race.final_lobby(None, 0.0)
+    a, r, d = Car(race, "A", "a", L - 15), Car(race, "R", "r", L - 115), Car(race, "D", "d", L - 215)
+    t = _drive(race, [a, r, d], [50] * 3, 0.0, 60)
+    race.red_flag(t, "keep")
+    for car in (a, r, d):
+        _new_lobby(car, L - 400)
+    t = _drive(race, [a, r, d], [None] * 3, t, 3)
+    a.box = False
+    t = _drive(race, [a, r, d], [50, None, None], t, 30)
+    r.box = False
+    t = _drive(race, [a, r, d], [50, 50, None], t, 2)
+    d.box = False
+    t = _drive(race, [a, r, d], [50] * 3, t, 3)
+    race.release(t)
+    while a.along - d.along < L + 500:
+        t = _drive(race, [a, r, d], [50, 50, 30], t, 1.0 / HZ)
+    t = _drive(race, [a, r, d], [50] * 3, t, 30)
+    race.final_lap(t)
+    wrong = []
+    while race.standings(t)["state"] != "finished" and len(wrong) < 5:
+        t = _drive(race, [a, r, d], [50] * 3, t, 1.0 / HZ)
+        order = _order(race, t)
+        if order.index("D") < order.index("R"):
+            wrong.append((round(t, 1), [(x["entry"], x["laps"], x["finished"]) for x in race.standings(t)["entries"]]))
+    assert not wrong, f"the lapped finisher D never passes R, which runs on the leader's lap: {wrong}"
+    assert _order(race, t) == ["A", "R", "D"] and _row(race, "D", t)["lapped"] == 1, race.standings(t)["entries"]
+
+
 def t_an_endurance_winner_stays_first_when_its_race_lap_ends_past_the_line():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     race.final_lobby(2, 0.0)

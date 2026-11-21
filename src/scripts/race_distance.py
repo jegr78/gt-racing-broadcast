@@ -1319,8 +1319,9 @@ class Race:
             road = self._road_finish(e)
             if road is not None:
                 reached = road
-            elif self.multi_lobby and e.road is not None and e.finished_at is None and est is None:
-                # On the road it completes that lap at its flag, not before now.
+            elif self.multi_lobby and e.road is not None and e.finished_at is None and est is None \
+                    and self._flag_entry is not None and laps == self._ranked_laps(self._flag_entry):
+                # On the road it completes the flag car's laps at its flag, not before now.
                 car = self._cars.get(e.active) or _NO_CAR
                 reached = now - (e.adjust - e.road) / max(car.speed or 0.0, GAP_SPEED_MPS)
             if reached is None:
