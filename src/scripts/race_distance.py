@@ -992,6 +992,8 @@ class Race:
     def _road_laps(self, ent):
         """The whole laps of a car's corrections in `_road_post`."""
         post = self._road_post(ent)
+        # Laps are whole, so a step at some length is unavoidable; it sits SNAP_M short of
+        # each lap, so a lap typed as a rounded line length still counts as that lap.
         return math.trunc((post + math.copysign(SNAP_M, post)) / self.length)
 
     def _race_lead(self, real=False):
