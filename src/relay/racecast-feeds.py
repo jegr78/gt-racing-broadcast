@@ -15698,8 +15698,8 @@ def _on_air_tick(relay, path, state, clock):
     if not relay.solo and relay.mode == "race":
         stint = relay.on_air_row_idx() + 1
     if stint != state["stint"] or state["at"] is None or now - state["at"] >= ON_AIR_ALIVE_S:
-        write_on_air_record(path, stint, now)
-        state["stint"], state["at"] = stint, now
+        if write_on_air_record(path, stint, now):
+            state["stint"], state["at"] = stint, now
 
 
 def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None,

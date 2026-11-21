@@ -1189,6 +1189,26 @@ def t_the_stint_watch_records_the_race_stint_on_air():
             worker.join(2)
 
 
+def t_a_failed_on_air_write_is_retried_on_the_next_tick():
+    import tempfile
+
+    class Relay:
+        solo, mode = False, "race"
+
+        def on_air_row_idx(self):
+            return 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = os.path.join(tmp, "later")
+        path = os.path.join(folder, "on-air.json")
+        state = {"stint": None, "at": None}
+        g.m._on_air_tick(Relay(), path, state, lambda: 100.0)
+        os.makedirs(folder)
+        g.m._on_air_tick(Relay(), path, state, lambda: 101.0)
+        with open(path, encoding="utf-8") as fh:
+            assert json.load(fh) == {"stint": 2, "alive": 101.0}, "the next tick retries a failed write"
+
+
 def t_only_an_event_relay_records_the_stint_and_its_stamp():
     assert g.m.on_air_record_path("/rt", False) is None, "a standalone relay writes no stamp"
     assert g.m.on_air_record_path("/rt", True) == os.path.join("/rt", "on-air.json")
