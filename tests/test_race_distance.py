@@ -604,6 +604,18 @@ def t_an_estimate_stays_behind_its_reference_when_the_field_compares_back():
     assert abs(rows[2]["interval_time_s"] - 0.5) <= 0.05, f"X is 0.5 s behind A: {rows[2]}"
 
 
+def t_a_quiet_car_does_not_hold_the_field_back_in_time():
+    race = rd.Race(TRACE, formation=False)
+    ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),
+                   Car(race, "B", "b", L - 310), Car(race, "C", "c", L - 600))
+    t = _drive(race, [ld, a, b, c], [50, 50, 50, 50], 0.0, 30)
+    t = _drive(race, [ld, a, b], [50, 50, 50], t, rd.NO_DATA_S + 2)      # C's sender drops
+    while _row(race, "B", t)["distance_m"] < _row(race, "A", t)["distance_m"] + 5:
+        t = _drive(race, [ld, a, b], [50, 50, 60], t, 0.1)               # B passes A
+    order = [r["entry"] for r in race.standings(t)["entries"]]
+    assert order[:3] == ["L", "B", "A"], f"B passed A half a second ago, every sample is fresh: {order}"
+
+
 def t_a_car_far_behind_keeps_its_exact_gap_to_the_leader():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 30)

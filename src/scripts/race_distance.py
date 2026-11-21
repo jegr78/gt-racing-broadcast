@@ -1103,12 +1103,13 @@ class Race:
             return self._gap_by_speed(ahead, ent)
         return max(0.0, self._racing(mine_t) - reached)
 
-    def _synced(self, ents):
+    def _synced(self, ents, now):
         """Each running car's shown distance at one moment: the oldest last sample among
         them, at most SYNC_S before the newest, so a fresher sample does not rank a car
-        ahead of one it trails on the road."""
+        ahead of one it trails on the road. Quiet cars keep their last distance."""
         lasts = {e.entry: self._last(e) for e in ents
-                 if e.distance is not None and not e.waiting and not self._estimated(e)}
+                 if e.distance is not None and not e.waiting and not self._estimated(e)
+                 and not self._quiet(e, now)}
         lasts = {k: v for k, v in lasts.items() if v is not None}
         if len(lasts) < 2:
             return {}
@@ -1210,7 +1211,7 @@ class Race:
             [self._ghost(n) for n in self._roster if n in self._retired and n not in self._entries]
         out.sort(key=lambda e: (-self._shown(e) if e.distance is not None else math.inf, e.entry))
         winner = self._winner()
-        synced = self._synced(ents) if self._finishing_at is None else {}
+        synced = self._synced(ents, now) if self._finishing_at is None else {}
 
         def key(e):
             shown = self._shown(e)
