@@ -84,6 +84,9 @@ start.
   Python processes (CLI, Control Center, relay and the scripts they start) refuse any
   connection that is not loopback; external programs such as ffmpeg and the stream
   stand-ins are outside that guard.
+- A simulation relay and a live relay never replace each other: `relay start` and
+  `event start` refuse while the other kind holds the control port, and a simulated
+  `relay stop` or `event stop` refuses a live relay. Stop the other one first.
 - The relay's default `--bind auto` binds `127.0.0.1` only, so a rehearsal relay is
   never reachable on the tailnet. The one local exception is read-only: the relay and
   the Control Center status rows still run `tailscale status`/`tailscale ip` to read

@@ -159,6 +159,11 @@ never the real one.
   export does not. The machine `.env` never supplies it. A subcommand's own `--force`
   keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
+- `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`.
+  `relay_start_plan` answers `refuse` (no kill, no reuse) when the port holder runs in the
+  other mode, and a simulation start never kills an unstamped holder;
+  `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop` before it
+  touches a live relay. `relay_status_data` carries `mode`.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
   getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
   It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every

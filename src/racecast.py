@@ -759,18 +759,42 @@ def _running_relay_dir():
     slug = _running_relay_profile()
     return _profile_runtime(_runtime_base_dir(), slug) if slug else _runtime_dir()
 
+def _relay_mode_path():
+    return os.path.join(_runtime_base_dir(), "relay.mode")
+
+def _relay_run_mode():
+    """The mode a relay started now runs in: "simulation" or "live"."""
+    return "simulation" if simulation.active() else "live"
+
+def _running_relay_mode():
+    """The running relay's mode from its stamp, "" for no stamp (no relay or an older one)."""
+    try:
+        with open(_relay_mode_path(), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
 def _write_relay_profile_stamp():
-    """Stamp the active profile as the relay's running profile, just before spawn."""
+    """Stamp the active profile and the mode as the relay's, just before spawn."""
     path = _relay_profile_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(_active_profile_name() or "")
+    with open(_relay_mode_path(), "w", encoding="utf-8") as fh:
+        fh.write(_relay_run_mode())
 
 def _clear_relay_profile_stamp():
-    try:
-        os.remove(_relay_profile_path())
-    except OSError:
-        pass  # no stamp to clear, already gone
+    for path in (_relay_profile_path(), _relay_mode_path()):
+        try:
+            os.remove(path)
+        except OSError:
+            pass  # no stamp to clear, already gone
+
+def _refuse_live_relay_in_simulation():
+    """A simulated stop never touches a relay that runs outside simulation mode."""
+    if simulation.active() and _running_relay_mode() != "simulation":
+        sys.exit("racecast: the running relay is a live relay, not a simulation one. "
+                 "Stop it without --simulation.")
 
 def _event_title_path():
     """The active profile's persisted event-title file (#207). The relay's
@@ -2610,7 +2634,7 @@ def _event_title_sanitizer():
     return _EVENT_TITLE_SANITIZER
 
 
-def relay_status_data(read_pid=None, alive=None, probe=None):
+def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
     """Structured relay state: one source for `racecast status` (text) and the
     Control Center's /api/status (JSON). `probe` returns the relay's /status dict or
     None. Injection points are for tests."""
@@ -2623,7 +2647,8 @@ def relay_status_data(read_pid=None, alive=None, probe=None):
     awake = status.get("keep_awake") if isinstance(status, dict) else None
     return {"pid": pid, "alive": is_alive, "port": RELAY_PORT,
             "http_ok": status is not None,
-            "keep_awake": awake if isinstance(awake, dict) else None}
+            "keep_awake": awake if isinstance(awake, dict) else None,
+            "mode": ((mode or _running_relay_mode)() or "live") if is_alive else None}
 
 
 def _relay_status_probe():
@@ -2693,7 +2718,8 @@ def _frozen_child_env():
 
 
 def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
-                     running_profile, active_profile, http_ok):
+                     running_profile, active_profile, http_ok, running_mode="",
+                     active_mode="live"):
     """Pure: decide what `relay start` must do, from the gathered signals.
 
     Returns (action, kill_pids, reason):
@@ -2702,7 +2728,9 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
               "heal"    a defect (orphan / split-brain / wrong-profile / dead-PID /
                         not-responding) -> kill kill_pids, then start fresh
       kill_pids  sorted union of the 8088 + feed-port holders (heal only, else [])
-      reason     short plain-language defect string (heal only, else "")
+              "refuse"  the holder runs in the other mode (simulation vs live): never
+                        kill or reuse it, the operator stops it
+      reason     short plain-language defect string (heal and refuse, else "")
 
     An EMPTY/unknown running_profile counts as a mismatch (heal): a current-binary
     relay always writes its stamp, so a stampless holder is a pre-stamp/old daemon.
@@ -2710,6 +2738,14 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
     port_set = set(port_pids)
     if not port_set:
         return ("start", [], "")
+    simulated = active_mode == "simulation"
+    if simulated != (running_mode == "simulation"):
+        if simulated:
+            return ("refuse", [], f"port {RELAY_PORT} is held by a relay outside simulation "
+                                  f"mode. Stop it first: racecast relay stop")
+        if running_mode == "simulation":
+            return ("refuse", [], "a simulation relay is running. Stop it first: "
+                                  "racecast --simulation relay stop")
     single = len(port_set) == 1
     ours = single and pidfile_alive and (pidfile_pid in port_set)
     if ours and http_ok and running_profile and running_profile == active_profile:
@@ -2745,6 +2781,8 @@ def _relay_start_signals():
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
+            "running_mode": _running_relay_mode(),
+            "active_mode": _relay_run_mode(),
             "http_ok": _relay_responds(own) if port_pids else False}
 
 
@@ -2870,6 +2908,8 @@ def relay_start(rest):
     signals = _relay_start_signals()
     pid = signals["pidfile_pid"]
     action, kill_pids, reason = relay_start_plan(**signals)
+    if action == "refuse":
+        sys.exit(f"racecast: {reason}")
     if action == "running":
         print(f"relay already running (pid {pid}).")
         if stint:
@@ -5316,6 +5356,8 @@ def _release_obs_feeds():
 
 def relay_stop(rest):
     pid = sv.read_pid(_relay_pid_path())
+    if sv.pid_alive(pid):
+        _refuse_live_relay_in_simulation()
     if not sv.pid_alive(pid):
         if os.path.exists(_relay_pid_path()):
             os.remove(_relay_pid_path())
@@ -7046,6 +7088,8 @@ def event_stop(rest):
     the live relay), overwriting/re-sending a strictly worse report. So a stop with no
     live relay only ends the driver invite, the drivers' requests and the public timing
     link, and nudges the relay's timing host. The good report stands."""
+    if _relay_is_alive():
+        _refuse_live_relay_in_simulation()
     try:
         _stop_driver_invite()          # the invite link dies with the event
     except OSError as exc:

@@ -120,7 +120,7 @@ def t_event_stop_reaches_no_real_party():
     with tempfile.TemporaryDirectory() as tmp, _env(**SIM_ENV), _patched(
             *_external(calls),
             (m, "_stop_driver_invite", noop), (m, "_nudge_relay_timing_host", noop),
-            (m, "_relay_is_alive", lambda: True),
+            (m, "_relay_is_alive", lambda: True), (m, "_running_relay_mode", lambda: "simulation"),
             (m, "_build_report_file", lambda: {"summary": "report", "path": "r.html"}),
             (m, "_send_report_core", lambda *a, **k: sent.append(a)),
             (m, "_streams_static_dir", lambda: tmp), (m, "_wait_timing_host_end", noop),
@@ -292,6 +292,77 @@ def t_bootstrap_gate_refuses_an_unrecognised_flag():
     assert refused and "RACECAST_SIMULATION" in refused, refused
     assert m._simulation_gate(["help"], {"RACECAST_SIMULATION": "y"}, "demo", {}), \
         "no command runs for real on a mistyped flag"
+
+
+def _plan(running_mode, active_mode, **kw):
+    args = dict(port_pids=[4242], feed_pids=[], pidfile_pid=4242, pidfile_alive=True,
+                running_profile="demo", active_profile="demo", http_ok=True,
+                running_mode=running_mode, active_mode=active_mode)
+    args.update(kw)
+    return m.relay_start_plan(**args)
+
+
+def t_relay_start_never_crosses_simulation_and_live():
+    assert _plan("live", "live")[0] == "running"
+    assert _plan("simulation", "simulation")[0] == "running"
+    action, kill, reason = _plan("live", "simulation")
+    assert action == "refuse" and kill == [] and "relay stop" in reason, (action, reason)
+    action, kill, reason = _plan("simulation", "live")
+    assert action == "refuse" and kill == [] and "relay stop" in reason, (action, reason)
+    action, kill, _ = _plan("", "simulation", pidfile_alive=False, pidfile_pid=None)
+    assert action == "refuse" and kill == [], "simulation never kills an unknown holder"
+    assert _plan("", "live", pidfile_alive=False, pidfile_pid=None)[0] == "heal", \
+        "a live start keeps healing an orphan"
+    assert _plan("", "simulation", port_pids=[])[0] == "start"
+
+
+def t_relay_start_refuses_without_killing():
+    killed = []
+    signals = dict(port_pids=[4242], feed_pids=[], pidfile_pid=4242, pidfile_alive=True,
+                   running_profile="demo", active_profile="demo", http_ok=True,
+                   running_mode="live", active_mode="simulation")
+    with _env(**SIM_ENV), _patched((m, "_relay_start_signals", lambda: dict(signals)),
+                                   (m.pt, "kill_pid", killed.append)):
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.relay_start([])
+        except SystemExit as exc:
+            assert "relay stop" in str(exc.code), exc.code
+        else:
+            raise AssertionError("a simulated start went past a live relay")
+    assert killed == []
+
+
+def t_simulated_stop_leaves_a_live_relay_alone():
+    stopped = []
+    with _env(**SIM_ENV), _patched((m.sv, "read_pid", lambda p: 4242),
+                                   (m.sv, "pid_alive", lambda pid: True),
+                                   (m.sv, "stop_pid", lambda *a, **k: stopped.append(a)),
+                                   (m, "_running_relay_mode", lambda: "live"),
+                                   (m, "_relay_is_alive", lambda: True),
+                                   (m, "_stop_driver_invite", lambda: stopped.append("invite"))):
+        for fn in (m.relay_stop, m.event_stop):
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    fn([])
+            except SystemExit as exc:
+                assert "live relay" in str(exc.code), exc.code
+            else:
+                raise AssertionError(f"{fn.__name__} in simulation touched a live relay")
+    assert stopped == []
+
+
+def t_relay_mode_stamp_round_trip():
+    with tempfile.TemporaryDirectory() as tmp, _patched(
+            (m, "_runtime_base_dir", lambda: tmp), (m, "_active_profile_name", lambda: "demo")):
+        with _env(**SIM_ENV):
+            m._write_relay_profile_stamp()
+        assert m._running_relay_mode() == "simulation"
+        os.environ.pop("RACECAST_SIMULATION", None)
+        m._write_relay_profile_stamp()
+        assert m._running_relay_mode() == "live"
+        m._clear_relay_profile_stamp()
+        assert m._running_relay_mode() == ""
 
 
 if __name__ == "__main__":
