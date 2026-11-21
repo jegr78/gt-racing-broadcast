@@ -59,6 +59,12 @@ def _tower(body):
                 + body + "})()));")
 
 
+def _tower_async(body):
+    """Like _tower, for a body that returns a promise."""
+    return _run(_DOM + _script(TOWER) + "\n;(async function () {" + body
+                + "})().then(r => console.log(JSON.stringify(r)));")
+
+
 CAR = {"pos": 2, "entry": "Team B #2", "number": "2", "driver": "Ann Lind", "team": "Team B",
        "status": "racing", "gap_s": 1.44, "lapped": 0, "last_lap_ms": 118412, "fuel_l": 56.4,
        "finished": False, "compound": "RM", "pit_stops": 1, "brand": "bmw", "brand_name": "BMW"}
@@ -287,6 +293,38 @@ def t_the_desks_and_the_cockpit_show_logos_through_the_console_route():
         assert re.search(r"RC_API\(['\"]/drivers/brand/", src), f"{rel[-1]}: the logo goes through /console like its data"
         at = re.search(r"['\"]/drivers/brand/", src).start()
         assert ".remove()" in src[at - 400:at + 200], f"{rel[-1]}: a missing logo shows nothing"
+
+
+def t_the_map_fetches_a_missing_line_again_after_a_while():
+    got = _tower_async("""
+      return (async function () {
+        let lines = 0, answer = "404";
+        const dash = {visible: true, mode: "race", track: "suzuka", entries: []};
+        fetch = async function (url) {
+          if (url !== "/drivers/line") return {ok: true, json: async () => dash};
+          lines++;
+          if (answer === "down") throw new Error("relay down");
+          return answer === "ok" ? {ok: true, json: async () => ({points: [[0, 0], [10, 0], [10, 10]]})}
+                                 : {ok: false, status: 404};
+        };
+        const seen = [];
+        async function at(t) { Date.now = () => t; await poll(); seen.push(lines); }
+        await at(1000);            // 404: the line is not there yet
+        await at(2000);            // too soon to ask again
+        answer = "down";
+        await at(12000);           // asks again, the fetch fails
+        await at(13000);
+        answer = "ok";
+        await at(23000);           // asks again and gets it
+        await at(60000);           // kept, never asked again
+        dash.track = "spa";
+        await at(61000);           // a new track asks at once
+        return {seen: seen, drawn: !!view};
+      })();""")
+    if got is None:
+        return
+    assert got["seen"] == [1, 1, 2, 2, 3, 3, 4], f"a missing line is asked for again every 10 s, a loaded one never: {got}"
+    assert got["drawn"], f"the line the retry got is drawn: {got}"
 
 
 def t_stale_rows_show_no_fuel():

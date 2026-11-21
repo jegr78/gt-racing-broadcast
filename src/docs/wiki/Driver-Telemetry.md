@@ -336,7 +336,9 @@ It never carries connection ids, corrections or who made them.
   remaining time), the fastest lap and a track map with each car as a numbered dot in
   its entry colour. Dots sit on the racing line; in a close pack a dot slides back
   along the line to stay readable, never past the car behind, and otherwise lies under
-  the dot ahead. The value column switches every 15 seconds between the gap to the
+  the dot ahead. Without a racing line for the layout the map stays empty, and the
+  overlay asks again every 10 seconds, so a line downloaded later appears without a
+  reload. The value column switches every 15 seconds between the gap to the
   leader and the interval to the car ahead, and a white badge on the header's lap line,
   right above the value column, names the current one: `GAP TO LEADER` or `INTERVAL`. On class pages
   the gap is to the class leader. The badge is `#dd-phase` with `data-phase="gap"` or
