@@ -1113,9 +1113,9 @@ class Race:
     def _synced(self, ents, now):
         """Each running car's shown distance at one moment: the oldest last sample of
         the cars within SYNC_S of the newest, so a fresher sample does not rank a car
-        ahead of one it trails on the road. A car silent for longer keeps its distance to
-        the nearest running car, the one ahead first, until it is quiet; quiet and held
-        cars keep their last distance."""
+        ahead of one it trails on the road. A car silent for longer that was moving keeps
+        its distance to the nearest running car, the one ahead first, until it is quiet;
+        quiet, held and standing cars keep their last distance."""
         lasts = {e.entry: self._last(e) for e in ents
                  if e.distance is not None and not e.waiting and not e.held and not self._estimated(e)
                  and e.finished_at is None and not self._quiet(e, now)}
@@ -1134,6 +1134,9 @@ class Race:
         silent = [e for e in ents if e.entry in lasts and lasts[e.entry][0] < at and self._silent(e)]
         running = [e for e in ents if e.entry in lasts and e not in silent]
         for e in silent:
+            car = self._cars[e.active]
+            if car.speed < GAP_SPEED_MPS:
+                continue                       # standing, also in the box: it stays there
             then, mine = lasts[e.entry][0], lasts[e.entry][1] + e.adjust
             near = []
             for r in running:

@@ -757,6 +757,19 @@ def t_gaps_behind_a_dead_sender_follow_the_road_after_no_data():
         f"C closes on L's last point, its gap does not freeze at L's silent moment: {before} -> {after}"
 
 
+def t_a_car_standing_when_its_sender_stops_is_passed():
+    for box in (False, True):
+        race = rd.Race(TRACE, formation=False)
+        ld, a, b = Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300), Car(race, "B", "b", L - 400)
+        t = _drive(race, [ld, a, b], [50, 50, 50], 0.0, 30)
+        a.box = box
+        t = _drive(race, [ld, a, b], [50, None, 50], t, 1.0)             # A stands, then its sender stops
+        t = _drive(race, [ld, b], [50, 50], t, 3.5)
+        assert b.along > a.along + 50 and _row(race, "A", t)["status"] in ("racing", "box")
+        order = [r["entry"] for r in race.standings(t)["entries"]]
+        assert order == ["L", "B", "A"], f"A stood still (box={box}), B drove past it: {order}"
+
+
 def t_a_car_going_quiet_does_not_hold_the_field_back_in_time():
     race = rd.Race(TRACE, formation=False)
     ld, a, b, c = (Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300),
