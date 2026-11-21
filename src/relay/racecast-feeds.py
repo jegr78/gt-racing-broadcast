@@ -12081,7 +12081,9 @@ def _start_timing_publisher(go, stop, **fns):
     pub = timing_publish.Publisher(lambda: timing_host.read_settings(env_file), **fns)
 
     def run():
-        go.wait()
+        while not go.wait(0.5):
+            if stop.is_set():
+                return
         pub.run(stop)
     threading.Thread(target=run, name="timing-host", daemon=True).start()
     return pub

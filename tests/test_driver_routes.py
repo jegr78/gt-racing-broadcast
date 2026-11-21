@@ -1712,6 +1712,17 @@ def t_the_timing_publisher_waits_for_the_control_port():
         "main releases the publisher only after the bind succeeded"
 
 
+def t_a_relay_stopping_before_the_bind_ends_the_waiting_publisher():
+    before = set(threading.enumerate())
+    g.m._start_timing_publisher(go=threading.Event(), stop=(stop := threading.Event()), link_fn=lambda: None,
+                                body_fn=lambda: (b"{}", 0.0), served_fn=lambda: "funnel", fallback_fn=lambda: None)
+    waiting = [t for t in set(threading.enumerate()) - before if t.name == "timing-host"]
+    assert len(waiting) == 1, waiting
+    stop.set()
+    waiting[0].join(3)
+    assert not waiting[0].is_alive(), "a stop before the control port bind ends the waiting thread"
+
+
 FUNNEL_HOST = "relay.example.ts.net"
 
 
