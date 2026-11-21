@@ -390,7 +390,8 @@ It never carries connection ids, corrections or who made them.
   gap; a lap that does not count shows nothing. The seconds are a league setting
   (Control Center Home, **Lap time**, or `racecast event race --last-lap-seconds N`,
   1 to 30) that the relay applies at once. A reloaded overlay does not replay the laps
-  it already had; in qualifying a row that appears later shows its first lap. A car in the box shows `Box`. Right of the tyre ring a bar
+  it already had; in qualifying a row that appears later shows its lap when it was just driven, as
+  with Race Control's first lap for a car without a sender. A car in the box shows `Box`. Right of the tyre ring a bar
   and a percentage show each car's fuel (GT7 reports the tank in percent); both turn
   amber at 10 % or less, and a car without data shows none. A car that took the
   chequered flag shows a flag in place of ring and fuel, and its final gap.

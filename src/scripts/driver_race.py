@@ -375,7 +375,7 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
         ms, name, last, at = ranked.get(entry, (None, "", None, 0.0))
         ms = added["best"] if ms is None else min(ms, added["best"])
         if last is None or added["ts"] >= at:
-            last = added["last"]
+            last, at = added["last"], added["ts"]
         ranked[entry] = (ms, name, last, at)
     for entry, ms in (overrides or {}).items():
         _ms, name, last, at = ranked.get(entry, (None, "", None, 0.0))
@@ -383,12 +383,12 @@ def qualifying(connections, segment, roster, min_ms=0, overrides=None, seen=None
     order = sorted(ranked.items(), key=lambda kv: (kv[1][0] is None, kv[1][0] or 0, kv[0]))
     pole = order[0][1][0] if order else None
     rows = []
-    for i, (e, (ms, name, last, _at)) in enumerate(order):
+    for i, (e, (ms, name, last, at)) in enumerate(order):
         ahead = order[i - 1][1][0] if i else None
         rows.append(dict(_viewer_entry({"entry": e, "driver": name}, roster), pos=i + 1, best_ms=ms,
                          gap_ms=None if ms is None or pole is None else ms - pole,
                          interval_ms=None if ms is None or ahead is None else ms - ahead,
-                         last_lap_ms=last))
+                         last_lap_ms=last, last_lap_at=at))
     return rows
 
 
@@ -825,7 +825,11 @@ class Service:
             overrides=_saved_quali(path, ctx.get("segment")), seen=seen,
             laps=_saved_quali_laps(path, ctx.get("segment")), now=self._wall())
         named = self._request_names(ctx.get("segment"))
+        window = read_league(self._league)["last_lap_s"]
         for row in rows:
+            at = row.pop("last_lap_at")
+            # The tower flashes a row it has not seen before only for a lap driven just now.
+            row["lap_fresh"] = row["last_lap_ms"] is not None and self._wall() - at <= window
             row["compound"] = (compounds.get(row["entry"]) or {}).get("code")
             if row["entry"] in seen:
                 row["driver"] = race.display_name(row["entry"], row["driver"])

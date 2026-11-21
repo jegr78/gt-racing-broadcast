@@ -618,18 +618,33 @@ def t_race_control_adds_a_qualifying_lap_for_an_entry_without_a_sender():
     row = svc.standings()["qualifying"][0]
     assert (row["entry"], row["number"], row["team"], row["best_ms"], row["last_lap_ms"], row["gap_ms"]) == \
         ("X", "9", "Grey Team", 91000, 91000, 0), f"an added lap is the last and the best lap: {row}"
+    assert row["lap_fresh"] is True, "the tower flashes the lap of a row it has not seen yet"
+    wall[0] += 6
+    assert svc.standings()["qualifying"][0]["lap_fresh"] is False, "after the league's lap seconds it is old"
     wall[0] += 100
     svc.add_quali_lap("rc:Anna", "X", 92000)
     assert _quali_rows(svc) == {"X": (91000, 92000)}, "a slower lap is the last lap, the best stays"
     wall[0] += 100
     svc.add_quali_lap("rc:Anna", "X", 90500)
     assert _quali_rows(svc) == {"X": (90500, 90500)}, "a faster one is both"
-    assert svc.standings()["quali_laps"] == {"X": {"best": 90500, "last": 90500, "ts": 1200.0}}, \
+    assert svc.standings()["quali_laps"] == {"X": {"best": 90500, "last": 90500, "ts": 1206.0}}, \
         svc.standings()["quali_laps"]
     assert [(r["action"], r["entry"], r["ms"]) for r in _audit(path) if r["action"] == "quali_lap"] == [
         ("quali_lap", "X", 91000), ("quali_lap", "X", 92000), ("quali_lap", "X", 90500)], "each lap is audited"
     svc.tick()
-    assert dr.public_view(svc.dashboard())["qualifying"][0]["last_lap_ms"] == 90500, "the public page gets it"
+    pub = dr.public_view(svc.dashboard())["qualifying"][0]
+    assert pub["last_lap_ms"] == 90500 and "lap_fresh" not in pub, f"the public page gets the lap, not the flag: {pub}"
+    full = {"quali_laps": {"Q1": {f"E{i}": {"best": 90000, "last": 90000, "ts": 1.0} for i in range(dr.MAX_QUALI)}}}
+    keep = dr._read_json(dr._actions_path_for(path))
+    dr._write_json(dr._actions_path_for(path), full)
+    try:
+        svc.add_quali_lap("rc:Anna", "X", 90000)
+    except ValueError:
+        pass  # refused, as it must be
+    else:
+        raise AssertionError("a full list refuses instead of claiming success")
+    svc.add_quali_lap("rc:Anna", "E0", 89000)
+    dr._write_json(dr._actions_path_for(path), keep)
     again, _ctx, _wall, _p = _lap_service([], path)
     assert _quali_rows(again) == {"X": (90500, 90500)}, "added laps survive a restart"
     ctx["segment"] = "Q2"
@@ -647,16 +662,32 @@ def t_race_control_adds_a_qualifying_lap_for_an_entry_without_a_sender():
     assert _quali_rows(svc) == {}, "a fresh event drops them"
 
 
+def t_an_entry_without_a_sender_ranks_in_its_class():
+    conns = [{"entry": "A", "segment": "Q1", "name": "a", "latest": {"best_ms": 90000}}]
+    ctx = {"roster": QUALI_CLASSES, "stint": "Q1", "remaining": None, "mode": "qualifying",
+           "segment": "Q1", "connections": conns}
+    svc, _clock, _path = _dash_service(ctx)
+    svc.add_quali_lap("rc:Anna", "C", 90400)
+    svc.set_quali("rc:Anna", "B", 95000)
+    svc.add_quali_lap("rc:Anna", "D", 94000)
+    st = svc.standings()
+    got = [(r["entry"], r["class"], r["class_pos"], r["class_gap_ms"], r["class_interval_ms"]) for r in st["qualifying"]]
+    assert got == [("A", "GT3", 1, 0, None), ("C", "GT3", 2, 400, 400), ("D", "GT4", 1, 0, None),
+                   ("B", "GT4", 2, 1000, 1000)], f"entries without a sender rank in their class: {got}"
+    assert [c["name"] for c in st["quali_classes"]] == ["GT3", "GT4"], st["quali_classes"]
+
+
 def t_an_added_lap_and_gt7_laps_count_together():
     conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "last_ms": 90500}}]
     svc, _ctx, wall, path = _lap_service(conns)
-    svc.standings()
+    assert svc.standings()["qualifying"][0]["lap_fresh"] is False, "a lap GT7 sent before the relay saw it is old"
     wall[0] += 10
     svc.add_quali_lap("rc:Anna", "A", 91500)
     assert _quali_rows(svc)["A"] == (90500, 91500), "an added lap after GT7's is the last lap"
     wall[0] += 10
     conns[0]["latest"] = {"best_ms": 90500, "last_ms": 92000}
     assert _quali_rows(svc)["A"] == (90500, 92000), "a new GT7 lap after it is the last lap again"
+    assert svc.standings()["qualifying"][0]["lap_fresh"] is True, "and it is fresh"
     wall[0] += 10
     svc.add_quali_lap("rc:Anna", "A", 90000)
     assert _quali_rows(svc)["A"] == (90000, 90000), "the faster of GT7's and the added laps is the best"

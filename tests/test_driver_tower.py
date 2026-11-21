@@ -1256,17 +1256,32 @@ def t_a_qualifying_lap_flashes_purple_green_or_white():
     assert [r["value"] for r in later[:3]] == ["Pole", "+0.400", "+1.250"], f"then the gap returns: {later}"
 
 
-def t_a_row_that_first_appears_with_a_lap_flashes_it():
+def t_a_row_that_first_appears_with_a_fresh_lap_flashes_it():
+    fresh = [dict(r, lap_fresh=True) for r in QROWS[1:3]]
     got = _tower(_QUALI + f"""
       lastLapS = 5;
-      const first = quali(1000, {{qualifying: {json.dumps(QROWS[:1])}}});
-      return [first, quali(2000, {{qualifying: {json.dumps(QROWS[:3])}}})];""")
+      const first = quali(1000, {{qualifying: [Object.assign({json.dumps(QROWS[0])}, {{lap_fresh: true}})]}});
+      const later = quali(2000, {{qualifying: [{json.dumps(QROWS[0])}].concat({json.dumps(fresh)})}});
+      const old = quali(3000, {{qualifying: {json.dumps(QROWS[:4])}.slice(0, 3).concat([Object.assign({json.dumps(QROWS[3])}, {{entry: "Z #9", last_lap_ms: 95000}})])}});
+      return [first, later, old];""")
     if got is None:
         return
-    first, later = got
+    first, later, old = got
     assert first[0]["value"] == "Pole", f"a lap the page found on its first render is old: {first}"
     assert [(r["value"], r["mark"]) for r in later[1:3]] == [("1:31.000", ""), ("1:31.250", "pb")], \
-        f"a row added later, like Race Control's first lap for a car without a sender, shows its lap: {later}"
+        f"a row added later with a fresh lap, like Race Control's first lap for a car without a sender, shows it: {later}"
+    assert old[3]["value"] == "", f"a row that appears with an old lap, as after a relay restart, does not: {old}"
+
+
+def t_an_empty_first_render_replays_no_lap():
+    got = _tower(_QUALI + f"""
+      lastLapS = 5;
+      quali(1000, {{qualifying: []}});
+      return quali(2000, {{qualifying: {json.dumps(QROWS)}}});""")
+    if got is None:
+        return
+    assert [r["mark"] for r in got] == ["", "", "", ""] and got[0]["value"] == "Pole", \
+        f"rows that arrive after an empty start with old laps stay quiet: {got}"
 
 
 def t_qualifying_ranks_each_class_under_its_header():
