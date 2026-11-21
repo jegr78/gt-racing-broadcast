@@ -263,6 +263,13 @@
     waiting.forEach(function (s) { pills.push([fitName(s.name, max || 16) + ": pending", "amb"]); });
     return pills;
   }
+  // Puts `rows` into `body` in order, moving only rows out of place, so a focused control keeps its focus.
+  function placeRows(body, rows) {
+    rows.forEach(function (tr, i) {
+      if (body.children[i] !== tr) body.insertBefore(tr, body.children[i] || null);
+    });
+    while (body.children.length > rows.length) body.removeChild(body.lastChild);
+  }
   // A sender row's pill.
   function senderState(s) {
     if (s.live) return ["live", "ok"];
@@ -537,13 +544,8 @@
       ids.forEach(function (id) { evSeen[id] = true; });
       if (fresh) beep();
       evTitle.textContent = "Events (" + open + ")";
-      // Rows stay in place and only new ones are inserted, so a focused control keeps its focus.
       var rows = ids.map(function (id) { return evRows[id].tr; });
-      if (!rows.length) rows = [evEmpty];
-      rows.forEach(function (tr, i) {
-        if (evBody.children[i] !== tr) evBody.insertBefore(tr, evBody.children[i] || null);
-      });
-      while (evBody.children.length > rows.length) evBody.removeChild(evBody.lastChild);
+      placeRows(evBody, rows.length ? rows : [evEmpty]);
       return Object.keys(suspected).sort().join("\n") !== before;
     }
 
@@ -691,6 +693,7 @@
     var tyreTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
       "Entry", "Compound", "Set by"].map(function (h) { return el("th", {text: h}); }))]), tyreBody])]);
     var tyreRows = Object.create(null);   // keyed by entry name: no inherited keys
+    var tyreEmpty = el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No entries yet."})]);
     function tyreRow(entry) {
       var sel = el("select", {"aria-label": "Tyre compound of " + entry},
                    COMPOUNDS.map(function (c) { return opt(c[0], c[1]); }));
@@ -709,8 +712,7 @@
         t.by.textContent = c ? c.who + " at " + new Date(c.ts * 1000).toLocaleTimeString() : "";
         return t.tr;
       });
-      if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No entries yet."})])];
-      tyreBody.replaceChildren.apply(tyreBody, rows);
+      placeRows(tyreBody, rows.length ? rows : [tyreEmpty]);
     }
     // Roster rows too: in qualifying the race has no entries.
     var tyreSrc = {roster: [], race: [], compounds: {}};

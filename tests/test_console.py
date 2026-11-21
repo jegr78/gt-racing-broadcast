@@ -478,6 +478,38 @@ def t_the_desk_sends_the_corrected_request():
     assert "document.activeElement.blur()" in desk
 
 
+def t_the_desk_keeps_tyre_rows_in_place_so_a_focused_select_keeps_its_focus():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    fn = desk[desk.index("function renderTyres("):desk.index("function syncTyres(")]
+    assert "replaceChildren" not in fn and "placeRows(tyreBody," in fn, \
+        f"re-inserting every row blurs the focused compound select on each poll: {fn}"
+    got = _desk_fn("placeRows", """(function () {
+      var moves = 0;
+      function tr(n) { return {n: n}; }
+      var body = {children: [], insertBefore: function (node, ref) {
+        var i = this.children.indexOf(node);
+        if (i >= 0) { this.children.splice(i, 1); moves++; }
+        var at = ref ? this.children.indexOf(ref) : -1;
+        this.children.splice(at < 0 ? this.children.length : at, 0, node);
+      }, removeChild: function (node) { this.children.splice(this.children.indexOf(node), 1); }};
+      Object.defineProperty(body, "lastChild", {get: function () { return this.children[this.children.length - 1]; }});
+      var a = tr("a"), b = tr("b"), c = tr("c");
+      placeRows(body, [a, b, c]);
+      moves = 0;
+      placeRows(body, [a, b, c]);
+      var same = moves;
+      placeRows(body, [a, c]);
+      var trimmed = body.children.map(function (x) { return x.n; });
+      placeRows(body, [c, a, b]);
+      return [same, trimmed, body.children.map(function (x) { return x.n; })];
+    })()""")
+    if got is None:
+        return
+    assert got[0] == 0, f"an unchanged table moves no row: {got}"
+    assert got[1] == ["a", "c"] and got[2] == ["c", "a", "b"], f"rows follow the new order and extras go: {got}"
+
+
 def t_the_desk_offers_a_lap_count_per_slower_class():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()
