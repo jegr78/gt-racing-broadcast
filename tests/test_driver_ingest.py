@@ -322,6 +322,16 @@ def t_entry_for_follows_a_reassignment():
     assert hub.entry_for("unknown", "Team A #1") == "Team A #1"
 
 
+def t_a_refused_batch_still_forgets_the_long_quiet_senders():
+    hub, clock = _hub()
+    hub.ingest(_reg("c1"), _batch(1), None)
+    hub.revoke("c2")
+    clock.t += ing.FORGET_S + 1
+    _refused(lambda: hub.ingest(_reg("c2", entry="Team B #2"), _batch(2), None), 410, "disconnected")
+    assert "c1" not in hub._counts.snapshot()["senders"], \
+        "a refusal must not keep a forgotten sender in the counter, where it holds a probe slot"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
