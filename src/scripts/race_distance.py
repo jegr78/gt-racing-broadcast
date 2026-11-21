@@ -109,6 +109,7 @@ PRUNE_EVERY_S = 10.0
 MAX_CHANGE_LAP = 2          # a car leaving a fresh lobby's box has driven at most lap 1
 LINE_QUORUM = 3
 GAP_SPEED_MPS = 10.0        # below this a gap from distance and speed means nothing
+SYNC_S = 1.0                # cars' samples this far apart compare at the older one's time
 
 
 class _Car:
@@ -1090,10 +1091,37 @@ class Race:
             mine = self._time_at(ent, last[1] + ahead.adjust - ent.adjust)
             if mine is not None:
                 return max(0.0, self._racing(mine) - self._racing(last[0]))
-        reached = self._passed(ahead, ent, ent.distance + ent.adjust)
+        mine_t, dist = self._cars[ent.active].t, ent.distance
+        theirs = self._last(ahead)
+        if theirs is not None and 0.0 < mine_t - theirs[0] <= SYNC_S:
+            # `ahead`'s last sample is older: compare where this car was at that moment.
+            then = self._distance_at(ent, theirs[0])
+            if then is not None:
+                mine_t, dist = theirs[0], then
+        reached = self._passed(ahead, ent, dist + ent.adjust)
         if reached is None:
             return self._gap_by_speed(ahead, ent)
-        return max(0.0, self._racing(self._cars[ent.active].t) - reached)
+        return max(0.0, self._racing(mine_t) - reached)
+
+    def _synced(self, ents):
+        """Each running car's shown distance at one moment: the oldest last sample among
+        them, at most SYNC_S before the newest, so a fresher sample does not rank a car
+        ahead of one it trails on the road."""
+        lasts = {e.entry: self._last(e) for e in ents
+                 if e.distance is not None and not e.waiting and not self._estimated(e)}
+        lasts = {k: v for k, v in lasts.items() if v is not None}
+        if len(lasts) < 2:
+            return {}
+        newest = max(v[0] for v in lasts.values())
+        at = max(min(v[0] for v in lasts.values()), newest - SYNC_S)
+        out = {}
+        for e in ents:
+            last = lasts.get(e.entry)
+            if last is not None and last[0] > at:
+                d = self._distance_at(e, at)
+                if d is not None:
+                    out[e.entry] = d + e.adjust
+        return out
 
     def _passed(self, ahead, ent, at):
         """The racing time `ahead` passed the shown distance `at` that `ent` compares with
@@ -1177,11 +1205,13 @@ class Race:
             [self._ghost(n) for n in self._roster if n in self._retired and n not in self._entries]
         out.sort(key=lambda e: (-self._shown(e) if e.distance is not None else math.inf, e.entry))
         winner = self._winner()
+        synced = self._synced(ents) if self._finishing_at is None else {}
 
         def key(e):
             shown = self._shown(e)
             dist = shown if shown is not None else -math.inf
             if self._finishing_at is None:
+                dist = synced.get(e.entry, dist)
                 # On a tie an estimate stays on its side of its reference.
                 side = (-1.0 if self._est[e.entry]["ahead"] else 1.0) if self._estimated(e) else 0.0
                 return (0, -dist, side, 0.0, "")

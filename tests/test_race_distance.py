@@ -561,6 +561,29 @@ def t_history_and_quiet_connections_stay_bounded():
     assert set(race._cars) == {"a"}, f"quiet connections no entry follows are dropped: {set(race._cars)}"
 
 
+def t_order_and_interval_compare_two_cars_at_the_same_moment():
+    race = rd.Race(TRACE, formation=False)
+    lead, a, b = Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300), Car(race, "B", "b", L - 302)
+    t = _drive(race, [lead, a, b], [50, 50, 50], 0.0, 30)
+    for _ in range(5):                       # A runs ahead of B; B's sample is 0.2 s fresher
+        t += 0.2
+        for car in (lead, a, b):
+            car.along += 10.0
+        lead.send(t)
+        a.send(t)
+        b.along += 10.0
+        b.send(t + 0.2)
+        b.along -= 10.0
+    now = t + 0.2
+    rows = race.standings(now)["entries"]
+    assert [r["entry"] for r in rows] == ["L", "A", "B"], f"A leads B on the road: {[r['entry'] for r in rows]}"
+    ra, rb = rows[1], rows[2]
+    assert rb["gap_time_s"] > ra["gap_time_s"], f"gaps grow down the order: {ra['gap_time_s']} {rb['gap_time_s']}"
+    assert rb["interval_time_s"] > 0 and abs(rb["interval_time_s"] - (rb["gap_time_s"] - ra["gap_time_s"])) <= 0.02, \
+        f"B's interval to A is the difference of their gaps: {ra} {rb}"
+    assert ra["interval_time_s"] > 5, f"A's interval is to the leader: {ra['interval_time_s']}"
+
+
 def t_a_car_far_behind_keeps_its_exact_gap_to_the_leader():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 30)
