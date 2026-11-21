@@ -263,6 +263,27 @@
     waiting.forEach(function (s) { pills.push([fitName(s.name, max || 16) + ": pending", "amb"]); });
     return pills;
   }
+  // Two clicks for anything that changes the race for everyone: the first arms the button
+  // for 4 s and disarms any other, the second on the same button runs `fn`.
+  function arming() {
+    var cur = null;   // {btn, timer}
+    function disarm() {
+      if (!cur) return;
+      clearTimeout(cur.timer);
+      cur.btn.classList.remove("armed");
+      cur.btn.textContent = cur.btn.dataset.label;
+      cur = null;
+    }
+    return function (btn, fn) {
+      btn.addEventListener("click", function () {
+        if (cur && cur.btn === btn) { disarm(); fn(); return; }
+        disarm();
+        btn.classList.add("armed");
+        btn.textContent = "Confirm " + btn.dataset.label;
+        cur = {btn: btn, timer: setTimeout(function () { if (cur && cur.btn === btn) disarm(); }, 4000)};
+      });
+    };
+  }
   // Puts `rows` into `body` in order, moving only rows out of place, so a focused control keeps its focus.
   function placeRows(body, rows) {
     rows.forEach(function (tr, i) {
@@ -284,7 +305,7 @@
     if (!document.getElementById("dd-style")) {
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
     }
-    var state = {race: null, ready: null, invite: null, armed: null, armTimer: null};
+    var state = {race: null, ready: null, invite: null};
     var msg = el("div", {cls: "msg", role: "status"});
     // Shown after STALE_POLLS failed polls: decisions must not rest on frozen gaps.
     var staleNote = el("div", {cls: "msg err", role: "alert"});
@@ -312,24 +333,11 @@
       if (d) { say(done || ""); refresh(); }
       return d;
     }
-    // Two clicks for anything that changes the race for everyone.
-    function armed(btn, key, fn) {
-      btn.addEventListener("click", function () {
-        if (state.armed === key) {
-          clearTimeout(state.armTimer); state.armed = null; btn.classList.remove("armed");
-          btn.textContent = btn.dataset.label; fn(); return;
-        }
-        state.armed = key; btn.classList.add("armed"); btn.textContent = "Confirm " + btn.dataset.label;
-        clearTimeout(state.armTimer);
-        state.armTimer = setTimeout(function () {
-          state.armed = null; btn.classList.remove("armed"); btn.textContent = btn.dataset.label;
-        }, 4000);
-      });
-    }
+    var armed = arming();
     function button(label, cls, key, fn) {
       var b = el("button", {type: "button", cls: cls || "", text: label});
       b.dataset.label = label;
-      if (key) armed(b, key, fn); else b.addEventListener("click", fn);
+      if (key) armed(b, fn); else b.addEventListener("click", fn);
       return b;
     }
 

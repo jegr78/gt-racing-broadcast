@@ -510,6 +510,49 @@ def t_the_desk_keeps_tyre_rows_in_place_so_a_focused_select_keeps_its_focus():
     assert got[1] == ["a", "c"] and got[2] == ["c", "a", "b"], f"rows follow the new order and extras go: {got}"
 
 
+def t_the_desk_arms_one_button_at_a_time():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    assert "state.armTimer" not in desk and "var armed = arming();" in desk, \
+        "one shared timer lets a second armed button cancel the first one's reset"
+    got = _desk_fn("arming", """(function () {
+      var timers = [], fired = [];
+      setTimeout = function (f) { timers.push(f); return timers.length; };
+      clearTimeout = function (id) { if (id) timers[id - 1] = null; };
+      function btn(label) {
+        var b = {dataset: {label: label}, textContent: label, cls: {}, handlers: [],
+                 classList: {add: function (c) { b.cls[c] = true; }, remove: function (c) { delete b.cls[c]; }},
+                 addEventListener: function (t, f) { b.handlers.push(f); }};
+        b.click = function () { b.handlers.forEach(function (f) { f(); }); };
+        return b;
+      }
+      function look(b) { return [b.textContent, !!b.cls.armed]; }
+      var armed = arming();
+      var a = btn("Final lap"), b = btn("Finish"), r1 = btn("Reject"), r2 = btn("Reject");
+      armed(a, function () { fired.push("a"); });
+      armed(b, function () { fired.push("b"); });
+      armed(r1, function () { fired.push("r1"); });
+      armed(r2, function () { fired.push("r2"); });
+      a.click(); b.click();
+      var afterB = [look(a), look(b)];
+      a.click();
+      var aOnce = fired.slice();
+      b.click(); b.click();
+      timers.forEach(function (f) { if (f) f(); });
+      var timedOut = [look(a), look(b)];
+      r1.click(); r2.click();
+      return {afterB: afterB, aOnce: aOnce, fired: fired, timedOut: timedOut, rebuilt: look(r2)};
+    })()""")
+    if got is None:
+        return
+    assert got["afterB"] == [["Final lap", False], ["Confirm Finish", True]], \
+        f"arming a second button resets the first: {got}"
+    assert got["aOnce"] == [], f"the reset button needs two clicks again: {got}"
+    assert got["fired"] == ["b"] and got["timedOut"] == [["Final lap", False], ["Finish", False]], \
+        f"a confirmed button fires once, and a timer resets only its own button: {got}"
+    assert got["rebuilt"] == ["Confirm Reject", True], f"a rebuilt button never inherits the armed state: {got}"
+
+
 def t_the_desk_offers_a_lap_count_per_slower_class():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()
