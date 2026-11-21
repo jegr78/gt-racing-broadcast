@@ -296,7 +296,7 @@ except on the tower.
 ### Dashboard
 
 The relay keeps a viewer version of the race for the broadcast dashboard, the
-Commentator Cockpit and later the public live timing page: order, entry number and
+Commentator Cockpit and the public live timing page: order, entry number and
 colour, driver, the `Cup Team` from the [Configuration tab](Sheet-Template), gaps, status,
 pit stops, race laps (in endurance also the laps of the current stint lobby), the last
 completed lap time, fuel, each car's position for the track map, the leader's race lap

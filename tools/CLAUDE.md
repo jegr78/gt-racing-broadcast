@@ -58,8 +58,8 @@ real release: triggered by the `preview` label on a PR or by `workflow_dispatch`
 against a ref. Its tags are `preview-*` (never `v*`), so it never triggers
 `release.yml` or release-please; `preview-cleanup.yml` deletes a PR's pre-release
 on close. The jobs that run the PR's code (`meta`, `build`) hold a read-only token
-and keep no credentials; `publish` creates the tag and pre-release from the run's
-artifacts without checking out the PR and refuses any tag outside `preview-*`, since
+and keep no credentials; `publish` runs only when every build succeeded and creates
+the tag and pre-release from the run's artifacts without checking out the PR and refuses any tag outside `preview-*`, since
 the tag name comes from PR-head code. `comment` only writes the PR comment, which also
 links the driver sender assets.
 

@@ -25,7 +25,7 @@ import atomic_replace
 FILENAME = "driver-invite.json"
 PREFIX = "D1:"
 MAX_CODE = 1024
-NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,24}\Z")   # it ends up in a shell command line
+NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,24}\Z")   # short and plain enough for the tower and the desks
 KNOWN_NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # names registered before the 24 character cap
 MAX_ENTRY = 120
 

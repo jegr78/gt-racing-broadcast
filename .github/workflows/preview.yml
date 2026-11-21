@@ -182,7 +182,8 @@ jobs:
   # Publishes what the builds produced; it never checks out or runs the PR's code.
   publish:
     needs: [meta, build]
-    if: ${{ !cancelled() && needs.meta.result == 'success' }}
+    # One failed build keeps the old pre-release: the PR comment links every asset.
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write          # the tag and the pre-release
