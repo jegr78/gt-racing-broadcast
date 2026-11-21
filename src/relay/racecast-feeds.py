@@ -12072,14 +12072,28 @@ def _funnel_watch(max_age_s=60.0, poll=None):
     return get
 
 
-def _start_timing_publisher(**fns):
+def _start_timing_publisher(go, stop, **fns):
     """The timing host publisher thread (#1161); idle until the league has a host. It
-    re-reads the host keys from the league's profile.env, so a deploy needs no restart."""
+    re-reads the host keys from the league's profile.env, so a deploy needs no restart.
+    It starts once `go` is set: a relay that loses the port bind must not take the
+    host's link over from the running one."""
     env_file = os.environ.get("RACECAST_PROFILE_ENV_FILE", "")
     pub = timing_publish.Publisher(lambda: timing_host.read_settings(env_file), **fns)
-    threading.Thread(target=pub.run, args=(threading.Event(),), name="timing-host",
-                     daemon=True).start()
+
+    def run():
+        while not go.wait(0.5):
+            if stop.is_set():
+                return
+        pub.run(stop)
+    pub.thread = threading.Thread(target=run, name="timing-host", daemon=True)
+    pub.thread.start()
     return pub
+
+
+def _stop_timing_publisher(pub, timeout=1.0):
+    """Give the publisher (its stop already set) up to `timeout` to close its socket."""
+    pub.wake()
+    pub.thread.join(timeout)
 
 
 def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_dir=None,
@@ -12166,6 +12180,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _timing_authfail_rl = console_auth.RateLimiter(limit=120, window_s=60)   # public scans spare the drivers
     _drive_register_rl = console_auth.RateLimiter(limit=DRIVE_REGISTER_PER_MIN, window_s=60)
     _red_flag_lock, _red_flag_last = threading.Lock(), {}   # Race Control's RED FLAG (#1114)
+    _red_flag_read, _red_flag_read_at = threading.Lock(), [float("-inf")]   # one Sheet read for concurrent lowers
     _invite_cache = driver_invite.Cache(driver_invite_path) if driver_invite_path else None
     _requests = driver_requests.Store(
         driver_requests.path_in(os.path.dirname(os.path.abspath(driver_invite_path))),
@@ -13987,14 +14002,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"error": "setup control disabled"}, 404)
                     if p == ["setup", "data"]:
                         return self._send(setup_ctl.data())
-                    if len(p) == 4 and p[1] == "set":
-                        return self._send(setup_ctl.set_field(p[2].lower(),
-                                                              unquote(p[3])))
+                    if (len(p) == 4 and p[1] == "set") or (len(p) == 3 and p[1] == "clear"):
+                        key = p[2].lower()
+                        res = setup_ctl.set_field(key, unquote(p[3]) if p[1] == "set" else "")
+                        if key == "racecontrol" and not res.get("error"):
+                            relay.rc_red_flag_banner = False    # the director's banner now
+                        return self._send(res)
                     if len(p) == 4 and p[1] == "team":
                         return self._send(setup_ctl.set_team(p[2].lower(),
                                                              unquote(p[3])))
-                    if len(p) == 3 and p[1] == "clear":
-                        return self._send(setup_ctl.set_field(p[2].lower(), ""))
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p == ["obs", "asset-labels"]:
                     return self._send(asset_labels(graphics_dir, director=True))
@@ -14440,6 +14456,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # happened. Best-effort: set_field no-ops without the webhook.
                     if result.get("obs_cut") and setup_ctl:
                         setup_ctl.set_field("racecontrol", "")
+                        relay.rc_red_flag_banner = False
                     # Auto-follow the on-air stint's Streamer + Stint label from the
                     # Schedule (issue #112) on a real cut OR a same-URL continuation
                     # The DISPLAY stint advances on a continuation too, even
@@ -14554,7 +14571,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return self._send({"ok": True, "request": after})
 
         def _drive_refuse(self, status, message):
-            client = self.client_address[0] if self.client_address else "?"
+            client = drive_client_key(self.client_address[0] if self.client_address else "?", self.headers)
             if status in (401, 403) and not _drive_authfail_rl.allow(client):
                 status, message = 429, "too many attempts"
             self._send({"error": message}, status)
@@ -14569,7 +14586,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return None
             if not link or not hmac.compare_digest(presented.encode("utf-8", "replace"),
                                                    link["id"].encode("utf-8")):
-                client = self.client_address[0] if self.client_address else "?"
+                client = drive_client_key(self.client_address[0] if self.client_address else "?", self.headers)
                 if not _timing_authfail_rl.allow(client):
                     return self._send({"error": "too many attempts"}, 429)
                 return self._send({"error": "this timing link is not valid (any more)"}, 403)
@@ -14672,12 +14689,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if reg is None:
                     return self._drive_refuse(403, "invalid or revoked code: register again on the invite page")
                 req = _requests.get(reg["conn"])
+                if _requests.was_disconnected(reg["conn"]):     # still approved in the store
+                    return self._drive_refuse(410, "disconnected by the producer: register again on the invite page")
                 if req is None and _requests.was_evicted(reg["conn"]):
                     return self._drive_refuse(410, "your registration was dropped: register again on the invite page")
                 if req is None:
                     return self._drive_refuse(403, "unknown registration: register again on the invite page")
-                if req["status"] == "rejected":
-                    return self._drive_refuse(403, "Race Control rejected this registration: "
+                if req["status"] == "rejected":     # 410 stops the sender: a rejection is final
+                    return self._drive_refuse(410, "Race Control rejected this registration: "
                                                    "register again on the invite page")
                 if req["status"] == "pending":
                     # Its own status outside the failed-auth bucket: the sender polls it.
@@ -15122,6 +15141,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     done = driver_hub.disconnect(conn)
                     if done and driver_race_svc is not None:
                         driver_race_svc.log(who, "disconnect", conn=conn)
+                    if done and _requests is not None:
+                        try:
+                            _requests.disconnect(conn)      # so a restart keeps refusing it
+                        except OSError:
+                            return self._send({"ok": False, "error": "the disconnect could not be saved: "
+                                               "it holds until the relay restarts"}, 500)
                     return self._send({"ok": done})
                 if p == ["drivers", "reassign"] and driver_hub is not None:
                     conn, entry = str(body.get("conn") or ""), body.get("entry")
@@ -15135,7 +15160,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"ok": False, "error": "unknown sender"}, 400)
                     req = _requests.get(conn) if _requests else None
                     if req and req["status"] == "approved":     # a Move persists like a correction
-                        _requests.correct(conn, who, entry=entry, segment=req["segment"], name=req["name"])
+                        fail = None
+                        try:
+                            _requests.correct(conn, who, entry=entry, segment=req["segment"], name=req["name"])
+                        except KeyError:
+                            fail = "this request is gone: the invite link was renewed", 404
+                        except driver_requests.Decided as exc:
+                            fail = str(exc), 409
+                        except ValueError:
+                            fail = "unknown entry", 400
+                        except OSError:
+                            fail = "the decision could not be saved", 500
+                        if fail:            # the hub goes back to the saved request
+                            driver_hub.update(conn, req["entry"], req["segment"], req["name"])
+                            return self._send({"ok": False, "error": fail[0]}, fail[1])
                     if driver_race_svc is not None:
                         driver_race_svc.log(who, "reassign", conn=conn, entry=entry)
                     return self._send({"ok": True})
@@ -15145,27 +15183,51 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     on = body.get("on") is not False
                     now = time.monotonic()
                     cover, note, banner = False, "obs unavailable", {"error": "not raised here"}
+                    hud = getattr(setup_ctl, "hud", None)
                     with _red_flag_lock:
                         if now - _red_flag_last.get(who, -RED_FLAG_MIN_S) < RED_FLAG_MIN_S:
                             return self._send({"ok": False, "error": "one red flag change per 2 s"}, 429)
                         _red_flag_last[who] = now
+                    if not on and getattr(relay, "rc_red_flag_banner", False) and hasattr(hud, "refresh"):
+                        with _red_flag_read:
+                            if _red_flag_read_at[0] < now:     # else a read began after this request
+                                _red_flag_read_at[0] = time.monotonic()
+                                hud.refresh(timeout=5)      # the Sheet now, not the last poll
+                    with _red_flag_lock:
                         # Lowering undoes only a cover this route turned on: never an
                         # auto-cover over a dead feed (#495) or the director's own.
                         owned = getattr(relay, "rc_red_flag_raised", False)
-                        if on or owned:
-                            if _obs_ws is not None:
-                                scene = _obs_ws.graphic_scene(relay.solo)
-                                state, note = relay._obs.read_obs_state([(scene, STANDBY_COVER_SOURCE)], [])
-                                was_up = bool(state and ((state.get("sources") or [{}])[0] or {}).get("enabled"))
-                                if on and was_up:
-                                    cover, note = True, None
-                                elif state is not None:
-                                    cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
-                                # A second raise keeps the claim; a failed lower keeps it too.
-                                relay.rc_red_flag_raised = (
-                                    bool(owned or (cover and not was_up)) if on else not cover)
-                            banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
-                                      if setup_ctl else {"error": "no Setup tab control"})
+                        # The banner has its own claim: the cover may be the director's or
+                        # unreachable while this desk's banner is on air.
+                        banner_owned = getattr(relay, "rc_red_flag_banner", False)
+                        if not on and banner_owned and hud is not None \
+                                and hud.data().get("raceControl") != RED_FLAG_BANNER:
+                            banner_owned = relay.rc_red_flag_banner = False    # changed in the Sheet
+                        if (on or owned) and _obs_ws is not None:
+                            scene = _obs_ws.graphic_scene(relay.solo)
+                            state, note = relay._obs.read_obs_state([(scene, STANDBY_COVER_SOURCE)], [])
+                            was_up = bool(state and ((state.get("sources") or [{}])[0] or {}).get("enabled"))
+                            if on and was_up:
+                                cover, note = True, None
+                            elif state is not None:
+                                cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
+                            # A second raise keeps the claim; a failed lower keeps it too.
+                            relay.rc_red_flag_raised = (
+                                bool(owned or (cover and not was_up)) if on else not cover)
+                        if (on or banner_owned) and not setup_ctl:
+                            banner = {"error": "no Setup tab control"}
+                        elif on:
+                            before = hud.data().get("raceControl") or "" if hud is not None else ""
+                            banner = setup_ctl.set_field("racecontrol", RED_FLAG_BANNER)
+                            if not banner.get("error") and not banner_owned:
+                                relay.rc_red_flag_prev_banner = "" if before == RED_FLAG_BANNER else before
+                        elif banner_owned:
+                            prev = getattr(relay, "rc_red_flag_prev_banner", "")
+                            banner = setup_ctl.set_field("racecontrol", prev)
+                            if banner.get("error") and prev:    # left the vocabulary meanwhile
+                                banner = setup_ctl.set_field("racecontrol", "")
+                        if on or banner_owned:
+                            relay.rc_red_flag_banner = on if not banner.get("error") else banner_owned
                     race = None
                     if driver_race_svc is not None:
                         race = (driver_race_svc.red_flag(who) if on
@@ -16626,6 +16688,8 @@ def main():
     twitch_service = (audience_twitch_connection.Service(
         os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)
         if args.overlay_dir else None)
+    timing_go = threading.Event()   # set once the control port is bound
+    timing_pubs = []
     handler = make_handler(
         relay,
         panel_path,
@@ -16683,7 +16747,9 @@ def main():
         driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
-        timing_publisher=_start_timing_publisher, funnel_host=_funnel_watch(poll=stop_evt),
+        timing_publisher=lambda **fns: timing_pubs.append(
+            _start_timing_publisher(timing_go, stop_evt, **fns)) or timing_pubs[-1],
+        funnel_host=_funnel_watch(poll=stop_evt),
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
         radio_service=radio_service,
@@ -16714,6 +16780,7 @@ def main():
     relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
     relay.keep_awake.start()
     race_svc.open_recording()   # the port is ours, so the recording file is too
+    timing_go.set()             # ... and the timing host's link
     radio_service.start()
     if coach_service is not None:coach_service.start()
     radio_enricher.start()
@@ -16772,7 +16839,10 @@ def main():
         if twitch_service is not None:
             twitch_service.close()
         relay.keep_awake.stop()
-        stop_evt.set(); relay.shutdown(); os._exit(0)
+        stop_evt.set(); relay.shutdown()
+        for pub in timing_pubs:
+            _stop_timing_publisher(pub)
+        os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 

@@ -264,6 +264,24 @@ def t_cross_site_clicks_open_the_public_pages_and_timing_failures_spare_the_driv
         srv.shutdown()
 
 
+def t_failure_caps_behind_funnel_count_each_client():
+    link_path = os.path.join(tempfile.mkdtemp(), "timing-link.json")
+    srv, port, path, _hub = _serve(timing_link_path=link_path,
+                                   timing_page_path=os.path.join(ROOT, "src", "console", "timing.html"))
+    scanner, driver = {"X-Forwarded-For": "198.51.100.7"}, {"X-Forwarded-For": "203.0.113.5"}
+    batch = tp.encode_batch([_wire(1)])
+    try:
+        driver_invite.create(path)
+        timing_link.create(link_path)
+        for route, data in (("/console/drive/ingest", batch), ("/console/timing?l=wrong", None)):
+            codes = [_req(port, route, data, dict(scanner, **{"X-Driver-Code": "D1:x.y"}))[0] for _ in range(125)]
+            assert 429 in codes, (route, "a scanner behind the Funnel proxy is capped")
+            st = _req(port, route, data, dict(driver, **{"X-Driver-Code": "D1:x.y"}))[0]
+            assert st == 403, (route, f"another client still hears why it failed, not 429: {st}")
+    finally:
+        srv.shutdown()
+
+
 def _register(port, invite, **body):
     return _req(port, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
                 {"Content-Type": "application/json"})
@@ -413,13 +431,13 @@ def t_a_rejected_code_is_revoked_even_while_it_sends():
         assert code == 200 and json.loads(text)["request"]["status"] == "rejected", text
         assert hub.connections() == [], "a rejection drops the live sender"
         code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
-        assert code == 403 and "rejected" in text, (code, text)
+        assert code == 410 and "rejected" in text, ("a rejection stops the sender", code, text)
         for route in ("approve", "correct", "reject"):
             code, text, _h = _post(port, f"/drivers/requests/{route}", {"conn": conn})
             assert code == 409, (route, code, text)
         pending = json.loads(_register(port, invite, entry="Team A #1", name="Ann")[1])["code"]
         assert _post(port, "/drivers/requests/reject", {"conn": _conn_of(path, pending)})[0] == 200
-        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": pending})[0] == 403, \
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": pending})[0] == 410, \
             "a request rejected before it sent never sends"
     finally:
         srv.shutdown()
@@ -487,7 +505,7 @@ def t_requests_reach_both_desks_and_never_the_driver_routes():
         assert st == 200 and [(r["conn"], r["status"]) for r in data["requests"]] == [(conn, "pending")], text
         assert data["entries"] == ENTRIES and data["multi_lobby"] is False, data
         assert set(data["requests"][0]) == {"conn", "entry", "segment", "name", "status", "ts", "registered",
-                                            "who", "decided"}, "a request shows no telemetry"
+                                            "who", "decided", "disconnected"}, "a request shows no telemetry"
         for route in (f"/console/drivers/requests?t={alice}", f"/console/race-control/drivers/requests?t={alice}",
                       f"/console/race-control/drivers/requests?t={director}"):
             assert _req(port, route)[0] == 403, route
@@ -667,6 +685,35 @@ def t_a_decision_survives_a_renewed_invite_and_a_failed_write_cleanly():
         srv.shutdown()
 
 
+def t_a_move_that_cannot_be_saved_leaves_the_sender_where_it_was():
+    import driver_requests
+    srv, port, path, hub = _serve()
+    real_save, real_correct = driver_requests.Store._save, driver_requests.Store.correct
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
+        conn = _conn_of(path, issued)
+
+        def broken(self):
+            raise OSError("disk full at /home/producer/runtime")
+        driver_requests.Store._save = broken
+        code, text, _h = _post(port, "/drivers/reassign", {"conn": conn, "entry": "Team B #2"})
+        assert code == 500 and "could not be saved" in text and "disk full" not in text, (code, text)
+        assert hub.connections()[0]["entry"] == "Team A #1", "the hub stays with the saved request"
+        driver_requests.Store._save = real_save
+
+        def gone(self, *a, **k):
+            raise KeyError(conn)
+        driver_requests.Store.correct = gone
+        code, text, _h = _post(port, "/drivers/reassign", {"conn": conn, "entry": "Team B #2"})
+        assert code == 404 and "renewed" in text, (code, text)
+        assert hub.connections()[0]["entry"] == "Team A #1"
+    finally:
+        driver_requests.Store._save, driver_requests.Store.correct = real_save, real_correct
+        srv.shutdown()
+
+
 def t_both_desks_reject_every_waiting_request_at_once():
     srv, port, path, hub = _serve()
     try:
@@ -680,7 +727,7 @@ def t_both_desks_reject_every_waiting_request_at_once():
         st, text, _h = _post(port, f"/console/race-control/drivers/requests/reject-pending?t={rc}", {})
         assert st == 200 and json.loads(text)["rejected"] == 2, text
         batch = tp.encode_batch([_wire(1)])
-        assert [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0] for c in waiting] == [403, 403]
+        assert [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0] for c in waiting] == [410, 410]
         assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": kept})[0] == 200, "approvals stay"
         last = _audit_of(srv)[-1]
         assert last["action"] == "driver_reject_pending" and last["who"] == "race_control:dave" \
@@ -778,7 +825,53 @@ def t_the_producer_disconnects_a_sender_on_the_tailnet():
         assert code == 200 and json.loads(text) == {"ok": True}, (code, text)
         code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(2)]), {"X-Driver-Code": issued})
         assert code == 410 and "disconnected" in text, (code, text)
+        req = json.loads(_req(port, "/drivers/requests")[1])["requests"][0]
+        assert req["status"] == "approved" and req["disconnected"] is True, ("the desks see the disconnect", req)
+        senders = [s for r in json.loads(_req(port, "/drivers/readiness")[1])["rows"] for s in r["senders"]]
+        assert [s["approval"] for s in senders] == ["disconnected"], ("readiness says disconnected", senders)
     finally:
+        srv.shutdown()
+
+
+def t_a_disconnect_holds_across_a_relay_restart():
+    path = os.path.join(tempfile.mkdtemp(), "driver-invite.json")
+    srv, port, _p, hub = _serve(invite_path=path)
+    batch = tp.encode_batch([_wire(1)])
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})[0] == 200
+        assert _post(port, "/drivers/disconnect", {"conn": _conn_of(path, issued)})[0] == 200
+    finally:
+        srv.shutdown()
+    srv, port, _p, hub = _serve(invite_path=path)
+    try:
+        code, text, _h = _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": issued})
+        assert code == 410 and "disconnected" in text, ("a restart never lets a disconnected code back", code, text)
+        assert hub.connections() == []
+    finally:
+        srv.shutdown()
+
+
+def t_a_disconnect_that_cannot_be_saved_says_so_without_a_path():
+    import driver_requests
+    srv, port, path, _hub = _serve()
+    real_save = driver_requests.Store._save
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
+
+        def broken(self):
+            raise OSError("disk full at /home/producer/runtime")
+        driver_requests.Store._save = broken
+        code, text, _h = _post(port, "/drivers/disconnect", {"conn": _conn_of(path, issued)})
+        assert code == 500 and "could not be saved" in text and "disk full" not in text, (code, text)
+        driver_requests.Store._save = real_save
+        code, text, _h = _req(port, "/console/drive/ingest", tp.encode_batch([_wire(2)]), {"X-Driver-Code": issued})
+        assert code == 410, ("the hub still refuses it until the relay restarts", code, text)
+    finally:
+        driver_requests.Store._save = real_save
         srv.shutdown()
 
 
@@ -1251,6 +1344,109 @@ def t_race_control_lowers_only_a_cover_it_raised():
         srv.shutdown()
 
 
+class _Setup:
+    """The Setup tab control: `banner` is the Sheet, the HUD shows its last poll."""
+    def __init__(self):
+        self.banner = self.polled = ""
+        self.hud = self
+
+    def data(self):
+        return {"raceControl": self.polled}
+
+    def refresh(self, timeout=10):
+        self.polled = self.banner
+        return True
+
+    def set_field(self, key, value):
+        if value not in ("", g.m.RED_FLAG_BANNER, "Driver Swaps"):
+            return {"error": "not in the Configuration vocabulary"}
+        if key == "racecontrol":
+            self.banner = self.polled = value
+        return {"ok": True, "field": key, "value": value}
+
+
+def t_race_control_clears_the_banner_its_red_flag_set_whoever_owns_the_cover():
+    hdr = {"Content-Type": "application/json"}
+    setup = _Setup()
+    orig_obs, orig_min, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, 0.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: json.loads(_req(port, f"/console/race-control/red-flag?t={rc}",
+                                      json.dumps({"on": on}).encode(), hdr)[1])
+    try:
+        for obs in (None, _CoverObs(up=True)):
+            g.m._obs_ws = obs
+            assert flag(True)["banner"] == "ok" and setup.banner == g.m.RED_FLAG_BANNER
+            assert flag(False)["banner"] == "ok" and setup.banner == "", \
+                f"Restart released clears the banner this desk set, cover {'up' if obs else 'unreachable'}"
+            assert obs is None or obs.up, "a cover the desk did not raise stays up"
+        flag(True)
+        assert _req(port, "/setup/set/racecontrol/Driver%20Swaps")[0] == 200
+        flag(False)
+        assert setup.banner == "Driver Swaps", "a banner the director set afterwards stays"
+        flag(True)
+        setup.banner = "Driver Swaps"                    # typed into the Setup tab, not polled yet
+        flag(False)
+        assert setup.banner == "Driver Swaps", "a banner changed in the Sheet stays, even before the next poll"
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
+def t_restart_released_brings_back_the_banner_the_red_flag_replaced():
+    hdr = {"Content-Type": "application/json"}
+    setup = _Setup()
+    setup.banner = setup.polled = "Driver Swaps"
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, None, 0.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: json.loads(_req(port, f"/console/race-control/red-flag?t={rc}",
+                                      json.dumps({"on": on}).encode(), hdr)[1])
+    try:
+        assert flag(True)["banner"] == "ok" and setup.banner == g.m.RED_FLAG_BANNER
+        assert flag(True)["banner"] == "ok", "a second raise keeps the banner to bring back"
+        assert flag(False)["banner"] == "ok" and setup.banner == "Driver Swaps", \
+            ("Restart released shows the director's banner again", setup.banner)
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
+def t_a_rate_limited_lower_never_reads_the_sheet():
+    hdr = {"Content-Type": "application/json"}
+    setup, reads = _Setup(), []
+    setup.refresh = lambda timeout=10: reads.append(timeout)
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, None, 60.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: _req(port, f"/console/race-control/red-flag?t={rc}", json.dumps({"on": on}).encode(), hdr)[0]
+    try:
+        assert flag(True) == 200
+        assert [flag(False) for _ in range(3)] == [429] * 3
+        assert reads == [], ("a refused lower costs no outbound Sheet fetch", reads)
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
+def t_a_refused_banner_write_keeps_the_desk_claim():
+    hdr = {"Content-Type": "application/json"}
+    setup = _Setup()
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, None, 0.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: _req(port, f"/console/race-control/red-flag?t={rc}", json.dumps({"on": on}).encode(), hdr)
+    try:
+        flag(True)
+        assert _req(port, "/setup/set/racecontrol")[0] == 404
+        assert "error" in json.loads(_req(port, "/setup/set/racecontrol/Not%20Listed")[1])
+        flag(False)
+        assert setup.banner == "", "a write that changed nothing leaves Restart released its banner to clear"
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
 def t_a_failing_dashboard_tick_warns_once_per_distinct_error():
     import logging
 
@@ -1487,6 +1683,71 @@ class _FakePublisher:
 
     def reload(self):
         self.reloads += 1
+
+
+def t_the_timing_publisher_waits_for_the_control_port():
+    import inspect
+    runs = []
+
+    class _Pub:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def run(self, stop):
+            runs.append(stop)
+    real, g.m.timing_publish.Publisher = g.m.timing_publish.Publisher, _Pub
+    try:
+        go, stop = threading.Event(), threading.Event()
+        g.m._start_timing_publisher(go=go, stop=stop, link_fn=lambda: None)
+        time.sleep(0.2)
+        assert runs == [], "a relay that may still lose the port bind never opens the host socket"
+        go.set()
+        deadline = time.monotonic() + 5
+        while not runs and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runs == [stop], "the publisher runs once the port is bound"
+    finally:
+        g.m.timing_publish.Publisher = real
+    src = inspect.getsource(g.m.main)
+    assert src.index("Could not bind the control server") < src.index("timing_go.set()"), \
+        "main releases the publisher only after the bind succeeded"
+
+
+def t_a_relay_stopping_before_the_bind_ends_the_waiting_publisher():
+    before = set(threading.enumerate())
+    g.m._start_timing_publisher(go=threading.Event(), stop=(stop := threading.Event()), link_fn=lambda: None,
+                                body_fn=lambda: (b"{}", 0.0), served_fn=lambda: "funnel", fallback_fn=lambda: None)
+    waiting = [t for t in set(threading.enumerate()) - before if t.name == "timing-host"]
+    assert len(waiting) == 1, waiting
+    stop.set()
+    waiting[0].join(3)
+    assert not waiting[0].is_alive(), "a stop before the control port bind ends the waiting thread"
+
+
+def t_a_relay_shutdown_gives_the_publisher_a_bounded_close():
+    import inspect
+
+    class _Pub:
+        def __init__(self, closes):
+            self.woke, self.closed = threading.Event(), []
+            self.thread = threading.Thread(target=lambda: self.woke.wait(5 if closes else 30)
+                                           and closes and self.closed.append(True), daemon=True)
+            self.thread.start()
+
+        def wake(self):
+            if self.thread.name != "stuck":
+                self.woke.set()
+    quick = _Pub(closes=True)
+    g.m._stop_timing_publisher(quick, timeout=1.0)
+    assert quick.closed == [True], "the shutdown wakes the publisher and waits for its close"
+    stuck = _Pub(closes=False)
+    stuck.thread.name = "stuck"
+    started = time.monotonic()
+    g.m._stop_timing_publisher(stuck, timeout=0.3)
+    assert time.monotonic() - started < 1.5, "a publisher stuck in a connect never holds the exit"
+    src = inspect.getsource(g.m.main)
+    assert src.index("_stop_timing_publisher(") < src.index("os._exit(0)"), \
+        "the shutdown lets the publisher close before the hard exit"
 
 
 FUNNEL_HOST = "relay.example.ts.net"

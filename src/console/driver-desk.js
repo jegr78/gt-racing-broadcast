@@ -234,7 +234,7 @@
   function duplicates(reqs) {
     var seen = Object.create(null), out = Object.create(null);
     (reqs || []).forEach(function (r) {
-      if (r.status === "rejected") return;
+      if (r.status === "rejected" || r.disconnected) return;
       var k = [r.name, r.entry, r.segment || ""].join("\u0000");
       (seen[k] = seen[k] || []).push(r.conn);
     });
@@ -242,6 +242,11 @@
       if (seen[k].length > 1) seen[k].forEach(function (c) { out[c] = true; });
     });
     return out;
+  }
+  // A request's pill; a disconnected code is refused until the driver registers again.
+  function requestState(r) {
+    if (r.status === "pending") return ["waiting", "amb"];
+    return r.disconnected ? ["disconnected", "bad"] : ["approved", "ok"];
   }
   // The approve or correct body: the desk's draft over what the request holds.
   function requestBody(rec, draft, multi) {
@@ -259,6 +264,7 @@
     if (live.length) pills.push([live.map(function (x) { return fitName(x.name, max || 16); }).join(", "), "ok"]);
     else if (senders.some(function (s) { return s.connected; })) pills.push(["quiet", "amb"]);
     else if (senders.some(function (s) { return s.approval === "approved"; })) pills.push(["approved, no data", "amb"]);
+    else if (senders.some(function (s) { return s.approval === "disconnected"; })) pills.push(["disconnected", "bad"]);
     else if (!waiting.length) pills.push(["no sender", "bad"]);
     waiting.forEach(function (s) { pills.push([fitName(s.name, max || 16) + ": pending", "amb"]); });
     return pills;
@@ -307,6 +313,7 @@
   function senderState(s) {
     if (s.live) return ["live", "ok"];
     if (s.connected) return ["quiet", "bad"];
+    if (s.approval === "disconnected") return ["disconnected", "bad"];
     return s.approval === "pending" ? ["pending", "amb"] : ["approved, no data", "amb"];
   }
 
@@ -823,14 +830,16 @@
         var changed = reg.name !== r.name || reg.entry !== r.entry || (reg.segment || null) !== (r.segment || null);
         var meta = pend ? "registered " + new Date(r.ts * 1000).toLocaleTimeString() : "approved by " + (r.who || "");
         if (changed) meta += "; registered as " + [reg.name, reg.entry, reg.segment].filter(Boolean).join(", ");
-        var open = pend || reqOpen[r.conn];
+        if (r.disconnected) meta += "; disconnected: the driver registers again on the invite link";
+        var open = pend || (reqOpen[r.conn] && !r.disconnected);
+        var pill = requestState(r);
         var head = el("div", {cls: "row"}, [
           el("strong", {text: fitName(r.name, NAME_LIST_MAX), title: r.name}),
-          el("span", {cls: "pill " + (pend ? "amb" : "ok"), text: pend ? "waiting" : "approved"}),
+          el("span", {cls: "pill " + pill[1], text: pill[0]}),
           dup[r.conn] ? el("span", {cls: "pill bad", text: "duplicate",
             title: "Another request has the same name, entry and stint: approve only the driver's own"}) : null,
           el("span", {cls: "grow", text: [r.entry, multi ? r.segment : null].filter(Boolean).join(" \u00b7 ")}),
-          open ? null : button("Correct", "", null, function () {
+          open || r.disconnected ? null : button("Correct", "", null, function () {
             reqOpen[r.conn] = true; renderRequests(d, true);
           }),
           open ? null : rejectBtn(r)]);
@@ -1069,7 +1078,8 @@
           var where = el("td", {}, [el("div", {text: r.entry}), el("div", {cls: "muted", text: r.segment || ""})]);
           if (!s.connected) {
             rows.push(el("tr", {}, [who, where, el("td", {colspan: "2", cls: "muted",
-              text: s.approval === "pending" ? "Approve it under Driver requests" : "Not sending"})]));
+              text: {pending: "Approve it under Driver requests",
+                     disconnected: "Registers again on the invite link"}[s.approval] || "Not sending"})]));
             return;
           }
           var to = el("select", {"aria-label": "Move " + s.name + " to another entry"},

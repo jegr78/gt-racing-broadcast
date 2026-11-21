@@ -80,8 +80,8 @@ The **Driver telemetry** card has the same controls as the Director Panel's sect
 on air stays with the director. Its `RED FLAG` is the full one: it raises the
 Standby Cover, sets the HUD banner *Red Flag - Race Suspended* and holds the race, and
 it says when the cover or the banner could not be set. **Restart released** lowers the
-cover and clears the banner again when this desk raised them; a cover or banner the
-director raised stays until the director lowers it. Every action is logged with the person's name.
+cover when this desk raised it and puts back the banner its RED FLAG replaced (empty if
+there was none); a cover or banner the director raised stays until the director lowers it. Every action is logged with the person's name.
 
 On top of the card, **Driver requests** lists the drivers who registered on the invite
 link and wait for approval. Compare each with the car in the GT7 lobby, correct the
@@ -146,7 +146,7 @@ The director keeps every control in the Panel and can take any graphic off air.
 > Setup-tab `Race Control` field shown on the lower third, set by hand only by the
 > director). They are different things: the role is `race_control` (Crew tab), the
 > banner is `racecontrol` (Setup tab). The role sets that banner only through its `RED FLAG`, to *Red Flag - Race
-> Suspended*, and clears it again with **Restart released** when its own RED FLAG set it.
+> Suspended*, and **Restart released** puts back the previous banner when its own RED FLAG set it.
 
 Every card opens **in the same tab**. Every destination carries a **`← Console`**
 back link in its header that returns to this launcher, so there is clean

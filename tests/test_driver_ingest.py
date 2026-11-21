@@ -193,12 +193,13 @@ def t_readiness_marks_pending_and_approved_requests_without_a_sender():
     reqs = [{"conn": "c1", "entry": "A", "segment": None, "name": "Max", "status": "approved"},
             {"conn": "c2", "entry": "A", "segment": None, "name": "Ann", "status": "pending"},
             {"conn": "c3", "entry": "B", "segment": None, "name": "Lea", "status": "approved"},
-            {"conn": "c4", "entry": "B", "segment": None, "name": "Eve", "status": "rejected"}]
+            {"conn": "c4", "entry": "B", "segment": None, "name": "Eve", "status": "rejected"},
+            {"conn": "c5", "entry": "B", "segment": None, "name": "Ole", "status": "approved", "disconnected": True}]
     rows = ing.readiness(["A", "B"], [], conns, multi_lobby=False, requests=reqs)
     got = {r["entry"]: (r["ready"], [(s["name"], s["approval"], s["connected"]) for s in r["senders"]])
            for r in rows}
     assert got == {"A": (True, [("Max", "approved", True), ("Ann", "pending", False)]),
-                   "B": (False, [("Lea", "approved", False)])}, got
+                   "B": (False, [("Lea", "approved", False), ("Ole", "disconnected", False)])}, got
 
 
 def t_an_approval_correction_and_a_revoke_reach_the_hub():
@@ -320,6 +321,16 @@ def t_entry_for_follows_a_reassignment():
     hub.reassign("c1", "Team B #2")
     assert hub.entry_for("c1", "Team A #1") == "Team B #2"
     assert hub.entry_for("unknown", "Team A #1") == "Team A #1"
+
+
+def t_a_refused_batch_still_forgets_the_long_quiet_senders():
+    hub, clock = _hub()
+    hub.ingest(_reg("c1"), _batch(1), None)
+    hub.revoke("c2")
+    clock.t += ing.FORGET_S + 1
+    _refused(lambda: hub.ingest(_reg("c2", entry="Team B #2"), _batch(2), None), 410, "disconnected")
+    assert "c1" not in hub._counts.snapshot()["senders"], \
+        "a refusal must not keep a forgotten sender in the counter, where it holds a probe slot"
 
 
 if __name__ == "__main__":

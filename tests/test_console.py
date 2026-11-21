@@ -432,7 +432,8 @@ def t_the_desk_marks_requests_with_the_same_name_entry_and_stint():
             {"conn": "b", "name": "Max", "entry": "A", "segment": "S1", "status": "pending"},
             {"conn": "c", "name": "Max", "entry": "A", "segment": "S2", "status": "approved"},
             {"conn": "d", "name": "Ann", "entry": "A", "segment": "S2", "status": "pending"},
-            {"conn": "e", "name": "Ann", "entry": "A", "segment": "S2", "status": "rejected"}]
+            {"conn": "e", "name": "Ann", "entry": "A", "segment": "S2", "status": "rejected"},
+            {"conn": "f", "name": "Max", "entry": "A", "segment": "S2", "status": "approved", "disconnected": True}]
     got = _desk_fn("duplicates", "Object.keys(duplicates(" + json.dumps(reqs) + ")).sort()")
     if got is None:
         return
@@ -445,17 +446,29 @@ def t_the_desk_marks_pending_and_approved_senders_apart():
     got = _desk_fn("fitName,readyPills", "[readyPills(" + json.dumps(senders) + "), readyPills(" +
                    json.dumps(senders[1:]) + "), readyPills([{name: 'Lea', live: false, connected: false, "
                    "approval: 'approved'}]), readyPills([{name: 'Ole', live: false, connected: true, "
-                   "approval: 'approved'}]), readyPills([])]")
+                   "approval: 'approved'}]), readyPills([]), readyPills([{name: 'Eve', live: false, "
+                   "connected: false, approval: 'disconnected'}])]")
     if got is None:
         return
     assert got == [[["Max", "ok"], ["Ann: pending", "amb"]], [["Ann: pending", "amb"]],
-                   [["approved, no data", "amb"]], [["quiet", "amb"]], [["no sender", "bad"]]], got
+                   [["approved, no data", "amb"]], [["quiet", "amb"]], [["no sender", "bad"]],
+                   [["disconnected", "bad"]]], got
     got = _desk_fn("senderState", "[" + ",".join("senderState(" + json.dumps(x) + ")" for x in (
         {"live": True, "connected": True, "approval": "approved"},
         {"live": False, "connected": True, "approval": "approved"},
         {"live": False, "connected": False, "approval": "pending"},
-        {"live": False, "connected": False, "approval": "approved"})) + "]")
-    assert got == [["live", "ok"], ["quiet", "bad"], ["pending", "amb"], ["approved, no data", "amb"]], got
+        {"live": False, "connected": False, "approval": "approved"},
+        {"live": False, "connected": False, "approval": "disconnected"})) + "]")
+    assert got == [["live", "ok"], ["quiet", "bad"], ["pending", "amb"], ["approved, no data", "amb"],
+                   ["disconnected", "bad"]], got
+
+
+def t_the_desk_marks_a_disconnected_request():
+    got = _desk_fn("requestState", "[" + ",".join("requestState(" + json.dumps(x) + ")" for x in (
+        {"status": "pending"}, {"status": "approved"}, {"status": "approved", "disconnected": True})) + "]")
+    if got is None:
+        return
+    assert got == [["waiting", "amb"], ["approved", "ok"], ["disconnected", "bad"]], got
 
 
 def t_the_desk_sends_the_corrected_request():
