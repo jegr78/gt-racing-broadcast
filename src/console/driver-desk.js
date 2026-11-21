@@ -269,6 +269,46 @@
     waiting.forEach(function (s) { pills.push([fitName(s.name, max || 16) + ": pending", "amb"]); });
     return pills;
   }
+  // Two clicks for anything that changes the race for everyone: the first arms the button
+  // for 4 s and disarms any other, the second on the same key runs `fn`. A button rebuilt
+  // with the armed key takes over the armed state, so a row re-render keeps the confirm.
+  function arming() {
+    var cur = null;   // {key, btn, timer}
+    function show(btn, on) {
+      if (on) btn.classList.add("armed"); else btn.classList.remove("armed");
+      btn.textContent = (on ? "Confirm " : "") + btn.dataset.label;
+    }
+    function disarm() {
+      if (!cur) return;
+      clearTimeout(cur.timer);
+      show(cur.btn, false);
+      cur = null;
+    }
+    return function (btn, key, fn) {
+      if (cur && cur.key === key) {
+        show(cur.btn, false);
+        cur.btn = btn;
+        show(btn, true);
+      }
+      btn.addEventListener("click", function () {
+        if (cur && cur.key === key) { disarm(); fn(); return; }
+        disarm();
+        show(btn, true);
+        var mine = {key: key, btn: btn, timer: 0};
+        mine.timer = setTimeout(function () { if (cur === mine) disarm(); }, 4000);
+        cur = mine;
+      });
+    };
+  }
+  // Puts `rows` into `body` in order, moving only rows out of place, so a focused control keeps its focus.
+  function placeRows(body, rows) {
+    Array.prototype.slice.call(body.children).forEach(function (tr) {
+      if (rows.indexOf(tr) < 0) body.removeChild(tr);
+    });
+    rows.forEach(function (tr, i) {
+      if (body.children[i] !== tr) body.insertBefore(tr, body.children[i] || null);
+    });
+  }
   // A sender row's pill.
   function senderState(s) {
     if (s.live) return ["live", "ok"];
@@ -284,7 +324,7 @@
     if (!document.getElementById("dd-style")) {
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
     }
-    var state = {race: null, ready: null, invite: null, armed: null, armTimer: null};
+    var state = {race: null, ready: null, invite: null};
     var msg = el("div", {cls: "msg", role: "status"});
     // Shown after STALE_POLLS failed polls: decisions must not rest on frozen gaps.
     var staleNote = el("div", {cls: "msg err", role: "alert"});
@@ -312,20 +352,7 @@
       if (d) { say(done || ""); refresh(); }
       return d;
     }
-    // Two clicks for anything that changes the race for everyone.
-    function armed(btn, key, fn) {
-      btn.addEventListener("click", function () {
-        if (state.armed === key) {
-          clearTimeout(state.armTimer); state.armed = null; btn.classList.remove("armed");
-          btn.textContent = btn.dataset.label; fn(); return;
-        }
-        state.armed = key; btn.classList.add("armed"); btn.textContent = "Confirm " + btn.dataset.label;
-        clearTimeout(state.armTimer);
-        state.armTimer = setTimeout(function () {
-          state.armed = null; btn.classList.remove("armed"); btn.textContent = btn.dataset.label;
-        }, 4000);
-      });
-    }
+    var armed = arming();
     function button(label, cls, key, fn) {
       var b = el("button", {type: "button", cls: cls || "", text: label});
       b.dataset.label = label;
@@ -544,13 +571,8 @@
       ids.forEach(function (id) { evSeen[id] = true; });
       if (fresh) beep();
       evTitle.textContent = "Events (" + open + ")";
-      // Rows stay in place and only new ones are inserted, so a focused control keeps its focus.
       var rows = ids.map(function (id) { return evRows[id].tr; });
-      if (!rows.length) rows = [evEmpty];
-      rows.forEach(function (tr, i) {
-        if (evBody.children[i] !== tr) evBody.insertBefore(tr, evBody.children[i] || null);
-      });
-      while (evBody.children.length > rows.length) evBody.removeChild(evBody.lastChild);
+      placeRows(evBody, rows.length ? rows : [evEmpty]);
       return Object.keys(suspected).sort().join("\n") !== before;
     }
 
@@ -698,6 +720,7 @@
     var tyreTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
       "Entry", "Compound", "Set by"].map(function (h) { return el("th", {text: h}); }))]), tyreBody])]);
     var tyreRows = Object.create(null);   // keyed by entry name: no inherited keys
+    var tyreEmpty = el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No entries yet."})]);
     function tyreRow(entry) {
       var sel = el("select", {"aria-label": "Tyre compound of " + entry},
                    COMPOUNDS.map(function (c) { return opt(c[0], c[1]); }));
@@ -716,8 +739,7 @@
         t.by.textContent = c ? c.who + " at " + new Date(c.ts * 1000).toLocaleTimeString() : "";
         return t.tr;
       });
-      if (!rows.length) rows = [el("tr", {}, [el("td", {colspan: "3", cls: "muted", text: "No entries yet."})])];
-      tyreBody.replaceChildren.apply(tyreBody, rows);
+      placeRows(tyreBody, rows.length ? rows : [tyreEmpty]);
     }
     // Roster rows too: in qualifying the race has no entries.
     var tyreSrc = {roster: [], race: [], compounds: {}};

@@ -290,6 +290,8 @@
     if (value instanceof Node) td.appendChild(value); else td.textContent = value === undefined || value === null ? "" : String(value);
     return td;
   }
+  // A car without live data: its last fuel reading is stale.
+  const QUIET = ["est", "no_data", "dc", "no_sender", "retired"];
   // An estimated position: the gap Race Control set, marked EST.
   function estGap(e, i) {
     const s = el("span", "", i === 0 ? "" : e.lapped ? "+" + e.lapped + " L"
@@ -406,7 +408,8 @@
                     : i && typeof v.interval_s === "number" ? "+" + v.interval_s.toFixed(1) : ""),
           last: cell("last", lapTime(e.last_lap_ms), quali ? qualiMark(e, i)
                      : flg && flg.entry === e.entry && flg.ms === e.last_lap_ms ? "fl" : ""),
-          fuel: cell("fuel", typeof e.fuel_l === "number" ? e.fuel_l.toFixed(1) + " L" : ""),
+          fuel: cell("fuel", typeof e.fuel_l === "number" && QUIET.indexOf(e.status) < 0
+                     ? e.fuel_l.toFixed(1) + " L" : ""),
           best: cell("best", lapTime(e.best_ms), i === 0 && typeof e.best_ms === "number" ? "fl" : ""),
         };
         cols.forEach(function (c) { tr.appendChild(all[c[0]]); });
