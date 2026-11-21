@@ -1250,6 +1250,44 @@ def t_race_control_lowers_only_a_cover_it_raised():
         srv.shutdown()
 
 
+class _Setup:
+    """The Setup tab control: records the banner."""
+    def __init__(self):
+        self.banner = ""
+
+    def set_field(self, key, value):
+        if key == "racecontrol":
+            self.banner = value
+        return {"ok": True, "field": key, "value": value}
+
+    def data(self):
+        return {}
+
+
+def t_race_control_clears_the_banner_its_red_flag_set_whoever_owns_the_cover():
+    hdr = {"Content-Type": "application/json"}
+    setup = _Setup()
+    orig_obs, orig_min, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, 0.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: json.loads(_req(port, f"/console/race-control/red-flag?t={rc}",
+                                      json.dumps({"on": on}).encode(), hdr)[1])
+    try:
+        for obs in (None, _CoverObs(up=True)):
+            g.m._obs_ws = obs
+            assert flag(True)["banner"] == "ok" and setup.banner == g.m.RED_FLAG_BANNER
+            assert flag(False)["banner"] == "ok" and setup.banner == "", \
+                f"Restart released clears the banner this desk set, cover {'up' if obs else 'unreachable'}"
+            assert obs is None or obs.up, "a cover the desk did not raise stays up"
+        flag(True)
+        assert _req(port, "/setup/set/racecontrol/Driver%20Swaps")[0] == 200
+        flag(False)
+        assert setup.banner == "Driver Swaps", "a banner the director set afterwards stays"
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
 def t_a_failing_dashboard_tick_warns_once_per_distinct_error():
     import logging
 

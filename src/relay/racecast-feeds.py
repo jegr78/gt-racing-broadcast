@@ -13992,6 +13992,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"error": "setup control disabled"}, 404)
                     if p == ["setup", "data"]:
                         return self._send(setup_ctl.data())
+                    if len(p) in (3, 4) and p[1] in ("set", "clear") and p[2].lower() == "racecontrol":
+                        relay.rc_red_flag_banner = False    # the director's banner now
                     if len(p) == 4 and p[1] == "set":
                         return self._send(setup_ctl.set_field(p[2].lower(),
                                                               unquote(p[3])))
@@ -15157,20 +15159,24 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         # Lowering undoes only a cover this route turned on: never an
                         # auto-cover over a dead feed (#495) or the director's own.
                         owned = getattr(relay, "rc_red_flag_raised", False)
-                        if on or owned:
-                            if _obs_ws is not None:
-                                scene = _obs_ws.graphic_scene(relay.solo)
-                                state, note = relay._obs.read_obs_state([(scene, STANDBY_COVER_SOURCE)], [])
-                                was_up = bool(state and ((state.get("sources") or [{}])[0] or {}).get("enabled"))
-                                if on and was_up:
-                                    cover, note = True, None
-                                elif state is not None:
-                                    cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
-                                # A second raise keeps the claim; a failed lower keeps it too.
-                                relay.rc_red_flag_raised = (
-                                    bool(owned or (cover and not was_up)) if on else not cover)
+                        # The banner has its own claim: the cover may be the director's or
+                        # unreachable while this desk's banner is on air.
+                        banner_owned = getattr(relay, "rc_red_flag_banner", False)
+                        if (on or owned) and _obs_ws is not None:
+                            scene = _obs_ws.graphic_scene(relay.solo)
+                            state, note = relay._obs.read_obs_state([(scene, STANDBY_COVER_SOURCE)], [])
+                            was_up = bool(state and ((state.get("sources") or [{}])[0] or {}).get("enabled"))
+                            if on and was_up:
+                                cover, note = True, None
+                            elif state is not None:
+                                cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
+                            # A second raise keeps the claim; a failed lower keeps it too.
+                            relay.rc_red_flag_raised = (
+                                bool(owned or (cover and not was_up)) if on else not cover)
+                        if on or banner_owned:
                             banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
                                       if setup_ctl else {"error": "no Setup tab control"})
+                            relay.rc_red_flag_banner = on if not banner.get("error") else banner_owned
                     race = None
                     if driver_race_svc is not None:
                         race = (driver_race_svc.red_flag(who) if on
