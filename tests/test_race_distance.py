@@ -197,6 +197,20 @@ def t_the_winner_stays_first_when_its_flag_is_off_a_whole_race_lap():
     assert order == ["A", "B"], f"the car that took the flag first is the winner: {order}"
 
 
+def t_a_final_lobby_finish_a_few_metres_short_of_its_line_counts_the_lap():
+    # These grids put B's (then also A's) finishing sample a few metres short of its own line.
+    for grid_a in (L - 15, L - 15.2):
+        race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
+        race.final_lobby(3, 0.0)
+        a, b = Car(race, "A", "a", grid_a), Car(race, "B", "b", L - 300)
+        t = _drive(race, [a, b], [50, 49], 0.0, (3 * L + 400) / 49 + 5)
+        assert race.standings(t)["state"] == "finished", race.standings(t)["state"]
+        ra, rb = _row(race, "A", t), _row(race, "B", t)
+        assert (ra["laps"], rb["laps"]) == (3, 3), \
+            f"both crossed the line of GT7's lap 3: {ra['laps']} {rb['laps']} ({ra['distance_m']}, {rb['distance_m']})"
+        assert rb["lapped"] == 0 and rb["gap_time_s"] > 5, f"B finished on the lead lap behind A: {rb}"
+
+
 def t_the_lap_count_follows_gt7s_counter_including_the_formation_lap():
     race = rd.Race(TRACE, formation=True, finish_mode="laps", lap_count=3)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 400)

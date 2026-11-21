@@ -186,7 +186,7 @@ class _Entry:
         self.stint_laps = 0        # race laps since the active car began counting
         self.parked = None         # (conn, counting state) of the car moved away from it
         self.resume = False        # an undone retirement: count on from `distance`
-        self.crossed = None        # (interpolated time, sample time) of its last crossing
+        self.crossed = None        # (interpolated time, sample time, line distance or None) of its last crossing
         self.resumed = None        # restart: (red flag number, box exit time, anchor distance)
 
     def restart(self):
@@ -873,11 +873,14 @@ class Race:
 
     def _crossing(self, ent, car, t, at):
         """`at`: when the car passed the line, between its previous sample and `t`."""
-        ent.crossed = (at, t)
+        # A lobby's counter may step a few metres before the car's own line station.
+        line = car.anchor + (car.lap - car.lap0) * self.length - car.f0 if self.multi_lobby else None
+        ent.crossed = (at, t, line)
         if self._finished:
             return
         if self._finishing_at is not None:
             if ent.finished_at is None and t > self._finishing_at:
+                self._to_line(ent)
                 ent.finished_at = t
                 self._finished = all(e.finished_at is not None or self._quiet(e, t) or self._out(e)
                                      for e in self._entries.values())
@@ -889,6 +892,7 @@ class Race:
             by_flag = self._final_lap_at is not None and t > self._final_lap_at \
                 and car.lap >= self._lobby_lead_lap(t)
             if by_laps or by_flag:
+                self._to_line(ent)
                 self._flag(ent, t, at)
             return
         # The order Race Control's corrections set is the order that takes the flag.
@@ -900,6 +904,15 @@ class Race:
         by_flag = self._final_lap_at is not None and t > self._final_lap_at
         if by_laps or by_flag:
             self._flag(ent, t, at)
+
+    @staticmethod
+    def _to_line(ent):
+        """A car that finishes at a lobby line it just crossed has covered that line."""
+        line = ent.crossed[2] if ent.crossed else None
+        if line is not None and ent.distance is not None and ent.distance < line:
+            ent.distance = line
+            if ent.ds:
+                ent.ds[-1] = line
 
     def _race_lead(self, real=False):
         """The leading shown distance, None before any car counts; `real` leaves out
@@ -921,6 +934,7 @@ class Race:
                 if e is not ent and e.finished_at is None and not self._out(e)
                 and e.crossed is not None and e.crossed[0] > at]
         for e in late:
+            self._to_line(e)
             e.finished_at = e.crossed[1]
         self._finished = sum(1 for e in self._entries.values()
                              if e.active is not None and not self._out(e)) == 1 \
