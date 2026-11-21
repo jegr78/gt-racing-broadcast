@@ -1167,7 +1167,8 @@ def t_both_desks_act_with_their_identity():
         st, text, _h = _req(port, f"/console/race-control/red-flag?t={rc}", b"{}", hdr)
         body = _json.loads(text)
         assert st == 200 and body["on"] and body["race"]["red_flag"] is not None, text
-        assert "127.0.0.1" not in text and "4455" not in text, "no OBS address reaches the desk"
+        assert body["note"] == "cover not changed" and "127.0.0.1" not in text and ":4455" not in text, \
+            f"no OBS address reaches the desk: {body['note']}"
         assert _req(port, f"/console/race-control/red-flag?t={rc}", b"{}", hdr)[0] == 429, \
             "one red flag change per person in 2 s"
         assert _req(port, f"/console/race-control/red-flag?t={director}", b"{}", hdr)[0] == 403
