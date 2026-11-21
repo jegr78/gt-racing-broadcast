@@ -15142,7 +15142,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"ok": False, "error": "unknown sender"}, 400)
                     req = _requests.get(conn) if _requests else None
                     if req and req["status"] == "approved":     # a Move persists like a correction
-                        _requests.correct(conn, who, entry=entry, segment=req["segment"], name=req["name"])
+                        fail = None
+                        try:
+                            _requests.correct(conn, who, entry=entry, segment=req["segment"], name=req["name"])
+                        except KeyError:
+                            fail = "this request is gone: the invite link was renewed", 404
+                        except driver_requests.Decided as exc:
+                            fail = str(exc), 409
+                        except ValueError:
+                            fail = "unknown entry", 400
+                        except OSError:
+                            fail = "the decision could not be saved", 500
+                        if fail:            # the hub goes back to the saved request
+                            driver_hub.update(conn, req["entry"], req["segment"], req["name"])
+                            return self._send({"ok": False, "error": fail[0]}, fail[1])
                     if driver_race_svc is not None:
                         driver_race_svc.log(who, "reassign", conn=conn, entry=entry)
                     return self._send({"ok": True})

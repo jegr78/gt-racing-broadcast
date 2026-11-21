@@ -667,6 +667,35 @@ def t_a_decision_survives_a_renewed_invite_and_a_failed_write_cleanly():
         srv.shutdown()
 
 
+def t_a_move_that_cannot_be_saved_leaves_the_sender_where_it_was():
+    import driver_requests
+    srv, port, path, hub = _serve()
+    real_save, real_correct = driver_requests.Store._save, driver_requests.Store.correct
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
+        _req(port, "/console/drive/ingest", tp.encode_batch([_wire(1)]), {"X-Driver-Code": issued})
+        conn = _conn_of(path, issued)
+
+        def broken(self):
+            raise OSError("disk full at /home/producer/runtime")
+        driver_requests.Store._save = broken
+        code, text, _h = _post(port, "/drivers/reassign", {"conn": conn, "entry": "Team B #2"})
+        assert code == 500 and "could not be saved" in text and "disk full" not in text, (code, text)
+        assert hub.connections()[0]["entry"] == "Team A #1", "the hub stays with the saved request"
+        driver_requests.Store._save = real_save
+
+        def gone(self, *a, **k):
+            raise KeyError(conn)
+        driver_requests.Store.correct = gone
+        code, text, _h = _post(port, "/drivers/reassign", {"conn": conn, "entry": "Team B #2"})
+        assert code == 404 and "renewed" in text, (code, text)
+        assert hub.connections()[0]["entry"] == "Team A #1"
+    finally:
+        driver_requests.Store._save, driver_requests.Store.correct = real_save, real_correct
+        srv.shutdown()
+
+
 def t_both_desks_reject_every_waiting_request_at_once():
     srv, port, path, hub = _serve()
     try:

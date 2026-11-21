@@ -103,8 +103,9 @@ pending request is approved, only an approved one corrected, and a rejection is 
 rejected}` with their count; if requests keep coming, renew the invite. A rejection
 stops new data and leaves what the code sent before in the race and the recording;
 `/drivers/reassign` and `/drivers/race/change` answer 409 for a rejected connection.
-A decision answers 404 when the invite was renewed meanwhile and 500 when the file
-could not be written, which leaves the request as it was. Each decision appends `driver_approve`, `driver_correct`,
+A decision or a Move (`/drivers/reassign`) answers 404 when the invite was renewed
+meanwhile and 500 when the file could not be written, which leaves the request, and for
+a Move the sender's entry, as it was. Each decision appends `driver_approve`, `driver_correct`,
 `driver_reject` or `driver_reject_pending` with `who` to `driver-race-audit.jsonl`, the
 single decisions with the new values and `before`.
 
