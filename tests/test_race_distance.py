@@ -668,7 +668,8 @@ def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit
     last and first `pit_s` around its stand, at 15 m/s and otherwise at 50 m/s.
     `on_tick(race, t, rows, out)` runs on every tick from A's stop on; `out` is the
     set of teams whose next car has left the box. `b_mode` "never": B drives on past its
-    box; "pit": B stops for 8 s and drives on. Returns the gaps before the switch."""
+    box; "pit": B stops for 8 s and drives on; "queue": B halts 2 s in the pit lane, moves
+    on for 4 s at 50 m/s, then stands for its change. Returns the gaps before the switch."""
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     old = {"A": Car(race, "A", "a1", L - 15), "B": Car(race, "B", "b1", L - 25),
            "C": Car(race, "C", "c1", L - 515)}
@@ -682,10 +683,12 @@ def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit
         since = step / HZ
         for e, car in old.items():
             car.box = car.box or (since >= stop[e] and e not in out and not (e == "B" and b_mode == "never"))
+        if b_mode == "queue" and "B" not in out:
+            old["B"].box = since >= stop["B"] and not stop["B"] + 2 <= since < stop["B"] + 6
         if b_mode == "pit" and "B" not in out and since >= stop["B"] + 8:
             old["B"].box = False
             out.add("B")
-        for e in "ABC" if b_mode == "change" else "AC":
+        for e in "ABC" if b_mode in ("change", "queue") else "AC":
             if e not in new and since >= stop[e] + stall_s - 5:
                 new[e] = Car(race, e, e.lower() + "2", L - 15)
                 new[e].box = True
@@ -696,6 +699,8 @@ def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit
         lane = {id(old[e]) for e in "ABC" if stop[e] - pit_s <= since and e not in out} | \
             {id(new[e]) for e in out if e in new and since < stop[e] + stall_s + pit_s}
         if b_mode == "never":
+            lane.discard(id(old["B"]))
+        elif b_mode == "queue" and stop["B"] + 2 <= since < stop["B"] + 6:
             lane.discard(id(old["B"]))
         elif b_mode == "pit" and "B" in out and since < stop["B"] + 8 + pit_s:
             lane.add(id(old["B"]))
@@ -724,8 +729,8 @@ def t_a_lapped_car_keeps_its_gap_through_a_driver_change():
 
 
 def t_a_lapped_car_stays_lapped_while_the_field_stands_for_a_change():
-    # B's box before, beyond and far beyond the leader's a lap on.
-    for in_lap_s, mode in ((15.0, "change"), (25.0, "change"), (30.0, "change")):
+    # B's box before, beyond and far beyond the leader's a lap on; B queueing behind a car first.
+    for in_lap_s, mode in ((15.0, "change"), (25.0, "change"), (30.0, "change"), (25.0, "queue")):
         seen = []
         _lapped_through_a_change(in_lap_s, lambda race, t, rows, out, seen=seen: seen.append(
             (rows["B"]["lapped"], rows["C"]["lapped"])), after_s=20.0, b_mode=mode)
@@ -744,7 +749,7 @@ def t_a_lapped_car_that_skips_its_change_regains_the_lead_lap():
         lapped, gap, _ = seen[-1]
         assert lapped == 0 and gap < L / 50, f"B ({mode}) is on the lead lap again: {seen[-1]}"
         if mode == "pit":
-            assert all(lap == 0 for lap, _, gone in seen if gone), "from its box exit on"
+            assert all(lap == 0 for lap, _, gone in seen[-200:]), "back at racing pace out of the pit lane"
 
 
 def _lapped_field(extra=()):

@@ -185,7 +185,7 @@ class _Entry:
         self.stint_end = None      # change window: the shown distance where its old car stopped
         self.change_stop = None    # change window: when its old car began standing at the anchor
         self.stall = None          # (stop, box exit) of its change in the current switch
-        self.drove_on = False      # change window: its car left the box without a change
+        self.halted = None         # change window: the shown distance where its car drove out of the box
         self.changed = False
         self.held = False          # endurance: the counter dropped, waiting for a rejoin
         self.relobby = False       # endurance: the same driver moved on to the next lobby
@@ -374,7 +374,7 @@ class Race:
             for ent in self._entries.values():
                 ent.changed, ent.stint_end, ent.switch_pit = False, None, False
                 ent.change_stop = ent.stall = None
-                ent.drove_on = False
+                ent.halted = None
 
     def red_flag(self, now, mode):
         """Freeze every entry; each continues from its anchor in the restart lobby."""
@@ -893,7 +893,7 @@ class Race:
                     self._changed(ent, t)
             elif car.left_box:
                 ent.change_anchor = ent.change_stop = None   # it drove on: a pit stop, not a change
-                ent.drove_on = True
+                ent.halted = ent.distance + ent.adjust
             return
         if car.left_box and ent.change_anchor is not None and window \
                 and car.lap <= MAX_CHANGE_LAP \
@@ -1172,7 +1172,9 @@ class Race:
             held = None if a is None or b is None else \
                 math.floor((a + ahead.adjust - b - ent.adjust) / self.length)
             # Past its box without standing, the stand of the car ahead was its gain.
-            near = held is not None and a + ahead.adjust - shown > held * self.length - PIT_ROW_M
+            # A car that drove out of its box may only queue in the pit lane: count from there.
+            near = held is not None and shown < max(a + ahead.adjust - held * self.length,
+                                                    ent.halted if ent.halted is not None else -math.inf) + PIT_ROW_M
             if held is not None and held > laps and (ent.changed or ent.change_anchor is not None
                                                      or near or self._pit_pace(ent, stop)):
                 laps = held
@@ -1191,7 +1193,7 @@ class Race:
         """When `ahead` began standing for its change, while the window is open and not
         both of them have taken over in the next lobby; None otherwise."""
         car = self._cars.get(ent.active)
-        if ahead.change_stop is None or (ahead.changed and ent.changed) or ent.drove_on or self._estimated(ent) \
+        if ahead.change_stop is None or (ahead.changed and ent.changed) or self._estimated(ent) \
                 or car is None or car.t is None or self._window_until is None \
                 or car.t > self._window_until:
             return None
