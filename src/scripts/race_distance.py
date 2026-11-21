@@ -1110,7 +1110,7 @@ class Race:
         ahead of one it trails on the road. Quiet and held cars keep their last distance."""
         lasts = {e.entry: self._last(e) for e in ents
                  if e.distance is not None and not e.waiting and not e.held and not self._estimated(e)
-                 and not self._quiet(e, now)}
+                 and e.finished_at is None and not self._quiet(e, now)}
         lasts = {k: v for k, v in lasts.items() if v is not None}
         if len(lasts) < 2:
             return {}
@@ -1212,13 +1212,12 @@ class Race:
             [self._ghost(n) for n in self._roster if n in self._retired and n not in self._entries]
         out.sort(key=lambda e: (-self._shown(e) if e.distance is not None else math.inf, e.entry))
         winner = self._winner()
-        synced = self._synced(ents, now) if self._finishing_at is None else {}
+        synced = self._synced(ents, now)
 
         def key(e):
             shown = self._shown(e)
-            dist = shown if shown is not None else -math.inf
+            dist = synced.get(e.entry, shown if shown is not None else -math.inf)
             if self._finishing_at is None:
-                dist = synced.get(e.entry, dist)
                 # On a tie an estimate stays on its side of its reference.
                 side = (-1.0 if self._est[e.entry]["ahead"] else 1.0) if self._estimated(e) else 0.0
                 return (0, -dist, side, 0.0, "")
@@ -1241,7 +1240,10 @@ class Race:
             if reached is None:
                 reached = e.finished_at if e.finished_at is not None else math.inf
             return (0, -laps, reached, -dist, e.entry)
-        ents.sort(key=key)
+        keys = {e.entry: key(e) for e in ents}
+        if self._finishing_at is not None:
+            self._road_order(ents, keys)
+        ents.sort(key=lambda e: keys[e.entry])
         mismatch = self._mismatches(ents)
         lap = self._lap_display(ents, now)
         ranked = len(ents)
@@ -1324,6 +1326,24 @@ class Race:
                 "fastest": self.fastest,
                 "lap": lap, "lobby_lap": self._lobby_lap(now), "classes": classes, "class_lap": class_lap,
                 "class_counts": class_counts, "class_count": class_count, "entries": rows}
+
+    def _road_order(self, ents, keys):
+        """After the flag, cars still running on one ranked lap follow the road: each
+        takes the earliest time at that lap of the running cars behind it."""
+        runners = {}
+        for e in ents:
+            k = keys[e.entry]
+            shown = self._shown(e)
+            if k[0] == 0 and e.finished_at is None and not self._estimated(e) and shown is not None \
+                    and math.floor(shown / self.length) == -k[1]:
+                runners.setdefault(k[1], []).append(e)
+        for group in runners.values():
+            group.sort(key=lambda e: keys[e.entry][3])
+            earliest = math.inf
+            for e in reversed(group):
+                k = keys[e.entry]
+                earliest = min(earliest, k[2])
+                keys[e.entry] = (k[0], k[1], earliest, k[3], k[4])
 
     def _estimate_gaps(self, ents, rows, now):
         """An estimated car's gaps are its reference's plus the seconds behind, minus

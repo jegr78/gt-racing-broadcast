@@ -197,6 +197,8 @@ and says so. Changing the layout mid-event starts the race over.
   leader's. The race timer never ends a race. **Finish** freezes the order at once. After the
   leader's flag the order is laps first, then who completed them first, so a lapped
   car that takes the flag stays behind a car on the lead lap that is still running.
+  Cars still running on the same lap keep following the road until each finishes,
+  compared at one moment as while racing.
   No car shows more laps than the leader had when the flag fell, and a finished car's
   gap is the time it completed that many laps after the car ahead. A finished car with
   fewer laps than the car it is compared with reads lapped (`+1 L`).
