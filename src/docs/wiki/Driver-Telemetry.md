@@ -366,8 +366,10 @@ It never carries connection ids, corrections or who made them.
   later laps then no longer change the best lap, but a lap added afterwards does when it
   is faster or the time was deleted. **GT7 time** drops the correction and the added
   laps, so only GT7's laps count again. An entry without a sender gets its row with the
-  first time entered for it, and its name comes from the driver's approved request, else
-  from a name override for the entry without a sender (**Driver name**, `(no sender)`).
+  first time entered for it. Its name is a **Driver name** override when one is set:
+  first the one for the driver of its approved request, then the one for the entry
+  without a sender (`(no sender)`). Without an override it shows the approved request's
+  name.
 
 ### On air and in the cockpit
 
