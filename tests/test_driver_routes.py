@@ -1343,14 +1343,15 @@ class _Setup:
     """The Setup tab control: records the banner."""
     def __init__(self):
         self.banner = ""
+        self.hud = self
+
+    def data(self):
+        return {"raceControl": self.banner}
 
     def set_field(self, key, value):
         if key == "racecontrol":
             self.banner = value
         return {"ok": True, "field": key, "value": value}
-
-    def data(self):
-        return {}
 
 
 def t_race_control_clears_the_banner_its_red_flag_set_whoever_owns_the_cover():
@@ -1372,6 +1373,10 @@ def t_race_control_clears_the_banner_its_red_flag_set_whoever_owns_the_cover():
         assert _req(port, "/setup/set/racecontrol/Driver%20Swaps")[0] == 200
         flag(False)
         assert setup.banner == "Driver Swaps", "a banner the director set afterwards stays"
+        flag(True)
+        setup.banner = "Driver Swaps"                    # typed into the Setup tab
+        flag(False)
+        assert setup.banner == "Driver Swaps", "a banner changed in the Sheet stays too"
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()

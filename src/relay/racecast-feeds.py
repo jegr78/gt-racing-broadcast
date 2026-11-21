@@ -14447,6 +14447,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # happened. Best-effort: set_field no-ops without the webhook.
                     if result.get("obs_cut") and setup_ctl:
                         setup_ctl.set_field("racecontrol", "")
+                        relay.rc_red_flag_banner = False
                     # Auto-follow the on-air stint's Streamer + Stint label from the
                     # Schedule (issue #112) on a real cut OR a same-URL continuation
                     # The DISPLAY stint advances on a continuation too, even
@@ -15183,6 +15184,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         # The banner has its own claim: the cover may be the director's or
                         # unreachable while this desk's banner is on air.
                         banner_owned = getattr(relay, "rc_red_flag_banner", False)
+                        hud = getattr(setup_ctl, "hud", None)
+                        if not on and banner_owned and hud is not None \
+                                and hud.data().get("raceControl") != RED_FLAG_BANNER:
+                            banner_owned = relay.rc_red_flag_banner = False    # changed in the Sheet
                         if (on or owned) and _obs_ws is not None:
                             scene = _obs_ws.graphic_scene(relay.solo)
                             state, note = relay._obs.read_obs_state([(scene, STANDBY_COVER_SOURCE)], [])
