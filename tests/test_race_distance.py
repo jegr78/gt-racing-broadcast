@@ -661,6 +661,60 @@ def t_a_box_stop_outside_the_change_window_changes_nobody():
     assert _row(race, "A", t)["driver"] == "Max", "no change without the stint switch"
 
 
+def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit_s=10.0):
+    """A leads; C runs 10 s behind; B a lap and about 20 s down. At a stint switch A
+    stands in its box, C and B drive on for 10 s and `in_lap_s` to theirs. Every team
+    stands `stall_s` and leaves the next lobby's box; each car runs the pit lane, the
+    last and first `pit_s` around its stand, at 15 m/s and otherwise at 50 m/s.
+    `on_tick(race, t, rows, out)` runs on every tick from A's stop on; `out` is the
+    set of teams whose next car has left the box. Returns the gaps before the switch."""
+    race = rd.Race(TRACE, formation=False, multi_lobby=True)
+    old = {"A": Car(race, "A", "a1", L - 15), "B": Car(race, "B", "b1", L - 25),
+           "C": Car(race, "C", "c1", L - 515)}
+    t = _drive(race, list(old.values()), [50, 40, 50], 0.0, 415)
+    t = _drive(race, list(old.values()), [50, 50, 50], t, 20)
+    before = {e: _row(race, e, t)["gap_time_s"] for e in "BC"}
+    race.open_change_window(t)
+    stop = {"A": pit_s, "C": pit_s + 10.0, "B": pit_s + in_lap_s}
+    new, out = {}, set()
+    for step in range(int((max(stop.values()) + stall_s + after_s) * HZ)):
+        since = step / HZ
+        for e, car in old.items():
+            car.box = car.box or since >= stop[e]
+        for e in "ABC":
+            if e not in new and since >= stop[e] + stall_s - 5:
+                new[e] = Car(race, e, e.lower() + "2", L - 15)
+                new[e].box = True
+            if e in new and e not in out and since >= stop[e] + stall_s:
+                new[e].box = False
+                out.add(e)
+        cars = [old[e] for e in "ABC" if e not in out] + [new[e] for e in "ABC" if e in new]
+        lane = {id(old[e]) for e in "ABC" if stop[e] - pit_s <= since} | \
+            {id(new[e]) for e in out if since < stop[e] + stall_s + pit_s}
+        t = _drive(race, cars, [None if c.box else 15 if id(c) in lane else 50 for c in cars], t, 1.0 / HZ)
+        rows = {r["entry"]: r for r in race.standings(t)["entries"]}
+        on_tick(race, t, rows, out)
+    return before
+
+
+def t_a_lapped_car_keeps_its_gap_through_a_driver_change():
+    """B's own pit lane shows in its gap until it passes where A lost the same, as at any
+    pit stop of a lapped car; the stand for the change never does."""
+    seen = []
+    before = _lapped_through_a_change(15.0, lambda race, t, rows, out: seen.append(
+        (rows["B"]["gap_time_s"], rows["C"]["gap_time_s"])) if out >= {"B", "C"} else None)
+    assert before["B"] > L / 50 + 15, before
+    gaps_b, gaps_c = [b for b, _ in seen], [c for _, c in seen]
+    pit_lane = 2 * 10.0 * (1 - 15 / 50)
+    assert max(gaps_b) < before["B"] + pit_lane + 1.0, \
+        f"B's gap from its box exit on: {before['B']} -> {min(gaps_b)} .. {max(gaps_b)}"
+    assert max(abs(a - b) for a, b in zip(gaps_b[:-1], gaps_b[1:], strict=True)) < 1.0, "B's gap never steps"
+    assert all(abs(g - before["B"]) < 0.3 for g in gaps_b[-100:]), \
+        f"past A's pit lane B reads its old gap: {before['B']} -> {gaps_b[-100:][::25]}"
+    assert all(abs(g - before["C"]) < 0.5 for g in gaps_c), \
+        f"C's gap holds from its box exit on: {before['C']} -> {min(gaps_c)} .. {max(gaps_c)}"
+
+
 def t_distance_stays_continuous_when_the_line_starts_mid_lap():
     shifted = [{"d": p["d"], "x": q["x"], "z": q["z"]}
                for p, q in zip(TRACE, TRACE[240:] + TRACE[1:241], strict=True)]

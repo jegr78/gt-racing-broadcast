@@ -28,7 +28,8 @@ nearest the predicted distance decides.
   then leaves the box continues from it. A driver who stays on for the next stint keeps
   the connection: its counter drops in the new lobby, and leaving that lobby's box
   continues from the anchor too. Lap 1 of the follow-up lobby, driven before that car
-  leaves the box, never counts.
+  leaves the box, never counts. Once both took over, a gap leaves out the stand of the
+  car ahead from its stop to its box exit.
 - Plausibility: every field comes from a driver's machine. A sample with a non-finite
   value, a position far off the line's area or a time before the car's last sample is
   dropped; one whose distance step is faster than MAX_SPEED_MPS only keeps the
@@ -178,6 +179,8 @@ class _Entry:
         self.cts, self.cds = array("d"), array("d")
         self.change_anchor = None
         self.stint_end = None      # change window: the shown distance where its old car stopped
+        self.change_stop = None    # change window: when its old car began standing at the anchor
+        self.stall = None          # (stop, box exit) of its change in the current switch
         self.changed = False
         self.held = False          # endurance: the counter dropped, waiting for a rejoin
         self.relobby = False       # endurance: the same driver moved on to the next lobby
@@ -365,6 +368,7 @@ class Race:
             self._lobby_at = now
             for ent in self._entries.values():
                 ent.changed, ent.stint_end, ent.switch_pit = False, None, False
+                ent.change_stop = ent.stall = None
 
     def red_flag(self, now, mode):
         """Freeze every entry; each continues from its anchor in the restart lobby."""
@@ -877,7 +881,7 @@ class Race:
         if car.conn == ent.active:
             if window and car.in_box and ent.change_anchor is None and ent.distance is not None \
                     and not ent.changed:
-                ent.change_anchor = ent.distance
+                ent.change_anchor, ent.change_stop = ent.distance, car.still_since
             elif car.left_box and ent.relobby and window and car.lap <= MAX_CHANGE_LAP:
                 if self._start(ent, car, t, ent.change_anchor, car.lap, car.s, from_line=False):
                     self._changed(ent, t)
@@ -907,6 +911,7 @@ class Race:
             ent.pit_stops += 1
             ent.switch_pit = True
         ent.stint_end = ent.distance + ent.adjust
+        ent.stall = None if ent.change_stop is None else (ent.change_stop, t)
         ent.change_anchor, ent.changed, ent.held, ent.relobby = None, True, False, False
         ent.ts.append(t)
         ent.ds.append(ent.distance)
@@ -1253,7 +1258,14 @@ class Race:
                 if after is not None and before is not None:
                     return self._racing(after) - (self._racing(theirs[1]) - before)
         reached = self._time_at(ahead, at - ahead.adjust)
-        return None if reached is None else self._racing(reached)
+        if reached is None:
+            return None
+        if ahead.stall is not None and ent.changed and ent.stint_end is not None \
+                and at >= ent.stint_end and reached < ahead.stall[1]:
+            # Both took over in the next lobby: `ahead`'s stand for the change is no gap.
+            stop, out = ahead.stall
+            return self._racing(min(reached, stop)) + self._racing(out) - self._racing(stop)
+        return self._racing(reached)
 
     def _racing_at(self, ent, d):
         """The racing time `ent` passed raw distance d; None outside its history. Between

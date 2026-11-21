@@ -243,7 +243,9 @@ In an endurance race each stint switch on air opens a window for driver changes.
 the team's car stands in the box and the next driver's car then leaves the box of the
 next lobby, the team continues from where the old car stopped. A driver who stays on
 for the next stint does the same with one sender. Lap 1 of the new lobby before that
-never counts. The lap count applies to the final lobby only and counts that lobby's
+never counts. Gaps leave out the time the car ahead stood for its change. A lapped
+car's own pit lane shows in its gap until it passes where the car ahead lost the same,
+as at any pit stop. The lap count applies to the final lobby only and counts that lobby's
 laps on GT7's counter, from the car that took over after the last stint switch: the
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
 event setting. A lap count set while the final stint is already on air applies at once.
