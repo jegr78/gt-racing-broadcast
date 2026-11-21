@@ -296,6 +296,10 @@ class Race:
                 ent.finished_at = now              # a finish by hand classifies it where it stopped
             elif ent is not None and ent.distance is not None and self._red is not None:
                 ent.frozen, ent.waiting = ent.distance, True
+                car = self._cars.get(ent.active)
+                if car is not None and car.lap is not None and car.s is not None \
+                        and self._start(ent, car, car.t, ent.distance, car.lap, car.s, from_line=False):
+                    car.counting = False           # a release counts on from here
             elif ent is not None and ent.distance is not None:
                 ent.resume = True
         self._settle_stoppage()

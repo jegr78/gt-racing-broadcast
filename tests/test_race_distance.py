@@ -2328,6 +2328,24 @@ def t_undoing_a_retirement_under_a_red_flag_waits_for_the_restart_like_every_car
         assert _row(race, "B", t)["distance_m"] > db, f"B resumes from its anchor: {_row(race, 'B', t)}"
 
 
+def t_an_undone_retirement_under_a_mis_pressed_red_flag_counts_on_from_the_undo():
+    for multi_lobby in (False, True):
+        race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby)
+        a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 25)
+        t = _drive(race, [a, b], [50, 50], 0.0, 90)
+        race.retire("B", True, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        db = _row(race, "B", t)["distance_m"]
+        race.red_flag(t, "keep")
+        race.retire("B", False, t)
+        t = _drive(race, [a, b], [50, 50], t, 2)
+        race.release(t)
+        t = _drive(race, [a, b], [50, 50], t, 4)
+        rb = _row(race, "B", t)
+        assert abs(rb["distance_m"] - (db + 300)) < 30, \
+            f"B counts the metres from the undo on, none driven while retired: {db} {rb['distance_m']}"
+
+
 def _undo_in_the_restart_lobby(new_console):
     """B retires, the red flag falls, B's console reaches the restart lobby while
     retired (the same console, or `new_console` connecting there), then Undo DNF."""
