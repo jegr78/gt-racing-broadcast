@@ -245,10 +245,12 @@ next lobby, the team continues from where the old car stopped. A driver who stay
 for the next stint does the same with one sender. Lap 1 of the new lobby before that
 never counts. Gaps leave out the time the car ahead stood for its change. A lapped
 car's own pit lane shows in its gap until it passes where the car ahead lost the same,
-as at any pit stop. The lap count applies to the final lobby only and counts that lobby's
-laps on GT7's counter, from the car that took over after the last stint switch: the
-last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
-event setting. A lap count set while the final stint is already on air applies at once.
+as at any pit stop. Until both cars have taken over, a car's laps down count from the
+moment the car ahead stopped, so a lapped car driving on to its box while the leader
+stands stays `+1 L`. The lap count applies to the final lobby only and counts that
+lobby's laps on GT7's counter, from the car that took over after the last stint
+switch: the last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab),
+else the event setting. A lap count set while the final stint is already on air applies at once.
 The final lobby's flag follows the road, as in GT7: the first of its cars to complete
 the count takes it, or after **Final lap** the leader on the road at its next crossing,
 even when another car leads in race distance. A car behind that crosses onto the

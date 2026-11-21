@@ -715,6 +715,16 @@ def t_a_lapped_car_keeps_its_gap_through_a_driver_change():
         f"C's gap holds from its box exit on: {before['C']} -> {min(gaps_c)} .. {max(gaps_c)}"
 
 
+def t_a_lapped_car_stays_lapped_while_the_field_stands_for_a_change():
+    for in_lap_s in (15.0, 25.0):            # B's box before, then beyond the leader's a lap on
+        seen = []
+        _lapped_through_a_change(in_lap_s, lambda race, t, rows, out, seen=seen: seen.append(
+            (rows["B"]["lapped"], rows["C"]["lapped"])), after_s=20.0)
+        assert all(b == 1 for b, _ in seen), \
+            f"B stays a lap down through the change ({in_lap_s} s in-lap): {[b for b, _ in seen].count(0)} ticks on 0"
+        assert all(c == 0 for _, c in seen), f"C stays on the lead lap ({in_lap_s} s in-lap)"
+
+
 def t_distance_stays_continuous_when_the_line_starts_mid_lap():
     shifted = [{"d": p["d"], "x": q["x"], "z": q["z"]}
                for p, q in zip(TRACE, TRACE[240:] + TRACE[1:241], strict=True)]

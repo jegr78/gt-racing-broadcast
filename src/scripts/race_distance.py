@@ -29,7 +29,7 @@ nearest the predicted distance decides.
   the connection: its counter drops in the new lobby, and leaving that lobby's box
   continues from the anchor too. Lap 1 of the follow-up lobby, driven before that car
   leaves the box, never counts. Once both took over, a gap leaves out the stand of the
-  car ahead from its stop to its box exit.
+  car ahead from its stop to its box exit; until then laps down count from that stop.
 - Plausibility: every field comes from a driver's machine. A sample with a non-finite
   value, a position far off the line's area or a time before the car's last sample is
   dropped; one whose distance step is faster than MAX_SPEED_MPS only keeps the
@@ -886,7 +886,7 @@ class Race:
                 if self._start(ent, car, t, ent.change_anchor, car.lap, car.s, from_line=False):
                     self._changed(ent, t)
             elif car.left_box:
-                ent.change_anchor = None          # it drove on: a pit stop, not a change
+                ent.change_anchor = ent.change_stop = None   # it drove on: a pit stop, not a change
             return
         if car.left_box and ent.change_anchor is not None and window \
                 and car.lap <= MAX_CHANGE_LAP \
@@ -1148,7 +1148,8 @@ class Race:
 
     def _laps_behind(self, ahead, ent):
         """Whole laps `ent` is behind `ahead`; for a car that took the flag the laps the
-        order counts, since a frozen finish distance overshoots the line by chance."""
+        order counts, since a frozen finish distance overshoots the line by chance; in the
+        change window, until both took over, at least the laps when `ahead` stopped."""
         if ent.finished_at is not None and self._finishing_at is not None:
             return max(0, self._ranked_laps(ahead) - self._ranked_laps(ent))
         shown = self._shown(ent)
@@ -1156,7 +1157,24 @@ class Race:
             # Against a frozen finish the laps at that moment, not a distance it closes on.
             then = self._distance_at(ent, ahead.finished_at)
             shown = shown if then is None else then + ent.adjust
-        return math.floor((self._shown(ahead) - shown) / self.length)
+        laps = math.floor((self._shown(ahead) - shown) / self.length)
+        stop = self._change_stop(ahead, ent)
+        if stop is not None:
+            # A car driving on to its box while `ahead` stands closes in by distance only.
+            a, b = self._distance_at(ahead, stop), self._distance_at(ent, stop)
+            if a is not None and b is not None:
+                laps = max(laps, math.floor((a + ahead.adjust - b - ent.adjust) / self.length))
+        return laps
+
+    def _change_stop(self, ahead, ent):
+        """When `ahead` began standing for its change, while the window is open and not
+        both of them have taken over in the next lobby; None otherwise."""
+        car = self._cars.get(ent.active)
+        if ahead.change_stop is None or (ahead.changed and ent.changed) or self._estimated(ent) \
+                or car is None or car.t is None or self._window_until is None \
+                or car.t > self._window_until:
+            return None
+        return ahead.change_stop
 
     def _time_behind(self, ahead, ent, now=None):
         """Seconds `ent` is behind `ahead` by distance history, also when lapped; None
