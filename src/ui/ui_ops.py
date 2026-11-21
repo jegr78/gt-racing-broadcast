@@ -91,7 +91,7 @@ OPS = {
 PROFILE_OPS=frozenset({'chat-clear','chat-pull','chat-import','chat-export',
     'health-export','health-import','health-pull','console-pull-versions',
     'telemetry-record-start','telemetry-record-stop','telemetry-record-status',
-    'obs-benchmark','streams-restart','smoketest'})
+    'obs-benchmark','streams-restart','smoketest','timing-host-deploy'})
 
 # Browsers get-cookies can export from (yt-dlp --cookies-from-browser names).
 BROWSERS = ("firefox", "chrome", "edge", "brave", "safari")
