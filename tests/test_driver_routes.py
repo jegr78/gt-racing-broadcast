@@ -1242,6 +1242,27 @@ def t_the_on_air_record_waits_for_the_schedule():
             assert json.load(fh) == {"stint": 1, "alive": 101.0}, "a loaded schedule records its row"
 
 
+def t_main_hands_the_profiles_invite_to_the_stint_watch():
+    import inspect
+
+    class Cache:
+        invite = None
+
+        def get(self):
+            return self.invite
+
+    cache = Cache()
+    kw = g.m._on_air_watch_kwargs("/rt", cache)
+    assert kw["on_air_path"] == os.path.join("/rt", "on-air.json")
+    assert kw["invite_active"]() is False, "no invite: no record"
+    cache.invite = {"id": "x"}
+    assert kw["invite_active"]() is True, "the watch follows the invite file through the cache"
+    src = inspect.getsource(g.m.main)
+    assert "_hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))" in src
+    assert "kwargs=_on_air_watch_kwargs(runtime, _hub_invite)" in src, \
+        "main gives the stint watch the profile's invite cache"
+
+
 def t_any_relay_of_an_unstopped_event_records_the_stint_and_its_stamp():
     import tempfile, threading, time
 

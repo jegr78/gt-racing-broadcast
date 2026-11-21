@@ -15699,6 +15699,12 @@ def _on_air_tick(relay, path, state, clock):
             state["stint"], state["at"] = stint, now
 
 
+def _on_air_watch_kwargs(runtime, invite_cache):
+    """The stint watch keeps runtime on-air.json while the profile's invite exists."""
+    return {"on_air_path": os.path.join(runtime, "on-air.json"),
+            "invite_active": lambda: invite_cache.get() is not None}
+
+
 def stint_switch_watch(relay, race_svc, stop_evt, settings_laps, interval=1.0, on_air_path=None,
                        clock=time.time, invite_active=lambda: True):
     """Tell the driver race when the broadcast switches stints: that opens the driver
@@ -16686,8 +16692,7 @@ def main():
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),
-        kwargs={"on_air_path": os.path.join(runtime, "on-air.json"),
-                "invite_active": lambda: _hub_invite.get() is not None}).start()
+        kwargs=_on_air_watch_kwargs(runtime, _hub_invite)).start()
     sender_script_path = os.path.join(here, "racecast-sender.py")
     drive_page_path = None
     for cand in (os.path.join(here, "drive.html"), os.path.join(here, "..", "drive.html"),
