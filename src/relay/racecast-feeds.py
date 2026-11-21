@@ -15200,9 +15200,19 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             # A second raise keeps the claim; a failed lower keeps it too.
                             relay.rc_red_flag_raised = (
                                 bool(owned or (cover and not was_up)) if on else not cover)
+                        if (on or banner_owned) and not setup_ctl:
+                            banner = {"error": "no Setup tab control"}
+                        elif on:
+                            before = hud.data().get("raceControl") or "" if hud is not None else ""
+                            banner = setup_ctl.set_field("racecontrol", RED_FLAG_BANNER)
+                            if not banner.get("error") and not banner_owned:
+                                relay.rc_red_flag_prev_banner = "" if before == RED_FLAG_BANNER else before
+                        elif banner_owned:
+                            prev = getattr(relay, "rc_red_flag_prev_banner", "")
+                            banner = setup_ctl.set_field("racecontrol", prev)
+                            if banner.get("error") and prev:    # left the vocabulary meanwhile
+                                banner = setup_ctl.set_field("racecontrol", "")
                         if on or banner_owned:
-                            banner = (setup_ctl.set_field("racecontrol", RED_FLAG_BANNER if on else "")
-                                      if setup_ctl else {"error": "no Setup tab control"})
                             relay.rc_red_flag_banner = on if not banner.get("error") else banner_owned
                     race = None
                     if driver_race_svc is not None:

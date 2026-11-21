@@ -1392,6 +1392,25 @@ def t_race_control_clears_the_banner_its_red_flag_set_whoever_owns_the_cover():
         srv.shutdown()
 
 
+def t_restart_released_brings_back_the_banner_the_red_flag_replaced():
+    hdr = {"Content-Type": "application/json"}
+    setup = _Setup()
+    setup.banner = setup.polled = "Driver Swaps"
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, None, 0.0
+    srv, port, _path, _hub = _serve(setup_ctl=setup)
+    rc = g._tok("dave")
+    flag = lambda on: json.loads(_req(port, f"/console/race-control/red-flag?t={rc}",
+                                      json.dumps({"on": on}).encode(), hdr)[1])
+    try:
+        assert flag(True)["banner"] == "ok" and setup.banner == g.m.RED_FLAG_BANNER
+        assert flag(True)["banner"] == "ok", "a second raise keeps the banner to bring back"
+        assert flag(False)["banner"] == "ok" and setup.banner == "Driver Swaps", \
+            ("Restart released shows the director's banner again", setup.banner)
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+
+
 def t_a_refused_banner_write_keeps_the_desk_claim():
     hdr = {"Content-Type": "application/json"}
     setup = _Setup()
