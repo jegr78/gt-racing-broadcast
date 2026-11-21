@@ -3299,13 +3299,13 @@ def t_event_start_and_stop_drive_the_invite():
         m._write_session_start = saved
     assert session == [True], "Start event on a running relay still opens a new report window"
 
-    def _broadcast(age_s, stint=5, part=2):
+    def _broadcast(age_s, stint=5, part=2, mode="race"):
         def seed(tmp):
             _invite(age_s)(tmp)
             with open(os.path.join(tmp, "on-air.json"), "w", encoding="utf-8") as fh:
                 json.dump({"stint": stint}, fh)
             with open(os.path.join(tmp, "part.json"), "w", encoding="utf-8") as fh:
-                json.dump({"index": part, "live": True}, fh)
+                json.dump({"index": part, "live": True, "mode": mode}, fh)
         return seed
 
     def _files(tmp):
@@ -3320,21 +3320,32 @@ def t_event_start_and_stop_drive_the_invite():
     args, state, out = [], [], io.StringIO()
     _start([], running=False, seed=_broadcast(60), out=out, relay_args=args, after=_files)
     assert args == [["--stint", "5", "--event-run"]], f"a continuation resumes the stint on air: {args}"
-    assert state[0][0] == {"index": 2, "live": False}, f"a continuation keeps the Part: {state}"
+    assert state[0][0] == {"index": 2, "live": False, "mode": "race"}, \
+        f"a continuation keeps the Part: {state}"
     assert "resuming stint 5, Part 2" in out.getvalue(), out.getvalue()
     args, state = [], []
     _start(["--stint", "3", "--part", "1"], running=False, seed=_broadcast(60),
            relay_args=args, after=_files)
-    assert args == [["--stint", "3", "--event-run"]] and state[0][0] == {"index": 1, "live": False}, \
+    assert args == [["--stint", "3", "--event-run"]] and state[0][0]["index"] == 1, \
         f"explicit --stint/--part win: {args} {state}"
     args, state = [], []
     _start([], running=False, seed=_broadcast(13 * 3600), relay_args=args, after=_files)
     assert args == [["--event-run"]], f"a new event starts at stint 1: {args}"
-    assert state[0] == ({"index": 1, "live": False}, None), \
+    assert state[0] == ({"index": 1, "live": False, "mode": "race"}, None), \
         f"a new event resets the Part and drops the last stint record: {state}"
-    args = []
-    _start(["--qualifying"], running=False, seed=_broadcast(60), relay_args=args)
+    args, state = [], []
+    _start(["--qualifying"], running=False, seed=_broadcast(60), relay_args=args, after=_files)
     assert args == [["--qualifying", "--event-run"]], f"the race stint is not forced onto qualifying: {args}"
+    assert state[0][0] == {"index": 1, "live": False, "mode": "qualifying"}, \
+        f"a race Part is not resumed in qualifying: {state}"
+    state = []
+    _start(["--qualifying"], running=False, seed=_broadcast(60, part=3, mode="qualifying"),
+           after=_files)
+    assert state[0][0]["index"] == 3, f"a qualifying Part resumes in qualifying: {state}"
+    state = []
+    _start([], running=False, seed=_broadcast(60, part=3, mode="qualifying"), after=_files)
+    assert state[0][0] == {"index": 1, "live": False, "mode": "race"}, \
+        f"a qualifying Part is not resumed in the race: {state}"
 
 
 def t_event_continues_bounds():
@@ -6356,7 +6367,10 @@ def t_write_part_reset_writes_file():
     try:
         m._write_part_reset(2)
         with open(m._part_path(), encoding="utf-8") as fh:
-            assert json.load(fh) == {"index": 2, "live": False}
+            assert json.load(fh) == {"index": 2, "live": False, "mode": "race"}
+        m._write_part_reset(1, "qualifying")
+        with open(m._part_path(), encoding="utf-8") as fh:
+            assert json.load(fh) == {"index": 1, "live": False, "mode": "qualifying"}
     finally:
         m._runtime_dir = orig
 

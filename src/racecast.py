@@ -796,7 +796,7 @@ def _part_path():
     return os.path.join(_runtime_dir(), "part.json")
 
 
-def _write_part_reset(index):
+def _write_part_reset(index, mode="race"):
     """Reset the broadcast-Part pointer to Part `index`, not-live. `event start`
     is the one reliable reset point (every event begins with it; a clean
     last-Part-stop / event stop can't be detected). A fresh relay adopts this on
@@ -807,7 +807,7 @@ def _write_part_reset(index):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"index": int(index), "live": False}, fh)
+            json.dump({"index": int(index), "live": False, "mode": mode}, fh)
     except OSError as exc:
         print("note: could not reset part.json ({}). Continuing.".format(exc))
 
@@ -1640,11 +1640,13 @@ def _read_positive(path, key):
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
 
 
-def _resume_point():
-    """(stint, part) a continued event resumes: the last recorded race stint or None,
-    and the persisted Part pointer (1 when unknown)."""
-    return (_read_positive(_on_air_record_path(), "stint"),
-            _read_positive(_part_path(), "index") or 1)
+def _resume_point(mode):
+    """(stint, part) a continued event in `mode` resumes, each None when unknown: the
+    last recorded race stint (race only) and the Part pointer saved in the same mode."""
+    stint = _read_positive(_on_air_record_path(), "stint") if mode == "race" else None
+    part = (_read_positive(_part_path(), "index")
+            if _read_on_air(_part_path()).get("mode") == mode else None)
+    return stint, part
 
 
 def _clear_on_air_record():
@@ -6838,14 +6840,18 @@ def event_start(rest, _autojoin=True, _new_session=True):
     relay_was_running = _relay_already_running_for_active_profile() if fresh else False
     continuing = fresh and not relay_was_running and _unstopped_event_continues()
     fresh = fresh and not continuing
+    mode = "qualifying" if _qualifying_args(rest) else "race"
     resume_stint = None
-    if continuing and not _qualifying_args(rest):
-        resume_stint, part = _resume_point()
-        print(f"event: resuming stint {resume_stint}, Part {part}." if resume_stint else
-              f"event: resuming Part {part}; no stint recorded, the feeds start at stint 1.")
+    if continuing:
+        resume_stint, saved_part = _resume_point(mode)
+        part = saved_part or part
+        resumed = ([f"stint {resume_stint}"] if resume_stint else []) + \
+            ([f"Part {saved_part}"] if saved_part else [])
+        print("event: resuming " + ", ".join(resumed) + "." if resumed else
+              "event: nothing recorded to resume: stint and Part start at 1.")
     if fresh and not relay_was_running:
         _clear_on_air_record()
-    _write_part_reset(part)
+    _write_part_reset(part, mode)
     try:
         # Start event again on a running event (OBS or Companion back up) keeps the
         # drivers' codes; only a new event gets a new link.

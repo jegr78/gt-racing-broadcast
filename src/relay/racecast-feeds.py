@@ -3021,8 +3021,9 @@ class PartStore:
     state from OBS. Same best-effort, lock-guarded, type-checked-load contract as
     TimerStore/EventTitleStore (a hand-edited file must never crash later)."""
 
-    def __init__(self, path):
+    def __init__(self, path, mode=lambda: None):
         self.path = path
+        self.mode = mode   # the relay's mode, saved with the index so a resume can match it
         self.lock = threading.Lock()
         self.state = default_part_state()
         try:
@@ -3049,7 +3050,7 @@ class PartStore:
     def _save_file(self):
         try:
             with open(self.path, "w", encoding="utf-8") as fh:
-                json.dump(self.state, fh)
+                json.dump(dict(self.state, mode=self.mode()), fh)
         except OSError:
             pass  # best-effort, same contract as the timer/event caches
 
@@ -16484,6 +16485,7 @@ def main():
                   league_name=args.league_name,
                   producer_name=os.environ.get("RACECAST_PRODUCER_NAME", ""),
                   solo=args.solo)
+    part_store.mode = lambda: relay.mode
     if cookies:
         # After the Relay exists: only a YouTube feed source makes old cookies matter (#1091).
         _ch = cookie_health(cookies, needed=relay.cookies_needed())
