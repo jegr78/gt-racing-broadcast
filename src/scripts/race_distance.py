@@ -1121,6 +1121,11 @@ class Race:
                 d = self._distance_at(e, at)
                 if d is not None:
                     out[e.entry] = d + e.adjust
+        for e in ents:
+            # An estimate moves back with its reference.
+            ref = self._entries.get(self._est[e.entry]["ref"]) if self._estimated(e) else None
+            if ref is not None and ref.entry in out and self._shown(e) is not None:
+                out[e.entry] = self._shown(e) - (self._shown(ref) - out[ref.entry])
         return out
 
     def _passed(self, ahead, ent, at):

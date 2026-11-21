@@ -584,6 +584,26 @@ def t_order_and_interval_compare_two_cars_at_the_same_moment():
     assert ra["interval_time_s"] > 5, f"A's interval is to the leader: {ra['interval_time_s']}"
 
 
+def t_an_estimate_stays_behind_its_reference_when_the_field_compares_back():
+    race = rd.Race(TRACE, formation=False)
+    ld, a, x = Car(race, "L", "l", L - 15), Car(race, "A", "a", L - 300), Car(race, "X", "x", L - 330)
+    t = _drive(race, [ld, a, x], [50, 50, 50], 0.0, 30)
+    for _ in range(8 * HZ):                  # X goes quiet; L's samples lag A's by 0.8 s
+        t += 1.0 / HZ
+        for car in (ld, a):
+            car.speed = 50.0
+            car.along += 50.0 / HZ
+        a.send(t)
+        ld.along -= 40.0
+        if t - 0.8 > 30:
+            ld.send(t - 0.8)
+        ld.along += 40.0
+    race.estimate("X", "A", 0.5, t)
+    rows = race.standings(t)["entries"]
+    assert [r["entry"] for r in rows] == ["L", "A", "X"], f"X is estimated behind A: {[r['entry'] for r in rows]}"
+    assert abs(rows[2]["interval_time_s"] - 0.5) <= 0.05, f"X is 0.5 s behind A: {rows[2]}"
+
+
 def t_a_car_far_behind_keeps_its_exact_gap_to_the_leader():
     race = rd.Race(TRACE, formation=False)
     a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 30)
