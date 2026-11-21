@@ -10565,7 +10565,7 @@ def _apply_simulation_flag(argv, environ=None):
     environ = os.environ if environ is None else environ
     machine = pcfg.load_machine_env(_env_base(IS_FROZEN, _real_executable(), HERE))
     for key, value in machine.items():
-        if key == simulation.FLAG or key.startswith("RACECAST_SIM_"):
+        if key == simulation.FLAG or key.startswith("RACECAST_SIM_") and key != simulation.FORCE:
             environ.setdefault(key, value)
     out = [a for a in argv if a != "--simulation"]
     if len(out) != len(argv):
@@ -10587,10 +10587,48 @@ def _simulation_profile_values(name):
         return {}
 
 
-def _simulation_gate(argv, environ=None, profile=None, values=None, force=False):
+def _simulation_force_dir():
+    return os.path.join(_runtime_base_dir(), "simulation-force")
+
+
+def _grant_simulation_force(name, environ, force_dir):
+    """Record this forced run so its children pass for `name` while it lives."""
+    import secrets
+    nonce = secrets.token_hex(16)
+    os.makedirs(force_dir, exist_ok=True)
+    for old in glob.glob(os.path.join(force_dir, "*.json")):
+        try:
+            with open(old, encoding="utf-8") as fh:
+                if not sv.pid_alive(json.load(fh).get("pid")):
+                    os.remove(old)
+        except (OSError, ValueError, AttributeError):
+            pass  # unreadable record: leave it
+    with open(os.path.join(force_dir, nonce + ".json"), "w", encoding="utf-8") as fh:
+        json.dump({"profile": name, "pid": os.getpid()}, fh)
+    environ[simulation.FORCE] = f"{name}:{nonce}"
+
+
+def _simulation_forced_profile(environ, force_dir):
+    """The profile an inherited RACECAST_SIM_FORCE allows, or None. It counts only while
+    the run that granted it is alive and its record matches."""
+    name, _, nonce = (environ.get(simulation.FORCE) or "").partition(":")
+    if not (name and re.fullmatch(r"[0-9a-f]{32}", nonce)):
+        return None
+    try:
+        with open(os.path.join(force_dir, nonce + ".json"), encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or record.get("profile") != name:
+        return None
+    return name if sv.pid_alive(record.get("pid")) else None
+
+
+def _simulation_gate(argv, environ=None, profile=None, values=None, force=False,
+                     force_dir=None):
     """In simulation mode: None when this command may run, else why not. A forced run
-    (`racecast --simulation --force ...`) records the profile it allowed, so its
-    children run there too. A subcommand's own `--force` does not count."""
+    (`racecast --simulation --force ...`) grants its children a pass for its profile,
+    valid while it runs. A subcommand's own `--force` does not count."""
     environ = os.environ if environ is None else environ
     if simulation.flag_problem(environ):
         return "simulation mode: " + simulation.flag_problem(environ) + "."
@@ -10600,10 +10638,13 @@ def _simulation_gate(argv, environ=None, profile=None, values=None, force=False)
     if problems:
         return "simulation mode: " + "; ".join(problems) + "."
     name = _active_profile_name() if profile is None else profile
+    force_dir = force_dir or _simulation_force_dir()
     if name and force:
-        environ[simulation.FORCE] = name
+        _grant_simulation_force(name, environ, force_dir)
+        return None
     values = _simulation_profile_values(name) if values is None and name else (values or {})
-    return simulation.profile_refusal(name, values, environ.get(simulation.FORCE))
+    return simulation.profile_refusal(name, values,
+                                      _simulation_forced_profile(environ, force_dir))
 
 
 def _bootstrap(argv):

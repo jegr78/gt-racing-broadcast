@@ -153,8 +153,11 @@ never the real one.
 - `_simulation_gate` refuses a missing endpoint and a profile other than `demo` or one
   with `SIMULATION=1` in its `profile.env`. Only a `--force` before the command
   (`racecast --simulation --force <group> ...`, consumed by `_apply_simulation_flag`)
-  passes it and records the profile in `RACECAST_SIM_FORCE`, so the run's children pass
-  for that profile only; a subcommand's own `--force` keeps its old meaning. `profile`, `help`
+  passes it. `_grant_simulation_force` writes `runtime/simulation-force/<nonce>.json`
+  (profile + pid) and sets `RACECAST_SIM_FORCE=<profile>:<nonce>`; a child passes only
+  while that record matches and its pid is alive (`_simulation_forced_profile`), so a stale
+  export does not. The machine `.env` never supplies it. A subcommand's own `--force`
+  keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
   getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).

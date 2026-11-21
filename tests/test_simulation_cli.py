@@ -221,12 +221,32 @@ def t_simulation_flag_and_gate():
         "switching to the demo profile must stay possible"
     assert m._simulation_gate(["event", "start", "--force"], dict(ok), "league", {}), \
         "event start --force skips the pre-flight gate, it must not pass the profile guard"
+    fdir = tempfile.mkdtemp()
     forced = dict(ok)
-    assert m._simulation_gate(["event", "start"], forced, "league", {}, force=True) is None
-    assert forced[sim.FORCE] == "league", "the children of a forced run need the same pass"
-    assert m._simulation_gate(["relay", "start"], dict(forced), "league", {}) is None
-    assert m._simulation_gate(["relay", "start"], dict(forced), "other", {}), \
+    assert m._simulation_gate(["event", "start"], forced, "league", {}, force=True,
+                              force_dir=fdir) is None
+    assert forced[sim.FORCE].startswith("league:"), "the children of a forced run need a pass"
+    assert m._simulation_gate(["relay", "start"], dict(forced), "league", {},
+                              force_dir=fdir) is None
+    assert m._simulation_gate(["relay", "start"], dict(forced), "other", {}, force_dir=fdir), \
         "a force covers only the profile it was given for"
+    swapped = dict(ok, RACECAST_SIM_FORCE="other:" + forced[sim.FORCE].split(":")[1])
+    assert m._simulation_gate(["relay", "start"], swapped, "other", {}, force_dir=fdir), \
+        "a pass recorded for one profile must not be renamed to another"
+    stale = dict(ok, RACECAST_SIM_FORCE="league")
+    assert m._simulation_gate(["relay", "start"], stale, "league", {}, force_dir=fdir), \
+        "a bare exported RACECAST_SIM_FORCE must not pass"
+    forged = dict(ok, RACECAST_SIM_FORCE="league:" + "0" * 32)
+    assert m._simulation_gate(["relay", "start"], forged, "league", {}, force_dir=fdir), \
+        "a pass needs the record its forcing run wrote"
+    with _patched((m.sv, "pid_alive", lambda pid: False)):
+        assert m._simulation_gate(["relay", "start"], dict(forced), "league", {},
+                                  force_dir=fdir), "a pass dies with the run that forced it"
+    env = {}
+    with _patched((m.pcfg, "load_machine_env",
+                   lambda start: {"RACECAST_SIMULATION": "1", "RACECAST_SIM_FORCE": "league"})):
+        m._apply_simulation_flag(["event", "start"], env)
+    assert sim.FORCE not in env, "the machine .env must not carry a force"
 
 
 def t_scripts_run_behind_the_guard_in_simulation():
