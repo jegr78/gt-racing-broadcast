@@ -160,6 +160,7 @@ import console_proxy      # pure /console/buttons proxy plumbing (#236)
 import install_apps       # companion_http_version for the buttons health probe (#236)
 import companion_common   # companion config.json path for bind-address resolution (#236)
 import tailscale          # detect_tailscale_ip fallback for bind-address resolution (#236)
+import simulation  # RACECAST_SIMULATION: loopback endpoints and the network guard
 import logsetup  # rotating per-feed/console loggers + streamlink pump (src/scripts on sys.path)
 import av_sync   # pure parser/classifier for the A/V sync disturbances OBS logs (#619)
 import cookie_jar  # the shared "jar holds a YouTube login" rule, same as preflight (#615)
@@ -2078,7 +2079,7 @@ def _is_stream_url(v: str) -> bool:
 
 def is_channel(v: str) -> bool:
     v = v.strip()
-    return bool(CHANNEL_RE.match(v)) or _is_stream_url(v)
+    return bool(CHANNEL_RE.match(v)) or _is_stream_url(v) or simulation.is_channel(v)
 
 
 # #592: the Schedule URL cell `local:` means "this stint comes from the producer
@@ -4457,7 +4458,7 @@ def twitch_oauth_from_cookies(path):
 
 def channel_url(entry: str) -> str:
     entry = entry.strip()
-    if entry.startswith("http://") or entry.startswith("https://"):
+    if entry.startswith("http://") or entry.startswith("https://") or simulation.is_channel(entry):
         return entry
     return f"https://www.youtube.com/channel/{entry}/live"
 
@@ -6930,8 +6931,7 @@ def sanitize_reason(text):
 
 
 def _sheet_tab_csv_url(sheet_id, tab):
-    return (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-            f"/gviz/tq?tqx=out:csv&sheet={quote(tab)}")
+    return simulation.sheet_csv_url(sheet_id, tab)
 
 
 def pov_schedule_source(sheet_id, tab, runtime):
@@ -7640,8 +7640,7 @@ def crew_csv_url(sheet_id, crew_tab, sheet_csv_url=None, override=None):
         return override
     if sheet_csv_url:
         return None
-    return (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-            f"/gviz/tq?tqx=out:csv&sheet={quote(crew_tab)}")
+    return _sheet_tab_csv_url(sheet_id, crew_tab)
 
 
 class CrewSource:
@@ -12073,12 +12072,30 @@ def _funnel_watch(max_age_s=60.0, poll=None):
     return get
 
 
+def simulation_startup(environ):
+    """None when the relay may start. In simulation it first checks the RACECAST_SIM_*
+    endpoints and puts the stream stand-ins at the front of PATH."""
+    if not simulation.active(environ):
+        return None
+    problems = simulation.problems(environ)
+    if problems:
+        return "simulation mode: " + "; ".join(problems) + "."
+    environ.update(simulation.with_stream_bin(environ))
+    environ.update(simulation.env_overrides(environ))
+    return None
+
+
+def _timing_host_env_file():
+    """The league profile.env the timing host keys come from; none in simulation."""
+    return "" if simulation.active() else os.environ.get("RACECAST_PROFILE_ENV_FILE", "")
+
+
 def _start_timing_publisher(go, stop, **fns):
     """The timing host publisher thread (#1161); idle until the league has a host. It
     re-reads the host keys from the league's profile.env, so a deploy needs no restart.
     It starts once `go` is set: a relay that loses the port bind must not take the
     host's link over from the running one."""
-    env_file = os.environ.get("RACECAST_PROFILE_ENV_FILE", "")
+    env_file = _timing_host_env_file()
     pub = timing_publish.Publisher(lambda: timing_host.read_settings(env_file), **fns)
 
     def run():
@@ -12796,6 +12813,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if not ctype:
                 return self._send({"error": "font not found", "key": name}, 404)
             return self._send_file(path, ctype)
+        def _companion_off(self):
+            """Simulation never reaches the Companion running on this machine."""
+            return simulation.active() and not companion_url
+
         def _companion_base(self):
             """Resolved Companion admin base URL. The make_handler `companion_url` override
             wins (tests / non-standard installs); otherwise resolve from Companion's own
@@ -12817,6 +12838,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             -> 502."""
             import urllib.request, urllib.error
             from urllib.parse import urlsplit
+            if self._companion_off():
+                return self._send({"error": "Companion " + simulation.SKIPPED}, 503)
             clean_path = console_proxy.strip_relay_token(self.path)   # relay token never goes upstream
             base = self._companion_base()
             u = urlsplit(base); host, cport = u.hostname or "127.0.0.1", u.port or 8000
@@ -12930,6 +12953,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             """Director-gated availability probe for the launcher: is Companion up and new
             enough (>= 4.1.0) to serve under the /console/buttons sub-path? (#236)"""
             import urllib.request
+            if self._companion_off():
+                return self._send({"reachable": False, "version": None, "ok": False})
             base = self._companion_base()
             ver = install_apps.companion_http_version(base)
             reachable = ver is not None
@@ -16158,6 +16183,12 @@ def main():
     try: sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     except Exception: pass   # not all stdout objects support reconfigure (e.g. pipes)
 
+    _sim_error = simulation_startup(os.environ)
+    if _sim_error:
+        sys.exit(f"ERROR: {_sim_error}")
+    if simulation.install_network_guard():
+        print("Simulation mode: loopback endpoints only, no outbound connection.", flush=True)
+
     if not args.sheet_csv_url and not args.sheet_id:
         sys.exit("ERROR: no Google Sheet configured. Set SHEET_ID in the active profile "
                  "(profiles/<name>/profile.env), or pass --sheet-id / --sheet-csv-url.")
@@ -16190,9 +16221,7 @@ def main():
     cache = os.path.join(runtime, "schedule.cache.txt")
     ports = [int(x) for x in args.ports.split(",")]
 
-    csv_url = args.sheet_csv_url or (
-        f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-        f"/gviz/tq?tqx=out:csv&sheet={quote(args.sheet_tab)}")
+    csv_url = args.sheet_csv_url or _sheet_tab_csv_url(args.sheet_id, args.sheet_tab)
 
     LOG.info("relay starting: profile=%s bind=%s ports=%s mode=%s schedule=%s",
              (args.league_name or "?"), args.bind, args.ports,
@@ -16246,8 +16275,7 @@ def main():
     # both this reader and the Part control (#395) below can share it.
     channel_csv_url = None
     if not args.sheet_csv_url:
-        channel_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                           f"/gviz/tq?tqx=out:csv&sheet={quote(args.channel_tab)}")
+        channel_csv_url = _sheet_tab_csv_url(args.sheet_id, args.channel_tab)
     channel_source = None
     broadcast_chat_store = None
     if channel_csv_url and not args.no_broadcast_chat:
@@ -16265,8 +16293,8 @@ def main():
         # headers=1: pin sheet row 1 as the header so gviz never merges it into
         # row 1 (which happens when the Part column mixes text + numbers), which
         # would empty the parse and break the Parts control's stream-key lookup.
-        producer_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                            f"/gviz/tq?tqx=out:csv&headers=1&sheet={quote(args.producer_tab)}")
+        producer_csv_url = simulation.sheet_csv_url(args.sheet_id, args.producer_tab,
+                                                    headers=True)
         producer_source = ProducerSource(producer_csv_url,
                                          os.path.join(runtime, "producer.cache.txt"))
         producer_source.refresh()   # non-fatal: prime the Part list on startup
@@ -16277,16 +16305,15 @@ def main():
     # roster, so a custom --sheet-csv-url (or --no-event-notes) disables it.
     event_notes_source = None
     if not args.sheet_csv_url and not args.no_event_notes:
-        event_notes_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                               f"/gviz/tq?tqx=out:csv&sheet={quote(args.event_notes_tab)}")
+        event_notes_csv_url = _sheet_tab_csv_url(args.sheet_id, args.event_notes_tab)
         event_notes_cache = os.path.join(runtime, "event-notes.cache.txt")
         event_notes_source = EventNotesSource(event_notes_csv_url, event_notes_cache)
         event_notes_source.refresh()   # non-fatal: empty/unreachable = no notes
 
     event_documents_source = None
     if not args.sheet_csv_url and not args.no_documents:
-        documents_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                             f"/gviz/tq?tqx=out:csv&headers=1&sheet={quote(args.documents_tab)}")
+        documents_csv_url = simulation.sheet_csv_url(args.sheet_id, args.documents_tab,
+                                                     headers=True)
         event_documents_source = EventDocumentsSource(documents_csv_url)
         event_documents_source.refresh()  # Missing/empty tab is optional.
 
@@ -16376,10 +16403,9 @@ def main():
             health_monitor_page_path = os.path.abspath(cand); break
     uplot_dir = os.path.abspath(os.path.join(here, "..", "assets", "vendor", "uplot"))
     if not args.no_hud and not args.sheet_csv_url:
-        base = f"https://docs.google.com/spreadsheets/d/{args.sheet_id}/gviz/tq?tqx=out:csv&sheet="
-        overlay_url = base + quote(args.overlay_tab)
-        config_url = base + quote(args.config_tab)
-        quali_url = base + quote(args.quali_times_tab)
+        overlay_url = _sheet_tab_csv_url(args.sheet_id, args.overlay_tab)
+        config_url = _sheet_tab_csv_url(args.sheet_id, args.config_tab)
+        quali_url = _sheet_tab_csv_url(args.sheet_id, args.quali_times_tab)
         hud_cache = os.path.join(runtime, "hud.cache.json")
         hud_source = HudSource(overlay_url, config_url, hud_cache,
                                quali_url=quali_url)
@@ -16415,8 +16441,7 @@ def main():
     if not args.no_timer:
         timer_csv = None
         if not args.sheet_csv_url:
-            timer_csv = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                         f"/gviz/tq?tqx=out:csv&sheet={quote(args.timer_tab)}")
+            timer_csv = _sheet_tab_csv_url(args.sheet_id, args.timer_tab)
         timer_store = TimerStore(timer_csv, push_url,
                                  os.path.join(runtime, "timer.json"))
         timer_store.refresh()   # non-fatal: adopt a newer sheet anchor on startup

@@ -10,6 +10,7 @@ PUBLIC channels only. The unlisted flow is the relay (`racecast relay start`).
 import argparse, json, os, re, shutil, subprocess, sys
 from urllib.parse import urlparse
 import services   # src/scripts sibling, stdlib-only (boot-log helper)
+import simulation
 
 
 def state_dir(here):
@@ -80,7 +81,7 @@ def _is_stream_url(v: str) -> bool:
 # keep in sync with src/relay/racecast-feeds.py
 def is_channel(v: str) -> bool:
     v = v.strip()
-    return bool(CHANNEL_RE.match(v)) or _is_stream_url(v)
+    return bool(CHANNEL_RE.match(v)) or _is_stream_url(v) or simulation.is_channel(v)
 
 
 # Channels as (CHANNEL_ID, PORT).

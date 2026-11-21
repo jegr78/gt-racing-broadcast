@@ -21,7 +21,7 @@ Usage: python3 get-media.py [--which intro|outro|trailer|music|both|all] [--out 
        [--trailer-url U] [--music-url U]
 """
 import argparse, csv, io, os, re, subprocess, sys, time
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 # src/scripts holds the shared external_tool_env(); add it to sys.path the way
@@ -35,6 +35,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
 from services import external_tool_env  # de-PyInstaller the env for the yt-dlp spawn
 import asset_metadata  # noqa: E402
 import placeholders  # noqa: E402  (pure stdlib helper, fills a missing clip)
+import simulation  # noqa: E402
 
 
 # Single muxed MP4 with audio, capped at 1080p (falls back to best available).
@@ -277,8 +278,7 @@ def resolve_urls(which, cli, env, csv_text):
 
 def fetch_assets_csv(sheet_id, tab, timeout=15):
     """Fetch the Assets tab as CSV via the public gviz endpoint (no API key)."""
-    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-           f"/gviz/tq?tqx=out:csv&sheet={quote(tab)}")
+    url = simulation.sheet_csv_url(sheet_id, tab)
     req = Request(url, headers={"User-Agent": "racecast-media/1.0"})
     with urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", "replace")

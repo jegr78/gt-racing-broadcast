@@ -517,6 +517,29 @@ def t_buttons_502_when_companion_down():
         srv.shutdown()
 
 
+def t_buttons_never_reach_a_real_companion_in_simulation():
+    up = _stub_companion(); upurl = f"http://127.0.0.1:{up.server_address[1]}"
+    orig = m.console_proxy.resolve_companion_base
+    m.console_proxy.resolve_companion_base = lambda *a: upurl   # Companion running on loopback
+    srv = _serve(); port = srv.server_address[1]
+    os.environ["RACECAST_SIMULATION"] = "1"
+    try:
+        _StubCompanion.last = {}
+        code, _body = _get(port, "/console/buttons/tablet", _tok("bob"))
+        assert code == 503 and _StubCompanion.last == {}, \
+            f"simulation proxied to a real Companion: {code} {_StubCompanion.last}"
+        code, body = _get(port, "/console/buttons/health", _tok("bob"))
+        assert code == 200 and json.loads(body)["reachable"] is False, body
+        assert _StubCompanion.last == {}, "the health probe reached a real Companion"
+        del os.environ["RACECAST_SIMULATION"]
+        assert _get(port, "/console/buttons/tablet", _tok("bob"))[0] == 200, \
+            "outside simulation the proxy reaches Companion"
+    finally:
+        os.environ.pop("RACECAST_SIMULATION", None)
+        m.console_proxy.resolve_companion_base = orig
+        srv.shutdown(); up.shutdown()
+
+
 def t_buttons_health_shape_and_director_gated():
     srv = _serve(companion_url="http://127.0.0.1:1"); port = srv.server_address[1]
     try:

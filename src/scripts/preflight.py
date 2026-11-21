@@ -22,9 +22,9 @@ import sys
 import time
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
 import http_util
 import cookie_jar
+import simulation
 
 from services import external_tool_env  # de-PyInstaller the env for spawned tool probes
 
@@ -422,8 +422,7 @@ def fetch_sheet_csv(sheet_id, tab=SHEET_TAB, timeout=10):
     ('ok', body); ('network', why) for a timeout or connection error, which is NOT
     a sharing problem; ('forbidden', why) for 401 and 403; ('not_found', why) for
     404; ('error', why) for anything else."""
-    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-           f"/gviz/tq?tqx=out:csv&sheet={quote(tab)}")
+    url = simulation.sheet_csv_url(sheet_id, tab)
     try:
         with http_util.open_url(url, timeout=timeout) as resp:
             return "ok", resp.read().decode("utf-8", "replace")

@@ -16,7 +16,9 @@ run in-process under the frozen binary. Keep the parsing/boundary rules in sync.
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+
+import simulation
 
 PROJECT_MARKERS = (".git", ".env.example")
 
@@ -232,7 +234,7 @@ def resolve_config(root, *, override=None, runtime_root=None, environ=None):
         logo_path = ""
     resolved_name = prof.get("NAME", name)
     kind = normalize_kind(prof.get("KIND", ""))
-    return ResolvedConfig(
+    return replace(ResolvedConfig(
         profile=name,
         name=resolved_name,
         sheet_id=prof.get("SHEET_ID", ""),
@@ -262,4 +264,4 @@ def resolve_config(root, *, override=None, runtime_root=None, environ=None):
         profile_dir=pdir,
         runtime_dir=profile_runtime_dir(root, name),
         machine_env=machine,
-    )
+    ), **simulation.config_overrides(environ))

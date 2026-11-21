@@ -45,6 +45,7 @@
   racecast status                            # aggregate health of all services
   racecast profile   list | show [<name>] | use <name> | new <name> [--from <source>] | export <name> [--no-assets] [--out PATH] | import <file> [--force]
   racecast --profile <name> <command>        # run one command against a non-active profile
+  racecast --simulation <command>            # rehearse against simulated parties (RACECAST_SIM_*): no OBS, Discord, Companion, Tailscale or Funnel
   racecast chat      clear | pull <ip> [--port N] | import <file> | export [--out PATH]
   racecast report                            # generate the post-event report (last session) -> runtime/<profile>/reports/
   racecast report send [FILE]                # send the newest (or given) report to the league Discord as an attachment
@@ -78,6 +79,7 @@ import services as sv
 import init_setup as ins
 import config as pcfg    # 'pcfg' (not 'cfg'): avoids F811 clash with local `cfg = json.loads(...)` dicts elsewhere in this file
 import http_util
+import simulation   # RACECAST_SIMULATION: skipped launches, loopback endpoints
 import profile_admin as pa
 import chat_admin as ca
 import console_auth as cpa
@@ -329,6 +331,7 @@ def _apply_profile_env(rc, environ=None):
         else:
             environ.pop(key, None)
     environ.update(values)
+    environ.update(simulation.env_overrides(environ))
     environ[PROFILE_ENV_MARKER] = ",".join(sorted(values))
 
 def _apply_active_profile_env():
@@ -617,7 +620,10 @@ def _script_invocation(rel, args, frozen, base=None):
     if frozen:
         base = base if base is not None else _src_base(True, getattr(sys, "_MEIPASS", ""), HERE)
         return ("inprocess", os.path.join(base, *rel.split("/")), list(args))
-    return ("subprocess", [sys.executable, os.path.join(HERE, *rel.split("/"))] + list(args), None)
+    script = os.path.join(HERE, *rel.split("/"))
+    if simulation.active():
+        return ("subprocess", simulation.guarded_argv(sys.executable, script, list(args)), None)
+    return ("subprocess", [sys.executable, script] + list(args), None)
 
 def _run_module(path, args):
     """Load a bundled script by file path and run its main() with patched argv.
@@ -1410,9 +1416,7 @@ def _discord_voice_target():
     sheet_val = ""
     sid = os.environ.get("RACECAST_SHEET_ID", "")
     if sid:
-        from urllib.parse import quote
-        url = ("https://docs.google.com/spreadsheets/d/{}/gviz/tq?tqx=out:csv&sheet={}"
-               .format(sid, quote(discord_rpc.CONFIG_TAB)))
+        url = simulation.sheet_csv_url(sid, discord_rpc.CONFIG_TAB)
         try:
             sheet_val = discord_rpc.discord_voice_from_csv(
                 http_util.get_bytes(url, timeout=8).decode("utf-8"))
@@ -1438,6 +1442,9 @@ def discord_cmd(rest):
                 os.environ.get("RACECAST_DISCORD_CLIENT_SECRET")):
             print("discord app: no DISCORD_CLIENT_ID/SECRET in this league's profile.env")
         return 0
+    if simulation.active():
+        print(simulation.skipped(f"discord {verb}"))
+        return 0
     client = _discord_voice_client()
     if verb == "leave":
         ok, note = client.leave()
@@ -1458,6 +1465,9 @@ def _discord_autojoin_enabled(env):
 
 def _discord_autojoin():
     """Best-effort voice join during event start, never fatal, secrets stay quiet."""
+    if simulation.active():
+        print(simulation.skipped("discord voice auto-join"))
+        return
     if not _discord_autojoin_enabled(os.environ):
         return
     if not (os.environ.get("RACECAST_DISCORD_CLIENT_ID") and
@@ -1488,6 +1498,9 @@ def _discord_autoleave():
     """Best-effort voice leave during event stop. The counterpart to the event-start
     auto-join. Never fatal. Unlike join it needs no channel target (leave just sends
     SELECT_VOICE_CHANNEL with a null channel)."""
+    if simulation.active():
+        print(simulation.skipped("discord voice auto-leave"))
+        return
     if not _discord_autoleave_enabled(os.environ):
         return
     if not (os.environ.get("RACECAST_DISCORD_CLIENT_ID") and
@@ -2212,6 +2225,9 @@ def funnel_cmd(rest):
     import tailscale as ts
     if not rest or rest[0] not in ("on", "off"):
         sys.exit("usage: racecast funnel {on|off} [--force]")
+    if simulation.active():
+        print(simulation.skipped(f"funnel {rest[0]}"))
+        return None
     enable = rest[0] == "on"
     binary, _state, _ip = ts.tailscale_backend()
     if not binary:
@@ -2453,6 +2469,8 @@ def backup_cmd(rest):
 
 
 def _tailscale_ip():
+    if simulation.active():
+        return None
     try:
         import tailscale
         return tailscale.detect_tailscale_ip()
@@ -2462,6 +2480,8 @@ def _tailscale_ip():
 
 def _tailscale_magicdns():
     """This machine's MagicDNS name (the public Funnel host), or '' if unavailable."""
+    if simulation.active():
+        return ""
     try:
         import tailscale
         return tailscale.detect_magicdns_name()
@@ -3015,6 +3035,9 @@ def app_launch_cmd(rest):
     name = rest[0] if rest else None
     if name not in APP_CONTROLLED:
         sys.exit(f"usage: racecast app launch {{{'|'.join(APP_CONTROLLED)}}}")
+    if simulation.active():
+        print(simulation.skipped(name))
+        return
     ev = _event_modules()[0]
     cmd = ev.launch_command(name, sys.platform)
     if cmd is None:
@@ -3051,6 +3074,9 @@ def app_quit_cmd(rest):
     name = rest[0] if rest else None
     if name not in APP_CONTROLLED:
         sys.exit(f"usage: racecast app quit {{{'|'.join(APP_CONTROLLED)}}}")
+    if simulation.active():
+        print(simulation.skipped(name))
+        return
     ev = _event_modules()[0]
     cmd = ev.quit_command(name, sys.platform)
     if cmd is None:
@@ -3124,9 +3150,7 @@ CHANNEL_TAB = "Channel"               # single-event platform (YT/Twitch)
 
 
 def _gviz_csv_url(sheet_id, tab):
-    from urllib.parse import quote
-    return ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=%s"
-            % (sheet_id, quote(tab)))
+    return simulation.sheet_csv_url(sheet_id, tab)
 
 
 def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
@@ -5410,6 +5434,9 @@ def _companion_stop_linux(cc, cl, unit):
 
 
 def companion_start(rest):
+    if simulation.active():
+        print(simulation.skipped("companion"))
+        return
     cc = _companion()
     import companion_linux as cl
     if not sys.platform.startswith("win") and sys.platform != "darwin":
@@ -5471,6 +5498,9 @@ def companion_start(rest):
     return
 
 def companion_stop(rest):
+    if simulation.active():
+        print(simulation.skipped("companion"))
+        return
     cc = _companion()
     import companion_linux as cl
     if not sys.platform.startswith("win") and sys.platform != "darwin":
@@ -5818,11 +5848,18 @@ def _event_sections(ev, pf):
     """Gather all event-day facts and classify them into report sections."""
     # Apps
     import discord_web
-    obs_running = ev.app_running("obs")
-    discord_web_mode = discord_web.use_web(sys.platform, os.environ)
-    apps = [ev.classify_app("obs", obs_running),
-            ev.classify_app("discord", ev.app_running("discord"), web=discord_web_mode),
-            ev.classify_tailscale(_tailscale_ip())]
+    sim = simulation.active()
+    obs_running = _obs_up(ev)
+    def skip(name):
+        return ev.Result(ev.INFO, name, simulation.SKIPPED)
+    if sim:
+        apps = [ev.Result(ev.PASS, "OBS", "simulated OBS answering") if obs_running
+                else skip("OBS"), skip("Discord"), skip("Tailscale")]
+    else:
+        discord_web_mode = discord_web.use_web(sys.platform, os.environ)
+        apps = [ev.classify_app("obs", obs_running),
+                ev.classify_app("discord", ev.app_running("discord"), web=discord_web_mode),
+                ev.classify_tailscale(_tailscale_ip())]
     # Scene-collection line: only probe obs-websocket when OBS is actually up
     # (no point paying the connect timeout otherwise). Best effort: a broken
     # probe must never traceback the readiness report.
@@ -5839,11 +5876,14 @@ def _event_sections(ev, pf):
     alive = sv.pid_alive(pid)
     services = [ev.classify_relay(alive, _relay_http_ok() if alive else False, RELAY_PORT)]
     try:
-        cc = _companion()
-        supported = _companion_cmds(cc) is not None
-        services.append(ev.classify_companion(
-            _companion_running(cc) if supported else False, supported,
-            "" if supported else _companion_unsupported_msg()))
+        if sim:
+            services.append(skip("Companion"))
+        else:
+            cc = _companion()
+            supported = _companion_cmds(cc) is not None
+            services.append(ev.classify_companion(
+                _companion_running(cc) if supported else False, supported,
+                "" if supported else _companion_unsupported_msg()))
     except Exception as exc:
         services.append(ev.Result(ev.WARN, "Companion", f"check failed: {exc}"))
     # Assets: a broken probe must never traceback the report.
@@ -6502,6 +6542,8 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
     Raises OSError like Popen; returns the note it printed ("" when the app is
     still alive).
     """
+    if simulation.active():
+        raise OSError(f"{app} not launched in simulation mode")
     if app == "obs" and not _wait_for_obs_exit():
         raise OSError("OBS is still running or shutting down after 30 seconds; "
                       "no second instance started. Wait for OBS to exit and try again")
@@ -6525,6 +6567,9 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
 def _event_launch(ev, app, popen=None, sleep=None):
     """Best-effort GUI-app launch: report and continue on every failure path.
     Returns True iff a launch was actually attempted."""
+    if simulation.active():
+        print(simulation.skipped(app))
+        return False
     import install_apps
     if not install_apps.app_present(app, sys.platform):
         print(f"{app}: not installed. Run `racecast install-apps`.")
@@ -6580,6 +6625,9 @@ def _tailscale_connect(ev=None):
     answers (macOS: the backend only lives while the app runs); never runs `up`
     in NeedsLogin: that would trigger the interactive browser login. Shared by
     `racecast tailscale up` and `racecast event start`; returns the tailnet IP or None."""
+    if simulation.active():
+        print(simulation.skipped("tailscale"))
+        return None
     import tailscale as ts
     binary, state, ip = ts.tailscale_backend()
     if ts.plan_tailscale_up(state) == "launch-app":
@@ -6616,10 +6664,13 @@ def _tailscale_connect(ev=None):
 
 
 def tailscale_up_cmd(_rest):
-    raise SystemExit(0 if _tailscale_connect() else 1)
+    raise SystemExit(0 if _tailscale_connect() or simulation.active() else 1)
 
 
 def tailscale_down_cmd(_rest):
+    if simulation.active():
+        print(simulation.skipped("tailscale"))
+        return
     import tailscale as ts
     binary, state, _ip = ts.tailscale_backend()
     if state != "Running":
@@ -6643,6 +6694,15 @@ def tailscale_status_cmd(_rest):
     else:
         print(f"Tailscale: {state}. Run `racecast tailscale up` to connect.")
     _append_tailscale_snapshot()
+
+
+def _obs_up(ev):
+    """Whether OBS is there to talk to: the process, or in simulation the simulated
+    OBS WebSocket answering."""
+    if not simulation.active():
+        return ev.app_running("obs")
+    import obs_ws
+    return obs_ws.wait_until_ready(timeout=0)[0]
 
 
 OBS_READY_TIMEOUT_S = 30      # OBS loading a big scene collection is not quick
@@ -6833,11 +6893,12 @@ def event_start(rest, _autojoin=True, _new_session=True):
             for r in blockers:
                 print(pf.fmt_result(r, color))
             raise SystemExit(1)
+    sim = simulation.active()
     # 1. Tailscale: connect a stopped backend; launch the app when needed.
-    if _tailscale_connect(ev) is None:
+    if _tailscale_connect(ev) is None and not sim:
         print("tailscale: continuing local-only (OBS keeps working).")
     # 2. Discord
-    if ev.app_running("discord"):
+    if not sim and ev.app_running("discord"):
         print("discord: already running.")
     else:
         _event_launch(ev, "discord")
@@ -6847,8 +6908,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # pause (#1038). The short bound keeps a hung OBS from holding up bring-up; the
     # late check after the launches below still runs.
     early_collection = None      # None = step 2b did not reach OBS
-    if ev.app_running("obs") and _wait_for_obs_ready(timeout=OBS_EARLY_READY_TIMEOUT_S,
-                                                     early=True):
+    if _obs_up(ev) and _wait_for_obs_ready(timeout=OBS_EARLY_READY_TIMEOUT_S, early=True):
         early_collection = _align_scene_collection(relay_up=_relay_http_ok)
     # 3. Relay (before OBS, see docstring). A takeover forwards --stint so the feeds
     # start at the stint on air right now, --qualifying brings the stack up in
@@ -6909,7 +6969,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         if _mm:
             print("WARNING: " + _mm)
     # 4. OBS
-    if ev.app_running("obs"):
+    if not sim and ev.app_running("obs"):
         print("obs: already running.")
     else:
         _event_launch(ev, "obs")
@@ -6924,13 +6984,16 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # dynamic probes are waited on; static problems never self-heal.
     import install_apps
     probes = {"relay": _relay_http_ok}
-    if install_apps.app_present("obs", sys.platform):
+    if sim:
+        if simulation.obs_target():
+            probes["obs"] = lambda: _obs_up(ev)
+    elif install_apps.app_present("obs", sys.platform):
         probes["obs"] = lambda: ev.app_running("obs")
     # Companion is an Electron app, so its HTTP server takes a few seconds to
     # come up. Wait for it too, or the readiness report below races the launch
     # and prints a spurious "Companion: not running" right after starting it.
     cc = _companion()
-    if _companion_cmds(cc) is not None:   # controllable on this OS (not Linux)
+    if not sim and _companion_cmds(cc) is not None:   # controllable on this OS (not Linux)
         probes["companion"] = lambda: _companion_running(cc)
     print("\nWaiting for the launched services to come up (max 60 s)…")
     for name, up in sorted(ev.wait_until_up(probes).items()):
@@ -6939,7 +7002,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # the relay is up. On by default, since the Funnel is the preferred path.
     # Best-effort: a funnel failure (e.g. missing nodeAttr) must never abort the
     # event; print one concise line.
-    if _funnel_auto_enabled():
+    if sim or _funnel_auto_enabled():
         try:
             funnel_cmd(["on"])
         except SystemExit as exc:
@@ -7056,6 +7119,9 @@ def event_takeover(rest):
     port = _takeover_port(args)
     stint_tokens = _stint_args(args)        # validates 1-based int (sys.exit on bad)
     stint_override = int(stint_tokens[1]) if stint_tokens else None
+    if simulation.active() and (funnel or not simulation.is_loopback_host(host)):
+        sys.exit("racecast: a simulated takeover reads producer A on 127.0.0.1, "
+                 "never over the tailnet or the Funnel.")
 
     secret = _active_console_secret() if funnel else None
     if funnel and not secret:
@@ -7477,6 +7543,9 @@ def update_check_data(fetch=None, current=None, platform=None, frozen=None):
     if os.environ.get("RACECAST_UPDATE_CHECK") == "0":
         out["note"] = "update check off (RACECAST_UPDATE_CHECK=0)"
         return out
+    if simulation.active():
+        out["note"] = "update check " + simulation.SKIPPED
+        return out
     try:
         release = (fetch or upd.fetch_latest)()
     except Exception:
@@ -7878,7 +7947,6 @@ def producer_schedule_data(fetch=None, self_name=None, refresh_env=None):
 
     Tolerant: any fetch/parse failure returns empty rows (the card hides), never
     raises. `fetch`/`self_name`/`refresh_env` are test seams."""
-    from urllib.parse import quote
     import producer as prod
     import tailscale as ts
     (refresh_env or _apply_active_profile_env)()
@@ -7891,8 +7959,7 @@ def producer_schedule_data(fetch=None, self_name=None, refresh_env=None):
     # when the Part column mixes text + numbers (an empty/"Q" qualifying label
     # beside numbered parts), merges the header into row 1 -> parse_producer_rows
     # finds no header and returns [] -> this card silently hides. (erf-nls: 4 rows.)
-    url = ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&headers=1&sheet=%s"
-           % (sheet_id, quote(PRODUCER_TAB)))
+    url = simulation.sheet_csv_url(sheet_id, PRODUCER_TAB, headers=True)
     try:
         text = (fetch or _producer_fetch)(url)
         rows = prod.parse_producer_rows(text)
@@ -10486,6 +10553,46 @@ def init_cmd(rest):
     raise SystemExit(code)
 
 
+SIMULATION_EXEMPT = ("profile", "help", "-h", "--help", "--version", "-V")
+
+
+def _apply_simulation_flag(argv, environ=None):
+    """Consume a global `--simulation` and turn the mode on for this process and its
+    children; the machine .env may set RACECAST_SIMULATION and RACECAST_SIM_* too."""
+    environ = os.environ if environ is None else environ
+    machine = pcfg.load_machine_env(_env_base(IS_FROZEN, _real_executable(), HERE))
+    for key, value in machine.items():
+        if key == simulation.FLAG or key.startswith("RACECAST_SIM_"):
+            environ.setdefault(key, value)
+    out = [a for a in argv if a != "--simulation"]
+    if len(out) != len(argv):
+        environ[simulation.FLAG] = "1"
+    return out
+
+
+def _simulation_profile_values(name):
+    try:
+        return pcfg.parse_profile(_env_base(IS_FROZEN, _real_executable(), HERE), name)
+    except (OSError, pcfg.ProfileError):
+        return {}
+
+
+def _simulation_gate(argv, environ=None, profile=None, values=None):
+    """In simulation mode: None when this command may run, else why not. A `--force`
+    run records the profile it allowed, so its children run there too."""
+    environ = os.environ if environ is None else environ
+    if not simulation.active(environ) or argv[:1] and argv[0] in SIMULATION_EXEMPT:
+        return None
+    problems = simulation.problems(environ)
+    if problems:
+        return "simulation mode: " + "; ".join(problems) + "."
+    name = _active_profile_name() if profile is None else profile
+    if name and "--force" in argv:
+        environ[simulation.FORCE] = name
+    values = _simulation_profile_values(name) if values is None and name else (values or {})
+    return simulation.profile_refusal(name, values, environ.get(simulation.FORCE))
+
+
 def _bootstrap(argv):
     """Shared process startup for BOTH binaries: the `racecast` CLI (main) and the
     windowed `racecast-ui` launcher (racecast_ui.main). It lives in one place on
@@ -10508,11 +10615,18 @@ def _bootstrap(argv):
     _ensure_ssl_certs()
     _ensure_tool_path()    # Finder/Dock launch truncates PATH past Homebrew (#38)
     argv, profile = pa.split_profile_flag(argv)
+    argv = _apply_simulation_flag(argv)
     global _telemetry_launch_profile
     _telemetry_launch_profile = profile if argv[:2] == ["telemetry", "ui"] else None
     if profile and _telemetry_launch_profile is None:
         os.environ["RACECAST_PROFILE"] = profile   # M3 consumers read this
     _apply_active_profile_env()   # inject the active profile's sheet config for children
+    refusal = _simulation_gate(argv)
+    if refusal:
+        raise ValueError(refusal)
+    if simulation.install_network_guard():
+        os.environ.update(simulation.with_stream_bin(os.environ))
+        os.environ.update(simulation.env_overrides())
     return argv
 
 

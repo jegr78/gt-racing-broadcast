@@ -11,6 +11,7 @@ import os, subprocess, sys, time
 from urllib.parse import urlparse
 
 from services import external_tool_env  # de-PyInstaller the env for spawned streamlink
+import simulation
 
 
 # keep in sync with src/relay/racecast-feeds.py
@@ -36,7 +37,7 @@ def no_window_kwargs(os_name=None):
 # keep in sync with src/relay/racecast-feeds.py
 def channel_url(entry: str) -> str:
     entry = entry.strip()
-    if entry.startswith("http://") or entry.startswith("https://"):
+    if entry.startswith("http://") or entry.startswith("https://") or simulation.is_channel(entry):
         return entry
     return f"https://www.youtube.com/channel/{entry}/live"
 

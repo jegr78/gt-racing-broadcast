@@ -51,6 +51,41 @@ their scene goes active.
 > the panel; see [Director](Director#event-title)). At a producer takeover, the
 > incoming machine pulls the on-air title from producer A automatically.
 
+## Rehearse in simulation mode
+
+`racecast --simulation event start` (or `RACECAST_SIMULATION=1` in the environment or
+the machine `.env`) runs the same bring-up, relay, Control Center and console pages
+against simulated parties instead of the real ones. A Control Center started with
+`racecast --simulation ui` passes the mode on to its Start event, Stop event and
+Takeover buttons.
+
+- Event start, stop and takeover do not launch OBS, Discord or Companion and do not
+  touch Tailscale or the Funnel. Each step prints `skipped (simulation)` in the job log,
+  and the readiness report lists those rows as INFO.
+- Every external endpoint comes from a loopback variable. An endpoint that is unset is
+  off, it never falls back to the real one:
+
+  | Variable | Stands in for | Required |
+  |---|---|---|
+  | `RACECAST_SIM_SHEET_URL` | `https://docs.google.com/spreadsheets/d/<SHEET_ID>`; tabs are read from `<url>/gviz/tq?tqx=out:csv&sheet=<Tab>` | yes |
+  | `RACECAST_SIM_STREAM_BIN` | a directory holding stand-ins for `yt-dlp` and `streamlink` (`.exe` on Windows), put first on `PATH` | yes |
+  | `RACECAST_SIM_OBS_WS` | the OBS WebSocket, as `ws://127.0.0.1:<port>`, no password | no |
+  | `RACECAST_SIM_SHEET_PUSH_URL` | the league `SHEET_PUSH_URL` | no |
+  | `RACECAST_SIM_DISCORD_WEBHOOK_URL` | the league `DISCORD_WEBHOOK_URL` | no |
+
+  Each value must point at `127.0.0.1` or `localhost`, and it replaces the league value
+  whichever file or shell set that. The league's Discord login, voice channel, timing
+  host, the Director's Companion buttons and the update check are off. The racecast
+  Python processes (CLI, Control Center, relay and the scripts they start) refuse any
+  connection that is not loopback; external programs such as ffmpeg and the stream
+  stand-ins are outside that guard.
+- A Schedule cell may name a simulated stream as `sim://<name>`; outside simulation
+  mode that value is invalid.
+- The mode runs on the `demo` profile or on a profile whose `profile.env` sets
+  `SIMULATION=1`. Any other profile needs `--force`, because the run writes that
+  profile's runtime state (driver codes, chat, timing). On `event start`, `--force`
+  also skips the pre-flight gate.
+
 ## Before you go live
 
 Plan **about 30 minutes** for these steps before the broadcast slot. Do them from

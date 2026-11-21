@@ -11,7 +11,7 @@ Usage: python3 get-graphics.py [--out DIR] [--sheet-id ID] [--assets-tab NAME]
        [--only "Label[,Label...]"]
 """
 import argparse, csv, io, os, re, sys
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 # Stdlib-only helpers from src/scripts (asset_metadata owns the Assets-tab parser
@@ -24,6 +24,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
         sys.path.insert(0, _cand)
 import asset_metadata  # noqa: E402
 import placeholders  # noqa: E402
+import simulation  # noqa: E402
 
 
 def load_dotenv(start):
@@ -200,8 +201,7 @@ def seed_missing_graphics(out_dir, here):
 
 def fetch_assets_csv(sheet_id, tab, timeout=15):
     """Fetch the Assets tab as CSV via the public gviz endpoint (no API key)."""
-    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-           f"/gviz/tq?tqx=out:csv&sheet={quote(tab)}")
+    url = simulation.sheet_csv_url(sheet_id, tab)
     req = Request(url, headers={"User-Agent": "racecast-graphics/1.0"})
     with urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", "replace")
