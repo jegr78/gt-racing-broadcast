@@ -1172,13 +1172,29 @@ class Race:
             held = None if a is None or b is None else \
                 math.floor((a + ahead.adjust - b - ent.adjust) / self.length)
             # Past its box without standing, the stand of the car ahead was its gain.
-            # A car that drove out of its box may only queue in the pit lane: count from there.
-            near = held is not None and shown < max(a + ahead.adjust - held * self.length,
-                                                    ent.halted if ent.halted is not None else -math.inf) + PIT_ROW_M
-            if held is not None and held > laps and (ent.changed or ent.change_anchor is not None
-                                                     or near or self._pit_pace(ent, stop)):
-                laps = held
+            if held is not None and held > laps:
+                past = shown - (a + ahead.adjust - held * self.length)
+                # A car that drove out of its box may only queue in the pit lane: count from there.
+                queued = ent.halted is not None and shown - ent.halted < PIT_ROW_M
+                # Slow further on is a pit lane only within its length, else a spin or a stop on track.
+                if ent.changed or ent.change_anchor is not None or past < PIT_ROW_M or queued \
+                        or (past < PIT_ROW_M + self._pit_in(ahead, stop) and self._pit_pace(ent, stop)):
+                    laps = held
         return laps
+
+    def _pit_in(self, ent, at):
+        """The metres `ent` ran below its racing pace into the stand it began at `at`."""
+        end = self._distance_at(ent, at)
+        start = self._distance_at(ent, at - PACE_S)
+        if end is None or start is None:
+            return 0.0
+        slow, entry = PIT_PACE * (end - start) / PACE_S, end
+        for k in range(1, int(PACE_S) + 1):
+            d = self._distance_at(ent, at - k)
+            if d is None or entry - d >= slow:
+                break
+            entry = d
+        return end - entry
 
     def _pit_pace(self, ent, at):
         """Whether `ent` now runs well below its racing pace before `at`: in the pit lane."""

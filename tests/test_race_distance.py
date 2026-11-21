@@ -661,7 +661,8 @@ def t_a_box_stop_outside_the_change_window_changes_nobody():
     assert _row(race, "A", t)["driver"] == "Max", "no change without the stint switch"
 
 
-def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit_s=10.0, b_mode="change"):
+def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit_s=10.0, b_mode="change",
+                             b_slow=None):
     """A leads; C runs 10 s behind; B a lap and about 20 s down. At a stint switch A
     stands in its box, C and B drive on for 10 s and `in_lap_s` to theirs. Every team
     stands `stall_s` and leaves the next lobby's box; each car runs the pit lane, the
@@ -669,7 +670,8 @@ def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit
     `on_tick(race, t, rows, out)` runs on every tick from A's stop on; `out` is the
     set of teams whose next car has left the box. `b_mode` "never": B drives on past its
     box; "pit": B stops for 8 s and drives on; "queue": B halts 2 s in the pit lane, moves
-    on for 4 s at 50 m/s, then stands for its change. Returns the gaps before the switch."""
+    on for 4 s at 50 m/s, then stands for its change. `b_slow` (from, seconds, m/s): B's
+    old car crawls on track then. Returns the gaps before the switch."""
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     old = {"A": Car(race, "A", "a1", L - 15), "B": Car(race, "B", "b1", L - 25),
            "C": Car(race, "C", "c1", L - 515)}
@@ -704,7 +706,10 @@ def _lapped_through_a_change(in_lap_s, on_tick, stall_s=40.0, after_s=200.0, pit
             lane.discard(id(old["B"]))
         elif b_mode == "pit" and "B" in out and since < stop["B"] + 8 + pit_s:
             lane.add(id(old["B"]))
-        t = _drive(race, cars, [None if c.box else 15 if id(c) in lane else 50 for c in cars], t, 1.0 / HZ)
+        speeds = [None if c.box else 15 if id(c) in lane else 50 for c in cars]
+        if b_slow and b_slow[0] <= since < b_slow[0] + b_slow[1]:
+            speeds = [b_slow[2] if c is old["B"] else v for c, v in zip(cars, speeds, strict=True)]
+        t = _drive(race, cars, speeds, t, 1.0 / HZ)
         rows = {r["entry"]: r for r in race.standings(t)["entries"]}
         on_tick(race, t, rows, out)
     return before
@@ -750,6 +755,19 @@ def t_a_lapped_car_that_skips_its_change_regains_the_lead_lap():
         assert lapped == 0 and gap < L / 50, f"B ({mode}) is on the lead lap again: {seen[-1]}"
         if mode == "pit":
             assert all(lap == 0 for lap, _, gone in seen[-200:]), "back at racing pace out of the pit lane"
+
+
+def t_a_lapped_car_back_on_the_lead_lap_keeps_it_through_a_spin_or_a_stop_on_track():
+    for mode in ("never", "pit"):
+        for slow in ((60.0, 10.0, 5.0), (60.0, 60.0, 0.0001)):
+            seen = []
+
+            def tick(race, t, rows, out, seen=seen):
+                a, b = race._entries["A"], race._entries["B"]
+                seen.append((rows["B"]["lapped"], max(0, math.floor((race._shown(a) - race._shown(b)) / L))))
+            _lapped_through_a_change(25.0, tick, b_mode=mode, after_s=80.0, b_slow=slow)
+            wrong = [x for x in seen[int(slow[0] * HZ):] if x[0] != x[1]]
+            assert not wrong, f"B ({mode}, {slow}) slow on track is no pit lane: {len(wrong)} ticks off its distance"
 
 
 def _lapped_field(extra=()):
