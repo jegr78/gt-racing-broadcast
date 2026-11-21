@@ -1,6 +1,7 @@
 # Event simulation
 
-Status: draft for review.
+Status: draft for review. Decided in review: three stints and lobbies with one commentator
+each, and the `full` scenario produces the deck's image set.
 
 ## Problem
 
@@ -107,7 +108,7 @@ mode, stints, laps, classes, roster, crew, commentators) and lists steps on a ti
 [event]
 track = "6e378b"
 mode = "endurance"
-stints = 2
+stints = 3                    # three stints, each its own GT7 lobby
 laps_per_stint = 3            # quick profile; full uses real values
 seed = 7
 
@@ -143,9 +144,13 @@ do = "final_lap"
   (5 s) that a step may override.
 - Steps may name a screenshot (`shot = "dc-tower-1"`, with a role and an optional element),
   which lands in `shots/` under that name.
+- Every bundled scenario runs three stints, each in its own GT7 lobby, with one
+  commentator per stint (Comms 1, 2, 3). The commentator changes only at a stint change,
+  never within a stint.
 - The bundled scenarios: `quick` (under 20 minutes: approval, a short qualifying with Add
-  lap, two short stints with a swap, one DC, final lap, finish, stop), `full` (the run 10
-  event in real time), `multiclass` (Hypercar and GT3), and the failure scenarios
+  lap, three short stints with driver swaps at both stint changes, one DC, final lap in
+  the third lobby, finish, stop), `full` (the run 10 event in real time, extended to
+  three stints), `multiclass` (Hypercar and GT3), and the failure scenarios
   `late-link`, `dc-rejoin`, `relay-crash` (kill the relay, plain Start event, codes and
   stint resumed) and `red-flag` (keep restart). v2 adds `feed-drop` and `takeover`.
 
@@ -167,7 +172,9 @@ do = "final_lap"
 `report.html` shows one row per step: time, role, action, result, duration, screenshot
 thumbnail, findings. A summary lists hard failures first, then soft findings by role.
 `report.json` holds the same data for tooling. `shots/` keeps every named screenshot at full
-size.
+size. The `full` scenario names its screenshots after the slide deck's image set, so a
+deck update is one run of `full` followed by a copy of `shots/`; this replaces the scratch
+shot lists used so far.
 
 ## CI
 
@@ -196,9 +203,3 @@ One epic with a sub-issue per pull request:
 6. Role drivers.
 7. Bundled scenarios (quick, full, multiclass, late-link, dc-rejoin, relay-crash, red-flag).
 8. `event-sim.yml` workflow.
-
-## Open questions
-
-- Which commentator count the bundled scenarios use (two or three).
-- Whether the full scenario should also produce the deck's image set by name, replacing the
-  scratch shot list, or keep that as a separate scenario.
