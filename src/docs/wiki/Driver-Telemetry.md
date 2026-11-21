@@ -248,8 +248,9 @@ laps on GT7's counter, from the car that took over after the last stint switch: 
 last row's `Laps` cell of the [Schedule tab](Sheet-Template#schedule-tab), else the
 event setting. A lap count set while the final stint is already on air applies at once.
 The final lobby's flag follows the road, as in GT7: the first of its cars to complete
-the count takes it, or after **Final lap** the first car to cross the line on the
-lobby's leading lap, even when another car leads in race distance. Every other car
+the count takes it, or after **Final lap** the leader on the road at its next crossing,
+even when another car leads in race distance. A car behind that crosses onto the
+leader's lap after the call does not take the flag. Every other car
 finishes at its next crossing, a car a lap down on the road too, and the order after
 the flag stays laps first, then who completed them first.
 

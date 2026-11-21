@@ -1573,6 +1573,46 @@ def t_a_quiet_car_does_not_hold_back_a_timed_finish_after_a_keep_restart():
         f"E's counter from before the red flag is no lead lap: {flags}"
 
 
+def _final_lap_called_mid_lap(multi_lobby, keep):
+    """A leads B by 40 s on the road and is 300 m into its lap when Final lap is
+    called, so B, still on the lap behind on the road, crosses the line first."""
+    race = rd.Race(TRACE, formation=False, multi_lobby=multi_lobby, finish_mode="time")
+    if multi_lobby:
+        race.final_lobby(None, 0.0)
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 2015)
+    t = _drive(race, [a, b], [50, 50], 0.0, 60)
+    if keep:
+        race.red_flag(t, "keep")
+        for car in (a, b):
+            _new_lobby(car, L - 180)
+        t = _drive(race, [a, b], [None, None], t, 3)
+        a.box = False
+        t = _drive(race, [a, b], [50, None], t, 40)          # B released by its 40 s gap
+        b.box = False
+        t = _drive(race, [a, b], [50, 50], t, 3)
+        race.release(t)
+    while not (a.lap() > b.lap() and a.along % L > 300):
+        t = _drive(race, [a, b], [50, 50], t, 1.0 / HZ)
+    race.final_lap(t)
+    return race, (a, b), t
+
+
+def t_final_lap_ends_the_race_at_the_leaders_next_crossing_not_a_trailing_cars():
+    for multi_lobby in (False, True):
+        for keep in (False, True):
+            race, (a, b), t = _final_lap_called_mid_lap(multi_lobby, keep)
+            called = t
+            flags, t = _flags(race, [a, b], t, 2.5 * L / 50, speeds=(50, 50))
+            case = f"multi_lobby={multi_lobby}, keep={keep}: {flags}"
+            assert set(flags) == {"A", "B"} and flags["A"][0] < flags["B"][0], \
+                f"the leader takes the flag first, B finishes at its first crossing after it ({case})"
+            assert flags["A"][0] - called < L / 50, f"A finishes within a lap of the call ({case})"
+            rows = race.standings(t)["entries"]
+            assert [r["entry"] for r in rows] == ["A", "B"] and rows[0]["laps"] == rows[1]["laps"] \
+                and rows[1]["lapped"] == 0 and abs(rows[1]["gap_time_s"] - 40) < 1.5, \
+                f"B finishes on the leader's lap, 40 s down ({case}): {rows[:2]}"
+
+
 def t_an_endurance_winner_stays_first_when_its_race_lap_ends_past_the_line():
     race = rd.Race(TRACE, formation=False, multi_lobby=True, finish_mode="laps")
     race.final_lobby(2, 0.0)

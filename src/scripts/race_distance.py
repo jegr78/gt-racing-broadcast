@@ -39,9 +39,9 @@ nearest the predicted distance decides.
   from the box keeps the count; `final_lap` ends it at the leader's next crossing.
   Endurance follows the final lobby on the road, as GT7 does: the first of its cars
   (each took over after the final stint switch) to pass `lap_count` on that lobby's
-  counter, or after `final_lap` the first to cross on the lobby's leading counter,
-  takes the flag, whoever leads in race distance. Every other car finishes at its
-  next crossing, timed between its samples around the line, so a crossing after the
+  counter, or after `final_lap` the first to cross onto a counter no other of them
+  shows (the road leader completing its lap), takes the flag, whoever leads in race
+  distance. Every other car finishes at its next crossing, timed between its samples around the line, so a crossing after the
   flag that arrived before it still counts; `finish` freezes everything at once. The race timer never ends a race.
   From the first flag on the order is laps, then who reached that lap count first,
   so a lapped car taking the flag stays behind a lead-lap car still running. The first
@@ -922,8 +922,9 @@ class Race:
             # GT7 ends the final lobby on the road, which after a red flag restart need
             # not follow race distance.
             by_laps = self.finish_mode == "laps" and self.lap_count and car.lap > self.lap_count
+            # After Final lap the road leader's crossing ends it, not a car crossing onto its lap.
             by_flag = self._final_lap_at is not None and t > self._final_lap_at \
-                and car.lap >= self._lobby_lead_lap(t)
+                and car.lap > self._lobby_lead_lap(t, [e for e in self._entries.values() if e is not ent])
             if by_laps or by_flag:
                 self._to_line(ent)
                 self._flag(ent, t, at)
