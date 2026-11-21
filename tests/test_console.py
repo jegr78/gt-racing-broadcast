@@ -502,12 +502,16 @@ def t_the_desk_keeps_tyre_rows_in_place_so_a_focused_select_keeps_its_focus():
       placeRows(body, [a, c]);
       var trimmed = body.children.map(function (x) { return x.n; });
       placeRows(body, [c, a, b]);
-      return [same, trimmed, body.children.map(function (x) { return x.n; })];
+      var order = body.children.map(function (x) { return x.n; });
+      moves = 0;
+      placeRows(body, [a, b]);
+      return [same, trimmed, order, moves, body.children.map(function (x) { return x.n; })];
     })()""")
     if got is None:
         return
     assert got[0] == 0, f"an unchanged table moves no row: {got}"
     assert got[1] == ["a", "c"] and got[2] == ["c", "a", "b"], f"rows follow the new order and extras go: {got}"
+    assert got[3:] == [0, ["a", "b"]], f"a row whose neighbour goes keeps its node, so its focus stays: {got}"
 
 
 def t_the_desk_arms_one_button_at_a_time():

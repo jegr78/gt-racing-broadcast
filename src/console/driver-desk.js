@@ -296,10 +296,12 @@
   }
   // Puts `rows` into `body` in order, moving only rows out of place, so a focused control keeps its focus.
   function placeRows(body, rows) {
+    Array.prototype.slice.call(body.children).forEach(function (tr) {
+      if (rows.indexOf(tr) < 0) body.removeChild(tr);
+    });
     rows.forEach(function (tr, i) {
       if (body.children[i] !== tr) body.insertBefore(tr, body.children[i] || null);
     });
-    while (body.children.length > rows.length) body.removeChild(body.lastChild);
   }
   // A sender row's pill.
   function senderState(s) {
