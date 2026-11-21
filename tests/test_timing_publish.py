@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The relay's timing host publisher (#1161).
 Run: python3 tests/test_timing_publish.py"""
-import json, os, sys
+import json, os, sys, threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src", "scripts"))
@@ -104,6 +104,19 @@ def t_sends_one_state_per_tick():
     first = r.states(r.conns[0])[0]
     assert first["data"] == {"v": 1} and first["age_s"] == 0.5 and first["fallback"] == FALLBACK
     assert r.conns[0].url == th.publish_url("https://h.example.workers.dev", LINK_A)
+
+
+def t_a_stopped_run_closes_its_connection():
+    r = _Rig()
+    r.step()
+    stop = threading.Event()
+    th_run = threading.Thread(target=r.pub.run, args=(stop,))
+    th_run.start()
+    stop.set()
+    r.pub._wake.set()
+    th_run.join(3)
+    assert not th_run.is_alive() and r.conns[0].closed, "a relay shutdown closes the room's socket"
+    assert not any(f["t"] == "end" for c in r.conns for f in c.sent), "a shutdown never ends the room"
 
 
 def t_no_second_state_within_a_tick():

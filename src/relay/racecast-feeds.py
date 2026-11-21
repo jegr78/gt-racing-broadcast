@@ -12085,8 +12085,15 @@ def _start_timing_publisher(go, stop, **fns):
             if stop.is_set():
                 return
         pub.run(stop)
-    threading.Thread(target=run, name="timing-host", daemon=True).start()
+    pub.thread = threading.Thread(target=run, name="timing-host", daemon=True)
+    pub.thread.start()
     return pub
+
+
+def _stop_timing_publisher(pub, timeout=1.0):
+    """Give the publisher (its stop already set) up to `timeout` to close its socket."""
+    pub.wake()
+    pub.thread.join(timeout)
 
 
 def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_dir=None,
@@ -16682,6 +16689,7 @@ def main():
         os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)
         if args.overlay_dir else None)
     timing_go = threading.Event()   # set once the control port is bound
+    timing_pubs = []
     handler = make_handler(
         relay,
         panel_path,
@@ -16739,7 +16747,8 @@ def main():
         driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
         driver_segments=driver_segments, driver_race_svc=race_svc,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
-        timing_publisher=lambda **fns: _start_timing_publisher(timing_go, stop_evt, **fns),
+        timing_publisher=lambda **fns: timing_pubs.append(
+            _start_timing_publisher(timing_go, stop_evt, **fns)) or timing_pubs[-1],
         funnel_host=_funnel_watch(poll=stop_evt),
         engineer_access=engineer_access,
         engineer_page_path=engineer_page_path,
@@ -16830,7 +16839,10 @@ def main():
         if twitch_service is not None:
             twitch_service.close()
         relay.keep_awake.stop()
-        stop_evt.set(); relay.shutdown(); os._exit(0)
+        stop_evt.set(); relay.shutdown()
+        for pub in timing_pubs:
+            _stop_timing_publisher(pub)
+        os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 

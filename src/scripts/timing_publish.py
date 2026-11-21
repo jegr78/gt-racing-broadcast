@@ -86,6 +86,10 @@ class Publisher:
         self._reload = True
         self._wake.set()
 
+    def wake(self):
+        """Run the next step now, e.g. to notice a stop."""
+        self._wake.set()
+
     def host_url(self):
         """The configured host URL, or None without a host."""
         settings = self._settings
@@ -111,6 +115,7 @@ class Publisher:
                 wait = TICK_S
             self._wake.wait(wait)
             self._wake.clear()
+        self._close()                   # the room stays open for the next relay start
 
     def step(self):
         """One iteration; returns the seconds until the next one is due."""

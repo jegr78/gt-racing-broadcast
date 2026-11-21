@@ -1723,6 +1723,32 @@ def t_a_relay_stopping_before_the_bind_ends_the_waiting_publisher():
     assert not waiting[0].is_alive(), "a stop before the control port bind ends the waiting thread"
 
 
+def t_a_relay_shutdown_gives_the_publisher_a_bounded_close():
+    import inspect
+
+    class _Pub:
+        def __init__(self, closes):
+            self.woke, self.closed = threading.Event(), []
+            self.thread = threading.Thread(target=lambda: self.woke.wait(5 if closes else 30)
+                                           and closes and self.closed.append(True), daemon=True)
+            self.thread.start()
+
+        def wake(self):
+            if self.thread.name != "stuck":
+                self.woke.set()
+    quick = _Pub(closes=True)
+    g.m._stop_timing_publisher(quick, timeout=1.0)
+    assert quick.closed == [True], "the shutdown wakes the publisher and waits for its close"
+    stuck = _Pub(closes=False)
+    stuck.thread.name = "stuck"
+    started = time.monotonic()
+    g.m._stop_timing_publisher(stuck, timeout=0.3)
+    assert time.monotonic() - started < 1.5, "a publisher stuck in a connect never holds the exit"
+    src = inspect.getsource(g.m.main)
+    assert src.index("_stop_timing_publisher(") < src.index("os._exit(0)"), \
+        "the shutdown lets the publisher close before the hard exit"
+
+
 FUNNEL_HOST = "relay.example.ts.net"
 
 
