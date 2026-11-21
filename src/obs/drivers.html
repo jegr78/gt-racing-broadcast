@@ -184,14 +184,18 @@
     badge.setAttribute("data-phase", key);
   }
   const laps = {};   // entry -> {ms, until}: its last lap and when that lap stops showing
-  function noteLaps(entries) {
+  let lapsSeeded = false;
+  // `joined` (qualifying): a row that appears after the first render shows its lap, since
+  // a car without a sender gets its row with Race Control's first lap.
+  function noteLaps(entries, joined) {
     const now = Date.now();
     entries.forEach(function (e) {
       const ms = typeof e.last_lap_ms === "number" && e.last_lap_ms > 0 ? e.last_lap_ms : null;
-      const seen = laps[e.entry];
+      const seen = laps[e.entry] || (joined && lapsSeeded ? {ms: null} : null);
       if (!seen) laps[e.entry] = {ms: ms, until: 0};   // a lap set before the page saw the car is old
       else if (ms !== seen.ms) laps[e.entry] = {ms: ms, until: ms ? now + lastLapS * 1000 : 0};
     });
+    lapsSeeded = true;
   }
   function lapShows(e) {
     const seen = laps[e.entry];
@@ -421,7 +425,7 @@
     document.getElementById("dd-lap").textContent = typeof d.remaining === "number" ? clock(d.remaining) : "QUALIFYING";
     const list = d.classes || [];
     const entries = d.qualifying || [];
-    noteLaps(entries);
+    noteLaps(entries, true);
     const book = pages(entries, list, towerRows());
     const page = book[book.length > 1 ? Math.floor(Date.now() / (CYCLE_MS * QUALI_PHASES.length)) % book.length : 0];
     let inGroup = 0;

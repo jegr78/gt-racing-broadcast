@@ -392,6 +392,13 @@ def t_class_lap_counts_are_a_desk_route():
     assert cp.decide({"commentator"}, ["race-control"] + path, "POST") == cp.FORBIDDEN
 
 
+def t_an_added_qualifying_lap_is_a_desk_route():
+    path = ["drivers", "race", "quali-lap"]
+    assert cp.decide({"director"}, path, "POST") == cp.ALLOW
+    assert cp.decide({"race_control"}, ["race-control"] + path, "POST") == cp.ALLOW
+    assert cp.decide({"commentator"}, ["race-control"] + path, "POST") == cp.FORBIDDEN
+
+
 def t_recording_routes_are_desk_routes():
     for path, method in ((["drivers", "race", "recording"], "GET"),
                          (["drivers", "race", "recording", "at"], "GET"),
@@ -595,6 +602,19 @@ def t_the_desk_offers_a_lap_count_per_slower_class():
         return
     assert got == [["GT4", "GT2"], ["GT4"], []], \
         f"one input per named class after the first, which runs on the Schedule laps, none for the unclassed: {got}"
+
+
+def t_the_desk_adds_a_qualifying_lap_and_lists_the_corrections():
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        desk = fh.read()
+    assert '"/drivers/race/quali-lap", {entry: qEntry.value, ms: ms}' in desk, "Add lap posts to its route"
+    assert 'quali_lap: "qualifying lap"' in desk, "the last change names an added lap"
+    got = _desk_fn("lapTime,qualiNote", "[qualiNote({A: 90000, B: null}, {C: {best: 90500, last: 91000}}),"
+                                        " qualiNote({}, {}), qualiNote(null, {C: {best: 90500, last: 90500}})]")
+    if got is None:
+        return
+    assert got == ["Corrected: A 1:30.000, B deleted \u00b7 Added laps: C last 1:31.000, best 1:30.500", "",
+                   "Added laps: C last 1:30.500, best 1:30.500"], got
 
 
 def t_the_desk_estimates_a_quiet_car_behind_or_ahead_of_its_reference():

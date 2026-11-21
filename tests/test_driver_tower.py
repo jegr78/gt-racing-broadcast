@@ -1256,6 +1256,19 @@ def t_a_qualifying_lap_flashes_purple_green_or_white():
     assert [r["value"] for r in later[:3]] == ["Pole", "+0.400", "+1.250"], f"then the gap returns: {later}"
 
 
+def t_a_row_that_first_appears_with_a_lap_flashes_it():
+    got = _tower(_QUALI + f"""
+      lastLapS = 5;
+      const first = quali(1000, {{qualifying: {json.dumps(QROWS[:1])}}});
+      return [first, quali(2000, {{qualifying: {json.dumps(QROWS[:3])}}})];""")
+    if got is None:
+        return
+    first, later = got
+    assert first[0]["value"] == "Pole", f"a lap the page found on its first render is old: {first}"
+    assert [(r["value"], r["mark"]) for r in later[1:3]] == [("1:31.000", ""), ("1:31.250", "pb")], \
+        f"a row added later, like Race Control's first lap for a car without a sender, shows its lap: {later}"
+
+
 def t_qualifying_ranks_each_class_under_its_header():
     gt3 = {"name": "GT3", "color": "#f00", "fastest": {"entry": "A #1", "driver": "Max", "team": "", "ms": 90000}}
     gt4 = {"name": "GT4", "color": "#0f0", "fastest": {"entry": "B #2", "driver": "Ann", "team": "", "ms": 95000}}

@@ -597,6 +597,130 @@ def t_race_control_corrects_a_qualifying_time():
                       multi_lobby=lambda: False).standings()["quali_overrides"] == {}
 
 
+def _lap_service(conns, path=None, requests=()):
+    ctx = {"roster": ROSTER_X, "stint": "Q1", "remaining": None, "mode": "qualifying",
+           "segment": "Q1", "connections": conns}
+    path = path or os.path.join(tempfile.mkdtemp(), "driver-race.json")
+    wall = [1000.0]
+    svc = dr.Service(path, pick=lambda: {"id": "good"}, trace_for=lambda _i: TRACE,
+                     multi_lobby=lambda: False, context=lambda: ctx, wall=lambda: wall[0])
+    svc.use_requests(lambda: list(requests))
+    return svc, ctx, wall, path
+
+
+def _quali_rows(svc):
+    return {r["entry"]: (r["best_ms"], r["last_lap_ms"]) for r in svc.standings()["qualifying"]}
+
+
+def t_race_control_adds_a_qualifying_lap_for_an_entry_without_a_sender():
+    svc, ctx, wall, path = _lap_service([])
+    svc.add_quali_lap("rc:Anna", "X", 91000)
+    row = svc.standings()["qualifying"][0]
+    assert (row["entry"], row["number"], row["team"], row["best_ms"], row["last_lap_ms"], row["gap_ms"]) == \
+        ("X", "9", "Grey Team", 91000, 91000, 0), f"an added lap is the last and the best lap: {row}"
+    wall[0] += 100
+    svc.add_quali_lap("rc:Anna", "X", 92000)
+    assert _quali_rows(svc) == {"X": (91000, 92000)}, "a slower lap is the last lap, the best stays"
+    wall[0] += 100
+    svc.add_quali_lap("rc:Anna", "X", 90500)
+    assert _quali_rows(svc) == {"X": (90500, 90500)}, "a faster one is both"
+    assert svc.standings()["quali_laps"] == {"X": {"best": 90500, "last": 90500, "ts": 1200.0}}, \
+        svc.standings()["quali_laps"]
+    assert [(r["action"], r["entry"], r["ms"]) for r in _audit(path) if r["action"] == "quali_lap"] == [
+        ("quali_lap", "X", 91000), ("quali_lap", "X", 92000), ("quali_lap", "X", 90500)], "each lap is audited"
+    svc.tick()
+    assert dr.public_view(svc.dashboard())["qualifying"][0]["last_lap_ms"] == 90500, "the public page gets it"
+    again, _ctx, _wall, _p = _lap_service([], path)
+    assert _quali_rows(again) == {"X": (90500, 90500)}, "added laps survive a restart"
+    ctx["segment"] = "Q2"
+    assert _quali_rows(svc) == {} and svc.standings()["quali_laps"] == {}, "an added lap belongs to its segment"
+    ctx["segment"] = "Q1"
+    for bad in (0, -1, 10**8, "1:30", True, None):
+        try:
+            svc.add_quali_lap("rc:Anna", "X", bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} must be refused")
+    svc.reset("rc:Anna")
+    assert _quali_rows(svc) == {"X": (90500, 90500)}, "a race reset keeps them"
+    dr.clear_actions(os.path.dirname(path))
+    assert _quali_rows(svc) == {}, "a fresh event drops them"
+
+
+def t_an_added_lap_and_gt7_laps_count_together():
+    conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "last_ms": 90500}}]
+    svc, _ctx, wall, path = _lap_service(conns)
+    svc.standings()
+    wall[0] += 10
+    svc.add_quali_lap("rc:Anna", "A", 91500)
+    assert _quali_rows(svc)["A"] == (90500, 91500), "an added lap after GT7's is the last lap"
+    wall[0] += 10
+    conns[0]["latest"] = {"best_ms": 90500, "last_ms": 92000}
+    assert _quali_rows(svc)["A"] == (90500, 92000), "a new GT7 lap after it is the last lap again"
+    wall[0] += 10
+    svc.add_quali_lap("rc:Anna", "A", 90000)
+    assert _quali_rows(svc)["A"] == (90000, 90000), "the faster of GT7's and the added laps is the best"
+    conns[0]["latest"] = {"best_ms": 89000, "last_ms": 89000}
+    wall[0] += 10
+    assert _quali_rows(svc)["A"] == (89000, 89000), "GT7 keeps counting"
+    again, _c, later, _p = _lap_service([dict(conns[0], latest={"best_ms": 90500, "last_ms": 92000})], path)
+    later[0] = 5000.0
+    assert _quali_rows(again)["A"] == (90000, 90000), \
+        "after a restart the stored lap is newer than the one GT7 sent before it"
+
+
+def t_set_delete_and_gt7_time_work_with_added_laps():
+    conns = [{"entry": "A", "segment": "Q1", "name": "Max", "latest": {"best_ms": 90500, "last_ms": 90500}}]
+    svc, _ctx, wall, _path = _lap_service(conns)
+    svc.set_quali("rc:Anna", "A", 91000)
+    wall[0] += 10
+    svc.add_quali_lap("rc:Anna", "A", 91200)
+    assert _quali_rows(svc)["A"] == (91000, 91200), "a set time stays the best against a slower added lap"
+    wall[0] += 10
+    svc.add_quali_lap("rc:Anna", "A", 90800)
+    assert _quali_rows(svc)["A"] == (90800, 90800) and svc.standings()["quali_overrides"] == {"A": 90800}, \
+        "a faster added lap replaces the set time"
+    svc.set_quali("rc:Anna", "A", None)
+    assert _quali_rows(svc)["A"] == (None, 90800), "a deleted time leaves the last lap"
+    wall[0] += 10
+    svc.add_quali_lap("rc:Anna", "A", 91100)
+    assert _quali_rows(svc)["A"] == (91100, 91100), "a lap added after the delete is the best"
+    svc.set_quali("rc:Anna", "A", clear=True)
+    assert _quali_rows(svc)["A"] == (90500, 90500) and svc.standings()["quali_laps"] == {}, \
+        "GT7 time drops the correction and the added laps"
+    svc.add_quali_lap("rc:Anna", "X", 95000)
+    svc.set_quali("rc:Anna", "X", clear=True)
+    assert "X" not in _quali_rows(svc), "an entry without a sender then has no row"
+
+
+def t_an_approved_driver_who_never_sent_names_the_row():
+    reqs = [{"conn": "c1", "entry": "X", "segment": None, "name": "Lea", "status": "approved", "ts": 1.0,
+             "decided": 2.0, "disconnected": False},
+            {"conn": "c2", "entry": "X", "segment": "Q1", "name": "Kim", "status": "approved", "ts": 1.5,
+             "decided": 3.0, "disconnected": False},
+            {"conn": "c3", "entry": "X", "segment": "Q2", "name": "Bo", "status": "approved", "ts": 2.0,
+             "decided": 4.0, "disconnected": False},
+            {"conn": "c4", "entry": "X", "segment": None, "name": "Ned", "status": "pending", "ts": 5.0,
+             "decided": None, "disconnected": False},
+            {"conn": "c6", "entry": "X", "segment": "Q1", "name": "Zed", "status": "approved", "ts": 6.0,
+             "decided": 9.0, "disconnected": True},
+            {"conn": "c5", "entry": "B", "segment": None, "name": "Ann", "status": "rejected", "ts": 1.0,
+             "decided": 2.0, "disconnected": False}]
+    svc, _ctx, _wall, _path = _lap_service([], requests=reqs)
+    svc.add_quali_lap("rc:Anna", "X", 91000)
+    svc.add_quali_lap("rc:Anna", "B", 92000)
+    names = {r["entry"]: r["driver"] for r in svc.standings()["qualifying"]}
+    assert names == {"X": "Kim", "B": ""}, \
+        f"the latest approved request of the segment names it; pending, rejected and disconnected ones never do: {names}"
+    svc.set_driver_name("rc:Anna", "B", "Ann B")
+    svc.set_driver_name("rc:Anna", "X", "Lea X")
+    names = {r["entry"]: r["driver"] for r in svc.standings()["qualifying"]}
+    assert names == {"X": "Lea X", "B": "Ann B"}, f"the no-sender name override applies: {names}"
+    svc.set_driver_name("rc:Anna", "X", "Kim X", driver="Kim")
+    assert {r["entry"]: r["driver"] for r in svc.standings()["qualifying"]}["X"] == "Kim X", \
+        "the override of the registered driver wins"
+
+
 def t_the_crew_sets_a_tyre_compound_that_outlives_a_driver_change():
     ctx = {"roster": ROSTER, "stint": "Stint 1", "remaining": None, "mode": "race"}
     svc, clock, path = _dash_service(ctx)
@@ -1900,6 +2024,13 @@ def t_a_class_fastest_lap_without_valid_text_is_dropped():
 def t_a_qualifying_correction_without_valid_text_is_dropped():
     path = _file({"qualifying": {"": {BAD: 60000, "A": 61000}}})
     assert dr._saved_quali(path, "") == {"A": 61000}, dr._saved_quali(path, "")
+
+
+def t_an_added_qualifying_lap_without_valid_values_is_dropped():
+    ok = {"best": 90000, "last": 91000, "ts": 5.0}
+    path = _file({"quali_laps": {"": {BAD: ok, "A": ok, "B": dict(ok, best=0), "C": dict(ok, last="1:30"),
+                                      "D": dict(ok, ts=True), "E": "x"}}})
+    assert dr._saved_quali_laps(path, None) == {"A": ok}, dr._saved_quali_laps(path, None)
 
 
 def t_a_tyre_compound_without_valid_text_is_dropped():

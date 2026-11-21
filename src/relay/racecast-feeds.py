@@ -12186,6 +12186,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _requests = driver_requests.Store(
         driver_requests.path_in(os.path.dirname(os.path.abspath(driver_invite_path))),
         invite_id=lambda: (_invite_cache.get() or {}).get("id")) if driver_invite_path else None
+    if _requests is not None and driver_race_svc is not None:
+        driver_race_svc.use_requests(_requests.all)
     _timing_cache = timing_link.Cache(timing_link_path) if timing_link_path else None
     # Public timing (#1128): one body per tick for every viewer, and the poll interval
     # stretches with the crowd so the page stays within its share of the upload.
@@ -15078,7 +15080,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     action = p[2] if len(p) == 3 else None
                     if action == "change" and self._rejected(body.get("conn")):
                         return self._send({"ok": False, "error": "this driver was rejected"}, 409)
-                    if action in ("quali", "fastest", "compound", "estimate", "retire",
+                    if action in ("quali", "quali-lap", "fastest", "compound", "estimate", "retire",
                                   "driver-name") and hud_source:
                         roster = hud_source.roster_names()
                         named = [body.get(k) for k in ("entry", "ref") if body.get(k) is not None]
@@ -15115,6 +15117,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                            b.get("ms"), b.get("class")),
                         "quali": lambda: svc.set_quali(who, b.get("entry"), b.get("ms"),
                                                        b.get("clear") is True),
+                        "quali-lap": lambda: svc.add_quali_lap(who, b.get("entry"), b.get("ms")),
                         "compound": lambda: svc.set_compound(who, b.get("entry"), b.get("code")),
                         "estimate": lambda: svc.estimate(who, b.get("entry"), b.get("ref"), b.get("seconds"),
                                                          b.get("clear") is True, b.get("ahead", False)),

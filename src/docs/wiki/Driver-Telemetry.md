@@ -357,6 +357,17 @@ It never carries connection ids, corrections or who made them.
   gap and interval within the class. Qualifying has no race laps: the header names the
   segment and, with the race timer set, the remaining time. There is no fastest lap in
   qualifying: the best lap column holds each driver's best.
+- **Qualifying without a sender**: Race Control and the director can time any roster
+  entry by hand, whether its driver sends or not. **Add lap** enters one completed lap
+  as GT7 would: it becomes the entry's last lap, and its best lap when faster, and the
+  tower shows it purple, green or white like a sent lap. With a live sender GT7's laps
+  keep counting next to it: the best lap is the faster of both, the last lap the newer
+  one. **Set time** sets the best lap outright and **Delete time** removes it; GT7's
+  later laps then no longer change the best lap, but a lap added afterwards does when it
+  is faster or the time was deleted. **GT7 time** drops the correction and the added
+  laps, so only GT7's laps count again. An entry without a sender gets its row with the
+  first time entered for it, and its name comes from the driver's approved request, else
+  from a name override for the entry without a sender (**Driver name**, `(no sender)`).
 
 ### On air and in the cockpit
 
@@ -379,7 +390,7 @@ It never carries connection ids, corrections or who made them.
   gap; a lap that does not count shows nothing. The seconds are a league setting
   (Control Center Home, **Lap time**, or `racecast event race --last-lap-seconds N`,
   1 to 30) that the relay applies at once. A reloaded overlay does not replay the laps
-  it already had. A car in the box shows `Box`. Right of the tyre ring a bar
+  it already had; in qualifying a row that appears later shows its first lap. A car in the box shows `Box`. Right of the tyre ring a bar
   and a percentage show each car's fuel (GT7 reports the tank in percent); both turn
   amber at 10 % or less, and a car without data shows none. A car that took the
   chequered flag shows a flag in place of ring and fuel, and its final gap.
@@ -423,10 +434,12 @@ It never carries connection ids, corrections or who made them.
   the public timing page always show both, without fuel for a car that sends no live
   data (`EST`, `No data`, `DC`, `DNF`); both mark a finished car with a chequered
   flag next to its final gap, which stays when the car parks or its sender goes quiet.
-- **Corrections** from both desks: clear or set the fastest lap, and set or delete an
-  entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart.
-  A race reset clears the fastest lap; qualifying times and tyre compounds stay until
-  the next [new event](#new-event-or-continued-event).
+- **Corrections** from both desks: clear or set the fastest lap, and in qualifying set
+  or delete an entry's time or add a lap (**GT7 time** undoes both, see
+  [Qualifying without a sender](#dashboard)). Corrections and
+  added laps belong to their segment, are audited and survive a relay restart. A race
+  reset clears the fastest lap; qualifying times, added laps and tyre compounds stay
+  until the next [new event](#new-event-or-continued-event).
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
 - **Commentator Cockpit**: the **Timing** card shows the same delayed data with every

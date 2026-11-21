@@ -46,7 +46,7 @@ _DRIVER_DESK_POST = {("reassign",), ("disconnect",), ("race", "recording"),
                      ("requests", "reject-pending"),
                      ("race", "recording", "event")} | {
     ("race", a) for a in ("settings", "final-lap", "finish", "red-flag", "restart-mode",
-                          "release", "rejoin", "correct", "change", "fastest", "quali", "compound",
+                          "release", "rejoin", "correct", "change", "fastest", "quali", "quali-lap", "compound",
                           "estimate", "retire", "driver-name", "class-laps")}
 
 
