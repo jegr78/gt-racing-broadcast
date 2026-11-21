@@ -98,7 +98,7 @@
                  red_flag: "RED FLAG", restart_mode: "restart mode", release: "restart released",
                  rejoin: "rejoin", change: "change override", settings: "settings",
                  reassign: "reassign", disconnect: "disconnect", red_flag_cover_down: "cover down",
-                 fastest: "fastest lap", quali: "qualifying time", compound: "tyre compound",
+                 fastest: "fastest lap", quali: "qualifying time", quali_lap: "qualifying lap", compound: "tyre compound",
                  recording_start: "recording start", recording_stop: "recording stop",
                  dc_confirm: "DC confirmed", dc_dismiss: "DC dismissed",
                  estimate: "estimate", estimate_end: "estimate ended", retire: "retirement",
@@ -190,6 +190,17 @@
     });
   }
 
+  // The segment's qualifying corrections and added laps, for the line under the form.
+  function qualiNote(fixed, added) {
+    var q = fixed || {}, a = added || {}, parts = [];
+    if (Object.keys(q).length) parts.push("Corrected: " + Object.keys(q).map(function (e) {
+      return e + " " + (q[e] === null ? "deleted" : lapTime(q[e]));
+    }).join(", "));
+    if (Object.keys(a).length) parts.push("Added laps: " + Object.keys(a).map(function (e) {
+      return e + " last " + lapTime(a[e].last) + ", best " + lapTime(a[e].best);
+    }).join(", "));
+    return parts.join(" \u00b7 ");
+  }
   function plusMs(ms) { return typeof ms === "number" ? "+" + (ms / 1000).toFixed(3) : ""; }
   // The qualifying rows under their class, as classGroups does for the race.
   function qualiGroups(r) {
@@ -696,6 +707,11 @@
       if (!isFinite(ms) || ms <= 0) return say("Lap time as m:ss.mmm", true);
       act("/drivers/race/quali", {entry: qEntry.value, ms: ms}, "Qualifying time set");
     });
+    var qLap = button("Add lap", "", null, function () {
+      var ms = parseLap(qTime.value);
+      if (!isFinite(ms) || ms <= 0) return say("Lap time as m:ss.mmm", true);
+      act("/drivers/race/quali-lap", {entry: qEntry.value, ms: ms}, "Qualifying lap added");
+    });
     var qDelete = button("Delete time", "warn", "q-del", function () {
       act("/drivers/race/quali", {entry: qEntry.value, ms: null}, "Qualifying time deleted");
     });
@@ -886,7 +902,7 @@
       el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
       el("div", {cls: "row"}, [flClass, flText, flClear]),
       el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qDelete, qRestore]),
+      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qLap, qDelete, qRestore]),
       qList,
       el("h3", {text: "Tyres"}),
       el("div", {cls: "row"}, [showTyre.label, showFuel.label]),
@@ -926,10 +942,7 @@
       tyreSrc.compounds = r.compounds || {};
       syncTyres();
       renderFastest(r);
-      var q = r.quali_overrides || {};
-      qList.textContent = Object.keys(q).length ? "Corrected: " + Object.keys(q).map(function (e) {
-        return e + " " + (q[e] === null ? "deleted" : lapTime(q[e]));
-      }).join(", ") : "";
+      qList.textContent = qualiNote(r.quali_overrides, r.quali_laps);
       if (document.activeElement !== mode) mode.value = s.finish_mode || "laps";
       if (document.activeElement !== laps) laps.value = s.lap_count || "";
       laps.hidden = mode.value !== "laps";

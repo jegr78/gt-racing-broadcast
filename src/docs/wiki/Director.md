@@ -328,8 +328,10 @@ desk:
   dashboard** / **Hide dashboard** puts it on air (Director Panel only), the delay in
   seconds, the fastest lap with **Clear fastest lap** and a form to set it (with
   classes, a class selector narrows both to one class's lap), and
-  qualifying corrections per entry: **Set time**, **Delete time** (for example after a
-  track limits penalty) and **GT7 time** to undo the correction
+  qualifying corrections per entry: **Set time**, **Add lap** (one completed lap, as
+  GT7 would send it, also for an entry whose driver does not send), **Delete time** (for
+  example after a track limits penalty) and **GT7 time** to undo the correction and the
+  added laps
 - the tyre compound per entry and the dashboard's **Show compound** / **Show fuel**
   switches
 - readiness per entry (in endurance for the stint on air and the next one) and every

@@ -169,7 +169,11 @@ rows without `x` and `z`; a row names a `brand` only when the relay holds its lo
 `delay_s` (0 to 120). `POST /drivers/race/fastest` with no `entry`
 clears the fastest lap, with `{entry, driver, ms}` sets it. `POST /drivers/race/quali
 {entry, ms}` sets a roster entry's time in the running qualifying segment, `ms: null` deletes it, `clear: true` gives
-GT7's time back; `GET /drivers/race` lists them as `quali_overrides`. `POST
+GT7's time back and drops the added laps; `GET /drivers/race` lists them as `quali_overrides`.
+`POST /drivers/race/quali-lap {entry, ms}` adds one completed lap: the entry's last lap
+while it is newer than GT7's, its best when faster, and a set or deleted time takes it
+when faster or deleted; `GET /drivers/race` lists them as `quali_laps {entry: {best,
+last, ts}}`. `POST
 /drivers/race/compound {entry, code}` sets a roster entry's tyre compound (`RS`, `RM`,
 `RH`, `I`, `W`, or null to clear), listed as `compounds {entry: {code, who, ts}}`; the
 dashboard rows carry `compound`, and `show {compound, fuel, last_lap_s}` follows the

@@ -1131,8 +1131,6 @@ def t_the_stint_watch_prefills_the_on_air_rows_class_laps():
 
 
 def t_the_stint_watch_records_the_race_stint_on_air():
-    import json, tempfile, threading, time
-
     class Source:
         def get_rows(self):
             return [("u", "A", "S1", 2), ("u", "B", "S2", 3), ("u", "C", "S3", 4)]
@@ -1379,6 +1377,44 @@ def t_a_stint_switch_opens_the_change_window_and_the_last_row_brings_its_laps():
     worker.join(2)
     assert calls == [("start", None)] and rows_seen == [True], \
         f"the last row on air is passed without a count, so a later count reaches it: {calls} {rows_seen}"
+
+
+def t_race_control_times_an_entry_whose_driver_never_sent_in_qualifying():
+    import json as _json
+    ctx = {"roster": {e: {"number": str(i + 1), "cupTeam": "Cup " + str(i)} for i, e in enumerate(ENTRIES)},
+           "stint": "Q", "remaining": None, "mode": "qualifying", "segment": "Q", "connections": []}
+    srv, port, path, _hub = _serve(context=lambda: ctx)
+    hdr = {"Content-Type": "application/json"}
+    try:
+        invite = driver_invite.create(path)["id"]
+        _approved(port, path, invite, entry=ENTRIES[1], name="Lea")
+        rc = g._tok("dave")
+        st, text, _h = _req(port, f"/console/race-control/drivers/readiness?t={rc}")
+        assert st == 200 and [r["entry"] for r in _json.loads(text)["rows"]] == ENTRIES, \
+            f"the entry picker lists every roster entry, sender or not: {text}"
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/quali-lap?t={rc}",
+                            _json.dumps({"entry": ENTRIES[1], "ms": 91000}).encode(), hdr)
+        assert st == 200, (st, text)
+        row = _json.loads(text)["race"]["qualifying"][0]
+        assert (row["entry"], row["number"], row["team"], row["driver"], row["best_ms"], row["last_lap_ms"]) == \
+            (ENTRIES[1], "2", "Cup 1", "Lea", 91000, 91000), f"the approved driver's lap, as GT7 would send it: {row}"
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/quali?t={rc}",
+                            _json.dumps({"entry": ENTRIES[0], "ms": 90000}).encode(), hdr)
+        rows = _json.loads(text)["race"]["qualifying"]
+        assert st == 200 and [(r["entry"], r["gap_ms"], r["interval_ms"]) for r in rows] == [
+            (ENTRIES[0], 0, None), (ENTRIES[1], 1000, 1000)], f"a set time ranks an entry without a sender: {rows}"
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/quali-lap?t={rc}",
+                            _json.dumps({"entry": "Invented Team", "ms": 91000}).encode(), hdr)
+        assert st == 400 and "unknown entry" in text, "only roster entries get a lap"
+        st, text, _h = _req(port, f"/console/race-control/drivers/race/quali-lap?t={rc}",
+                            _json.dumps({"entry": ENTRIES[0], "ms": "1:30"}).encode(), hdr)
+        assert st == 400 and "milliseconds" in text, (st, text)
+        srv.race_svc.tick()
+        st, text, _h = _req(port, f"/console/drivers/dashboard?t={rc}")
+        assert st == 200 and [r["driver"] for r in _json.loads(text)["qualifying"]] == ["", "Lea"], text
+        assert [r["action"] for r in _audit_of(srv)][-2:] == ["quali_lap", "quali"], _audit_of(srv)
+    finally:
+        srv.shutdown()
 
 
 def t_both_desks_act_with_their_identity():
