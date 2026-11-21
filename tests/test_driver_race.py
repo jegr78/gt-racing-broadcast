@@ -794,6 +794,42 @@ def t_a_new_event_on_a_running_relay_drops_every_action_and_rotates_the_recordin
     assert _audit(svc._path)[-1]["action"] == "new_event", "the new event is audited"
 
 
+def t_a_new_event_never_reopens_the_old_recording_or_takes_old_standings():
+    import threading, time
+    svc, wall, d = _recording_service()
+    svc.set_settings({"formation": False})
+    svc.recording_start("pit")
+    _two_cars(svc, wall, 1010.0)
+    svc.tick()
+    _flush(svc)
+    old = svc._recorder()._store.path
+    assert svc._snapshots, "the tick kept a delayed viewer frame"
+    stale = svc.standings()
+    epoch = svc._event_epoch
+    real_rotate, seen = dr.race_recording.rotate, []
+
+    def rotate(runtime_dir):
+        racer = threading.Thread(target=lambda: seen.append(svc._recorder()._store.path), daemon=True)
+        racer.start()
+        racer.join(0.3)       # a racer that is not blocked opens a recording right now
+        real_rotate(runtime_dir)
+    dr.race_recording.rotate = rotate
+    try:
+        wall[0] += 5
+        svc.new_event("tailnet")
+    finally:
+        dr.race_recording.rotate = real_rotate
+    deadline = time.monotonic() + 2
+    while not seen and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert seen and seen[0] != old, f"a recorder opened during the swap is a new file: {seen} {old}"
+    assert svc._recorder()._store.path != old, "the new event records into a new file"
+    assert not svc._snapshots, "the last event's delayed viewer frames go with it"
+    svc._observe(stale, None, epoch=epoch)
+    _flush(svc)
+    assert svc._recorder()._store.span() is None, "standings read before the new event are dropped"
+
+
 def t_a_race_reset_ends_the_old_races_disconnects():
     svc, wall, _d = _recording_service()
     svc.set_settings({"formation": False})
