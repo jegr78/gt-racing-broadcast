@@ -57,7 +57,9 @@ nearest the predicted distance decides.
   to a lap past that point, with that car's pass after the restart plus the time it
   took to its restart point before the red flag, so a box exit never meets a flying lap.
   `release` ends the mode: a car still in its old session counts on from where it
-  is, one in a restart lobby still resumes at its box exit.
+  is, one in a restart lobby still resumes at its box exit. In an endurance final
+  lobby the cars a keep restart started rank at the flag by their crossing moments,
+  each later by its corrections since the restart at its speed on the line.
 - Rejoin (endurance): a marked team's next car to leave the box inside the change
   window starts from the leader's distance where its old lobby's car stopped (where
   the leader is, while it still runs).
@@ -190,12 +192,14 @@ class _Entry:
         self.resume = False        # an undone retirement: count on from `distance`
         self.crossed = None        # (interpolated time, sample time, line distance or None) of its last crossing
         self.resumed = None        # restart: (red flag number, box exit time, anchor distance)
+        self.road = None           # its correction when a keep restart started it: the road then matches its race
+        self.cross_v = 0.0         # its speed at its last crossing
 
     def restart(self):
         self.distance, self.ts, self.ds = None, [], []
         self.cts, self.cds = array("d"), array("d")
         self.pit_stops, self.finished_at, self.since = 0, None, None
-        self.resumed = None
+        self.resumed = self.road = None
 
 
 class Race:
@@ -330,6 +334,7 @@ class Race:
         ent.distance = self._raw(car, lap, s)      # at the exit, though the car may have crossed since
         ent.active, ent.waiting, ent.held = car.conn, False, False
         ent.resumed = (self._red_flags, t, ent.distance)
+        ent.road = ent.adjust if self._restart_mode == "keep" else None
         if self._stopped is not None:              # the first car out ends the stoppage
             self._close_stoppage(t)
             self._lobby_at = t
@@ -662,7 +667,7 @@ class Race:
         car.counting, car.anchor, car.lap0 = True, anchor, lap0
         car.f0 = 0.0 if from_line else frac
         car.lap_ok, car.line_t, car.pending = False, None, None   # the running lap is partial
-        ent.stint_laps = 0
+        ent.stint_laps, ent.road = 0, None
         ent.distance, ent.since = self._raw(car, car.lap, s), t
         if from_line and frac > self.length - SNAP_M:
             ent.distance -= self.length    # the counter flipped: a few metres short is past it
@@ -908,7 +913,7 @@ class Race:
         """`at`: when the car passed the line, between its previous sample and `t`."""
         # A lobby's counter may step a few metres before the car's own line station.
         line = car.anchor + (car.lap - car.lap0) * self.length - car.f0 if self.multi_lobby else None
-        ent.crossed = (at, t, line)
+        ent.crossed, ent.cross_v = (at, t, line), car.speed
         if self._finished:
             return
         if self._finishing_at is not None:
@@ -948,6 +953,14 @@ class Race:
             ent.distance = line
             if ent.ds:
                 ent.ds[-1] = line
+
+    def _road_finish(self, ent):
+        """When a car a keep restart started took the flag at a final lobby's line, its
+        corrections since the restart counted at its speed there; None otherwise."""
+        if not self.multi_lobby or ent.road is None or ent.finished_at is None \
+                or ent.crossed is None or ent.crossed[1] != ent.finished_at:
+            return None
+        return ent.crossed[0] - (ent.adjust - ent.road) / max(ent.cross_v, GAP_SPEED_MPS)
 
     def _race_lead(self, real=False):
         """The leading shown distance, None before any car counts; `real` leaves out
@@ -1111,6 +1124,9 @@ class Race:
         if ahead.distance is None or ent.distance is None:
             return None
         if ent.finished_at is not None:
+            mine, theirs = self._road_finish(ent), self._road_finish(ahead)
+            if mine is not None and theirs is not None and self._ranked_laps(ent) == self._ranked_laps(ahead):
+                return max(0.0, self._racing(mine) - self._racing(theirs))
             # At the lap count the order compares: a car ranked ahead can take the flag later.
             laps = self._ranked_laps(ent)
             if laps is not None and laps > 0:
@@ -1292,6 +1308,13 @@ class Race:
                     reached = at
                 else:
                     reached = None if at is None else at + (-est["lag"] if est["ahead"] else est["lag"])
+            road = self._road_finish(e)
+            if road is not None:
+                reached = road
+            elif self.multi_lobby and e.road is not None and e.finished_at is None and est is None:
+                # On the road it completes that lap at its flag, not before now.
+                car = self._cars.get(e.active) or _NO_CAR
+                reached = now - (e.adjust - e.road) / max(car.speed or 0.0, GAP_SPEED_MPS)
             if reached is None:
                 reached = e.finished_at if e.finished_at is not None else math.inf
             return (0, -laps, reached, -dist, e.entry)
