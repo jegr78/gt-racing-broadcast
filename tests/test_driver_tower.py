@@ -1048,9 +1048,10 @@ def t_the_public_page_renders_one_class_as_today():
 COCKPIT = os.path.join(ROOT, "src", "cockpit", "cockpit.html")
 
 
-def _cockpit(payload, head=False):
+def _cockpit(payload, head=False, probe=None):
     """The cockpit's timing card after one poll of `payload`: each body row's cell texts,
-    a class header as {head, color}; with `head` the header line's parts."""
+    a class header as {head, color}; with `head` the header line's parts; with `probe`
+    the value of that JS expression."""
     with open(COCKPIT, encoding="utf-8") as fh:
         html = fh.read()
     start = html.index("// Driver timing (#1115)")
@@ -1059,12 +1060,14 @@ def _cockpit(payload, head=False):
           + "const j = async () => (" + json.dumps(payload) + ");\n" + block
           + """\n;(async function () {
       await pollTiming();
+      if (__PROBE__) return (__PROBE__);
       if (__HEAD__) return els.timingHead.children.map(text);
       return els.timing.tBodies[0].children.map(function (r) {
         if (r.className === "cls") return {head: text(r), color: r.children[0].children[0].style.color || ""};
         return r.children.map(text);
       });
-    })().then(r => console.log(JSON.stringify(r)));""").replace("__HEAD__", json.dumps(head))
+    })().then(r => console.log(JSON.stringify(r)));""").replace("__HEAD__", json.dumps(head)).replace(
+        "__PROBE__", probe or "null")
     return _run(js)
 
 
@@ -1087,6 +1090,22 @@ def t_the_cockpit_shows_class_position_and_gap():
     assert [r[0] for r in cars] == ["1", "2", "1", "2"], f"class positions: {cars}"
     assert [r[6] for r in cars] == ["", "+1.0", "", "+2.0"], f"class gaps, not +1 L: {cars}"
     assert [r[7] for r in cars] == ["", "+1.0", "", "+2.0"], f"class intervals: {cars}"
+
+
+def t_the_cockpit_flags_a_finished_row_with_its_final_gap():
+    cars = [dict(CAR, entry="A #1", pos=1, gap_s=0.0, finished=True, status="box"),
+            dict(CAR, finished=True, status="no_data"), dict(CAR, entry="C #3", pos=3, finished=True, status="dc"),
+            dict(CAR, entry="D #4", pos=4, gap_s=3.0, finished=True, status="est")]
+    got = _cockpit({"mode": "race", "entries": cars}, probe="""els.timing.tBodies[0].children.map(r => ({
+        row: r.className, gap: text(r.children[6]),
+        flag: flat(r.children[6]).some(c => /chequer/.test(c.className)),
+        est: flat(r.children[6]).some(c => c.className === "est")}))""")
+    if got is None:
+        return
+    assert [g["gap"] for g in got] == ["", "+1.4", "+1.4", "+3.0EST"], f"the final gap, not the status: {got}"
+    assert [g["flag"] for g in got] == [True, True, True, False], f"a finish shows the flag, an estimate its tag: {got}"
+    assert got[3]["est"], f"an estimate keeps its EST tag: {got}"
+    assert got[0]["row"] == "", f"a finished car in the box is not marked as boxed: {got}"
 
 
 def t_the_cockpit_renders_one_class_as_today():

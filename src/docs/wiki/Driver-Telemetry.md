@@ -386,8 +386,8 @@ It never carries connection ids, corrections or who made them.
   driver changes and applies to the race and qualifying; the last change wins and the
   desks show who made it. **Show compound** and **Show fuel** switch those two columns
   on the on-air dashboard for every entry; name and number always show. The cockpit and
-  the public timing page always show both; the public page marks a finished car with a
-  chequered flag next to its final gap.
+  the public timing page always show both; both mark a finished car with a chequered
+  flag next to its final gap, which stays when the car parks or its sender goes quiet.
 - **Corrections** from both desks: clear or set the fastest lap, and set or delete an
   entry's qualifying time (**GT7 time** undoes it). Corrections survive a relay restart.
   A race reset clears the fastest lap; qualifying times and tyre compounds stay until
