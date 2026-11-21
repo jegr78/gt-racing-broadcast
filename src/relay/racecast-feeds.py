@@ -1658,13 +1658,14 @@ def detect_tailscale_ip():
 def resolve_bind_addresses(bind_arg, tailscale_ip):
     """Map the --bind value (+ a detected Tailscale IP) to bind addresses.
 
-    'auto'  -> 127.0.0.1 plus the Tailscale IP when present (localhost only if not).
+    'auto'  -> 127.0.0.1 plus the Tailscale IP when present (localhost only if not, and
+               always in simulation mode).
     localhost/127.0.0.1 -> [127.0.0.1].
     anything else (e.g. 0.0.0.0 or a specific IP) -> taken literally.
     """
     if bind_arg == "auto":
         addrs = ["127.0.0.1"]
-        if tailscale_ip and tailscale_ip not in addrs:
+        if tailscale_ip and tailscale_ip not in addrs and not simulation.active():
             addrs.append(tailscale_ip)
         return addrs
     if bind_arg in ("127.0.0.1", "localhost"):
@@ -16961,7 +16962,7 @@ def main():
         LOG.info("  Director panel (local): http://127.0.0.1:%s/panel", args.http_port)
         if remote_host:
             LOG.info("    remote (tailnet):      http://%s:%s/panel", remote_host, args.http_port)
-        elif args.bind == "auto":
+        elif args.bind == "auto" and not simulation.active():
             LOG.info("    (no Tailscale IP found, local only; start Tailscale for remote access)")
     if event_store.get():
         LOG.info("  Event title: “%s”  (panel/cockpit/Discord; edit live in the Director Panel)",

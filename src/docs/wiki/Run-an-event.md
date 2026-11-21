@@ -84,6 +84,10 @@ start.
   Python processes (CLI, Control Center, relay and the scripts they start) refuse any
   connection that is not loopback; external programs such as ffmpeg and the stream
   stand-ins are outside that guard.
+- The relay's default `--bind auto` binds `127.0.0.1` only, so a rehearsal relay is
+  never reachable on the tailnet. The one local exception is read-only: the relay and
+  the Control Center status rows still run `tailscale status`/`tailscale ip` to read
+  this machine's state, and never change it.
 - A Schedule cell may name a simulated stream as `sim://<name>`; outside simulation
   mode that value is invalid.
 - The mode runs on the `demo` profile or on a profile whose `profile.env` sets

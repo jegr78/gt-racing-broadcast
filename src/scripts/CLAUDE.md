@@ -160,8 +160,9 @@ never the real one.
   getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
   It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every
   subprocess script through `guarded_argv` so the one-shots run behind it too. It covers
-  Python only: ffmpeg, the stream stand-ins and the CLI tools a status view reads
-  (`tailscale status`) are outside it. Real parties on loopback (OBS 4455, Companion, the
+  Python only: ffmpeg and the stream stand-ins are outside it. The one documented local
+  exception is read-only `tailscale status`/`tailscale ip` probes (relay funnel watch and
+  bind detection, Control Center status rows); `--bind auto` still binds 127.0.0.1 only. Real parties on loopback (OBS 4455, Companion, the
   Discord client) are kept out by the skips above, `obs_ws._connect` and the relay's
   `_companion_off`, not by the guard.
 

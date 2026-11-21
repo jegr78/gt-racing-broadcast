@@ -391,7 +391,8 @@ start without the `RACECAST_SIM_*` endpoints (`simulation_startup`), puts the st
 stand-ins first on `PATH` and installs the network guard. Every Sheet tab URL goes through
 `_sheet_tab_csv_url` (`simulation.sheet_csv_url`), `is_channel` also accepts `sim://<name>`
 and `channel_url` passes it unchanged to the stand-ins (`yt-dlp ... -- sim://<name>`),
-`_timing_host_env_file` returns "" so the timing host stays off, and `_companion_off`
+`_timing_host_env_file` returns "" so the timing host stays off, `resolve_bind_addresses`
+keeps `--bind auto` on 127.0.0.1 (never the Tailscale IP), and `_companion_off`
 answers `/console/buttons` with 503 instead of reaching the Companion on this machine. Details:
 `src/scripts/CLAUDE.md`, "Simulation mode".
 

@@ -400,6 +400,18 @@ def t_windows_stand_ins_must_be_exe():
     assert sim.stand_in_present(d, "yt-dlp", windows=True)
 
 
+def t_relay_bind_auto_stays_off_the_tailnet_in_simulation():
+    m = _relay()
+    assert m.resolve_bind_addresses("auto", "100.64.0.7") == ["127.0.0.1", "100.64.0.7"]
+    restore = _patched_env(RACECAST_SIMULATION="1")
+    try:
+        assert m.resolve_bind_addresses("auto", "100.64.0.7") == ["127.0.0.1"], \
+            "a rehearsal relay must not be reachable on the tailnet"
+        assert m.resolve_bind_addresses("0.0.0.0", None) == ["0.0.0.0"], "an explicit bind stays"
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
