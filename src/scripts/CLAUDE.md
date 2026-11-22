@@ -183,14 +183,18 @@ never the real one.
   `RACECAST_SIMULATION`, and `driver_radio_process.run_process` and
   `driver_radio_voice_process.Owned` start Python workers through `guard_python_argv`; the
   frozen `_radio-*` entrypoints install the guard before they dispatch.
-- `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`.
-  `relay_start_plan` answers `refuse` (no kill, no reuse) when the port holder runs in the
-  other mode, and a simulation start never kills an unstamped holder. A live start
-  refuses only while the stamped simulation relay is alive and holds the port; a stale
-  stamp heals as before. `event start` runs the same plan before it launches anything;
-  `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop` before it
-  touches a live relay, and a simulated `freeport --force` never frees a live relay's
-  ports. `relay_status_data` carries `mode`.
+- `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`; both modes share
+  `relay.pid` and the stamps. `relay_start_plan` answers `refuse` (no kill, no reuse) while
+  the PID file names a live relay process of the other mode, on any control port (a
+  simulation relay may run on `RACECAST_SIM_RELAY_PORT`), so neither start overwrites the
+  other's PID file and stamps; `pidfile_relay` keeps a recycled PID from blocking. A
+  simulation start also refuses an unstamped port holder and never kills it; a stale stamp
+  with a dead relay heals as before. `event start` runs the same plan before it launches
+  anything; `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop`
+  before it touches a live relay. In simulation `freeport` and the Control Center's Kill
+  relay (`_simulated_freeport`) only stop this install's own simulation relay through its
+  PID file and never kill a port holder they cannot prove is theirs. `relay_status_data`
+  carries `mode`.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
   getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
   It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every

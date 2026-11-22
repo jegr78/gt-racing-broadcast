@@ -2730,7 +2730,7 @@ def _frozen_child_env():
 
 def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
                      running_profile, active_profile, http_ok, running_mode="",
-                     active_mode="live"):
+                     active_mode="live", pidfile_relay=True):
     """Pure: decide what `relay start` must do, from the gathered signals.
 
     Returns (action, kill_pids, reason):
@@ -2745,11 +2745,20 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
 
     An EMPTY/unknown running_profile counts as a mismatch (heal): a current-binary
     relay always writes its stamp, so a stampless holder is a pre-stamp/old daemon.
+    A live relay of the other mode in this install's PID file refuses on any port: a
+    simulation relay may run on another control port, and a start would overwrite the
+    PID file and stamps of the other one.
     """
     port_set = set(port_pids)
+    simulated = active_mode == "simulation"
+    if pidfile_alive and pidfile_relay and simulated != (running_mode == "simulation"):
+        if simulated:
+            return ("refuse", [], f"a live relay is running (PID {pidfile_pid}). Stop it "
+                                  "first without simulation mode: racecast relay stop")
+        return ("refuse", [], f"a simulation relay is running (PID {pidfile_pid}). Stop it "
+                              "first: racecast relay stop")
     if not port_set:
         return ("start", [], "")
-    simulated = active_mode == "simulation"
     if simulated != (running_mode == "simulation"):
         if simulated:
             return ("refuse", [], f"port {_relay_port()} is held by a relay outside simulation "
@@ -2788,6 +2797,7 @@ def _relay_start_signals():
     alive = sv.pid_alive(pid)
     own = len(set(port_pids)) == 1 and alive and pid in port_pids
     return {"port_pids": port_pids,
+            "pidfile_relay": bool(alive and sv.pid_is_relay(pid)),
             "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
@@ -7362,6 +7372,26 @@ def freeport_owner(port, relay_alive, static_alive_ports):
     return None
 
 
+def _simulated_freeport(ports):
+    """Simulation mode frees ports only by stopping this app home's own simulation relay
+    (its PID file, stamped simulation, a relay process); it never kills a port holder it
+    cannot prove is its own. Returns the exit code."""
+    pid = sv.read_pid(_relay_pid_path())
+    if sv.pid_alive(pid) and sv.pid_is_relay(pid) and _running_relay_mode() == "simulation":
+        print(f"simulation: stopping this install's simulation relay (PID {pid}) to free "
+              f"its ports instead of killing port holders.")
+        relay_stop([])
+        return 0
+    held = [(port, pt.pids_on_port(port)) for port in ports]
+    held = [(port, pids) for port, pids in held if pids]
+    for port, pids in held:
+        print(f"port {port}: held by PID {', '.join(map(str, pids))}, which this simulation "
+              f"cannot prove is its own relay; left alone. Stop it where it was started.")
+    if not held:
+        print("simulation: no port held and no simulation relay of this install running.")
+    return 1 if held else 0
+
+
 def freeport_cmd(rest):
     """Free stuck feed ports: kill whatever LISTENS on each, unless a running relay
     or static-streams owns it (then refuse, stop that service, or --force). Default
@@ -7370,6 +7400,8 @@ def freeport_cmd(rest):
         chosen, force = parse_freeport_args(rest)
     except ValueError as exc:
         sys.exit(f"racecast: {exc}")
+    if simulation.active():
+        raise SystemExit(_simulated_freeport(chosen))
     relay_alive = _relay_is_alive()
     static_alive = {int(f["label"]) for f in streams_status_data()
                     if f["alive"] and str(f["label"]).isdigit()}

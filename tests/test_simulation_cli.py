@@ -316,15 +316,25 @@ def t_relay_start_never_crosses_simulation_and_live():
     assert action == "refuse" and kill == [], "simulation never kills an unknown holder"
     assert _plan("", "live", pidfile_alive=False, pidfile_pid=None)[0] == "heal", \
         "a live start keeps healing an orphan"
-    assert _plan("", "simulation", port_pids=[])[0] == "start"
+    assert _plan("", "simulation", port_pids=[], pidfile_alive=False)[0] == "start"
     action, _kill, reason = _plan("simulation", "live")
     assert "racecast relay stop" in reason and "--simulation" not in reason, \
         "a live operator must be able to run the hint as printed"
     assert _plan("simulation", "live", pidfile_alive=False, pidfile_pid=None)[0] == "heal", \
         "a stale simulation stamp with a dead relay must not block a live start"
-    assert _plan("simulation", "live", port_pids=[555])[0] == "heal", \
+    assert _plan("simulation", "live", port_pids=[555], pidfile_alive=False)[0] == "heal", \
         "a stale simulation stamp says nothing about a foreign holder"
-    assert _plan("simulation", "live", port_pids=[])[0] == "start"
+    assert _plan("simulation", "live", port_pids=[], pidfile_alive=False)[0] == "start"
+
+
+def t_a_relay_of_the_other_mode_blocks_a_start_on_any_port():
+    for running, active in (("live", "simulation"), ("", "simulation"), ("simulation", "live")):
+        for ports in ([], [555]):
+            action, kill, reason = _plan(running, active, port_pids=ports)
+            assert action == "refuse" and kill == [], (running, active, ports, action)
+            assert "relay stop" in reason, reason
+    assert _plan("live", "simulation", port_pids=[], pidfile_relay=False)[0] == "start", \
+        "a recycled PID that is no relay blocks nothing"
 
 
 def t_event_start_refuses_a_crossed_relay_before_any_launch():
@@ -399,21 +409,33 @@ def t_relay_mode_stamp_round_trip():
         assert m._running_relay_mode() == ""
 
 
-def t_simulated_freeport_never_kills_a_live_relay():
-    killed = []
-    seams = ((m, "_relay_is_alive", lambda: True), (m, "streams_status_data", lambda: []),
-             (m.pt, "pids_on_port", lambda port: [4242]), (m.pt, "kill_pid", killed.append))
-    with _env(**SIM_ENV), _patched(*seams, (m, "_running_relay_mode", lambda: "live")):
+def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
+    killed, stopped = [], []
+    seams = ((m, "streams_status_data", lambda: []), (m.sv, "read_pid", lambda p: 4242),
+             (m.sv, "pid_alive", lambda pid: pid_alive), (m.sv, "pid_is_relay", lambda pid: is_relay),
+             (m.pt, "pids_on_port", lambda port: [4242, 777]), (m.pt, "kill_pid", killed.append),
+             (m.sv, "stop_pid", lambda pid, path=None, **k: stopped.append(pid) or True),
+             (m, "_running_relay_mode", lambda: mode), (m, "_release_obs_feeds", lambda: None))
+    code, out = 0, io.StringIO()
+    with _env(**SIM_ENV), _patched(*seams):
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                m.freeport_cmd(["--force"])
+            with contextlib.redirect_stdout(out):
+                m.freeport_cmd(list(args))
         except SystemExit as exc:
-            assert exc.code == 1, exc.code
-    assert killed == [], "a simulated freeport --force killed a live relay"
-    with _env(**SIM_ENV), _patched(*seams, (m, "_running_relay_mode", lambda: "simulation")):
-        with contextlib.suppress(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-            m.freeport_cmd(["--force"])
-    assert killed, "--force still frees the ports of a simulation relay"
+            code = exc.code
+    return killed, stopped, code, out.getvalue()
+
+
+def t_simulated_freeport_acts_only_on_its_own_simulation_relay():
+    killed, stopped, code, out = _sim_freeport("simulation", True)
+    assert killed == [] and stopped == [4242], "it stops this app home's simulation relay, never a port holder"
+    killed, stopped, code, out = _sim_freeport("live", True)
+    assert killed == stopped == [] and code == 1, "a live relay is never touched"
+    killed, stopped, code, out = _sim_freeport("simulation", False, args=("--force", "8088", "53001"))
+    assert killed == stopped == [] and code == 1, "a holder it cannot prove is its own stays"
+    assert "cannot prove" in out, out
+    killed, stopped, code, out = _sim_freeport("simulation", True, is_relay=False)
+    assert killed == stopped == [] and code == 1, "a recycled PID is no simulation relay"
 
 
 def _sim_ok_env():
@@ -616,6 +638,14 @@ def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
     assert urls == ["http://127.0.0.1:41234/hud"], urls
     assert m._relay_port() == 8088 and ui_ops.build_argv("kill-relay")[2] == "8088"
     assert preflight.relay_status_url() == "http://127.0.0.1:8088/status"
+
+
+def t_kill_relay_text_names_the_actual_port():
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    assert "control port 8088" not in html and "relay control port 8088" not in html, \
+        "the Kill relay texts show the port the Control Center reads from the relay status"
+    assert 'class="relay-port"' in html
 
 
 def t_every_relay_port_reader_goes_through_the_helper():

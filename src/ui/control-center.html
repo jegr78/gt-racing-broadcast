@@ -81,7 +81,7 @@
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Restart</button>
             <a class="linkbtn" id="rel-panel-open" target="_blank" rel="noopener" hidden>Open panel ↗</a></div>
           <div class="row"><span class="name">Stale relay</span>
-            <span class="dim grow">control port 8088: force-free a stale/orphaned relay the Stop button can't reach (unknown PID); a healthy relay is left untouched</span>
+            <span class="dim grow">control port <span class="relay-port">8088</span>: force-free a stale/orphaned relay the Stop button can't reach (unknown PID); a healthy relay is left untouched</span>
             <button class="danger" onclick="op('kill-relay', true)">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>Kill stale relay</button></div>
           <div class="row"><span class="name">Feed ports</span>
@@ -1687,6 +1687,7 @@ async function refresh() {
   $('linux-admin-actions').hidden = !(s.os || '').startsWith('linux');
   $('ver').textContent = s.version;
   $('sim-badge').hidden = !s.simulation;
+  document.querySelectorAll('.relay-port').forEach(el => { el.textContent = String(s.relay.port); });
   const relayUp = s.relay.alive;
   setBadge('relay', relayUp, 'RUNNING', 'stopped',
     relayUp ? relayDetail(s.relay) : '');
@@ -1874,11 +1875,13 @@ const CONFIRM_TEXT = {
   'obs-collection-set': 'Switch OBS to the GT Racing Endurance scene collection? This rebuilds all sources (incl. the relay feeds).',
   'chat-clear': 'Clear all crew-chat messages? This cannot be undone.',
   'free-ports': 'Free the feed ports (53001–53003)? Kills any orphaned process holding them. A running relay or static stream is left untouched.',
-  'kill-relay': 'Kill a stale relay? Frees the relay control port 8088 by killing the process holding it — use this when the relay is orphaned (unknown PID) and the Stop button can\'t reach it. A healthy, running relay is left untouched (use Stop Relay instead).'
+  'kill-relay': 'Kill a stale relay? Frees the relay control port {port} by killing the process holding it — use this when the relay is orphaned (unknown PID) and the Stop button can\'t reach it. A healthy, running relay is left untouched (use Stop Relay instead).'
 };
 
 async function op(name, confirmFirst, params, confirmation) {
-  if (confirmFirst && !(await confirmModal(CONFIRM_TEXT[name] || ('Run ' + name + '?')))) return;
+  const relayPort = String((lastStatus && lastStatus.relay && lastStatus.relay.port) || 8088);
+  const ask = (CONFIRM_TEXT[name] || ('Run ' + name + '?')).replace('{port}', relayPort);
+  if (confirmFirst && !(await confirmModal(ask))) return;
   let r;
   try {
     r = await (await fetch('/api/op/' + name, {method: 'POST',

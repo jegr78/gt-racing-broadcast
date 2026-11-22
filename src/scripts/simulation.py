@@ -125,9 +125,20 @@ def obs_target(environ=None):
     return (u.hostname, u.port) if u.port else None
 
 
-def _port_problem(value):
-    if not value.isdigit() or not 1 <= int(value) <= 65535:
+LIVE_PORTS = (DEFAULT_RELAY_PORT, 53001, 53002, 53003)   # the live relay's control and feed ports
+DEFAULT_UI_PORT = 8089
+
+
+def _port_problem(value, environ=None):
+    environ = os.environ if environ is None else environ
+    if not (value.isascii() and value.isdigit()) or not 1 <= int(value) <= 65535:
         return f"{RELAY_PORT} must be a port number 1-65535, not {value!r}"
+    port = int(value)
+    if port in LIVE_PORTS:
+        return f"{RELAY_PORT}={port} is a port of the live relay (8088, 53001-53003); pick a free one"
+    ui = (environ.get("RACECAST_UI_PORT") or "").strip()
+    if port == (int(ui) if ui.isascii() and ui.isdigit() else DEFAULT_UI_PORT):
+        return f"{RELAY_PORT}={port} is the Control Center's port; pick another one"
     return ""
 
 
@@ -138,7 +149,7 @@ def relay_port(environ=None, default=DEFAULT_RELAY_PORT):
     value = (environ.get(RELAY_PORT) or "").strip()
     if not (active(environ) and value):
         return default
-    problem = _port_problem(value)
+    problem = _port_problem(value, environ)
     if problem:
         raise ValueError(problem)
     return int(value)
@@ -193,8 +204,8 @@ def problems(environ=None):
     if stream:
         out.append(stream)
     port = (environ.get(RELAY_PORT) or "").strip()
-    if port and _port_problem(port):
-        out.append(_port_problem(port))
+    if port and _port_problem(port, environ):
+        out.append(_port_problem(port, environ))
     return out
 
 

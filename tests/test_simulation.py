@@ -290,7 +290,13 @@ def t_relay_port_moves_only_in_simulation():
     assert sim.relay_port(dict(ON, RACECAST_SIM_RELAY_PORT=" 41234 ")) == 41234
     base = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin())
     assert sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="41234")) == []
-    for bad in ("0", "65536", "abc", "8088.5", "-1", "127.0.0.1:41234"):
+    assert "8088" in " ".join(sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="8088"))), \
+        "the live relay's port is no simulation port"
+    ui = sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="41235", RACECAST_UI_PORT="41235"))
+    assert any("Control Center" in p for p in ui), ui
+    assert any("Control Center" in p for p in sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="8089")))
+    for bad in ("0", "65536", "abc", "8088.5", "-1", "127.0.0.1:41234", "\u0664\u0661\u0662\u0663\u0664",
+                "8088", "53001", "53002", "53003"):
         env = dict(base, RACECAST_SIM_RELAY_PORT=bad)
         assert any(sim.RELAY_PORT in p for p in sim.problems(env)), bad
         try:

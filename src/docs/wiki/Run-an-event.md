@@ -95,8 +95,11 @@ start.
   such as ffmpeg, the stream stand-ins and the local speech models are outside that
   guard and get no network endpoint from racecast.
 - A simulation relay and a live relay never replace each other: `relay start` and
-  `event start` refuse while the other kind holds the control port, and a simulated
-  `relay stop` or `event stop` refuses a live relay. Stop the other one first.
+  `event start` refuse while the other kind runs from the same installation, whatever its
+  port, and a simulated `relay stop` or `event stop` refuses a live relay. Stop the other
+  one first. In simulation, `freeport` and the Control Center's Kill relay only stop this
+  installation's own simulation relay; a process on a port that they cannot prove is
+  theirs is left alone.
 - The relay's default `--bind auto` binds `127.0.0.1` only, so a rehearsal relay is
   never reachable on the tailnet. The one local exception is read-only: the relay and
   the Control Center status rows still run `tailscale status`/`tailscale ip` to read
