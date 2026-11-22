@@ -816,6 +816,31 @@ def t_red_flag_without_the_cover_still_sets_banner_and_race():
             f"an answer without a direction changes nothing and says so: {d['lost']}"
 
 
+def t_mute_key_toggles_from_the_relays_answer():
+    html = _html()
+    assert "!last.muted" not in html, "a mute press never derives its direction from the last /obs/state poll"
+    out = _run_js(_TOGGLE_HARNESS + "async " + _func_src(html, "muteToggle") + """
+}
+(async () => {
+  obsState.audio.push({input: 'Feed A', muted: false});
+  const key = {textContent: 'Mute', muted: null, classList: {toggle: (_c, on) => { key.muted = on; }}};
+  answers.push({ok: true, muted: true}, {ok: true, muted: false}, {ok: false, error: 'obs unreachable'});
+  await muteToggle('Feed A', key);
+  const first = [key.muted, key.textContent, obsState.audio[0].muted];
+  await muteToggle('Feed A', key);
+  const second = [key.muted, key.textContent];
+  await muteToggle('Feed A', key);
+  console.log(JSON.stringify({first, second, third: [key.muted, key.textContent], sent, logs}));
+})();""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["sent"] == ['audio {"input":"Feed A","toggle":true}'] * 3, d["sent"]
+        assert d["first"] == [True, "Muted", True] and d["second"] == [False, "Mute"], \
+            f"two presses inside one poll interval mute and unmute: {d}"
+        assert d["third"] == [False, "Mute"] and any(line.startswith("toast: ") for line in d["logs"]), \
+            f"a refused toggle leaves the key as it was and says why: {d}"
+
+
 def t_relay_driven_keys_start_hidden():
     html = _html()
     out = _run_js(_func_src(html, "relayGated") + """

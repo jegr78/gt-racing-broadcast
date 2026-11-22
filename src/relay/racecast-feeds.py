@@ -5514,6 +5514,20 @@ def switch_scene_item(obs_ws, scene, source, on=None):
         return bool(ok), on, note
 
 
+def toggle_input_mute(obs_ws, name):
+    """Flip an audio input's mute from the state OBS reports; switches nothing when
+    OBS cannot report it. Returns (ok, muted, note), with muted None for that refusal."""
+    with _ITEM_SWITCH_LOCK:
+        state, note = obs_ws.read_obs_state([], [name])
+        if state is None:
+            return False, None, note or "obs unreachable"
+        muted = (state.get("audio") or [{}])[0].get("muted")
+        if muted is None:
+            return False, None, f"no audio input {name!r}"
+        ok, note = obs_ws.set_input_mute(name, not muted)
+        return bool(ok), not muted, note
+
+
 def red_flag_on_record(relay, hud):
     """Whether a red flag is on by the relay's own record, for when OBS cannot report
     the Standby Cover: the HUD banner, or a cover the Race Control desk raised."""
@@ -15413,11 +15427,18 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
                     inp = body.get("input")
-                    if "mute" in body:
-                        ok, note = relay._obs.set_input_mute(inp, bool(body.get("mute")))
+                    if body.get("toggle") is True or "mute" in body:
+                        # `toggle: true` flips the mute OBS reports (the panel's key).
+                        if body.get("toggle") is True:
+                            ok, muted, note = toggle_input_mute(relay._obs, inp)
+                        else:
+                            muted = bool(body.get("mute"))
+                            ok, note = relay._obs.set_input_mute(inp, muted)
                         note_mute = getattr(relay, "note_director_mute", None)
                         if ok and note_mute is not None:
-                            note_mute(inp, bool(body.get("mute")))
+                            note_mute(inp, muted)
+                        if ok and body.get("toggle") is True:
+                            return self._send({"ok": True, "muted": muted})
                     elif "db" in body:
                         ok, note = relay._obs.set_input_volume(inp, body.get("db"))
                     else:

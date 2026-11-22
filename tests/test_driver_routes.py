@@ -1614,6 +1614,54 @@ def t_obs_source_toggle_flips_the_state_obs_reports():
         srv.server_close()
 
 
+class _MuteObs:
+    """OBS with audio inputs: an input maps to its mute state, None when OBS cannot report it."""
+    def __init__(self, inputs):
+        self.inputs, self.sets = dict(inputs), []
+
+    def read_obs_state(self, _items, inputs):
+        return {"scene": "Stint", "sources": [],
+                "audio": [{"input": n, "muted": self.inputs.get(n), "volumeDb": 0.0} for n in inputs]}, None
+
+    def set_input_mute(self, name, muted):
+        self.inputs[name] = bool(muted)
+        self.sets.append((name, bool(muted)))
+        return True, None
+
+
+def t_obs_audio_toggle_flips_the_mute_obs_reports():
+    import json as _json
+    obs = _MuteObs({"Feed A": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv = g._serve()
+    port = srv.server_address[1]
+    noted = []
+    srv.relay.note_director_mute = lambda name, muted: noted.append((name, muted))
+
+    def post(name, **extra):
+        st, text, _h = _req(port, "/obs/audio", _json.dumps({"input": name, **extra}).encode(),
+                            {"Content-Type": "application/json"})
+        return st, _json.loads(text)
+    try:
+        assert post("Feed A", toggle=True) == (200, {"ok": True, "muted": True})
+        assert post("Feed A", toggle=True) == (200, {"ok": True, "muted": False}), \
+            "a second press unmutes again, whatever the caller last polled"
+        obs.inputs["Feed A"] = True
+        assert post("Feed A", toggle=True)[1]["muted"] is False, "the toggle reads OBS, not a cached state"
+        assert noted == [("Feed A", True), ("Feed A", False), ("Feed A", False)], \
+            f"the relay notes the director's mute as for an explicit one: {noted}"
+        obs.sets.clear()
+        st, d = post("Missing", toggle=True)
+        assert st == 503 and d["ok"] is False and "Missing" in d["error"] and obs.sets == [], \
+            f"an input OBS cannot report is never switched on a guess: {(st, d, obs.sets)}"
+        assert post("Feed A", mute=True) == (200, {"ok": True}) and obs.sets == [("Feed A", True)], \
+            "an explicit mute keeps its contract"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
 class _BannerHud:
     def __init__(self, banner=""):
         self.banner = banner

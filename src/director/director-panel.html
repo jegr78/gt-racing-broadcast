@@ -1376,11 +1376,8 @@ function buildControls(cfg){
     row.querySelector(".rst").addEventListener("click", async ()=>{
       await obsVol(a.input, 0); obsStatePoll();
     });
-    row.querySelector(".mute").addEventListener("click", async ()=>{
-      const last = obsState.audio.find(x=>x.input===a.input);
-      const muted = last ? !last.muted : true;
-      await obsMute(a.input, muted); obsStatePoll();
-    });
+    const mute = row.querySelector(".mute");
+    mute.addEventListener("click", ()=>muteToggle(a.input, mute));
   });
   relabelAssetControls();
 }
@@ -1901,6 +1898,21 @@ async function obsToggle(item, raw){
   if (last) last.enabled = d.enabled;
   else obsState.sources.push({scene: item.scene, source: item.source, enabled: d.enabled});
   return raw ? d : d.enabled;
+}
+
+/* Flips an input's mute in the relay, which reads OBS first, like obsToggle. */
+async function muteToggle(input, btn){
+  const d = await obsPost("audio", {input, toggle: true}).catch(e=>({ok: false, error: e.message||e}));
+  if (!d.ok){
+    log(`Mute "${input}" failed: ${d.error || "OBS did not answer"}`, "err");
+    toast(`Mute "${input}" not switched: ${d.error || "OBS did not answer"}`);
+    return;
+  }
+  const last = obsState.audio.find(x=>x.input===input);
+  if (last) last.muted = d.muted;
+  btn.classList.toggle("muted", d.muted);
+  btn.textContent = d.muted ? "Muted" : "Mute";
+  obsStatePoll();
 }
 
 async function toggleSource(item, btn){
