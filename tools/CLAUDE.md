@@ -267,7 +267,7 @@ request log. A web page must not reach the port: a request needs `Host` 127.0.0.
 localhost with this port, no `Origin` (also on the WebSocket upgrade) and a POST
 `application/json`. A handler failure answers code 400 instead of dropping the session,
 and a WebSocket client that stops reading is closed once its queue fills. In-process use: `ObsSim(...).start()`, `.env()` gives
-`RACECAST_SIM_OBS_WS`, `obs_sim.fetch(url, path)` reads the endpoint.
+`RACECAST_SIMULATION=1` and `RACECAST_SIM_OBS_WS`, `obs_sim.fetch(url, path)` reads the endpoint.
 
 ```bash
 python3 tools/event-sim/fakes/obs_sim.py --port 0 --ready-file obs.json
@@ -278,6 +278,95 @@ answers (no inputs, any scene item exists and is visible, every other request su
 without effect). `tools/e2e.py` and the
 wiki-screenshots skill use it. `tests/test_obs_sim.py` drives both through the real
 `obs_ws` helpers.
+
+## Simulated Sheet and Discord webhook (`tools/event-sim/fakes/`, #1230)
+
+`sheet_sim.py` serves seeded tabs the way gviz exports them (every cell quoted, trailing
+blank rows and columns trimmed, `headers=1` changes nothing) under
+`/spreadsheets/d/sim/gviz/tq`; a tab nobody seeded is an empty 200, or the first seeded
+tab with `unknown_tab="first"` (`--unknown-tab first`). Its
+`/macros/s/sim/exec?key=sim` runs the v7 script of the Sheet-Webhook wiki page against
+the same tabs: always HTTP 200, `{"ok":true,"action":...,"v":7}` or the script's own
+`{"error": ...}` strings (`bad key`, `unknown action: x`, `row out of range: 9`, ...),
+JavaScript coercion included (`"false"` is a true crew flag). The Overlay tab mirrors
+the Setup tab like the league's formula: label in column B, value in C, `Team N` into
+`Teams PN`; without a seeded Overlay it is built from the mirror labels. Script
+Properties come from `stream_keys`; a `get_stream_key` (the relay's recovery probe too)
+is only counted as `key_reads`, never logged with its key. Every other call lands in
+`writes(since)` with seq, time, action, payload, response and `ok`.
+
+`webhook_sink.py` takes any POST path outside `/_sim/` as a Discord webhook (JSON, or
+multipart with `payload_json` and files as the report send posts) and answers 204. An
+empty or unparseable message gets Discord's 400 body (50006, 50109); a field of the
+wrong type or size (content not a string or over 2000 characters, username not a
+string, embeds not a list of at most 10 objects) gets 400 50035 with the field under
+`errors`; a file over Discord's documented 20 MiB per-file default a 413 40005. None of
+them is recorded; `rejected` counts them. Each message keeps seq, time,
+path, username, content, embeds, file names and sizes, and `text`: content, username and
+the embeds' titles, descriptions, fields, footers. `count(needle)` matches `text`
+without case.
+
+Both use `loopback_http.py`, the shared loopback base: 127.0.0.1, port 0, `Host`
+127.0.0.1 or localhost with this port, no `Origin`, POST `application/json` (the sink
+also multipart). In-process: `SheetSim(tabs, stream_keys).start()` with `set_tab`,
+`tab`, `records` (`records(tab)[i]` is physical row i+2) and `writes`;
+`WebhookSink().start()` with `messages(since)` and `count`. `.env()` gives the
+`RACECAST_SIM_SHEET_URL`/`_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL`
+values plus `RACECAST_SIMULATION=1`, so no caller reaches Google by forgetting the flag.
+Over HTTP: `/_sim/state`, `/_sim/tab?name=`, `POST /_sim/tab` (`rows` or `csv`),
+`/_sim/writes?since=N`, `/_sim/messages?since=N`.
+
+Failure injection: a rule `{"target", "delay", "status", "error", "times"}` from the
+constructor (`faults=[...]`), `.fail(target, ...)` or `POST /_sim/fail` (one rule or a
+list; an empty body clears them, as `.clear_faults()` does). Targets: the Sheet's
+`tab:<Tab>` and `read` for gviz reads, `action:<action>` and `push` for script calls;
+the sink's `path:<path>` and `hook`. Every matching rule adds its `delay`, slept through
+the `sleep` seam (tests pass a recorder, never the wall clock; the default wait ends on
+`stop()`). The first matching rule with a status (400-599 only) or an error answers in
+place of the request, and rules behind it are not hit: the Sheet's script error is HTTP
+200 `{"error": ...}`, a read error needs a status and answers an HTML error page, the
+sink's error is 400 `{"message": ..., "code": 0}`, a bare status gets `{"error":
+"simulated failure"}`. A faulted request never reaches the tabs or the message log.
+`times` spends a rule after that many hits; `faults_hit` in `/_sim/state` counts every
+rule hit.
+
+Script Properties can be seeded out of process with `--stream-keys FILE` (JSON
+`{ref: key}`) or `POST /_sim/stream-keys`, which answers only the number of refs; no
+route reads a key back. `redirect=True` (`--redirect`) answers the push URL the way
+Apps Script does, with a 302 to a one-time echo URL that urllib follows as a GET.
+Seeded cells are formatted like `setValue` writes them (`TRUE`/`FALSE`, null empty).
+`stop()` refuses new requests with 503, wakes handlers in a delay and joins them for
+at most 5 s. Bodies are capped (Sheet 1 MiB, sink 41 MiB so an oversized file still
+reaches the per-file check); a refused body is drained up to 1 MiB first, so the
+client receives the answer. The CLIs remove their ready-file on Ctrl+C or SIGTERM
+(`obs_sim.py` too).
+
+Unverified against the real services (from memory or chosen, not measured):
+- gviz on an unknown `sheet=` name: the fake answers an empty 200. Forum reports of
+  gviz answering with the first sheet exist but none tests a missing name, so
+  `unknown_tab="first"` offers that instead.
+- gviz without `headers=1` may merge leading rows into a header; the fake never does.
+- Discord's `?wait=true` (200 with the message object) is ignored: the sink always
+  answers 204.
+- The Discord 400 and 413 bodies (50006, 50109, 50035, 40005) and the `errors` shapes
+  are written from memory; no racecast caller reads them. The 20 MiB per-file limit is
+  from Discord's API reference; Nitro and boost tiers raise it, the fake does not.
+- gviz types each column by its majority and exports minority-type cells blank (why the
+  script pins every written cell to text with `setNumberFormat('@')`); the fake keeps
+  every cell as text.
+- `/exec` answers a POST with a 302 to `script.googleusercontent.com`; the fake answers
+  directly unless `redirect=True`, and its echo URL stays on loopback.
+
+```bash
+python3 tools/event-sim/fakes/sheet_sim.py --port 0 --tabs DIR --stream-keys keys.json --ready-file sheet.json
+python3 tools/event-sim/fakes/webhook_sink.py --port 0 --ready-file sink.json
+```
+
+`tests/test_sheet_sim.py` and `tests/test_webhook_sink.py` drive them through the relay's
+own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSource`,
+`parse_timer_tab`, `apply_stream_service_for_ref` on the Channel tab, get-graphics on the
+Assets tab, the Discord payload builders, the relay's own `Relay._discord_post`,
+`http_util.post_multipart`).
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
