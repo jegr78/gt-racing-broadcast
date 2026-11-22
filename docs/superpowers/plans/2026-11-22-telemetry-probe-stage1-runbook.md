@@ -33,11 +33,10 @@ repo checkout on `main`.
    Note `key`. Ingest URLs: `https://<magicdns-host>/console/probe/ingest` (Funnel) and
    `http://<tailnet-ip>:8088/console/probe/ingest` (tailnet). Use the Funnel URL for
    every sender: that is the path drivers take.
-5. Firewall, inbound UDP 33740, on every sender machine:
-   - Windows (admin PowerShell):
-     `New-NetFirewallRule -DisplayName "racecast sender UDP 33740" -Direction Inbound -Protocol UDP -LocalPort 33740 -Action Allow -Profile Private`
-   - Linux: `sudo ufw allow 33740/udp`
-   - macOS: allow incoming connections for Python when asked.
+5. Firewall: nothing to prepare on Windows and macOS. Windows asks once when a program
+   first listens, the same prompt SimHub answered: choose Allow. macOS asks only when its
+   firewall is on. Only a Linux machine with an active firewall needs a rule:
+   `sudo ufw allow 33740/udp`. A sender that gets no packets says so and names the port.
 6. PS5: note its IP address (Settings, Network). Keep it awake; rest mode stops
    telemetry.
 7. A results folder outside the repo, one JSON per test:
