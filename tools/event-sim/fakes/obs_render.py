@@ -123,24 +123,31 @@ def scale_rgb(rgb, sw, sh, dw, dh):
     return b"".join(rows)
 
 
-def size(width):
-    """The picture size for a requested screenshot width."""
-    width = max(64, min(int(width or 640), 1920))
-    return width, width * 9 // 16
+CANVAS_H = 1080.0
+FORMATS = ("png", "jpg", "jpeg")
+
+
+def size(width=None, height=None):
+    """The picture size OBS renders for a requested width and/or height: the canvas
+    scaled to fit inside them, the full canvas without either."""
+    if not width and not height:
+        return int(CANVAS_W), int(CANVAS_H)
+    k = min(width / CANVAS_W if width else float("inf"), height / CANVAS_H if height else float("inf"))
+    return max(1, round(CANVAS_W * k)), max(1, round(CANVAS_H * k))
 
 
 def pixel_rect(rect, width):
     """A canvas rect [x, y, w, h] in pixels of a picture `width` wide, unclipped."""
-    k = size(width)[0] / CANVAS_W
+    k = width / CANVAS_W
     return tuple(round(v * k) for v in rect)
 
 
-def render_program(scene, layers, width=640, labels=None):
-    """PNG bytes of `scene`. `layers` are {kind: feed|opaque, name, rect: [x, y, w, h],
-    frame: (rgb, w, h) or None} on the 1920x1080 canvas, bottom first, a frame scaled
-    to its rect;
-    `labels` maps a feed to the text its pattern shows."""
-    width, height = size(width)
+def render_program(scene, layers, picture=(640, 360), labels=None, fmt="png", quality=75):
+    """Image bytes of `scene` at `picture` (width, height) as PNG or JPEG. `layers` are
+    {kind: feed|opaque, name, rect: [x, y, w, h], frame: (rgb, w, h) or None} on the
+    1920x1080 canvas, bottom first, a frame scaled to its rect; `labels` maps a feed to
+    the text its pattern shows."""
+    width, height = picture
     canvas = Canvas(width, height, _tint(scene))
     for layer in layers:
         x, y, w, h = pixel_rect(layer["rect"], width)
@@ -163,4 +170,163 @@ def render_program(scene, layers, width=640, labels=None):
     canvas.rect(0, 0, width, bar, LABEL_BG)
     title, scale = _fit(scene or "?", width - 8, max(1, (bar - 4) // 7))
     canvas.text(4, (bar - 7 * scale) // 2, title, scale)
-    return canvas.png()
+    return canvas.png() if fmt == "png" else jpeg(width, height, canvas.px, quality)
+
+
+# Baseline JPEG, 4:2:0, stdlib only. Fixed-length Huffman codes keep the tables trivial:
+# every DC category is a 4-bit code and every AC symbol an 8-bit one, valid but larger.
+_ZIGZAG = [r * 8 + c for s in range(15)
+           for r, c in (((i, s - i) for i in range(s, -1, -1)) if s % 2 == 0 else ((i, s - i) for i in range(s + 1)))
+           if 0 <= r < 8 and 0 <= c < 8]
+_LUMA_Q = (16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56,
+           14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92,
+           49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99)
+_CHROMA_Q = (17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99,
+             47, 66, 99, 99, 99, 99, 99, 99) + (99,) * 32
+_AAN = (1.0, 1.387039845, 1.306562965, 1.175875602, 1.0, 0.785694958, 0.541196100, 0.275899379)
+_DC_SYMBOLS = list(range(12))
+_AC_SYMBOLS = [0x00, 0xF0] + [(run << 4) | size for run in range(16) for size in range(1, 11)]
+
+
+def _qtable(base, quality):
+    q = max(1, min(100, int(quality)))
+    scale = 5000 // q if q < 50 else 200 - 2 * q
+    return [max(1, min(255, (b * scale + 50) // 100)) for b in base]
+
+
+def _fixed_codes(symbols, bits):
+    return {sym: (n, bits) for n, sym in enumerate(symbols)}
+
+
+_DC_CODES = _fixed_codes(_DC_SYMBOLS, 4)
+_AC_CODES = _fixed_codes(_AC_SYMBOLS, 8)
+
+
+def _fdct(block):
+    """AAN float forward DCT of 64 samples, rows then columns, in place."""
+    for step in (1, 8):
+        for k in range(8):
+            o = k * 8 if step == 1 else k
+            d = [block[o + i * step] for i in range(8)]
+            t0, t7 = d[0] + d[7], d[0] - d[7]
+            t1, t6 = d[1] + d[6], d[1] - d[6]
+            t2, t5 = d[2] + d[5], d[2] - d[5]
+            t3, t4 = d[3] + d[4], d[3] - d[4]
+            t10, t13, t11, t12 = t0 + t3, t0 - t3, t1 + t2, t1 - t2
+            z1 = (t12 + t13) * 0.707106781
+            out = [0.0] * 8
+            out[0], out[4] = t10 + t11, t10 - t11
+            out[2], out[6] = t13 + z1, t13 - z1
+            t10, t11, t12 = t4 + t5, t5 + t6, t6 + t7
+            z5 = (t10 - t12) * 0.382683433
+            z2, z4, z3 = 0.541196100 * t10 + z5, 1.306562965 * t12 + z5, t11 * 0.707106781
+            z11, z13 = t7 + z3, t7 - z3
+            out[5], out[3], out[1], out[7] = z13 + z2, z13 - z2, z11 + z4, z11 - z4
+            for i in range(8):
+                block[o + i * step] = out[i]
+    return block
+
+
+class _Bits:
+    def __init__(self):
+        self.out, self.acc, self.n = bytearray(), 0, 0
+
+    def put(self, value, length):
+        self.acc = (self.acc << length) | (value & ((1 << length) - 1))
+        self.n += length
+        while self.n >= 8:
+            self.n -= 8
+            byte = (self.acc >> self.n) & 0xFF
+            self.out.append(byte)
+            if byte == 0xFF:
+                self.out.append(0)
+        self.acc &= (1 << self.n) - 1
+
+    def flush(self):
+        if self.n:
+            self.put((1 << (8 - self.n)) - 1, 8 - self.n)
+
+
+def _category(v):
+    return 0 if v == 0 else abs(v).bit_length()
+
+
+def _amplitude(v, size):
+    return v if v >= 0 else v + (1 << size) - 1
+
+
+def _encode_block(bits, samples, divisors, prev_dc):
+    coef = _fdct(samples)
+    q = [int(round(coef[_ZIGZAG[i]] / divisors[i])) for i in range(64)]
+    diff = q[0] - prev_dc
+    size = _category(diff)
+    bits.put(*_DC_CODES[size])
+    if size:
+        bits.put(_amplitude(diff, size), size)
+    run = 0
+    for v in q[1:]:
+        if v == 0:
+            run += 1
+            continue
+        while run > 15:
+            bits.put(*_AC_CODES[0xF0])
+            run -= 16
+        size = _category(v)
+        bits.put(*_AC_CODES[(run << 4) | size])
+        bits.put(_amplitude(v, size), size)
+        run = 0
+    if run:
+        bits.put(*_AC_CODES[0x00])
+    return q[0]
+
+
+def _segment(marker, body):
+    return bytes((0xFF, marker)) + struct.pack(">H", len(body) + 2) + body
+
+
+def _dht(table_class, table_id, symbols, bits):
+    counts = [0] * 16
+    counts[bits - 1] = len(symbols)
+    return _segment(0xC4, bytes([(table_class << 4) | table_id]) + bytes(counts) + bytes(symbols))
+
+
+def jpeg(width, height, px, quality=75):
+    """Baseline JPEG bytes of a width*height RGB buffer."""
+    lq, cq = _qtable(_LUMA_Q, quality), _qtable(_CHROMA_Q, quality)
+    ldiv = [lq[k] * _AAN[k // 8] * _AAN[k % 8] * 8 for k in _ZIGZAG]
+    cdiv = [cq[k] * _AAN[k // 8] * _AAN[k % 8] * 8 for k in _ZIGZAG]
+    r, g, b = px[0::3], px[1::3], px[2::3]
+    ys = [0.299 * R + 0.587 * G + 0.114 * B - 128 for R, G, B in zip(r, g, b, strict=True)]
+    cbs = [-0.168736 * R - 0.331264 * G + 0.5 * B for R, G, B in zip(r, g, b, strict=True)]
+    crs = [0.5 * R - 0.418688 * G - 0.081312 * B for R, G, B in zip(r, g, b, strict=True)]
+    bits, dc = _Bits(), [0, 0, 0]
+    mw, mh = (width + 15) // 16, (height + 15) // 16
+    for my in range(mh):
+        for mx in range(mw):
+            for by, bx in ((0, 0), (0, 8), (8, 0), (8, 8)):
+                block = []
+                for y in range(8):
+                    row = min(height - 1, my * 16 + by + y) * width
+                    block.extend(ys[row + min(width - 1, mx * 16 + bx + x)] for x in range(8))
+                dc[0] = _encode_block(bits, block, ldiv, dc[0])
+            for n, plane in ((1, cbs), (2, crs)):
+                block = []
+                for y in range(8):
+                    y0 = min(height - 1, my * 16 + 2 * y)
+                    y1 = min(height - 1, y0 + 1)
+                    for x in range(8):
+                        x0 = min(width - 1, mx * 16 + 2 * x)
+                        x1 = min(width - 1, x0 + 1)
+                        block.append((plane[y0 * width + x0] + plane[y0 * width + x1]
+                                      + plane[y1 * width + x0] + plane[y1 * width + x1]) / 4)
+                dc[n] = _encode_block(bits, block, cdiv, dc[n])
+    bits.flush()
+    head = (b"\xff\xd8"
+            + _segment(0xE0, b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+            + _segment(0xDB, b"\x00" + bytes(lq[k] for k in _ZIGZAG) + b"\x01" + bytes(cq[k] for k in _ZIGZAG))
+            + _segment(0xC0, struct.pack(">BHHB", 8, height, width, 3)
+                       + b"\x01\x22\x00\x02\x11\x01\x03\x11\x01")
+            + _dht(0, 0, _DC_SYMBOLS, 4) + _dht(1, 0, _AC_SYMBOLS, 8)
+            + _dht(0, 1, _DC_SYMBOLS, 4) + _dht(1, 1, _AC_SYMBOLS, 8)
+            + _segment(0xDA, b"\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00"))
+    return head + bytes(bits.out) + b"\xff\xd9"

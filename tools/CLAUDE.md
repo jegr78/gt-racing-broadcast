@@ -228,7 +228,11 @@ events its `eventSubscriptions` asks for; `obs_ws` asks for none. `obs_render.py
 program screenshots at each item's canvas rect: per visible feed its newest frame, or
 colour bars with the input name or its `/labels` text when there is none; a solid panel
 per opaque item; the scene name on top. `program.feeds[].source` says which the last
-screenshot used (`frame`, `synthetic`, or null for a hidden feed). A screenshot is
+screenshot used (`frame`, `synthetic`, or null for a hidden feed). `GetSourceScreenshot`
+answers like OBS: `png`, `jpg` or `jpeg` (a stdlib baseline JPEG encoder; any other
+format is code 400), the canvas fitted inside `imageWidth`/`imageHeight` (8-4096, the
+full 1920x1080 without either) and `imageCompressionQuality`. A fixed `--image` is sent
+as it is, labelled with its own type. A screenshot is
 planned under the state lock and drawn after it, so a feed read never holds up another
 request.
 

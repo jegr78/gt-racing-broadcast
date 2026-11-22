@@ -622,6 +622,160 @@ def t_a_slow_grab_never_blocks_obs():
 
 
 
+def _jpeg_size(raw):
+    assert raw[:2] == b"\xff\xd8" and raw[-2:] == b"\xff\xd9", "a JPEG with SOI and EOI"
+    pos = 2
+    while pos < len(raw):
+        marker, n = raw[pos + 1], struct.unpack(">H", raw[pos + 2:pos + 4])[0]
+        if marker == 0xC0:
+            h, w = struct.unpack(">HH", raw[pos + 5:pos + 9])
+            return w, h
+        pos += 2 + n
+    raise AssertionError("no baseline SOF0")
+
+
+def _shot(st, **data):
+    data.setdefault("sourceName", "Splitscreen")
+    return st.request("GetSourceScreenshot", data)["imageData"]
+
+
+def t_screenshots_honour_format_size_and_quality():
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
+    uri = _shot(st, imageFormat="jpg", imageWidth=320)
+    assert uri.startswith("data:image/jpg;base64,"), "OBS echoes the requested format"
+    raw = obs_ws.parse_screenshot_data_uri(uri)
+    assert _jpeg_size(raw) == (320, 180), "a real JPEG of the asked size"
+    uri = _shot(st, imageFormat="jpeg", imageHeight=90)
+    assert uri.startswith("data:image/jpeg;base64,") and _jpeg_size(obs_ws.parse_screenshot_data_uri(uri)) == (160, 90)
+    low = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg", imageWidth=320, imageCompressionQuality=10))
+    assert len(low) < len(raw), "a lower quality gives a smaller file"
+    png = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="png", imageWidth=100))
+    assert _png_size(png) == (100, 56)
+    for bad, code in (({"imageFormat": "webp"}, 400), ({"imageFormat": "png", "imageWidth": 4097}, 402),
+                      ({"imageFormat": "png", "imageCompressionQuality": 101}, 402)):
+        try:
+            _shot(st, **bad)
+        except obs_state.ObsError as exc:
+            assert exc.code == code, (bad, exc.code)
+        else:
+            raise AssertionError(f"OBS refuses {bad}")
+
+
+ZIGZAG = (0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,
+          7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31,
+          39, 46, 53, 60, 61, 54, 47, 55, 62, 63)
+
+
+def _decode_fixed_jpeg(raw):
+    """Decode obs_render's baseline 4:2:0 JPEG (fixed-length codes) to RGB pixels."""
+    import math
+    pos, qt = 2, {}
+    while True:
+        marker, n = raw[pos + 1], struct.unpack(">H", raw[pos + 2:pos + 4])[0]
+        body = raw[pos + 4:pos + 2 + n]
+        if marker == 0xDB:
+            for t in range(len(body) // 65):
+                qt[body[t * 65]] = body[t * 65 + 1:t * 65 + 65]
+        elif marker == 0xC0:
+            h, w = struct.unpack(">HH", body[1:5])
+        elif marker == 0xDA:
+            data = raw[pos + 2 + n:-2].replace(b"\xff\x00", b"\xff")
+            break
+        pos += 2 + n
+    bits = "".join(f"{byte:08b}" for byte in data)
+    cur = [0]
+
+    def take(k):
+        v = int(bits[cur[0]:cur[0] + k] or "0", 2)
+        cur[0] += k
+        return v
+
+    def signed(v, size):
+        return v if size == 0 or v >= 1 << (size - 1) else v - (1 << size) + 1
+
+    cos = [[math.cos((2 * x + 1) * u * math.pi / 16) * (math.sqrt(0.5) if u == 0 else 1) for u in range(8)]
+           for x in range(8)]
+
+    def block(q, prev):
+        coef = [0] * 64
+        size = take(4)
+        coef[0] = prev + signed(take(size), size)
+        k = 1
+        while k < 64:
+            sym = take(8)
+            symbols = [0x00, 0xF0] + [(r << 4) | s for r in range(16) for s in range(1, 11)]
+            rs = symbols[sym]
+            if rs == 0x00:
+                break
+            if rs == 0xF0:
+                k += 16
+                continue
+            k += rs >> 4
+            coef[k] = signed(take(rs & 15), rs & 15)
+            k += 1
+        nat = [0.0] * 64
+        for i in range(64):
+            nat[ZIGZAG[i]] = coef[i] * q[i]
+        out = [sum(cos[x][u] * cos[y][v] * nat[v * 8 + u] for u in range(8) for v in range(8)) / 4 + 128
+               for y in range(8) for x in range(8)]
+        return out, coef[0]
+
+    ys, cb, cr = [[0.0] * (w * h) for _ in range(3)]
+    dc = [0, 0, 0]
+    for my in range((h + 15) // 16):
+        for mx in range((w + 15) // 16):
+            for by, bx in ((0, 0), (0, 8), (8, 0), (8, 8)):
+                pix, dc[0] = block(qt[0], dc[0])
+                for i, v in enumerate(pix):
+                    y, x = my * 16 + by + i // 8, mx * 16 + bx + i % 8
+                    if y < h and x < w:
+                        ys[y * w + x] = v
+            for plane, n in ((cb, 1), (cr, 2)):
+                pix, dc[n] = block(qt[1], dc[n])
+                for i, v in enumerate(pix):
+                    for dy in (0, 1):
+                        for dx in (0, 1):
+                            y, x = my * 16 + 2 * (i // 8) + dy, mx * 16 + 2 * (i % 8) + dx
+                            if y < h and x < w:
+                                plane[y * w + x] = v - 128
+    return w, h, [(ys[i] + 1.402 * cr[i], ys[i] - 0.344136 * cb[i] - 0.714136 * cr[i], ys[i] + 1.772 * cb[i])
+                  for i in range(w * h)]
+
+
+def t_jpeg_encoder_round_trips():
+    import obs_render
+    w, h = 40, 24
+    colours = [(200, 30, 30), (30, 200, 30), (30, 30, 200), (230, 230, 230)]
+    px = bytes(c for y in range(h) for x in range(w) for c in colours[(y >= h // 2) * 2 + (x >= w // 2)])
+    dw, dh, pixels = _decode_fixed_jpeg(obs_render.jpeg(w, h, px, 95))
+    assert (dw, dh) == (w, h)
+    worst = max(abs(pixels[y * w + x][c] - px[(y * w + x) * 3 + c])
+                for y in range(h) for x in range(w) for c in range(3)
+                if x % (w // 2) not in (0, w // 2 - 1) and y % (h // 2) not in (0, h // 2 - 1))
+    assert worst < 30, f"decoded pixels match the source, worst channel error {worst}"
+
+
+def t_jpeg_stuffs_ff_bytes_and_averages_chroma():
+    import obs_render
+    bits = obs_render._Bits()
+    bits.put(0xFF, 8)
+    assert bytes(bits.out) == b"\xff\x00", "a 0xFF byte in the scan is followed by 0x00"
+    rows = [(200, 30, 30) if y % 2 == 0 else (30, 30, 200) for y in range(16)]
+    px = bytes(c for y in range(16) for _ in range(16) for c in rows[y])
+    _, _, pixels = _decode_fixed_jpeg(obs_render.jpeg(16, 16, px, 95))
+    drift = sum(r - b for r, _, b in pixels) / len(pixels)
+    assert abs(drift) < 20, f"chroma is the mean of each 2x2 cell, red minus blue drifts by {drift}"
+
+
+def t_relay_program_monitor_gets_a_jpeg():
+    sim = _sim()
+    try:
+        data, note = obs_ws.get_program_screenshot(width=640)
+        assert _jpeg_size(data) == (640, 360), note
+    finally:
+        sim.stop()
+
+
 def t_relay_helpers_drive_the_sim_over_the_wire():
     sim = _sim()
     try:
@@ -636,7 +790,7 @@ def t_relay_helpers_drive_the_sim_over_the_wire():
         ok, note = obs_ws.set_stream(True)
         assert ok and obs_sim.fetch(sim.http_url)["stream"]["active"], note
         data, note = obs_ws.get_program_screenshot(width=320)
-        assert _png_size(data) == (320, 180), note
+        assert _jpeg_size(data) == (320, 180), note
         _, note = obs_ws.set_scene_item_enabled("Stint", "Nope", True)
         assert note, "a missing scene item reaches the caller as an error"
     finally:
