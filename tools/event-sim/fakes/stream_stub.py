@@ -36,6 +36,7 @@ import sys
 import threading
 import time
 import zipfile
+from collections import namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -216,7 +217,8 @@ class StreamStub:
                 codes = {c.get("code") for c in self.channels().values()}
                 code = next((n for n in range(1, 256) if n not in codes), None)
                 if code is None:
-                    raise ValueError("at most 255 simulated channels")
+                    raise ValueError("at most 255 simulated channels per directory: "
+                                     "the identity strip holds an 8-bit code")
                 ch = {"name": name, "code": code, "stint": 0, "commentator": "", "status": "live",
                       "cuts": [], "stall": None, "freeze": None}
             for key, value in (("stint", stint), ("commentator", commentator), ("status", status)):
@@ -465,6 +467,78 @@ def ffmpeg_argv(ffmpeg, mode, height, code, stint, text, offset):
             "-c:a", "mp2", "-b:a", "96k", "-output_ts_offset", f"{offset:.3f}", "-f", "mpegts", "pipe:1"]
 
 
+# --- MPEG-TS splicing ---
+
+TS = 188
+TsPacket = namedtuple("TsPacket", "pid cc payload pts")
+
+
+def parse_ts(data):
+    """TsPacket per whole 188-byte packet of `data`; `pts` (90 kHz) on a packet that
+    starts an audio or video PES carrying one."""
+    for i in range(0, len(data) - TS + 1, TS):
+        pkt = data[i:i + TS]
+        if pkt[0] != 0x47:
+            continue
+        pid, afc = ((pkt[1] & 0x1F) << 8) | pkt[2], (pkt[3] >> 4) & 3
+        pts = None
+        start = 4 + (1 + pkt[4] if afc & 2 else 0)
+        pes = pkt[start:]
+        if (pkt[1] & 0x40 and afc & 1 and len(pes) >= 14 and pes[:3] == b"\x00\x00\x01"
+                and 0xC0 <= pes[3] <= 0xEF and pes[7] & 0x80):
+            b = pes[9:14]
+            pts = ((b[0] >> 1) & 7) << 30 | b[1] << 22 | (b[2] >> 1) << 15 | b[3] << 7 | b[4] >> 1
+        yield TsPacket(pid, pkt[3] & 0x0F, bool(afc & 1), pts)
+
+
+class TsSplicer:
+    """Joins the MPEG-TS of successive ffmpeg runs into one stream: it forwards whole
+    packets only, continues each PID's continuity counter, and picks each run's
+    `-output_ts_offset` so its first PTS follows the last one sent. An ffmpeg run's first
+    PTS varies by about a frame, so the offset leaves two frames of room. Bytes that do
+    not start with a sync byte pass through unchanged."""
+
+    def __init__(self, fps=FPS):
+        self.frame = 1.0 / fps
+        self.cc = {}
+        self.base = self.last = None      # PTS seconds minus the offset of their run; last PTS sent
+        self.offset = 0.0
+        self.pending, self.raw = b"", None
+
+    def start(self, offset):
+        """A new ffmpeg run with this offset begins; the old run's partial packet is dropped."""
+        self.offset, self.pending, self.raw = offset, b"", None
+
+    def next_offset(self, elapsed):
+        """The offset for the next run: right after the last PTS, or the wall clock after a gap."""
+        if self.last is None:
+            return elapsed
+        return max(self.last - self.base + 2 * self.frame, elapsed)
+
+    def feed(self, chunk):
+        if self.raw is None and chunk:
+            self.raw = chunk[0] != 0x47
+        if self.raw:
+            return chunk
+        data = self.pending + chunk
+        cut = len(data) - len(data) % TS
+        self.pending = data[cut:]
+        out = bytearray(data[:cut])
+        for n, p in enumerate(parse_ts(out)):
+            if p.pid == 0x1FFF:
+                continue
+            if p.pts is not None:
+                seconds = p.pts / 90000
+                run_base = seconds - self.offset
+                self.base = run_base if self.base is None else min(self.base, run_base)
+                self.last = seconds if self.last is None else max(self.last, seconds)
+            prev = self.cc.get(p.pid)
+            cc = p.cc if prev is None else ((prev + 1) % 16 if p.payload else prev)
+            self.cc[p.pid] = cc
+            out[n * TS + 3] = (out[n * TS + 3] & 0xF0) | cc
+        return bytes(out)
+
+
 # --- the pull ---
 
 class Pull:
@@ -478,6 +552,7 @@ class Pull:
         self.started = clock() if started is None else started
         self.stream_timeout = stream_timeout
         self.last, self.unreadable = None, False
+        self.splicer = TsSplicer()
 
     def channel(self):
         try:
@@ -519,9 +594,10 @@ class Pull:
             ch = self.last
             with open(os.path.join(workdir, "label.txt"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(label_text(ch))
-            argv = ffmpeg_argv(self.ffmpeg, act, self.height, ch["code"], ch.get("stint"), text,
-                               max(0.0, self.clock() - self.started))
-            self.log(f"[sim][info] {act}")
+            offset = self.splicer.next_offset(max(0.0, self.clock() - self.started))
+            self.splicer.start(offset)
+            argv = ffmpeg_argv(self.ffmpeg, act, self.height, ch["code"], ch.get("stint"), text, offset)
+            self.log(f"[sim][info] {act} from {offset:.3f} s")
             try:
                 rc, wrote, changed, broken = self._ffmpeg(argv, act, workdir)
             except OSError as e:
@@ -561,12 +637,14 @@ class Pull:
         wrote = broken = False
         try:
             for chunk in iter(lambda: proc.stdout.read1(65536), b""):
+                wrote = True
+                data = self.splicer.feed(chunk)
                 try:
-                    self.write(chunk)
+                    if data:
+                        self.write(data)
                 except OSError:
                     broken = True
                     break
-                wrote = True
         finally:
             done.set()
             if proc.poll() is None:
@@ -763,6 +841,8 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     inst = sub.add_parser("install", help="write the stand-ins")
     inst.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg binary the stand-ins run (default: on PATH)")
+    inst.add_argument("--stream-timeout", type=float, default=STREAM_TIMEOUT,
+                      help="seconds a stalled pull waits for a byte before it gives up (default: 60)")
     ch = sub.add_parser("set", help="create or update a channel")
     ch.add_argument("name")
     ch.add_argument("--stint", type=int)
@@ -778,7 +858,7 @@ def main(argv=None):
     sub.add_parser("show", help="print every channel's state as JSON")
     a = ap.parse_args(argv)
     if a.cmd == "install":
-        stub = StreamStub(a.directory, ffmpeg=[a.ffmpeg]).install()
+        stub = StreamStub(a.directory, ffmpeg=[a.ffmpeg], stream_timeout=a.stream_timeout).install()
         print(json.dumps(stub.env()))
         return 0
     stub = StreamStub(a.directory)

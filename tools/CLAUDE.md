@@ -394,20 +394,26 @@ fontconfig's default font; if drawtext fails, the pull logs it and goes on witho
 An 18-cell strip at the bottom holds the channel's `code` and stint, and the audio is a
 sine at `tone_hz(code)`.
 `decode_identity(rgb, w, h)` reads `(code, stint)` back from a grabbed frame. The stand-in
-copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe.
+copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe. A freeze,
+a stall's end or a text fallback starts a new ffmpeg; `TsSplicer` forwards whole 188-byte
+packets only, continues each PID's continuity counter and gives the new run an
+`-output_ts_offset` two frames past the last PTS sent (or the wall clock after a gap), so
+PTS and PCR keep rising across the seam.
 
 Control for the scenario engine: each channel is `<dir>/channels/<name>.json`, which every
 running pull reads every 0.2 s; an unreadable file keeps the last state. Times are epoch seconds; `at` defaults to now, `until` to
 the next `clear`.
 
 - `channel(name, stint=, commentator=, status=)` creates or updates a channel, and a new
-  one is live. A status other than `live` ends the running pulls.
+  one is live. A directory holds at most 255 channels, since the identity strip carries an
+  8-bit code; the 256th is refused. A status other than `live` ends the running pulls.
 - `cut(name, at=None)`: the pulls running at `at` end like a finished stream (exit 0);
   later pulls play, so the relay recovers at once.
 - `stall(name, at=None, until=None)`: pulls in the window send nothing. The relay's
   byte-stall watchdog kills a pull that had sent bytes; one that sent none, such as the
   re-pull inside the window, gives up after `stream_timeout` (60 s, streamlink's default
-  `--stream-timeout`, set on `StreamStub`) with a read timeout and exit 1.
+  `--stream-timeout`, set by `StreamStub(stream_timeout=)` or `install --stream-timeout`
+  and stored in the directory) with a read timeout and exit 1.
 - `freeze(name, at=None, until=None)`: pulls in the window send still colour bars with
   the identity and the tone at the normal rate, a freeze only the picture shows.
 - `clear(name)` ends a stall and a freeze, running or scheduled.

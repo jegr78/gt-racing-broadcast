@@ -2,6 +2,7 @@
 """The event simulation's stream stub (#1231). Run: python3 tests/test_stream_stub.py"""
 import importlib.util
 import io
+import json
 import logging
 import os
 import subprocess
@@ -327,6 +328,104 @@ def t_ffmpeg_argv_is_conservative():
     assert "size=640x360" in frozen
 
 
+def _ts_packet(pid, cc, pts=None, payload=True):
+    """One 188-byte MPEG-TS packet; with `pts`, it starts a PES carrying that PTS (90 kHz)."""
+    head = bytes((0x47, (0x40 if pts is not None else 0) | (pid >> 8), pid & 0xFF, (0x10 if payload else 0x20) | cc))
+    body = b""
+    if pts is not None:
+        p = pts
+        body = bytes((0, 0, 1, 0xE0, 0, 0, 0x80, 0x80, 5, 0x21 | ((p >> 29) & 0x0E), (p >> 22) & 0xFF,
+                      0x01 | ((p >> 14) & 0xFE), (p >> 7) & 0xFF, 0x01 | ((p << 1) & 0xFE)))
+    if not payload:
+        return head + bytes((183, 0)) + b"\xff" * 182
+    return head + body + b"\xff" * (184 - len(body))
+
+
+def t_ts_parse_reads_pid_cc_and_pts():
+    data = _ts_packet(256, 3, pts=90000 * 2) + _ts_packet(256, 4) + _ts_packet(257, 0, pts=(1 << 33) - 1)
+    assert [(p.pid, p.cc, p.pts) for p in stream_stub.parse_ts(data)] == [
+        (256, 3, 180000), (256, 4, None), (257, 0, (1 << 33) - 1)]
+
+
+def t_splicer_forwards_whole_packets_and_keeps_counters_and_time_rising():
+    sp = stream_stub.TsSplicer(fps=25)
+    assert sp.next_offset(0.0) == 0.0, "the first run starts at the wall clock"
+    run1 = _ts_packet(256, 0, pts=126000) + _ts_packet(256, 1, pts=129600) + _ts_packet(256, 2, pts=133200)
+    sp.start(0.0)
+    out = sp.feed(run1[:100]) + sp.feed(run1[100:400]) + sp.feed(run1[400:500])
+    assert out == run1[:376], "only whole packets pass, the rest waits"
+    off = sp.next_offset(0.01)
+    assert abs(off - ((129600 - 126000) / 90000 + 0.08)) < 1e-9, "two frames after the last PTS sent"
+    sp.start(off)   # the run was killed mid-packet: its tail is dropped
+    run2 = _ts_packet(256, 0, pts=126000 + round(off * 90000)) + _ts_packet(256, 1, payload=False)
+    out = list(stream_stub.parse_ts(sp.feed(run2)))
+    assert [p.cc for p in out] == [2, 2], "counters continue, a packet without payload keeps its counter"
+    assert out[0].pts > 129600, "time keeps rising across the seam"
+    assert sp.next_offset(100.0) == 100.0, "after a long gap the wall clock wins"
+    raw = stream_stub.TsSplicer()
+    raw.start(0.0)
+    assert raw.feed(b"PLAY" * 3) == b"PLAY" * 3, "bytes that are not MPEG-TS pass unchanged"
+
+
+def t_a_256th_channel_is_refused():
+    stub = stream_stub.StreamStub(tempfile.mkdtemp(prefix="stub1231-")).install()
+    for n in range(255):
+        stub.channel(f"c{n}")
+    try:
+        stub.channel("one-too-many")
+    except ValueError as e:
+        assert "255" in str(e), e
+    else:
+        raise AssertionError("the identity strip holds 255 codes")
+    stub.channel("c7", stint=2)
+
+
+def t_cli_install_stores_the_stream_timeout():
+    d = tempfile.mkdtemp(prefix="stub1231-")
+    out = io.StringIO()
+    real = sys.stdout
+    sys.stdout = out
+    try:
+        assert stream_stub.main([d, "install", "--stream-timeout", "5"]) == 0
+    finally:
+        sys.stdout = real
+    with open(os.path.join(d, "stub.json")) as fh:
+        assert json.load(fh)["stream_timeout"] == 5.0
+    stream_stub.StreamStub(d, stream_timeout=7).install()
+    with open(os.path.join(d, "stub.json")) as fh:
+        assert json.load(fh)["stream_timeout"] == 7, "StreamStub sets it too"
+
+
+def t_direct_serve_binds_loopback_only():
+    stub = _stub()
+    stub.channel("comms1")
+    bound, lines = [], []
+    real = stream_stub.ThreadingHTTPServer
+
+    class Recording(real):
+        def __init__(self, address, handler):
+            bound.append(address)
+            super().__init__(address, handler)
+    stream_stub.ThreadingHTTPServer = Recording
+    started = threading.Event()
+
+    def log(line):
+        lines.append(line)
+        if "Starting server" in line:
+            started.set()
+    t = threading.Thread(target=stream_stub.serve_http, args=(stub.directory, "comms1", 360, ["ffmpeg"], 0, log),
+                         daemon=True)
+    try:
+        t.start()
+        assert started.wait(WAIT), lines
+        assert bound and bound[0][0] == "127.0.0.1", bound
+    finally:
+        stream_stub.ThreadingHTTPServer = real
+        stub.cut("comms1")
+        t.join(WAIT)
+    assert not t.is_alive(), "a cut ends the server"
+
+
 # --- the stand-ins, run by bare name through PATH like the relay runs them ---
 
 def t_ytdlp_stand_in_answers_the_relay_resolve():
@@ -608,6 +707,46 @@ def t_real_ffmpeg_pull_carries_the_identity():
             assert "without text" not in err, "drawtext works with the CI ffmpeg: " + err
     finally:
         restore()
+
+
+def t_real_ffmpeg_seams_keep_time_and_counters_rising():
+    try:
+        ok = subprocess.run(["ffmpeg", "-hide_banner", "-version"], capture_output=True, timeout=WAIT).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    if not ok:
+        assert not os.environ.get("OBS_SIM_REQUIRE_FFMPEG"), "this CI job installs ffmpeg"
+        raise Skip("no working ffmpeg on PATH")
+    stub = _stub(ffmpeg=["ffmpeg"])
+    stub.channel("comms1", stint=1, commentator="Anna")
+    restore = _on_path(stub)
+    pull = _Pull("sim://comms1")
+    try:
+        for step, marker in ((None, "[sim][info] play"), ("freeze", "[sim][info] freeze"), ("clear", "[sim][info] play")):
+            err_mark = len(pull.err.data)
+            if step == "freeze":
+                stub.freeze("comms1")
+            elif step == "clear":
+                stub.clear("comms1")
+            assert pull.wait_err(marker, err_mark), pull.err.text()
+            mark = len(pull.data)
+            assert pull.out.wait(b"\x47", mark + 188 * 200), "the run after the seam sends packets"
+    finally:
+        pull.close()
+        restore()
+    data = bytes(pull.data)
+    assert len(data) % 188 == 0, "only whole packets are forwarded"
+    last_pts, last_cc = {}, {}
+    for p in stream_stub.parse_ts(data):
+        if p.pid == 0x1FFF:
+            continue
+        if p.pts is not None:
+            assert p.pts > last_pts.get(p.pid, -1), f"PTS of PID {p.pid} went back: {last_pts[p.pid]} -> {p.pts}"
+            last_pts[p.pid] = p.pts
+        if p.payload and p.pid in last_cc:
+            assert p.cc == (last_cc[p.pid] + 1) % 16, f"counter of PID {p.pid} jumped"
+        last_cc[p.pid] = p.cc
+    assert len(last_pts) >= 2, "video and audio carry PTS"
 
 
 if __name__ == "__main__":
