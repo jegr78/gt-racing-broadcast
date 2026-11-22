@@ -1130,21 +1130,34 @@ def t_a_failing_handler_answers_400_and_keeps_the_session():
 
 
 def t_a_client_that_stops_reading_is_dropped():
-    old = obs_sim._Client.QUEUE_MAX
+    old, old_write = obs_sim._Client.QUEUE_MAX, obs_sim._Client._write
     obs_sim._Client.QUEUE_MAX = 4
+    stall, release = threading.Event(), threading.Event()
+
+    def write(self):  # a writer stuck on a full socket, without relying on OS buffer sizes
+        while True:
+            data = self.out.get()
+            if data is None:
+                return
+            if stall.is_set():
+                release.wait(20)
+                return
+            self.conn.sendall(data)
+
+    obs_sim._Client._write = write
     sim = _sim()
     try:
         slow = RawClient(sim.port)
-        slow.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-        big = {"blob": "x" * 65536}
-        for _ in range(400):
-            sim.state.request("SetInputSettings", {"inputName": "Feed A", "inputSettings": big})
+        stall.set()
+        for _ in range(40):
+            sim.state.request("SetInputSettings", {"inputName": "Feed A", "inputSettings": {"n": _}})
             if len(sim.conns) == 0:
                 break
-        assert _wait(lambda: len(sim.conns) == 0), "a client that never reads is closed"
+        assert _wait(lambda: len(sim.conns) == 0, timeout=10), "a client that never reads is closed"
         slow.close()
     finally:
-        obs_sim._Client.QUEUE_MAX = old
+        release.set()
+        obs_sim._Client.QUEUE_MAX, obs_sim._Client._write = old, old_write
         sim.stop()
 
 
