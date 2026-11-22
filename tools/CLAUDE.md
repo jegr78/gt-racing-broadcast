@@ -470,7 +470,8 @@ python3 tools/event-sim/event_sim.py --scenario smoke --out DIR --no-skips   # a
 ```
 
 `--no-skips` is for a run that must have its browser (the workflow): every skipped step
-becomes a hard finding.
+and every missing screenshot becomes a hard finding. The generic `page` role is skipped
+without a browser too.
 
 `stack.Stack` runs the Sheet, sink, stream stub and OBS in process. It copies `src/` and
 `profiles/demo` into a temporary app home and starts `racecast --simulation relay run` and
@@ -628,20 +629,29 @@ line (`drive.write_track_data`: a stadium-shaped lap as the layout's `signatures
 row, since the relay's race needs a downloaded line and the network guard blocks
 `gt7-data update`), one placeholder graphic (Start event refuses a machine without any)
 and the RED FLAG banner in the Race Control vocabulary. `ctx.event_link("invite" |
-"timing")` reads the ids Start event wrote into the app home. They are credentials:
-results, findings and `page(role)` never carry them or a driver code, `redact` strips
-`t=`, `i=` and `l=`, and a desk screenshot blacks the link texts out (`Surface.masked`).
+"timing")` reads the ids Start event wrote into the app home. They are credentials.
+`redaction.py` is the one filter for them: `Engine.data` passes everything the run writes
+(step errors, results, check details, findings, and so the printed lines and both report
+files) through `ctx.scrub`, which removes `t=`, `i=` and `l=` values and driver codes by
+shape and every token, link id and the console secret the run handed out by value. So an
+exception text, a navigation error or an `api` response body cannot carry one out. Every
+page screenshot blacks out the link texts (`selectors.LINKS`).
 
 `drive.py` is the driver library, also behind `tools/driver-replay.py`: `packet`, `Line`,
 the synthetic track, `Field` (cars and their senders, stepped with `step(now, dt)` on the
 caller's clock, so a seed fixes every packet), `Client` (loopback unless told otherwise) and
-`Runner` (a field on real time in one thread, joined in `close`). A car's GT7 lap counter
+`Runner` (a field on real time in one thread, joined in `close`; it steps under its lock
+and posts the tick's batches outside it, each post bounded by `Client.ingest_timeout`).
+`register` is all or nothing: on a failure the role holds no driver and names the
+registrations the relay already took. A car's GT7 lap counter
 reads 0 on the grid and steps at the line; a boxed car stands 22 m off the line; `lobby(n)`
 puts stint n's driver into the box on lap 0 beside the old one, `release` sends the cars out
 in arrival order, each by its arrival gap. `tests/test_event_sim_drive.py` feeds a field
 into the relay's own `race_distance.Race`.
 
-Selectors are class constants (`selectors`, with the shipped files in `sources`).
+Every selector and desk label lives in `roles/selectors.py` (the desks are due for a
+restructure, #1267: that change touches this one file); a test keeps selector fragments out
+of the role code.
 `t_every_selector_names_something_the_shipped_page_has` fails when a page renames an id,
 class, label or button text a role uses, on every OS and without a browser.
 
