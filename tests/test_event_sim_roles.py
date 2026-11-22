@@ -1270,7 +1270,9 @@ def t_driver_actions_reach_the_field():
     role.do("stop", {"entries": [1]})
     assert role.page()["sending"] == 2
     role.do("stop", {})
-    assert role.page()["sending"] == 0 and role.close() == []
+    assert role.page()["sending"] == 0
+    leftover = role.close()
+    assert leftover == [], leftover
 
 
 def t_the_drivers_thread_sends_and_ends_with_the_role():
@@ -1328,7 +1330,8 @@ def t_a_dead_sender_thread_is_a_hard_finding():
     role.do("register", {"stints": 1})
     role.do("start", {})
     role.runner.error = "ZeroDivisionError: division by zero"
-    assert ("hard", "the drivers stopped sending: ZeroDivisionError: division by zero") in role.close()
+    late = role.close()
+    assert ("hard", "the drivers stopped sending: ZeroDivisionError: division by zero") in late, late
 
 
 # -- the stack's part -------------------------------------------------------------------

@@ -33,7 +33,6 @@ NAMES = ("Lena Hart", "Marco Vidal", "Sam Okafor", "Iris Nakamura", "Tom Becker"
 WAITING = ("Finn Olsen", "Aya Mori", "Leo Brandt")
 TICK_S = 0.1
 PACE_MPS = 99.4
-packet, Line = drive.packet, drive.Line
 
 
 def approve(client, name):
