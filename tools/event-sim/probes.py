@@ -5,7 +5,8 @@ import json
 from urllib.parse import urlsplit
 
 import expect
-from expect import Probe, Unresolved, View
+
+Probe, Unresolved, View = expect.Probe, expect.Unresolved, expect.View
 
 TIMEOUT_S = 3.0
 

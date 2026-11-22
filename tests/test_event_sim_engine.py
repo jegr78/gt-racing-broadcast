@@ -26,7 +26,9 @@ import scenario  # noqa: E402
 import sheet_sim  # noqa: E402
 import stack  # noqa: E402
 import webhook_sink  # noqa: E402
-from roles import builtin  # noqa: E402
+import roles.builtin  # noqa: E402
+
+builtin = roles.builtin
 
 REG = roles.default_registry()
 

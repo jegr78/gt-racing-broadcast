@@ -267,8 +267,8 @@ def is_channel(value, environ=None):
 
 
 def _windows_started(pid):
-    import ctypes
-    from ctypes import wintypes
+    import ctypes.wintypes
+    wintypes = ctypes.wintypes
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel.OpenProcess.restype = wintypes.HANDLE
