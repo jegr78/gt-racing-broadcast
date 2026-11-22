@@ -112,10 +112,11 @@ RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 \
 > start` / `relay restart`, or it runs on the real login and rewrites it. Checked by
 > `tests/test_skill_recipes.py` (#617).
 
-`tools/obs-sim.py` speaks just enough obs-websocket v5 (no-auth handshake +
-`GetCurrentProgramScene` + `GetSourceScreenshot`) to answer the relay's
+`tools/obs-sim.py` speaks obs-websocket v5 (no-auth handshake) and answers the relay's
 `get_program_screenshot` with that fixed image, so the program monitor in the cockpit /
-panel / race-control pages shows the still you passed, with **no real OBS running**.
+panel / race-control pages shows the still you passed, with **no real OBS running**. It is
+the lenient mode of the stateful simulated OBS in `tools/event-sim/fakes/obs_sim.py`
+(see `tools/CLAUDE.md`).
 
 ### B2. Mint a console token (cockpit / launcher / race-control need auth)
 

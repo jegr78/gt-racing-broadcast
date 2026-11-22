@@ -214,6 +214,71 @@ simulated PS5 cannot share a host on the default ports: both need UDP 33740 or
 sender's own upload code; `--status` adds the relay's counts to its JSON report and
 `--reset` clears the probe's counters first.
 
+## Simulated OBS (`tools/event-sim/fakes/obs_sim.py`, #1229)
+
+The event simulation's stand-in OBS (spec
+`docs/superpowers/specs/2026-11-21-event-simulation-design.md`). `obs_state.py` holds the
+state seeded from `src/obs/GT_Racing_Endurance.json` (or `--collection`): scenes, program
+and preview, Cut and Fade, streaming and recording, inputs with settings, mute and
+volume, scene item visibility and transforms (as in the collection), media cursors. It answers each request the way OBS does,
+including OBS's error codes for a missing scene, item or input. OBS lists the loaded
+collection under its own name and the demo profile's `OBS_COLLECTION`
+(`--collection-name` adds more), so `event start` can switch to it. Each client gets the
+events its `eventSubscriptions` asks for; `obs_ws` asks for none. `obs_render.py` draws
+program screenshots at each item's canvas rect: per visible feed its newest frame, or
+colour bars with the input name or its `/labels` text when there is none; a solid panel
+per opaque item; the scene name on top. `program.feeds[].source` says which the last
+screenshot used (`frame`, `synthetic`, or null for a hidden feed). `GetSourceScreenshot`
+answers like OBS: `png`, `jpg` or `jpeg` (any other format is code 400). A JPEG of a
+picture with a grabbed frame comes from ffmpeg, which works when frames do; otherwise
+from a stdlib baseline encoder that writes one-colour 16x16 blocks without a DCT (a
+synthetic 1920x1080 picture in well under a second). An unchanged picture reuses its
+last JPEG. The picture is the canvas fitted inside `imageWidth`/`imageHeight` (8-4096, the
+full 1920x1080 without either), at `imageCompressionQuality`. A fixed `--image` is sent
+as it is, labelled with its own type. A screenshot is
+planned under the state lock and drawn after it, so a feed read never holds up another
+request.
+
+`obs_grab.py` reads the frames only from the relay's feed URLs (http, loopback, ports
+53001-53003 or `--feed-port`, path `/`). It makes the HTTP request itself, follows no
+redirect and pipes the bytes into ffmpeg, which may only read its stdin (`pipe` is the
+one allowed protocol, MPEG-TS demuxer forced) and is killed after 4 s. Each feed is read in the
+background at most once per `--grab-interval` (5 s); a screenshot waits only for a
+feed's first frame, up to 1 s. `--no-grab` turns the reads off, `ObsSim.stop()` kills
+running ones. A read is a short-lived consumer on the relay's fan-out port: while it
+runs, `consumer_attached` is true (a relay restart in that moment rebuilds the feed
+input, here in the simulated OBS), and `consumer_backlog`, the backlog floor and
+`consumer_starved` count it like OBS. Opaque by default are the full-page
+graphics of `obs_ws.GRAPHIC_SOURCES` except the transparent Grid Rows, plus the feed
+covers (`--opaque` replaces the list); `program.feeds` marks a feed such an item covers
+as `occluded` and names it in `occluded_by`.
+
+One loopback port carries the WebSocket and a JSON endpoint for checks: `GET /state`
+(`scene` is the program scene), `/events?since=N`, `/requests?since=N` (state-changing
+requests; `Get*` reads are only counted, under `reads` in the state), `/program.png`,
+and `POST /request` (an operator acting in OBS), `/labels` (text a feed's pattern shows)
+and `/freeze` (stop a feed's media cursor; `state` sets what OBS reports, PLAYING by
+default as for a stalled stream). New input settings reopen the media and end a plain
+freeze, including the relay's own `close_when_inactive` write; `"sticky": true` keeps it
+through any rebuild until `"frozen": false`, for a source that stays stalled. As in
+OBS, a transition reports `CurrentProgramSceneChanged` when it ends, and switching to
+the scene already on air (or already faded to) starts nothing. The stream key never reaches the state or the
+request log. A web page must not reach the port: a request needs `Host` 127.0.0.1 or
+localhost with this port, no `Origin` (also on the WebSocket upgrade) and a POST
+`application/json`. A handler failure answers code 400 instead of dropping the session,
+and a WebSocket client that stops reading is closed once its queue fills. In-process use: `ObsSim(...).start()`, `.env()` gives
+`RACECAST_SIM_OBS_WS`, `obs_sim.fetch(url, path)` reads the endpoint.
+
+```bash
+python3 tools/event-sim/fakes/obs_sim.py --port 0 --ready-file obs.json
+```
+
+`tools/obs-sim.py` is its lenient mode for screenshots: a fixed image and the old fixed
+answers (no inputs, any scene item exists and is visible, every other request succeeds
+without effect). `tools/e2e.py` and the
+wiki-screenshots skill use it. `tests/test_obs_sim.py` drives both through the real
+`obs_ws` helpers.
+
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
 Up to 15 simulated senders for a running relay: they register on the event's invite,
