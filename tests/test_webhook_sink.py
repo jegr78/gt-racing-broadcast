@@ -21,6 +21,7 @@ import webhook_sink  # noqa: E402
 for _key in [k for k in os.environ if k.startswith("RACECAST_")]:
     del os.environ[_key]
 os.environ["RACECAST_SIMULATION"] = "1"
+simulation.install_network_guard()
 
 _spec = importlib.util.spec_from_file_location(
     "relay_feeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
@@ -122,7 +123,9 @@ def t_rejects_what_discord_rejects_and_records_nothing():
         assert status == 400 and json.loads(body)["code"] == 50109, body
         status, _ = _status(sink.url, json.dumps({"content": "x" * 2001}).encode(), json_ct)
         assert status == 400, "content over 2000 characters"
-        assert sink.messages() == [] and sink.rejected == 3
+        status, body = _status(sink.url, b'["hi"]', json_ct)
+        assert status == 400 and json.loads(body)["code"] == 50006, "a payload that is no object is empty"
+        assert sink.messages() == [] and sink.rejected == 4
 
 
 def t_refuses_requests_a_web_page_could_send():

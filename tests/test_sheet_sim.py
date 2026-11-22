@@ -23,11 +23,16 @@ import stream_target  # noqa: E402
 for _key in [k for k in os.environ if k.startswith("RACECAST_")]:
     del os.environ[_key]
 os.environ["RACECAST_SIMULATION"] = "1"
+simulation.install_network_guard()
 
 _spec = importlib.util.spec_from_file_location(
     "relay_feeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 m = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(m)
+_gg_spec = importlib.util.spec_from_file_location(
+    "get_graphics", os.path.join(ROOT, "src", "relay", "get-graphics.py"))
+gg = importlib.util.module_from_spec(_gg_spec)
+_gg_spec.loader.exec_module(gg)
 
 SCHEDULE = [["URL", "Streamer", "Stint"],
             ["sim://comms1", "Comms 1", "Stint 1"],
@@ -246,6 +251,7 @@ def t_crew_writes_booleans_extends_headers_and_deletes():
         assert names == ["Sim Director", "Sim Marshal"], names
         assert _post(sim, {"action": "crew", "row": 1, "name": " "}) == {"error": "crew: name is required"}
         assert _post(sim, {"action": "crew", "row": "x"}) == {"error": "crew: row must be >= 1"}
+        assert _post(sim, {"action": "crew", "row": 0, "name": "A"}) == {"error": "crew: row must be >= 1"}
         assert ctl.crew_delete(1) == {"ok": True, "row": 1}
         assert [r[0] for r in sim.tab("Crew")[1:]] == ["Sim Marshal"], "rows below shift up"
 
@@ -309,6 +315,75 @@ def t_refuses_an_oversized_body_before_reading_it():
                       "Content-Type: application/json\r\nContent-Length: 999999999\r\n\r\n").encode())
         assert conn.recv(64).startswith(b"HTTP/1.1 413"), "a body over the limit is refused"
         assert sim.writes() == []
+
+
+def t_refuses_a_content_length_that_is_no_number():
+    with _sim() as sim, socket.create_connection(("127.0.0.1", sim.port), timeout=5) as conn:
+        conn.sendall((f"POST {sheet_sim.EXEC_PATH}?key=sim HTTP/1.1\r\nHost: 127.0.0.1:{sim.port}\r\n"
+                      "Content-Type: application/json\r\nContent-Length: ten\r\n\r\n").encode())
+        assert conn.recv(64).startswith(b"HTTP/1.1 400"), "a non-numeric Content-Length is refused"
+
+
+def t_fetch_stays_on_loopback():
+    try:
+        sheet_sim.fetch("http://sheet.example.test", "/_sim/state")
+    except ValueError:
+        return
+    raise AssertionError("fetch must refuse a non-loopback URL")
+
+
+def t_a_payload_that_is_no_object_is_an_error():
+    with _sim() as sim:
+        answer = _post(sim, ["schedule"])
+        assert set(answer) == {"error"} and answer["error"].startswith("TypeError"), answer
+
+
+def t_missing_tabs_and_headers_answer_the_script_errors():
+    with _sim(tabs={"Setup": None, "Schedule": None}) as sim:
+        assert _post(sim, {"action": "setup", "fields": {"Stint": "Stint 1"}}) == {"error": "tab not found: Setup"}
+        assert _post(sim, {"action": "schedule", "row": 1}) == {"error": "tab not found: Schedule"}
+
+
+def t_crew_delete_past_the_last_row_changes_nothing():
+    with _sim() as sim:
+        assert _post(sim, {"action": "crew", "row": 5, "delete": True})["ok"] is True
+        assert sim.tab("Crew") == CREW
+
+
+def t_channel_tab_and_stream_key_set_the_obs_target():
+    with _sim(tabs={"Channel": [["Platform", "Channel"], ["YouTube", "sim://league"]]},
+              stream_keys={"key1": "sim-stream-1"}) as sim:
+        applied = []
+
+        def set_service(platform, key):
+            applied.append((platform, key))
+            return True, "set"
+        ok, note = m.apply_stream_service_for_ref("key1", _csv_url(sim, "Channel"), sim.push_url,
+                                                  set_service)
+        assert ok and applied == [("youtube", "sim-stream-1")], (ok, note, applied)
+        assert "sim-stream-1" not in note, note
+
+
+def t_assets_tab_reaches_the_graphics_reader():
+    link = "https://drive.google.com/file/d/simfile1/view"
+    with _sim(tabs={"Assets": [["Name", "Link"], ["Standby", link]]}) as sim:
+        saved = dict(os.environ)
+        os.environ.update(sim.env())
+        try:
+            rows = list(csv.reader(io.StringIO(gg.fetch_assets_csv("x", "Assets", timeout=5))))
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+        assert gg.graphics_from_csv(rows) == {"Standby": link}, rows
+
+
+def t_check_endpoints_refuse_a_bad_tab():
+    with _sim() as sim:
+        url = sim.http_url + "/_sim/tab"
+        json_ct = {"Content-Type": "application/json"}
+        assert _status(url, json.dumps({"name": 5}).encode(), json_ct)[0] == 400
+        assert _status(url, json.dumps({"name": "X", "rows": ["a"]}).encode(), json_ct)[0] == 400
+        assert sim.tab("X") is None
 
 
 def t_check_endpoints_seed_tabs_and_list_writes():

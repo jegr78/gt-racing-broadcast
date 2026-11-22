@@ -318,7 +318,10 @@ python3 tools/event-sim/fakes/webhook_sink.py --port 0 --ready-file sink.json
 
 `tests/test_sheet_sim.py` and `tests/test_webhook_sink.py` drive them through the relay's
 own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSource`,
-`parse_timer_tab`, the Discord payload builders, `http_util.post_multipart`).
+`parse_timer_tab`, `apply_stream_service_for_ref` on the Channel tab, get-graphics on the
+Assets tab, the Discord payload builders, `http_util.post_multipart`). `env()` carries
+only the endpoints: the caller sets `RACECAST_SIMULATION=1`, or the Sheet URL resolves
+to Google.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
