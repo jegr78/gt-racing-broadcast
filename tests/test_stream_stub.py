@@ -472,6 +472,9 @@ def t_killing_the_stand_in_ends_its_ffmpeg():
         pull.proc.kill()
         pull.proc.wait(timeout=WAIT)
         assert _eventually(lambda: not _alive(pid)), "the orphaned ffmpeg stops on its broken pipe"
+        assert os.listdir(os.path.join(stub.directory, "pulls")), "a killed stand-in leaves its work dir"
+        stub.install()
+        assert not os.path.exists(os.path.join(stub.directory, "pulls")), "install clears what killed pulls left"
     finally:
         pull.close()
         restore()

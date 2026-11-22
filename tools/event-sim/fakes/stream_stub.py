@@ -164,6 +164,7 @@ class StreamStub:
         self.lock = threading.Lock()
 
     def install(self):
+        shutil.rmtree(os.path.join(self.directory, "pulls"), ignore_errors=True)   # left by killed stand-ins
         os.makedirs(os.path.join(self.directory, "channels"), exist_ok=True)
         try:
             os.chmod(self.directory, 0o700)
