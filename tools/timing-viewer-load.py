@@ -86,7 +86,7 @@ class Viewer:
         self.header_bytes += sum(len(k) + len(v) + 4 for k, v in res.getheaders()) + 19
         return res.status, res.headers
 
-    def run(self, stop, until, min_wait, page):
+    def watch(self, stop, until, min_wait, page):
         if page and not stop.is_set():
             status, _headers = self._get(self._page, {})
             self.page_loads += status == 200
@@ -151,7 +151,7 @@ def run(link, viewers, duration, ramp=10.0, min_wait=PAGE_WAIT_S, page=True, sto
 
     def one(k):
         if not stop.wait(ramp * k / max(1, viewers)):
-            crowd[k].run(stop, until, min_wait, page)
+            crowd[k].watch(stop, until, min_wait, page)
     threads = [threading.Thread(target=one, args=(k,), daemon=True) for k in range(viewers)]
     for t in threads:
         t.start()
