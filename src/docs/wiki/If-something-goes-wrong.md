@@ -40,7 +40,7 @@ exists, so those are not real contingencies. The realistic levers are all on you
    your **Standby** scene instead of showing a frozen/black feed, that keeps the stream
    alive and buys time. Hold the previous commentator longer if they are willing.
 5. **Last resort: relay really wedged.** Only if the relay *process* itself is
-   unresponsive: `racecast relay restart`. It comes back on the race stint that was on air,
+   unresponsive: `racecast relay restart`. It comes back on the race stint that was on air (in qualifying: in qualifying mode),
    and with manual arm the feeds start stopped until you arm them. If it then reports **control port 8088 already
    in use**, run `racecast freeport 8088`, then `racecast relay start`. (Free the feed
    ports separately with `racecast freeport`.)

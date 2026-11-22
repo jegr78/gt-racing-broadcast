@@ -2488,10 +2488,10 @@ def t_takeover_event_title_extracts():
     assert m._takeover_event_title({"event_title": 5}) is None       # bad type ignored
 
 
-def _restart_calls(rest, running, status, continues=False, recorded=None):
+def _restart_calls(rest, running, status, continues=False, recorded=None, part_mode=None):
     """The calls relay_restart makes, with the relay and the event record stubbed."""
     names = ("_relay_already_running_for_active_profile", "_relay_status_probe", "relay_stop",
-             "relay_start", "_unstopped_event_continues", "_read_positive")
+             "relay_start", "_unstopped_event_continues", "_read_positive", "_read_on_air")
     saved = {n: getattr(m, n) for n in names}
     calls = []
     m._relay_already_running_for_active_profile = lambda: running
@@ -2500,6 +2500,7 @@ def _restart_calls(rest, running, status, continues=False, recorded=None):
     m.relay_start = lambda rest: calls.append(("start", list(rest)))
     m._unstopped_event_continues = lambda: continues
     m._read_positive = lambda _path, key: recorded if key == "stint" else None
+    m._read_on_air = lambda _path: {"mode": part_mode} if part_mode else {}
     try:
         with contextlib.redirect_stdout(io.StringIO()) as out:
             m.relay_restart(list(rest))
@@ -2515,12 +2516,34 @@ def t_relay_restart_comes_back_on_the_stint_that_was_on_air():
     assert calls == ["status", "stop", ("start", ["--stint", "2"])], \
         f"the stint is read before the stop and handed to the start: {calls}"
     assert "stint 2" in out, f"the restart says where it resumes: {out!r}"
-    assert _restart_calls(["--stint", "5"], True, race)[0] == ["stop", ("start", ["--stint", "5"])], \
+    assert _restart_calls(["--stint", "5"], True, race)[0][-1] == ("start", ["--stint", "5"]), \
         "an explicit --stint wins"
-    for status in ({"live": {"feed": "A", "stint": 3, "mode": "qualifying"}},
-                   {"live": {"feed": None, "stint": None, "mode": "solo"}}, {}):
+    for status in ({"live": {"feed": None, "stint": None, "mode": "solo"}}, {}):
         assert _restart_calls([], True, status)[0][-1] == ("start", []), \
             f"only a race stint is resumed: {status}"
+
+
+def t_relay_restart_comes_back_in_qualifying_mode():
+    quali = {"live": {"feed": "A", "stint": 3, "mode": "qualifying"}}
+    race = {"live": {"feed": "B", "stint": 2, "mode": "race"}}
+    calls, out = _restart_calls([], True, quali)
+    assert calls[-1] == ("start", ["--qualifying"]), \
+        f"a relay in qualifying mode restarts in it, without a race stint: {calls}"
+    assert "qualifying" in out, f"the restart says so: {out!r}"
+    assert _restart_calls(["--qualifying"], True, quali)[0][-1] == ("start", ["--qualifying"]), \
+        "an explicit --qualifying is not doubled"
+    assert _restart_calls(["--no-qualifying"], True, quali)[0][-1] == ("start", ["--no-qualifying"]), \
+        "an explicit --no-qualifying wins over the running mode"
+    assert _restart_calls(["--qualifying"], True, race)[0][-1] == ("start", ["--qualifying"]), \
+        "an explicit --qualifying on a race relay takes no race stint along"
+    assert _restart_calls(["--stint", "5"], True, quali)[0][-1] == ("start", ["--qualifying", "--stint", "5"]), \
+        "an explicit --stint keeps the resumed mode"
+    assert _restart_calls([], False, None, continues=True, recorded=4, part_mode="qualifying")[0][-1] == \
+        ("start", ["--qualifying"]), "a relay that does not answer takes the mode from the event record"
+    assert _restart_calls([], False, None, continues=False, recorded=4, part_mode="qualifying")[0][-1] == \
+        ("start", []), "without an unstopped event an old record is not resumed"
+    assert _restart_calls([], False, None, continues=True, recorded=4, part_mode="race")[0][-1] == \
+        ("start", ["--stint", "4"])
 
 
 def t_relay_restart_of_a_silent_relay_uses_the_event_record():

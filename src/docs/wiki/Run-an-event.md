@@ -242,7 +242,8 @@ no producer machine access needed:
    one of them by hand; the other is still resumed. After an upgrade, the first
    continued event resumes Part 1, since the older Part pointer has no mode.
    A relay restart alone (`racecast relay restart`, the Control Center's relay
-   **Restart**) keeps the Part and comes back on the race stint that was on air.
+   **Restart**) keeps the Part and comes back on the race stint that was on air, or in
+   qualifying mode when the relay ran in it.
 2. In the panel, click **Start Part N** → type the confirmation phrase
    (`START PART N`) → the relay sets that Part's stream key and goes live.
 3. **End Part N** (type `END PART N`) stops the broadcast. If a next Part exists the

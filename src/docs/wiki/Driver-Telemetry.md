@@ -48,9 +48,11 @@ while the event's relay still runs keeps all of this as well and leaves the rela
 stint and Part alone. A relay restart (`racecast relay restart`, the Control Center's
 relay **Restart**) comes back on the race stint that was on air as well: it reads the
 stint from the running relay, or from the event's record when the relay no longer
-answers, and says `resuming stint 5`. The Part pointer survives a restart on its own.
+answers, and says `resuming stint 5`. A relay in qualifying mode comes back in
+qualifying mode instead (`resuming qualifying mode`); when it no longer answers, the
+mode saved with the Part pointer decides. The Part pointer survives a restart on its own.
 The feeds start stopped, as on every relay start with manual arm, and `--stint N` sets
-the stint by hand. On a relay that runs without an unstopped event (none, or one
+the stint by hand, `--qualifying` the mode. On a relay that runs without an unstopped event (none, or one
 past the limits above) Start event begins a new event: a new invite and timing link
 and a new report window. It also asks that relay to drop the last race's data, as a
 new event does, and to start a new race recording. The first continued event after upgrading to this version
