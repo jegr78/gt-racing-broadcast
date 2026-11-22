@@ -220,7 +220,7 @@ The event simulation's stand-in OBS (spec
 `docs/superpowers/specs/2026-11-21-event-simulation-design.md`). `obs_state.py` holds the
 state seeded from `src/obs/GT_Racing_Endurance.json` (or `--collection`): scenes, program
 and preview, Cut and Fade, streaming and recording, inputs with settings, mute and
-volume, scene item visibility, media cursors. It answers each request the way OBS does,
+volume, scene item visibility and transforms (as in the collection), media cursors. It answers each request the way OBS does,
 including OBS's error codes for a missing scene, item or input. OBS lists the loaded
 collection under its own name and the demo profile's `OBS_COLLECTION`
 (`--collection-name` adds more), so `event start` can switch to it. Each client gets the

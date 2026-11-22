@@ -69,7 +69,6 @@ _LEGACY = {"GetSceneItemId": {"sceneItemId": 1}, "GetSceneItemEnabled": {"sceneI
            "GetStreamStatus": {"outputActive": False, "outputReconnecting": False,
                                "outputDuration": 0, "outputBytes": 0}}
 _LENIENT_LIVE = ("GetCurrentProgramScene", "GetSourceScreenshot")
-_READ_ONLY_TRANSFORM = ("sourceWidth", "sourceHeight", "width", "height")
 
 
 class ObsError(Exception):
@@ -94,12 +93,27 @@ def _timecode(ms):
     return f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}.{ms:03d}"
 
 
-def _transform():
-    return {"positionX": 0.0, "positionY": 0.0, "rotation": 0.0, "scaleX": 1.0, "scaleY": 1.0,
-            "alignment": 5, "boundsType": "OBS_BOUNDS_NONE", "boundsAlignment": 0,
-            "boundsWidth": 0.0, "boundsHeight": 0.0, "cropLeft": 0, "cropRight": 0,
-            "cropTop": 0, "cropBottom": 0, "sourceWidth": 1920.0, "sourceHeight": 1080.0,
-            "width": 1920.0, "height": 1080.0}
+CANVAS = (1920.0, 1080.0)
+BOUNDS_TYPES = ("OBS_BOUNDS_NONE", "OBS_BOUNDS_STRETCH", "OBS_BOUNDS_SCALE_INNER",
+                "OBS_BOUNDS_SCALE_OUTER", "OBS_BOUNDS_SCALE_TO_WIDTH",
+                "OBS_BOUNDS_SCALE_TO_HEIGHT", "OBS_BOUNDS_MAX_ONLY")
+
+
+def _transform(item=None):
+    """The settable transform of a collection scene item (defaults without one)."""
+    it = item or {}
+    pos, scale, bounds = it.get("pos") or {}, it.get("scale") or {}, it.get("bounds") or {}
+    kind = it.get("bounds_type", 0)
+    return {"positionX": float(pos.get("x", 0.0)), "positionY": float(pos.get("y", 0.0)),
+            "rotation": float(it.get("rot", 0.0)),
+            "scaleX": float(scale.get("x", 1.0)), "scaleY": float(scale.get("y", 1.0)),
+            "alignment": int(it.get("align", 5)),
+            "boundsType": BOUNDS_TYPES[kind] if isinstance(kind, int) and 0 <= kind < len(BOUNDS_TYPES)
+            else "OBS_BOUNDS_NONE",
+            "boundsAlignment": int(it.get("bounds_align", 0)),
+            "boundsWidth": float(bounds.get("x", 0.0)), "boundsHeight": float(bounds.get("y", 0.0)),
+            "cropLeft": int(it.get("crop_left", 0)), "cropRight": int(it.get("crop_right", 0)),
+            "cropTop": int(it.get("crop_top", 0)), "cropBottom": int(it.get("crop_bottom", 0))}
 
 
 def feed_url(settings):
@@ -185,7 +199,7 @@ class ObsState:
             for it in (src.get("settings") or {}).get("items") or []:
                 items.append({"id": int(it.get("id") or len(items) + 1), "source": it["name"],
                               "enabled": bool(it.get("visible", True)),
-                              "transform": _transform()})
+                              "transform": _transform(it)})
             self.scenes[src["name"]] = items
             self.next_item_id[src["name"]] = max([i["id"] for i in items] or [0]) + 1
         order = [s.get("name") for s in collection.get("scene_order") or []]
@@ -296,7 +310,26 @@ class ObsState:
                 "inputKind": None if nested else (self.inputs.get(item["source"]) or {}).get("kind"),
                 "sourceType": "OBS_SOURCE_TYPE_SCENE" if nested else "OBS_SOURCE_TYPE_INPUT",
                 "isGroup": False if nested else None,
-                "sceneItemTransform": copy.deepcopy(item["transform"])}
+                "sceneItemTransform": self._transform_json(item)}
+
+    def _source_size(self, source):
+        settings = (self.inputs.get(source) or {}).get("settings") or {}
+        try:
+            return float(settings["width"]), float(settings["height"])
+        except (KeyError, TypeError, ValueError):
+            return CANVAS
+
+    def _transform_json(self, item):
+        """The item's transform as OBS reports it, with the derived source and drawn size."""
+        tr = copy.deepcopy(item["transform"])
+        sw, sh = self._source_size(item["source"])
+        if tr["boundsType"] != "OBS_BOUNDS_NONE":
+            w, h = tr["boundsWidth"], tr["boundsHeight"]
+        else:
+            w = (sw - tr["cropLeft"] - tr["cropRight"]) * tr["scaleX"]
+            h = (sh - tr["cropTop"] - tr["cropBottom"]) * tr["scaleY"]
+        tr.update(sourceWidth=sw, sourceHeight=sh, width=w, height=h)
+        return tr
 
     def _add_item(self, scene, source, enabled):
         item_id = self.next_item_id.get(scene, 1)
@@ -603,14 +636,14 @@ class ObsState:
         return {}
 
     def _r_GetSceneItemTransform(self, data):
-        return {"sceneItemTransform": copy.deepcopy(self._item(data)[1]["transform"])}
+        return {"sceneItemTransform": self._transform_json(self._item(data)[1])}
 
     def _r_SetSceneItemTransform(self, data):
         scene, item = self._item(data)
         (tr,) = _need(data, "sceneItemTransform")
-        item["transform"].update({k: v for k, v in tr.items() if k not in _READ_ONLY_TRANSFORM})
+        item["transform"].update({k: v for k, v in tr.items() if k in item["transform"]})
         self._emit("SceneItemTransformChanged", {"sceneName": scene, "sceneItemId": item["id"],
-                                                 "sceneItemTransform": copy.deepcopy(item["transform"])})
+                                                 "sceneItemTransform": self._transform_json(item)})
         return {}
 
     def _r_GetSceneItemIndex(self, data):

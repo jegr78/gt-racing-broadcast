@@ -151,6 +151,41 @@ def t_extra_collection_names_are_listed():
         raise AssertionError("OBS refuses a collection it does not list")
 
 
+def _transform(st, scene, source):
+    item = st.request("GetSceneItemId", {"sceneName": scene, "sourceName": source})["sceneItemId"]
+    return st.request("GetSceneItemTransform", {"sceneName": scene, "sceneItemId": item})["sceneItemTransform"]
+
+
+def t_item_transforms_come_from_the_collection():
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
+    feed_b = _transform(st, "Splitscreen", "Feed B")
+    want = {"positionX": 960.0, "positionY": 270.0, "boundsType": "OBS_BOUNDS_SCALE_INNER",
+            "boundsWidth": 960.0, "boundsHeight": 540.0, "alignment": 5, "width": 960.0, "height": 540.0}
+    assert {k: feed_b[k] for k in want} == want, feed_b
+    pov = _transform(st, "Stint", "Feed POV")
+    assert (pov["positionX"], pov["positionY"], pov["width"], pov["height"]) == (1496.0, 644.0, 384.0, 216.0), pov
+    hud = _transform(st, "Stint", "Stint HUD")
+    assert (hud["boundsType"], hud["width"], hud["height"]) == ("OBS_BOUNDS_NONE", 1920.0, 1080.0), hud
+    item = st.request("GetSceneItemId", {"sceneName": "Stint", "sceneItemId": 0, "sourceName": "Feed POV"})
+    st.request("SetSceneItemTransform", {"sceneName": "Stint", "sceneItemId": item["sceneItemId"],
+                                         "sceneItemTransform": {"boundsWidth": 480.0, "width": 1.0,
+                                                                "bogus": 1}})
+    pov = _transform(st, "Stint", "Feed POV")
+    assert (pov["boundsWidth"], pov["width"]) == (480.0, 480.0), "width follows the bounds, never a Set"
+    assert "bogus" not in pov, "unknown transform keys are ignored, as in OBS"
+
+
+def t_unbounded_size_follows_source_scale_and_crop():
+    collection = {"name": "C", "sources": [
+        {"id": "browser_source", "name": "Page", "settings": {"width": 800, "height": 600}},
+        {"id": "scene", "name": "S", "settings": {"items": [
+            {"name": "Page", "id": 1, "visible": True, "scale": {"x": 0.5, "y": 2.0},
+             "crop_left": 100, "crop_top": 50}]}}]}
+    st = obs_state.ObsState(collection)
+    tr = _transform(st, "S", "Page")
+    assert (tr["sourceWidth"], tr["width"], tr["height"]) == (800.0, 350.0, 1100.0), tr
+
+
 def t_strict_mode_answers_missing_things_like_obs():
     st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
     for rtype, data in (("SetCurrentProgramScene", {"sceneName": "Nope"}),
