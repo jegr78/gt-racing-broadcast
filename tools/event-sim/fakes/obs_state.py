@@ -21,7 +21,6 @@ import time
 from urllib.parse import urlsplit
 
 import obs_render
-from obs_render import FORMATS, size
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
@@ -898,7 +897,7 @@ class ObsState:
         frame comes from the grabber, outside the lock; `feed_sources` records whether
         the picture used that `frame` or the `synthetic` pattern (None: hidden)."""
         with self.lock:
-            plan = self._shot_plan(source, size(width), fmt)
+            plan = self._shot_plan(source, obs_render.size(width), fmt)
         return self._shot_draw(plan)
 
     def _shot_plan(self, source, picture, fmt="png", quality=75):
@@ -962,7 +961,7 @@ class ObsState:
         source, fmt = _need(data, "sourceName", "imageFormat")
         if self.image is None and source not in self.scenes and source not in self.inputs:
             raise ObsError(NOT_FOUND, f"No source was found by the name of `{source}`.")
-        if fmt not in FORMATS:
+        if fmt not in obs_render.FORMATS:
             raise ObsError(INVALID_FIELD, "Your specified image format is invalid or not supported by this system.")
         for name, low, high in (("imageWidth", 8, 4096), ("imageHeight", 8, 4096),
                                 ("imageCompressionQuality", -1, 100)):
@@ -971,7 +970,7 @@ class ObsState:
                 raise ObsError(OUT_OF_RANGE, f"The field value of `{name}` is out of range.")
         quality = data.get("imageCompressionQuality")
         quality = 75 if quality is None or quality < 0 else quality
-        picture = size(data.get("imageWidth"), data.get("imageHeight"))
+        picture = obs_render.size(data.get("imageWidth"), data.get("imageHeight"))
         return _Shot(self, self._shot_plan(source, picture, fmt, quality))
 
     # -- what checks read ------------------------------------------------------------
