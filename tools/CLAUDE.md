@@ -225,7 +225,11 @@ including OBS's error codes for a missing scene, item or input. OBS lists the lo
 collection under its own name and the demo profile's `OBS_COLLECTION`
 (`--collection-name` adds more), so `event start` can switch to it. Each client gets the
 events its `eventSubscriptions` asks for; `obs_ws` asks for none. `obs_render.py` draws
-program screenshots as PNG: the scene name over colour bars per visible feed.
+program screenshots as PNG at each item's canvas rect: colour bars per visible feed, a
+solid panel per opaque item, the scene name on top. Opaque by default are the full-page
+graphics of `obs_ws.GRAPHIC_SOURCES` except the transparent Grid Rows, plus the feed
+covers (`--opaque` replaces the list); `program.feeds` marks a feed such an item covers
+as `occluded` and names it in `occluded_by`.
 
 One loopback port carries the WebSocket and a JSON endpoint for checks: `GET /state`
 (`scene` is the program scene), `/events?since=N`, `/requests?since=N` (state-changing

@@ -329,6 +329,75 @@ def t_screenshot_shows_scene_and_visible_feeds():
     assert st.screenshot("Splitscreen", 320)[0] == plain, "the same state renders the same bytes"
 
 
+def _enable(st, scene, source, on=True):
+    item = st.request("GetSceneItemId", {"sceneName": scene, "sourceName": source})["sceneItemId"]
+    st.request("SetSceneItemEnabled", {"sceneName": scene, "sceneItemId": item, "sceneItemEnabled": on})
+
+
+def _feeds(st, scene):
+    return {f["input"]: (f["occluded"], f["occluded_by"]) for f in st.feeds(scene)}
+
+
+def t_splitscreen_picture_places_feeds_by_their_transform():
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
+    rects = {f["input"]: f["rect"] for f in st.feeds("Splitscreen")}
+    assert rects == {"Feed A": [0.0, 270.0, 960.0, 540.0], "Feed B": [960.0, 270.0, 960.0, 540.0]}, rects
+    shot, _ = st.screenshot("Splitscreen", 320)
+    assert _png_pixel(shot, 2, 100) == (192, 192, 192), "Feed A's bars start at the left edge"
+    assert _png_pixel(shot, 2, 150) != (192, 192, 192), "below the halves is no feed"
+
+
+def t_a_full_frame_graphic_above_a_feed_hides_it():
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
+    assert _feeds(st, "Stint") == {"Feed A": (False, None)}, "transparent overlays never hide a feed"
+    _enable(st, "Stint", "Feed POV")
+    _enable(st, "Stint", "Standby Cover")
+    assert _feeds(st, "Stint") == {"Feed A": (True, "Standby Cover"), "Feed POV": (True, "Standby Cover")}
+    shot, _ = st.screenshot("Stint", 320)
+    assert _png_pixel(shot, 2, 100) != (192, 192, 192), "the cover paints over the feed"
+    _enable(st, "Stint", "Standby Cover", False)
+    _enable(st, "Stint", "Standings")
+    assert _feeds(st, "Stint")["Feed A"] == (True, "Standings"), "a full-page graphic hides it too"
+    _enable(st, "Stint", "Standings", False)
+    _enable(st, "Stint", "Grid Row 1")
+    assert _feeds(st, "Stint")["Feed A"] == (False, None), "a grid row paints only its own row"
+
+
+def t_rect_honours_the_alignment():
+    collection = {"name": "C", "sources": [{"id": "image_source", "name": "Img", "settings": {}},
+                                           {"id": "scene", "name": "S", "settings": {"items": [
+                                               {"name": "Img", "id": 1, "align": 0, "pos": {"x": 960.0, "y": 540.0},
+                                                "bounds_type": 2, "bounds": {"x": 100.0, "y": 50.0}},
+                                               {"name": "Img", "id": 2, "align": 10, "pos": {"x": 960.0, "y": 540.0},
+                                                "bounds_type": 2, "bounds": {"x": 100.0, "y": 50.0}}]}}]}
+    st = obs_state.ObsState(collection)
+    assert [st.rect(i) for i in st.scenes["S"]] == [[910.0, 515.0, 100.0, 50.0], [860.0, 490.0, 100.0, 50.0]]
+
+
+def t_only_an_opaque_item_above_and_around_a_feed_hides_it():
+    def item(name, n, w):
+        return {"name": name, "id": n, "bounds_type": 2, "bounds": {"x": w, "y": w * 9 / 16}}
+    collection = {"name": "C", "sources": [
+        {"id": "image_source", "name": "Back", "settings": {}},
+        {"id": "image_source", "name": "Badge", "settings": {}},
+        {"id": "ffmpeg_source", "name": "Cam", "settings": {"input": "http://127.0.0.1:53001"}},
+        {"id": "scene", "name": "S", "settings": {"items": [
+            item("Back", 1, 1920.0), item("Cam", 2, 1920.0), item("Badge", 3, 400.0)]}}]}
+    st = obs_state.ObsState(collection, opaque=["Back", "Badge"])
+    assert _feeds(st, "S") == {"Cam": (False, None)}, "neither a backdrop below nor a small badge above hides it"
+
+
+def t_a_feed_cover_hides_only_its_own_half():
+    sim = _sim()
+    try:
+        report, note = obs_ws.ensure_cover_items("Feed A", "Feed A Cover", "cover.png")
+        assert report.get("Splitscreen") == "created", (report, note)
+        obs_ws.set_scene_item_enabled("Splitscreen", "Feed A Cover", True)
+        assert _feeds(sim.state, "Splitscreen") == {"Feed A": (True, "Feed A Cover"), "Feed B": (False, None)}
+    finally:
+        sim.stop()
+
+
 def t_relay_helpers_drive_the_sim_over_the_wire():
     sim = _sim()
     try:

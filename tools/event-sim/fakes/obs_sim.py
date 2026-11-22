@@ -162,9 +162,9 @@ class ObsSim:
     stand-in's lenient answers; `image` serves fixed bytes for every screenshot."""
 
     def __init__(self, collection=obs_state.DEFAULT_COLLECTION, scene=None, strict=True,
-                 image=None, port=0, clock=time.monotonic, collection_names=None):
+                 image=None, port=0, clock=time.monotonic, collection_names=None, opaque=None):
         self.state = obs_state.ObsState(collection, scene=scene, strict=strict, clock=clock,
-                                        collection_names=collection_names)
+                                        collection_names=collection_names, opaque=opaque)
         if image is not None:
             self.state.set_image(image)
         self.requested_port = port
@@ -347,6 +347,9 @@ def build_parser():
                     help="another name OBS lists for the collection, repeatable "
                          "(default: the demo profile's OBS_COLLECTION)")
     ap.add_argument("--image", help="serve this fixed image for every screenshot")
+    ap.add_argument("--opaque", action="append",
+                    help="an input that hides the feeds below it, repeatable "
+                         "(default: the full-page graphics and feed covers)")
     ap.add_argument("--ready-file", help="write {port, url, state_url} here once listening")
     return ap
 
@@ -374,7 +377,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     image = read_image(args.image) if args.image else None
     run(ObsSim(args.collection, scene=args.scene, image=image, port=args.port,
-               collection_names=args.collection_names), args.ready_file)
+               collection_names=args.collection_names, opaque=args.opaque), args.ready_file)
 
 
 if __name__ == "__main__":

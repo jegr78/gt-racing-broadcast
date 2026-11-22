@@ -1,9 +1,8 @@
 """Program screenshots of the simulated OBS as PNG, stdlib only.
 
-The picture shows the program scene's name in a top bar and, below it, a test pattern
-per visible feed (colour bars plus the input name), side by side when a scene shows two
-feeds. A scene without a feed gets a plain background. The same scene and feeds always
-give the same bytes."""
+The picture paints the scene's layers bottom first at their canvas rects: a test pattern
+per feed (colour bars plus the input name or its label) and a solid panel per opaque
+item, under a top bar with the scene name. The same layers always give the same bytes."""
 import struct
 import zlib
 
@@ -33,13 +32,13 @@ FONT = {   # 5x7 glyphs, one 5-bit row each, top row first
 }
 BARS = ((192, 192, 192), (192, 192, 0), (0, 192, 192), (0, 192, 0), (192, 0, 192),
         (192, 0, 0), (0, 0, 192))
-BAR_TOP = (24, 24, 32)
+CANVAS_W = 1920.0
 TEXT = (255, 255, 255)
 LABEL_BG = (0, 0, 0)
 
 
 def _tint(name):
-    """A stable dark background colour for a scene without a feed."""
+    """A stable dark colour for a scene background or an opaque item."""
     h = zlib.crc32(name.encode("utf-8"))
     return (32 + h % 64, 32 + (h >> 8) % 64, 48 + (h >> 16) % 64)
 
@@ -91,25 +90,36 @@ def _fit(text, width, scale):
     return (text if len(text) <= keep else text[:keep]), scale
 
 
-def render_program(scene, feeds, width=640, labels=None):
-    """PNG bytes of the program: `feeds` are input names in picture order, `labels`
-    optionally maps an input name to the text its pattern shows."""
+def _label(canvas, x0, y0, w, h, text):
+    label, scale = _fit(text, w - 8, max(1, h // 50))
+    lw, lh = text_width(label, scale), 7 * scale
+    lx, ly = x0 + (w - lw) // 2, y0 + (h - lh) // 2
+    canvas.rect(lx - 2 * scale, ly - 2 * scale, lw + 4 * scale, lh + 4 * scale, LABEL_BG)
+    canvas.text(lx, ly, label, scale)
+
+
+def render_program(scene, layers, width=640, labels=None):
+    """PNG bytes of `scene`. `layers` are {kind: feed|opaque, name, rect: [x, y, w, h]}
+    on the 1920x1080 canvas, bottom first; `labels` maps a feed to the text it shows."""
     width = max(64, min(int(width or 640), 1920))
     height = width * 9 // 16
-    canvas = Canvas(width, height, _tint(scene) if not feeds else BAR_TOP)
-    bar = max(10, height // 8)
-    if feeds:
-        col = width // len(feeds)
-        for n, name in enumerate(feeds):
-            x0, w = n * col, (width - n * col if n == len(feeds) - 1 else col)
+    k = width / CANVAS_W
+    canvas = Canvas(width, height, _tint(scene))
+    for layer in layers:
+        x, y, w, h = (round(v * k) for v in layer["rect"])
+        x0, y0 = max(0, x), max(0, y)
+        w, h = min(width, x + w) - x0, min(height, y + h) - y0
+        if w <= 0 or h <= 0:
+            continue
+        if layer["kind"] == "feed":
             for b, colour in enumerate(BARS):
                 bx = x0 + w * b // len(BARS)
-                canvas.rect(bx, bar, x0 + w * (b + 1) // len(BARS) - bx, height - bar, colour)
-            label, scale = _fit((labels or {}).get(name) or name, w - 8, max(1, height // 60))
-            lw, lh = text_width(label, scale), 7 * scale
-            lx, ly = x0 + (w - lw) // 2, bar + (height - bar - lh) // 2
-            canvas.rect(lx - 2 * scale, ly - 2 * scale, lw + 4 * scale, lh + 4 * scale, LABEL_BG)
-            canvas.text(lx, ly, label, scale)
+                canvas.rect(bx, y0, x0 + w * (b + 1) // len(BARS) - bx, h, colour)
+            _label(canvas, x0, y0, w, h, (labels or {}).get(layer["name"]) or layer["name"])
+        else:
+            canvas.rect(x0, y0, w, h, _tint(layer["name"]))
+            _label(canvas, x0, y0, w, h, layer["name"])
+    bar = max(10, height // 8)
     canvas.rect(0, 0, width, bar, LABEL_BG)
     title, scale = _fit(scene or "?", width - 8, max(1, (bar - 4) // 7))
     canvas.text(4, (bar - 7 * scale) // 2, title, scale)

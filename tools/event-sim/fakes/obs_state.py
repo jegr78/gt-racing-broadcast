@@ -14,6 +14,7 @@ import copy
 import json
 import math
 import os
+import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -21,6 +22,8 @@ from urllib.parse import urlsplit
 from obs_render import render_program
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
+import obs_ws  # noqa: E402
 DEFAULT_COLLECTION = os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json")
 DEMO_PROFILE_ENV = os.path.join(ROOT, "profiles", "demo", "profile.env")
 
@@ -60,6 +63,10 @@ EVENT_CATEGORY = {
 STARTED, STOPPED = "OBS_WEBSOCKET_OUTPUT_STARTED", "OBS_WEBSOCKET_OUTPUT_STOPPED"
 STARTING, STOPPING = "OBS_WEBSOCKET_OUTPUT_STARTING", "OBS_WEBSOCKET_OUTPUT_STOPPING"
 PAUSED, RESUMED = "OBS_WEBSOCKET_OUTPUT_PAUSED", "OBS_WEBSOCKET_OUTPUT_RESUMED"
+# Inputs assumed to paint their whole item area: the full-page graphics and feed covers.
+# The Grid Row stills are full-frame but transparent outside their own row.
+OPAQUE_DEFAULT = tuple(n for n in obs_ws.GRAPHIC_SOURCES if not n.startswith("Grid Row")) \
+    + tuple(obs_ws.COVER_SOURCES.values())
 TRANSITIONS_BUILTIN = (("Cut", "cut_transition", True), ("Fade", "fade_transition", False))
 TRANSITION_KINDS = {name: kind for name, kind, _ in TRANSITIONS_BUILTIN}
 LOG_LIMIT = 5000
@@ -136,6 +143,13 @@ def demo_collection_name(path=DEMO_PROFILE_ENV):
     return ""
 
 
+def _contains(outer, inner, slack=0.5):
+    ox, oy, ow, oh = outer
+    ix, iy, iw, ih = inner
+    return (ox - slack <= ix and oy - slack <= iy
+            and ix + iw <= ox + ow + slack and iy + ih <= oy + oh + slack)
+
+
 def _redacted(request_type, data):
     data = copy.deepcopy(data)
     if request_type == "SetStreamServiceSettings":
@@ -149,9 +163,10 @@ class ObsState:
     """One simulated OBS instance. Thread-safe; every public method takes the lock."""
 
     def __init__(self, collection=None, scene=None, strict=True, clock=time.monotonic,
-                 collection_names=None):
+                 collection_names=None, opaque=None):
         """`collection_names` are further names OBS lists for the loaded collection
-        (default: the demo profile's OBS_COLLECTION), so a profile's switch succeeds."""
+        (default: the demo profile's OBS_COLLECTION), so a profile's switch succeeds.
+        `opaque` names the inputs that hide what lies below them (default OPAQUE_DEFAULT)."""
         self.strict, self.clock = strict, clock
         self.lock = threading.RLock()
         self.listeners = []
@@ -169,6 +184,7 @@ class ObsState:
         self.media_frozen = set()
         self.media_started = {}
         self.image, self.labels = None, {}
+        self.opaque = set(OPAQUE_DEFAULT if opaque is None else opaque)
         if collection is not None:
             self._load(collection)
         extra = [demo_collection_name()] if collection_names is None else list(collection_names)
@@ -807,11 +823,12 @@ class ObsState:
             if self.image is not None:
                 return self.image, "png" if self.image[:8] == b"\x89PNG\r\n\x1a\n" else "jpg"
             if source in self.scenes:
-                feeds = [f["input"] for f in self.feeds(source)]
+                layers = self.layers(source)
             else:
                 inp = self.inputs.get(source) or {}
-                feeds = [source] if feed_url(inp.get("settings") or {}) else []
-            return render_program(source, feeds, width, self.labels), "png"
+                kind = "feed" if feed_url(inp.get("settings") or {}) else "opaque"
+                layers = [{"kind": kind, "name": source, "rect": [0.0, 0.0, *CANVAS]}]
+            return render_program(source, layers, width, self.labels), "png"
 
     def _r_GetSourceScreenshot(self, data):
         source, _ = _need(data, "sourceName", "imageFormat")
@@ -837,16 +854,54 @@ class ObsState:
             walk(scene)
             return out
 
-    def feeds(self, scene):
-        """The visible network media inputs of `scene`, bottom first: what the picture shows."""
+    def rect(self, item):
+        """[x, y, w, h] of a scene item on the canvas; rotation is ignored."""
+        tr = self._transform_json(item)
+        w, h, align = tr["width"], tr["height"], tr["alignment"]
+        x = tr["positionX"] - (0.0 if align & 1 else w if align & 2 else w / 2)
+        y = tr["positionY"] - (0.0 if align & 4 else h if align & 8 else h / 2)
+        return [x, y, w, h]
+
+    def layers(self, scene):
+        """What the picture of `scene` paints, bottom first: each visible feed and each
+        visible opaque item with its canvas rect. Nested scenes add theirs in place."""
         with self.lock:
-            out = []
-            for name in self.visible(scene):
-                inp = self.inputs.get(name)
-                url = feed_url(inp["settings"]) if inp and inp["kind"] == "ffmpeg_source" else ""
-                if url:
-                    out.append({"input": name, "url": url, "port": urlsplit(url).port,
-                                "muted": inp["muted"]})
+            out, seen = [], set()
+
+            def walk(name):
+                if name in seen:
+                    return
+                seen.add(name)
+                for item in self.scenes.get(name, []):
+                    if not item["enabled"]:
+                        continue
+                    if item["source"] in self.scenes:
+                        walk(item["source"])
+                        continue
+                    inp = self.inputs.get(item["source"]) or {}
+                    if inp.get("kind") == "ffmpeg_source" and feed_url(inp["settings"]):
+                        out.append({"kind": "feed", "name": item["source"], "rect": self.rect(item)})
+                    elif item["source"] in self.opaque:
+                        out.append({"kind": "opaque", "name": item["source"], "rect": self.rect(item)})
+            walk(scene)
+            return out
+
+    def feeds(self, scene):
+        """The visible network media inputs of `scene`, bottom first, each with its rect
+        and the opaque item above it that covers it (`occluded_by`), if any."""
+        with self.lock:
+            layers, out = self.layers(scene), []
+            for n, layer in enumerate(layers):
+                if layer["kind"] != "feed":
+                    continue
+                inp = self.inputs[layer["name"]]
+                url = feed_url(inp["settings"])
+                cover = next((above["name"] for above in layers[n + 1:]
+                              if above["kind"] == "opaque" and _contains(above["rect"], layer["rect"])),
+                             None)
+                out.append({"input": layer["name"], "url": url, "port": urlsplit(url).port,
+                            "muted": inp["muted"], "rect": layer["rect"],
+                            "occluded": cover is not None, "occluded_by": cover})
             return out
 
     def snapshot(self):
