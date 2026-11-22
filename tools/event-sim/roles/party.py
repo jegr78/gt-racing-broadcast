@@ -331,8 +331,10 @@ class DirectorRole(Surface):
     def act_scene(self, args):
         scene = str(args.get("scene", "")).strip()
         key = self.sel("scene", scene=scene.upper())
-        if not scene or self.count(key) != 1:
-            raise StepError(f"scene {scene!r}: {self.count(key) if scene else 0} matching scene keys")
+        try:
+            self.until(lambda: scene and self.count(key) == 1, "the scene keys")
+        except StepError:
+            raise StepError(f"scene {scene!r}: {self.count(key) if scene else 0} matching scene keys") from None
         self.answered(lambda: self.click(key, f"scene {scene}"), "/obs/scene", f"scene {scene}")
         self.until(lambda: "air" in self._classes(key), f"scene {scene} on air")
         return {"scene": scene}
@@ -447,9 +449,10 @@ class RaceControlRole(Surface):
     def act_approve_driver(self, args):
         name = str(args.get("name", ""))
         row = self.sel("request", name=name)
-        before = self.count(row)
-        if not before:
-            raise StepError(f"no waiting request of {name!r}")
+        try:
+            before = self.until(lambda: self.count(row), "the request")
+        except StepError:
+            raise StepError(f"no waiting request of {name!r}") from None
         if args.get("entry"):
             self.choose(self.sel("request_entry", name=name), f"Entry of {name}", value=args["entry"])
         self.answered(lambda: self.click(self.sel("request_approve", name=name), f"Approve {name}"),
@@ -458,6 +461,8 @@ class RaceControlRole(Surface):
         return {"name": name}
 
     def act_approve_drivers(self, args):
+        """Approve every waiting request, top to bottom; none waiting is a failure."""
+        self.until(lambda: self.count(self.sel("waiting")), "a waiting driver request")
         names = []
         while self.count(self.sel("waiting")):
             name = self.text(self.sel("waiting_name"))
@@ -551,7 +556,7 @@ class CommentatorRole(Surface):
 
 @register
 class ViewerRole(Surface):
-    """A viewer on the public timing page: `read` returns what the page shows."""
+    """A viewer on the public timing page: `read` (cars) returns what the page shows."""
     kind = "viewer"
     ready = "#timing"
     sources = ("src/console/timing.html",)
@@ -569,4 +574,7 @@ class ViewerRole(Surface):
                 "rows": rows, "cars": len(rows)}
 
     def act_read(self, args):
+        """What the page shows once it lists `cars` rows (default 1; 0 reads at once)."""
+        cars = int(args.get("cars", 1))
+        self.until(lambda: self.count(self.sel("rows")) >= cars, f"{cars} cars in the timing")
         return self.facts()

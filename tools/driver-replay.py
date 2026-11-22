@@ -81,7 +81,7 @@ def main():
         later = segments[1] if len(segments) > 1 else (segments[0] if segments else None)
         for k, entry in enumerate((data.get("entries") or [])[:args.pending]):   # the next stint's drivers
             client.register(invite, entry, WAITING[k % len(WAITING)], later)
-    except (drive.DriveError, OSError, http.client.HTTPException) as exc:
+    except (drive.DriveError, ValueError, OSError, http.client.HTTPException) as exc:
         sys.exit(f"driver-replay: {exc}")
     field.start()
     drive.Runner(field, tick_s=TICK_S).loop(until=time.monotonic() + args.seconds)

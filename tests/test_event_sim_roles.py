@@ -824,6 +824,42 @@ def t_a_viewer_opens_the_timing_link_and_reads_the_page():
     fails(lambda: late.do("read", {}), "no timing link yet")
 
 
+def t_a_freshly_opened_page_is_read_once_it_has_rendered():
+    role, page, _ = make(party.ViewerRole, links={"timing": "L"})
+    page.add("#session", text="")
+    page.add("#state", text="Waiting for timing data…")
+    page.add("#fastest", text="", visible=False)
+    page.after(1.5, lambda: (page.add("#timing tbody tr", count=4, texts=["1", "2", "3", "4"]),
+                             page.add("#state", text="", visible=False)))
+    assert role.do("read", {"cars": 4})["cars"] == 4, "read waits for the page's first poll"
+    assert role.do("read", {"cars": 0})["cars"] == 4
+    fails(lambda: role.do("read", {"cars": 5}), "5 cars in the timing")
+
+    rc, page, left = waiting_desk(["Ann"])
+    shown = dict(page.els)
+    for key in [k for k in page.els if ".req.waiting" in k]:
+        del page.els[key]
+    page.after(1.5, lambda: page.els.update(shown))
+    assert rc.do("approve_drivers", {}) == {"approved": 1, "names": ["Ann"]}, "the desk lists requests after its first poll"
+    fails(lambda: rc.do("approve_drivers", {}), "a waiting driver request")
+
+    rc, page, left = waiting_desk(["Bo"])
+    shown = dict(page.els)
+    for key in [k for k in page.els if ".req.waiting" in k]:
+        del page.els[key]
+    page.after(1.5, lambda: page.els.update(shown))
+    assert rc.do("approve_driver", {"name": "Bo"}) == {"name": "Bo"}
+
+    director, page, _ = make(party.DirectorRole)
+    key = '#pgmBus button.k:has-text("STINT")'
+
+    def cut():
+        page.respond("/obs/scene")
+        page.els[key].attrs["class"] = "k air"
+    page.after(1.5, lambda: page.add(key, attrs={"class": "k"}, on_click=cut))
+    assert director.do("scene", {"scene": "Stint"}) == {"scene": "Stint"}, "the scene keys are built after load"
+
+
 # -- drivers ----------------------------------------------------------------------------
 class Relay:
     """The relay's driver routes as `drive.Client` offers them, in memory."""

@@ -151,6 +151,7 @@ id = "timing"
 at = "after:lap2"
 role = "viewer"
 do = "read"
+args = { cars = 4 }
 expect = ["result('timing').cars == 4", "page('viewer').cars == 4"]
 timeout = "20s"
 shot = "public-timing"

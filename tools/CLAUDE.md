@@ -568,7 +568,7 @@ action and acts on the controls a person uses; the drivers have no page.
 | `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene), `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name) |
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `add_lap` (entry, time) |
 | `commentator:<crew name>` | `/cockpit` with that person's token | `open`, `submit_link` (url, stint), `chat` (text) |
-| `viewer` | `/console/timing` on the event's timing link | `open`, `read` |
+| `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
 | `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release`, `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 
 An action is a mechanism. Which one follows which is the scenario's business, never a
@@ -593,9 +593,13 @@ UI or API:
   minute. `register` only asks: Race Control approves on its desk.
 - `api`, `obs` and `stream` stay for what no party does: probes, the simulated OBS
   operator, a channel's failure.
-- Not offered, because the simulation has no control for it: Start/End Part (the demo
-  Sheet configures no Parts, so the panel hides the button) and the Control Center's relay
-  restart (a fresh `relay start` has no feed port override and would bind 53001-53003).
+- A page a role just opened has not polled yet: `read`, `approve_driver`, `approve_drivers`
+  and `scene` wait for the rows, requests or keys before they act.
+- Not offered: Start/End Part (the panel hides its Part button in this simulation; why is
+  not established), the Control Center's relay restart (a fresh `relay start` passes no feed
+  ports, so the relay would bind its defaults 53001-53003), and of the spec's examples the
+  HUD, graphics, splitscreen, intermission, corrections, notes and profile controls, which
+  no bundled scenario needs yet.
 
 Without a browser a page role raises `roles.Unavailable`: the engine marks the step
 `skipped`, records a soft finding and runs neither its checks nor its shot, and steps
