@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
 from urllib.parse import quote, urlparse
 
@@ -217,6 +218,22 @@ def profile_refusal(name, values, forced=None):
 def is_channel(value, environ=None):
     """A `sim://<name>` stream address, accepted only in simulation mode."""
     return active(environ) and isinstance(value, str) and bool(CHANNEL_RE.match(value.strip()))
+
+
+def process_started(pid):
+    """An opaque start marker for `pid` so a reused pid is not mistaken for it, or None
+    where the OS gives none (Windows) or the process is gone."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open(f"/proc/{int(pid)}/stat", encoding="utf-8", errors="replace") as fh:
+                return fh.read().rsplit(")", 1)[1].split()[19]
+        if sys.platform == "darwin":
+            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))],
+                                 capture_output=True, text=True, errors="replace", timeout=5)
+            return out.stdout.strip() or None
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+    return None
 
 
 def guarded_argv(python, script, args):

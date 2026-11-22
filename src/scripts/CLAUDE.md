@@ -154,9 +154,11 @@ never the real one.
   with `SIMULATION=1` in its `profile.env`. Only a `--force` before the command
   (`racecast --simulation --force <group> ...`, consumed by `_apply_simulation_flag`)
   passes it. `_grant_simulation_force` writes `runtime/simulation-force/<nonce>.json`
-  (profile + pid) and sets `RACECAST_SIM_FORCE=<profile>:<nonce>`; a child passes only
-  while that record matches and its pid is alive (`_simulation_forced_profile`), so a stale
-  export does not. The machine `.env` never supplies it. A subcommand's own `--force`
+  (profile + holders, each a pid with its process start time where the OS gives one) and
+  sets `RACECAST_SIM_FORCE=<profile>:<nonce>`; a child passes only while that record
+  matches and a holder is alive (`_simulation_forced_profile`), so a stale export or a
+  reused pid does not. The granting run drops itself at exit (`atexit`), and every check
+  prunes records without a live holder. The machine `.env` never supplies it. A subcommand's own `--force`
   keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
 - Driver Radio and AI: `env_overrides` blanks `RACECAST_GCLOUD_TTS_KEY`/`STT_KEY` and

@@ -63,7 +63,7 @@
   racecast update [--check] [--yes] [--tag TAG]   # self-update the binary (--tag installs an exact release)
   racecast --version
 """
-import glob, io, json, os, re, shutil, sys, tempfile, threading, time, webbrowser, zipfile
+import atexit, contextlib, glob, io, json, os, re, shutil, sys, tempfile, threading, time, webbrowser, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Adapters (added in later tasks) import sibling modules from scripts/ at module
@@ -10646,37 +10646,88 @@ def _simulation_force_dir():
     return os.path.join(_runtime_base_dir(), "simulation-force")
 
 
+def _force_holder(pid):
+    return {"pid": pid, "started": simulation.process_started(pid)}
+
+
+def _holder_alive(holder):
+    """The holder's process still runs, and is the same process where the OS can tell."""
+    if not isinstance(holder, dict) or not sv.pid_alive(holder.get("pid")):
+        return False
+    started = holder.get("started")
+    return started is None or simulation.process_started(holder["pid"]) in (None, started)
+
+
+def _read_force_record(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    ok = isinstance(record, dict) and isinstance(record.get("holders"), list)
+    return record if ok else None
+
+
+def _write_force_record(path, record):
+    """Keep only live holders; a record without one is removed."""
+    record["holders"] = [h for h in record["holders"] if _holder_alive(h)]
+    if not record["holders"]:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        return None
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(record, fh)
+    os.replace(tmp, path)
+    return record
+
+
+def _prune_simulation_force(force_dir):
+    for path in glob.glob(os.path.join(force_dir, "*.json")):
+        record = _read_force_record(path)
+        if record is None:
+            with contextlib.suppress(OSError):
+                os.remove(path)
+        else:
+            _write_force_record(path, record)
+
+
+def _release_simulation_force(path, pid):
+    """Drop `pid` as a holder of the pass in `path` (the forcing run's normal exit)."""
+    record = _read_force_record(path)
+    if record is not None:
+        record["holders"] = [h for h in record["holders"] if h.get("pid") != pid]
+        _write_force_record(path, record)
+
+
 def _grant_simulation_force(name, environ, force_dir):
     """Record this forced run so its children pass for `name` while it lives."""
     import secrets
     nonce = secrets.token_hex(16)
     os.makedirs(force_dir, exist_ok=True)
-    for old in glob.glob(os.path.join(force_dir, "*.json")):
-        try:
-            with open(old, encoding="utf-8") as fh:
-                if not sv.pid_alive(json.load(fh).get("pid")):
-                    os.remove(old)
-        except (OSError, ValueError, AttributeError):
-            pass  # unreadable record: leave it
-    with open(os.path.join(force_dir, nonce + ".json"), "w", encoding="utf-8") as fh:
-        json.dump({"profile": name, "pid": os.getpid()}, fh)
+    _prune_simulation_force(force_dir)
+    path = os.path.join(force_dir, nonce + ".json")
+    _write_force_record(path, {"profile": name, "holders": [_force_holder(os.getpid())]})
+    atexit.register(_release_simulation_force, path, os.getpid())
     environ[simulation.FORCE] = f"{name}:{nonce}"
+
+
+def _force_record_path(environ, force_dir):
+    name, _, nonce = (environ.get(simulation.FORCE) or "").partition(":")
+    if not (name and re.fullmatch(r"[0-9a-f]{32}", nonce)):
+        return None, None
+    return name, os.path.join(force_dir, nonce + ".json")
 
 
 def _simulation_forced_profile(environ, force_dir):
     """The profile an inherited RACECAST_SIM_FORCE allows, or None. It counts only while
-    the run that granted it is alive and its record matches."""
-    name, _, nonce = (environ.get(simulation.FORCE) or "").partition(":")
-    if not (name and re.fullmatch(r"[0-9a-f]{32}", nonce)):
+    a holder of its record is alive."""
+    _prune_simulation_force(force_dir)
+    name, path = _force_record_path(environ, force_dir)
+    record = _read_force_record(path) if path else None
+    if record is None or record.get("profile") != name:
         return None
-    try:
-        with open(os.path.join(force_dir, nonce + ".json"), encoding="utf-8") as fh:
-            record = json.load(fh)
-    except (OSError, ValueError):
-        return None
-    if not isinstance(record, dict) or record.get("profile") != name:
-        return None
-    return name if sv.pid_alive(record.get("pid")) else None
+    return name if any(_holder_alive(h) for h in record["holders"]) else None
 
 
 def _simulation_gate(argv, environ=None, profile=None, values=None, force=False,

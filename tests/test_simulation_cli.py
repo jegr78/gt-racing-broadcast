@@ -3,7 +3,7 @@
 Discord, Companion, Tailscale or the Funnel, and the mode refuses a league profile.
 Every external leaf is replaced by a recorder, so a broken guard records instead of
 acting on this machine. Run: python3 tests/test_simulation_cli.py"""
-import contextlib, importlib.util, io, os, subprocess, sys, tempfile
+import contextlib, importlib.util, io, json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -412,6 +412,70 @@ def t_simulated_freeport_never_kills_a_live_relay():
         with contextlib.suppress(SystemExit), contextlib.redirect_stdout(io.StringIO()):
             m.freeport_cmd(["--force"])
     assert killed, "--force still frees the ports of a simulation relay"
+
+
+def _sim_ok_env():
+    d = tempfile.mkdtemp()
+    for tool in sim.STREAM_TOOLS:
+        p = os.path.join(d, tool + (".exe" if os.name == "nt" else ""))
+        open(p, "w").close(); os.chmod(p, 0o755)
+    return dict(SIM_ENV, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=d)
+
+
+def _grant(fdir):
+    env = _sim_ok_env()
+    with _patched((m.atexit, "register", lambda *a, **k: None)):
+        assert m._simulation_gate(["event", "start"], env, "league", {}, force=True,
+                                  force_dir=fdir) is None
+    nonce = env[sim.FORCE].split(":")[1]
+    return env, os.path.join(fdir, nonce + ".json")
+
+
+def t_force_record_ties_pid_to_its_start_and_is_released_on_exit():
+    fdir = tempfile.mkdtemp()
+    registered = []
+    env = _sim_ok_env()
+    with _patched((m.atexit, "register", lambda fn, *a: registered.append((fn, a)))):
+        m._simulation_gate(["event", "start"], env, "league", {}, force=True, force_dir=fdir)
+    path = os.path.join(fdir, env[sim.FORCE].split(":")[1] + ".json")
+    with open(path) as fh:
+        holder = json.load(fh)["holders"][0]
+    assert holder["pid"] == os.getpid() and "started" in holder, holder
+    assert registered, "the grant must be released when the forcing run exits"
+    fn, args = registered[0]
+    fn(*args)
+    assert not os.path.exists(path), "a normal exit leaves no force record behind"
+
+
+def t_process_start_marker():
+    p = subprocess.Popen([sys.executable, "-c", "pass"]); p.wait()
+    assert sim.process_started(p.pid) is None, "a gone process has no start marker"
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
+        mark = sim.process_started(os.getpid())
+        assert mark and mark == sim.process_started(os.getpid()), mark
+
+
+def t_a_reused_pid_does_not_revive_a_pass():
+    fdir = tempfile.mkdtemp()
+    env, path = _grant(fdir)
+    with open(path) as fh:
+        record = json.load(fh)
+    record["holders"][0]["started"] = "not-this-process"
+    with open(path, "w") as fh:
+        json.dump(record, fh)
+    if sim.process_started(os.getpid()) is not None:
+        assert m._simulation_gate(["relay", "start"], dict(env), "league", {}, force_dir=fdir), \
+            "a pid whose start time differs is another process"
+
+
+def t_dead_force_records_are_pruned_on_every_check():
+    fdir = tempfile.mkdtemp()
+    p = subprocess.Popen([sys.executable, "-c", "pass"]); p.wait()
+    stale = os.path.join(fdir, "a" * 32 + ".json")
+    with open(stale, "w") as fh:
+        json.dump({"profile": "league", "holders": [{"pid": p.pid, "started": None}]}, fh)
+    m._simulation_gate(["relay", "start"], _sim_ok_env(), "demo", {}, force_dir=fdir)
+    assert not os.path.exists(stale), "a record without a live holder must go"
 
 
 if __name__ == "__main__":
