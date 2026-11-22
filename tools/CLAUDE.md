@@ -279,6 +279,47 @@ without effect). `tools/e2e.py` and the
 wiki-screenshots skill use it. `tests/test_obs_sim.py` drives both through the real
 `obs_ws` helpers.
 
+## Simulated Sheet and Discord webhook (`tools/event-sim/fakes/`, #1230)
+
+`sheet_sim.py` serves seeded tabs the way gviz exports them (every cell quoted, trailing
+blank rows and columns trimmed, `headers=1` changes nothing) under
+`/spreadsheets/d/sim/gviz/tq`; a tab nobody seeded is an empty 200. Its
+`/macros/s/sim/exec?key=sim` runs the v7 script of the Sheet-Webhook wiki page against
+the same tabs: always HTTP 200, `{"ok":true,"action":...,"v":7}` or the script's own
+`{"error": ...}` strings (`bad key`, `unknown action: x`, `row out of range: 9`, ...),
+JavaScript coercion included (`"false"` is a true crew flag). The Overlay tab mirrors
+the Setup tab like the league's formula: label in column B, value in C, `Team N` into
+`Teams PN`; without a seeded Overlay it is built from the mirror labels. Script
+Properties come from `stream_keys`; a `get_stream_key` (the relay's recovery probe too)
+is only counted as `key_reads`, never logged with its key. Every other call lands in
+`writes(since)` with seq, time, action, payload, response and `ok`.
+
+`webhook_sink.py` takes any POST path outside `/_sim/` as a Discord webhook (JSON, or
+multipart with `payload_json` and files as the report send posts) and answers 204. An
+empty, unparseable or over-2000-character message gets Discord's 400 body (code 50006,
+50109, 50035) and is counted in `rejected`, not recorded. Each message keeps seq, time,
+path, username, content, embeds, file names and sizes, and `text`: content, username and
+the embeds' titles, descriptions, fields, footers. `count(needle)` matches `text`
+without case.
+
+Both use `loopback_http.py`, the shared loopback base: 127.0.0.1, port 0, `Host`
+127.0.0.1 or localhost with this port, no `Origin`, POST `application/json` (the sink
+also multipart). In-process: `SheetSim(tabs, stream_keys).start()` with `set_tab`,
+`tab`, `records` (`records(tab)[i]` is physical row i+2) and `writes`;
+`WebhookSink().start()` with `messages(since)` and `count`. `.env()` gives the
+`RACECAST_SIM_SHEET_URL`/`_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL`
+values. Over HTTP: `/_sim/state`, `/_sim/tab?name=`, `POST /_sim/tab` (`rows` or
+`csv`), `/_sim/writes?since=N`, `/_sim/messages?since=N`.
+
+```bash
+python3 tools/event-sim/fakes/sheet_sim.py --port 0 --tabs DIR --ready-file sheet.json
+python3 tools/event-sim/fakes/webhook_sink.py --port 0 --ready-file sink.json
+```
+
+`tests/test_sheet_sim.py` and `tests/test_webhook_sink.py` drive them through the relay's
+own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSource`,
+`parse_timer_tab`, the Discord payload builders, `http_util.post_multipart`).
+
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
 Up to 15 simulated senders for a running relay: they register on the event's invite,
