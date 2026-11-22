@@ -5461,15 +5461,15 @@ def relay_stop(rest):
 def _restart_resume_args(rest):
     """Flags so a restarted relay comes back where it was: --qualifying for a relay in
     qualifying mode, else --stint N for the race stint on air. Read from the running
-    relay's /status, else from the records of an unstopped event (the on-air record and
-    the mode saved with the Part). An explicit --stint, --qualifying or --no-qualifying
+    relay's /status, else from the on-air record of an unstopped event. An explicit --stint, --qualifying or --no-qualifying
     wins for its value."""
     status = _relay_status_probe() if _relay_already_running_for_active_profile() else None
     if status is not None:
         live = status.get("live") if isinstance(status.get("live"), dict) else {}
         mode, stint = live.get("mode"), live.get("stint")
     elif _unstopped_event_continues():
-        mode = "qualifying" if _read_on_air(_part_path()).get("mode") == "qualifying" else "race"
+        mode = ("qualifying" if _read_on_air(_on_air_record_path()).get("mode") == "qualifying"
+                else "race")
         stint = _read_positive(_on_air_record_path(), "stint")
     else:
         return []

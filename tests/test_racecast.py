@@ -2488,7 +2488,7 @@ def t_takeover_event_title_extracts():
     assert m._takeover_event_title({"event_title": 5}) is None       # bad type ignored
 
 
-def _restart_calls(rest, running, status, continues=False, recorded=None, part_mode=None):
+def _restart_calls(rest, running, status, continues=False, recorded=None, recorded_mode=None):
     """The calls relay_restart makes, with the relay and the event record stubbed."""
     names = ("_relay_already_running_for_active_profile", "_relay_status_probe", "relay_stop",
              "relay_start", "_unstopped_event_continues", "_read_positive", "_read_on_air")
@@ -2500,7 +2500,8 @@ def _restart_calls(rest, running, status, continues=False, recorded=None, part_m
     m.relay_start = lambda rest: calls.append(("start", list(rest)))
     m._unstopped_event_continues = lambda: continues
     m._read_positive = lambda _path, key: recorded if key == "stint" else None
-    m._read_on_air = lambda _path: {"mode": part_mode} if part_mode else {}
+    on_air = m._on_air_record_path()
+    m._read_on_air = lambda path: {"mode": recorded_mode} if recorded_mode and path == on_air else {}
     try:
         with contextlib.redirect_stdout(io.StringIO()) as out:
             m.relay_restart(list(rest))
@@ -2538,11 +2539,11 @@ def t_relay_restart_comes_back_in_qualifying_mode():
         "an explicit --qualifying on a race relay takes no race stint along"
     assert _restart_calls(["--stint", "5"], True, quali)[0][-1] == ("start", ["--qualifying", "--stint", "5"]), \
         "an explicit --stint keeps the resumed mode"
-    assert _restart_calls([], False, None, continues=True, recorded=4, part_mode="qualifying")[0][-1] == \
-        ("start", ["--qualifying"]), "a relay that does not answer takes the mode from the event record"
-    assert _restart_calls([], False, None, continues=False, recorded=4, part_mode="qualifying")[0][-1] == \
+    assert _restart_calls([], False, None, continues=True, recorded=4, recorded_mode="qualifying")[0][-1] == \
+        ("start", ["--qualifying"]), "a relay that does not answer takes the mode from the on-air record"
+    assert _restart_calls([], False, None, continues=False, recorded=4, recorded_mode="qualifying")[0][-1] == \
         ("start", []), "without an unstopped event an old record is not resumed"
-    assert _restart_calls([], False, None, continues=True, recorded=4, part_mode="race")[0][-1] == \
+    assert _restart_calls([], False, None, continues=True, recorded=4, recorded_mode="race")[0][-1] == \
         ("start", ["--stint", "4"])
 
 

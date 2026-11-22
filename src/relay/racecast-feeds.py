@@ -15795,9 +15795,12 @@ def _read_on_air_stint(path):
     return stint if isinstance(stint, int) and not isinstance(stint, bool) else None
 
 
-def write_on_air_record(path, stint, alive):
-    """Write {"stint", "alive"} (no stint while none is known). True on success."""
+def write_on_air_record(path, stint, alive, mode=None):
+    """Write {"stint", "alive"} (no stint while none is known), plus "mode" when it is
+    not race. True on success."""
     doc = {"alive": float(alive)} if stint is None else {"stint": int(stint), "alive": float(alive)}
+    if mode:
+        doc["mode"] = mode
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -15810,15 +15813,18 @@ def write_on_air_record(path, stint, alive):
 
 
 def _on_air_tick(relay, path, state, clock):
-    """Refresh the on-air record when the race stint changes or the stamp is due."""
+    """Refresh the on-air record when the race stint or the mode changes or the stamp
+    is due. The mode is what a restart of a relay that no longer answers resumes."""
     now = clock()
     stint = state["stint"]
+    mode = "qualifying" if not relay.solo and relay.mode == "qualifying" else None
     if (not relay.solo and relay.mode == "race" and relay.race_source
             and relay.race_source.get_rows()):   # an empty cache would read as stint 1
         stint = relay.on_air_row_idx() + 1
-    if stint != state["stint"] or state["at"] is None or now - state["at"] >= ON_AIR_ALIVE_S:
-        if write_on_air_record(path, stint, now):
-            state["stint"], state["at"] = stint, now
+    if (stint != state["stint"] or mode != state.get("mode") or state["at"] is None
+            or now - state["at"] >= ON_AIR_ALIVE_S):
+        if write_on_air_record(path, stint, now, mode):
+            state["stint"], state["at"], state["mode"] = stint, now, mode
 
 
 def _on_air_watch_kwargs(runtime, invite_cache):

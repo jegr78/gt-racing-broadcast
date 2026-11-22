@@ -50,7 +50,7 @@ relay **Restart**) comes back on the race stint that was on air as well: it read
 stint from the running relay, or from the event's record when the relay no longer
 answers, and says `resuming stint 5`. A relay in qualifying mode comes back in
 qualifying mode instead (`resuming qualifying mode`); when it no longer answers, the
-mode saved with the Part pointer decides. The Part pointer survives a restart on its own.
+event's record decides, which follows a live mode switch within a second. The Part pointer survives a restart on its own.
 The feeds start stopped, as on every relay start with manual arm, and `--stint N` sets
 the stint by hand, `--qualifying` the mode. On a relay that runs without an unstopped event (none, or one
 past the limits above) Start event begins a new event: a new invite and timing link

@@ -1240,6 +1240,39 @@ def t_the_on_air_record_waits_for_the_schedule():
             assert json.load(fh) == {"stint": 1, "alive": 101.0}, "a loaded schedule records its row"
 
 
+def t_the_on_air_record_follows_a_live_mode_switch():
+    import tempfile
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3)]
+
+    class Relay:
+        solo, mode, race_source = False, "race", Source()
+
+        def on_air_row_idx(self):
+            return 1
+
+    def record(path):
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        state, relay = {"stint": None, "at": None}, Relay()
+        g.m._on_air_tick(relay, path, state, lambda: 100.0)
+        assert record(path) == {"stint": 2, "alive": 100.0}
+        relay.mode = "qualifying"
+        g.m._on_air_tick(relay, path, state, lambda: 101.0)
+        assert record(path) == {"stint": 2, "alive": 101.0, "mode": "qualifying"}, \
+            "a switch to qualifying is recorded on the next tick, with the race stint kept"
+        relay.mode = "race"
+        g.m._on_air_tick(relay, path, state, lambda: 102.0)
+        assert record(path) == {"stint": 2, "alive": 102.0}, "and so is the switch back"
+        g.m._on_air_tick(relay, path, state, lambda: 103.0)
+        assert record(path)["alive"] == 102.0, "an unchanged tick writes nothing"
+
+
 def t_main_hands_the_profiles_invite_to_the_stint_watch():
     import inspect
 
