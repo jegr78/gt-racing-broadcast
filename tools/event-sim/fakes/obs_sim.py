@@ -63,6 +63,9 @@ class _Closed(Exception):
     pass
 
 
+READ_POLL_S = 0.5
+
+
 class _Client:
     """One WebSocket client. A writer thread owns the socket's send side, so an event
     never waits on a slow reader while the state lock is held. A client whose queue
@@ -74,6 +77,7 @@ class _Client:
         self.buf = b""
         self.mask = 0
         self.out = queue.Queue(self.QUEUE_MAX)
+        self.dropped = threading.Event()
         self.writer = threading.Thread(target=self._write, daemon=True)
 
     def _write(self):
@@ -90,6 +94,7 @@ class _Client:
         try:
             self.out.put_nowait(data)
         except queue.Full:
+            self.dropped.set()  # a blocked recv does not wake on Windows, so the read loop polls this
             try:
                 self.conn.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -108,7 +113,12 @@ class _Client:
         while True:
             parsed = obs_ws.decode_frame(self.buf)
             if parsed is None:
-                chunk = self.conn.recv(65536)
+                if self.dropped.is_set():
+                    raise _Closed()
+                try:
+                    chunk = self.conn.recv(65536)
+                except socket.timeout:
+                    continue
                 if not chunk:
                     raise _Closed()
                 self.buf += chunk
@@ -145,7 +155,7 @@ class _Client:
             self.mask = obs_state.ALL_EVENTS if subs is None else int(subs)
             self.state.subscribe(self.on_event)
             self.send({"op": 2, "d": {"negotiatedRpcVersion": 1}})
-            self.conn.settimeout(None)
+            self.conn.settimeout(READ_POLL_S)
             while True:
                 msg = self.recv()
                 op, d = msg.get("op"), msg.get("d") or {}
