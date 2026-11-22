@@ -464,6 +464,8 @@ def t_a_feed_cover_hides_only_its_own_half():
 
 STUB = """import sys, time
 args = sys.argv[1:]
+with open(args[0] + ".start", "a") as fh:
+    fh.write("s\\n")
 data = sys.stdin.buffer.read(4)
 with open(args[0], "a") as fh:
     fh.write(args[args.index("-i") + 1] + ":" + data.decode("ascii", "replace") + "\\n")
@@ -619,7 +621,8 @@ def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
         assert _wait(lambda: not grab.procs, timeout=20)
         time.sleep(0.3)  # past the 0.2 s interval
         assert grab.frames([a])[a] and grab.feeds[a]["busy"] is not None, "the last frame at once while a new read runs"
-        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20), (_calls(calls), grab.reads, grab.errors, feeds.hits)
+        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20), (_calls(calls), _calls(calls + ".start"), grab.reads, grab.errors, feeds.hits,
+                                                               [pr.poll() for pr in grab.procs])
         assert _wait(lambda: grab.feeds[a]["busy"] is None, timeout=20) and grab.frames([a])[a], grab.feeds[a]
         assert _wait(lambda: not grab.procs, timeout=20)
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:
