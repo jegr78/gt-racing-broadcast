@@ -13,9 +13,11 @@ import re
 import secrets
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import time
+import zlib
 from urllib.parse import urlsplit, urlunsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +28,7 @@ for _p in (FAKES, os.path.join(ROOT, "src", "scripts"), os.path.join(ROOT, "tool
         sys.path.insert(0, _p)
 
 import console_auth  # noqa: E402
+import drive  # noqa: E402
 import e2e_safety  # noqa: E402
 import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
@@ -43,6 +46,8 @@ CHILD = os.path.join(ROOT, "tools", "e2e_child.py")
 TEARDOWN_MARGIN_S = 600           # start, teardown and the report around the steps
 READY_TIMEOUT_S = 90
 LOG_TAIL = 4000
+RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended")    # the second is the RED FLAG banner
+EVENT_FILES = {"invite": "driver-invite.json", "timing": "timing-link.json"}
 
 
 def _any_port():
@@ -107,16 +112,19 @@ def sheet_tabs(scn):
     comms = sorted(scn.commentators, key=lambda c: c.stint)
     stints = int(scn.event.get("stints") or max([c.stint for c in comms] or [1]))
     names = [c.name for c in comms]
+    teams = event_roster(scn.event)
     schedule = [["URL", "Streamer", "Stint"]]
     for n in range(1, stints + 1):
         c = next((c for c in comms if c.stint == n), None)
         url = f"sim://{c.channel}" if c and c.scheduled else ""
         schedule.append([url, c.name if c else "", f"Stint {n}"])
-    vocab_rows = max(stints, len(names), 1)
+    vocab_rows = max(stints, len(names), len(teams), len(RACE_CONTROL))
     config = [["Teams", "Stints", "Streamers", "Session", "Race Control", "Flag"]]
     for i in range(vocab_rows):
-        config.append(["", f"Stint {i + 1}" if i < stints else "", names[i] if i < len(names) else "",
-                       "Race" if i == 0 else "", "GREEN" if i == 0 else "", "Green Flag" if i == 0 else ""])
+        config.append([teams[i] if i < len(teams) else "",
+                       f"Stint {i + 1}" if i < stints else "", names[i] if i < len(names) else "",
+                       "Race" if i == 0 else "", RACE_CONTROL[i] if i < len(RACE_CONTROL) else "",
+                       "Green Flag" if i == 0 else ""])
     first = comms[0].name if comms else ""
     tabs = {
         "Schedule": schedule,
@@ -134,6 +142,30 @@ def sheet_tabs(scn):
     return tabs
 
 
+def placeholder_png():
+    """A 1x1 transparent PNG: Start event refuses a machine without any broadcast graphic."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(5))) + chunk(b"IEND", b""))
+
+
+def event_roster(event):
+    """The team labels of `[event] cars` (none without it)."""
+    cars = event.get("cars")
+    return drive.roster(cars) if cars is not None else []
+
+
+def event_track(event):
+    """(layout id, lap length in metres) of `[event] track`, or None."""
+    track = event.get("track")
+    if track is None:
+        return None
+    if not isinstance(track, str) or not re.fullmatch(r"[0-9a-f]{6}", track):
+        raise ValueError(f"event.track is a GT7 layout id (six hex digits), not {track!r}")
+    return track, float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
+
+
 def child_env(base, extra):
     """`base` without any inherited RACECAST_* value, plus `extra`."""
     env = {k: v for k, v in base.items() if not k.startswith("RACECAST_")}
@@ -145,14 +177,21 @@ SRC = os.path.join(ROOT, "src")
 PROFILE_DIR = os.path.join(ROOT, "profiles", PROFILE)
 
 
-def make_home(home, src=SRC, profile=PROFILE_DIR):
-    """A throwaway app home: src/, profiles/demo and an empty YouTube cookie jar."""
+def make_home(home, src=SRC, profile=PROFILE_DIR, track=None):
+    """A throwaway app home: src/, profiles/demo, an empty YouTube cookie jar, one
+    placeholder graphic and, for `track` (id, length), that layout's simulated line."""
     shutil.copytree(src, os.path.join(home, "src"), ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(profile, os.path.join(home, "profiles", PROFILE))
     runtime = os.path.join(home, "runtime")
     os.makedirs(runtime, exist_ok=True)
     with open(os.path.join(runtime, "yt-cookies.txt"), "w", encoding="utf-8") as fh:
         fh.write("# Netscape HTTP Cookie File\n")
+    graphics = os.path.join(runtime, PROFILE, "graphics")
+    os.makedirs(graphics, exist_ok=True)
+    with open(os.path.join(graphics, "sim-placeholder.png"), "wb") as fh:
+        fh.write(placeholder_png())
+    if track:
+        drive.write_track_data(runtime, *track)
     return os.path.join(home, "src", "racecast.py")
 
 
@@ -250,7 +289,7 @@ class Stack:
     def start(self):
         os.makedirs(self.work, exist_ok=True)
         os.chmod(self.work, 0o700)
-        racecast = make_home(os.path.join(self.work, "app"))
+        racecast = make_home(os.path.join(self.work, "app"), track=event_track(self.scn.event))
         taken = set()
 
         def port():
@@ -305,6 +344,17 @@ class Stack:
 
     def token(self, name):
         return console_auth.mint_token(self.secret, console_auth.streamer_key(name), version=1)
+
+    def event_link(self, kind):
+        """The id of the event's driver invite ("invite") or public timing link ("timing"),
+        which Start event creates in the app home; None before that."""
+        path = os.path.join(self.work, "app", "runtime", PROFILE, EVENT_FILES[kind])
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        return data.get("id") if isinstance(data, dict) and isinstance(data.get("id"), str) else None
 
     def probes(self):
         return {"relay": probes.RelayProbe(self.urls["relay"]),

@@ -12,11 +12,14 @@ from roles import Role, ShotUnavailable, StepError, register
 
 PAGE_TIMEOUT_MS = 15000
 LOAD_FAILED = "Failed to load resource"
-_TOKEN = re.compile(r"([?&]t=)[^&#\s)]+")
+CONNECTION = "net::ERR_CONNECTION_"
+_QUERY = re.compile(r"\?[^\s)]*")
+_TOKEN = re.compile(r"([?&][til]=)[^&#\s)]+")
 
 
 def redact(text):
-    """`text` without console tokens, which stay in the run's temporary directory."""
+    """`text` without console tokens, driver invites and timing links (`t=`, `i=`,
+    `l=`), which stay in the run's temporary directory."""
     return _TOKEN.sub(r"\1REDACTED", str(text))
 
 
@@ -188,8 +191,19 @@ class PageRole(Role):
 
     def close(self):
         # A failed image or fetch (an idle feed's preview answers 503) is the browser's
-        # network log, not a script error.
-        out = [("soft" if e.startswith(LOAD_FAILED) else "hard", f"console error: {e}") for e in self.errors]
+        # network log, not a script error. A polled resource fails once per poll, and
+        # every poll fails once its service stopped.
+        counts, gone = {}, 0
+        for e in self.errors:
+            if e.startswith(LOAD_FAILED) and CONNECTION in e:
+                gone += 1
+                continue
+            key = _QUERY.sub("", e)
+            counts[key] = counts.get(key, 0) + 1
+        out = [("soft" if e.startswith(LOAD_FAILED) else "hard",
+                f"console error: {e}" + (f" ({n}x)" if n > 1 else "")) for e, n in counts.items()]
+        if gone:
+            out.append(("soft", f"{gone} requests of the page found its service stopped"))
         if self.context is not None:
             self.context.close()
         return out

@@ -56,7 +56,7 @@ def run(scn, out, keep_work=False, headed=False):
             print(f"event-sim: the stack did not start: {exc}", file=sys.stderr)
             return 2
         ctx = engine.RunContext(urls=st.urls, token=st.token, stub=st.stub, obs=st.obs,
-                                browser=br, out_dir=out)
+                                browser=br, out_dir=out, event=scn.event, event_link=st.event_link)
         eng = engine.Engine(scn, ctx, st.probes(), registry=roles.default_registry(),
                             shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks])
         try:
@@ -83,8 +83,10 @@ def run(scn, out, keep_work=False, headed=False):
         print(f"  {s['status']:<8} {s['id']:<24} {s['role']}.{s['do']}" + (f"  {s['error']}" if s["error"] else ""))
     for f in hard:
         print(f"  HARD  {f.get('step') or f.get('role') or 'run'}: {f['message']}")
-    print(f"event-sim: {scn.name} {'PASS' if data['ok'] else 'FAIL'}: {len(data['steps'])} steps, "
-          f"{len(hard)} hard, {len(soft)} soft findings; report {os.path.join(out, 'report.html')}")
+    skipped = sum(1 for s in data["steps"] if s["status"] == "skipped")
+    print(f"event-sim: {scn.name} {'PASS' if data['ok'] else 'FAIL'}: {len(data['steps'])} steps "
+          f"({skipped} skipped), {len(hard)} hard, {len(soft)} soft findings; "
+          f"report {os.path.join(out, 'report.html')}")
     return 0 if data["ok"] else 1
 
 

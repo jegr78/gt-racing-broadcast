@@ -500,7 +500,7 @@ trigger timeout), `[event]` with `stints` and `[[event.commentators]]` (`name`, 
 `expect`, `soft`, `timeout` (per check, default 5 s), `wait` and `shot` (a name, or
 `{name, role, element}`). `at` is a duration since the run started, `after:<id>[+dur]`
 (after that step ended; skipped when it failed), `lap:leader=N` (`race.lap >= N`) or
-`state:<name>` (`race.state`). `${id.key}` in args reads an earlier step's result; such a
+`state:<name>` (`race.state`); the leader's lap is the relay's `race.lap.leader`. `${id.key}` in args reads an earlier step's result; such a
 step waits for that step and is skipped when it failed. `after:` and `${...}` must name an
 earlier step in the file (a typo, a forward or a mutual reference is refused at load).
 Names that become files (scenario, shot) are letters, digits, `.`, `_`, `-`, start with a
@@ -543,22 +543,101 @@ Writing scenarios against the relay:
 Roles (`roles/`): a class with `kind`, registered with `@roles.register`; a step's `role`
 is `kind` or `kind:instance`, one instance per string, opened on first use and closed at
 the end. `do = "x"` calls `act_x(args)`; a dict it returns is the step's result.
-`StepError` is a hard failure, `ctx.finding("soft", text)` a soft one, `page()` feeds
+`StepError` is a hard failure, `ctx.finding("soft", text)` a soft one, `Unavailable` skips
+the step, `page()` feeds
 `page(role)`, `shot(path, element)` writes a PNG or raises `ShotUnavailable`, `close()`
 returns late findings. `ctx` (`engine.RunContext`) has `url(service)` (`relay`, `ui`, `obs`,
-`sheet`, `sink`), `token(name)` (a console token for a crew name), `stub`, `obs` and
-`browser()` (a shared headless Chromium, None without Playwright). Built in
+`sheet`, `sink`), `token(name)` (a console token for a crew name), `stub`, `obs`, `event`
+(the scenario's `[event]`), `event_link(kind)` and `browser()` (a shared headless Chromium,
+None without Playwright). Built in
 (`roles/builtin.py`): `api` (`get`/`post` with `service`, `path`, `as`, `json`, `status`),
 `obs` (`scene`, `request`; its shot is the program), `stream` (`channel`, `cut`, `stall`,
 `freeze`, `clear`) and `page` (`open` with `service`, `path` starting with one `/` on that
-service, `as`, `wait_for`; tokens are redacted from what it reports; the base for the party
-roles of #1233).
+service, `as`, `wait_for`; tokens are redacted from what it reports; the base of the party
+roles below). A page's repeated console error is one finding with its count, and its
+requests after its service stopped are one more.
 
-`scenarios/smoke.toml` uses only those: relay up, the Control Center reporting the relay
-alive and answering on its simulated port, a commentator's link submission (webhook), its approval (Sheet `schedule`
-write, webhook), arming Feed A, the scene switch through the relay's `/obs/scene` and
-`'comms1' in obs.program_channels`, plus shots of the program, the Director Panel and the
-Control Center.
+### Role drivers (`roles/party.py`, `roles/drivers.py`, `drive.py`, #1233)
+
+One class per party. A page role opens its page in its own browser context on its first
+action and acts on the controls a person uses; the drivers have no page.
+
+| Role (`role =`) | Surface | Actions (`do =`) |
+|---|---|---|
+| `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event` |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene), `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name) |
+| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `add_lap` (entry, time) |
+| `commentator:<crew name>` | `/cockpit` with that person's token | `open`, `submit_link` (url, stint), `chat` (text) |
+| `viewer` | `/console/timing` on the event's timing link | `open`, `read` |
+| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release`, `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
+
+An action is a mechanism. Which one follows which is the scenario's business, never a
+role's: `box`, the director's `next`, `lobby` and `release` are four steps, not one "swap".
+
+UI or API:
+- Producer, director, Race Control, commentator and viewer act through their page only.
+  `Surface.control` requires a control to be visible and enabled (else `StepError`), notes
+  one outside the 1440x900 viewport as a soft finding and scrolls it into view.
+  `Surface.answered` waits for the page's own request to be answered (HTTP 400 and up is
+  hard), `Surface.until` for the page to show the result (soft when slower than 2 s; a
+  job or a feed start is slow by nature and exempt). The desk's armed buttons (Final lap,
+  Finish, RED FLAG, Restart released, Retire) get both clicks, and an error on the desk's
+  status line fails the step.
+- The panel's RED FLAG is a toggle on the cover state the panel last polled from OBS, so
+  right after Race Control moved the cover it toggles the wrong way. `red_flag` with `on`
+  waits for the light to read the opposite before it presses.
+- Drivers act through the API, as `racecast-sender.py` does for a real driver: the
+  registration form adds nothing a sender does not do. Each driver registers as its own
+  device (`X-Forwarded-For` from 198.51.100.0/24, which the relay honours from loopback as
+  behind Funnel), since one client may hold 8 waiting requests and register 30 times a
+  minute. `register` only asks: Race Control approves on its desk.
+- `api`, `obs` and `stream` stay for what no party does: probes, the simulated OBS
+  operator, a channel's failure.
+- Not offered, because the simulation has no control for it: Start/End Part (the demo
+  Sheet configures no Parts, so the panel hides the button) and the Control Center's relay
+  restart (a fresh `relay start` has no feed port override and would bind 53001-53003).
+
+Without a browser a page role raises `roles.Unavailable`: the engine marks the step
+`skipped`, records a soft finding and runs neither its checks nor its shot, and steps
+chained to it with `after:` or `${...}` are skipped too. So chain every party step with
+`after:`; `tests/test_event_sim_roles.py` holds `smoke.toml` to that.
+
+Event data a scenario sets for the roles (`[event]`): `track` (a GT7 layout id), `track_length_m`
+(default 1200, at least 860), `cars` (1-15, the roster in the Configuration tab's Teams
+column, `drive.TEAMS`) and `seed`. The stack then gives the temporary app home a racing
+line (`drive.write_track_data`: a stadium-shaped lap as the layout's `signatures.json`
+row, since the relay's race needs a downloaded line and the network guard blocks
+`gt7-data update`), one placeholder graphic (Start event refuses a machine without any)
+and the RED FLAG banner in the Race Control vocabulary. `ctx.event_link("invite" |
+"timing")` reads the ids Start event wrote into the app home. They are credentials:
+results, findings and `page(role)` never carry them or a driver code, `redact` strips
+`t=`, `i=` and `l=`, and a desk screenshot blacks the link texts out (`Surface.masked`).
+
+`drive.py` is the driver library, also behind `tools/driver-replay.py`: `packet`, `Line`,
+the synthetic track, `Field` (cars and their senders, stepped with `step(now, dt)` on the
+caller's clock, so a seed fixes every packet), `Client` (loopback unless told otherwise) and
+`Runner` (a field on real time in one thread, joined in `close`). A car's GT7 lap counter
+reads 0 on the grid and steps at the line; a boxed car stands 22 m off the line; `lobby(n)`
+puts stint n's driver into the box on lap 0 beside the old one, `release` sends the cars out
+in arrival order, each by its arrival gap. `tests/test_event_sim_drive.py` feeds a field
+into the relay's own `race_distance.Race`.
+
+Selectors are class constants (`selectors`, with the shipped files in `sources`).
+`t_every_selector_names_something_the_shipped_page_has` fails when a page renames an id,
+class, label or button text a role uses, on every OS and without a browser.
+
+`page(role)` facts: `producer` (`summary`, `relay`, `job`), `director` (`on_air`, `arm`,
+`next`, `next_ready`, `next_step`, `red_flag`), `race_control` (`waiting`, `status`,
+`status_error`, `lap_line`), `commentator` (`tally`, `on_air`, `pending`, `message`), `viewer`
+(`session`, `state`, `fastest`, `rows`, `cars`), `drivers` (`registered`, `cars` with `entry`,
+`mode`, `lap`, `driver`, `sending`; `driving`, `standing`, `sending`, `ingest_errors`).
+
+`scenarios/smoke.toml` plays each role once: the producer picks the track, sets the race
+and starts the event (the relay's PID and port must stay the stack's), a commentator
+submits a link in the cockpit, the director approves it, arms Feed A and cuts to Stint
+(`'comms1' in obs.program_channels`), four drivers register, Race Control approves them,
+they race, a viewer reads the public timing, Race Control calls the final lap and the
+producer stops the event. Stop event ends the relay, so it is the last step.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
@@ -571,7 +650,8 @@ give a dense pack for the track map). Needs `racecast event invite --new` and th
 the demo profile. Never point it at a league during an event: its senders take real
 entries and its laps reach the race and the fastest lap; a profile other than `demo`
 needs `--force`. `--pending N` registers N more drivers for the second stint and leaves
-them waiting for approval (the desks' Driver requests). `tests/test_driver_replay.py`
+them waiting for approval (the desks' Driver requests). Its cars and senders are the event
+simulation's driver library (`tools/event-sim/drive.py`). `tests/test_driver_replay.py`
 pins its packets to the GT7 layout.
 
 ```bash

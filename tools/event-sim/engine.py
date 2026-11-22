@@ -50,13 +50,16 @@ class RunContext:
     """What roles see of the run. `urls` maps service names (relay, ui, obs, sheet,
     sink) to base URLs; `token(name)` mints a console token for a crew member."""
 
-    def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir=""):
+    def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir="",
+                 event=None, event_link=None):
         self.urls = dict(urls or {})
         self._token = token
         self.stub = stub
         self.obs = obs
         self._browser = browser
         self.out_dir = out_dir
+        self.event = dict(event or {})
+        self._event_link = event_link
         self.findings = []
 
     def url(self, service):
@@ -68,6 +71,14 @@ class RunContext:
         if self._token is None:
             raise roles.StepError("this run mints no console tokens")
         return self._token(name)
+
+    def event_link(self, kind):
+        """The id of the event's driver invite ("invite") or public timing link
+        ("timing"). It is a credential: never put it into a result or a finding."""
+        link = self._event_link(kind) if self._event_link is not None else None
+        if not link:
+            raise roles.StepError(f"the event has no {kind} link yet (Start event creates it)")
+        return link
 
     def browser(self):
         """The shared headless browser (`browser.Browser`), or None without Playwright."""
@@ -270,17 +281,21 @@ class Engine:
                                             if r.result is not None})
             res.result = self._role(step.role).do(step.do, args)
             res.status = "ok"
+        except roles.Unavailable as exc:
+            res.status, res.error = "skipped", str(exc)
+            self.findings.append(Finding(SOFT, f"skipped: {exc}", step.id, step.role))
         except roles.StepError as exc:
             res.status, res.error = "failed", str(exc)
         except Exception as exc:  # a role bug must not hide the rest of the report
             res.status, res.error = "failed", f"{type(exc).__name__}: {exc}"
         if res.status == "failed":
             self.findings.append(Finding(HARD, res.error, step.id, step.role))
-        else:
+        elif res.status == "ok":
             self._checks(step, res)
             if any(not c.ok and not c.soft for c in res.checks):
                 res.status = "failed"
-        self._shoot(step, res)
+        if res.status != "skipped":
+            self._shoot(step, res)
         self._take_findings(step)
         res.duration = round(self.clock() - begin, 3)
         return res
