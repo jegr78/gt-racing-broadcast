@@ -2537,14 +2537,32 @@ def t_relay_restart_comes_back_in_qualifying_mode():
         "an explicit --no-qualifying wins over the running mode"
     assert _restart_calls(["--qualifying"], True, race)[0][-1] == ("start", ["--qualifying"]), \
         "an explicit --qualifying on a race relay takes no race stint along"
-    assert _restart_calls(["--stint", "5"], True, quali)[0][-1] == ("start", ["--qualifying", "--stint", "5"]), \
-        "an explicit --stint keeps the resumed mode"
+    calls, out = _restart_calls(["--stint", "5"], True, quali)
+    assert calls[-1] == ("start", ["--stint", "5"]), \
+        f"an explicit --stint means a race stint, so qualifying is not resumed: {calls}"
+    assert "race mode" in out and "--qualifying" in out, f"the restart says how to keep qualifying: {out!r}"
+    assert _restart_calls(["--stint", "5", "--qualifying"], True, quali)[0][-1] == \
+        ("start", ["--stint", "5", "--qualifying"]), "an explicit --qualifying still wins"
     assert _restart_calls([], False, None, continues=True, recorded=4, recorded_mode="qualifying")[0][-1] == \
         ("start", ["--qualifying"]), "a relay that does not answer takes the mode from the on-air record"
     assert _restart_calls([], False, None, continues=False, recorded=4, recorded_mode="qualifying")[0][-1] == \
         ("start", []), "without an unstopped event an old record is not resumed"
     assert _restart_calls([], False, None, continues=True, recorded=4, recorded_mode="race")[0][-1] == \
         ("start", ["--stint", "4"])
+
+
+def t_relay_restart_with_an_empty_schedule_takes_the_stint_from_the_record():
+    empty = {"schedule_len": 0, "live": {"feed": "A", "stint": 1, "mode": "race"}}
+    assert _restart_calls([], True, empty, continues=True, recorded=4)[0][-1] == ("start", ["--stint", "4"]), \
+        "a relay whose schedule is empty reports stint 1 whatever is on air: the event record knows better"
+    assert _restart_calls([], True, empty, continues=False, recorded=4)[0][-1] == ("start", []), \
+        "without an unstopped event neither source is used"
+    loaded = dict(empty, schedule_len=6)
+    assert _restart_calls([], True, loaded, continues=True, recorded=4)[0][-1] == ("start", ["--stint", "1"]), \
+        "a loaded schedule keeps the stint the relay reports"
+    quali = {"schedule_len": 0, "live": {"feed": "A", "stint": 1, "mode": "qualifying"}}
+    assert _restart_calls([], True, quali, continues=True, recorded=4)[0][-1] == ("start", ["--qualifying"]), \
+        "the mode still comes from the running relay"
 
 
 def t_relay_restart_of_a_silent_relay_uses_the_event_record():

@@ -5459,33 +5459,43 @@ def relay_stop(rest):
         print("relay may still be running.")
 
 def _restart_resume_args(rest):
-    """Flags so a restarted relay comes back where it was: --qualifying for a relay in
-    qualifying mode, else --stint N for the race stint on air. Read from the running
-    relay's /status, else from the on-air record of an unstopped event. An explicit --stint, --qualifying or --no-qualifying
-    wins for its value."""
+    """(flags, note) so a restarted relay comes back where it was: --qualifying for a
+    relay in qualifying mode, else --stint N for the race stint on air. Read from the
+    running relay's /status, else from the on-air record of an unstopped event; a
+    /status with an empty schedule knows the mode but not the stint. An explicit
+    --stint, --qualifying or --no-qualifying wins, and an explicit --stint means a race
+    stint, so it ends qualifying; `note` says so."""
     status = _relay_status_probe() if _relay_already_running_for_active_profile() else None
+    continues = _unstopped_event_continues()
+    recorded = _read_positive(_on_air_record_path(), "stint") if continues else None
     if status is not None:
         live = status.get("live") if isinstance(status.get("live"), dict) else {}
-        mode, stint = live.get("mode"), live.get("stint")
-    elif _unstopped_event_continues():
+        mode = live.get("mode")
+        stint = recorded if status.get("schedule_len") == 0 else live.get("stint")
+    elif continues:
         mode = ("qualifying" if _read_on_air(_on_air_record_path()).get("mode") == "qualifying"
                 else "race")
-        stint = _read_positive(_on_air_record_path(), "stint")
+        stint = recorded
     else:
-        return []
+        return [], ""
     if "--qualifying" in rest:
-        return []
+        return [], ""
     if mode == "qualifying":
-        return [] if "--no-qualifying" in rest else ["--qualifying"]
+        if _stint_args(rest):
+            return [], ("relay: --stint names a race stint, so the relay restarts in race mode "
+                        "(add --qualifying to stay in qualifying).")
+        return ([] if "--no-qualifying" in rest else ["--qualifying"]), ""
     if (mode == "race" and not _stint_args(rest) and isinstance(stint, int)
             and not isinstance(stint, bool) and stint >= 1):
-        return ["--stint", str(stint)]
-    return []
+        return ["--stint", str(stint)], ""
+    return [], ""
 
 
 def relay_restart(rest):
-    resume = _restart_resume_args(rest)   # before the stop: afterwards nothing answers
+    resume, note = _restart_resume_args(rest)   # before the stop: afterwards nothing answers
     relay_stop([])
+    if note:
+        print(note)
     if resume:
         print("relay: resuming " + ("qualifying mode" if resume[0] == "--qualifying"
                                     else f"stint {resume[1]}") + ".")
