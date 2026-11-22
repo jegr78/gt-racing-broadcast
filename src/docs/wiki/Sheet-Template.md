@@ -48,12 +48,12 @@ with **no leading blank rows**. Most tabs locate their columns **by header text*
 
 ## Overlay tab
 
-The live lower-third values. Read **by label**: column **A** holds the label, and the
-value is the **first non-empty cell from column C onward** (column B is a spacer). In a
+The live lower-third values. Read **by label**: column **B** holds the label, and the
+value is the **first non-empty cell from column C onward** (column A is unused). In a
 league with the write webhook the Director Panel writes the Setup tab and the Overlay
 tab mirrors it with a formula: but the relay only ever **reads** Overlay.
 
-| Label (col A) | Meaning |
+| Label (col B) | Meaning |
 |---|---|
 | `Stint` | Current stint number/label shown on the HUD |
 | `Streamer` | Current commentator name |
@@ -67,17 +67,17 @@ tab mirrors it with a formula: but the relay only ever **reads** Overlay.
 Sample:
 
 ```
-              | (B) |
-Stint         |     | 5
-Streamer      |     | Sample Commentator
-Session       |     | Race: Hour 3
-Round Top     |     | Demo Series: Round 1
-Round Bottom  |     | Germany
-Race Control  |     | GREEN
-Flag          |     | Green Flag
-Teams P1      |     | Sample Team Alpha #11
-Teams P2      |     | Sample Team Bravo #22
-Teams P3      |     | Sample Team Charlie #33
+(A) | (B)           | (C)
+    | Stint         | 5
+    | Streamer      | Sample Commentator
+    | Session       | Race: Hour 3
+    | Round Top     | Demo Series: Round 1
+    | Round Bottom  | Germany
+    | Race Control  | GREEN
+    | Flag          | Green Flag
+    | Teams P1      | Sample Team Alpha #11
+    | Teams P2      | Sample Team Bravo #22
+    | Teams P3      | Sample Team Charlie #33
 ```
 
 The team name and country resolve to a bundled logo/flag by a normalised key
