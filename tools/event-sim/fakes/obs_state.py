@@ -22,6 +22,7 @@ from obs_render import render_program
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 DEFAULT_COLLECTION = os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json")
+DEMO_PROFILE_ENV = os.path.join(ROOT, "profiles", "demo", "profile.env")
 
 SUCCESS = 100
 UNKNOWN_REQUEST = 204
@@ -41,7 +42,7 @@ OUTPUTS, SCENE_ITEMS, MEDIA_INPUTS, UI = 64, 128, 256, 1024
 ALL_EVENTS = 2047
 SCENE_ITEM_TRANSFORM = 1 << 19      # high-volume: only on explicit subscription
 EVENT_CATEGORY = {
-    "CurrentSceneCollectionChanged": CONFIG,
+    "CurrentSceneCollectionChanging": CONFIG, "CurrentSceneCollectionChanged": CONFIG,
     "SceneCreated": SCENES, "SceneRemoved": SCENES, "SceneListChanged": SCENES,
     "CurrentProgramSceneChanged": SCENES, "CurrentPreviewSceneChanged": SCENES,
     "InputCreated": INPUTS, "InputRemoved": INPUTS, "InputSettingsChanged": INPUTS,
@@ -109,6 +110,18 @@ def feed_url(settings):
     return url.strip() if isinstance(url, str) else ""
 
 
+def demo_collection_name(path=DEMO_PROFILE_ENV):
+    """The demo profile's OBS_COLLECTION, the name `event start` switches to, or ""."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("OBS_COLLECTION="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass  # no demo profile in this checkout
+    return ""
+
+
 def _redacted(request_type, data):
     data = copy.deepcopy(data)
     if request_type == "SetStreamServiceSettings":
@@ -121,7 +134,10 @@ def _redacted(request_type, data):
 class ObsState:
     """One simulated OBS instance. Thread-safe; every public method takes the lock."""
 
-    def __init__(self, collection=None, scene=None, strict=True, clock=time.monotonic):
+    def __init__(self, collection=None, scene=None, strict=True, clock=time.monotonic,
+                 collection_names=None):
+        """`collection_names` are further names OBS lists for the loaded collection
+        (default: the demo profile's OBS_COLLECTION), so a profile's switch succeeds."""
         self.strict, self.clock = strict, clock
         self.lock = threading.RLock()
         self.listeners = []
@@ -141,6 +157,8 @@ class ObsState:
         self.image, self.labels = None, {}
         if collection is not None:
             self._load(collection)
+        extra = [demo_collection_name()] if collection_names is None else list(collection_names)
+        self.collections = [self.collection] + [n for n in extra if n and n != self.collection]
         self.program = scene or (self.scene_order[0] if self.scene_order else "Scene")
         if self.program not in self.scenes:
             self.scenes[self.program] = []
@@ -309,12 +327,16 @@ class ObsState:
                 "outputWidth": 1920, "outputHeight": 1080}
 
     def _r_GetSceneCollectionList(self, data):
-        return {"currentSceneCollectionName": self.collection, "sceneCollections": [self.collection]}
+        return {"currentSceneCollectionName": self.collection, "sceneCollections": list(self.collections)}
 
     def _r_SetCurrentSceneCollection(self, data):
         (name,) = _need(data, "sceneCollectionName")
-        if name != self.collection:
+        if name not in self.collections:
             raise ObsError(NOT_FOUND, "Your specified scene collection was not found.")
+        if name != self.collection:
+            self._emit("CurrentSceneCollectionChanging", {"sceneCollectionName": self.collection})
+            self.collection = name
+            self._emit("CurrentSceneCollectionChanged", {"sceneCollectionName": name})
         return {}
 
     def _r_GetStudioModeEnabled(self, data):
@@ -802,7 +824,8 @@ class ObsState:
             svc = self.stream["service"].get("settings", {})
             return {
                 "scene": self.program, "preview": self.preview, "studio_mode": self.studio_mode,
-                "collection": self.collection, "scene_order": list(self.scene_order),
+                "collection": self.collection, "collections": list(self.collections),
+                "scene_order": list(self.scene_order),
                 "transition": {"name": t["name"], "duration": t["duration"], "active": t["active"]},
                 "stream": {"active": self.stream["active"],
                            "duration_ms": self._elapsed_ms(self.stream["started_at"]),

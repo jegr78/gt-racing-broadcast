@@ -221,7 +221,9 @@ The event simulation's stand-in OBS (spec
 state seeded from `src/obs/GT_Racing_Endurance.json` (or `--collection`): scenes, program
 and preview, Cut and Fade, streaming and recording, inputs with settings, mute and
 volume, scene item visibility, media cursors. It answers each request the way OBS does,
-including OBS's error codes for a missing scene, item or input. Each client gets the
+including OBS's error codes for a missing scene, item or input. OBS lists the loaded
+collection under its own name and the demo profile's `OBS_COLLECTION`
+(`--collection-name` adds more), so `event start` can switch to it. Each client gets the
 events its `eventSubscriptions` asks for; `obs_ws` asks for none. `obs_render.py` draws
 program screenshots as PNG: the scene name over colour bars per visible feed.
 

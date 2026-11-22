@@ -118,6 +118,39 @@ def t_seeds_scenes_inputs_and_items_from_the_collection():
     assert snap["inputs"]["Feed A"]["settings"]["input"] == "http://127.0.0.1:53001"
 
 
+def _demo_collection():
+    with open(os.path.join(ROOT, "profiles", "demo", "profile.env"), encoding="utf-8") as fh:
+        return next(line.split("=", 1)[1].strip() for line in fh if line.startswith("OBS_COLLECTION="))
+
+
+def t_event_start_switches_to_the_demo_collection_name():
+    sim = _sim()
+    try:
+        demo = _demo_collection()
+        status, note = obs_ws.get_scene_collection(expected=demo)
+        assert status["expected_present"] and not status["match"], (status, note)
+        ok, note = obs_ws.set_scene_collection(demo)
+        assert ok and note == "", note
+        assert obs_ws.get_scene_collection(expected=demo)[0]["match"], "OBS now runs the demo name"
+        names = [e["eventType"] for e in sim.state.events_since(0)]
+        assert names[-2:] == ["CurrentSceneCollectionChanging", "CurrentSceneCollectionChanged"], names
+        assert obs_ws.set_scene_collection("Some League")[0] is False, "an unknown name is refused"
+    finally:
+        sim.stop()
+
+
+def t_extra_collection_names_are_listed():
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION, collection_names=["League X"])
+    names = st.request("GetSceneCollectionList")["sceneCollections"]
+    assert names[0] == "GT Racing Endurance" and "League X" in names, names
+    try:
+        st.request("SetCurrentSceneCollection", {"sceneCollectionName": "Some League"})
+    except obs_state.ObsError as exc:
+        assert exc.code == obs_state.NOT_FOUND
+    else:
+        raise AssertionError("OBS refuses a collection it does not list")
+
+
 def t_strict_mode_answers_missing_things_like_obs():
     st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
     for rtype, data in (("SetCurrentProgramScene", {"sceneName": "Nope"}),

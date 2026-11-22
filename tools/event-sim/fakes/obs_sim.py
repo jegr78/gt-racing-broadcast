@@ -162,8 +162,9 @@ class ObsSim:
     stand-in's lenient answers; `image` serves fixed bytes for every screenshot."""
 
     def __init__(self, collection=obs_state.DEFAULT_COLLECTION, scene=None, strict=True,
-                 image=None, port=0, clock=time.monotonic):
-        self.state = obs_state.ObsState(collection, scene=scene, strict=strict, clock=clock)
+                 image=None, port=0, clock=time.monotonic, collection_names=None):
+        self.state = obs_state.ObsState(collection, scene=scene, strict=strict, clock=clock,
+                                        collection_names=collection_names)
         if image is not None:
             self.state.set_image(image)
         self.requested_port = port
@@ -342,6 +343,9 @@ def build_parser():
     ap.add_argument("--collection", default=obs_state.DEFAULT_COLLECTION,
                     help="OBS scene collection JSON to seed scenes and inputs (default: the shipped one)")
     ap.add_argument("--scene", help="initial program scene (default: the collection's)")
+    ap.add_argument("--collection-name", action="append", dest="collection_names",
+                    help="another name OBS lists for the collection, repeatable "
+                         "(default: the demo profile's OBS_COLLECTION)")
     ap.add_argument("--image", help="serve this fixed image for every screenshot")
     ap.add_argument("--ready-file", help="write {port, url, state_url} here once listening")
     return ap
@@ -369,7 +373,8 @@ def run(sim, ready_file=None, banner=""):
 def main(argv=None):
     args = build_parser().parse_args(argv)
     image = read_image(args.image) if args.image else None
-    run(ObsSim(args.collection, scene=args.scene, image=image, port=args.port), args.ready_file)
+    run(ObsSim(args.collection, scene=args.scene, image=image, port=args.port,
+               collection_names=args.collection_names), args.ready_file)
 
 
 if __name__ == "__main__":
