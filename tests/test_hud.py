@@ -1243,7 +1243,6 @@ def t_hud_data_carries_engineer_and_coach_text():
 
 def _css_rules(css):
     """(selector, display, important) for every top-level rule's display declaration."""
-    import re
     css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
     out = []
     for match in re.finditer(r"([^{}]*)\{([^{}]*)\}", css):
@@ -1266,7 +1265,6 @@ def _display(sid, classes, rule_sets):
     """The cascaded `display` of <div id=sid class=classes> under the base page CSS
     then the compiled override CSS, for compound #id/.class selectors (the only kind
     that can name a top-level HUD slot without matching its position in the DOM)."""
-    import re
     best, order = None, 0
     for css in rule_sets:
         for sel, value, important in _css_rules(css):
@@ -1316,7 +1314,6 @@ def t_hud_slots_hidden_when_empty_even_if_visible():
         assert _display(sid, filled, [base]) == "none", "no profile overlay: hidden"
         # Until the first /hud/data reply fills it, the slot starts empty, so a Visible
         # slot shows no blank box on page load (or ever, if that fetch fails).
-        import re
         m = re.search(r'<div id="%s" class="([^"]*)"' % sid, html)
         assert m and "empty" in m.group(1).split(), (sid, m and m.group(1))
 
