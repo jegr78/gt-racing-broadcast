@@ -17,6 +17,7 @@ import os
 import socket
 import sys
 import threading
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
@@ -340,7 +341,8 @@ def serve_cli(server, ready_file, info, banner):
         if ready_file:
             write_ready_file(ready_file, info)
         print(banner, flush=True)
-        threading.Event().wait()
+        while True:
+            time.sleep(1)  # an untimed wait ignores Ctrl+C on Windows before Python 3.14
     except KeyboardInterrupt:
         pass  # Ctrl+C ends the run
     finally:
