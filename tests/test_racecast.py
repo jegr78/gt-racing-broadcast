@@ -3146,22 +3146,65 @@ def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
     return restore
 
 
+def _sim_env(**values):
+    """Set simulation env vars; returns a restore callable."""
+    keys = ("RACECAST_SIMULATION", "RACECAST_SIM_FEED_PORTS", "RACECAST_SIM_RELAY_PORT")
+    saved = {k: os.environ.get(k) for k in keys}
+    for k in keys:
+        os.environ.pop(k, None)
+    os.environ.update(values)
+
+    def restore():
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return restore
+
+
 def t_a_simulated_relay_start_never_counts_the_live_feed_ports():
     restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
-    saved = (m.pt.pids_on_port, m.simulation.active)
-    m.pt.pids_on_port = lambda port: [4242] if port == m._relay_port() else [777]
+    saved = m.pt.pids_on_port
+    holders = {53001: [777], 53002: [777], 53003: [777], 41001: [4242], 41002: [4242], 41003: [4243]}
+    env = _sim_env()
     try:
-        m.simulation.active = lambda environ=None: False
+        m.pt.pids_on_port = lambda port: [4242] if port == m._relay_port() else holders.get(port, [])
         assert m._relay_start_signals()["feed_pids"] == [777], "a live start heals its own feed ports"
-        m.simulation.active = lambda environ=None: True
+        os.environ["RACECAST_SIMULATION"] = "1"
         signals = m._relay_start_signals()
         assert signals["feed_pids"] == [], \
             "53001-53003 belong to a live relay: a simulated start must never put their holders on a kill list"
         action, kill, _ = m.relay_start_plan(**dict(signals, http_ok=False, running_mode="simulation"))
         assert action == "heal" and kill == [4242], f"a hung simulation relay heals itself only: {action} {kill}"
+        os.environ["RACECAST_SIM_FEED_PORTS"] = "41001,41002,41003"
+        assert m._relay_start_signals()["feed_pids"] == [4242, 4243], \
+            "with simulated feed ports a heal frees those, and only those"
     finally:
-        m.pt.pids_on_port, m.simulation.active = saved
+        env()
+        m.pt.pids_on_port = saved
         restore()
+
+
+def t_a_simulated_relay_gets_the_simulated_feed_ports_on_every_start_path():
+    env = _sim_env()
+    try:
+        assert "--ports" not in m._relay_runtime_args(), "a live relay keeps its default feed ports"
+        os.environ["RACECAST_SIM_FEED_PORTS"] = "41001,41002,41003"
+        assert "--ports" not in m._relay_runtime_args(), "the variable means nothing outside simulation"
+        os.environ["RACECAST_SIMULATION"] = "1"
+        args = m._relay_runtime_args()
+        assert args[args.index("--ports") + 1] == "41001,41002" and args[args.index("--pov-port") + 1] == "41003", args
+        daemon = m._relay_daemon_argv(["--stint", "2"], False)
+        assert "41001,41002" in daemon and daemon[-2:] == ["--stint", "2"], \
+            f"relay start, restart and a heal all spawn through here: {daemon}"
+        assert m._feed_ports() == (41001, 41002, 41003)
+        assert m.freeport_owner(41002, True, set()) == "relay" and m.freeport_owner(53002, True, set()) is None, \
+            "in simulation the relay owns the simulated feed ports, not the product ones"
+        del os.environ["RACECAST_SIM_FEED_PORTS"]
+        assert "--ports" not in m._relay_runtime_args(), "unset keeps the relay's defaults"
+    finally:
+        env()
 
 
 def t_relay_already_running_for_active_profile_requires_both():

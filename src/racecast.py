@@ -1079,7 +1079,21 @@ def _relay_runtime_args():
     explicit flag in rest still wins."""
     return (["--runtime-dir", _runtime_dir(), "--runtime-base", _runtime_base_dir(),
              "--cookies", _cookies_path()]
-            + _overlay_relay_args(_active_overlay_dir()))
+            + _overlay_relay_args(_active_overlay_dir()) + _simulated_feed_args())
+
+
+def _feed_ports():
+    """The relay's feed ports (Feed A, Feed B, POV): RACECAST_SIM_FEED_PORTS in simulation."""
+    return simulation.feed_ports(default=pt.FEED_PORTS)
+
+
+def _simulated_feed_args():
+    """`--ports`/`--pov-port` for a simulated relay with its own feed ports, so no start
+    path binds 53001-53003; [] otherwise (the relay's defaults)."""
+    feeds = _feed_ports()
+    if feeds == tuple(pt.FEED_PORTS):
+        return []
+    return ["--ports", f"{feeds[0]},{feeds[1]}", "--pov-port", str(feeds[2])]
 
 RELAY_PORT = 8088
 
@@ -2835,8 +2849,8 @@ def _relay_start_signals():
     return {"port_pids": port_pids,
             "pidfile_relay": bool(alive and _relay_identity(pid) != "other"),
             # 53001-53003 are a live relay's ports: a simulated start never kills their holders.
-            "feed_pids": [] if simulation.active() else
-            sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
+            "feed_pids": [] if simulation.active() and _feed_ports() == tuple(pt.FEED_PORTS) else
+            sorted({p for fp in _feed_ports() for p in pt.pids_on_port(fp)}),
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
@@ -2996,7 +3010,7 @@ def relay_start(rest):
     # action in {"start", "heal"} -> fresh start.
     # A feed port may still LISTEN even with 8088 free (a leaked static-streams
     # streamlink) -> warn rather than letting Feed A loop silently in "connecting".
-    busy = [p for p in pt.FEED_PORTS if pt.pids_on_port(p)]
+    busy = [p for p in _feed_ports() if pt.pids_on_port(p)]
     if busy:
         print(f"WARNING: feed port(s) {', '.join(map(str, busy))} already in use. "
               f"That feed may fail to bind. Free them first: racecast freeport")
@@ -5406,7 +5420,7 @@ def _release_obs_feeds():
     Print one notice and keep going."""
     try:
         import obs_ws
-        names, note = obs_ws.release_feed_inputs()
+        names, note = obs_ws.release_feed_inputs(ports=_feed_ports())
     except Exception as exc:                # a stop must never fail on this
         print(f"obs: feed release skipped ({exc}).")
         return
@@ -7422,7 +7436,7 @@ def freeport_owner(port, relay_alive, static_alive_ports):
     """Which RUNNING racecast service legitimately owns `port` right now (so freeing
     it would cut a live feed): 'relay' (it binds the feed ports + control port),
     'streams' (a tracked static feed is alive on it), or None (orphan/foreign)."""
-    if relay_alive and (port in pt.FEED_PORTS or port == _relay_port()):
+    if relay_alive and (port in _feed_ports() or port == _relay_port()):
         return "relay"
     if port in static_alive_ports:
         return "streams"

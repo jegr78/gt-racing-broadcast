@@ -252,7 +252,7 @@ def fails(fn, *needles):
 
 # -- every role, every selector ---------------------------------------------------
 def t_the_registry_has_every_party_and_its_actions():
-    want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event"},
+    want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
             "director": {"open", "approve_link", "arm_feed", "arm", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
@@ -485,13 +485,16 @@ def producer(job="done", log="relay: up", stale=None):
     page.ops = []
 
     def confirm():
-        op = "event-start" if page.clicks[-2].endswith('"Start event")') else "event-stop"
+        last = page.clicks[-2]
+        op = "event-start" if "Start event" in last else "relay-restart" if "relay-restart" in last else "event-stop"
         page.ops.append(op)
         page.respond("/api/op/" + op, body={"ok": True, "job_id": len(page.ops)})
         page.after(0.2, lambda: page.add("#jobchip", visible=False))
         page.after(1.2, lambda: page.add("#jobchip", text=job))
     page.add("#cmodal-ok", on_click=confirm)
     page.add("#joblog", text=log)
+    for view in ("home", "services"):
+        page.add(f'.navitem[data-nav="{view}"]')
     page.add('button:has-text("Start event")')
     page.add('button:has-text("Stop event")')
     return role, page, ctx
@@ -500,11 +503,14 @@ def producer(job="done", log="relay: up", stale=None):
 def t_start_event_confirms_and_waits_for_the_job():
     role, page, ctx = producer()
     assert role.do("start_event", {}) == {"job": "done"}
-    assert page.clicks == ['button:has-text("Start event")', "#cmodal-ok"], page.clicks
+    assert page.clicks == ['.navitem[data-nav="home"]', 'button:has-text("Start event")', "#cmodal-ok"], page.clicks
     assert not ctx.findings, "a job is slow by nature: no soft finding for its duration"
     assert role.do("stop_event", {}) == {"job": "done"}
     assert page.clicks[-2:] == ['button:has-text("Stop event")', "#cmodal-ok"]
     assert page.ops == ["event-start", "event-stop"]
+    page.add("""[data-view="services"] button[onclick="op('relay-restart', true)"]""")
+    assert role.do("relay_restart", {}) == {"job": "done"} and page.ops[-1] == "relay-restart"
+    assert page.clicks[-3] == '.navitem[data-nav="services"]', "Restart lives in the Relay view"
 
 
 def t_an_earlier_jobs_chip_is_not_this_jobs_result():
@@ -1064,6 +1070,32 @@ def t_event_links_come_from_the_app_home_and_never_before_start_event():
         ctx = engine.RunContext(event_link=st.event_link)
         assert ctx.event_link("invite") == "abc"
         fails(lambda: ctx.event_link("timing"), "no timing link yet")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def t_the_stack_stops_a_relay_the_control_center_restarted():
+    tmp = tempfile.mkdtemp(prefix="racecast-roles-test-")
+    try:
+        st = stack.Stack(scn({}), tmp)
+        calls = []
+
+        def run(argv, **kw):
+            calls.append((argv, kw))
+            return type("Done", (), {"returncode": 0, "stdout": ""})()
+        assert st.stop_relay(run) == "" and calls == [], "nothing started, nothing to stop"
+        st.racecast, st.env, st.home = os.path.join(tmp, "app", "src", "racecast.py"), {"X": "1"}, os.path.join(tmp, "app")
+        assert st.stop_relay(run) == "" and calls == [], "no PID file, no relay"
+        os.makedirs(os.path.join(st.home, "runtime"))
+        with open(os.path.join(st.home, "runtime", "relay.pid"), "w", encoding="utf-8") as fh:
+            fh.write("1")
+        assert st.stop_relay(run) == ""
+        argv, kw = calls[0]
+        assert argv[1:] == [st.racecast, "--simulation", "relay", "stop"] and kw["env"] == {"X": "1"}, \
+            "the app home's own CLI stops it, in simulation mode"
+        assert kw["timeout"] and kw["errors"] == "replace"
+        bad = lambda argv, **kw: type("Done", (), {"returncode": 1, "stdout": "port held"})()  # noqa: E731
+        assert "port held" in st.stop_relay(bad)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

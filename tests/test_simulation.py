@@ -282,6 +282,34 @@ def _relay():
     return _RELAY
 
 
+def t_feed_ports_move_only_in_simulation_and_never_onto_a_live_port():
+    live = (53001, 53002, 53003)
+    assert sim.FEED_PORTS == "RACECAST_SIM_FEED_PORTS"
+    assert sim.feed_ports({}) == live
+    assert sim.feed_ports({"RACECAST_SIM_FEED_PORTS": "41001,41002,41003"}) == live, "outside simulation nothing changes"
+    assert sim.feed_ports(dict(ON)) == live, "unset keeps the product ports"
+    assert sim.feed_ports(dict(ON, RACECAST_SIM_FEED_PORTS=" 41001, 41002 ,41003 ")) == (41001, 41002, 41003)
+    base = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin())
+    assert sim.problems(dict(base, RACECAST_SIM_FEED_PORTS="41001,41002,41003")) == []
+    bad = {"41001,41002": "three", "41001,41002,41003,41004": "three", "41001,41001,41003": "differ",
+           "41001,53002,41003": "53001-53003", "8088,41002,41003": "8088", "41001,41002,8089": "Control Center",
+           "a,b,c": "port number", "0,41002,41003": "port number", "41001;41002;41003": "three",
+           "41001,41002,70000": "port number"}
+    for value, needle in bad.items():
+        env = dict(base, RACECAST_SIM_FEED_PORTS=value)
+        found = [p for p in sim.problems(env) if sim.FEED_PORTS in p]
+        assert found and needle in found[0], f"{value!r}: {sim.problems(env)}"
+        try:
+            sim.feed_ports(env)
+        except ValueError:
+            continue
+        raise AssertionError(f"{value!r} must raise instead of falling back to the live ports")
+    clash = dict(base, RACECAST_SIM_FEED_PORTS="41001,41002,41003", RACECAST_SIM_RELAY_PORT="41002")
+    assert any("control port" in p for p in sim.problems(clash)), sim.problems(clash)
+    ui = dict(base, RACECAST_SIM_FEED_PORTS="41001,41002,41003", RACECAST_UI_PORT="41003")
+    assert any("Control Center" in p for p in sim.problems(ui)), sim.problems(ui)
+
+
 def t_relay_port_moves_only_in_simulation():
     assert sim.RELAY_PORT == "RACECAST_SIM_RELAY_PORT" and sim.DEFAULT_RELAY_PORT == 8088
     assert sim.relay_port({}) == 8088

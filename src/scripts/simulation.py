@@ -26,6 +26,7 @@ DISCORD_WEBHOOK_URL = "RACECAST_SIM_DISCORD_WEBHOOK_URL"
 STREAM_BIN = "RACECAST_SIM_STREAM_BIN"              # directory with yt-dlp and streamlink stand-ins
 FORCE = "RACECAST_SIM_FORCE"                        # the one profile a --force run allowed
 RELAY_PORT = "RACECAST_SIM_RELAY_PORT"              # the relay control port, on 127.0.0.1
+FEED_PORTS = "RACECAST_SIM_FEED_PORTS"              # Feed A, Feed B, POV: three ports, comma-separated
 DEFAULT_RELAY_PORT = 8088
 
 SCHEMES = {OBS_WS: ("ws",), SHEET_URL: ("http",), SHEET_PUSH_URL: ("http",),
@@ -136,10 +137,51 @@ def _port_problem(value, environ=None):
     port = int(value)
     if port in LIVE_PORTS:
         return f"{RELAY_PORT}={port} is a port of the live relay (8088, 53001-53003); pick a free one"
-    ui = (environ.get("RACECAST_UI_PORT") or "").strip()
-    if port == (int(ui) if ui.isascii() and ui.isdigit() else DEFAULT_UI_PORT):
+    if port == _ui_port(environ):
         return f"{RELAY_PORT}={port} is the Control Center's port; pick another one"
     return ""
+
+
+LIVE_FEED_PORTS = LIVE_PORTS[1:]
+
+
+def _ui_port(environ):
+    ui = (environ.get("RACECAST_UI_PORT") or "").strip()
+    return int(ui) if ui.isascii() and ui.isdigit() else DEFAULT_UI_PORT
+
+
+def _feed_ports_problem(value, environ=None):
+    environ = os.environ if environ is None else environ
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) != 3:
+        return f"{FEED_PORTS} must be three ports (Feed A, Feed B, POV) separated by commas, not {value!r}"
+    if not all(p.isascii() and p.isdigit() and 1 <= int(p) <= 65535 for p in parts):
+        return f"{FEED_PORTS} must hold port numbers 1-65535, not {value!r}"
+    ports = [int(p) for p in parts]
+    if len(set(ports)) != 3:
+        return f"{FEED_PORTS} must differ from each other, not {value!r}"
+    live = [p for p in ports if p in LIVE_PORTS]
+    if live:
+        return f"{FEED_PORTS}: {live[0]} is a port of the live relay (8088, 53001-53003); pick a free one"
+    if _ui_port(environ) in ports:
+        return f"{FEED_PORTS}: {_ui_port(environ)} is the Control Center's port; pick another one"
+    control = (environ.get(RELAY_PORT) or "").strip()
+    if control.isascii() and control.isdigit() and int(control) in ports:
+        return f"{FEED_PORTS}: {control} is the simulated relay control port; pick another one"
+    return ""
+
+
+def feed_ports(environ=None, default=LIVE_FEED_PORTS):
+    """The relay's feed ports (Feed A, Feed B, POV): RACECAST_SIM_FEED_PORTS in simulation,
+    else `default`. An invalid value raises instead of falling back to the live ports."""
+    environ = os.environ if environ is None else environ
+    value = (environ.get(FEED_PORTS) or "").strip()
+    if not (active(environ) and value):
+        return tuple(default)
+    problem = _feed_ports_problem(value, environ)
+    if problem:
+        raise ValueError(problem)
+    return tuple(int(p) for p in value.split(","))
 
 
 def relay_port(environ=None, default=DEFAULT_RELAY_PORT):
@@ -206,6 +248,9 @@ def problems(environ=None):
     port = (environ.get(RELAY_PORT) or "").strip()
     if port and _port_problem(port, environ):
         out.append(_port_problem(port, environ))
+    feeds = (environ.get(FEED_PORTS) or "").strip()
+    if feeds and _feed_ports_problem(feeds, environ):
+        out.append(_feed_ports_problem(feeds, environ))
     return out
 
 

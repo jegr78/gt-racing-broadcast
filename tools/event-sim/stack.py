@@ -285,6 +285,7 @@ class Stack:
         self.sheet = self.sink = self.stub = self.obs = None
         self.children = []
         self.urls = {}
+        self.racecast = self.env = self.home = None
 
     def start(self):
         os.makedirs(self.work, exist_ok=True)
@@ -316,11 +317,12 @@ class Stack:
                                      "RACECAST_UPDATE_CHECK": "0",
                                      "RACECAST_CONSOLE_SECRET": self.secret,
                                      "RACECAST_SIM_RELAY_PORT": str(http_port),
+                                     "RACECAST_SIM_FEED_PORTS": f"{feed_a},{feed_b},{pov}",
                                      "PYTHONDONTWRITEBYTECODE": "1"})
         home = os.path.dirname(os.path.dirname(racecast))
+        self.racecast, self.env, self.home = racecast, env, home
         relay = self._child("relay", [self.python, racecast, "--simulation", "relay", "run",
                                       "--bind", "127.0.0.1", "--http-port", str(http_port),
-                                      "--ports", f"{feed_a},{feed_b}", "--pov-port", str(pov),
                                       "--gt7-bind", "127.0.0.1", "--gt7-port", "0",
                                       "--gt7-ps-ip", "127.0.0.1"], env, home)
         self.urls = {"relay": f"http://127.0.0.1:{http_port}", "ui": f"http://127.0.0.1:{ui_port}",
@@ -382,9 +384,24 @@ class Stack:
                 out.append(("soft", f"{name} log unreadable"))
         return out
 
+    def stop_relay(self, run=subprocess.run):
+        """Stop the relay this app home's PID file names: a relay the Control Center
+        restarted is detached and no child of this run. Returns a problem text, or ""."""
+        if not self.racecast or not os.path.exists(os.path.join(self.home, "runtime", "relay.pid")):
+            return ""
+        try:
+            done = run([self.python, self.racecast, "--simulation", "relay", "stop"], cwd=self.home,
+                       env=self.env, capture_output=True, text=True, errors="replace", timeout=60)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"relay stop: {exc}"
+        return "" if done.returncode == 0 else f"relay stop exited {done.returncode}: {done.stdout[-300:]}"
+
     def stop(self, logs_to=None):
         """Stop everything; copy the service logs to `logs_to`. Returns problem texts."""
         problems = []
+        problem = self.stop_relay()
+        if problem:
+            problems.append(problem)
         for child in reversed(self.children):
             problem = child.stop()
             if problem:

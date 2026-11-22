@@ -173,7 +173,8 @@ class Surface(builtin.PageRole):
 @register
 class ProducerRole(Surface):
     """The producer in the Control Center: `pick_track` (track), `race_settings`
-    (formation, finish_mode, laps), `start_event` (qualifying, stint), `stop_event`."""
+    (formation, finish_mode, laps), `start_event` (qualifying, stint), `stop_event`,
+    `relay_restart`."""
     kind = "producer"
     service, ready = "ui", "#evt-track"
     sources = ("src/ui/control-center.html",)
@@ -186,7 +187,12 @@ class ProducerRole(Surface):
         "start": 'button:has-text("Start event")', "stop": 'button:has-text("Stop event")',
         "confirm": "#cmodal-ok", "confirm_text": "#cmodal-body",
         "job": "#jobchip", "job_log": "#joblog", "summary": "#home-summary", "relay": "#h-relay",
+        "view": '.navitem[data-nav="{view}"]',
+        "relay_restart": """[data-view="services"] button[onclick="op('relay-restart', true)"]""",
     }
+
+    def view(self, name):
+        self.click(self.sel("view", view=name), f"view {name}")
 
     def _no_error(self, name, what):
         loc = self.pg.locator(self.sel(name)).first
@@ -197,6 +203,7 @@ class ProducerRole(Surface):
         track = str(args.get("track") or self.ctx.event.get("track") or "")
         if not track:
             raise StepError("pick_track needs args.track or [event] track")
+        self.view("home")
         self.until(lambda: self.count(self.sel("track_option", track=track)), f"layout {track} in the list")
         self.answered(lambda: self.choose(self.sel("track"), "Track layout", value=track),
                       "/api/event-track", "Track layout")
@@ -207,6 +214,7 @@ class ProducerRole(Surface):
 
     def act_race_settings(self, args):
         done = {}
+        self.view("home")
         if "formation" in args:
             box = self.control(self.sel("formation"), "Formation lap")
             if box.is_checked() != bool(args["formation"]):
@@ -241,7 +249,13 @@ class ProducerRole(Surface):
             raise StepError(f"{what}: the job ended {result!r}: {tail}")
         return {"job": result}
 
+    def act_relay_restart(self, args):
+        """Relay view, Restart: the relay comes back as a new process."""
+        self.view("services")
+        return self._job("relay_restart", "relay-restart", "Restart relay")
+
     def act_start_event(self, args):
+        self.view("home")
         if args.get("stint"):
             self.fill(self.sel("stint"), args["stint"], "Stint number")
         if "qualifying" in args:
@@ -250,6 +264,7 @@ class ProducerRole(Surface):
         return self._job("start", "event-start", "Start event")
 
     def act_stop_event(self, args):
+        self.view("home")
         return self._job("stop", "event-stop", "Stop event")
 
     def facts(self):
