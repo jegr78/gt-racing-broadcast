@@ -10,10 +10,13 @@ the Sheet-Webhook wiki page against them, so a write is visible on the next read
     GET  /_sim/tab?name=<Tab>             rows and header-keyed records of one tab
     GET  /_sim/writes?since=N             script calls after sequence N
     POST /_sim/tab                        {"name", "rows" | "csv"}: seed or replace a tab
+    POST /_sim/stream-keys                {ref: key}: merge Script Properties, never read back
     POST /_sim/fail                       fault rules (loopback_http); targets `tab:<Tab>`,
                                           `read` (any tab), `action:<action>`, `push` (any call)
 
-A script-style fault answers HTTP 200 {"error": ...} on the push URL. An unknown tab
+A script-style fault answers HTTP 200 {"error": ...} on the push URL; a read fault with
+an error needs a status and answers an HTML error page. `redirect=True` answers the push
+URL with Apps Script's 302 to a one-time echo URL. An unknown tab
 reads as empty, or with `unknown_tab="first"` as the first seeded tab.
 `SheetSim.env()` gives RACECAST_SIMULATION=1, RACECAST_SIM_SHEET_URL and
 RACECAST_SIM_SHEET_PUSH_URL.
@@ -24,10 +27,12 @@ Maintainer tool, not shipped."""
 import argparse
 import csv
 import datetime
+import html
 import io
 import json
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -35,12 +40,14 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import loopback_http  # noqa: E402
+import logsetup  # noqa: E402
 
 FLAG_ENV = "RACECAST_SIMULATION"                    # simulation.FLAG
 SHEET_URL_ENV = "RACECAST_SIM_SHEET_URL"            # simulation.SHEET_URL
 SHEET_PUSH_URL_ENV = "RACECAST_SIM_SHEET_PUSH_URL"  # simulation.SHEET_PUSH_URL
 SHEET_PATH = "/spreadsheets/d/sim"
 EXEC_PATH = "/macros/s/sim/exec"
+ECHO_PATH = "/macros/echo"
 DEFAULT_KEY = "sim"
 SCRIPT_VERSION = 7
 SETUP_FIELDS = ("Stint", "Streamer", "Session", "Race Control", "Flag")
@@ -65,10 +72,17 @@ def js_str(value):
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    if isinstance(value, (list, dict)):
-        return json.dumps(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "NaN"
+        if math.isinf(value):
+            return "Infinity" if value > 0 else "-Infinity"
+        if value.is_integer():
+            return str(int(value))
+    if isinstance(value, list):
+        return ",".join("" if v is None else js_str(v) for v in value)
+    if isinstance(value, dict):
+        return "[object Object]"
     return str(value)
 
 
@@ -76,6 +90,10 @@ def js_truthy(value):
     return not (value is None or value is False or value == "" or
                 (isinstance(value, (int, float)) and not isinstance(value, bool) and
                  (value == 0 or math.isnan(value))))
+
+
+JS_DECIMAL = re.compile(r"^[+-]?(Infinity|(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?)$")
+JS_RADIX = {"0x": 16, "0o": 8, "0b": 2}
 
 
 def js_number(value):
@@ -86,15 +104,24 @@ def js_number(value):
         return 0.0
     if isinstance(value, (int, float)):
         return float(value)
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return 0.0
+    if isinstance(value, list):
+        return js_number(js_str(value))
+    if not isinstance(value, str):
+        return math.nan
+    text = value.strip()
+    if not text:
+        return 0.0
+    if not text.isascii():
+        return math.nan
+    radix = JS_RADIX.get(text[:2].lower())
+    if radix:
         try:
-            return float(text)
+            return float(int(text[2:], radix)) if text[2:].isalnum() else math.nan
         except ValueError:
             return math.nan
-    return math.nan
+    if not JS_DECIMAL.match(text):
+        return math.nan
+    return float(text.replace("Infinity", "inf"))
 
 
 def js_parse_int(value):
@@ -102,7 +129,7 @@ def js_parse_int(value):
     text = js_str(value).strip()
     digits = ""
     for i, ch in enumerate(text):
-        if ch.isdigit() or (i == 0 and ch in "+-"):
+        if ch in "0123456789" or (i == 0 and ch in "+-"):
             digits += ch
         else:
             break
@@ -110,6 +137,15 @@ def js_parse_int(value):
         return int(digits)
     except ValueError:
         return None
+
+
+def js_keys(value):
+    """Object.keys(value || {}) as the script sees it."""
+    if isinstance(value, dict):
+        return list(value)
+    if isinstance(value, (str, list)):
+        return [str(i) for i in range(len(value))]
+    return []
 
 
 def cell(value):
@@ -159,7 +195,7 @@ class Sheet:
             if rows is None:
                 self._tabs.pop(name, None)
             else:
-                self._tabs[name] = [list(map(str, r)) for r in
+                self._tabs[name] = [[cell(c) for c in r] for r in
                                     (parse_csv(rows) if isinstance(rows, str) else rows)]
 
     def tab_names(self):
@@ -243,22 +279,27 @@ class Sheet:
                 p = json.loads(body.decode("utf-8"))
             except (ValueError, UnicodeDecodeError) as exc:
                 return self._log(None, {"error": f"SyntaxError: {exc}"})
-            if not isinstance(p, dict):
-                return self._log(p, {"error": "TypeError: the payload is not an object"})
-            action = p.get("action") if js_truthy(p.get("action")) else "timer"
+            if p is None:
+                return self._log(p, {"error": "TypeError: Cannot read properties of null (reading 'action')"})
+            if not isinstance(p, (dict, list)):
+                return self._log(p, {"error": "TypeError: Cannot use 'in' operator to search for "
+                                              f"'end' in {js_str(p)}"})
+            fields = p if isinstance(p, dict) else {}
+            action = fields.get("action") if js_truthy(fields.get("action")) else "timer"
             if action == "get_stream_key":
                 self.key_reads += 1
-                ref = js_str(p.get("ref") or "")
+                ref = js_str(fields.get("ref") or "")
                 found = self.stream_keys.get(ref)
                 return ({"ok": True, "action": action, "key": found} if found else
                         {"ok": False, "action": action, "error": f"no key for ref '{ref}'"})
             handler = {"timer": self._write_timer, "setup": self._write_setup,
                        "schedule": self._write_schedule, "pov": self._write_pov,
-                       "teams": self._write_teams, "crew": self._write_crew}.get(action)
+                       "teams": self._write_teams, "crew": self._write_crew}.get(
+                action if isinstance(action, str) else "")
             if handler is None:
                 return self._log(p, {"error": f"unknown action: {js_str(action)}"})
             try:
-                handler(p)
+                handler(fields)
             except ScriptError as exc:
                 return self._log(p, {"error": str(exc)})
             return self._log(p, {"ok": True, "action": action, "v": SCRIPT_VERSION})
@@ -267,8 +308,8 @@ class Sheet:
         self.write_seq += 1
         action = payload.get("action") if isinstance(payload, dict) else None
         self._writes.append({"seq": self.write_seq, "time": self.clock(),
-                             "action": action if js_truthy(action) else
-                             ("timer" if isinstance(payload, dict) else None),
+                             "action": js_str(action) if js_truthy(action) else
+                             ("timer" if isinstance(payload, (dict, list)) else None),
                              "payload": payload, "response": response,
                              "ok": response.get("ok") is True})
         return response
@@ -319,9 +360,10 @@ class Sheet:
 
     def _write_setup(self, p):
         rows = self._sheet(SETUP)
-        fields = p.get("fields") if isinstance(p.get("fields"), dict) else {}
+        raw = p.get("fields") if js_truthy(p.get("fields")) else {}
+        fields = raw if isinstance(raw, dict) else {}
         targets = {}
-        for name in fields:
+        for name in js_keys(raw):
             if name not in SETUP_FIELDS:
                 raise ScriptError(f"unknown setup field: {name}")
             hit = self._below(rows, name)
@@ -382,7 +424,8 @@ class Sheet:
         name = js_str(p.get("name") if js_truthy(p.get("name")) else "").strip()
         if not name:
             raise ScriptError("crew: name is required")
-        header = rows[0][:max(1, self._last_col(rows[:1]))]
+        width = max(1, self._last_col(rows))
+        header = (rows[0] + [""] * width)[:width]
 
         def col_of(label):
             found = self._col_of(header, label.lower())
@@ -406,10 +449,14 @@ class SheetSim(loopback_http.LoopbackServer):
     the script's KEY, carried in the push URL."""
 
     def __init__(self, tabs=None, stream_keys=None, key=DEFAULT_KEY, port=0, clock=time.time,
-                 unknown_tab="empty", faults=None, sleep=time.sleep):
-        super().__init__(port, faults=faults, sleep=sleep)
+                 unknown_tab="empty", faults=None, sleep=None, redirect=False):
         self.sheet = Sheet(tabs, stream_keys=stream_keys, clock=clock, key=key,
                            unknown_tab=unknown_tab)
+        super().__init__(port, faults=faults, sleep=sleep)
+        self.redirect = redirect
+        self._echo_lock = threading.Lock()
+        self._echo = {}
+        self._echo_seq = 0
         self.set_tab, self.tab, self.records = self.sheet.set_tab, self.sheet.tab, self.sheet.records
         self.writes = self.sheet.writes
 
@@ -440,10 +487,42 @@ class SheetSim(loopback_http.LoopbackServer):
             return ["push", "action:" + (js_str(action) if js_truthy(action) else "timer")]
         return []
 
+    def set_stream_keys(self, keys):
+        """Merge {ref: key} into the Script Properties; the keys are never read back."""
+        if not isinstance(keys, dict) or not all(isinstance(k, str) and isinstance(v, str)
+                                                 for k, v in keys.items()):
+            raise ValueError("stream keys are {ref: key} strings")
+        with self.sheet.lock:
+            self.sheet.stream_keys.update(keys)
+            return len(self.sheet.stream_keys)
+
+    @staticmethod
+    def _is_read(rule):
+        return rule["target"] == "read" or rule["target"].startswith("tab:")
+
+    def validate_fault(self, rule):
+        if self._is_read(rule) and rule["error"] is not None and rule["status"] is None:
+            raise ValueError("a read fault with an error needs a status: gviz answers no "
+                             "error body with 200")
+
     def fault_reply(self, rule):
+        if self._is_read(rule) and rule["error"] is not None:
+            page = f"<html><body>{html.escape(rule['error'])}</body></html>"
+            return rule["status"], "text/html; charset=utf-8", page.encode("utf-8")
         if rule["error"] is not None:
             return loopback_http.json_reply({"error": rule["error"]}, rule["status"] or 200)
         return super().fault_reply(rule)
+
+    def _exec(self, key, body):
+        answer = self.sheet.do_post(key, body)
+        if not self.redirect:
+            return loopback_http.json_reply(answer)
+        with self._echo_lock:
+            self._echo_seq += 1
+            self._echo[str(self._echo_seq)] = answer
+            token = self._echo_seq
+        return (302, "text/html; charset=utf-8", b"Moved Temporarily",
+                {"Location": f"{self.http_url}{ECHO_PATH}?user_content_key={token}"})
 
     def route(self, method, path, query, headers, body):
         reply = loopback_http.json_reply
@@ -453,7 +532,13 @@ class SheetSim(loopback_http.LoopbackServer):
                 return reply({"error": "only tqx=out:csv with a sheet name is served"}, 400)
             return 200, "text/csv; charset=utf-8", self.sheet.csv(first["sheet"]).encode("utf-8")
         if method == "POST" and path == EXEC_PATH:
-            return reply(self.sheet.do_post(first.get("key", ""), body))
+            return self._exec(first.get("key", ""), body)
+        if method == "GET" and path == ECHO_PATH:
+            with self._echo_lock:
+                answer = self._echo.pop(first.get("user_content_key", ""), None)
+            return reply({"error": "not found"}, 404) if answer is None else reply(answer)
+        if method == "POST" and path == "/_sim/stream-keys":
+            return reply({"refs": self.set_stream_keys(json.loads(body or b"{}"))})
         if method == "GET" and path == "/_sim/state":
             return reply(self.snapshot())
         if method == "GET" and path == "/_sim/writes":
@@ -491,6 +576,9 @@ def build_parser():
     ap.add_argument("--port", type=int, default=0, help="listen port, 0 picks a free one (default)")
     ap.add_argument("--tabs", help="directory of <Tab>.csv files to seed the tabs")
     ap.add_argument("--key", default=DEFAULT_KEY, help="the script's KEY in the push URL (default sim)")
+    ap.add_argument("--stream-keys", help="JSON file {ref: key} seeding the Script Properties")
+    ap.add_argument("--redirect", action="store_true",
+                    help="answer the push URL with a 302 to its echo URL, like Apps Script")
     ap.add_argument("--unknown-tab", choices=("empty", "first"), default="empty",
                     help="what a read of an unseeded tab returns (default empty)")
     ap.add_argument("--ready-file", help="write {port, url, push_url, http_url, env} here once listening")
@@ -498,21 +586,21 @@ def build_parser():
 
 
 def main(argv=None):
+    logsetup.harden_stdio()
     args = build_parser().parse_args(argv)
+    keys = None
+    if args.stream_keys:
+        with open(args.stream_keys, encoding="utf-8") as fh:
+            keys = json.load(fh)
     sim = SheetSim(load_tabs(args.tabs) if args.tabs else None, key=args.key, port=args.port,
-                   unknown_tab=args.unknown_tab).start()
-    if args.ready_file:
-        loopback_http.write_ready_file(args.ready_file, {
-            "port": sim.port, "url": sim.url, "push_url": sim.push_url,
-            "http_url": sim.http_url, "env": sim.env()})
-    print(f"sheet-sim: tabs {', '.join(sim.sheet.tab_names()) or '(none)'} on {sim.url}", flush=True)
-    try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        pass  # Ctrl+C ends the run
-    finally:
-        sim.stop()
+                   unknown_tab=args.unknown_tab, redirect=args.redirect)
+    if keys is not None:
+        sim.set_stream_keys(keys)
+    sim.start()
+    loopback_http.serve_cli(sim, args.ready_file, {
+        "port": sim.port, "url": sim.url, "push_url": sim.push_url,
+        "http_url": sim.http_url, "env": sim.env()},
+        f"sheet-sim: tabs {', '.join(sim.sheet.tab_names()) or '(none)'} on {sim.url}")
 
 
 fetch = loopback_http.fetch

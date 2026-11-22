@@ -5,10 +5,12 @@ import importlib.util
 import io
 import json
 import os
+import queue
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 
@@ -61,6 +63,24 @@ def _sim(**kw):
             "POV": [["URL", "Name"], ["", ""]]}
     tabs.update(kw.pop("tabs", {}))
     return sheet_sim.SheetSim(tabs=tabs, **kw).start()
+
+
+def _banner(proc, timeout=30):
+    """The CLI's first stdout line, or an AssertionError once `timeout` passes."""
+    lines = queue.Queue()
+    threading.Thread(target=lambda: lines.put(proc.stdout.readline()), daemon=True).start()
+    try:
+        return lines.get(timeout=timeout).decode("utf-8", "replace")
+    except queue.Empty:
+        raise AssertionError("the CLI printed no banner") from None
+
+
+def _stop_cli(proc, ready):
+    proc.terminate()
+    proc.wait(timeout=10)
+    proc.stdout.close()
+    if os.name != "nt":   # TerminateProcess leaves no chance to clean up
+        assert not os.path.exists(ready), "the CLI removes its ready-file on exit"
 
 
 def _csv_url(sim, tab, headers=False):
@@ -332,10 +352,132 @@ def t_fetch_stays_on_loopback():
     raise AssertionError("fetch must refuse a non-loopback URL")
 
 
-def t_a_payload_that_is_no_object_is_an_error():
+def t_payloads_that_are_no_plain_object_behave_like_v7():
     with _sim() as sim:
-        answer = _post(sim, ["schedule"])
-        assert set(answer) == {"error"} and answer["error"].startswith("TypeError"), answer
+        assert _post(sim, ["schedule"]) == {"ok": True, "action": "timer", "v": 7}, "an array runs as timer"
+        assert _post(sim, None) == {"error": "TypeError: Cannot read properties of null (reading 'action')"}
+        assert _post(sim, 5) == {"error": "TypeError: Cannot use 'in' operator to search for 'end' in 5"}
+        assert _post(sim, {"action": ["a", "b"]}) == {"error": "unknown action: a,b"}, "String() joins an array"
+        assert _post(sim, {"action": "setup", "fields": "ab"}) == {"error": "unknown setup field: 0"}
+        assert _post(sim, {"action": "schedule", "row": [2], "url": "sim://list"})["ok"] is True
+        assert sim.tab("Schedule")[1][0] == "sim://list", "Number([2]) is 2"
+        assert _post(sim, {"action": "schedule", "row": "1_0"}) == {"error": "row out of range: 1_0"}
+        assert _post(sim, {"action": "schedule", "row": "0x2", "url": "sim://hex"})["ok"] is True
+        assert sim.tab("Schedule")[1][0] == "sim://hex", "Number('0x2') is 2"
+        assert _post(sim, {"action": "schedule", "row": "inf"}) == {"error": "row out of range: inf"}
+
+
+def t_a_content_length_in_non_ascii_digits_is_refused():
+    with _sim() as sim, socket.create_connection(("127.0.0.1", sim.port), timeout=5) as conn:
+        conn.sendall(b"POST /macros/s/sim/exec?key=sim HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n"
+                     b"Content-Type: application/json\r\nContent-Length: \xb2\r\n\r\n" % sim.port)
+        assert conn.recv(64).startswith(b"HTTP/1.1 400"), "a superscript digit is no length"
+
+
+def t_an_error_fault_on_a_read_needs_a_status_and_answers_an_error_page():
+    with _sim() as sim, tempfile.TemporaryDirectory() as tmp:
+        for target in ("read", "tab:Crew"):
+            try:
+                sim.fail(target, error="boom")
+            except ValueError:
+                continue
+            raise AssertionError(f"{target} took an error without a status")
+        json_ct = {"Content-Type": "application/json"}
+        assert _status(sim.http_url + "/_sim/fail", b'{"target": "read", "error": "boom"}', json_ct)[0] == 400
+        crew = m.CrewSource(_csv_url(sim, "Crew"), os.path.join(tmp, "crew.json"))
+        sim.fail("tab:Crew", status=500, error="boom")
+        req = urllib.request.Request(_csv_url(sim, "Crew"))
+        try:
+            urllib.request.urlopen(req, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 500 and exc.headers.get("Content-Type", "").startswith("text/html")
+            assert b"boom" in exc.read()
+        else:
+            raise AssertionError("the read must fail")
+        assert not crew.refresh() and crew.rows == [], "a failed read adds no member"
+
+
+def t_delays_add_up_and_a_later_status_rule_still_answers():
+    sleeps = Sleeps()
+    with _sim(sleep=sleeps) as sim:
+        sim.fail("read", delay=1)
+        sim.fail("tab:Schedule", delay=2)
+        sim.fail("tab:Schedule", status=500)
+        sim.fail("tab:Schedule", status=503)
+        assert _status(_csv_url(sim, "Schedule"))[0] == 500, "the first status rule answers"
+        assert sleeps == [3], sleeps
+        assert sim.snapshot()["faults_hit"] == 3, "the 503 rule behind the answer is not hit"
+
+
+def t_fault_statuses_are_errors_only():
+    with _sim() as sim:
+        for status in (101, 204, 304, 399, 600):
+            try:
+                sim.fail("push", status=status)
+            except ValueError:
+                continue
+            raise AssertionError(f"status {status} would make malformed HTTP")
+        sim.fail("push", status=400)
+        sim.fail("push", status=599)
+
+
+def t_stop_interrupts_an_injected_delay_and_refuses_new_work():
+    sim = _sim()
+    sim.fail("push", delay=600)
+    answers = queue.Queue()
+
+    def post():
+        try:
+            answers.put(_status(sim.push_url, b'{"action": "pov"}', {"Content-Type": "application/json"})[0])
+        except OSError as exc:
+            answers.put(type(exc).__name__)
+    worker = threading.Thread(target=post, daemon=True)
+    worker.start()
+    for _ in range(500):
+        if sim.snapshot()["faults_hit"]:
+            break
+        threading.Event().wait(0.02)
+    sim.stop()
+    worker.join(timeout=30)
+    assert not worker.is_alive(), "stop() ends a handler inside an injected delay"
+    assert answers.get_nowait() != 200 and sim.writes() == [], "a stopped fake runs no request"
+
+
+def t_crew_columns_follow_the_last_column_of_the_whole_tab():
+    with _sim(tabs={"Crew": [["Name", "Director"], ["A", "TRUE", "note"]]}) as sim:
+        _post(sim, {"action": "crew", "row": 1, "name": "A"})
+        header = sim.tab("Crew")[0]
+        assert header[2] == "" and header[3] == "Commentator", header
+        assert sim.tab("Crew")[1][2] == "note", "the unheaded column keeps its data"
+
+
+def t_seeded_cells_are_formatted_like_sheets():
+    with _sim() as sim:
+        got = sheet_sim.fetch(sim.http_url, "/_sim/tab", {"name": "Crew", "rows": [["Name", "Director"],
+                                                                                   ["A", True], ["B", None]]})
+        assert got["rows"] == [["Name", "Director"], ["A", "TRUE"], ["B", ""]], got
+        sim.set_tab("Flags", [[False, 2.0]])
+        assert sim.tab("Flags") == [["FALSE", "2"]]
+
+
+def t_stream_keys_are_seeded_over_http_and_never_read_back():
+    with _sim() as sim:
+        got = sheet_sim.fetch(sim.http_url, "/_sim/stream-keys", {"key2": "sim-stream-2"})
+        assert got == {"refs": 1}, got
+        body = m.post_webhook(sim.push_url, {"action": "get_stream_key", "ref": "key2"}, timeout=5)
+        assert stream_target.parse_stream_key_response(body) == ("sim-stream-2", "")
+        assert "sim-stream-2" not in json.dumps(sheet_sim.fetch(sim.http_url, "/_sim/state"))
+        assert _status(sim.http_url + "/_sim/stream-keys")[0] == 404, "no read-back route"
+        json_ct = {"Content-Type": "application/json"}
+        assert _status(sim.http_url + "/_sim/stream-keys", b'{"key3": 5}', json_ct)[0] == 400
+
+
+def t_the_exec_redirect_is_followed_like_apps_script():
+    with _sim(redirect=True) as sim:
+        body = m.post_webhook(sim.push_url, {"action": "pov", "url": "sim://r"}, timeout=5)
+        assert m.check_webhook_response(body, "pov") == (True, None), body
+        assert sim.tab("POV")[1][0] == "sim://r" and len(sim.writes()) == 1, "the GET after the 302 runs nothing"
+        assert m.probe_webhook(sim.push_url)
 
 
 def t_missing_tabs_and_headers_answer_the_script_errors():
@@ -408,22 +550,26 @@ def t_cli_seeds_tabs_from_a_directory_and_writes_a_ready_file():
         with open(os.path.join(tabs, "Schedule.csv"), "w", encoding="utf-8", newline="") as fh:
             fh.write("URL,Streamer\nsim://comms1,Comms 1\n")
         ready = os.path.join(tmp, "sheet.json")
+        keys = os.path.join(tmp, "keys.json")
+        with open(keys, "w", encoding="utf-8") as fh:
+            json.dump({"key1": "sim-stream-1"}, fh)
         proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "tools", "event-sim", "fakes",
                                                               "sheet_sim.py"),
-                                 "--port", "0", "--tabs", tabs, "--ready-file", ready],
+                                 "--port", "0", "--tabs", tabs, "--stream-keys", keys,
+                                 "--ready-file", ready],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
-            assert "sheet-sim" in proc.stdout.readline().decode("utf-8", "replace")
+            assert "sheet-sim" in _banner(proc)
             with open(ready, encoding="utf-8") as fh:
                 info = json.load(fh)
             env = info["env"]
             body = _get(simulation.sheet_csv_url("x", "Schedule", env))[2]
             assert body == '"URL","Streamer"\n"sim://comms1","Comms 1"\n', body
             assert info["push_url"] == env[simulation.SHEET_PUSH_URL]
+            body = m.post_webhook(info["push_url"], {"action": "get_stream_key", "ref": "key1"}, timeout=5)
+            assert stream_target.parse_stream_key_response(body) == ("sim-stream-1", "")
         finally:
-            proc.terminate()
-            proc.wait(timeout=5)
-            proc.stdout.close()
+            _stop_cli(proc, ready)
 
 
 class Sleeps(list):
