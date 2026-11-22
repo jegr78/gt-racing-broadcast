@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the HUD additions. Run: python3 tests/test_hud.py"""
-import importlib.util, os
+import importlib.util, os, re
+from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -58,6 +59,37 @@ def t_the_shipped_overlay_template_parses():
         o = m.parse_overlay(fh.read())
     assert o["streamer"] == "Sample Commentator", f"template label column must be the one the relay reads: {o}"
     assert o["teams"][0] == "Sample Team Alpha #11", o
+
+
+def _product_setup_texts():
+    """{field: {text}}: every fixed Setup text the relay, the Director Panel and the
+    Companion board write through set_field."""
+    out = {"racecontrol": {m.RED_FLAG_BANNER}}
+    with open(os.path.join(ROOT, "src", "director", "director-panel.html"), encoding="utf-8") as fh:
+        panel = fh.read()
+    out["racecontrol"] |= set(re.findall(r'\brc:"([^"]+)"', panel))
+    out["racecontrol"] |= set(re.findall(r'setupSet\("racecontrol", on \? "([^"]+)"', panel))
+    with open(os.path.join(ROOT, "src", "companion", "racecast-buttons.companionconfig"),
+              encoding="utf-8") as fh:
+        for field, value in re.findall(r'/setup/set/(\w+)/([^"/]+)"', fh.read()):
+            out.setdefault(field, set()).add(unquote(value))
+    return out
+
+
+def t_the_shipped_configuration_template_holds_every_text_the_product_writes():
+    texts = _product_setup_texts()
+    assert {"Red Flag - Race Suspended", "Driver Swaps"} <= texts["racecontrol"] and "Red Flag" in texts["flag"], \
+        f"the scan found the panel's and the board's texts: {texts}"
+    with open(os.path.join(ROOT, "src", "docs", "sheet-template", "Configuration.csv"), encoding="utf-8") as fh:
+        csv_text = fh.read()
+    vocab = m.parse_config_vocab(csv_text)
+    missing = {k: sorted(v - set(vocab.get(k, []))) for k, v in texts.items() if v - set(vocab.get(k, []))}
+    assert not missing, f"set_field refuses these in a league built from the template: {missing}"
+    assert len(m.parse_config_roster(csv_text)) == 3, "the vocabulary rows add no team"
+    with open(os.path.join(ROOT, "src", "docs", "wiki", "Sheet-Template.md"), encoding="utf-8") as fh:
+        wiki = fh.read()
+    undocumented = sorted(t for t in texts["racecontrol"] if f"`{t}`" not in wiki)
+    assert not undocumented, f"Sheet-Template.md names every Race Control text the product writes: {undocumented}"
 
 
 def t_parse_overlay_missing_rows_safe():

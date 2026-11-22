@@ -101,7 +101,7 @@ A header row (row 1) plus one row per team. Columns are located **by header text
 | `Stints` | optional | Dropdown options for the panel's **Stint** field |
 | `Streamers` | optional | Dropdown options for the panel's **Streamer** field |
 | `Session` | optional | Dropdown options for the panel's **Session** field |
-| `Race Control` | optional | Dropdown options for the panel's **Race Control** field |
+| `Race Control` | optional | Dropdown options for the panel's **Race Control** field. `RED FLAG` and `SPLIT` write fixed texts that must be listed here, see [below](#texts-the-product-writes) |
 | `Flag` | optional | Dropdown options for the panel/Companion **race-condition flag** (Green/Yellow/Safety Car/Full Course Yellow/Red/…). Shown color-coded in the HUD; hidden when unset. Distinct from the country flag (which derives from `Round Bottom`/Country) |
 | `Cue Preset` | optional | Quick-cue presets for the director text-cue channel |
 | `BG Color` *(or `BG Colour`/`Background Color`/`Background Colour`)* | optional | Per-team tile background colour: any plain CSS colour (`#C00000`, `rgb(0,80,160)`, `white`); implausible values are ignored |
@@ -117,11 +117,29 @@ Teams                  | Number | Brand Key | Stints  | Streamers          | Ses
 Sample Team Alpha #11  | 11     | porsche   | Stint 1 | Sample Commentator | Practice      | GREEN        | Stand by       | Green Flag
 Sample Team Bravo #22  | 22     | bmw       | Stint 2 | Second Commentator | Qualifying    | YELLOW       | Wrap in 30s    | Yellow Flag
 Sample Team Charlie #33| 33     | ferrari   | Stint 3 |                    | Race          | SAFETY CAR   | Throw to break | Safety Car
+                       |        |           |         |                    |               | Red Flag - Race Suspended |   | Full Course Yellow
+                       |        |           |         |                    |               | Driver Swaps |                | Red Flag
 ```
 
 The vocabulary columns (`Stints`/`Streamers`/`Session`/`Race Control`/`Flag`/`Cue Preset`)
 are independent lists: blanks are skipped and duplicates dropped. See
 [Configuration](Configuration#google-sheet-configuration-tab-columns).
+
+#### Texts the product writes
+
+The relay refuses a Setup value that the matching vocabulary column does not list
+(`not in the Configuration vocabulary`). Some buttons write a fixed text, so the column
+must contain it exactly as spelled here:
+
+| Column | Text | Written by |
+|---|---|---|
+| `Race Control` | `Red Flag - Race Suspended` | `RED FLAG` on the Director Panel, the Companion board and the Race Control desk |
+| `Race Control` | `Driver Swaps` | `SPLIT` on the Director Panel and the Companion board |
+| `Flag` | `Green Flag`, `Yellow Flag`, `Safety Car`, `Full Course Yellow`, `Red Flag` | the Companion flag buttons |
+
+A missing text does not stop the rest of the press: the Standby Cover or the Splitscreen
+still switches, only the banner or flag write fails with that error. Clearing a banner
+needs no entry. The template's `Configuration.csv` lists all of these.
 
 The canonical flag states ship default HUD colors: `Green Flag`, `Yellow Flag`,
 `Double Yellow`, `Safety Car`, `Full Course Yellow`, `Code 60`, `Red Flag`,
