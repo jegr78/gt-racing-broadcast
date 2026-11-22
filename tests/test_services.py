@@ -340,6 +340,29 @@ def t_daemon_bundle_env_does_not_mutate_the_input():
     assert out["TMPDIR"] == "/new"
 
 
+
+def t_relay_identity_prefers_the_recorded_start_then_the_command_line():
+    relay_cmd = (True, "python3 /x/src/relay/racecast-feeds.py --http-port 8088")
+    other_cmd = (True, "python3 some_other_tool.py")
+    def ident(recorded, now, probe, windows=False):
+        return sv.relay_identity(4242, recorded, started=lambda pid: now, probe=lambda pid: probe,
+                                 windows=windows)
+    assert ident("t1", "t1", other_cmd) == "relay", "the recorded start identifies it"
+    assert ident("t1", "t2", relay_cmd) == "other", "a recycled PID started at another time"
+    assert ident("t1", None, relay_cmd) == "relay", "no start marker: the command line decides"
+    assert ident(None, "t2", other_cmd) == "other"
+    assert ident(None, None, (False, "")) == "unknown", "a failed probe is unknown, not 'no relay'"
+    assert ident(None, None, (True, '"python.exe","4242"'), windows=True) == "relay", \
+        "Windows tasklist names only the image"
+    assert ident("t1", "t9", (True, '"python.exe","4242"'), windows=True) == "other", \
+        "a recycled python PID on Windows is no relay once the start differs"
+    assert sv.pid_is_relay(4242) in (True, False)
+
+
+def t_process_probe_failure_is_reported():
+    ok, _text = sv._pid_probe(os.getpid())
+    assert ok, "probing this process works"
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp:
         for name, fn in sorted(globals().items()):

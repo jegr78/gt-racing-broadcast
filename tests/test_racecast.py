@@ -2725,7 +2725,7 @@ def t_relay_stop_releases_obs_feeds_after_kill():
     try:
         with contextlib.redirect_stdout(io.StringIO()):
             m.relay_stop([])
-        assert calls == [("stop_pid", m.sv.pid_is_relay), "obs"], \
+        assert calls == [("stop_pid", m._relay_is_target), "obs"], \
             "the relay stop must verify process identity before killing (#102)"
     finally:
         m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds = old

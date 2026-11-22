@@ -775,7 +775,12 @@ def _running_relay_mode():
         return ""
 
 def _write_relay_profile_stamp():
-    """Stamp the active profile and the mode as the relay's, just before spawn."""
+    """Stamp the active profile and the mode as the relay's, just before spawn; the
+    previous relay's start marker goes."""
+    try:
+        os.remove(_relay_start_path())
+    except OSError:
+        pass  # no marker from an earlier relay
     path = _relay_profile_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -783,8 +788,39 @@ def _write_relay_profile_stamp():
     with open(_relay_mode_path(), "w", encoding="utf-8") as fh:
         fh.write(_relay_run_mode())
 
+def _relay_start_path():
+    """The relay process's start marker (simulation.process_started), next to relay.pid,
+    so a recycled PID is not taken for the relay."""
+    return os.path.join(_runtime_base_dir(), "relay.started")
+
+
+def _record_relay_start(pid):
+    marker = simulation.process_started(pid)
+    if marker:
+        with open(_relay_start_path(), "w", encoding="utf-8") as fh:
+            fh.write(marker)
+
+
+def _recorded_relay_start():
+    try:
+        with open(_relay_start_path(), encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def _relay_identity(pid):
+    """"relay", "other" or "unknown" for the PID file's process (services.relay_identity)."""
+    return sv.relay_identity(pid, _recorded_relay_start())
+
+
+def _relay_is_target(pid):
+    """Whether `relay stop` may signal `pid`: only a process proven to be the relay."""
+    return _relay_identity(pid) == "relay"
+
+
 def _clear_relay_profile_stamp():
-    for path in (_relay_profile_path(), _relay_mode_path()):
+    for path in (_relay_profile_path(), _relay_mode_path(), _relay_start_path()):
         try:
             os.remove(path)
         except OSError:
@@ -2797,7 +2833,7 @@ def _relay_start_signals():
     alive = sv.pid_alive(pid)
     own = len(set(port_pids)) == 1 and alive and pid in port_pids
     return {"port_pids": port_pids,
-            "pidfile_relay": bool(alive and sv.pid_is_relay(pid)),
+            "pidfile_relay": bool(alive and _relay_identity(pid) != "other"),
             "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
@@ -2858,6 +2894,7 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
         started = time.monotonic()
         wait_for(_settled, verify_s)
         if up:
+            _record_relay_start(pid)
             return pid
         reason = relay_boot_failure_line(_relay_boot_log_since(offset))
         # A slow startup may still be fetching Sheet tabs. Reap this owned
@@ -5387,7 +5424,7 @@ def relay_stop(rest):
         _clear_relay_profile_stamp()        # no relay -> no running-profile stamp
         print("relay is not running.")
         return
-    if sv.stop_pid(pid, _relay_pid_path(), is_target=sv.pid_is_relay):
+    if sv.stop_pid(pid, _relay_pid_path(), is_target=_relay_is_target):
         _clear_relay_profile_stamp()
         print("relay stopped.")
         _release_obs_feeds()                # AFTER the kill, see docstring
@@ -7377,7 +7414,7 @@ def _simulated_freeport(ports):
     (its PID file, stamped simulation, a relay process); it never kills a port holder it
     cannot prove is its own. Returns the exit code."""
     pid = sv.read_pid(_relay_pid_path())
-    if sv.pid_alive(pid) and sv.pid_is_relay(pid) and _running_relay_mode() == "simulation":
+    if sv.pid_alive(pid) and _relay_identity(pid) == "relay" and _running_relay_mode() == "simulation":
         print(f"simulation: stopping this install's simulation relay (PID {pid}) to free "
               f"its ports instead of killing port holders.")
         relay_stop([])

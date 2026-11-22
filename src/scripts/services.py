@@ -3,6 +3,8 @@ Pure decision logic (read_pid, pid_alive, status_line) is separated from process
 side effects (start_detached, stop_pid, tail) so it unit-tests without spawning."""
 import os, signal, subprocess, sys, time
 
+import simulation
+
 
 def read_pid(pid_path):
     """Int PID stored in pid_path, or None if missing/empty/garbage."""
@@ -283,29 +285,47 @@ def looks_like_relay(probe_output, windows=False):
     return False
 
 
-def _pid_cmdline(pid):
-    """Lowercase-able process text for `pid`: the full command line on POSIX, the
-    tasklist CSV (image name only) on Windows. '' when the probe fails / PID gone."""
+def _pid_probe(pid):
+    """(ok, text) for `pid`: the full command line on POSIX, the tasklist CSV (image
+    name only) on Windows. ok is False when the probe itself failed."""
     if os.name == "nt":
-        try:
-            return subprocess.check_output(
-                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
-                stderr=subprocess.DEVNULL, text=True, errors="replace",
-                **no_window_kwargs())
-        except (subprocess.SubprocessError, OSError):
-            return ""
+        argv = ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"]
+        kwargs = no_window_kwargs()
+    else:
+        argv, kwargs = ["ps", "-p", str(pid), "-o", "command="], {}
     try:
-        return subprocess.check_output(
-            ["ps", "-p", str(pid), "-o", "command="],
-            stderr=subprocess.DEVNULL, text=True, errors="replace")
+        return True, subprocess.check_output(argv, stderr=subprocess.DEVNULL, text=True,
+                                             errors="replace", **kwargs)
+    except subprocess.CalledProcessError as exc:
+        return exc.returncode == 1 and os.name != "nt", ""   # ps exits 1 for a gone PID
     except (subprocess.SubprocessError, OSError):
-        return ""
+        return False, ""
 
 
-def pid_is_relay(pid):
+def _pid_cmdline(pid):
+    """Lowercase-able process text for `pid`; '' when the probe fails / PID gone."""
+    return _pid_probe(pid)[1]
+
+
+def relay_identity(pid, recorded_start=None, started=None, probe=None, windows=None):
+    """"relay", "other" or "unknown" for the process `pid`. A start marker recorded when
+    the relay started decides when the OS still reports one; otherwise the command line
+    does, and a probe that fails is "unknown"."""
+    windows = os.name == "nt" if windows is None else windows
+    if recorded_start:
+        now = (started or simulation.process_started)(pid)
+        if now is not None:
+            return "relay" if now == recorded_start else "other"
+    ok, text = (probe or _pid_probe)(pid)
+    if not ok:
+        return "unknown"
+    return "relay" if looks_like_relay(text, windows=windows) else "other"
+
+
+def pid_is_relay(pid, recorded_start=None):
     """True only if `pid` is actually our relay daemon. Guards stop_pid against a
     stale/recycled PID file the same way stop-streams.py's pid_is_feed does."""
-    return looks_like_relay(_pid_cmdline(pid), windows=(os.name == "nt"))
+    return relay_identity(pid, recorded_start) == "relay"
 
 
 def _signal_stop(pid, force):

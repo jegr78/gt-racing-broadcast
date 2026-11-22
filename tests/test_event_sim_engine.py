@@ -592,6 +592,11 @@ def t_the_control_center_sees_the_engine_relay():
             assert fh.read() == "simulation"
         with open(os.path.join(rt, "relay.profile"), encoding="utf-8") as fh:
             assert fh.read() == "demo"
+        stack.stamp_relay(home, os.getpid())
+        mark = stack.simulation.process_started(os.getpid())
+        if mark:
+            with open(os.path.join(rt, "relay.started"), encoding="utf-8") as fh:
+                assert fh.read() == mark, "the start marker lets the CLI tell the relay from a recycled PID"
 
 
 def t_tracebacks_in_a_log_are_hard():

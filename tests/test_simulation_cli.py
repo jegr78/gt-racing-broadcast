@@ -412,7 +412,8 @@ def t_relay_mode_stamp_round_trip():
 def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
     killed, stopped = [], []
     seams = ((m, "streams_status_data", lambda: []), (m.sv, "read_pid", lambda p: 4242),
-             (m.sv, "pid_alive", lambda pid: pid_alive), (m.sv, "pid_is_relay", lambda pid: is_relay),
+             (m.sv, "pid_alive", lambda pid: pid_alive),
+             (m, "_relay_identity", lambda pid: "relay" if is_relay else "other"),
              (m.pt, "pids_on_port", lambda port: [4242, 777]), (m.pt, "kill_pid", killed.append),
              (m.sv, "stop_pid", lambda pid, path=None, **k: stopped.append(pid) or True),
              (m, "_running_relay_mode", lambda: mode), (m, "_release_obs_feeds", lambda: None))
@@ -424,6 +425,38 @@ def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
         except SystemExit as exc:
             code = exc.code
     return killed, stopped, code, out.getvalue()
+
+
+def t_relay_identity_uses_the_start_recorded_next_to_the_pid_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = []
+        with _patched((m, "_runtime_base_dir", lambda: tmp),
+                      (m.sv, "relay_identity", lambda pid, recorded: seen.append((pid, recorded)) or "relay"),
+                      (m.simulation, "process_started", lambda pid: "start-77")):
+            m._record_relay_start(4242)
+            assert m._relay_identity(4242) == "relay" and seen == [(4242, "start-77")], seen
+            m._clear_relay_profile_stamp()
+            m._relay_identity(4242)
+            assert seen[-1] == (4242, None), "the marker goes with the stamps"
+            m._record_relay_start(4242)
+            with _patched((m, "_active_profile_name", lambda: "demo")):
+                m._write_relay_profile_stamp()
+            m._relay_identity(4242)
+            assert seen[-1] == (4242, None), "a new start drops the old relay's marker"
+
+
+def t_start_signals_treat_an_unknown_process_as_a_relay():
+    for identity, expected in (("relay", True), ("unknown", True), ("other", False)):
+        with _patched((m.pt, "pids_on_port", lambda port: []), (m.sv, "read_pid", lambda p: 4242),
+                      (m.sv, "pid_alive", lambda pid: True), (m, "_relay_identity", lambda pid, _i=identity: _i),
+                      (m, "_running_relay_profile", lambda: "demo"), (m, "_running_relay_mode", lambda: "simulation")):
+            assert m._relay_start_signals()["pidfile_relay"] is expected, identity
+
+
+def t_relay_stop_signals_only_a_proven_relay():
+    for identity, target in (("relay", True), ("unknown", False), ("other", False)):
+        with _patched((m, "_relay_identity", lambda pid, _i=identity: _i)):
+            assert m._relay_is_target(4242) is target, identity
 
 
 def t_simulated_freeport_acts_only_on_its_own_simulation_relay():
@@ -478,7 +511,7 @@ def t_force_record_ties_pid_to_its_start_and_is_released_on_exit():
 def t_process_start_marker():
     p = subprocess.Popen([sys.executable, "-c", "pass"]); p.wait()
     assert sim.process_started(p.pid) is None, "a gone process has no start marker"
-    if sys.platform.startswith("linux") or sys.platform == "darwin":
+    if sys.platform.startswith("linux") or sys.platform in ("darwin", "win32"):
         mark = sim.process_started(os.getpid())
         assert mark and mark == sim.process_started(os.getpid()), mark
 

@@ -31,6 +31,7 @@ import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
 import ports  # noqa: E402
 import probes  # noqa: E402
+import simulation  # noqa: E402
 import sheet_sim  # noqa: E402
 import stream_stub  # noqa: E402
 import webhook_sink  # noqa: E402
@@ -62,11 +63,13 @@ def port_map(feeds, control):
 
 
 def stamp_relay(home, pid):
-    """Write the PID file and the profile and mode stamps `relay start` would, so the
-    Control Center in this app home sees the relay that `relay run` started."""
+    """Write the PID file, the profile and mode stamps and the start marker `relay start`
+    would, so the Control Center in this app home sees the relay that `relay run` started."""
     runtime = os.path.join(home, "runtime")
     os.makedirs(runtime, exist_ok=True)
-    for name, text in (("relay.pid", str(pid)), ("relay.profile", PROFILE), ("relay.mode", "simulation")):
+    marker = simulation.process_started(pid)
+    stamps = [("relay.pid", str(pid)), ("relay.profile", PROFILE), ("relay.mode", "simulation")]
+    for name, text in stamps + ([("relay.started", marker)] if marker else []):
         with open(os.path.join(runtime, name), "w", encoding="utf-8") as fh:
             fh.write(text)
 

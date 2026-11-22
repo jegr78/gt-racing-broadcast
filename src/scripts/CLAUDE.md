@@ -187,7 +187,12 @@ never the real one.
   `relay.pid` and the stamps. `relay_start_plan` answers `refuse` (no kill, no reuse) while
   the PID file names a live relay process of the other mode, on any control port (a
   simulation relay may run on `RACECAST_SIM_RELAY_PORT`), so neither start overwrites the
-  other's PID file and stamps; `pidfile_relay` keeps a recycled PID from blocking. A
+  other's PID file and stamps. `runtime/relay.started` holds the relay's
+  `simulation.process_started` marker (also on Windows, from `GetProcessTimes`), written
+  after a verified start and dropped with the stamps; `services.relay_identity` compares it
+  first and falls back to the command line, so a recycled PID is "other" (the start heals,
+  `relay stop` never signals it) and a failed probe is "unknown" (it still blocks a start
+  across modes, but `relay stop` does not signal it). A
   simulation start also refuses an unstamped port holder and never kills it; a stale stamp
   with a dead relay heals as before. `event start` runs the same plan before it launches
   anything; `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop`

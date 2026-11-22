@@ -266,10 +266,36 @@ def is_channel(value, environ=None):
     return active(environ) and isinstance(value, str) and bool(CHANNEL_RE.match(value.strip()))
 
 
+def _windows_started(pid):
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        code = wintypes.DWORD()
+        if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value != 259:
+            return None                                       # 259: STILL_ACTIVE
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return None
+        return str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def process_started(pid):
     """An opaque start marker for `pid` so a reused pid is not mistaken for it, or None
-    where the OS gives none (Windows) or the process is gone."""
+    when the process is gone or the OS does not answer."""
     try:
+        if os.name == "nt":
+            return _windows_started(pid)
         if sys.platform.startswith("linux"):
             with open(f"/proc/{int(pid)}/stat", encoding="utf-8", errors="replace") as fh:
                 return fh.read().rsplit(")", 1)[1].split()[19]
@@ -277,7 +303,7 @@ def process_started(pid):
             out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))],
                                  capture_output=True, text=True, errors="replace", timeout=5)
             return out.stdout.strip() or None
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+    except (OSError, ValueError, IndexError, AttributeError, subprocess.SubprocessError):
         return None
     return None
 
