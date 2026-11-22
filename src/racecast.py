@@ -45,6 +45,7 @@
   racecast status                            # aggregate health of all services
   racecast profile   list | show [<name>] | use <name> | new <name> [--from <source>] | export <name> [--no-assets] [--out PATH] | import <file> [--force]
   racecast --profile <name> <command>        # run one command against a non-active profile
+  racecast --simulation [--force] <command>  # rehearse against simulated parties (RACECAST_SIM_*): no OBS, Discord, Companion, Tailscale or Funnel
   racecast chat      clear | pull <ip> [--port N] | import <file> | export [--out PATH]
   racecast report                            # generate the post-event report (last session) -> runtime/<profile>/reports/
   racecast report send [FILE]                # send the newest (or given) report to the league Discord as an attachment
@@ -62,7 +63,7 @@
   racecast update [--check] [--yes] [--tag TAG]   # self-update the binary (--tag installs an exact release)
   racecast --version
 """
-import glob, io, json, os, re, shutil, sys, tempfile, threading, time, webbrowser, zipfile
+import atexit, contextlib, glob, io, json, os, re, shutil, sys, tempfile, threading, time, webbrowser, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Adapters (added in later tasks) import sibling modules from scripts/ at module
@@ -78,6 +79,7 @@ import services as sv
 import init_setup as ins
 import config as pcfg    # 'pcfg' (not 'cfg'): avoids F811 clash with local `cfg = json.loads(...)` dicts elsewhere in this file
 import http_util
+import simulation   # RACECAST_SIMULATION: skipped launches, loopback endpoints
 import profile_admin as pa
 import chat_admin as ca
 import console_auth as cpa
@@ -329,6 +331,7 @@ def _apply_profile_env(rc, environ=None):
         else:
             environ.pop(key, None)
     environ.update(values)
+    environ.update(simulation.env_overrides(environ))
     environ[PROFILE_ENV_MARKER] = ",".join(sorted(values))
 
 def _apply_active_profile_env():
@@ -617,7 +620,10 @@ def _script_invocation(rel, args, frozen, base=None):
     if frozen:
         base = base if base is not None else _src_base(True, getattr(sys, "_MEIPASS", ""), HERE)
         return ("inprocess", os.path.join(base, *rel.split("/")), list(args))
-    return ("subprocess", [sys.executable, os.path.join(HERE, *rel.split("/"))] + list(args), None)
+    script = os.path.join(HERE, *rel.split("/"))
+    if simulation.active():
+        return ("subprocess", simulation.guarded_argv(sys.executable, script, list(args)), None)
+    return ("subprocess", [sys.executable, script] + list(args), None)
 
 def _run_module(path, args):
     """Load a bundled script by file path and run its main() with patched argv.
@@ -753,18 +759,42 @@ def _running_relay_dir():
     slug = _running_relay_profile()
     return _profile_runtime(_runtime_base_dir(), slug) if slug else _runtime_dir()
 
+def _relay_mode_path():
+    return os.path.join(_runtime_base_dir(), "relay.mode")
+
+def _relay_run_mode():
+    """The mode a relay started now runs in: "simulation" or "live"."""
+    return "simulation" if simulation.active() else "live"
+
+def _running_relay_mode():
+    """The running relay's mode from its stamp, "" for no stamp (no relay or an older one)."""
+    try:
+        with open(_relay_mode_path(), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
 def _write_relay_profile_stamp():
-    """Stamp the active profile as the relay's running profile, just before spawn."""
+    """Stamp the active profile and the mode as the relay's, just before spawn."""
     path = _relay_profile_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(_active_profile_name() or "")
+    with open(_relay_mode_path(), "w", encoding="utf-8") as fh:
+        fh.write(_relay_run_mode())
 
 def _clear_relay_profile_stamp():
-    try:
-        os.remove(_relay_profile_path())
-    except OSError:
-        pass  # no stamp to clear, already gone
+    for path in (_relay_profile_path(), _relay_mode_path()):
+        try:
+            os.remove(path)
+        except OSError:
+            pass  # no stamp to clear, already gone
+
+def _refuse_live_relay_in_simulation():
+    """A simulated stop never touches a relay that runs outside simulation mode."""
+    if simulation.active() and _running_relay_mode() != "simulation":
+        sys.exit("racecast: the running relay is a live relay, not a simulation one. "
+                 "Stop it without --simulation.")
 
 def _event_title_path():
     """The active profile's persisted event-title file (#207). The relay's
@@ -1410,9 +1440,7 @@ def _discord_voice_target():
     sheet_val = ""
     sid = os.environ.get("RACECAST_SHEET_ID", "")
     if sid:
-        from urllib.parse import quote
-        url = ("https://docs.google.com/spreadsheets/d/{}/gviz/tq?tqx=out:csv&sheet={}"
-               .format(sid, quote(discord_rpc.CONFIG_TAB)))
+        url = simulation.sheet_csv_url(sid, discord_rpc.CONFIG_TAB)
         try:
             sheet_val = discord_rpc.discord_voice_from_csv(
                 http_util.get_bytes(url, timeout=8).decode("utf-8"))
@@ -1438,6 +1466,9 @@ def discord_cmd(rest):
                 os.environ.get("RACECAST_DISCORD_CLIENT_SECRET")):
             print("discord app: no DISCORD_CLIENT_ID/SECRET in this league's profile.env")
         return 0
+    if simulation.active():
+        print(simulation.skipped(f"discord {verb}"))
+        return 0
     client = _discord_voice_client()
     if verb == "leave":
         ok, note = client.leave()
@@ -1458,6 +1489,9 @@ def _discord_autojoin_enabled(env):
 
 def _discord_autojoin():
     """Best-effort voice join during event start, never fatal, secrets stay quiet."""
+    if simulation.active():
+        print(simulation.skipped("discord voice auto-join"))
+        return
     if not _discord_autojoin_enabled(os.environ):
         return
     if not (os.environ.get("RACECAST_DISCORD_CLIENT_ID") and
@@ -1488,6 +1522,9 @@ def _discord_autoleave():
     """Best-effort voice leave during event stop. The counterpart to the event-start
     auto-join. Never fatal. Unlike join it needs no channel target (leave just sends
     SELECT_VOICE_CHANNEL with a null channel)."""
+    if simulation.active():
+        print(simulation.skipped("discord voice auto-leave"))
+        return
     if not _discord_autoleave_enabled(os.environ):
         return
     if not (os.environ.get("RACECAST_DISCORD_CLIENT_ID") and
@@ -2212,6 +2249,9 @@ def funnel_cmd(rest):
     import tailscale as ts
     if not rest or rest[0] not in ("on", "off"):
         sys.exit("usage: racecast funnel {on|off} [--force]")
+    if simulation.active():
+        print(simulation.skipped(f"funnel {rest[0]}"))
+        return None
     enable = rest[0] == "on"
     binary, _state, _ip = ts.tailscale_backend()
     if not binary:
@@ -2453,6 +2493,8 @@ def backup_cmd(rest):
 
 
 def _tailscale_ip():
+    if simulation.active():
+        return None
     try:
         import tailscale
         return tailscale.detect_tailscale_ip()
@@ -2462,6 +2504,8 @@ def _tailscale_ip():
 
 def _tailscale_magicdns():
     """This machine's MagicDNS name (the public Funnel host), or '' if unavailable."""
+    if simulation.active():
+        return ""
     try:
         import tailscale
         return tailscale.detect_magicdns_name()
@@ -2590,7 +2634,7 @@ def _event_title_sanitizer():
     return _EVENT_TITLE_SANITIZER
 
 
-def relay_status_data(read_pid=None, alive=None, probe=None):
+def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
     """Structured relay state: one source for `racecast status` (text) and the
     Control Center's /api/status (JSON). `probe` returns the relay's /status dict or
     None. Injection points are for tests."""
@@ -2603,7 +2647,8 @@ def relay_status_data(read_pid=None, alive=None, probe=None):
     awake = status.get("keep_awake") if isinstance(status, dict) else None
     return {"pid": pid, "alive": is_alive, "port": RELAY_PORT,
             "http_ok": status is not None,
-            "keep_awake": awake if isinstance(awake, dict) else None}
+            "keep_awake": awake if isinstance(awake, dict) else None,
+            "mode": ((mode or _running_relay_mode)() or "live") if is_alive else None}
 
 
 def _relay_status_probe():
@@ -2673,7 +2718,8 @@ def _frozen_child_env():
 
 
 def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
-                     running_profile, active_profile, http_ok):
+                     running_profile, active_profile, http_ok, running_mode="",
+                     active_mode="live"):
     """Pure: decide what `relay start` must do, from the gathered signals.
 
     Returns (action, kill_pids, reason):
@@ -2682,7 +2728,9 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
               "heal"    a defect (orphan / split-brain / wrong-profile / dead-PID /
                         not-responding) -> kill kill_pids, then start fresh
       kill_pids  sorted union of the 8088 + feed-port holders (heal only, else [])
-      reason     short plain-language defect string (heal only, else "")
+              "refuse"  the holder runs in the other mode (simulation vs live): never
+                        kill or reuse it, the operator stops it
+      reason     short plain-language defect string (heal and refuse, else "")
 
     An EMPTY/unknown running_profile counts as a mismatch (heal): a current-binary
     relay always writes its stamp, so a stampless holder is a pre-stamp/old daemon.
@@ -2690,6 +2738,14 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
     port_set = set(port_pids)
     if not port_set:
         return ("start", [], "")
+    simulated = active_mode == "simulation"
+    if simulated != (running_mode == "simulation"):
+        if simulated:
+            return ("refuse", [], f"port {RELAY_PORT} is held by a relay outside simulation "
+                                  f"mode. Stop it first: racecast relay stop")
+        if pidfile_alive and pidfile_pid in port_set:   # a stale stamp alone never blocks
+            return ("refuse", [], "a simulation relay is running. Stop it first: "
+                                  "racecast relay stop")
     single = len(port_set) == 1
     ours = single and pidfile_alive and (pidfile_pid in port_set)
     if ours and http_ok and running_profile and running_profile == active_profile:
@@ -2725,6 +2781,8 @@ def _relay_start_signals():
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
+            "running_mode": _running_relay_mode(),
+            "active_mode": _relay_run_mode(),
             "http_ok": _relay_responds(own) if port_pids else False}
 
 
@@ -2850,6 +2908,8 @@ def relay_start(rest):
     signals = _relay_start_signals()
     pid = signals["pidfile_pid"]
     action, kill_pids, reason = relay_start_plan(**signals)
+    if action == "refuse":
+        sys.exit(f"racecast: {reason}")
     if action == "running":
         print(f"relay already running (pid {pid}).")
         if stint:
@@ -2889,6 +2949,8 @@ def relay_start(rest):
     newpid = _spawn_relay_verified(argv)
     if newpid is None:
         return None                   # honest failure already reported; never claim success
+    if simulation.active() and os.environ.get(simulation.FORCE):
+        _hold_simulation_force(newpid)
     print(f"relay started (pid {newpid}). Watch it: racecast relay logs -f")
     _append_tailscale_snapshot()
     _refresh_obs_pages(wait=0)    # relay already confirmed up -> refresh OBS pages now
@@ -3015,6 +3077,9 @@ def app_launch_cmd(rest):
     name = rest[0] if rest else None
     if name not in APP_CONTROLLED:
         sys.exit(f"usage: racecast app launch {{{'|'.join(APP_CONTROLLED)}}}")
+    if simulation.active():
+        print(simulation.skipped(name))
+        return
     ev = _event_modules()[0]
     cmd = ev.launch_command(name, sys.platform)
     if cmd is None:
@@ -3051,6 +3116,9 @@ def app_quit_cmd(rest):
     name = rest[0] if rest else None
     if name not in APP_CONTROLLED:
         sys.exit(f"usage: racecast app quit {{{'|'.join(APP_CONTROLLED)}}}")
+    if simulation.active():
+        print(simulation.skipped(name))
+        return
     ev = _event_modules()[0]
     cmd = ev.quit_command(name, sys.platform)
     if cmd is None:
@@ -3124,9 +3192,7 @@ CHANNEL_TAB = "Channel"               # single-event platform (YT/Twitch)
 
 
 def _gviz_csv_url(sheet_id, tab):
-    from urllib.parse import quote
-    return ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=%s"
-            % (sheet_id, quote(tab)))
+    return simulation.sheet_csv_url(sheet_id, tab)
 
 
 def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
@@ -5292,6 +5358,8 @@ def _release_obs_feeds():
 
 def relay_stop(rest):
     pid = sv.read_pid(_relay_pid_path())
+    if sv.pid_alive(pid):
+        _refuse_live_relay_in_simulation()
     if not sv.pid_alive(pid):
         if os.path.exists(_relay_pid_path()):
             os.remove(_relay_pid_path())
@@ -5410,6 +5478,9 @@ def _companion_stop_linux(cc, cl, unit):
 
 
 def companion_start(rest):
+    if simulation.active():
+        print(simulation.skipped("companion"))
+        return
     cc = _companion()
     import companion_linux as cl
     if not sys.platform.startswith("win") and sys.platform != "darwin":
@@ -5471,6 +5542,9 @@ def companion_start(rest):
     return
 
 def companion_stop(rest):
+    if simulation.active():
+        print(simulation.skipped("companion"))
+        return
     cc = _companion()
     import companion_linux as cl
     if not sys.platform.startswith("win") and sys.platform != "darwin":
@@ -5818,11 +5892,18 @@ def _event_sections(ev, pf):
     """Gather all event-day facts and classify them into report sections."""
     # Apps
     import discord_web
-    obs_running = ev.app_running("obs")
-    discord_web_mode = discord_web.use_web(sys.platform, os.environ)
-    apps = [ev.classify_app("obs", obs_running),
-            ev.classify_app("discord", ev.app_running("discord"), web=discord_web_mode),
-            ev.classify_tailscale(_tailscale_ip())]
+    sim = simulation.active()
+    obs_running = _obs_up(ev)
+    def skip(name):
+        return ev.Result(ev.INFO, name, simulation.SKIPPED)
+    if sim:
+        apps = [ev.Result(ev.PASS, "OBS", "simulated OBS answering") if obs_running
+                else skip("OBS"), skip("Discord"), skip("Tailscale")]
+    else:
+        discord_web_mode = discord_web.use_web(sys.platform, os.environ)
+        apps = [ev.classify_app("obs", obs_running),
+                ev.classify_app("discord", ev.app_running("discord"), web=discord_web_mode),
+                ev.classify_tailscale(_tailscale_ip())]
     # Scene-collection line: only probe obs-websocket when OBS is actually up
     # (no point paying the connect timeout otherwise). Best effort: a broken
     # probe must never traceback the readiness report.
@@ -5839,11 +5920,14 @@ def _event_sections(ev, pf):
     alive = sv.pid_alive(pid)
     services = [ev.classify_relay(alive, _relay_http_ok() if alive else False, RELAY_PORT)]
     try:
-        cc = _companion()
-        supported = _companion_cmds(cc) is not None
-        services.append(ev.classify_companion(
-            _companion_running(cc) if supported else False, supported,
-            "" if supported else _companion_unsupported_msg()))
+        if sim:
+            services.append(skip("Companion"))
+        else:
+            cc = _companion()
+            supported = _companion_cmds(cc) is not None
+            services.append(ev.classify_companion(
+                _companion_running(cc) if supported else False, supported,
+                "" if supported else _companion_unsupported_msg()))
     except Exception as exc:
         services.append(ev.Result(ev.WARN, "Companion", f"check failed: {exc}"))
     # Assets: a broken probe must never traceback the report.
@@ -6502,6 +6586,8 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
     Raises OSError like Popen; returns the note it printed ("" when the app is
     still alive).
     """
+    if simulation.active():
+        raise OSError(f"{app} not launched in simulation mode")
     if app == "obs" and not _wait_for_obs_exit():
         raise OSError("OBS is still running or shutting down after 30 seconds; "
                       "no second instance started. Wait for OBS to exit and try again")
@@ -6525,6 +6611,9 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
 def _event_launch(ev, app, popen=None, sleep=None):
     """Best-effort GUI-app launch: report and continue on every failure path.
     Returns True iff a launch was actually attempted."""
+    if simulation.active():
+        print(simulation.skipped(app))
+        return False
     import install_apps
     if not install_apps.app_present(app, sys.platform):
         print(f"{app}: not installed. Run `racecast install-apps`.")
@@ -6580,6 +6669,9 @@ def _tailscale_connect(ev=None):
     answers (macOS: the backend only lives while the app runs); never runs `up`
     in NeedsLogin: that would trigger the interactive browser login. Shared by
     `racecast tailscale up` and `racecast event start`; returns the tailnet IP or None."""
+    if simulation.active():
+        print(simulation.skipped("tailscale"))
+        return None
     import tailscale as ts
     binary, state, ip = ts.tailscale_backend()
     if ts.plan_tailscale_up(state) == "launch-app":
@@ -6616,10 +6708,13 @@ def _tailscale_connect(ev=None):
 
 
 def tailscale_up_cmd(_rest):
-    raise SystemExit(0 if _tailscale_connect() else 1)
+    raise SystemExit(0 if _tailscale_connect() or simulation.active() else 1)
 
 
 def tailscale_down_cmd(_rest):
+    if simulation.active():
+        print(simulation.skipped("tailscale"))
+        return
     import tailscale as ts
     binary, state, _ip = ts.tailscale_backend()
     if state != "Running":
@@ -6643,6 +6738,15 @@ def tailscale_status_cmd(_rest):
     else:
         print(f"Tailscale: {state}. Run `racecast tailscale up` to connect.")
     _append_tailscale_snapshot()
+
+
+def _obs_up(ev):
+    """Whether OBS is there to talk to: the process, or in simulation the simulated
+    OBS WebSocket answering."""
+    if not simulation.active():
+        return ev.app_running("obs")
+    import obs_ws
+    return obs_ws.wait_until_ready(timeout=0)[0]
 
 
 OBS_READY_TIMEOUT_S = 30      # OBS loading a big scene collection is not quick
@@ -6824,6 +6928,9 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # self-heal and would otherwise surface as black sources / unresolved feeds
     # mid-broadcast. WARNs (stale cookies, missing media) do not block. `--force`
     # skips the gate for a deliberate degraded start.
+    action, _kill, reason = relay_start_plan(**_relay_start_signals())
+    if action == "refuse":   # before any launch: the relay start would refuse anyway
+        sys.exit(f"racecast: {reason}")
     if "--force" not in rest:
         blockers = ev.gate_blockers(_event_gate_results(ev, pf))
         if blockers:
@@ -6833,11 +6940,12 @@ def event_start(rest, _autojoin=True, _new_session=True):
             for r in blockers:
                 print(pf.fmt_result(r, color))
             raise SystemExit(1)
+    sim = simulation.active()
     # 1. Tailscale: connect a stopped backend; launch the app when needed.
-    if _tailscale_connect(ev) is None:
+    if _tailscale_connect(ev) is None and not sim:
         print("tailscale: continuing local-only (OBS keeps working).")
     # 2. Discord
-    if ev.app_running("discord"):
+    if not sim and ev.app_running("discord"):
         print("discord: already running.")
     else:
         _event_launch(ev, "discord")
@@ -6847,8 +6955,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # pause (#1038). The short bound keeps a hung OBS from holding up bring-up; the
     # late check after the launches below still runs.
     early_collection = None      # None = step 2b did not reach OBS
-    if ev.app_running("obs") and _wait_for_obs_ready(timeout=OBS_EARLY_READY_TIMEOUT_S,
-                                                     early=True):
+    if _obs_up(ev) and _wait_for_obs_ready(timeout=OBS_EARLY_READY_TIMEOUT_S, early=True):
         early_collection = _align_scene_collection(relay_up=_relay_http_ok)
     # 3. Relay (before OBS, see docstring). A takeover forwards --stint so the feeds
     # start at the stint on air right now, --qualifying brings the stack up in
@@ -6909,7 +7016,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         if _mm:
             print("WARNING: " + _mm)
     # 4. OBS
-    if ev.app_running("obs"):
+    if not sim and ev.app_running("obs"):
         print("obs: already running.")
     else:
         _event_launch(ev, "obs")
@@ -6924,13 +7031,16 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # dynamic probes are waited on; static problems never self-heal.
     import install_apps
     probes = {"relay": _relay_http_ok}
-    if install_apps.app_present("obs", sys.platform):
+    if sim:
+        if simulation.obs_target():
+            probes["obs"] = lambda: _obs_up(ev)
+    elif install_apps.app_present("obs", sys.platform):
         probes["obs"] = lambda: ev.app_running("obs")
     # Companion is an Electron app, so its HTTP server takes a few seconds to
     # come up. Wait for it too, or the readiness report below races the launch
     # and prints a spurious "Companion: not running" right after starting it.
     cc = _companion()
-    if _companion_cmds(cc) is not None:   # controllable on this OS (not Linux)
+    if not sim and _companion_cmds(cc) is not None:   # controllable on this OS (not Linux)
         probes["companion"] = lambda: _companion_running(cc)
     print("\nWaiting for the launched services to come up (max 60 s)…")
     for name, up in sorted(ev.wait_until_up(probes).items()):
@@ -6939,7 +7049,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # the relay is up. On by default, since the Funnel is the preferred path.
     # Best-effort: a funnel failure (e.g. missing nodeAttr) must never abort the
     # event; print one concise line.
-    if _funnel_auto_enabled():
+    if sim or _funnel_auto_enabled():
         try:
             funnel_cmd(["on"])
         except SystemExit as exc:
@@ -6983,6 +7093,8 @@ def event_stop(rest):
     the live relay), overwriting/re-sending a strictly worse report. So a stop with no
     live relay only ends the driver invite, the drivers' requests and the public timing
     link, and nudges the relay's timing host. The good report stands."""
+    if _relay_is_alive():
+        _refuse_live_relay_in_simulation()
     try:
         _stop_driver_invite()          # the invite link dies with the event
     except OSError as exc:
@@ -7056,6 +7168,9 @@ def event_takeover(rest):
     port = _takeover_port(args)
     stint_tokens = _stint_args(args)        # validates 1-based int (sys.exit on bad)
     stint_override = int(stint_tokens[1]) if stint_tokens else None
+    if simulation.active() and (funnel or not simulation.is_loopback_host(host)):
+        sys.exit("racecast: a simulated takeover reads producer A on 127.0.0.1, "
+                 "never over the tailnet or the Funnel.")
 
     secret = _active_console_secret() if funnel else None
     if funnel and not secret:
@@ -7247,11 +7362,13 @@ def freeport_cmd(rest):
     relay_alive = _relay_is_alive()
     static_alive = {int(f["label"]) for f in streams_status_data()
                     if f["alive"] and str(f["label"]).isdigit()}
+    live_relay = simulation.active() and relay_alive and _running_relay_mode() != "simulation"
     refused = False
     for port in chosen:
         pids = pt.pids_on_port(port)
         owner = freeport_owner(port, relay_alive, static_alive)
-        action, found = pt.decide_free(pids, owned=bool(owner), force=force)
+        action, found = pt.decide_free(pids, owned=bool(owner),
+                                       force=force and not (live_relay and owner == "relay"))
         shown = ", ".join(str(p) for p in found)
         if action == "clear":
             print(f"port {port}: already free")
@@ -7259,8 +7376,12 @@ def freeport_cmd(rest):
             refused = True
             who = "relay" if owner == "relay" else "static streams"
             stop = "racecast relay stop" if owner == "relay" else "racecast streams stop"
-            print(f"port {port}: held by the running {who} (PID {shown}). "
-                  f"{stop}, or re-run with --force")
+            if live_relay and owner == "relay":
+                print(f"port {port}: held by a live relay (PID {shown}). Simulation mode "
+                      f"never frees it: {stop}")
+            else:
+                print(f"port {port}: held by the running {who} (PID {shown}). "
+                      f"{stop}, or re-run with --force")
         else:
             for pid in found:
                 pt.kill_pid(pid)
@@ -7291,6 +7412,8 @@ def fonts_cmd(rest):
 
 
 def _radio_tts_key():
+    if simulation.active():
+        return ""
     value = os.environ.get("RACECAST_GCLOUD_TTS_KEY", "")
     if value:
         return value
@@ -7476,6 +7599,9 @@ def update_check_data(fetch=None, current=None, platform=None, frozen=None):
         return out
     if os.environ.get("RACECAST_UPDATE_CHECK") == "0":
         out["note"] = "update check off (RACECAST_UPDATE_CHECK=0)"
+        return out
+    if simulation.active():
+        out["note"] = "update check " + simulation.SKIPPED
         return out
     try:
         release = (fetch or upd.fetch_latest)()
@@ -7796,7 +7922,8 @@ def ui_status_payload(relay=None, companion=None, streams=None, tailscale=None,
             "streams": (streams or streams_status_data)(),
             "tailscale_ip": (tailscale or _tailscale_ip)(),
             "cookies": (cookies or cookies_status_data)(),
-            "apps_running": (apps_running or running_apps_data)()}
+            "apps_running": (apps_running or running_apps_data)(),
+            "simulation": simulation.active()}
 
 
 _resource_monitor = None
@@ -7878,7 +8005,6 @@ def producer_schedule_data(fetch=None, self_name=None, refresh_env=None):
 
     Tolerant: any fetch/parse failure returns empty rows (the card hides), never
     raises. `fetch`/`self_name`/`refresh_env` are test seams."""
-    from urllib.parse import quote
     import producer as prod
     import tailscale as ts
     (refresh_env or _apply_active_profile_env)()
@@ -7891,8 +8017,7 @@ def producer_schedule_data(fetch=None, self_name=None, refresh_env=None):
     # when the Part column mixes text + numbers (an empty/"Q" qualifying label
     # beside numbered parts), merges the header into row 1 -> parse_producer_rows
     # finds no header and returns [] -> this card silently hides. (erf-nls: 4 rows.)
-    url = ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&headers=1&sheet=%s"
-           % (sheet_id, quote(PRODUCER_TAB)))
+    url = simulation.sheet_csv_url(sheet_id, PRODUCER_TAB, headers=True)
     try:
         text = (fetch or _producer_fetch)(url)
         rows = prod.parse_producer_rows(text)
@@ -10486,6 +10611,221 @@ def init_cmd(rest):
     raise SystemExit(code)
 
 
+SIMULATION_EXEMPT = ("profile", "help", "-h", "--help", "--version", "-V")
+
+
+def _apply_simulation_flag(argv, environ=None):
+    """Consume a global `--simulation` and turn the mode on for this process and its
+    children; the machine .env may set RACECAST_SIMULATION and RACECAST_SIM_* too.
+    In the mode, a `--force` before the command is the profile override. Returns
+    (argv, force)."""
+    environ = os.environ if environ is None else environ
+    machine = pcfg.load_machine_env(_env_base(IS_FROZEN, _real_executable(), HERE))
+    for key, value in machine.items():
+        if key == simulation.FLAG or key.startswith("RACECAST_SIM_") and key != simulation.FORCE:
+            environ.setdefault(key, value)
+    out = [a for a in argv if a != "--simulation"]
+    if len(out) != len(argv):
+        environ[simulation.FLAG] = "1"
+    force = False
+    if simulation.active(environ):
+        head = 0
+        while head < len(out) and out[head].startswith("-"):
+            head += 1
+        force = "--force" in out[:head]
+        out = [a for a in out[:head] if a != "--force"] + out[head:]
+    return out, force
+
+
+def _simulation_profile_values(name):
+    try:
+        return pcfg.parse_profile(_env_base(IS_FROZEN, _real_executable(), HERE), name)
+    except (OSError, pcfg.ProfileError):
+        return {}
+
+
+def _simulation_force_dir():
+    return os.path.join(_runtime_base_dir(), "simulation-force")
+
+
+def _force_holder(pid):
+    return {"pid": pid, "started": simulation.process_started(pid)}
+
+
+def _holder_alive(holder):
+    """The holder's process still runs, and is the same process where the OS can tell."""
+    if not isinstance(holder, dict) or not sv.pid_alive(holder.get("pid")):
+        return False
+    started = holder.get("started")
+    return started is None or simulation.process_started(holder["pid"]) in (None, started)
+
+
+FORCE_LOCK_WAIT_S = 2.0      # how long a force-record update waits for the lock
+FORCE_LOCK_STALE_S = 10.0    # a lock older than this was left by a crashed process
+FORCE_IO_RETRIES = 10        # Windows refuses a replace while another process reads
+
+
+@contextmanager
+def _force_lock(force_dir):
+    """Serialize force-record updates across processes with an O_EXCL lock file."""
+    os.makedirs(force_dir, exist_ok=True)
+    lock = os.path.join(force_dir, ".lock")
+    deadline = time.monotonic() + FORCE_LOCK_WAIT_S
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(lock) > FORCE_LOCK_STALE_S:
+                    os.remove(lock)
+                    continue
+            if time.monotonic() >= deadline:
+                raise OSError(f"force record lock {lock} is held") from None
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(lock)
+
+
+def _retry_io(fn, *args):
+    for _ in range(FORCE_IO_RETRIES - 1):
+        try:
+            return fn(*args)
+        except FileNotFoundError:
+            raise
+        except PermissionError:
+            time.sleep(0.05)
+    return fn(*args)
+
+
+def _load_force_record(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _read_force_record(path):
+    """The record, or None when it is missing or malformed. Other OSErrors raise."""
+    try:
+        record = _retry_io(_load_force_record, path)
+    except (FileNotFoundError, ValueError):
+        return None
+    ok = isinstance(record, dict) and isinstance(record.get("holders"), list)
+    return record if ok else None
+
+
+def _write_force_record(path, record):
+    """Keep only live holders; a record without one is removed. Call under the lock."""
+    record["holders"] = [h for h in record["holders"] if _holder_alive(h)]
+    if not record["holders"]:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        return None
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(record, fh)
+    _retry_io(os.replace, tmp, path)
+    return record
+
+
+def _prune_simulation_force(force_dir):
+    if not os.path.isdir(force_dir):
+        return
+    with _force_lock(force_dir):
+        for path in glob.glob(os.path.join(force_dir, "*.json")):
+            record = _read_force_record(path)
+            if record is None:
+                with contextlib.suppress(OSError):
+                    os.remove(path)
+            else:
+                _write_force_record(path, record)
+
+
+def _release_simulation_force(path, pid):
+    """Drop `pid` as a holder of the pass in `path` (the forcing run's normal exit)."""
+    with contextlib.suppress(OSError), _force_lock(os.path.dirname(path)):
+        record = _read_force_record(path)
+        if record is not None:
+            record["holders"] = [h for h in record["holders"] if h.get("pid") != pid]
+            _write_force_record(path, record)
+
+
+def _grant_simulation_force(name, environ, force_dir):
+    """Record this forced run so its children pass for `name` while it, or a relay it
+    started, lives."""
+    import secrets
+    nonce = secrets.token_hex(16)
+    with contextlib.suppress(OSError):
+        _prune_simulation_force(force_dir)
+    path = os.path.join(force_dir, nonce + ".json")
+    with _force_lock(force_dir):
+        _write_force_record(path, {"profile": name, "holders": [_force_holder(os.getpid())]})
+    atexit.register(_release_simulation_force, path, os.getpid())
+    environ[simulation.FORCE] = f"{name}:{nonce}"
+
+
+def _force_record_path(environ, force_dir):
+    name, _, nonce = (environ.get(simulation.FORCE) or "").partition(":")
+    if not (name and re.fullmatch(r"[0-9a-f]{32}", nonce)):
+        return None, None
+    return name, os.path.join(force_dir, nonce + ".json")
+
+
+def _hold_simulation_force(pid, environ=None, force_dir=None):
+    """A relay started under a pass keeps it alive, so its own `event stop` passes."""
+    environ = os.environ if environ is None else environ
+    force_dir = force_dir or _simulation_force_dir()
+    name, path = _force_record_path(environ, force_dir)
+    if not path:
+        return
+    with _force_lock(force_dir):
+        record = _read_force_record(path)
+        if record is not None and record.get("profile") == name:
+            record["holders"].append(_force_holder(pid))
+            _write_force_record(path, record)
+
+
+def _simulation_forced_profile(environ, force_dir):
+    """The profile an inherited RACECAST_SIM_FORCE allows, or None. It counts only while
+    a holder of its record (the forcing run or its relay) is alive. Raises OSError when
+    the record exists but cannot be read."""
+    with contextlib.suppress(OSError):
+        _prune_simulation_force(force_dir)
+    name, path = _force_record_path(environ, force_dir)
+    record = _read_force_record(path) if path else None
+    if record is None or record.get("profile") != name:
+        return None
+    return name if any(_holder_alive(h) for h in record["holders"]) else None
+
+
+def _simulation_gate(argv, environ=None, profile=None, values=None, force=False,
+                     force_dir=None):
+    """In simulation mode: None when this command may run, else why not. A forced run
+    (`racecast --simulation --force ...`) grants its children a pass for its profile,
+    valid while it runs. A subcommand's own `--force` does not count."""
+    environ = os.environ if environ is None else environ
+    if simulation.flag_problem(environ):
+        return "simulation mode: " + simulation.flag_problem(environ) + "."
+    if not simulation.active(environ) or argv[:1] and argv[0] in SIMULATION_EXEMPT:
+        return None
+    problems = simulation.problems(environ)
+    if problems:
+        return "simulation mode: " + "; ".join(problems) + "."
+    name = _active_profile_name() if profile is None else profile
+    force_dir = force_dir or _simulation_force_dir()
+    if name and force:
+        _grant_simulation_force(name, environ, force_dir)
+        return None
+    values = _simulation_profile_values(name) if values is None and name else (values or {})
+    try:
+        forced = _simulation_forced_profile(environ, force_dir)
+    except OSError as exc:
+        return f"simulation mode: the force record could not be read ({exc}); no pass granted."
+    return simulation.profile_refusal(name, values, forced)
+
+
 def _bootstrap(argv):
     """Shared process startup for BOTH binaries: the `racecast` CLI (main) and the
     windowed `racecast-ui` launcher (racecast_ui.main). It lives in one place on
@@ -10508,11 +10848,18 @@ def _bootstrap(argv):
     _ensure_ssl_certs()
     _ensure_tool_path()    # Finder/Dock launch truncates PATH past Homebrew (#38)
     argv, profile = pa.split_profile_flag(argv)
+    argv, sim_force = _apply_simulation_flag(argv)
     global _telemetry_launch_profile
     _telemetry_launch_profile = profile if argv[:2] == ["telemetry", "ui"] else None
     if profile and _telemetry_launch_profile is None:
         os.environ["RACECAST_PROFILE"] = profile   # M3 consumers read this
     _apply_active_profile_env()   # inject the active profile's sheet config for children
+    refusal = _simulation_gate(argv, force=sim_force)
+    if refusal:
+        raise ValueError(refusal)
+    if simulation.install_network_guard():
+        os.environ.update(simulation.with_stream_bin(os.environ))
+        os.environ.update(simulation.env_overrides())
     return argv
 
 
@@ -11321,6 +11668,8 @@ def _smoke_finish(results, tools, sources, minutes, as_json, lines, cleared=None
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] and argv[0].startswith("_radio-"):
+        simulation.install_network_guard()   # private workers return before _bootstrap
     if argv[:1] == ["_radio-model-check"]:
         from driver_radio_models import main as model_check
         return model_check(argv[1:])

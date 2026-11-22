@@ -23,9 +23,11 @@ import json
 import os
 import socket
 import struct
+import sys
 import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))   # obs_ws imports its siblings
 _spec = importlib.util.spec_from_file_location(
     "obs_ws", os.path.join(ROOT, "src", "scripts", "obs_ws.py"))
 obs_ws = importlib.util.module_from_spec(_spec)

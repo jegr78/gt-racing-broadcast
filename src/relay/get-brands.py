@@ -13,8 +13,15 @@ stem always lines up. Never stored under src/, never committed.
 Usage: python3 get-brands.py [--out DIR] [--sheet-id ID] [--brands-tab NAME]
 """
 import argparse, csv, io, os, re, sys
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _cand in (os.path.join(_HERE, "..", "scripts"),
+              os.path.join(getattr(sys, "_MEIPASS", _HERE), "src", "scripts")):
+    if os.path.isdir(_cand) and _cand not in sys.path:
+        sys.path.insert(0, _cand)
+import simulation  # noqa: E402  (stdlib-only Sheet origin + network guard)
 
 # Header names located case-insensitively, first match wins. The KEY column holds
 # the brand text; the LOGO column holds the Drive share link.
@@ -151,8 +158,7 @@ def brands_dir(here):
 
 def fetch_brands_csv(sheet_id, tab, timeout=15):
     """Fetch the Brands tab as CSV via the public gviz endpoint (no API key)."""
-    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-           f"/gviz/tq?tqx=out:csv&sheet={quote(tab)}")
+    url = simulation.sheet_csv_url(sheet_id, tab)
     req = Request(url, headers={"User-Agent": "racecast-brands/1.0"})
     with urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", "replace")

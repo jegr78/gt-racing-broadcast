@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path,PurePosixPath
 
 import http_util
+import simulation
 from driver_radio_process import temporary_directory
 
 MODELS={
@@ -36,6 +37,7 @@ def target(system=None,machine=None):
 
 
 def download(url,checksum,maximum,open_url=http_util.open_url):
+    if simulation.active():raise ValueError('Model download '+simulation.SKIPPED)
     deadline=time.monotonic()+DOWNLOAD_DEADLINE_S
     raw=bytearray()
     with open_url(url,timeout=30) as response:

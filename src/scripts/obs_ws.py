@@ -33,8 +33,11 @@ import threading
 import time
 import urllib.parse
 
+import simulation
+
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"   # RFC 6455 magic
 DEFAULT_PORT = 4455
+SIM_OBS_OFF = f"OBS {simulation.SKIPPED}: no {simulation.OBS_WS} endpoint"
 RELAY_PORTS = (53001, 53002, 53003)
 CLOSE_DRAIN_TIMEOUT_S = 1.0   # max seconds to wait for OBS's close echo before closing the socket
 
@@ -513,10 +516,16 @@ def _connect(host, port, password, timeout):
     """(session, "") or (None, reason). Host, port and password fall back to the
     RACECAST_OBS_WS_* overrides, then OBS's own obs-websocket config. Never
     raises."""
-    cfg = read_ws_config(default_config_path())
-    host, port = resolve_obs_target(host, port, os.environ, cfg)
-    if password is None:
-        password = find_password(os.environ, default_config_path())
+    if simulation.active():
+        target = simulation.obs_target()
+        if target is None:
+            return None, SIM_OBS_OFF
+        (host, port), password = target, password or ""
+    else:
+        cfg = read_ws_config(default_config_path())
+        host, port = resolve_obs_target(host, port, os.environ, cfg)
+        if password is None:
+            password = find_password(os.environ, default_config_path())
     try:
         return _open_session(host, port, password, timeout), ""
     except OSError:
@@ -1801,6 +1810,8 @@ def wait_until_ready(timeout=30.0, interval=1.0, host="127.0.0.1", port=None,
     the page refresh and the Standby switch inside that window and silently skipped
     all three. Best effort: never raises.
     """
+    if simulation.active() and simulation.obs_target() is None:
+        return False, SIM_OBS_OFF
     probe = _probe_ready if probe is None else probe
     deadline = clock() + timeout
     note = ""

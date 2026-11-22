@@ -20,6 +20,7 @@
   <nav class="sidebar">
     <div class="brand">
       <div><div class="brandname">Control Center</div>
+        <span class="sim-badge" id="sim-badge" hidden title="Simulation mode: OBS, Discord, Companion, Tailscale and the Funnel are skipped; every endpoint is a loopback stand-in">SIMULATION</span>
         <div class="brandsub" id="active-profile-badge" title="Active league profile. Click to manage" onclick="showView('profile')"><img id="active-profile-logo" class="pflogo" alt="" hidden onerror="this.hidden=true"><span id="active-profile-name">—</span></div>
         <span class="ver" id="ver"></span>
         <span class="ver-note" id="ver-note" onclick="checkUpdate(true)" title="Check for updates"></span></div></div>
@@ -1685,6 +1686,7 @@ async function refresh() {
   lastStatus = s;
   $('linux-admin-actions').hidden = !(s.os || '').startsWith('linux');
   $('ver').textContent = s.version;
+  $('sim-badge').hidden = !s.simulation;
   const relayUp = s.relay.alive;
   setBadge('relay', relayUp, 'RUNNING', 'stopped',
     relayUp ? relayDetail(s.relay) : '');

@@ -124,6 +124,72 @@ environment before dispatching to:
   best-effort: any failure prints one notice and the stop continues.
   It also exposes a scene-collection check/switch (`GetSceneCollectionList` / `SetCurrentSceneCollection`): `racecast obs collection [set]`, a warning during `racecast event start`, a line in `racecast event status`, and the Control Center's OBS row. `racecast event start` auto-switches OBS to the active profile's collection by default (`RACECAST_OBS_COLLECTION_SWITCH=0` restores the old warn-only behaviour), safe because `set_scene_collection` reads the stream and record status first and never switches under a live output; `event takeover` inherits it. The switch runs before the page-refresh hook (it rebuilds every source). The manual `racecast obs collection set` and the Control Center OBS-row button remain the explicit fallback. `racecast event start` also parks OBS on the **Standby** scene after the collection check and the forced page-refresh (Director Guide: start on Standby, then Start Streaming), default-on (`RACECAST_OBS_STANDBY_ON_START=0` opts out); it is best-effort and **never cuts a live program**, the switch is skipped when OBS output is already active (`obs_ws.switch_to_scene_if_idle`), which also makes a mid-event `event takeover` onto a streaming OBS a no-op. The canonical product name is `EXPECTED_SCENE_COLLECTION` (`GT Racing Endurance`), which mirrors the `name` field of `src/obs/GT_Racing_Endurance.json`; a localized per-league collection defaults to `GT Racing Endurance — <league>` (`PRODUCT_COLLECTION_PREFIX` + the profile name, unless the profile sets `OBS_COLLECTION`), so several leagues keep separate collections in one OBS. `racecast obs collection set` switches to the active profile's expected name.
 
+## Simulation mode (`simulation.py`, #1228)
+`RACECAST_SIMULATION=1` or the global `racecast --simulation` (consumed in `_bootstrap` by
+`_apply_simulation_flag`, which also copies `RACECAST_SIMULATION`/`RACECAST_SIM_*` from the
+machine `.env`) is a rehearsal of the shipped product against simulated parties; the
+event-sim tool (#1227) builds on it. `simulation.py` is stdlib-only because the relay and
+the `get-*` scripts import it. It fails closed: an unset or non-loopback endpoint is off,
+never the real one.
+- Endpoints: `RACECAST_SIM_SHEET_URL` (required) replaces the origin
+  `https://docs.google.com/spreadsheets/d/<id>` of every fetched Sheet URL
+  (`sheet_base`/`sheet_csv_url`; `tests/test_simulation.py` fails on a Sheet URL built
+  anywhere else); `RACECAST_SIM_STREAM_BIN` (required) is put first on `PATH` so
+  `yt-dlp`/`streamlink` resolve to stand-ins (`stand_in_present`: `.exe` on Windows, where
+  a bare-name call skips a `.bat` and would run the real tool); `RACECAST_SIM_OBS_WS` (`ws://127.0.0.1:<port>`,
+  read in `obs_ws._connect`, no password; unset = OBS off, `wait_until_ready` returns at
+  once); `RACECAST_SIM_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL` replace the
+  league values in `config.resolve_config` (`config_overrides`), which also blanks Discord
+  OAuth/voice and the timing host keys; `env_overrides` does the same for the env vars
+  (`_apply_profile_env`, `_bootstrap`, the relay's `simulation_startup`), so a value from
+  the shell or the machine `.env` cannot leak through.
+- Skips print `<what>: skipped (simulation).` at the leaves, so CLI and Control Center
+  jobs report alike: `_event_launch`, `app launch|quit`, `_tailscale_connect`,
+  `tailscale down`, `_tailscale_ip`/`_tailscale_magicdns` (None), `companion_start/stop`,
+  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check. `_gui_spawn`
+  refuses outright. `_obs_up` replaces the OBS process check with the simulated
+  WebSocket, and `_event_sections` lists OBS/Discord/Tailscale/Companion as INFO. A
+  takeover in simulation accepts only a loopback host, never `--funnel`.
+- `_simulation_gate` refuses a missing endpoint and a profile other than `demo` or one
+  with `SIMULATION=1` in its `profile.env`. Only a `--force` before the command
+  (`racecast --simulation --force <group> ...`, consumed by `_apply_simulation_flag`)
+  passes it. `_grant_simulation_force` writes `runtime/simulation-force/<nonce>.json`
+  (profile + holders, each a pid with its process start time where the OS gives one) and
+  sets `RACECAST_SIM_FORCE=<profile>:<nonce>`; a child passes only while that record
+  matches and a holder is alive (`_simulation_forced_profile`), so a stale export or a
+  reused pid does not. The granting run drops itself at exit (`atexit`), `relay start`
+  adds the relay it spawned (`_hold_simulation_force`) so the relay's own `event stop`
+  still passes, and every check prunes records without a live holder. Every
+  read-modify-write runs under `_force_lock` (an `O_CREAT|O_EXCL` lock file, broken after
+  `FORCE_LOCK_STALE_S`), `os.replace` retries a Windows sharing violation, and the gate
+  ignores prune failures but refuses the pass when the record cannot be read. The machine `.env` never supplies it. A subcommand's own `--force`
+  keeps its old meaning. `profile`, `help`
+  and `--version` are exempt.
+- Driver Radio and AI: `env_overrides` blanks `RACECAST_GCLOUD_TTS_KEY`/`STT_KEY` and
+  `RACECAST_TS_API_KEY`, `_radio_tts_key` never falls back to the `.env` file,
+  `ai_agents.Adapter.probe` reports `simulation` and `invocation` raises, and
+  `driver_radio_models.download` refuses. `ai_agents.execution_env` keeps
+  `RACECAST_SIMULATION`, and `driver_radio_process.run_process` and
+  `driver_radio_voice_process.Owned` start Python workers through `guard_python_argv`; the
+  frozen `_radio-*` entrypoints install the guard before they dispatch.
+- `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`.
+  `relay_start_plan` answers `refuse` (no kill, no reuse) when the port holder runs in the
+  other mode, and a simulation start never kills an unstamped holder. A live start
+  refuses only while the stamped simulation relay is alive and holds the port; a stale
+  stamp heals as before. `event start` runs the same plan before it launches anything;
+  `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop` before it
+  touches a live relay, and a simulated `freeport --force` never frees a live relay's
+  ports. `relay_status_data` carries `mode`.
+- `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
+  getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
+  It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every
+  subprocess script through `guarded_argv` so the one-shots run behind it too. It covers
+  Python only: ffmpeg and the stream stand-ins are outside it. The one documented local
+  exception is read-only `tailscale status`/`tailscale ip` probes (relay funnel watch and
+  bind detection, Control Center status rows); `--bind auto` still binds 127.0.0.1 only. Real parties on loopback (OBS 4455, Companion, the
+  Discord client) are kept out by the skips above, `obs_ws._connect` and the relay's
+  `_companion_off`, not by the guard.
+
 ## GT7 telemetry modules (solo POV, epic #785)
 `gt7_track_definitions` stores validated machine-wide world-anchor overrides separately
 from supplied definitions. Derived analysis joins the current snapshot without changing

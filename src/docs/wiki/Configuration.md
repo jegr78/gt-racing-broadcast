@@ -164,6 +164,11 @@ RACECAST_PROFILE=
   in `RACECAST_MIC`), so voice and picture stay in sync.
 - **`RACECAST_MIC_GAIN_DB`** *(optional)*: the mic's level in that mix relative to the
   game sound, in dB (default `0`, range -20 to +20).
+- **`RACECAST_SIMULATION`** *(optional, default off)*: `1` turns on
+  [simulation mode](Run-an-event#rehearse-in-simulation-mode), a rehearsal against
+  simulated parties, configured with the `RACECAST_SIM_*` variables listed there. On is
+  `1`, `true`, `yes` or `on`, off is empty, `0`, `false`, `no` or `off`; any other value
+  stops racecast with an error instead of running for real.
 - **`RACECAST_UI_PASSWORD`** *(reserved)*: for the future Control-Center-over-Tailscale
   feature; not read by any current version, leave commented out.
 

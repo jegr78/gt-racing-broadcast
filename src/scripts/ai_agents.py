@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import gt7_context
+import simulation
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,6 +92,7 @@ ENV_KEYS = {
     "HTTPS_PROXY",
     "HTTP_PROXY",
     "NO_PROXY",
+    "RACECAST_SIMULATION",
 }
 
 
@@ -365,6 +367,9 @@ class Adapter:
             manual_models=True,
             guidance="Install the provider CLI externally and configure its executable.",
         )
+        if simulation.active():
+            out.update(status="simulation", guidance="AI agents are off in simulation mode.")
+            return out
         if not self.executable:
             return out
         if any(env.get(k) for k in AUTH_ENV[self.provider]):
@@ -517,6 +522,8 @@ class Adapter:
 
     def invocation(self, package, output, schema, probe, model=None):
         """Fail closed; caller must re-probe immediately before spawning."""
+        if simulation.active():
+            raise AgentError("simulation", "AI agents are off in simulation mode")
         model = self.check_execution(probe, model)
         package, output, schema = (
             Path(package).resolve(),

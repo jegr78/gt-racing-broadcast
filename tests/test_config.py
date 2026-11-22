@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the profile-aware config resolver.
 Run: python3 tests/test_config.py"""
-import importlib.util, os, tempfile
+import importlib.util, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 spec = importlib.util.spec_from_file_location(
     "racecast_config", os.path.join(ROOT, "src", "scripts", "config.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)

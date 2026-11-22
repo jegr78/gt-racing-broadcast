@@ -86,3 +86,15 @@ description = "Fake publish-key fixture in the timing host Worker tests"
 condition = "AND"
 paths = ['''tests/timing-host/worker_test\.js''']
 regexes = ['''publish-key-1(-long-enough)?''']
+
+# src/scripts/simulation.py names the simulation-mode env variable
+# RACECAST_SIM_DISCORD_WEBHOOK_URL; the discord-client-secret rule reads that
+# variable name as a secret value.
+[[allowlists]]
+description = "Simulation-mode env variable name in src/scripts/simulation.py (not a secret)"
+condition = "AND"
+regexTarget = "line"
+paths = ['''src/scripts/simulation\.py''']
+regexes = [
+  '''DISCORD_WEBHOOK_URL = "RACECAST_SIM_DISCORD_WEBHOOK_URL"''',
+]

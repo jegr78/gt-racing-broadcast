@@ -15,6 +15,8 @@ m._announce_takeover = lambda *a, **k: None
 # event start/stop must never touch the invite a running event on this machine holds.
 _INVITE_DIR = tempfile.mkdtemp(prefix="racecast-invite-")
 m._driver_invite_path = lambda: os.path.join(_INVITE_DIR, "driver-invite.json")
+# Nor read the mode stamp of a relay that runs on this machine.
+m._running_relay_mode = lambda: ""
 
 
 def t_frozen_child_env_moves_the_extraction_dir_out_of_os_temp():
@@ -3127,7 +3129,8 @@ def t_sync_live_telemetry_record_never_raises():
 def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
     """Stub every signal relay_start_plan reads; returns a restore callable."""
     saved = (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
-             m._running_relay_profile, m._active_profile_name)
+             m._running_relay_profile, m._active_profile_name, m._running_relay_mode)
+    m._running_relay_mode = lambda: "live" if running else ""
     m.pt.pids_on_port = lambda port: list(port_pids) if port == m.RELAY_PORT else []
     m.sv.read_pid = lambda path: pidfile_pid
     m.sv.pid_alive = lambda pid: pid is not None
@@ -3137,7 +3140,7 @@ def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
 
     def restore():
         (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
-         m._running_relay_profile, m._active_profile_name) = saved
+         m._running_relay_profile, m._active_profile_name, m._running_relay_mode) = saved
     return restore
 
 

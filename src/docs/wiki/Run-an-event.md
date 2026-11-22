@@ -51,6 +51,62 @@ their scene goes active.
 > the panel; see [Director](Director#event-title)). At a producer takeover, the
 > incoming machine pulls the on-air title from producer A automatically.
 
+## Rehearse in simulation mode
+
+`racecast --simulation event start` (or `RACECAST_SIMULATION=1` in the environment or
+the machine `.env`) runs the same bring-up, relay, Control Center and console pages
+against simulated parties instead of the real ones. A Control Center started with
+`racecast --simulation ui` passes the mode on to its Start event, Stop event and
+Takeover buttons, and shows a SIMULATION badge under its title while the mode is on.
+
+A rehearsal needs the simulated parties as well: the event-sim tool under
+`tools/event-sim/` in a source checkout of the repository provides them. The tool does
+not ship in the release package, and without its endpoints simulation mode refuses to
+start.
+
+- Event start, stop and takeover do not launch OBS, Discord or Companion and do not
+  touch Tailscale or the Funnel. Each step prints `skipped (simulation)` in the job log,
+  and the readiness report lists those rows as INFO.
+- Every external endpoint comes from a loopback variable. An endpoint that is unset is
+  off, it never falls back to the real one:
+
+  | Variable | Stands in for | Required |
+  |---|---|---|
+  | `RACECAST_SIM_SHEET_URL` | `https://docs.google.com/spreadsheets/d/<SHEET_ID>`; tabs are read from `<url>/gviz/tq?tqx=out:csv&sheet=<Tab>` | yes |
+  | `RACECAST_SIM_STREAM_BIN` | a directory holding stand-ins for `yt-dlp` and `streamlink` (`.exe` on Windows), put first on `PATH` | yes |
+  | `RACECAST_SIM_OBS_WS` | the OBS WebSocket, as `ws://127.0.0.1:<port>`, no password | no |
+  | `RACECAST_SIM_SHEET_PUSH_URL` | the league `SHEET_PUSH_URL` | no |
+  | `RACECAST_SIM_DISCORD_WEBHOOK_URL` | the league `DISCORD_WEBHOOK_URL` | no |
+
+  Each value must point at `127.0.0.1` or `localhost`, and it replaces the league value
+  whichever file or shell set that.
+- Off in simulation mode: the league's Discord login and voice channel, the timing
+  host, the Director's Companion buttons, the update check, Driver Radio's cloud speech
+  (the Google text-to-speech and speech-to-text keys are blanked), the AI agent CLIs
+  (analysis, Race Engineer and Live AI answers) and every model download.
+- The racecast Python processes (CLI, Control Center, relay, the scripts they start and
+  the Driver Radio workers) refuse any connection that is not loopback. External programs
+  such as ffmpeg, the stream stand-ins and the local speech models are outside that
+  guard and get no network endpoint from racecast.
+- A simulation relay and a live relay never replace each other: `relay start` and
+  `event start` refuse while the other kind holds the control port, and a simulated
+  `relay stop` or `event stop` refuses a live relay. Stop the other one first.
+- The relay's default `--bind auto` binds `127.0.0.1` only, so a rehearsal relay is
+  never reachable on the tailnet. The one local exception is read-only: the relay and
+  the Control Center status rows still run `tailscale status`/`tailscale ip` to read
+  this machine's state, and never change it.
+- A Schedule cell may name a simulated stream as `sim://<name>`; outside simulation
+  mode that value is invalid.
+- The mode runs on the `demo` profile or on a profile whose `profile.env` sets
+  `SIMULATION=1`. Any other profile needs `--force` in the global position,
+  `racecast --simulation --force <command>`, because the run writes that profile's
+  runtime state (driver codes, chat, timing). The processes it starts inherit the pass
+  for that one profile, and only while the forcing command, the Control Center or the
+  relay it started runs; a
+  `RACECAST_SIM_FORCE` from the machine `.env` or a shell export does not count. A command's own `--force`
+  (`event start --force` skips the pre-flight gate) keeps its usual meaning and does not
+  override the profile check.
+
 ## Before you go live
 
 Plan **about 30 minutes** for these steps before the broadcast slot. Do them from
