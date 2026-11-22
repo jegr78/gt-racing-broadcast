@@ -1,0 +1,215 @@
+openapi: 3.0.3
+info:
+  title: racecast league service
+  version: 1.0.0-draft
+  description: >
+    Endpoints a league's management service implements. The racecast relay calls them;
+    the service never calls the relay. Fields are only ever added. Receivers ignore
+    fields they do not know.
+servers:
+  - url: https://league.example/racecast
+    description: The profile's LEAGUE_SERVICE_URL
+security:
+  - leagueKey: []
+paths:
+  /v1/event:
+    get:
+      summary: The event behind a reference, with its races in order and the widgets this service offers
+      parameters:
+        - { name: ref, in: query, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: Event description
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventInfo" }
+  /v1/live:
+    post:
+      summary: The live race state; the answer carries the current widget values
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LiveState" }
+      responses:
+        "200":
+          description: Current widget values
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WidgetValues" }
+  /v1/result:
+    post:
+      summary: The final classification; a resend for the same ref and race replaces the draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Result" }
+      responses:
+        "200":
+          description: Result status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResultStatus" }
+    get:
+      summary: Status of a result sent earlier
+      parameters:
+        - { name: ref, in: query, required: true, schema: { type: string, maxLength: 128 } }
+        - { name: race, in: query, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: Result status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResultStatus" }
+components:
+  securitySchemes:
+    leagueKey:
+      type: http
+      scheme: bearer
+  schemas:
+    Widget:
+      type: object
+      required: [id, title, form]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9-]{1,32}$" }
+        title: { type: string, maxLength: 60 }
+        form: { type: string, enum: [score, table] }
+        sample: { $ref: "#/components/schemas/WidgetValue" }
+    EventInfo:
+      type: object
+      required: [v, races, widgets]
+      properties:
+        v: { type: integer, enum: [1] }
+        title: { type: string, maxLength: 80 }
+        races:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            type: object
+            required: [race]
+            properties:
+              race: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+              title: { type: string, maxLength: 60 }
+        widgets:
+          type: array
+          maxItems: 8
+          items: { $ref: "#/components/schemas/Widget" }
+    WidgetValue:
+      type: object
+      description: >
+        For form score: values. For form table: rows and the optional value_title.
+        provisional marks a value that may still change, for example before penalties.
+      properties:
+        provisional: { type: boolean }
+        values:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [label, value]
+            properties:
+              label: { type: string, maxLength: 40 }
+              value: { type: string, maxLength: 16 }
+        value_title: { type: string, maxLength: 16 }
+        rows:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            required: [rank, name, value]
+            properties:
+              rank: { type: integer, minimum: 1 }
+              name: { type: string, maxLength: 40 }
+              value: { type: string, maxLength: 16 }
+    WidgetValues:
+      type: object
+      required: [v, widgets]
+      properties:
+        v: { type: integer, enum: [1] }
+        widgets:
+          type: object
+          description: Widget id to its current value. A missing id keeps its last value until it expires.
+          additionalProperties: { $ref: "#/components/schemas/WidgetValue" }
+    Lap:
+      type: object
+      properties:
+        entry: { type: string }
+        driver: { type: string }
+        team: { type: string }
+        ms: { type: integer }
+    Row:
+      type: object
+      required: [pos, entry, driver]
+      properties:
+        pos: { type: integer, minimum: 1 }
+        entry: { type: string }
+        number: { type: string }
+        driver: { type: string, description: The roster's name, verbatim }
+        driver_ref: { type: string, description: The service's own driver id; empty for now }
+        team: { type: string, description: The roster's team label, verbatim }
+        class: { type: string }
+        class_pos: { type: integer }
+        laps: { type: integer }
+        gap_s: { type: number, nullable: true, description: Race gap to the leader, null for a lapped car }
+        interval_s: { type: number, nullable: true, description: Race gap to the car ahead }
+        gap_ms: { type: integer, nullable: true, description: Qualifying gap to the best lap }
+        interval_ms: { type: integer, nullable: true }
+        lapped: { type: integer }
+        status: { type: string }
+        pit_stops: { type: integer }
+        last_lap_ms: { type: integer, nullable: true }
+        best_ms: { type: integer, nullable: true }
+        finished: { type: boolean }
+    LiveState:
+      type: object
+      required: [v, ref, race, mode, entries]
+      properties:
+        v: { type: integer, enum: [1] }
+        ref: { type: string, maxLength: 128, description: The reference the service showed for this event }
+        race: { type: string, maxLength: 64, description: The current race from the event's list }
+        mode: { type: string, enum: [race, qualifying] }
+        state: { type: string }
+        red_flag: { type: boolean }
+        stint: { type: integer, nullable: true }
+        lap: { type: integer, nullable: true }
+        remaining: { type: number, nullable: true }
+        track_name: { type: string }
+        fastest: { allOf: [{ $ref: "#/components/schemas/Lap" }], nullable: true }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/Row" }
+    Event:
+      type: object
+      required: [kind, at]
+      properties:
+        kind: { type: string, enum: [red_flag, disconnect, correction] }
+        at: { type: string, format: date-time }
+        entry: { type: string }
+        detail: { type: string, maxLength: 200 }
+    Result:
+      type: object
+      required: [v, ref, race, entries]
+      properties:
+        v: { type: integer, enum: [1] }
+        ref: { type: string, maxLength: 128 }
+        race: { type: string, maxLength: 64 }
+        track_name: { type: string }
+        finished_at: { type: string, format: date-time }
+        fastest: { allOf: [{ $ref: "#/components/schemas/Lap" }], nullable: true }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/Row" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+    ResultStatus:
+      type: object
+      required: [v, status]
+      properties:
+        v: { type: integer, enum: [1] }
+        status: { type: string, enum: [stored, pending] }
+        message: { type: string, maxLength: 200 }
+        link: { type: string, format: uri }
+        graphic_url: { type: string, format: uri, description: PNG on the service's own host }
