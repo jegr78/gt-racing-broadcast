@@ -10,8 +10,13 @@ the Sheet-Webhook wiki page against them, so a write is visible on the next read
     GET  /_sim/tab?name=<Tab>             rows and header-keyed records of one tab
     GET  /_sim/writes?since=N             script calls after sequence N
     POST /_sim/tab                        {"name", "rows" | "csv"}: seed or replace a tab
+    POST /_sim/fail                       fault rules (loopback_http); targets `tab:<Tab>`,
+                                          `read` (any tab), `action:<action>`, `push` (any call)
 
-`SheetSim.env()` gives RACECAST_SIM_SHEET_URL and RACECAST_SIM_SHEET_PUSH_URL.
+A script-style fault answers HTTP 200 {"error": ...} on the push URL. An unknown tab
+reads as empty, or with `unknown_tab="first"` as the first seeded tab.
+`SheetSim.env()` gives RACECAST_SIMULATION=1, RACECAST_SIM_SHEET_URL and
+RACECAST_SIM_SHEET_PUSH_URL.
 
     python3 tools/event-sim/fakes/sheet_sim.py --port 0 --tabs DIR --ready-file sheet.json
 
@@ -31,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import loopback_http  # noqa: E402
 
+FLAG_ENV = "RACECAST_SIMULATION"                    # simulation.FLAG
 SHEET_URL_ENV = "RACECAST_SIM_SHEET_URL"            # simulation.SHEET_URL
 SHEET_PUSH_URL_ENV = "RACECAST_SIM_SHEET_PUSH_URL"  # simulation.SHEET_PUSH_URL
 SHEET_PATH = "/spreadsheets/d/sim"
@@ -132,7 +138,11 @@ class Sheet:
     """The tabs, the script's Script Properties (`stream_keys`) and the write log.
     `tabs` maps a tab name to rows (lists of strings) or CSV text; None drops it."""
 
-    def __init__(self, tabs=None, stream_keys=None, clock=time.time, key=DEFAULT_KEY):
+    def __init__(self, tabs=None, stream_keys=None, clock=time.time, key=DEFAULT_KEY,
+                 unknown_tab="empty"):
+        if unknown_tab not in ("empty", "first"):
+            raise ValueError("unknown_tab is 'empty' or 'first'")
+        self.unknown_tab = unknown_tab
         self.lock = threading.RLock()
         self.clock = clock
         self.key = key
@@ -177,8 +187,13 @@ class Sheet:
                 for r in rows[1:]]
 
     def csv(self, name):
-        """The gviz CSV export of a tab: every cell quoted, "" for an unknown tab."""
-        rows = _trimmed(self.tab(name) or [])
+        """The gviz CSV export of a tab: every cell quoted. An unknown tab is "", or the
+        first tab with unknown_tab="first"."""
+        with self.lock:
+            rows = self.tab(name)
+            if rows is None and self.unknown_tab == "first" and self._tabs:
+                rows = self.tab(next(iter(self._tabs)))
+        rows = _trimmed(rows or [])
         out = io.StringIO()
         csv.writer(out, quoting=csv.QUOTE_ALL, lineterminator="\n").writerows(rows)
         return out.getvalue()
@@ -390,9 +405,11 @@ class SheetSim(loopback_http.LoopbackServer):
     """A running simulated Sheet. `tabs` and `stream_keys` seed `self.sheet`; `key` is
     the script's KEY, carried in the push URL."""
 
-    def __init__(self, tabs=None, stream_keys=None, key=DEFAULT_KEY, port=0, clock=time.time):
-        super().__init__(port)
-        self.sheet = Sheet(tabs, stream_keys=stream_keys, clock=clock, key=key)
+    def __init__(self, tabs=None, stream_keys=None, key=DEFAULT_KEY, port=0, clock=time.time,
+                 unknown_tab="empty", faults=None, sleep=time.sleep):
+        super().__init__(port, faults=faults, sleep=sleep)
+        self.sheet = Sheet(tabs, stream_keys=stream_keys, clock=clock, key=key,
+                           unknown_tab=unknown_tab)
         self.set_tab, self.tab, self.records = self.sheet.set_tab, self.sheet.tab, self.sheet.records
         self.writes = self.sheet.writes
 
@@ -406,7 +423,27 @@ class SheetSim(loopback_http.LoopbackServer):
 
     def env(self):
         """The simulation-mode environment that points racecast at this Sheet."""
-        return {SHEET_URL_ENV: self.url, SHEET_PUSH_URL_ENV: self.push_url}
+        return {FLAG_ENV: "1", SHEET_URL_ENV: self.url, SHEET_PUSH_URL_ENV: self.push_url}
+
+    def snapshot(self):
+        return dict(self.sheet.snapshot(), faults=self.faults(), faults_hit=self.faults_hit)
+
+    def fault_keys(self, method, path, query, body):
+        if method == "GET" and path == SHEET_PATH + "/gviz/tq":
+            return ["read", "tab:" + query.get("sheet", [""])[0]]
+        if method == "POST" and path == EXEC_PATH:
+            try:
+                p = json.loads(body.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                p = None
+            action = p.get("action") if isinstance(p, dict) else None
+            return ["push", "action:" + (js_str(action) if js_truthy(action) else "timer")]
+        return []
+
+    def fault_reply(self, rule):
+        if rule["error"] is not None:
+            return loopback_http.json_reply({"error": rule["error"]}, rule["status"] or 200)
+        return super().fault_reply(rule)
 
     def route(self, method, path, query, headers, body):
         reply = loopback_http.json_reply
@@ -418,7 +455,7 @@ class SheetSim(loopback_http.LoopbackServer):
         if method == "POST" and path == EXEC_PATH:
             return reply(self.sheet.do_post(first.get("key", ""), body))
         if method == "GET" and path == "/_sim/state":
-            return reply(self.sheet.snapshot())
+            return reply(self.snapshot())
         if method == "GET" and path == "/_sim/writes":
             since = int(first.get("since") or 0)
             return reply({"writes": self.sheet.writes(since), "seq": self.sheet.write_seq})
@@ -454,13 +491,16 @@ def build_parser():
     ap.add_argument("--port", type=int, default=0, help="listen port, 0 picks a free one (default)")
     ap.add_argument("--tabs", help="directory of <Tab>.csv files to seed the tabs")
     ap.add_argument("--key", default=DEFAULT_KEY, help="the script's KEY in the push URL (default sim)")
+    ap.add_argument("--unknown-tab", choices=("empty", "first"), default="empty",
+                    help="what a read of an unseeded tab returns (default empty)")
     ap.add_argument("--ready-file", help="write {port, url, push_url, http_url, env} here once listening")
     return ap
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    sim = SheetSim(load_tabs(args.tabs) if args.tabs else None, key=args.key, port=args.port).start()
+    sim = SheetSim(load_tabs(args.tabs) if args.tabs else None, key=args.key, port=args.port,
+                   unknown_tab=args.unknown_tab).start()
     if args.ready_file:
         loopback_http.write_ready_file(args.ready_file, {
             "port": sim.port, "url": sim.url, "push_url": sim.push_url,

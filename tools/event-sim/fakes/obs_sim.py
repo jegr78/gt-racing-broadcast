@@ -220,7 +220,7 @@ class ObsSim:
 
     def env(self):
         """The simulation-mode environment that points racecast at this OBS."""
-        return {OBS_WS_ENV: self.url}
+        return {"RACECAST_SIMULATION": "1", OBS_WS_ENV: self.url}
 
     def start(self):
         self.sock = socket.socket()

@@ -64,8 +64,7 @@ def _sim(**kw):
 
 
 def _csv_url(sim, tab, headers=False):
-    url = simulation.sheet_csv_url("ignored-id", tab, dict(sim.env(), RACECAST_SIMULATION="1"),
-                                   headers=headers)
+    url = simulation.sheet_csv_url("ignored-id", tab, sim.env(), headers=headers)
     assert url.startswith(sim.url), url
     return url
 
@@ -94,8 +93,9 @@ def _status(url, data=None, headers=None, method=None):
 
 def t_env_is_a_valid_simulation_endpoint():
     with _sim() as sim:
-        env = dict(sim.env(), RACECAST_SIMULATION="1")
-        assert set(sim.env()) == {simulation.SHEET_URL, simulation.SHEET_PUSH_URL}
+        env = sim.env()
+        assert env[simulation.FLAG] == "1", "a caller cannot forget simulation mode and reach Google"
+        assert set(env) == {simulation.FLAG, simulation.SHEET_URL, simulation.SHEET_PUSH_URL}
         assert simulation.endpoint(simulation.SHEET_URL, env) == sim.url
         assert simulation.endpoint(simulation.SHEET_PUSH_URL, env) == sim.push_url
         assert not [p for p in simulation.problems(env) if "SHEET" in p], simulation.problems(env)
@@ -416,7 +416,7 @@ def t_cli_seeds_tabs_from_a_directory_and_writes_a_ready_file():
             assert "sheet-sim" in proc.stdout.readline().decode("utf-8", "replace")
             with open(ready, encoding="utf-8") as fh:
                 info = json.load(fh)
-            env = dict(info["env"], RACECAST_SIMULATION="1")
+            env = info["env"]
             body = _get(simulation.sheet_csv_url("x", "Schedule", env))[2]
             assert body == '"URL","Streamer"\n"sim://comms1","Comms 1"\n', body
             assert info["push_url"] == env[simulation.SHEET_PUSH_URL]
@@ -424,6 +424,63 @@ def t_cli_seeds_tabs_from_a_directory_and_writes_a_ready_file():
             proc.terminate()
             proc.wait(timeout=5)
             proc.stdout.close()
+
+
+class Sleeps(list):
+    def __call__(self, seconds):
+        self.append(seconds)
+
+
+def t_an_injected_script_error_writes_nothing_and_counts_down():
+    with _sim() as sim:
+        sim.fail("action:schedule", error="Service invoked too many times for one day", times=1)
+        ok, err, _ = m.push_webhook_retrying(sim.push_url, {"action": "schedule", "row": 2, "url": "sim://x"},
+                                             "schedule", attempts=1, timeout=5)
+        assert not ok and "too many times" in err, err
+        assert sim.tab("Schedule") == SCHEDULE and sim.writes() == [], "the script never ran"
+        assert _post(sim, {"action": "schedule", "row": 2, "url": "sim://x"})["ok"] is True, "times=1 is spent"
+        assert sim.snapshot()["faults_hit"] == 1
+
+
+def t_an_injected_status_hits_only_its_tab():
+    with _sim() as sim:
+        sim.fail("tab:Schedule", status=500)
+        assert _status(_csv_url(sim, "Schedule"))[0] == 500
+        assert _rows(sim, "Crew") == CREW, "other tabs still read"
+        sim.clear_faults()
+        assert _rows(sim, "Schedule")[0] == SCHEDULE[0]
+
+
+def t_an_injected_delay_uses_the_sleep_seam():
+    sleeps = Sleeps()
+    with _sim(sleep=sleeps, faults=[{"target": "push", "delay": 12}]) as sim:
+        assert _post(sim, {"action": "pov", "url": "sim://a"})["ok"] is True, "a delay alone still answers"
+        _rows(sim, "Schedule")
+        assert sleeps == [12], sleeps
+
+
+def t_faults_over_http_set_list_and_clear():
+    with _sim() as sim:
+        got = sheet_sim.fetch(sim.http_url, "/_sim/fail", {"target": "read", "status": 503})
+        assert got["faults"] == [{"target": "read", "delay": 0, "status": 503, "error": None,
+                                  "times": None}], got
+        assert _status(_csv_url(sim, "Crew"))[0] == 503
+        req = urllib.request.Request(sim.http_url + "/_sim/fail", data=b"", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert json.loads(resp.read())["faults"] == [], "an empty body clears every fault"
+        assert _rows(sim, "Crew") == CREW
+        json_ct = {"Content-Type": "application/json"}
+        for bad in ({"target": 5}, {"target": "push", "status": 99}, {"target": "push", "delay": -1},
+                    {"target": "push", "times": 0}, {"target": "push", "error": 5}):
+            assert _status(sim.http_url + "/_sim/fail", json.dumps(bad).encode(), json_ct)[0] == 400, bad
+        assert sim.snapshot()["faults"] == []
+
+
+def t_an_unknown_tab_can_answer_with_the_first_tab():
+    with _sim(unknown_tab="first") as sim:
+        assert _rows(sim, "Nope") == SCHEDULE, "gviz may answer an unknown name with the first sheet"
+        assert _rows(sim, "Crew") == CREW
 
 
 if __name__ == "__main__":

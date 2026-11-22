@@ -59,8 +59,8 @@ def _status(url, data=None, headers=None):
 
 def t_env_is_a_valid_simulation_endpoint():
     with webhook_sink.WebhookSink().start() as sink:
-        env = dict(sink.env(), RACECAST_SIMULATION="1")
-        assert set(sink.env()) == {simulation.DISCORD_WEBHOOK_URL}
+        env = sink.env()
+        assert env == {simulation.FLAG: "1", simulation.DISCORD_WEBHOOK_URL: sink.url}, env
         assert simulation.endpoint(simulation.DISCORD_WEBHOOK_URL, env) == sink.url
         assert simulation.config_overrides(env)["discord_webhook_url"] == sink.url
         assert "/api/webhooks/" in sink.url
@@ -163,11 +163,40 @@ def t_cli_writes_a_ready_file():
             _relay_post(info["url"], {"content": "hello"})
             got = webhook_sink.fetch(info["http_url"], "/_sim/messages")
             assert got["messages"][0]["content"] == "hello", got
-            assert info["env"] == {simulation.DISCORD_WEBHOOK_URL: info["url"]}
+            assert info["env"] == {simulation.FLAG: "1", simulation.DISCORD_WEBHOOK_URL: info["url"]}
         finally:
             proc.terminate()
             proc.wait(timeout=5)
             proc.stdout.close()
+
+
+class Sleeps(list):
+    def __call__(self, seconds):
+        self.append(seconds)
+
+
+def t_injected_faults_answer_instead_of_recording():
+    sleeps = Sleeps()
+    with webhook_sink.WebhookSink(sleep=sleeps).start() as sink:
+        sink.fail("hook", status=429, times=1)
+        try:
+            _relay_post(sink.url, {"content": "one"})
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 429, exc.code
+        else:
+            raise AssertionError("the injected 429 must reach the poster")
+        sink.fail("path:" + sink.path, error="Unknown Webhook", delay=3)
+        status, body = _status(sink.url, b'{"content": "two"}', {"Content-Type": "application/json"})
+        assert (status, json.loads(body)) == (400, {"message": "Unknown Webhook", "code": 0}), body
+        assert sleeps == [3] and sink.messages() == [], "a faulted message is not recorded"
+        sink.clear_faults()
+        webhook_sink.fetch(sink.http_url, "/_sim/fail", {"target": "hook", "status": 500})
+        assert _status(sink.url, b'{"content": "x"}', {"Content-Type": "application/json"})[0] == 500
+        req = urllib.request.Request(sink.http_url + "/_sim/fail", data=b"", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5).close()
+        assert _relay_post(sink.url, {"content": "three"})[0] == 204 and sink.count("three") == 1
+        assert sink.snapshot()["faults_hit"] == 3, sink.snapshot()
 
 
 if __name__ == "__main__":

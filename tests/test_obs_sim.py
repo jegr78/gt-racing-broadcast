@@ -1023,7 +1023,7 @@ def t_http_endpoint_reads_and_pokes_state():
         status, ctype, raw = sim.route("GET", "/program.png?width=200")
         assert status.startswith("200") and ctype == "image/png" and _png_size(raw)[0] == 200
         assert sim.route("GET", "/nope")[0].startswith("404")
-        assert sim.env() == {"RACECAST_SIM_OBS_WS": sim.url}
+        assert sim.env() == {"RACECAST_SIMULATION": "1", "RACECAST_SIM_OBS_WS": sim.url}
     finally:
         sim.stop()
 

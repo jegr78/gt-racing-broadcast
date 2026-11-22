@@ -7,8 +7,12 @@ are accepted. A message is answered with 204 like Discord; an empty, unparseable
 over-long one with Discord's 400 error body, and it is not recorded.
 
     GET  /_sim/messages?since=N     messages after sequence N
+    GET  /_sim/state                counters and fault rules
+    POST /_sim/fail                 fault rules (loopback_http); targets `path:<path>`, `hook`
 
-`WebhookSink.env()` gives RACECAST_SIM_DISCORD_WEBHOOK_URL.
+A fault with an error answers Discord-style {"message": error, "code": 0}, 400 unless
+it names a status. A faulted message is not recorded.
+`WebhookSink.env()` gives RACECAST_SIMULATION=1 and RACECAST_SIM_DISCORD_WEBHOOK_URL.
 
     python3 tools/event-sim/fakes/webhook_sink.py --port 0 --ready-file sink.json
 
@@ -26,6 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import loopback_http  # noqa: E402
 
+FLAG_ENV = "RACECAST_SIMULATION"                       # simulation.FLAG
 WEBHOOK_URL_ENV = "RACECAST_SIM_DISCORD_WEBHOOK_URL"   # simulation.DISCORD_WEBHOOK_URL
 HOOK_PATH = "/api/webhooks/1/sim"
 MAX_CONTENT = 2000
@@ -71,8 +76,8 @@ class WebhookSink(loopback_http.LoopbackServer):
     username, content, embeds, files, the full payload and `text` (message_text)."""
     POST_TYPES = ("application/json", "multipart/form-data")
 
-    def __init__(self, port=0, clock=time.time):
-        super().__init__(port)
+    def __init__(self, port=0, clock=time.time, faults=None, sleep=time.sleep):
+        super().__init__(port, faults=faults, sleep=sleep)
         self.clock = clock
         self.lock = threading.Lock()
         self._messages = []
@@ -86,7 +91,23 @@ class WebhookSink(loopback_http.LoopbackServer):
 
     def env(self):
         """The simulation-mode environment that points racecast at this webhook."""
-        return {WEBHOOK_URL_ENV: self.url}
+        return {FLAG_ENV: "1", WEBHOOK_URL_ENV: self.url}
+
+    def snapshot(self):
+        with self.lock:
+            counts = {"seq": self.seq, "rejected": self.rejected}
+        return dict(counts, faults=self.faults(), faults_hit=self.faults_hit)
+
+    def fault_keys(self, method, path, query, body):
+        if method == "POST" and not path.startswith(loopback_http.CONTROL_PREFIX):
+            return ["hook", "path:" + path]
+        return []
+
+    def fault_reply(self, rule):
+        if rule["error"] is not None:
+            return loopback_http.json_reply({"message": rule["error"], "code": 0},
+                                            rule["status"] or 400)
+        return super().fault_reply(rule)
 
     def messages(self, since=0):
         with self.lock:
@@ -104,6 +125,8 @@ class WebhookSink(loopback_http.LoopbackServer):
             with self.lock:
                 seq = self.seq
             return reply({"messages": self.messages(since), "seq": seq})
+        if method == "GET" and path == "/_sim/state":
+            return reply(self.snapshot())
         if method != "POST" or path.startswith(loopback_http.CONTROL_PREFIX):
             return reply({"message": "404: Not Found", "code": 0}, 404)
         ctype = headers.get("Content-Type") or ""

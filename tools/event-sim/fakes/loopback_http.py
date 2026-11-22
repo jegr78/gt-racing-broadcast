@@ -2,9 +2,16 @@
 
 It binds 127.0.0.1 (port 0 picks a free one) and refuses what a web page could send:
 a `Host` other than 127.0.0.1 or localhost with this port, any `Origin`, and a POST
-whose Content-Type is not in `POST_TYPES`. Subclasses answer in `route()`."""
+whose Content-Type is not in `POST_TYPES`. Subclasses answer in `route()`.
+
+Faults: a rule {"target", "delay", "status", "error", "times"} applies to the requests
+whose `fault_keys()` contain its target. It sleeps `delay` seconds through the `sleep`
+seam, then answers `fault_reply()` instead of the request when it has a status or an
+error; `times` limits how many requests it hits. POST /_sim/fail sets rules (one or a
+list), an empty body clears them."""
 import json
 import os
+import time
 import sys
 import threading
 import urllib.request
@@ -30,10 +37,62 @@ class LoopbackServer:
     returns (status, content type, bytes)."""
     POST_TYPES = ("application/json",)
 
-    def __init__(self, port=0):
+    def __init__(self, port=0, faults=None, sleep=time.sleep):
         self.requested_port = port
         self.port = None
         self._server = None
+        self.sleep = sleep
+        self._fault_lock = threading.Lock()
+        self._faults = []
+        self.faults_hit = 0
+        for rule in faults or []:
+            self.fail(**rule)
+
+    def fail(self, target, delay=0, status=None, error=None, times=None):
+        """Add a fault rule; see the module docstring."""
+        rule = fault_rule({"target": target, "delay": delay, "status": status,
+                           "error": error, "times": times})
+        with self._fault_lock:
+            self._faults.append(rule)
+        return rule
+
+    def clear_faults(self):
+        with self._fault_lock:
+            self._faults = []
+
+    def faults(self):
+        with self._fault_lock:
+            return [dict(r) for r in self._faults]
+
+    def fault_keys(self, method, path, query, body):
+        """The fault targets a request answers to; none by default."""
+        return []
+
+    def fault_reply(self, rule):
+        """The answer for a rule with a status or an error."""
+        return json_reply({"error": rule["error"] or "simulated failure"}, rule["status"] or 500)
+
+    def _take_fault(self, keys):
+        with self._fault_lock:
+            for rule in self._faults:
+                if rule["target"] in keys:
+                    if rule["times"] is not None:
+                        rule["times"] -= 1
+                        if rule["times"] == 0:
+                            self._faults.remove(rule)
+                    self.faults_hit += 1
+                    return dict(rule)
+        return None
+
+    def _fail_route(self, body):
+        data = json.loads(body) if body.strip() else None
+        if data is None:
+            self.clear_faults()
+        else:
+            for rule in [fault_rule(r) for r in (data if isinstance(data, list) else [data])]:
+                with self._fault_lock:
+                    self._faults.append(rule)
+        return json_reply({"faults": self.faults()})
 
     @property
     def http_url(self):
@@ -103,15 +162,31 @@ class LoopbackServer:
             self._send(req, *json_reply({"error": refused[1]}, refused[0]))
             return
         u = urlsplit(req.path)
+        query = parse_qs(u.query, keep_blank_values=True)
         try:
-            reply = self.route(method, u.path, parse_qs(u.query, keep_blank_values=True),
-                               req.headers, body)
+            if method == "POST" and u.path == CONTROL_PREFIX + "fail":
+                reply = self._fail_route(body)
+            else:
+                rule = self._take_fault(self.fault_keys(method, u.path, query, body))
+                if rule and rule["delay"]:
+                    self.sleep(rule["delay"])
+                if rule and (rule["status"] or rule["error"] is not None):
+                    reply = self.fault_reply(rule)
+                else:
+                    reply = self.route(method, u.path, query, req.headers, body)
         except Exception as exc:  # noqa: BLE001  a bad request gets an answer, not a dropped socket
             reply = json_reply({"error": str(exc) or exc.__class__.__name__}, 400)
         self._send(req, *reply)
 
     @staticmethod
     def _send(req, status, ctype, payload):
+        try:
+            LoopbackServer._write(req, status, ctype, payload)
+        except ConnectionError:
+            pass  # the client hung up before the answer
+
+    @staticmethod
+    def _write(req, status, ctype, payload):
         req.send_response(status)
         if status != 204:
             req.send_header("Content-Type", ctype)
@@ -122,6 +197,25 @@ class LoopbackServer:
         if status != 204:
             req.wfile.write(payload)
         req.close_connection = True
+
+
+def fault_rule(data):
+    """A validated fault rule; ValueError names what is wrong."""
+    if not isinstance(data, dict) or not isinstance(data.get("target"), str) or not data["target"]:
+        raise ValueError("a fault needs a target string")
+    delay, status = data.get("delay") or 0, data.get("status")
+    error, times = data.get("error"), data.get("times")
+    if isinstance(delay, bool) or not isinstance(delay, (int, float)) or not 0 <= delay <= 600:
+        raise ValueError("delay must be 0-600 seconds")
+    if status is not None and (isinstance(status, bool) or not isinstance(status, int)
+                               or not 100 <= status <= 599):
+        raise ValueError("status must be an HTTP status 100-599")
+    if error is not None and not isinstance(error, str):
+        raise ValueError("error must be a string")
+    if times is not None and (isinstance(times, bool) or not isinstance(times, int) or times < 1):
+        raise ValueError("times must be a positive whole number")
+    return {"target": data["target"], "delay": delay, "status": status, "error": error,
+            "times": times}
 
 
 def write_ready_file(path, info):
