@@ -89,16 +89,19 @@ class LoopbackServer:
         raise NotImplementedError
 
     def _handle(self, req, method):
-        refused = self.refusal(method, req.headers)
         raw_length = req.headers.get("Content-Length") or "0"
-        if refused is None and not raw_length.isdigit():
+        refused = None
+        if not raw_length.isdigit():
             refused = 400, "Bad Request"
-        if refused is None and int(raw_length) > MAX_BODY:
+        elif int(raw_length) > MAX_BODY:
             refused = 413, "Payload Too Large"
+        # A refusal still reads the body: closing on unread data resets the connection,
+        # and on Windows the client then loses the answer.
+        body = req.rfile.read(int(raw_length)) if refused is None else b""
+        refused = refused or self.refusal(method, req.headers)
         if refused is not None:
             self._send(req, *json_reply({"error": refused[1]}, refused[0]))
             return
-        body = req.rfile.read(int(raw_length)) if method == "POST" else b""
         u = urlsplit(req.path)
         try:
             reply = self.route(method, u.path, parse_qs(u.query, keep_blank_values=True),
