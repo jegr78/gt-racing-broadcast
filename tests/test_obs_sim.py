@@ -591,7 +591,7 @@ def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:
         a, b = feeds.urls
         cmd, calls = _stub(tmp, "sleep2")
-        grab = _grabber(cmd, feeds, wait=30, interval=0.2)
+        grab = _grabber(cmd, feeds, wait=30, interval=0.2, timeout=30)  # slow interpreter starts on CI runners
         got = {}
         first = threading.Thread(target=lambda: got.update(grab.frames([a, b])))
         first.start()
@@ -601,7 +601,8 @@ def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
         assert _wait(lambda: not grab.procs, timeout=20)
         time.sleep(0.3)  # past the 0.2 s interval
         assert grab.frames([a])[a] and grab.feeds[a]["busy"] is not None, "the last frame at once while a new read runs"
-        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20) and grab.frames([a])[a]
+        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20), _calls(calls)
+        assert _wait(lambda: grab.feeds[a]["busy"] is None, timeout=20) and grab.frames([a])[a], grab.feeds[a]
         assert _wait(lambda: not grab.procs, timeout=20)
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:
         a, b = feeds.urls
