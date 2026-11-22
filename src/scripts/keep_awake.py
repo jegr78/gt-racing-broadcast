@@ -12,6 +12,8 @@ import subprocess
 import sys
 import threading
 
+import simulation
+
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 _FALSEY = {"0", "false", "no", "off"}
@@ -71,6 +73,10 @@ class KeepAwake:
         self._watch = None
 
     def start(self):
+        if simulation.active(self.environ):
+            self.note = simulation.SKIPPED
+            self.log.info("keep-awake: %s", simulation.skipped("idle-sleep block"))
+            return
         if not enabled(self.environ):
             self.note = "RACECAST_KEEP_AWAKE=0"
             self.log.info("keep-awake: off (%s)", self.note)

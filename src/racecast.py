@@ -912,11 +912,15 @@ def _streams_files():
 
 def _obs_files():
     import logsetup
+    if simulation.active():   # the host's OBS is not the simulated one
+        return []
     d = logsetup.obs_log_dir(sys.platform)
     newest = logsetup.newest_log(d)
     return [newest] if newest else []
 
 def _companion_files():
+    if simulation.active():   # Companion is skipped in simulation
+        return []
     p = _companion_log_path()
     return [p] if p else []
 

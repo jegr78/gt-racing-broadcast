@@ -307,6 +307,46 @@ def t_relay_control_port_default_follows_simulation():
     assert m.control_port(5000, dict(ON, RACECAST_SIM_RELAY_PORT="41234")) == 5000, "--http-port still wins"
 
 
+class _Log:
+    def __init__(self):
+        self.lines = []
+
+    def info(self, msg, *a):
+        self.lines.append(msg % a if a else msg)
+
+    warning = exception = info
+
+
+def t_relay_skips_host_integrations_in_simulation():
+    m = _relay()
+    import keep_awake
+    for env, skipped in ((dict(ON), True), ({}, False)):
+        restore = _patched_env(**env) if env else (lambda: None)
+        saved = (m.LOG, m.logsetup.obs_log_dir)
+        log, looked = _Log(), []
+        m.LOG = log
+        m.logsetup.obs_log_dir = looked.append
+        try:
+            fake = type("R", (), {})()
+            m.Relay._start_av_watcher(fake)
+        finally:
+            m.LOG, m.logsetup.obs_log_dir = saved
+            restore()
+        assert bool(looked) is not skipped, "the OBS log is read only outside simulation"
+        if skipped:
+            assert any("skipped (simulation)" in ln for ln in log.lines), log.lines
+        spawned, klog = [], _Log()
+        ka = keep_awake.KeepAwake(4242, platform="linux", which=lambda n: "/usr/bin/" + n,
+                                  popen=lambda *a, _s=spawned, **k: _s.append(a) or 1 / 0,
+                                  environ=dict(env), log=klog)
+        ka.start()
+        assert bool(spawned) is not skipped, "systemd-inhibit runs only outside simulation"
+        if skipped:
+            assert ka.note == "skipped (simulation)" and any("skipped (simulation)" in ln for ln in klog.lines)
+        both = dict(env, RACECAST_COOKIES_BROWSER="firefox")
+        assert (m.cookie_refresh_browser(both) is None) is skipped, "no export from the real browser"
+
+
 def t_relay_reads_every_sheet_tab_from_the_simulated_sheet():
     m = _relay()
     restore = _patched_env(RACECAST_SIMULATION="1",

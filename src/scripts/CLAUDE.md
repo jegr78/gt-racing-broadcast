@@ -154,7 +154,10 @@ never the real one.
 - Skips print `<what>: skipped (simulation).` at the leaves, so CLI and Control Center
   jobs report alike: `_event_launch`, `app launch|quit`, `_tailscale_connect`,
   `tailscale down`, `_tailscale_ip`/`_tailscale_magicdns` (None), `companion_start/stop`,
-  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check. `_gui_spawn`
+  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check, and the relay's
+  host integrations: the A/V sync watcher on the OBS log, the keep-awake block
+  (`systemd-inhibit`, `caffeinate`, `SetThreadExecutionState`) and the cookie refresh from
+  the browser; the log viewer lists no OBS or Companion log. `_gui_spawn`
   refuses outright. `_obs_up` replaces the OBS process check with the simulated
   WebSocket, and `_event_sections` lists OBS/Discord/Tailscale/Companion as INFO. A
   takeover in simulation accepts only a loopback host, never `--funnel`.

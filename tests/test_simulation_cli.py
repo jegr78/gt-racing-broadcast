@@ -625,6 +625,20 @@ def t_every_relay_port_reader_goes_through_the_helper():
     assert len(uses) == 2, f"RELAY_PORT is read outside _relay_port(): {len(uses)} uses"
 
 
+def t_log_viewer_shows_no_host_logs_in_simulation():
+    import logsetup
+    with tempfile.TemporaryDirectory() as tmp:
+        log = os.path.join(tmp, "obs.txt")
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        with _patched((logsetup, "obs_log_dir", lambda p: tmp), (logsetup, "newest_log", lambda d: log),
+                      (m, "_companion_log_path", lambda: log)):
+            assert m._obs_files() == [log] and m._companion_files() == [log]
+            with _env(RACECAST_SIMULATION="1"):
+                assert m._obs_files() == [] and m._companion_files() == [], \
+                    "the host's OBS and Companion logs are not the rehearsal's"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

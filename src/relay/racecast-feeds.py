@@ -9803,7 +9803,10 @@ class Relay:
     def _start_av_watcher(self):
         """Start the A/V sync watcher on OBS's own log directory. Entirely optional:
         without OBS installed there is no directory and the relay simply runs without
-        the detector (#619)."""
+        the detector (#619). Off in simulation: the host's OBS is not the simulated one."""
+        if simulation.active():
+            LOG.info(simulation.skipped("A/V sync watcher on the OBS log"))
+            return
         try:
             d = logsetup.obs_log_dir(sys.platform)
             if not d or not os.path.isdir(d):
@@ -15894,7 +15897,10 @@ def twitch_cookies_needed(urls):
 
 def cookie_refresh_browser(environ):
     """The browser named by RACECAST_COOKIES_BROWSER (machine .env), or None: unset,
-    or not a bare name from COOKIE_BROWSERS (#1092)."""
+    or not a bare name from COOKIE_BROWSERS (#1092). None in simulation: the real
+    browser's cookie store stays untouched."""
+    if simulation.active(environ):
+        return None
     value = (environ.get("RACECAST_COOKIES_BROWSER") or "").strip().lower()
     return value if value in COOKIE_BROWSERS else None
 
@@ -16528,6 +16534,8 @@ def main():
             LOG.warning("yt-cookies.txt is %.0f h old. Cookies rotate; "
                         "run 'racecast cookies firefox' before the event.", _ch['age_h'])
     _refresh_browser = cookie_refresh_browser(os.environ)
+    if simulation.active() and (os.environ.get("RACECAST_COOKIES_BROWSER") or "").strip():
+        LOG.info(simulation.skipped("cookie refresh from the browser"))
     if _refresh_browser:
         threading.Thread(target=CookieRefresher(
             relay, _refresh_browser,
