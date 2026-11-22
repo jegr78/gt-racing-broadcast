@@ -735,6 +735,9 @@ def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
     assert urls == ["http://127.0.0.1:41234/hud"], urls
     assert m._relay_port() == 8088 and ui_ops.build_argv("kill-relay")[2] == "8088"
     assert preflight.relay_status_url() == "http://127.0.0.1:8088/status"
+    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003"):
+        assert preflight.relay_ports()[:3] == (41001, 41002, 41003), "preflight checks the simulated feed ports"
+    assert preflight.relay_ports()[:3] == (53001, 53002, 53003)
 
 
 def t_kill_relay_text_names_the_actual_port():

@@ -6,7 +6,7 @@ route and posts encrypted GT7 packets
 along the picked layout's racing line through the real ingest route, with lap times,
 best laps and fuel. Use it to see the driver dashboard, the desks and the cockpit move
 without a PS5, and with --gap to check that a dense pack on the track map stays
-readable.
+readable. The cars and senders are the event simulation's (tools/event-sim/drive.py).
 
   python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4
 
@@ -16,75 +16,49 @@ event: its senders take real entries and its laps reach the real race, fastest l
 included. Any profile but demo needs --force.
 """
 import argparse
-import bisect
+import http.client
 import json
-import math
 import os
-import struct
 import sys
 import time
-import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path[:0] = [os.path.join(ROOT, "src", "scripts")]
-import gt7_crypto  # noqa: E402
-import gt7_telemetry  # noqa: E402
+sys.path[:0] = [os.path.join(ROOT, "src", "scripts"), os.path.join(ROOT, "tools", "event-sim")]
+import drive  # noqa: E402
 import gt7_tracks  # noqa: E402
-import telemetry_probe  # noqa: E402
 
 NAMES = ("Lena Hart", "Marco Vidal", "Sam Okafor", "Iris Nakamura", "Tom Becker", "Ana Ruiz",
          "Jonas Weber", "Mia Laine", "Luca Bianchi", "Noah Kim", "Eva Novak", "Ole Strand",
          "Rui Costa", "Kai Brandt", "Zoe Martin")
 WAITING = ("Finn Olsen", "Aya Mori", "Leo Brandt")
 TICK_S = 0.1
-PACKETS_PER_TICK = 6        # one sample per batch at the probe's SAMPLE_EVERY
+PACE_MPS = 99.4
+packet, Line = drive.packet, drive.Line
 
 
-def packet(pid, lap, speed, x, z, last_ms, best_ms, fuel):
-    """One encrypted GT7 'A' packet with the fields the race engine reads."""
-    b = bytearray(0x128)
-    struct.pack_into("<I", b, gt7_telemetry.OFF_MAGIC, 0x47375330)
-    struct.pack_into("<f", b, gt7_telemetry.OFF_FUEL_LEVEL, fuel)
-    struct.pack_into("<f", b, gt7_telemetry.OFF_FUEL_CAP, 60.0)
-    struct.pack_into("<f", b, gt7_telemetry.OFF_SPEED, speed)
-    struct.pack_into("<h", b, gt7_telemetry.OFF_LAP, lap)
-    struct.pack_into("<i", b, gt7_telemetry.OFF_BEST_MS, best_ms)
-    struct.pack_into("<i", b, gt7_telemetry.OFF_LAST_MS, last_ms)
-    struct.pack_into("<H", b, gt7_telemetry.OFF_FLAGS, gt7_telemetry.FLAG_ON_TRACK)
-    struct.pack_into("<3f", b, gt7_telemetry.OFF_POS, x, 0.0, z)
-    struct.pack_into("<i", b, 0x70, pid)
-    return gt7_crypto.encrypt(bytes(b), "A", iv=pid)
-
-
-class Line:
-    """Position along the layout's reference line, wrapping at its length."""
-
-    def __init__(self, trace):
-        self.trace = trace
-        self.length = trace[-1]["d"]
-        self.ds = [p["d"] for p in trace]
-
-    def at(self, s):
-        s %= self.length
-        i = max(1, bisect.bisect_left(self.ds, s))
-        a, b = self.trace[i - 1], self.trace[i]
-        u = (s - a["d"]) / ((b["d"] - a["d"]) or 1)
-        return a["x"] + u * (b["x"] - a["x"]), a["z"] + u * (b["z"] - a["z"])
-
-
-def request(base, path, body=None, headers=None):
-    req = urllib.request.Request(base + path, data=body, headers=headers or {},
-                                 method="POST" if body is not None else "GET")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read() or b"{}")
-
-
-def approve(base, name):
+def approve(client, name):
     """Approve the waiting registration of `name` on the relay's tailnet route."""
-    for r in request(base, "/drivers/requests")["requests"]:
+    for r in client.call("GET", "/drivers/requests")[1].get("requests") or []:
         if r["name"] == name and r["status"] == "pending":
-            request(base, "/drivers/requests/approve", json.dumps({"conn": r["conn"]}).encode(),
-                    {"Content-Type": "application/json"})
+            client.call("POST", "/drivers/requests/approve", json.dumps({"conn": r["conn"]}).encode(),
+                        {"Content-Type": "application/json"})
+
+
+def connect(relay):
+    """The client for `relay`, or the tool's exit with the reason."""
+    try:
+        return drive.Client(relay, loopback_only=False)
+    except ValueError as exc:
+        sys.exit(f"driver-replay: {exc}")
+
+
+def outcome(runner_error, post_errors):
+    """(exit code, message) once the drive ended."""
+    if runner_error:
+        return 1, f"driver-replay: the cars stopped driving: {runner_error}"
+    if post_errors:
+        return 1, f"driver-replay: {post_errors} telemetry posts were refused or failed"
+    return 0, ""
 
 
 def main():
@@ -109,49 +83,30 @@ def main():
                                     os.path.join(ROOT, "src", "assets", "gt7")).reference_trace(args.track)
     if not trace:
         sys.exit(f"no racing line for {args.track}: run racecast gt7-data update")
-    line = Line(trace)
-    data = request(args.relay, f"/console/drive/data?i={invite}")
-    segment = data["segments"][0] if data["segments"] else None
-    entries = data["entries"][:args.cars]
-    if len(entries) < args.cars:
-        print(f"the roster has {len(entries)} entries; driving {len(entries)} cars")
-    cars = []
-    for k, entry in enumerate(entries):
-        body = {"entry": entry, "name": NAMES[k]} | ({"segment": segment} if segment else {})
-        code = request(args.relay, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
-                       {"Content-Type": "application/json"})["code"]
-        approve(args.relay, NAMES[k])
-        cars.append({"code": code, "along": -20.0 - args.gap * k, "v": 100.0 - 1.2 * k - (k % 3) * 0.4,
-                     "pid": 0, "lap": None, "line_t": None, "last": -1, "best": -1, "fuel": 60.0 - k})
-    later = data["segments"][1] if len(data["segments"]) > 1 else segment    # the next stint's drivers
-    for k, entry in enumerate(data["entries"][:args.pending]):
-        body = {"entry": entry, "name": WAITING[k % len(WAITING)]} | ({"segment": later} if later else {})
-        request(args.relay, f"/console/drive/register?i={invite}", json.dumps(body).encode(),
-                {"Content-Type": "application/json"})
-    end = time.monotonic() + args.seconds
-    while time.monotonic() < end:
-        now = time.monotonic()
-        for c in cars:
-            c["along"] += c["v"] * TICK_S
-            c["fuel"] = max(0.0, c["fuel"] - 0.004)
-            lap = max(0, math.floor(c["along"] / line.length) + 1)
-            if c["lap"] is not None and lap != c["lap"]:
-                if c["line_t"] is not None:
-                    c["last"] = round((now - c["line_t"]) * 1000)
-                    c["best"] = c["last"] if c["best"] < 0 else min(c["best"], c["last"])
-                c["line_t"] = now
-            c["lap"] = lap
-            x, z = line.at(c["along"])
-            batch = []
-            for _ in range(PACKETS_PER_TICK):
-                c["pid"] += 1
-                batch.append(packet(c["pid"], lap, c["v"], x, z, c["last"], c["best"], c["fuel"]))
-            try:
-                request(args.relay, "/console/drive/ingest", telemetry_probe.encode_batch(batch),
-                        {"X-Driver-Code": c["code"]})
-            except OSError as exc:
-                print(f"ingest failed: {exc}", file=sys.stderr)
-        time.sleep(max(0.0, TICK_S - (time.monotonic() - now)))
+    client = connect(args.relay)
+    try:
+        data = client.data(invite)
+        segments = data.get("segments") or []
+        entries = (data.get("entries") or [])[:args.cars]
+        if len(entries) < args.cars:
+            print(f"the roster has {len(entries)} entries; driving {len(entries)} cars")
+        field = drive.Field(trace, client.ingest, pace_mps=PACE_MPS, gap_m=args.gap)
+        for k, entry in enumerate(entries):
+            field.add(entry, [NAMES[k]])
+            field.set_code(entry, 0, client.register(invite, entry, NAMES[k], segments[0] if segments else None))
+            approve(client, NAMES[k])
+        later = segments[1] if len(segments) > 1 else (segments[0] if segments else None)
+        for k, entry in enumerate((data.get("entries") or [])[:args.pending]):   # the next stint's drivers
+            client.register(invite, entry, WAITING[k % len(WAITING)], later)
+    except (drive.DriveError, ValueError, OSError, http.client.HTTPException) as exc:
+        sys.exit(f"driver-replay: {exc}")
+    field.start()
+    runner = drive.Runner(field, tick_s=TICK_S)
+    runner.loop(until=time.monotonic() + args.seconds)
+    code, text = outcome(runner.error, field.errors)
+    if text:
+        print(text, file=sys.stderr)
+    sys.exit(code)
 
 
 if __name__ == "__main__":

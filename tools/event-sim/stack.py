@@ -13,9 +13,11 @@ import re
 import secrets
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import time
+import zlib
 from urllib.parse import urlsplit, urlunsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +28,7 @@ for _p in (FAKES, os.path.join(ROOT, "src", "scripts"), os.path.join(ROOT, "tool
         sys.path.insert(0, _p)
 
 import console_auth  # noqa: E402
+import drive  # noqa: E402
 import e2e_safety  # noqa: E402
 import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
@@ -43,6 +46,9 @@ CHILD = os.path.join(ROOT, "tools", "e2e_child.py")
 TEARDOWN_MARGIN_S = 600           # start, teardown and the report around the steps
 READY_TIMEOUT_S = 90
 LOG_TAIL = 4000
+PART_KEY_REF = "sim-part-{}"     # a Script Property name; its value is made up per run
+RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended")    # the second is the RED FLAG banner
+EVENT_FILES = {"invite": "driver-invite.json", "timing": "timing-link.json"}
 
 
 def _any_port():
@@ -60,6 +66,13 @@ def port_map(feeds, control):
     """The live relay's ports -> this run's: the three feeds and the control port, so the
     collection's feed inputs and browser sources reach the simulated relay."""
     return {53001: feeds[0], 53002: feeds[1], 53003: feeds[2], 8088: control}
+
+
+def port_env(feeds, control, ui):
+    """The variables that keep every relay start of the app home, the Control Center's
+    Restart included, on this run's ports."""
+    return {"RACECAST_UI_PORT": str(ui), "RACECAST_SIM_RELAY_PORT": str(control),
+            "RACECAST_SIM_FEED_PORTS": ",".join(str(p) for p in feeds)}
 
 
 def stamp_relay(home, pid):
@@ -107,16 +120,19 @@ def sheet_tabs(scn):
     comms = sorted(scn.commentators, key=lambda c: c.stint)
     stints = int(scn.event.get("stints") or max([c.stint for c in comms] or [1]))
     names = [c.name for c in comms]
+    teams = event_roster(scn.event)
     schedule = [["URL", "Streamer", "Stint"]]
     for n in range(1, stints + 1):
         c = next((c for c in comms if c.stint == n), None)
         url = f"sim://{c.channel}" if c and c.scheduled else ""
         schedule.append([url, c.name if c else "", f"Stint {n}"])
-    vocab_rows = max(stints, len(names), 1)
+    vocab_rows = max(stints, len(names), len(teams), len(RACE_CONTROL))
     config = [["Teams", "Stints", "Streamers", "Session", "Race Control", "Flag"]]
     for i in range(vocab_rows):
-        config.append(["", f"Stint {i + 1}" if i < stints else "", names[i] if i < len(names) else "",
-                       "Race" if i == 0 else "", "GREEN" if i == 0 else "", "Green Flag" if i == 0 else ""])
+        config.append([teams[i] if i < len(teams) else "",
+                       f"Stint {i + 1}" if i < stints else "", names[i] if i < len(names) else "",
+                       "Race" if i == 0 else "", RACE_CONTROL[i] if i < len(RACE_CONTROL) else "",
+                       "Green Flag" if i == 0 else ""])
     first = comms[0].name if comms else ""
     tabs = {
         "Schedule": schedule,
@@ -130,8 +146,46 @@ def sheet_tabs(scn):
         + [[c.name, "TRUE", "FALSE", "FALSE", "FALSE", ""] for c in comms],
         "POV": [["URL", "Name"]],
     }
+    parts = event_parts(scn.event)
+    if parts:
+        tabs["Producer"] = [["Part", "Producer", "MagicDNS", "Stream Key"]] + \
+            [[label, "Sim Producer", "sim-producer.invalid", PART_KEY_REF.format(label)] for label in parts]
+        tabs["Channel"] = [["Platform", "Channel"], ["youtube", "sim://broadcast"]]
     tabs.update(scn.tabs)
     return tabs
+
+
+def placeholder_png():
+    """A 1x1 transparent PNG: Start event refuses a machine without any broadcast graphic."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(5))) + chunk(b"IEND", b""))
+
+
+def event_roster(event):
+    """The team labels of `[event] cars` (none without it)."""
+    cars = event.get("cars")
+    return drive.roster(cars) if cars is not None else []
+
+
+def event_parts(event):
+    """The Producer tab's Part labels of `[event] parts`: N race Parts, plus the qualifying
+    Part "Q" with `qualifying_part`. None without them: the panel then shows no Part control."""
+    parts = event.get("parts", 0)
+    if type(parts) is not int or not 0 <= parts <= 9:
+        raise ValueError(f"event.parts is a whole number 0-9, not {parts!r}")
+    return [str(n) for n in range(1, parts + 1)] + (["Q"] if event.get("qualifying_part") else [])
+
+
+def event_track(event):
+    """(layout id, lap length in metres) of `[event] track`, or None."""
+    track = event.get("track")
+    if track is None:
+        return None
+    if not isinstance(track, str) or not re.fullmatch(r"[0-9a-f]{6}", track):
+        raise ValueError(f"event.track is a GT7 layout id (six hex digits), not {track!r}")
+    return track, float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
 
 
 def child_env(base, extra):
@@ -145,14 +199,21 @@ SRC = os.path.join(ROOT, "src")
 PROFILE_DIR = os.path.join(ROOT, "profiles", PROFILE)
 
 
-def make_home(home, src=SRC, profile=PROFILE_DIR):
-    """A throwaway app home: src/, profiles/demo and an empty YouTube cookie jar."""
+def make_home(home, src=SRC, profile=PROFILE_DIR, track=None):
+    """A throwaway app home: src/, profiles/demo, an empty YouTube cookie jar, one
+    placeholder graphic and, for `track` (id, length), that layout's simulated line."""
     shutil.copytree(src, os.path.join(home, "src"), ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(profile, os.path.join(home, "profiles", PROFILE))
     runtime = os.path.join(home, "runtime")
     os.makedirs(runtime, exist_ok=True)
     with open(os.path.join(runtime, "yt-cookies.txt"), "w", encoding="utf-8") as fh:
         fh.write("# Netscape HTTP Cookie File\n")
+    graphics = os.path.join(runtime, PROFILE, "graphics")
+    os.makedirs(graphics, exist_ok=True)
+    with open(os.path.join(graphics, "sim-placeholder.png"), "wb") as fh:
+        fh.write(placeholder_png())
+    if track:
+        drive.write_track_data(runtime, *track)
     return os.path.join(home, "src", "racecast.py")
 
 
@@ -246,11 +307,12 @@ class Stack:
         self.sheet = self.sink = self.stub = self.obs = None
         self.children = []
         self.urls = {}
+        self.racecast = self.env = self.home = None
 
     def start(self):
         os.makedirs(self.work, exist_ok=True)
         os.chmod(self.work, 0o700)
-        racecast = make_home(os.path.join(self.work, "app"))
+        racecast = make_home(os.path.join(self.work, "app"), track=event_track(self.scn.event))
         taken = set()
 
         def port():
@@ -259,7 +321,8 @@ class Stack:
             return p
         feed_a, feed_b, pov, http_port, ui_port = (port() for _ in range(5))
 
-        self.sheet = sheet_sim.SheetSim(tabs=sheet_tabs(self.scn)).start()
+        keys = {PART_KEY_REF.format(label): secrets.token_hex(8) for label in event_parts(self.scn.event)}
+        self.sheet = sheet_sim.SheetSim(tabs=sheet_tabs(self.scn), stream_keys=keys).start()
         self.sink = webhook_sink.WebhookSink().start()
         self.stub = stream_stub.StreamStub(os.path.join(self.work, "streams")).install()
         for c in self.scn.commentators:
@@ -272,16 +335,15 @@ class Stack:
         fakes = {}
         for fake in (self.sheet, self.sink, self.stub, self.obs):
             fakes.update(fake.env())
-        env = child_env(os.environ, {**fakes, "RACECAST_PROFILE": PROFILE,
-                                     "RACECAST_UI_PORT": str(ui_port),
+        env = child_env(os.environ, {**fakes, **port_env((feed_a, feed_b, pov), http_port, ui_port),
+                                     "RACECAST_PROFILE": PROFILE,
                                      "RACECAST_UPDATE_CHECK": "0",
                                      "RACECAST_CONSOLE_SECRET": self.secret,
-                                     "RACECAST_SIM_RELAY_PORT": str(http_port),
                                      "PYTHONDONTWRITEBYTECODE": "1"})
         home = os.path.dirname(os.path.dirname(racecast))
+        self.racecast, self.env, self.home = racecast, env, home
         relay = self._child("relay", [self.python, racecast, "--simulation", "relay", "run",
                                       "--bind", "127.0.0.1", "--http-port", str(http_port),
-                                      "--ports", f"{feed_a},{feed_b}", "--pov-port", str(pov),
                                       "--gt7-bind", "127.0.0.1", "--gt7-port", "0",
                                       "--gt7-ps-ip", "127.0.0.1"], env, home)
         self.urls = {"relay": f"http://127.0.0.1:{http_port}", "ui": f"http://127.0.0.1:{ui_port}",
@@ -305,6 +367,17 @@ class Stack:
 
     def token(self, name):
         return console_auth.mint_token(self.secret, console_auth.streamer_key(name), version=1)
+
+    def event_link(self, kind):
+        """The id of the event's driver invite ("invite") or public timing link ("timing"),
+        which Start event creates in the app home; None before that."""
+        path = os.path.join(self.work, "app", "runtime", PROFILE, EVENT_FILES[kind])
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        return data.get("id") if isinstance(data, dict) and isinstance(data.get("id"), str) else None
 
     def probes(self):
         return {"relay": probes.RelayProbe(self.urls["relay"]),
@@ -332,9 +405,24 @@ class Stack:
                 out.append(("soft", f"{name} log unreadable"))
         return out
 
+    def stop_relay(self, run=subprocess.run):
+        """Stop the relay this app home's PID file names: a relay the Control Center
+        restarted is detached and no child of this run. Returns a problem text, or ""."""
+        if not self.racecast or not os.path.exists(os.path.join(self.home, "runtime", "relay.pid")):
+            return ""
+        try:
+            done = run([self.python, self.racecast, "--simulation", "relay", "stop"], cwd=self.home,
+                       env=self.env, capture_output=True, text=True, errors="replace", timeout=60)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"relay stop: {exc}"
+        return "" if done.returncode == 0 else f"relay stop exited {done.returncode}: {done.stdout[-300:]}"
+
     def stop(self, logs_to=None):
         """Stop everything; copy the service logs to `logs_to`. Returns problem texts."""
         problems = []
+        problem = self.stop_relay()
+        if problem:
+            problems.append(problem)
         for child in reversed(self.children):
             problem = child.stop()
             if problem:

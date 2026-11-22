@@ -5,7 +5,7 @@ one instance per distinct role string on its first step and closes them all at t
 An action `do = "x"` calls the method `act_x(args)` of the role's class; its return
 value (a dict, or None) becomes the step's result, which later steps read as
 `${step_id.key}` in their args. A role signals a hard failure by raising `StepError`;
-`ctx.finding("soft", text)` records a soft one.
+`ctx.finding("soft", text)` records a soft one, `Unavailable` skips the step.
 
 `ctx` is the run context (`engine.RunContext`): service URLs, console tokens, the stream
 stub, the simulated OBS and a shared headless browser (None without Playwright)."""
@@ -17,6 +17,11 @@ class StepError(Exception):
 
 class ShotUnavailable(Exception):  # noqa: N818  a soft outcome, not a bug
     """This role cannot take the screenshot; the engine records a soft finding."""
+
+
+class Unavailable(Exception):  # noqa: N818  a soft outcome, not a bug
+    """This role cannot act in this run (no browser): the engine skips the step, records
+    a soft finding and runs none of its checks."""
 
 
 class Role:
@@ -61,5 +66,5 @@ def register(cls):
 
 
 def default_registry():
-    from roles import builtin  # noqa: F401  registers the built-in roles
+    from roles import builtin, drivers, party  # noqa: F401  registers the roles
     return dict(REGISTRY)

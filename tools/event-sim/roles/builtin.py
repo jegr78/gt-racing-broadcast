@@ -7,17 +7,15 @@ from urllib.parse import quote, urlencode, urlsplit
 
 import expect
 import probes
+import redaction
 import scenario
-from roles import Role, ShotUnavailable, StepError, register
+from roles import Role, ShotUnavailable, StepError, Unavailable, register, selectors
 
 PAGE_TIMEOUT_MS = 15000
 LOAD_FAILED = "Failed to load resource"
-_TOKEN = re.compile(r"([?&]t=)[^&#\s)]+")
-
-
-def redact(text):
-    """`text` without console tokens, which stay in the run's temporary directory."""
-    return _TOKEN.sub(r"\1REDACTED", str(text))
+CONNECTION = "net::ERR_CONNECTION_"
+_QUERY = re.compile(r"\?[^\s)]*")
+redact = redaction.redact
 
 
 def _ok(status, expected):
@@ -130,7 +128,7 @@ class PageRole(Role):
     """A page in its own browser context: `open` (service, path, optional `as` for a
     console token, `wait_for` a selector). A script error on the page is a hard finding
     when the role closes, a failed resource load a soft one. Without Playwright, `open`
-    records a soft finding."""
+    is skipped. A screenshot blacks out the invite and timing links of any page."""
     kind = "page"
     viewport = {"width": 1440, "height": 900}
 
@@ -141,8 +139,7 @@ class PageRole(Role):
     def act_open(self, args):
         browser = self.ctx.browser()
         if browser is None:
-            self.ctx.finding("soft", f"page not opened: {self.ctx.browser_problem()}")
-            return None
+            raise Unavailable(f"a page needs a browser: {self.ctx.browser_problem()}")
         if self.context is None:
             self.context = browser.new_context(viewport=dict(self.viewport))
             self.pg = self.context.new_page()
@@ -157,7 +154,11 @@ class PageRole(Role):
         base = self.ctx.url(args.get("service", "relay"))
         if urlsplit(base).hostname not in ("127.0.0.1", "localhost"):
             raise StepError(f"pages open on loopback only, not {base}")
-        resp = self.pg.goto(base + path, timeout=PAGE_TIMEOUT_MS)
+        try:
+            resp = self.pg.goto(base + path, timeout=PAGE_TIMEOUT_MS)
+        except Exception as exc:  # Playwright's text names the whole URL, token included
+            why = redact(str(exc).splitlines()[0] if str(exc) else type(exc).__name__, self.ctx.secrets)
+            raise StepError(f"open {redact(path, self.ctx.secrets)}: {why}") from None
         if resp is not None and resp.status >= 400:
             raise StepError(f"open {redact(path)}: HTTP {resp.status}")
         if args.get("wait_for"):
@@ -181,15 +182,24 @@ class PageRole(Role):
     def shot(self, path, element=""):
         if self.pg is None:
             raise ShotUnavailable(f"role {self.name!r} has no open page")
-        if element:
-            self.pg.locator(element).first.screenshot(path=path, timeout=PAGE_TIMEOUT_MS)
-        else:
-            self.pg.screenshot(path=path, full_page=False)
+        target = self.pg.locator(element).first if element else self.pg
+        target.screenshot(path=path, mask=[self.pg.locator(s) for s in selectors.LINKS], timeout=PAGE_TIMEOUT_MS)
 
     def close(self):
         # A failed image or fetch (an idle feed's preview answers 503) is the browser's
-        # network log, not a script error.
-        out = [("soft" if e.startswith(LOAD_FAILED) else "hard", f"console error: {e}") for e in self.errors]
+        # network log, not a script error. A polled resource fails once per poll, and
+        # every poll fails once its service stopped.
+        counts, gone = {}, 0
+        for e in self.errors:
+            if e.startswith(LOAD_FAILED) and CONNECTION in e:
+                gone += 1
+                continue
+            key = _QUERY.sub("", e)
+            counts[key] = counts.get(key, 0) + 1
+        out = [("soft" if e.startswith(LOAD_FAILED) else "hard",
+                f"console error: {e}" + (f" ({n}x)" if n > 1 else "")) for e, n in counts.items()]
+        if gone:
+            out.append(("soft", f"{gone} requests of the page found its service stopped"))
         if self.context is not None:
             self.context.close()
         return out

@@ -1081,6 +1081,13 @@ def _relay_runtime_args():
              "--cookies", _cookies_path()]
             + _overlay_relay_args(_active_overlay_dir()))
 
+
+def _feed_ports():
+    """The relay's feed ports (Feed A, Feed B, POV): RACECAST_SIM_FEED_PORTS in simulation,
+    which the relay reads itself when it starts."""
+    return simulation.feed_ports(default=pt.FEED_PORTS)
+
+
 RELAY_PORT = 8088
 
 
@@ -2834,7 +2841,9 @@ def _relay_start_signals():
     own = len(set(port_pids)) == 1 and alive and pid in port_pids
     return {"port_pids": port_pids,
             "pidfile_relay": bool(alive and _relay_identity(pid) != "other"),
-            "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
+            # A simulated start cannot prove who holds a feed port, so it kills none of them.
+            "feed_pids": [] if simulation.active() else
+            sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
@@ -2994,7 +3003,7 @@ def relay_start(rest):
     # action in {"start", "heal"} -> fresh start.
     # A feed port may still LISTEN even with 8088 free (a leaked static-streams
     # streamlink) -> warn rather than letting Feed A loop silently in "connecting".
-    busy = [p for p in pt.FEED_PORTS if pt.pids_on_port(p)]
+    busy = [p for p in _feed_ports() if pt.pids_on_port(p)]
     if busy:
         print(f"WARNING: feed port(s) {', '.join(map(str, busy))} already in use. "
               f"That feed may fail to bind. Free them first: racecast freeport")
@@ -5404,7 +5413,7 @@ def _release_obs_feeds():
     Print one notice and keep going."""
     try:
         import obs_ws
-        names, note = obs_ws.release_feed_inputs()
+        names, note = obs_ws.release_feed_inputs(ports=_feed_ports())
     except Exception as exc:                # a stop must never fail on this
         print(f"obs: feed release skipped ({exc}).")
         return
@@ -5713,6 +5722,9 @@ def _streams_static_dir():
     return os.path.join(_runtime_dir(), "static")
 
 def streams_start(rest):
+    if simulation.active():
+        sys.exit("racecast: static streams serve on the product feed ports 53001/53002, "
+                 "so they do not start in simulation mode.")
     _append_tailscale_snapshot()
     raise SystemExit(_run_script("scripts/start-streams.py",
                                  ["--state-dir", _streams_static_dir()] + rest))
@@ -6259,7 +6271,10 @@ _INVITE_HOSTS = {"at": None, "magic": "", "ip": None}
 def _invite_hosts(clock=time.monotonic):
     """MagicDNS name and Tailscale IP, looked up at most once a minute: the Control
     Center polls the invite every few seconds and each lookup runs `tailscale`. A
-    lookup that found neither is retried 5 s after it ended. `clock` is a test seam."""
+    lookup that found neither is retried 5 s after it ended. `clock` is a test seam.
+    In simulation there is no Tailscale: the links name the relay's own loopback address."""
+    if simulation.active():
+        return "", "127.0.0.1"
     ttl = 60 if _INVITE_HOSTS["magic"] or _INVITE_HOSTS["ip"] else 5
     if _INVITE_HOSTS["at"] is None or clock() - _INVITE_HOSTS["at"] > ttl:
         magic, ip = _tailscale_magicdns(), _tailscale_ip()
@@ -7452,7 +7467,7 @@ def freeport_cmd(rest):
     or static-streams owns it (then refuse, stop that service, or --force). Default
     targets 53001-53003. Exit 1 if any port was refused, else 0."""
     try:
-        chosen, force = parse_freeport_args(rest)
+        chosen, force = parse_freeport_args(rest, default_ports=_feed_ports())
     except ValueError as exc:
         sys.exit(f"racecast: {exc}")
     if simulation.active():

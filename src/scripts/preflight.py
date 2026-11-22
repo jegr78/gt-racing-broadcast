@@ -619,8 +619,8 @@ FEED_PORTS = (53001, 53002, 53003)
 
 
 def relay_ports():
-    """The feed ports plus the relay control port (moved in simulation)."""
-    return (*FEED_PORTS, simulation.relay_port())
+    """The feed ports plus the relay control port (both moved in simulation)."""
+    return (*simulation.feed_ports(default=FEED_PORTS), simulation.relay_port())
 SERVICE_PORTS = ((4455, "OBS WebSocket"), (8000, "Companion"))
 REQUIRED_TOOLS = ("streamlink", "yt-dlp", "ffmpeg", "deno")
 

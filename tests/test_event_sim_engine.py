@@ -121,7 +121,8 @@ def t_durations_and_triggers():
             continue
         raise AssertionError(f"{bad!r} must be refused")
     assert scenario.parse_at("after:start+20s") == scenario.Trigger("after", 20.0, ref="start")
-    assert scenario.parse_at("lap:leader=3").condition == "race.lap >= 3"
+    assert scenario.parse_at("lap:leader=3").condition == "race.lap.leader >= 3", \
+        "the relay's race.lap is {leader, count}"
     assert scenario.parse_at("state:finishing").condition == "race.state == 'finishing'"
     assert scenario.parse_at(None).kind == "now"
 
@@ -270,7 +271,7 @@ def t_steps_ready_together_run_in_file_order_one_at_a_time():
 
 def t_a_waiting_race_trigger_does_not_hold_back_later_steps():
     race = Box(0)
-    race.resolve = lambda name: {"lap": race.value, "state": "racing"}[name]
+    race.resolve = lambda name: {"lap": expect.View({"leader": race.value}), "state": "racing"}[name]
     clock = Clock()
 
     def sleep(s):
@@ -368,13 +369,13 @@ def t_results_feed_later_args_and_a_failed_source_skips_its_users():
 
 def _race_box():
     race = Box(0)
-    race.resolve = lambda name: {"lap": 0, "state": "racing"}[name]
+    race.resolve = lambda name: {"lap": expect.View({"leader": 0}), "state": "racing"}[name]
     return race
 
 
 def t_race_triggers_wait_for_their_condition():
     race = Box(0)
-    race.resolve = lambda name: {"lap": race.value, "state": "racing"}[name]
+    race.resolve = lambda name: {"lap": expect.View({"leader": race.value}), "state": "racing"}[name]
     clock = Clock()
 
     def sleep(s):
@@ -708,8 +709,12 @@ class _FakePage:
     def title(self):
         return "Panel"
 
-    def screenshot(self, path, full_page=False):
+    def locator(self, selector):
+        return selector
+
+    def screenshot(self, path, mask=(), timeout=None):
         self.shots.append(path)
+        self.masks = list(mask)
 
 
 class _FakeBrowser:
@@ -795,12 +800,15 @@ def t_page_role_keeps_to_its_service():
     assert br.page.url == "http://127.0.0.1:9/panel?x=@y"
 
 
-def t_page_role_without_a_browser_is_soft():
+def t_page_role_without_a_browser_is_a_skip():
     ctx = engine.RunContext(urls={"relay": "http://127.0.0.1:9"})
     role = builtin.PageRole(ctx, "page")
     role.open()
-    assert role.do("open", {"path": "/"}) is None
-    assert ctx.findings and ctx.findings[0][0] == "soft"
+    try:
+        role.do("open", {"path": "/"})
+        raise AssertionError("without a browser the step is skipped, which --no-skips fails")
+    except roles.Unavailable as exc:
+        assert "browser" in str(exc)
     try:
         role.shot("x.png")
         raise AssertionError("no page, no shot")

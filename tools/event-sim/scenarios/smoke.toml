@@ -1,12 +1,19 @@
-# Engine smoke run with the built-in roles only: the relay comes up and the Control
-# Center reads it on its simulated port, a commentator's stream link reaches the webhook
-# and, once approved, the Sheet, the director's scene switch reaches OBS, and the
-# program shows stint 1's commentator.
-description = "Engine smoke run: submission and approval, scene switch, feed identity on program."
-max_minutes = 5
+# Smoke run: every role acts once. The producer picks the track and starts the event in
+# the Control Center, a commentator submits a stream link in the cockpit, the director
+# approves it, puts stint 1 on air, shows a graphic, sets a HUD field and starts Part 1
+# on the Director Panel, four drivers register and
+# Race Control approves them on its desk, they race two laps, a viewer reads the public
+# timing, Race Control calls the final lap and the producer stops the event.
+description = "Smoke run: each role once, from Start event to Stop event."
+max_minutes = 10
 
 [event]
 stints = 3
+track = "6e378b"
+track_length_m = 1200
+cars = 4
+seed = 7
+parts = 2
 
 [[event.commentators]]
 name = "Comms 1"
@@ -40,18 +47,52 @@ expect = ["result('cc_status').relay.port == relay.port", "result('cc_status').r
           "result('cc_status').simulation"]
 
 [[step]]
-id = "submit"
-at = "after:relay_up+1s"
+id = "track"
+at = "after:cc_status"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = false, finish_mode = "time" }
+expect = ["not race.settings.formation", "race.settings.finish_mode == 'time'"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'", "relay.up", "race.track == '6e378b'"]
+shot = "control-center"
+
+# Start event must reuse the simulation's relay, never start one on the live ports.
+[[step]]
+id = "same_relay"
+at = "after:start_event"
 role = "api"
-do = "post"
-args = { path = "/cockpit/submit", as = "Comms 2", json = { url = "sim://comms2", stint = "Stint 2" } }
-expect = ["webhook.count('submission') == 1"]
+do = "get"
+args = { service = "ui", path = "/api/status" }
+expect = ["result('same_relay').relay.pid == result('cc_status').relay.pid",
+          "result('same_relay').relay.port == relay.port"]
+
+[[step]]
+id = "submit"
+at = "after:start_event"
+role = "commentator:Comms 2"
+do = "submit_link"
+args = { url = "sim://comms2", stint = 2 }
+expect = ["webhook.count('submission') == 1", "page('commentator:Comms 2').pending != ''"]
+shot = "cockpit-submitted"
 
 [[step]]
 id = "approve"
-role = "api"
-do = "post"
-args = { path = "/submissions/approve", json = { id = "${submit.id}" } }
+at = "after:submit"
+role = "director"
+do = "approve_link"
+args = { stint = 2 }
 expect = ["sheet.write_count('schedule') == 1",
           "sheet.schedule[1].url == 'sim://comms2'",
           "webhook.count('stream link approved') == 1"]
@@ -59,29 +100,128 @@ timeout = "15s"
 
 [[step]]
 id = "arm"
-role = "api"
-do = "get"
-args = { path = "/feed/A/activate" }
+at = "after:approve"
+role = "director"
+do = "arm_feed"
+args = { feed = "A" }
 
 [[step]]
 id = "on_air"
-role = "api"
-do = "post"
-args = { path = "/obs/scene", json = { scene = "Stint" } }
+at = "after:arm"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
 expect = ["obs.scene == 'Stint'", "'comms1' in obs.program_channels"]
 timeout = "90s"
 shot = { name = "program-stint1", role = "obs" }
 
 [[step]]
-id = "panel"
-role = "page:director"
-do = "open"
-args = { path = "/panel" }
-shot = "director-panel"
+id = "graphic"
+at = "after:on_air"
+role = "director"
+do = "graphic"
+args = { name = "Standings", on = true }
 
 [[step]]
-id = "control_center"
-role = "page:producer"
-do = "open"
-args = { service = "ui", path = "/" }
-shot = "control-center"
+id = "graphic_item"
+at = "after:graphic"
+role = "obs"
+do = "request"
+args = { type = "GetSceneItemId", data = { sceneName = "Stint", sourceName = "Standings" } }
+
+[[step]]
+id = "graphic_shown"
+at = "after:graphic_item"
+role = "obs"
+do = "request"
+args = { type = "GetSceneItemEnabled", data = { sceneName = "Stint", sceneItemId = "${graphic_item.sceneItemId}" } }
+expect = ["result('graphic_shown').sceneItemEnabled"]
+
+[[step]]
+id = "hud"
+at = "after:graphic_shown"
+role = "director"
+do = "hud"
+args = { field = "racecontrol", value = "GREEN" }
+expect = ["relay.get('/setup/data').fields.racecontrol == 'GREEN'"]
+
+[[step]]
+id = "go_live"
+at = "after:hud"
+role = "director"
+do = "start_part"
+expect = ["obs.streaming"]
+
+[[step]]
+id = "register"
+at = "after:go_live"
+role = "drivers"
+do = "register"
+args = { stints = 1 }
+expect = ["result('register').registered == 4"]
+
+[[step]]
+id = "approve_drivers"
+at = "after:register"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 4", "page('race_control').waiting == 0"]
+
+[[step]]
+id = "green"
+at = "after:approve_drivers"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'", "page('drivers').driving == 4"]
+timeout = "60s"
+shot = { name = "director-panel", role = "director" }
+
+[[step]]
+id = "lap2"
+at = "after:green"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "3m"
+
+[[step]]
+id = "timing"
+at = "after:lap2"
+role = "viewer"
+do = "read"
+args = { cars = 4 }
+expect = ["result('timing').cars == 4", "page('viewer').cars == 4"]
+timeout = "20s"
+shot = "public-timing"
+
+[[step]]
+id = "final_lap"
+at = "after:timing"
+role = "race_control"
+do = "final_lap"
+expect = ["race.state == 'finished'"]
+timeout = "2m"
+shot = "race-control"
+
+[[step]]
+id = "chequered"
+at = "after:final_lap"
+role = "drivers"
+do = "stop"
+expect = ["page('drivers').sending == 0"]
+
+[[step]]
+id = "off_air"
+at = "after:chequered"
+role = "director"
+do = "end_part"
+expect = ["not obs.streaming"]
+
+[[step]]
+id = "stop_event"
+at = "after:off_air"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"

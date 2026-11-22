@@ -3146,6 +3146,91 @@ def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
     return restore
 
 
+def _sim_env(**values):
+    """Set simulation env vars; returns a restore callable."""
+    keys = ("RACECAST_SIMULATION", "RACECAST_SIM_FEED_PORTS", "RACECAST_SIM_RELAY_PORT")
+    saved = {k: os.environ.get(k) for k in keys}
+    for k in keys:
+        os.environ.pop(k, None)
+    os.environ.update(values)
+
+    def restore():
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return restore
+
+
+def t_a_simulated_relay_start_never_kills_a_feed_port_holder():
+    restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
+    saved = m.pt.pids_on_port
+    holders = {53001: [777], 53002: [777], 53003: [777], 41001: [888], 41002: [888], 41003: [889]}
+    env = _sim_env()
+    try:
+        m.pt.pids_on_port = lambda port: [4242] if port == m._relay_port() else holders.get(port, [])
+        assert m._relay_start_signals()["feed_pids"] == [777], "a live start heals its own feed ports"
+        os.environ["RACECAST_SIMULATION"] = "1"
+        for feeds in (None, "41001,41002,41003"):
+            if feeds:
+                os.environ["RACECAST_SIM_FEED_PORTS"] = feeds
+            signals = m._relay_start_signals()
+            assert signals["feed_pids"] == [], \
+                f"a simulated start cannot prove who holds a feed port, so it kills none of them ({feeds})"
+            action, kill, _ = m.relay_start_plan(**dict(signals, http_ok=False, running_mode="simulation"))
+            assert action == "heal" and kill == [4242], f"a hung simulation relay heals itself only: {action} {kill}"
+    finally:
+        env()
+        m.pt.pids_on_port = saved
+        restore()
+
+
+def t_simulated_feed_ports_reach_the_helpers_and_the_relay_reads_them_itself():
+    env = _sim_env()
+    try:
+        assert m._feed_ports() == (53001, 53002, 53003)
+        os.environ.update(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+        assert m._feed_ports() == (41001, 41002, 41003)
+        assert "--ports" not in m._relay_runtime_args(), \
+            "the relay reads the variable itself, so every way of starting it agrees"
+    finally:
+        env()
+
+
+def t_simulated_freeport_defaults_to_the_simulated_feed_ports():
+    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+    seen, saved = [], m._simulated_freeport
+    m._simulated_freeport = lambda ports: seen.append(list(ports)) or 0
+    try:
+        try:
+            m.freeport_cmd([])
+        except SystemExit as exc:
+            assert exc.code == 0
+        assert seen == [[41001, 41002, 41003]], f"freeport without ports looks at the simulated ones: {seen}"
+        assert m.freeport_owner(53002, True, set()) == "relay", "outside simulation the owner check is unchanged"
+    finally:
+        m._simulated_freeport = saved
+        env()
+
+
+def t_static_streams_refuse_to_start_in_simulation():
+    env = _sim_env(RACECAST_SIMULATION="1")
+    ran, saved = [], m._run_script
+    m._run_script = lambda *a, **k: ran.append(a) or 0
+    try:
+        try:
+            m.streams_start([])
+        except SystemExit as exc:
+            assert "simulation" in str(exc.code) and "53001" in str(exc.code), exc.code
+        else:
+            raise AssertionError("streams start binds 53001/53002: it must refuse in simulation")
+        assert ran == [], "nothing is started"
+    finally:
+        m._run_script = saved
+        env()
+
+
 def t_relay_already_running_for_active_profile_requires_both():
     cases = [
         ((4242,), 4242, True, "demo", "demo", True, "our healthy relay on the active profile"),
@@ -7065,6 +7150,27 @@ def t_event_race_takes_the_lap_time_seconds():
         m.event_race_write_data, m._apply_active_profile_env = old
     assert calls == [{"last_lap_s": 7}], calls
     assert "new lap shows 7 s" in out.getvalue(), out.getvalue()
+
+
+def t_a_simulated_event_hands_out_the_loopback_links_the_relay_serves():
+    old = m._tailscale_magicdns, m._tailscale_ip, dict(m._INVITE_HOSTS)
+    m._tailscale_magicdns, m._tailscale_ip = (lambda: "box.tailnet.ts.net"), (lambda: "100.64.0.7")
+    m._INVITE_HOSTS.update(at=None, magic="", ip=None)
+    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234")
+    try:
+        assert m._invite_links("abc") == {"funnel": None,
+                                          "tailnet": "http://127.0.0.1:41234/console/drive?i=abc"}, \
+            "simulation never names a Tailscale host: the link is the relay's own loopback address"
+        assert m._timing_links("xyz")["tailnet"] == "http://127.0.0.1:41234/console/timing?l=xyz"
+        assert m._INVITE_HOSTS["at"] is None, "a simulated answer is not cached for a later live run"
+        env()
+        env = _sim_env()
+        assert m._invite_links("abc")["funnel"] == "https://box.tailnet.ts.net/console/drive?i=abc", \
+            "outside simulation the Funnel link is unchanged"
+    finally:
+        env()
+        m._tailscale_magicdns, m._tailscale_ip = old[0], old[1]
+        m._INVITE_HOSTS.clear(); m._INVITE_HOSTS.update(old[2])
 
 
 def t_invite_hosts_retry_a_failed_tailscale_lookup_soon():

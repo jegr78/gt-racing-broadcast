@@ -8,10 +8,14 @@ import time
 from dataclasses import asdict, dataclass, field
 
 import expect
+import redaction
 import roles
 from scenario import TEMPLATE_RE as _TEMPLATE, template_refs
 
 HARD, SOFT = "hard", "soft"
+EVENT_LINKS = ("invite", "timing")
+LEARN_EVERY_S = 1.0
+scrub = redaction.scrub
 POLL_S = 0.25
 
 
@@ -50,14 +54,41 @@ class RunContext:
     """What roles see of the run. `urls` maps service names (relay, ui, obs, sheet,
     sink) to base URLs; `token(name)` mints a console token for a crew member."""
 
-    def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir=""):
+    def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir="",
+                 event=None, event_link=None, secrets=(), clock=time.monotonic):
         self.urls = dict(urls or {})
         self._token = token
         self.stub = stub
         self.obs = obs
         self._browser = browser
         self.out_dir = out_dir
+        self.event = dict(event or {})
+        self._event_link = event_link
+        self.secrets = set(secrets)      # every credential of the run, for `scrub`
+        self._clock, self._learned_at = clock, None
         self.findings = []
+
+    def learn(self, force=False):
+        """Note the event's current invite and timing ids as credentials, whoever read
+        them: an `api` answer carries them bare. A renewed link is learned too and the
+        old one kept. Read at most once per LEARN_EVERY_S unless `force`."""
+        now = self._clock()
+        if self._event_link is None or (not force and self._learned_at is not None
+                                        and now - self._learned_at < LEARN_EVERY_S):
+            return
+        self._learned_at = now
+        for kind in EVENT_LINKS:
+            try:
+                link = self._event_link(kind)
+            except Exception:
+                continue  # no readable link is no credential to hide
+            if isinstance(link, str) and link:
+                self.secrets.add(link)
+
+    def scrub(self, value):
+        """`value` without credentials: the one filter for everything the run writes."""
+        self.learn()
+        return redaction.scrub(value, self.secrets)
 
     def url(self, service):
         if service not in self.urls:
@@ -67,7 +98,18 @@ class RunContext:
     def token(self, name):
         if self._token is None:
             raise roles.StepError("this run mints no console tokens")
-        return self._token(name)
+        token = self._token(name)
+        self.secrets.add(token)
+        return token
+
+    def event_link(self, kind):
+        """The id of the event's driver invite ("invite") or public timing link
+        ("timing"). It is a credential: never put it into a result or a finding."""
+        link = self._event_link(kind) if self._event_link is not None else None
+        if not link:
+            raise roles.StepError(f"the event has no {kind} link yet (Start event creates it)")
+        self.secrets.add(link)
+        return link
 
     def browser(self):
         """The shared headless browser (`browser.Browser`), or None without Playwright."""
@@ -114,7 +156,7 @@ def resolve_args(value, results):
 
 class Engine:
     def __init__(self, scenario, ctx, probes, registry=None, clock=time.monotonic,
-                 sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=()):
+                 sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=(), no_skips=False):
         self.scenario = scenario
         self.ctx = ctx
         self.probes = dict(probes)
@@ -122,6 +164,7 @@ class Engine:
         self.clock, self.sleep, self.poll = clock, sleep, poll
         self.shots_dir = shots_dir
         self.final_checks = list(final_checks)
+        self.no_skips = no_skips
         self.roles = {}
         self.findings = []
         self.results = {}
@@ -234,7 +277,8 @@ class Engine:
             return
         role_name = shot.role or step.role
         if self.shots_dir is None:
-            self.findings.append(Finding(SOFT, f"shot {shot.name}: no shots directory", step.id, role_name))
+            self.findings.append(Finding(HARD if self.no_skips else SOFT,
+                                         f"shot {shot.name}: no shots directory", step.id, role_name))
             return
         os.makedirs(self.shots_dir, exist_ok=True)
         path = os.path.join(self.shots_dir, shot.name + ".png")
@@ -242,7 +286,9 @@ class Engine:
             self._role(role_name).shot(path, shot.element)
             res.shot = f"shots/{shot.name}.png"
         except Exception as exc:  # ShotUnavailable or a broken page: a screenshot never decides the run
-            self.findings.append(Finding(SOFT, f"shot {shot.name}: {exc}", step.id, role_name))
+            # A run that must have its browser (--no-skips) must have its pictures too.
+            self.findings.append(Finding(HARD if self.no_skips else SOFT, f"shot {shot.name}: {exc}",
+                                         step.id, role_name))
 
     def _checks(self, step, res):
         slow = self.scenario.tolerances.get("state_s", 2.0)
@@ -270,18 +316,23 @@ class Engine:
                                             if r.result is not None})
             res.result = self._role(step.role).do(step.do, args)
             res.status = "ok"
+        except roles.Unavailable as exc:
+            res.status, res.error = "skipped", str(exc)
+            self.findings.append(Finding(SOFT, f"skipped: {exc}", step.id, step.role))
         except roles.StepError as exc:
             res.status, res.error = "failed", str(exc)
         except Exception as exc:  # a role bug must not hide the rest of the report
             res.status, res.error = "failed", f"{type(exc).__name__}: {exc}"
         if res.status == "failed":
             self.findings.append(Finding(HARD, res.error, step.id, step.role))
-        else:
+        elif res.status == "ok":
             self._checks(step, res)
             if any(not c.ok and not c.soft for c in res.checks):
                 res.status = "failed"
-        self._shoot(step, res)
+        if res.status != "skipped":
+            self._shoot(step, res)
         self._take_findings(step)
+        self.ctx.learn(force=True)      # a link this step created or renewed
         res.duration = round(self.clock() - begin, 3)
         return res
 
@@ -318,9 +369,14 @@ class Engine:
         return self.data(out)
 
     def data(self, steps):
-        hard = [f for f in self.findings if f.severity == HARD]
+        findings = list(self.findings)
+        if self.no_skips:
+            findings += [Finding(HARD, f"skipped, and this run allows no skips: {s.error}", s.id, s.role)
+                         for s in steps if s.status == "skipped"]
+        hard = [f for f in findings if f.severity == HARD]
         failed = [s for s in steps if s.status == "failed"]
-        return {"scenario": self.scenario.name, "description": self.scenario.description,
-                "ok": not hard and not failed, "duration": round(self.now(), 3),
-                "steps": [asdict(s) for s in steps],
-                "findings": [asdict(f) for f in sorted(self.findings, key=lambda f: f.severity != HARD)]}
+        return self.ctx.scrub({
+            "scenario": self.scenario.name, "description": self.scenario.description,
+            "ok": not hard and not failed, "duration": round(self.now(), 3),
+            "steps": [asdict(s) for s in steps],
+            "findings": [asdict(f) for f in sorted(findings, key=lambda f: f.severity != HARD)]})
