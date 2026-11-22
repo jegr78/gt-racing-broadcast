@@ -214,6 +214,35 @@ simulated PS5 cannot share a host on the default ports: both need UDP 33740 or
 sender's own upload code; `--status` adds the relay's counts to its JSON report and
 `--reset` clears the probe's counters first.
 
+## Simulated OBS (`tools/event-sim/fakes/obs_sim.py`, #1229)
+
+The event simulation's stand-in OBS (spec
+`docs/superpowers/specs/2026-11-21-event-simulation-design.md`). `obs_state.py` holds the
+state seeded from `src/obs/GT_Racing_Endurance.json` (or `--collection`): scenes, program
+and preview, Cut and Fade, streaming and recording, inputs with settings, mute and
+volume, scene item visibility, media cursors. It answers each request the way OBS does,
+including OBS's error codes for a missing scene, item or input. Each client gets the
+events its `eventSubscriptions` asks for; `obs_ws` asks for none. `obs_render.py` draws
+program screenshots as PNG: the scene name over colour bars per visible feed.
+
+One loopback port carries the WebSocket and a JSON endpoint for checks: `GET /state`
+(`scene` is the program scene), `/events?since=N`, `/requests?since=N` (state-changing
+requests; `Get*` reads are only counted, under `reads` in the state), `/program.png`,
+and `POST /request` (an operator acting in OBS), `/labels` (text a feed's pattern shows)
+and `/freeze` (stop a feed's media cursor). The stream key never reaches the state or the
+request log. In-process use: `ObsSim(...).start()`, `.env()` gives
+`RACECAST_SIM_OBS_WS`, `obs_sim.fetch(url, path)` reads the endpoint.
+
+```bash
+python3 tools/event-sim/fakes/obs_sim.py --port 0 --ready-file obs.json
+```
+
+`tools/obs-sim.py` is its lenient mode for screenshots: a fixed image and the old fixed
+answers (no inputs, any scene item exists and is visible, every other request succeeds
+without effect). `tools/e2e.py` and the
+wiki-screenshots skill use it. `tests/test_obs_sim.py` drives both through the real
+`obs_ws` helpers.
+
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
 Up to 15 simulated senders for a running relay: they register on the event's invite,
