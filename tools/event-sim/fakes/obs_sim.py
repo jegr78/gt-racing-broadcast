@@ -12,7 +12,7 @@ state. Requests must name this port on 127.0.0.1 or localhost in `Host`, carry n
     GET  /program.png?width=W    the program screenshot
     POST /request                {"requestType", "requestData"}: an operator acting in OBS
     POST /labels                 {"Feed A": "Stint 1 Comms 1"}: text of a feed's pattern
-    POST /freeze                 {"input": "Feed A", "frozen": true}: stop a media cursor
+    POST /freeze                 {"input": "Feed A", "frozen": true, "state": ...}: stop a media cursor
 
 Point the relay at it with `RACECAST_SIM_OBS_WS=ws://127.0.0.1:<port>` in simulation
 mode (`ObsSim.env()`), or with the RACECAST_OBS_WS_HOST/PORT overrides otherwise.
@@ -368,7 +368,8 @@ class ObsSim:
             st.set_labels(data)
             return ok({"labels": st.snapshot()["labels"]})
         if method == "POST" and u.path == "/freeze" and isinstance(data, dict):
-            st.freeze_media(str(data.get("input")), bool(data.get("frozen", True)))
+            st.freeze_media(str(data.get("input")), bool(data.get("frozen", True)),
+                            str(data.get("state") or obs_state.PLAYING))
             return ok({"frozen": sorted(st.media_frozen)})
         return "404 Not Found", "application/json", b'{"error": "not found"}'
 

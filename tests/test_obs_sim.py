@@ -232,12 +232,20 @@ def t_transition_runs_for_its_duration_then_ends():
     st.request("SetCurrentProgramScene", {"sceneName": "Standby"})
     snap = st.snapshot()
     assert snap["scene"] == "Standby" and snap["transition"]["active"], snap["transition"]
+    assert [e["eventType"] for e in st.events_since(0)] == ["SceneTransitionStarted"], "OBS reports the scene at the end"
+    seq = st.event_seq
+    st.request("SetCurrentProgramScene", {"sceneName": "Standby"})
+    assert st.event_seq == seq, "the scene it is already fading to starts nothing new"
     clock.now += 0.31
     names = [e["eventType"] for e in st.events_since(0)]
-    assert names == ["SceneTransitionStarted", "CurrentProgramSceneChanged", "SceneTransitionEnded"], names
+    assert names == ["SceneTransitionStarted", "SceneTransitionEnded", "CurrentProgramSceneChanged"], names
+    seq = st.event_seq
+    st.request("SetCurrentProgramScene", {"sceneName": "Standby"})
+    assert st.event_seq == seq and not st.snapshot()["transition"]["active"], "the program scene again is a no-op"
     st.request("SetCurrentSceneTransition", {"transitionName": "Cut"})
     st.request("SetCurrentProgramScene", {"sceneName": "Stint"})
     assert not st.snapshot()["transition"]["active"], "a cut ends at once"
+    assert st.events_since(0)[-1]["eventType"] == "CurrentProgramSceneChanged"
 
 
 def t_studio_mode_preview_and_transition():
@@ -312,6 +320,57 @@ def t_media_cursor_advances_until_frozen():
     st.freeze_media("Feed A", False)
     clock.now += 1
     assert st.request("GetMediaInputStatus", {"inputName": "Feed A"})["mediaCursor"] == second + 1000
+
+
+def _media(st, name):
+    return st.request("GetMediaInputStatus", {"inputName": name})
+
+
+def t_media_status_follows_obs():
+    clock = Clock()
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION, clock=clock)
+    clock.now += 2
+    status = _media(st, "Feed A")
+    assert status["mediaState"] == "OBS_MEDIA_STATE_PLAYING" and status["mediaCursor"] == 2000, \
+        "the cursor runs from the input's creation, not from the first question"
+    assert status["mediaDuration"] == obs_state.LIVE_DURATION, "a live stream has no duration"
+    st.freeze_media("Feed A", state="OBS_MEDIA_STATE_ENDED")
+    ended = _media(st, "Feed A")
+    assert (ended["mediaState"], ended["mediaCursor"], ended["mediaDuration"]) == ("OBS_MEDIA_STATE_ENDED", None, None)
+    assert st.snapshot()["inputs"]["Feed A"]["frozen"], "the state shows the freeze"
+    st.request("SetInputSettings", {"inputName": "Feed A", "inputSettings": {"input": FEED_A}})
+    clock.now += 0.5
+    reopened = _media(st, "Feed A")
+    assert (reopened["mediaState"], reopened["mediaCursor"]) == ("OBS_MEDIA_STATE_PLAYING", 500), \
+        "new settings reopen the media and end the freeze"
+    assert not st.snapshot()["inputs"]["Feed A"]["frozen"]
+    assert _media(st, "Overlay") == {"mediaState": "OBS_MEDIA_STATE_NONE", "mediaDuration": None,
+                                     "mediaCursor": None}, "a non-media input answers like OBS"
+    try:
+        _media(st, "Stint")
+    except obs_state.ObsError as exc:
+        assert exc.code == obs_state.INVALID_RESOURCE_TYPE
+    else:
+        raise AssertionError("a scene is not an input")
+    st.request("CreateInput", {"sceneName": "Stint", "inputName": "Clip", "inputKind": "ffmpeg_source",
+                               "inputSettings": {"local_file": "clip.mp4", "is_local_file": True}})
+    clock.now += 1
+    assert _media(st, "Clip")["mediaCursor"] == 1000, "a new input starts at its creation"
+
+
+def t_obs_refuses_stream_settings_while_streaming_and_lists_scenes_bottom_up():
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
+    st.request("StartStream")
+    try:
+        st.request("SetStreamServiceSettings", obs_ws.stream_service_payload("twitch", "k"))
+    except obs_state.ObsError as exc:
+        assert exc.code == obs_state.OUTPUT_RUNNING
+    else:
+        raise AssertionError("OBS keeps the service while streaming")
+    scenes = st.request("GetSceneList")["scenes"]
+    order = st.snapshot()["scene_order"]
+    assert [s["sceneName"] for s in scenes] == order[::-1], "the list starts at the bottom scene"
+    assert [s["sceneIndex"] for s in scenes] == list(range(len(order))), "indexes count from the bottom"
 
 
 def t_screenshot_shows_scene_and_visible_feeds():
@@ -804,8 +863,8 @@ def t_events_reach_subscribers_only():
     try:
         resp, seen = quiet.request("SetCurrentProgramScene", {"sceneName": "Standby"})
         assert resp["requestStatus"]["result"] and seen == [], (resp, seen)
-        names = [loud.next()["d"]["eventType"] for _ in range(2)]
-        assert names == ["SceneTransitionStarted", "CurrentProgramSceneChanged"], names
+        names = [loud.next()["d"]["eventType"] for _ in range(3)]
+        assert names == ["SceneTransitionStarted", "SceneTransitionEnded", "CurrentProgramSceneChanged"], names
         resp, seen = quiet.request("GetCurrentProgramScene")
         assert seen == [] and resp["responseData"]["currentProgramSceneName"] == "Standby", seen
         quiet.send({"op": 3, "d": {"eventSubscriptions": obs_state.OUTPUTS}})
@@ -837,8 +896,9 @@ def t_http_endpoint_reads_and_pokes_state():
         obs_sim.fetch(sim.http_url, "/request", {"requestType": "GetStats"})
         snap = obs_sim.fetch(sim.http_url)
         assert snap["seq"]["requests"] == 2 and snap["reads"] == {"GetStats": 1}, "reads are counted, not logged"
+        assert _wait(lambda: "CurrentProgramSceneChanged" in [
+            e["eventType"] for e in obs_sim.fetch(sim.http_url, "/events?since=0")["events"]]), "after the fade"
         events = obs_sim.fetch(sim.http_url, "/events?since=0")
-        assert "CurrentProgramSceneChanged" in [e["eventType"] for e in events["events"]]
         assert obs_sim.fetch(sim.http_url, f"/events?since={events['seq']}")["events"] == []
         assert obs_sim.fetch(sim.http_url, "/labels", {"Feed A": "Comms 1"})["labels"] == {"Feed A": "Comms 1"}
         assert obs_sim.fetch(sim.http_url, "/freeze", {"input": "Feed A"})["frozen"] == ["Feed A"]

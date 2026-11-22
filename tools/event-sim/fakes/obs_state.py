@@ -39,6 +39,11 @@ OUTPUT_NOT_PAUSED = 503
 STUDIO_MODE_OFF = 506
 NOT_FOUND = 600
 ALREADY_EXISTS = 601
+INVALID_RESOURCE_TYPE = 602
+PLAYING, MEDIA_NONE = "OBS_MEDIA_STATE_PLAYING", "OBS_MEDIA_STATE_NONE"
+# What OBS reports as a live stream's duration: FFmpeg's AV_NOPTS_VALUE over 1000.
+LIVE_DURATION = -(9223372036854775808 // 1000)
+FILE_DURATION = 60000
 
 # obs-websocket v5 EventSubscription bits.
 GENERAL, CONFIG, SCENES, INPUTS, TRANSITIONS = 1, 2, 4, 8, 16
@@ -190,13 +195,12 @@ class ObsState:
         self.inputs, self.scenes, self.scene_order = {}, {}, []
         self.collection = "Untitled"
         self.next_item_id = {}
-        self.transition = {"name": "Fade", "duration": 300, "active": False, "ends_at": None}
+        self.transition = {"name": "Fade", "duration": 300, "active": False, "ends_at": None, "to": None}
         self.studio_mode, self.preview = False, None
         self.stream = {"active": False, "started_at": None, "service": {}}
         self.record = {"active": False, "paused": False, "started_at": None, "paused_ms": 0,
                        "paused_at": None, "path": None, "count": 0}
-        self.media_frozen = set()
-        self.media_started = {}
+        self.media = {}         # media input -> {"start", "held": frozen cursor ms or None, "state"}
         self.image, self.labels = None, {}
         self.opaque = set(OPAQUE_DEFAULT if opaque is None else opaque)
         self.grabber = grabber
@@ -224,6 +228,7 @@ class ObsState:
                 "kind": src.get("id") or "",
                 "settings": copy.deepcopy(src.get("settings") or {}),
                 "muted": bool(src.get("muted")), "volume": float(src.get("volume", 1.0))}
+            self._media_open(src["name"])
         for src in sources:
             if src.get("id") != "scene":
                 continue
@@ -281,12 +286,14 @@ class ObsState:
             return [r for r in self.requests if r["seq"] > seq]
 
     def tick(self):
-        """Finish a transition whose duration has passed."""
+        """Finish a transition whose duration has passed. OBS reports the new program
+        scene only then (OBSBasic::TransitionStopped)."""
         with self.lock:
             t = self.transition
             if t["active"] and self.clock() >= t["ends_at"]:
                 t["active"], t["ends_at"] = False, None
                 self._emit("SceneTransitionEnded", {"transitionName": t["name"]})
+                self._emit("CurrentProgramSceneChanged", {"sceneName": t["to"]})
 
     # -- the request entry point ----------------------------------------------------
     def request(self, request_type, data=None, origin="ws"):
@@ -436,9 +443,8 @@ class ObsState:
 
     # -- scenes ----------------------------------------------------------------------
     def _r_GetSceneList(self, data):
-        n = len(self.scene_order)
         return {"currentProgramSceneName": self.program, "currentPreviewSceneName": self.preview,
-                "scenes": [{"sceneName": s, "sceneIndex": n - 1 - i}
+                "scenes": [{"sceneName": s, "sceneIndex": i}
                            for i, s in enumerate(reversed(self.scene_order))]}
 
     def _r_GetCurrentProgramScene(self, data):
@@ -451,15 +457,16 @@ class ObsState:
         return {}
 
     def _switch(self, name):
+        """Start a transition to `name`. Switching to the scene already on air, or to the
+        one a running transition heads for, starts nothing: obs_transition_start refuses
+        its own source (libobs obs-source-transition.c)."""
         t = self.transition
-        if t["active"]:
-            t["active"] = False
-            self._emit("SceneTransitionEnded", {"transitionName": t["name"]})
+        if name == (t["to"] if t["active"] else self.program):
+            return
         self._emit("SceneTransitionStarted", {"transitionName": t["name"]})
         self.program = name
-        self._emit("CurrentProgramSceneChanged", {"sceneName": name})
         duration = 0 if t["name"] == "Cut" else t["duration"]
-        t["active"], t["ends_at"] = True, self.clock() + duration / 1000.0
+        t["active"], t["ends_at"], t["to"] = True, self.clock() + duration / 1000.0, name
         self.tick()
 
     def _r_GetCurrentPreviewScene(self, data):
@@ -563,6 +570,7 @@ class ObsState:
             inp["settings"].update(copy.deepcopy(settings))
         else:
             inp["settings"] = copy.deepcopy(settings)
+        self._media_open(name)
         self._emit("InputSettingsChanged", {"inputName": name,
                                             "inputSettings": copy.deepcopy(inp["settings"])})
         return {}
@@ -612,6 +620,7 @@ class ObsState:
             raise ObsError(ALREADY_EXISTS, "A source already exists by that input name.")
         self.inputs[name] = {"kind": kind, "settings": copy.deepcopy(data.get("inputSettings") or {}),
                              "muted": False, "volume": 1.0}
+        self._media_open(name)
         self._emit("InputCreated", {"inputName": name, "inputKind": kind,
                                     "inputSettings": copy.deepcopy(self.inputs[name]["settings"])})
         item_id = self._add_item(scene, name, data.get("sceneItemEnabled", True))
@@ -621,6 +630,7 @@ class ObsState:
         (name,) = _need(data, "inputName")
         self._input(name)
         del self.inputs[name]
+        self.media.pop(name, None)
         for scene, items in self.scenes.items():
             for item in [i for i in items if i["source"] == name]:
                 items.remove(item)
@@ -637,30 +647,45 @@ class ObsState:
         self._input(_need(data, "inputName", "propertyName")[0])
         return {}
 
+    def _media_open(self, name):
+        """(Re)open a media input as OBS does on creation and on new settings."""
+        if self.inputs[name]["kind"] == "ffmpeg_source":
+            self.media[name] = {"start": self.clock(), "held": None, "state": PLAYING}
+
+    def _cursor(self, entry):
+        if entry["held"] is not None:
+            return entry["held"]
+        return int((self.clock() - entry["start"]) * 1000)
+
     def _r_GetMediaInputStatus(self, data):
         (name,) = _need(data, "inputName")
+        if name in self.scenes:
+            raise ObsError(INVALID_RESOURCE_TYPE, "The specified source is not an input.")
         inp = self._input(name)
-        if inp["kind"] != "ffmpeg_source":
-            raise ObsError(NOT_FOUND, "The specified input is not a media input.")
-        if name in self.media_frozen:
-            cursor = self.media_started[name]
-        else:
-            cursor = int((self.clock() - self.media_started.setdefault(name, self.clock())) * 1000)
+        entry = self.media.get(name)
+        if entry is None:
+            return {"mediaState": MEDIA_NONE, "mediaDuration": None, "mediaCursor": None}
+        if entry["state"] not in (PLAYING, "OBS_MEDIA_STATE_PAUSED"):
+            return {"mediaState": entry["state"], "mediaDuration": None, "mediaCursor": None}
         live = bool(feed_url(inp["settings"]))
-        return {"mediaState": "OBS_MEDIA_STATE_PLAYING", "mediaDuration": None if live else 60000,
-                "mediaCursor": cursor}
+        return {"mediaState": entry["state"], "mediaDuration": LIVE_DURATION if live else FILE_DURATION,
+                "mediaCursor": self._cursor(entry)}
 
-    def freeze_media(self, name, frozen=True):
-        """Stop (or restart) a media input's cursor, the relay's freeze signal. While frozen,
-        media_started holds the stopped cursor in ms instead of a start time."""
+    def freeze_media(self, name, frozen=True, state=PLAYING):
+        """Stop a media input's cursor with OBS reporting `state` (PLAYING: a stalled
+        stream, the relay's freeze signal), or let it run on from where it stopped."""
         with self.lock:
-            if frozen and name not in self.media_frozen:
-                started = self.media_started.get(name, self.clock())
-                self.media_started[name] = int((self.clock() - started) * 1000)
-                self.media_frozen.add(name)
-            elif not frozen and name in self.media_frozen:
-                self.media_frozen.discard(name)
-                self.media_started[name] = self.clock() - self.media_started[name] / 1000.0
+            entry = self.media.get(name)
+            if entry is None:
+                return
+            if frozen:
+                entry["held"], entry["state"] = self._cursor(entry), state
+            elif entry["held"] is not None:
+                entry.update(start=self.clock() - entry["held"] / 1000.0, held=None, state=PLAYING)
+
+    @property
+    def media_frozen(self):
+        return {n for n, e in self.media.items() if e["held"] is not None}
 
     # -- scene items -----------------------------------------------------------------
     def _r_GetSceneItemList(self, data):
@@ -766,6 +791,8 @@ class ObsState:
                 "streamServiceSettings": copy.deepcopy(svc.get("settings", {}))}
 
     def _r_SetStreamServiceSettings(self, data):
+        if self.stream["active"]:
+            raise ObsError(OUTPUT_RUNNING, "You cannot change stream service settings while streaming.")
         kind, settings = _need(data, "streamServiceType", "streamServiceSettings")
         self.stream["service"] = {"type": kind, "settings": copy.deepcopy(settings)}
         return {}

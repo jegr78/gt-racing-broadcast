@@ -253,7 +253,10 @@ One loopback port carries the WebSocket and a JSON endpoint for checks: `GET /st
 (`scene` is the program scene), `/events?since=N`, `/requests?since=N` (state-changing
 requests; `Get*` reads are only counted, under `reads` in the state), `/program.png`,
 and `POST /request` (an operator acting in OBS), `/labels` (text a feed's pattern shows)
-and `/freeze` (stop a feed's media cursor). The stream key never reaches the state or the
+and `/freeze` (stop a feed's media cursor; `state` sets what OBS reports, PLAYING by
+default as for a stalled stream; new input settings reopen the media and end it). As in
+OBS, a transition reports `CurrentProgramSceneChanged` when it ends, and switching to
+the scene already on air (or already faded to) starts nothing. The stream key never reaches the state or the
 request log. A web page must not reach the port: a request needs `Host` 127.0.0.1 or
 localhost with this port, no `Origin` (also on the WebSocket upgrade) and a POST
 `application/json`. A handler failure answers code 400 instead of dropping the session,
