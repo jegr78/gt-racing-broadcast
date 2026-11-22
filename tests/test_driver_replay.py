@@ -16,7 +16,7 @@ spec.loader.exec_module(replay)
 
 
 def t_replay_packets_carry_what_the_race_reads():
-    mine = gt7_crypto.decrypt_typed(replay.packet(12, 3, 50.0, 1.5, -2.0, 61000, 60000, 40.0))[1]
+    mine = gt7_crypto.decrypt_typed(replay.drive.packet(12, 3, 50.0, 1.5, -2.0, 61000, 60000, 40.0))[1]
     ref = bytearray(_packet(lap=3, speed_mps=50.0, pos=(1.5, 0.0, -2.0), last_ms=61000,
                             best_ms=60000, fuel_level=40.0))
     struct.pack_into("<i", ref, 0x70, 12)
@@ -27,7 +27,7 @@ def t_replay_packets_carry_what_the_race_reads():
 
 
 def t_the_line_wraps_at_its_length():
-    line = replay.Line([{"d": 0.0, "x": 0.0, "z": 0.0}, {"d": 100.0, "x": 100.0, "z": 0.0}])
+    line = replay.drive.Line([{"d": 0.0, "x": 0.0, "z": 0.0}, {"d": 100.0, "x": 100.0, "z": 0.0}])
     assert line.at(25.0) == (25.0, 0.0) and line.at(125.0) == (25.0, 0.0) and line.at(-10.0) == (90.0, 0.0)
 
 

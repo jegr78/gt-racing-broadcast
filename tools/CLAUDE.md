@@ -639,7 +639,7 @@ scrub), so an id no role asked for, or one renewed mid-run, is covered too. So a
 exception text, a navigation error or an `api` response body cannot carry one out. Every
 page screenshot blacks out the link texts (`selectors.LINKS`).
 
-`drive.py` is the driver library, also behind `tools/driver-replay.py`: `packet`, `Line`,
+`drive.py` is the driver library behind `tools/driver-replay.py`: `packet`, `Line`,
 the synthetic track, `Field` (cars and their senders, stepped with `step(now, dt)` on the
 caller's clock, so a seed fixes every packet), `Client` (loopback unless told otherwise) and
 `Runner` (a field on real time in one thread, joined in `close`; it steps under its lock
