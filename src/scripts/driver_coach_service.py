@@ -282,6 +282,8 @@ class Service:
             if self._revision!=current['revision'] or self._token!=current.get('epoch',self._token):
                 state=self.snapshot(owner)
                 if state['active']:state.update(phase='pending' if state['pending'] else 'paused',calibration=None,focus=None,latest=None)
+        # A fresh snapshot carries no reference choices; the caller's view always does.
+        if 'references' in prior:state.setdefault('references',[])
         return state
 
     def _apply(self, command):

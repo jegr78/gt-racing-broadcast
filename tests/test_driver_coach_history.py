@@ -335,6 +335,26 @@ def t_a_control_during_the_final_source_proof_cannot_restore_the_previous_actor(
         assert changed and not result['active'] and result['focus'] is None
 
 
+def t_a_view_replaced_during_the_final_proof_keeps_an_empty_reference_list():
+    import driver_coach_service as service
+    with tempfile.TemporaryDirectory() as root:
+        f,store=coordinated(root);f.command();f.step()
+        for n in (2,3,4):f.complete(n);f.step()
+        offered=dict(f.service.view(LOCAL),references=[dict(id='r:archive:1')])
+        f.command('stop')
+        stale=f.service.after_io(LOCAL,offered,copy.deepcopy(f.snap))
+        assert stale.get('references')==[],'A revision change before the final proof dropped the references list'
+        f.step();f.command();f.step()
+        for n in (5,6,7):f.complete(n);f.step()
+        offered=dict(f.service.view(LOCAL),references=[dict(id='r:archive:1')]);original=service._facts;changed=[]
+        def facts(row):
+            if not changed:changed.append(True);f.command('stop')
+            return original(row)
+        with patch.object(service,'_facts',facts):
+            raced=f.service.after_io(LOCAL,offered,copy.deepcopy(f.snap))
+        assert changed and raced.get('references')==[],'A control during the final proof dropped the references list'
+
+
 def _records(record,count,first,step,start):
     """Finished copies of a real compact record with distinct ids and times."""
     rows=[]
