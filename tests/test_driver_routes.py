@@ -1614,6 +1614,52 @@ def t_obs_source_toggle_flips_the_state_obs_reports():
         srv.server_close()
 
 
+class _BannerHud:
+    def __init__(self, banner=""):
+        self.banner = banner
+
+    def data(self):
+        return {"raceControl": self.banner}
+
+    def roster_names(self):
+        return []
+
+    def roster_details(self):
+        return {}
+
+
+def t_red_flag_toggle_without_a_readable_cover_takes_the_relays_own_state():
+    import json as _json
+    hud = _BannerHud()
+    orig_obs, g.m._obs_ws = g.m._obs_ws, _ItemObs({"Standings": None})
+    srv = g._serve(hud_source=hud)
+    port = srv.server_address[1]
+
+    def toggle(source):
+        st, text, _h = _req(port, "/obs/source", _json.dumps(
+            {"scene": "Stint", "source": source, "toggle": True}).encode(), {"Content-Type": "application/json"})
+        return st, _json.loads(text)
+    try:
+        for obs in (g.m._obs_ws, None):                  # OBS cannot report the item, then no OBS at all
+            g.m._obs_ws = obs
+            hud.banner, srv.relay.rc_red_flag_raised = "", False
+            st, d = toggle("Standby Cover")
+            assert st == 503 and d["ok"] is False and d["error"] and d["red_flag"] is True, \
+                f"no red flag on record: the press raises one, and says the cover was not switched: {d}"
+            hud.banner = g.m.RED_FLAG_BANNER
+            assert toggle("Standby Cover")[1]["red_flag"] is False, "the banner on air means the press ends it"
+            hud.banner, srv.relay.rc_red_flag_raised = "Driver Swaps", True
+            assert toggle("Standby Cover")[1]["red_flag"] is False, "so does a cover the desk raised"
+            st, d = toggle("Standings")
+            assert st == 503 and "red_flag" not in d, f"a graphic key gets no direction to act on: {d}"
+            if obs is not None:
+                assert obs.sets == [], "nothing was switched in OBS"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
 class _Setup:
     """The Setup tab control: `banner` is the Sheet, the HUD shows its last poll."""
     def __init__(self):

@@ -772,25 +772,48 @@ def t_graphic_keys_toggle_from_the_relays_answer():
 def t_red_flag_follows_the_relays_answer():
     out = _toggle_js(_html(), """
 (async () => {
-  answers.push({ok: true, enabled: false}, {ok: true, enabled: true}, {ok: false, error: 'obs unreachable'});
+  answers.push({ok: true, enabled: false}, {ok: true, enabled: true});
   obsState.sources.push({scene: 'Stint', source: 'Standby Cover', enabled: false});
   await redFlagPress();
   const down = {setup: setup.splice(0), fetched: fetched.splice(0)};
   await redFlagPress();
   const up = {setup: setup.splice(0), fetched: fetched.splice(0)};
-  await redFlagPress();
-  console.log(JSON.stringify({down, up, refused: {setup, fetched}, sent, logs}));
+  console.log(JSON.stringify({down, up, sent, logs}));
 })();""")
     if out is not None:
         d = json.loads(out)
-        assert d["sent"] == ['source {"scene":"Stint","source":"Standby Cover","toggle":true}'] * 3, d["sent"]
+        assert d["sent"] == ['source {"scene":"Stint","source":"Standby Cover","toggle":true}'] * 2, d["sent"]
         assert d["down"] == {"setup": ["racecontrol="], "fetched": []}, \
             f"the relay lowered a cover the panel had not seen raised, so the banner clears: {d['down']}"
         assert d["up"] == {"setup": ["racecontrol=Red Flag - Race Suspended"],
                            "fetched": ["/drivers/race/red-flag"]}, d["up"]
-        assert d["refused"] == {"setup": [], "fetched": []}, \
-            f"a refused toggle writes no banner and holds no race: {d['refused']}"
-        assert any(line.startswith("toast: RED FLAG") for line in d["logs"]), d["logs"]
+        assert not [line for line in d["logs"] if line.startswith("toast")], d["logs"]
+
+
+def t_red_flag_without_the_cover_still_sets_banner_and_race():
+    out = _toggle_js(_html(), """
+(async () => {
+  answers.push({ok: false, error: 'obs unreachable', red_flag: true},
+               {ok: false, error: 'obs unreachable', red_flag: false}, {ok: false, error: 'bad response'});
+  await redFlagPress();
+  const up = {setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)};
+  await redFlagPress();
+  const down = {setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)};
+  await redFlagPress();
+  console.log(JSON.stringify({up, down, lost: {setup, fetched, logs}}));
+})();""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
+            and d["up"]["fetched"] == ["/drivers/race/red-flag"], \
+            f"a red flag the relay decided without OBS still sets the banner and holds the race: {d['up']}"
+        assert d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], d["down"]
+        for part in (d["up"], d["down"]):
+            assert any(line.startswith("toast: ") and "Standby Cover was not switched" in line
+                       and "obs unreachable" in line for line in part["logs"]), part["logs"]
+        assert d["lost"]["setup"] == [] and d["lost"]["fetched"] == [] \
+            and any(line.startswith("toast: RED FLAG not switched") for line in d["lost"]["logs"]), \
+            f"an answer without a direction changes nothing and says so: {d['lost']}"
 
 
 def t_relay_driven_keys_start_hidden():

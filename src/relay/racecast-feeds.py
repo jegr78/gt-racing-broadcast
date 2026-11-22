@@ -5514,6 +5514,13 @@ def switch_scene_item(obs_ws, scene, source, on=None):
         return bool(ok), on, note
 
 
+def red_flag_on_record(relay, hud):
+    """Whether a red flag is on by the relay's own record, for when OBS cannot report
+    the Standby Cover: the HUD banner, or a cover the Race Control desk raised."""
+    banner = hud.data().get("raceControl") if hud is not None else None
+    return banner == RED_FLAG_BANNER or bool(getattr(relay, "rc_red_flag_raised", False))
+
+
 def apply_graphic(relay, obs_ws, verb, source):
     """GET /obs/graphic/<show|hide|toggle>/<source> (Companion, #706): switch one
     full-screen graphic in the scene the loaded collection keeps it in, Stint for
@@ -15380,18 +15387,28 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     _takes_state["value"] = None
                     return self._send(payload, status)
                 if p == ["obs", "source"]:
-                    if _obs_ws is None:
-                        return self._send({"error": "obs unavailable"}, 503)
-                    _crew_takes.forget(body.get("source"))
                     # `toggle: true` flips the state OBS reports (the panel's keys);
                     # without it `on` decides, as before.
-                    ok, enabled, note = switch_scene_item(
-                        relay._obs, body.get("scene"), body.get("source"),
-                        None if body.get("toggle") is True else bool(body.get("on")))
+                    toggle = body.get("toggle") is True
+                    red_flag = toggle and body.get("source") == STANDBY_COVER_SOURCE
+                    if _obs_ws is None and not red_flag:
+                        return self._send({"error": "obs unavailable"}, 503)
+                    ok, enabled, note = False, None, "obs unavailable"
+                    if _obs_ws is not None:
+                        _crew_takes.forget(body.get("source"))
+                        ok, enabled, note = switch_scene_item(
+                            relay._obs, body.get("scene"), body.get("source"),
+                            None if toggle else bool(body.get("on")))
                     if ok and body.get("source") == STANDBY_COVER_SOURCE:
                         relay.rc_red_flag_raised = False
-                    return self._send({"ok": True, "enabled": enabled} if ok
-                                      else {"ok": False, "error": note}, 200 if ok else 503)
+                    if ok:
+                        return self._send({"ok": True, "enabled": enabled})
+                    payload = {"ok": False, "error": note}
+                    if red_flag:
+                        # RED FLAG still needs a direction for the banner and the race.
+                        payload["red_flag"] = (enabled if enabled is not None else not red_flag_on_record(
+                            relay, getattr(setup_ctl, "hud", None) or hud_source))
+                    return self._send(payload, 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
