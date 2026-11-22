@@ -236,9 +236,10 @@ as it is, labelled with its own type. A screenshot is
 planned under the state lock and drawn after it, so a feed read never holds up another
 request.
 
-`obs_grab.py` reads the frames with ffmpeg, only from the relay's feed URLs (http,
-loopback, ports 53001-53003 or `--feed-port`, path `/`), with a protocol whitelist, the
-MPEG-TS demuxer forced, no reconnect and a 4 s read timeout. Each feed is read in the
+`obs_grab.py` reads the frames only from the relay's feed URLs (http, loopback, ports
+53001-53003 or `--feed-port`, path `/`). It makes the HTTP request itself, follows no
+redirect and pipes the bytes into ffmpeg, which may only read its stdin (`pipe` is the
+one allowed protocol, MPEG-TS demuxer forced) and is killed after 4 s. Each feed is read in the
 background at most once per `--grab-interval` (5 s); a screenshot waits only for a
 feed's first frame, up to 1 s. `--no-grab` turns the reads off, `ObsSim.stop()` kills
 running ones. A read is a short-lived consumer on the relay's fan-out port: while it

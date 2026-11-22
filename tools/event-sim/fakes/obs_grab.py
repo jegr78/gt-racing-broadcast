@@ -1,12 +1,14 @@
 """Feed frames for the simulated OBS's program screenshots, read with ffmpeg.
 
 Only the relay's feed URLs are read: http on a loopback host, one of the feed ports
-(53001-53003 unless configured), path "/" and nothing else. ffmpeg runs with a protocol
-whitelist, the MPEG-TS demuxer forced (no playlists, no nested URLs), no reconnect and a
-read timeout. Each feed is read at most once per `interval` in the background; a
+(53001-53003 unless configured), path "/" and nothing else. This module makes the one
+HTTP request itself and follows no redirect; ffmpeg only decodes the bytes it gets on
+stdin, with the pipe as its only allowed protocol and the MPEG-TS demuxer forced, so it
+opens no URL of its own. Each feed is read at most once per `interval` in the background; a
 screenshot takes the newest frame and waits only for a feed's very first one. A grab is
 a short-lived consumer on the relay's fan-out port, see tools/CLAUDE.md. Any failure
 gives no frame, and the caller paints the synthetic pattern instead."""
+import http.client
 import os
 import subprocess
 import sys
@@ -49,38 +51,66 @@ class FeedGrabber:
                 and port in self.ports and u.path in ("", "/") and not u.query
                 and not u.fragment and u.username is None and u.password is None)
 
-    def argv(self, url):
+    def argv(self):
         w, h = self.size
-        return self.cmd + ["-hide_banner", "-loglevel", "error", "-nostdin",
-                           "-protocol_whitelist", "http,tcp,udp", "-reconnect", "0",
-                           "-rw_timeout", str(int(self.timeout * 1_000_000)), "-f", "mpegts",
-                           "-i", url, "-an", "-frames:v", "1", "-vf", f"scale={w}:{h}",
-                           "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
+        return self.cmd + ["-hide_banner", "-loglevel", "error", "-protocol_whitelist", "pipe",
+                           "-f", "mpegts", "-i", "pipe:0", "-an", "-frames:v", "1",
+                           "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
+
+    @staticmethod
+    def _pump(resp, sink):
+        try:
+            while True:
+                chunk = resp.read1(65536)
+                if not chunk:
+                    break
+                sink.write(chunk)
+        except (OSError, ValueError, http.client.HTTPException):
+            pass  # ffmpeg has its frame and closed the pipe, or the feed ended
+        finally:
+            try:
+                sink.close()
+            except OSError:
+                pass  # already closed by a broken pipe
 
     def _run(self, url):
         w, h = self.size
+        u = urlsplit(url)
+        conn = http.client.HTTPConnection(u.hostname, u.port, timeout=self.timeout)
         try:
-            proc = subprocess.Popen(self.argv(url), stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        except OSError:
+            conn.request("GET", "/")
+            resp = conn.getresponse()
+            if resp.status != 200:
+                return None
+            proc = subprocess.Popen(self.argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL)
+        except (OSError, http.client.HTTPException):
+            conn.close()
             return None
         with self.lock:
             self.procs.add(proc)
             closed = self.closed
         if closed:
             proc.kill()
+        out = []
+        reader = threading.Thread(target=lambda: out.append(proc.stdout.read()), daemon=True)
+        pump = threading.Thread(target=self._pump, args=(resp, proc.stdin), daemon=True)
+        reader.start()
+        pump.start()
         try:
-            out, _ = proc.communicate(timeout=self.timeout)
+            proc.wait(timeout=self.timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.communicate()
-            return None
+            proc.wait()
         finally:
+            conn.close()
+            reader.join(2)
             with self.lock:
                 self.procs.discard(proc)
-        if proc.returncode != 0 or len(out) < w * h * 3:
+        frame = out[0] if out else b""
+        if proc.returncode != 0 or len(frame) < w * h * 3:
             return None
-        return out[:w * h * 3], w, h
+        return frame[:w * h * 3], w, h
 
     def _grab(self, url, done):
         frame = self._run(url)
