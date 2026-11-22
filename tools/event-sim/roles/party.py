@@ -17,6 +17,8 @@ JOB_S = 240.0
 FEED_S = 120.0
 POLL_MS = 100
 STALE_S = 1.0
+HUD_FIELDS = ("stint", "streamer", "session", "flag", "racecontrol")
+URI_SAFE = "!'()*~"      # what the page's encodeURIComponent leaves as it is
 
 
 def stint_label(value):
@@ -153,6 +155,26 @@ class Surface(builtin.PageRole):
         loc = self.pg.locator(selector)
         return self.text(selector) if loc.count() and loc.first.is_visible() else ""
 
+    def accepting(self, act):
+        """Run `act`, answering the page's one native confirm dialog with OK."""
+        self.pg.once("dialog", lambda dialog: dialog.accept())
+        act()
+
+    def toggle(self, key, what, route, args, poll=None):
+        """Press a toggle key whose light is the class `on`. With `on` in `args`, let the
+        page finish its next `poll` and wait for the light to read the opposite first: the
+        key toggles from the state the page last polled."""
+        if "on" in args:
+            want = bool(args["on"])
+            if poll:
+                self.answered(lambda: None, poll, f"{what}: the page's next poll")
+            self.until(lambda: ("on" in self.attr(key, "class").split()) != want,
+                       f"{what} reading {'off' if want else 'on'} before the press", slow=None)
+        was = "on" in self.attr(key, "class").split()
+        self.answered(lambda: self.click(key, what), route, what)
+        self.until(lambda: ("on" in self.attr(key, "class").split()) != was, f"the {what} light")
+        return {"on": not was}
+
     def facts(self):
         return {}
 
@@ -189,7 +211,9 @@ class ProducerRole(Surface):
         "job": "#jobchip", "job_log": "#joblog", "summary": "#home-summary", "relay": "#h-relay",
         "view": '.navitem[data-nav="{view}"]',
         "relay_restart": """[data-view="services"] button[onclick="op('relay-restart', true)"]""",
+        "invite": "#evt-invite-text", "timing": "#evt-timing-text",
     }
+    masked = ("invite", "timing")
 
     def view(self, name):
         self.click(self.sel("view", view=name), f"view {name}")
@@ -275,7 +299,9 @@ class ProducerRole(Surface):
 @register
 class DirectorRole(Surface):
     """The director on the Director Panel: `approve_link` (stint), `arm_feed` (feed),
-    `arm`, `next`, `scene` (scene), `red_flag` (on), `show_dashboard` (on), `cue` (text,
+    `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
+    Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
+    (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
     target, level), `chat` (text, name)."""
     kind = "director"
     path, ready = "/panel", "#nextBtn"
@@ -293,6 +319,14 @@ class DirectorRole(Surface):
         "dashboard": '#driverBox button[data-label="Show dashboard"]',
         "cue_target": "#cueTarget", "cue_level": "#cueLevel", "cue_text": "#cueText", "cue_send": "#cueSend",
         "chat_name": "#chatName", "chat_text": "#chatInput", "chat_send": "#chatSendBtn", "chat_log": "#chatLog",
+        "graphic": ':is(#gfxBus, #gfxPreRaceBus, #gfxGridTopBus, #gfxGridBus) button.k:has-text("{name}")',
+        "graphic_in": ':is(#gfxBus, #gfxPreRaceBus, #gfxGridTopBus, #gfxGridBus) '
+                      'button.k:has(.tag:text-is("{scene}")):has-text("{name}")',
+        "pov": '#scnVisBus button.k:has-text("POV")',
+        "hud_field": 'select[data-setup="{field}"]',
+        "mode_switch": "#modeSwitch", "mode_chip": "#modeChip",
+        "part_button": "#partActionBtn", "part_status": "#partStatus", "part_phrase": "#partModalPhrase",
+        "part_input": "#partModalInput", "part_confirm": "#partModalConfirm",
     }
     masked = ("links",)
 
@@ -355,17 +389,79 @@ class DirectorRole(Surface):
         return {"scene": scene}
 
     def act_red_flag(self, args):
-        """Press RED FLAG, a toggle. With `on`, wait for the light to read the opposite
-        first: it follows OBS by a poll, so it lags a cover Race Control just moved."""
-        key = self.sel("red_flag")
-        if "on" in args:
-            want = bool(args["on"])
-            self.until(lambda: ("on" in self._classes(key)) != want,
-                       f"RED FLAG reading {'off' if want else 'on'} before the press", slow=None)
-        was = "on" in self._classes(key)
-        self.answered(lambda: self.click(key, "RED FLAG"), "/obs/source", "RED FLAG")
-        self.until(lambda: ("on" in self._classes(key)) != was, "the RED FLAG light")
-        return {"on": not was}
+        """Press RED FLAG, a toggle on the cover state the panel last polled."""
+        return self.toggle(self.sel("red_flag"), "RED FLAG", "/obs/source", args, poll="/obs/state")
+
+    def _one(self, key, what):
+        try:
+            self.until(lambda: self.count(key) == 1, what)
+        except StepError:
+            raise StepError(f"{what}: {self.count(key)} matching keys ({key})") from None
+        return key
+
+    def act_graphic(self, args):
+        """Toggle a graphic key by its caption; `scene` (the key's tag) tells two apart."""
+        name, scene = str(args.get("name", "")).upper(), str(args.get("scene", ""))
+        self.area("graphics")
+        key = self.sel("graphic_in", name=name, scene=scene) if scene else self.sel("graphic", name=name)
+        out = self.toggle(self._one(key, f"graphic {name}"), f"graphic {name}", "/obs/source", args,
+                          poll="/obs/state")
+        return dict(out, name=name)
+
+    def act_pov(self, args):
+        """Toggle the POV box's visibility."""
+        return self.toggle(self._one(self.sel("pov"), "POV"), "POV", "/pov/toggle", args)
+
+    def act_hud(self, args):
+        """Set a HUD field (stint, streamer, session, flag, racecontrol); "" clears it."""
+        field, value = str(args.get("field", "")), str(args.get("value", ""))
+        if field not in HUD_FIELDS:
+            raise StepError(f"hud field is one of {', '.join(HUD_FIELDS)}, not {field!r}")
+        self.area("hud")
+        box = self.sel("hud_field", field=field)
+        route = f"/setup/set/{field}/{quote(value, safe=URI_SAFE)}" if value else f"/setup/clear/{field}"
+        self.until(lambda: self.control(box, f"HUD {field}").is_enabled(), f"HUD {field} ready")
+        self.answered(lambda: self.choose(box, f"HUD {field}", value=value), route, f"HUD {field}")
+        self.until(lambda: self.control(box, f"HUD {field}").input_value() == value, f"HUD {field} = {value!r}")
+        return {"field": field, "value": value}
+
+    def act_mode(self, args):
+        """Switch the relay between race and qualifying mode (Schedule, confirmed)."""
+        mode = str(args.get("mode", "")).lower()
+        if mode not in ("race", "qualifying"):
+            raise StepError("mode is 'race' or 'qualifying'")
+        self.area("schedule")
+        switch = self.sel("mode_switch")
+        self.control(switch, "mode switch")
+        if mode.upper() not in self.text(switch).upper():
+            raise StepError(f"the switch offers {self.text(switch)!r}, not {mode}")
+        self.answered(lambda: self.accepting(lambda: self.click(switch, "mode switch")),
+                      "/mode/" + mode, "mode switch")
+        self.until(lambda: self.text(self.sel("mode_chip")).upper() == mode.upper(), f"{mode} mode")
+        return {"mode": mode}
+
+    def _part(self, verb, route, shows):
+        self.area("broadcast")
+        button = self.sel("part_button")
+        self.control(button, f"{verb} Part")
+        label = self.text(button)
+        if not label.startswith(verb + " Part"):
+            raise StepError(f"the Part button reads {label!r}, not {verb} Part")
+        self.click(button, label)
+        phrase = self.until(lambda: self.shown(self.sel("part_phrase")), "the confirmation phrase")
+        self.fill(self.sel("part_input"), phrase, "confirmation phrase")
+        self.answered(lambda: self.click(self.sel("part_confirm"), f"{label}: Confirm"), route, label)
+        status = self.sel("part_status")
+        self.until(lambda: any(word in self.text(status) for word in shows), f"{label}: the Part status")
+        return {"part": label, "status": self.text(status)}
+
+    def act_start_part(self, args):
+        """Start the next broadcast Part: OBS goes live after the typed confirmation."""
+        return self._part("Start", "/parts/start", ("LIVE",))
+
+    def act_end_part(self, args):
+        """End the live Part. Ending the last one stops the event, relay included."""
+        return self._part("End", "/parts/end", ("ended", "complete", "ending"))
 
     def act_show_dashboard(self, args):
         on = bool(args.get("on", True))
@@ -412,7 +508,8 @@ class DirectorRole(Surface):
 class RaceControlRole(Surface):
     """Race Control on its desk: `approve_driver` (name, entry), `approve_drivers`,
     `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
-    `estimate` (entry, ref, seconds, ahead), `add_lap` (entry, time)."""
+    `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
+    `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target)."""
     kind = "race_control"
     path, ready, crew = "/console/race-control", "#driverCard", "Sim Race Control"
     base = "/race-control"
@@ -428,6 +525,7 @@ class RaceControlRole(Surface):
         "input": '#driverCard input[aria-label="{label}"]',
         "status": '#driverCard .msg[role="status"]',
         "lap_line": "#driverCard .lapline", "links": "#driverCard .mono.grow",
+        "note_target": "#rcTarget", "note_text": "#rcText", "note_send": "#rcSend", "note_message": "#rcMsg",
     }
     masked = ("links",)
 
@@ -512,6 +610,35 @@ class RaceControlRole(Surface):
         self.choose(self.sel("select", label="Reference entry"), "Reference entry", value=args.get("ref"))
         self.fill(self.sel("input", label="Seconds from the reference"), args.get("seconds", ""), "Seconds")
         return self._press("Set estimate", "/drivers/race/estimate", "Estimate set")
+
+    def act_correction(self, args):
+        """Correct an entry's distance (`metres`) or pit stop count (`pits`), with a reason."""
+        self.choose(self.sel("select", label="Entry to correct"), "Entry to correct", value=args.get("entry"))
+        if "metres" in args:
+            self.fill(self.sel("input", label="Distance correction in metres"), args["metres"], "metres")
+        if "pits" in args:
+            self.fill(self.sel("input", label="Pit stop correction"), args["pits"], "pit stops")
+        self.fill(self.sel("input", label="Reason"), args.get("reason", ""), "Reason")
+        return self._press("Apply correction", "/drivers/race/correct", "Correction applied")
+
+    def act_set_time(self, args):
+        """Set an entry's qualifying time (`time` as m:ss.mmm)."""
+        self.choose(self.sel("select", label="Qualifying entry"), "Qualifying entry", value=args.get("entry"))
+        self.fill(self.sel("input", label="Qualifying time"), args.get("time", ""), "Qualifying time")
+        return self._press("Set time", "/drivers/race/quali", "Qualifying time set")
+
+    def act_note(self, args):
+        """Send a note to the commentators (`target`: the Send to label, default as shown)."""
+        text = str(args.get("text", ""))
+        if args.get("target"):
+            self.choose(self.sel("note_target"), "Send to", label=args["target"])
+        self.fill(self.sel("note_text"), text, "note")
+        message = self.sel("note_message")
+        self.answered(lambda: self.click(self.sel("note_send"), "Send"), "/race-control/cues", "Send")
+        self.until(lambda: self.text(message), "the note's receipt")
+        if "err" in self.attr(message, "class").split():
+            raise StepError(f"note: {self.text(message)}")
+        return {"text": text}
 
     def act_add_lap(self, args):
         self.choose(self.sel("select", label="Qualifying entry"), "Qualifying entry", value=args.get("entry"))

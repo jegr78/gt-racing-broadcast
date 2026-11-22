@@ -1,6 +1,7 @@
 # Smoke run: every role acts once. The producer picks the track and starts the event in
 # the Control Center, a commentator submits a stream link in the cockpit, the director
-# approves it and puts stint 1 on air on the Director Panel, four drivers register and
+# approves it, puts stint 1 on air, shows a graphic, sets a HUD field and starts Part 1
+# on the Director Panel, four drivers register and
 # Race Control approves them on its desk, they race two laps, a viewer reads the public
 # timing, Race Control calls the final lap and the producer stops the event.
 description = "Smoke run: each role once, from Start event to Stop event."
@@ -12,6 +13,7 @@ track = "6e378b"
 track_length_m = 1200
 cars = 4
 seed = 7
+parts = 2
 
 [[event.commentators]]
 name = "Comms 1"
@@ -114,8 +116,45 @@ timeout = "90s"
 shot = { name = "program-stint1", role = "obs" }
 
 [[step]]
-id = "register"
+id = "graphic"
 at = "after:on_air"
+role = "director"
+do = "graphic"
+args = { name = "Standings", on = true }
+
+[[step]]
+id = "graphic_item"
+at = "after:graphic"
+role = "obs"
+do = "request"
+args = { type = "GetSceneItemId", data = { sceneName = "Stint", sourceName = "Standings" } }
+
+[[step]]
+id = "graphic_shown"
+at = "after:graphic_item"
+role = "obs"
+do = "request"
+args = { type = "GetSceneItemEnabled", data = { sceneName = "Stint", sceneItemId = "${graphic_item.sceneItemId}" } }
+expect = ["result('graphic_shown').sceneItemEnabled"]
+
+[[step]]
+id = "hud"
+at = "after:graphic_shown"
+role = "director"
+do = "hud"
+args = { field = "racecontrol", value = "GREEN" }
+expect = ["relay.get('/setup/data').fields.racecontrol == 'GREEN'"]
+
+[[step]]
+id = "go_live"
+at = "after:hud"
+role = "director"
+do = "start_part"
+expect = ["obs.streaming"]
+
+[[step]]
+id = "register"
+at = "after:go_live"
 role = "drivers"
 do = "register"
 args = { stints = 1 }
@@ -173,8 +212,15 @@ do = "stop"
 expect = ["page('drivers').sending == 0"]
 
 [[step]]
-id = "stop_event"
+id = "off_air"
 at = "after:chequered"
+role = "director"
+do = "end_part"
+expect = ["not obs.streaming"]
+
+[[step]]
+id = "stop_event"
+at = "after:off_air"
 role = "producer"
 do = "stop_event"
 expect = ["not relay.up"]

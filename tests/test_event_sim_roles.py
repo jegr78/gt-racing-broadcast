@@ -57,8 +57,8 @@ class Response:
 
 
 class Expect:
-    def __init__(self, page, pred):
-        self.page, self.pred, self.value = page, pred, None
+    def __init__(self, page, pred, timeout):
+        self.page, self.pred, self.value, self.timeout = page, pred, None, timeout or 0
 
     def __enter__(self):
         self.mark = len(self.page.responses)
@@ -66,9 +66,15 @@ class Expect:
 
     def __exit__(self, kind, exc, tb):
         if kind is None:
-            hits = [r for r in self.page.responses[self.mark:] if self.pred(r)]
+            waited = 0
+            while True:
+                hits = [r for r in self.page.responses[self.mark:] if self.pred(r)]
+                if hits or waited >= self.timeout:
+                    break
+                self.page.wait_for_timeout(100)
+                waited += 100
             if not hits:
-                raise TimeoutError("Timeout 8000ms exceeded while waiting for a response")
+                raise TimeoutError("Timeout exceeded while waiting for a response")
             self.value = hits[0]
         return False
 
@@ -171,6 +177,19 @@ class Page:
     def on(self, event, fn):
         self.handlers[event] = fn
 
+    def once(self, event, fn):
+        self.handlers["once:" + event] = fn
+
+    def confirm(self):
+        """The page's native confirm(): True when a handler accepted it, as Playwright
+        dismisses a dialog nobody handles."""
+        fn = self.handlers.pop("once:dialog", None)
+        if fn is None:
+            return False
+        answer = []
+        fn(type("Dialog", (), {"accept": lambda self: answer.append(True)})())
+        return bool(answer)
+
     def goto(self, url, timeout=None):
         self.url = url
         self.gotos.append(url)
@@ -193,7 +212,7 @@ class Page:
         return Locator(self, selector)
 
     def expect_response(self, pred, timeout=None):
-        return Expect(self, pred)
+        return Expect(self, pred, timeout)
 
     def screenshot(self, path=None, mask=(), timeout=None, full_page=False):
         self.shots.append((path, "", [m.selector for m in mask]))
@@ -254,9 +273,11 @@ def fails(fn, *needles):
 def t_the_registry_has_every_party_and_its_actions():
     want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
             "director": {"open", "approve_link", "arm_feed", "arm", "next", "scene", "red_flag",
-                         "show_dashboard", "cue", "chat"},
+                         "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
+                         "end_part"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
-                             "release", "retire", "rejoin", "estimate", "add_lap"},
+                             "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
+                             "note"},
             "commentator": {"open", "submit_link", "chat"},
             "viewer": {"open", "read"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"}}
@@ -357,6 +378,30 @@ def t_the_engine_skips_an_unavailable_step_and_what_depends_on_it():
     assert not any("shot" in m for m in soft), "a skipped step asks for no screenshot"
 
 
+def t_no_skips_turns_a_skipped_step_into_a_hard_failure():
+    class Probe(roles.Role):
+        kind = "probe"
+
+        def act_go(self, args):
+            raise roles.Unavailable("no browser here")
+
+    reg = {"probe": Probe}
+    raw = {"step": [{"id": "a", "role": "probe", "do": "go"}, {"id": "b", "role": "probe", "do": "go", "at": "after:a"}]}
+    for strict, ok in ((False, True), (True, False)):
+        clock = Clock()
+
+        def sleep(s, clock=clock):
+            clock.t += max(s, 0.001)
+        eng = engine.Engine(scenario.from_dict(raw, reg), engine.RunContext(), {}, registry=reg, clock=clock,
+                            sleep=sleep, no_skips=strict)
+        data = eng.run()
+        hard = [f for f in data["findings"] if f["severity"] == "hard"]
+        assert data["ok"] is ok and len(hard) == (2 if strict else 0), (strict, data["findings"])
+        assert len([f for f in eng.data([]) ["findings"] if f["severity"] == "hard"]) == 0, \
+            "the findings are not added twice"
+    assert hard[0]["step"] == "a" and "allows no skips" in hard[0]["message"], hard
+
+
 def t_a_role_opens_its_own_page_with_its_token():
     role, page, _ = make(party.RaceControlRole)
     out = role.do("open", {})
@@ -441,11 +486,92 @@ def t_red_flag_with_on_waits_for_a_light_that_lags():
         page.respond("/obs/source")
         key.attrs["class"] = "k redflag on" if "on" not in key.attrs["class"].split() else "k redflag"
     key.on_click = press
-    page.after(2.0, lambda: key.attrs.update({"class": "k redflag"}))
+    page.after(2.0, lambda: (key.attrs.update({"class": "k redflag"}), page.respond("/obs/state")))
+    page.after(1.0, lambda: page.respond("/obs/state"))
     assert role.do("red_flag", {"on": True}) == {"on": True}
     assert pressed == ["k redflag"], "the press waits until the light reads off"
+    page.after(0.5, lambda: page.respond("/obs/state"))
     fails(lambda: role.do("red_flag", {"on": True}), "RED FLAG reading off before the press")
     assert len(pressed) == 1, "a light that already reads on is not toggled off"
+    fails(lambda: role.do("red_flag", {"on": False}), "the page's next poll", "/obs/state")
+    assert len(pressed) == 1, "without a fresh poll the key would toggle from stale state: no press"
+
+
+def t_a_graphic_key_is_told_apart_by_its_scene_and_toggled():
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="graphics"]')
+    buses = ":is(#gfxBus, #gfxPreRaceBus, #gfxGridTopBus, #gfxGridBus) "
+    page.add(buses + 'button.k:has-text("HUD")', count=2)
+    fails(lambda: role.do("graphic", {"name": "hud"}), "graphic HUD", "2 matching keys")
+    key = page.add(buses + 'button.k:has(.tag:text-is("Stint")):has-text("HUD")', attrs={"class": "k"})
+
+    def press():
+        page.respond("/obs/source")
+        key.attrs["class"] = "k on" if "on" not in key.attrs["class"].split() else "k"
+    key.on_click = press
+    assert role.do("graphic", {"name": "hud", "scene": "Stint"}) == {"on": True, "name": "HUD"}
+    page.after(0.3, lambda: page.respond("/obs/state"))
+    assert role.do("graphic", {"name": "hud", "scene": "Stint", "on": False}) == {"on": False, "name": "HUD"}
+    assert page.clicks[0] == '.navbtn[data-area="graphics"]'
+    pov = page.add('#scnVisBus button.k:has-text("POV")', attrs={"class": "k"})
+    pov.on_click = lambda: (page.respond("/pov/toggle"), pov.attrs.update({"class": "k on"}))
+    assert role.do("pov", {"on": True}) == {"on": True}, "the relay keeps the POV state: no poll to wait for"
+
+
+def t_hud_sets_and_clears_a_field_through_its_select():
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="hud"]')
+    box = page.add('select[data-setup="racecontrol"]', options=["", "GREEN", "Safety Car (lap 2)"])
+    routes = {"GREEN": "/setup/set/racecontrol/GREEN", "": "/setup/clear/racecontrol",
+              "Safety Car (lap 2)": "/setup/set/racecontrol/Safety%20Car%20(lap%202)"}
+    box.on_change = lambda: page.respond(routes[box.value])
+    for value in ("GREEN", "Safety Car (lap 2)", ""):
+        assert role.do("hud", {"field": "racecontrol", "value": value}) == {"field": "racecontrol", "value": value}
+    fails(lambda: role.do("hud", {"field": "weather", "value": "x"}), "hud field is one of")
+    fails(lambda: role.do("hud", {"field": "racecontrol", "value": "Unknown"}), "no option")
+    box.on_change = lambda: page.respond("/setup/set/racecontrol/other")
+    fails(lambda: role.do("hud", {"field": "racecontrol", "value": "GREEN"}), "sent no request to /setup/set/racecontrol/GREEN")
+
+
+def t_mode_accepts_the_pages_confirm_dialog():
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="schedule"]')
+    page.add("#modeChip", text="RACE")
+    switch = page.add("#modeSwitch", text="switch → QUALIFYING")
+
+    def click():
+        if page.confirm():
+            page.respond("/mode/qualifying")
+            page.els["#modeChip"].text, switch.text = "QUALIFYING", "switch → RACE"
+    switch.on_click = click
+    fails(lambda: role.do("mode", {"mode": "race"}), "the switch offers", "not race")
+    fails(lambda: role.do("mode", {"mode": "practice"}), "'race' or 'qualifying'")
+    assert role.do("mode", {"mode": "qualifying"}) == {"mode": "qualifying"}, \
+        "a dialog nobody accepts is dismissed and the switch does nothing"
+
+
+def t_a_part_is_started_and_ended_with_the_typed_phrase():
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="broadcast"]')
+    button = page.add("#partActionBtn", text="Start Part 1")
+    page.add("#partStatus", text="Part 1 of 2 — OFFLINE")
+    page.add("#partModalPhrase", text="", visible=False)
+    typed = page.add("#partModalInput")
+    button.on_click = lambda: page.add("#partModalPhrase", text="START PART 1" if button.text.startswith("Start") else "END PART 1")
+
+    def confirm():
+        want = page.els["#partModalPhrase"].text
+        if typed.value != want:
+            return
+        live = want.startswith("START")
+        page.respond("/parts/start" if live else "/parts/end")
+        page.els["#partStatus"].text = "● LIVE — Part 1 of 2" if live else "Part 1 ended — Next: Part 2 of 2"
+        button.text = "End Part 1" if live else "Start Part 2"
+    page.add("#partModalConfirm", on_click=confirm)
+    fails(lambda: role.do("end_part", {}), "reads 'Start Part 1', not End Part")
+    assert role.do("start_part", {}) == {"part": "Start Part 1", "status": "● LIVE — Part 1 of 2"}
+    assert typed.value == "START PART 1", "the phrase the page shows is typed"
+    assert role.do("end_part", {})["status"].startswith("Part 1 ended")
 
 
 def t_a_screenshot_blacks_out_the_event_links():
@@ -459,6 +585,11 @@ def t_a_screenshot_blacks_out_the_event_links():
     role.do("open", {})
     role.shot("desk.png")
     assert page.shots == [("desk.png", "", ["#driverCard .mono.grow"])], page.shots
+    cc, page, _ = producer()
+    cc.do("open", {})
+    cc.shot("cc.png")
+    assert page.shots == [("cc.png", "", ["#evt-invite-text", "#evt-timing-text"])], \
+        "the Control Center shows both links in simulation"
 
 
 def t_redact_hides_tokens_invites_and_timing_links():
@@ -755,6 +886,34 @@ def t_desk_forms_pick_the_entry_before_the_button():
     assert role.do("add_lap", {"entry": "A #1", "time": "1:45.312"}) == {"status": "Qualifying lap added"}
 
 
+def t_corrections_times_and_notes_go_through_their_forms():
+    role, page, _ = desk()
+    page.add('#driverCard select[aria-label="Entry to correct"]', options=["A #1"])
+    for label in ("Distance correction in metres", "Pit stop correction", "Reason"):
+        page.add(f'#driverCard input[aria-label="{label}"]')
+    desk_button(page, "Apply correction", "/drivers/race/correct", "Correction applied", armed=False)
+    assert role.do("correction", {"entry": "A #1", "pits": 1, "reason": "missed stop"}) == {"status": "Correction applied"}
+    assert page.els['#driverCard input[aria-label="Pit stop correction"]'].value == "1"
+    assert page.els['#driverCard input[aria-label="Distance correction in metres"]'].value == "", \
+        "a value nobody asked for is left alone"
+    assert page.els['#driverCard input[aria-label="Reason"]'].value == "missed stop"
+    page.add('#driverCard select[aria-label="Qualifying entry"]', options=["A #1"])
+    page.add('#driverCard input[aria-label="Qualifying time"]')
+    desk_button(page, "Set time", "/drivers/race/quali", "Qualifying time set", armed=False)
+    assert role.do("set_time", {"entry": "A #1", "time": "1:45.312"}) == {"status": "Qualifying time set"}
+    page.add("#rcTarget", options=["On air", "All commentators"])
+    page.add("#rcText")
+    message = page.add("#rcMsg", text="", attrs={"class": "rcmsg"})
+    send = page.add("#rcSend")
+    send.on_click = lambda: (page.respond("/console/race-control/cues"),
+                             setattr(message, "text", "Sent."), message.attrs.update({"class": "rcmsg ok"}))
+    assert role.do("note", {"text": "car 5", "target": "All commentators"}) == {"text": "car 5"}
+    assert (page.els["#rcTarget"].value, page.els["#rcText"].value) == ("All commentators", "car 5")
+    send.on_click = lambda: (page.respond("/console/race-control/cues"),
+                             setattr(message, "text", "no commentator on air"), message.attrs.update({"class": "rcmsg err"}))
+    fails(lambda: role.do("note", {"text": "x"}), "no commentator on air")
+
+
 def waiting_desk(names):
     role, page, ctx = desk()
     left = list(names)
@@ -1022,6 +1181,21 @@ def t_the_sheet_carries_the_roster_and_the_red_flag_banner():
         assert "1-15" in str(exc)
     else:
         raise AssertionError("more cars than the grid holds must be refused")
+
+
+def t_parts_seed_the_producer_and_channel_tabs():
+    assert "Producer" not in stack.sheet_tabs(scn({})), "no parts, no Part control on the panel"
+    tabs = stack.sheet_tabs(scn({"parts": 2, "qualifying_part": True}))
+    assert [row[0] for row in tabs["Producer"][1:]] == ["1", "2", "Q"], tabs["Producer"]
+    assert all(row[3] == stack.PART_KEY_REF.format(row[0]) and row[1] and row[2] for row in tabs["Producer"][1:]), \
+        "each Part names a producer, a host and a stream key reference"
+    assert tabs["Channel"][1][0] == "youtube", "starting a Part needs the event's platform"
+    for bad in (-1, 10, "2", True):
+        try:
+            stack.event_parts({"parts": bad})
+        except ValueError:
+            continue
+        raise AssertionError(f"parts {bad!r} must be refused")
 
 
 def t_the_event_track_is_a_layout_id():

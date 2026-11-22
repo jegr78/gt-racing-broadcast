@@ -36,10 +36,12 @@ def build_parser():
     ap.add_argument("--keep-work", action="store_true",
                     help="keep the temporary app home and fake state after the run")
     ap.add_argument("--headed", action="store_true", help="show the browser (local only)")
+    ap.add_argument("--no-skips", action="store_true",
+                    help="a skipped step is a hard failure (a run that must have its browser)")
     return ap
 
 
-def run(scn, out, keep_work=False, headed=False):
+def run(scn, out, keep_work=False, headed=False, no_skips=False):
     import browser
     import engine
     import report
@@ -58,7 +60,8 @@ def run(scn, out, keep_work=False, headed=False):
         ctx = engine.RunContext(urls=st.urls, token=st.token, stub=st.stub, obs=st.obs,
                                 browser=br, out_dir=out, event=scn.event, event_link=st.event_link)
         eng = engine.Engine(scn, ctx, st.probes(), registry=roles.default_registry(),
-                            shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks])
+                            shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks],
+                            no_skips=no_skips)
         try:
             data = eng.run()
         except Exception:
@@ -109,11 +112,12 @@ def main(argv=None):
     import stack
     # The contained run starts in tools/, so it gets absolute paths.
     contained = e2e_safety.enter(__file__, ["--scenario", scn.path, "--out", out]
-                                 + ["--keep-work"] * args.keep_work + ["--headed"] * args.headed,
+                                 + ["--keep-work"] * args.keep_work + ["--headed"] * args.headed
+                                 + ["--no-skips"] * args.no_skips,
                                  seconds=stack.lifetime(scn), long=True)
     if contained is not None:
         return contained
-    return run(scn, out, keep_work=args.keep_work, headed=args.headed)
+    return run(scn, out, keep_work=args.keep_work, headed=args.headed, no_skips=args.no_skips)
 
 
 if __name__ == "__main__":

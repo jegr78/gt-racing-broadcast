@@ -125,7 +125,7 @@ def resolve_args(value, results):
 
 class Engine:
     def __init__(self, scenario, ctx, probes, registry=None, clock=time.monotonic,
-                 sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=()):
+                 sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=(), no_skips=False):
         self.scenario = scenario
         self.ctx = ctx
         self.probes = dict(probes)
@@ -133,6 +133,7 @@ class Engine:
         self.clock, self.sleep, self.poll = clock, sleep, poll
         self.shots_dir = shots_dir
         self.final_checks = list(final_checks)
+        self.no_skips = no_skips
         self.roles = {}
         self.findings = []
         self.results = {}
@@ -333,9 +334,13 @@ class Engine:
         return self.data(out)
 
     def data(self, steps):
-        hard = [f for f in self.findings if f.severity == HARD]
+        findings = list(self.findings)
+        if self.no_skips:
+            findings += [Finding(HARD, f"skipped, and this run allows no skips: {s.error}", s.id, s.role)
+                         for s in steps if s.status == "skipped"]
+        hard = [f for f in findings if f.severity == HARD]
         failed = [s for s in steps if s.status == "failed"]
         return {"scenario": self.scenario.name, "description": self.scenario.description,
                 "ok": not hard and not failed, "duration": round(self.now(), 3),
                 "steps": [asdict(s) for s in steps],
-                "findings": [asdict(f) for f in sorted(self.findings, key=lambda f: f.severity != HARD)]}
+                "findings": [asdict(f) for f in sorted(findings, key=lambda f: f.severity != HARD)]}

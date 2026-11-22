@@ -46,6 +46,7 @@ CHILD = os.path.join(ROOT, "tools", "e2e_child.py")
 TEARDOWN_MARGIN_S = 600           # start, teardown and the report around the steps
 READY_TIMEOUT_S = 90
 LOG_TAIL = 4000
+PART_KEY_REF = "sim-part-{}"     # a Script Property name; its value is made up per run
 RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended")    # the second is the RED FLAG banner
 EVENT_FILES = {"invite": "driver-invite.json", "timing": "timing-link.json"}
 
@@ -138,6 +139,11 @@ def sheet_tabs(scn):
         + [[c.name, "TRUE", "FALSE", "FALSE", "FALSE", ""] for c in comms],
         "POV": [["URL", "Name"]],
     }
+    parts = event_parts(scn.event)
+    if parts:
+        tabs["Producer"] = [["Part", "Producer", "MagicDNS", "Stream Key"]] + \
+            [[label, "Sim Producer", "sim-producer.invalid", PART_KEY_REF.format(label)] for label in parts]
+        tabs["Channel"] = [["Platform", "Channel"], ["youtube", "sim://broadcast"]]
     tabs.update(scn.tabs)
     return tabs
 
@@ -154,6 +160,15 @@ def event_roster(event):
     """The team labels of `[event] cars` (none without it)."""
     cars = event.get("cars")
     return drive.roster(cars) if cars is not None else []
+
+
+def event_parts(event):
+    """The Producer tab's Part labels of `[event] parts`: N race Parts, plus the qualifying
+    Part "Q" with `qualifying_part`. None without them: the panel then shows no Part control."""
+    parts = event.get("parts", 0)
+    if type(parts) is not int or not 0 <= parts <= 9:
+        raise ValueError(f"event.parts is a whole number 0-9, not {parts!r}")
+    return [str(n) for n in range(1, parts + 1)] + (["Q"] if event.get("qualifying_part") else [])
 
 
 def event_track(event):
@@ -299,7 +314,8 @@ class Stack:
             return p
         feed_a, feed_b, pov, http_port, ui_port = (port() for _ in range(5))
 
-        self.sheet = sheet_sim.SheetSim(tabs=sheet_tabs(self.scn)).start()
+        keys = {PART_KEY_REF.format(label): secrets.token_hex(8) for label in event_parts(self.scn.event)}
+        self.sheet = sheet_sim.SheetSim(tabs=sheet_tabs(self.scn), stream_keys=keys).start()
         self.sink = webhook_sink.WebhookSink().start()
         self.stub = stream_stub.StreamStub(os.path.join(self.work, "streams")).install()
         for c in self.scn.commentators:

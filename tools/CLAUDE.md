@@ -466,7 +466,11 @@ Runs a scenario against the fakes above plus the real relay and Control Center, 
 ```bash
 python3 tools/event-sim/event_sim.py --scenario smoke --out DIR   # bundled name or a .toml path
 python3 tools/event-sim/event_sim.py --scenario smoke --check     # validate only, starts nothing
+python3 tools/event-sim/event_sim.py --scenario smoke --out DIR --no-skips   # a skipped step fails the run
 ```
+
+`--no-skips` is for a run that must have its browser (the workflow): every skipped step
+becomes a hard finding.
 
 `stack.Stack` runs the Sheet, sink, stream stub and OBS in process. It copies `src/` and
 `profiles/demo` into a temporary app home and starts `racecast --simulation relay run` and
@@ -566,8 +570,8 @@ action and acts on the controls a person uses; the drivers have no page.
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
-| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene), `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name) |
-| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `add_lap` (entry, time) |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name) |
+| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target) |
 | `commentator:<crew name>` | `/cockpit` with that person's token | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
 | `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release`, `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
@@ -584,9 +588,21 @@ UI or API:
   job or a feed start is slow by nature and exempt). The desk's armed buttons (Final lap,
   Finish, RED FLAG, Restart released, Retire) get both clicks, and an error on the desk's
   status line fails the step.
-- The panel's RED FLAG is a toggle on the cover state the panel last polled from OBS, so
-  right after Race Control moved the cover it toggles the wrong way. `red_flag` with `on`
-  waits for the light to read the opposite before it presses.
+- The panel's RED FLAG and graphic keys toggle from the OBS state the panel polled last
+  (every 2 s), so a press right after a change, its own included, repeats the old command.
+  `red_flag` and `graphic` with `on` wait for the panel's next `/obs/state` answer and for
+  the light to read the opposite before they press. `pov` toggles on the relay and needs
+  no wait.
+- `scene` presses a program key, so Split, Standby and Intermission are scene steps.
+  `hud` picks a value of the Configuration vocabulary (`""` clears), `mode` accepts the
+  page's native confirm dialog.
+- `start_part`/`end_part` type the phrase the panel shows. They need `[event] parts = N`
+  (`qualifying_part = true` adds the Q Part): the stack then serves a Producer tab, a
+  Channel tab and a made-up stream key per Part, without which the panel hides the Part
+  control and shows OFFLINE/GO LIVE instead. Ending the last Part stops the event.
+- `producer.start_event` on a stopped event starts a fresh relay. `relay_restart` and a
+  fresh start are detached relays. A restart comes back at stint 1 with the feeds stopped.
+- Not offered: switching the profile (the app home holds the demo profile only).
 - Drivers act through the API, as `racecast-sender.py` does for a real driver: the
   registration form adds nothing a sender does not do. Each driver registers as its own
   device (`X-Forwarded-For` from 198.51.100.0/24, which the relay honours from loopback as
@@ -607,7 +623,7 @@ chained to it with `after:` or `${...}` are skipped too. So chain every party st
 
 Event data a scenario sets for the roles (`[event]`): `track` (a GT7 layout id), `track_length_m`
 (default 1200, at least 860), `cars` (1-15, the roster in the Configuration tab's Teams
-column, `drive.TEAMS`) and `seed`. The stack then gives the temporary app home a racing
+column, `drive.TEAMS`), `seed`, `parts` (0-9) and `qualifying_part`. The stack then gives the temporary app home a racing
 line (`drive.write_track_data`: a stadium-shaped lap as the layout's `signatures.json`
 row, since the relay's race needs a downloaded line and the network guard blocks
 `gt7-data update`), one placeholder graphic (Start event refuses a machine without any)
@@ -638,9 +654,10 @@ class, label or button text a role uses, on every OS and without a browser.
 `scenarios/smoke.toml` plays each role once: the producer picks the track, sets the race
 and starts the event (the relay's PID and port must stay the stack's), a commentator
 submits a link in the cockpit, the director approves it, arms Feed A and cuts to Stint
-(`'comms1' in obs.program_channels`), four drivers register, Race Control approves them,
-they race, a viewer reads the public timing, Race Control calls the final lap and the
-producer stops the event. Stop event ends the relay, so it is the last step.
+(`'comms1' in obs.program_channels`), shows the Standings graphic, sets the HUD's Race
+Control field and starts Part 1 (`obs.streaming`), four drivers register, Race Control
+approves them, they race, a viewer reads the public timing, Race Control calls the final
+lap, the director ends Part 1 and the producer stops the event. Stop event ends the relay, so it is the last step.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
