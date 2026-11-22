@@ -90,14 +90,14 @@ def streamlink_argv(url, port, platform="youtube", twitch_token=None):
     720p. Twitch: served via Streamlink's twitch plugin (low-latency, automatic
     ad-filtering), mirroring the relay's Twitch serve; `--` hardens the positional
     URL."""
-    base = ["streamlink", "--player-external-http", "--player-external-http-port", port]
+    base = [simulation.tool("streamlink"), "--player-external-http", "--player-external-http-port", port]
     if platform == "twitch":
         base += STREAMLINK_TWITCH
         if twitch_token:
             base += ["--twitch-api-header", f"Authorization=OAuth {twitch_token}"]
         return base + ["--retry-streams", "15", "--retry-open", "5", "--", url, "best"]
     # YouTube: URL + quality positional, then options
-    return ["streamlink", url, "1080p60,1080p,720p60,720p",
+    return [simulation.tool("streamlink"), url, "1080p60,1080p,720p60,720p",
             "--player-external-http", "--player-external-http-port", port,
             "--ringbuffer-size", "64M", "--hls-live-edge", "4",
             "--retry-streams", "15", "--retry-open", "5"]

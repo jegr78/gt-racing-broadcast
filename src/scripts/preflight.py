@@ -287,11 +287,12 @@ def no_window_kwargs(os_name=None):
 def tool_version(name, run=subprocess.run, which=shutil.which):
     """Return the first line of `<name> --version`, or None if not on PATH.
     `run` and `which` are injectable seams for the unit test."""
-    path = which(name)
+    exe = simulation.tool(name)
+    path = which(exe)
     if not path:
         return None
     try:
-        out = run([name, "--version"], capture_output=True,
+        out = run([exe, "--version"], capture_output=True,
                   text=True, errors="replace", timeout=10,
                   env=external_tool_env(), **no_window_kwargs())
         lines = (out.stdout or out.stderr).strip().splitlines()

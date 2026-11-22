@@ -24,6 +24,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
         sys.path.insert(0, _cand)
 from services import external_tool_env  # de-PyInstaller the env for the yt-dlp spawn
 import cookie_jar  # the platform-domain filter and the shared login rule (#615, #616)
+import simulation  # in simulation the yt-dlp stand-in, by absolute path
 
 
 def default_runtime_dir(here):
@@ -75,7 +76,7 @@ def main():
     try:
         with cookie_jar.private_export_path(out, warn=lambda m: print(f"WARNING: {m}")) as raw:
             try:
-                proc = subprocess.run(["yt-dlp", "--cookies-from-browser", a.browser,
+                proc = subprocess.run([simulation.tool("yt-dlp"), "--cookies-from-browser", a.browser,
                                        "--cookies", raw, "--skip-download", "--no-warnings", url],
                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                       timeout=120, env=external_tool_env())

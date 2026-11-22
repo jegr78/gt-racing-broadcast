@@ -368,6 +368,85 @@ own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSourc
 Assets tab, the Discord payload builders, the relay's own `Relay._discord_post`,
 `http_util.post_multipart`).
 
+## Stream stub (`tools/event-sim/fakes/stream_stub.py`, #1231)
+
+Stand-ins for `yt-dlp` and `streamlink` that serve `sim://<name>` channels and refuse
+every other address; they open no connection. `StreamStub(dir).install()` writes them into
+`dir`, and `.env()` gives `RACECAST_SIMULATION=1` and `RACECAST_SIM_STREAM_BIN=dir`.
+
+- yt-dlp resolves a live channel to `http://sim.invalid/<name>/<height>.m3u8` and prints
+  `rcq <height> 25`, the height being the `-f` cap and at most 360. `.invalid` never resolves, so the
+  relay's one manifest probe per resolve fails at the network guard and reports nothing;
+  that refused lookup is expected, not a leak. Offline,
+  upcoming and ended exit 1 with the text `classify_source_state` reads; the live-status
+  print answers `is_upcoming` or `was_live`. Downloads, `--cookies-from-browser` and real
+  URLs exit 1, an unknown flag exits 2.
+- streamlink maps only that URL or a bare `sim://<name>` back to a channel and writes
+  MPEG-TS on `--stdout`. It reports version 8.2.0, and its help lists
+  `--stream-segmented-queue-deadline`.
+- `--player-external-http` behaves like streamlink's: one player at a time, each with a
+  fresh pull, and after a stream ends or goes offline the server waits for the next player
+  until it is killed. It binds `127.0.0.1` only, where the real tool binds every interface,
+  and never shares the port with another listener (`SO_EXCLUSIVEADDRUSE` on Windows), so a
+  busy port exits 1 at once, the relay's fast-exit case (#143). `SO_REUSEADDR` on POSIX lets
+  a restart rebind a port a killed server left in TIME_WAIT.
+- `tests/test_stream_stub.py` feeds every yt-dlp and streamlink argv the relay,
+  `loopstream`, racecast's smoke probes, `get-media` and both cookie exports build through
+  the stand-ins' parsers, so a new flag in `src/` fails there.
+
+The picture comes from ffmpeg: `testsrc2` at 640x360 and 25 fps, mpeg2video and mp2 in
+MPEG-TS. It carries stint, commentator and channel as drawtext from `label.txt` in
+fontconfig's default font; if drawtext fails, the pull logs it and goes on without text.
+An 18-cell strip at the bottom holds the channel's `code` and stint, and the audio is a
+sine at `tone_hz(code)`.
+`decode_identity(rgb, w, h)` reads `(code, stint)` back from a grabbed frame. The stand-in
+copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe. A freeze,
+a stall's end or a text fallback starts a new ffmpeg; `TsSplicer` forwards whole 188-byte
+packets only, continues each PID's continuity counter and gives the new run an
+`-output_ts_offset` two frames past the last PTS sent (or the wall clock after a gap), so
+PTS and PCR keep rising across the seam. Both are 33-bit 90 kHz values and would wrap after
+about 26.5 hours of one pull, longer than any simulated event.
+
+Control for the scenario engine: each channel is `<dir>/channels/<name>.json`, which every
+running pull reads every 0.2 s; an unreadable file keeps the last state, and a Windows
+sharing violation is retried briefly. Names are case-insensitive (stored in lower case),
+and the Windows device names `con`, `prn`, `aux`, `nul`, `com1`-`com9` and `lpt1`-`lpt9` are
+refused. Every change runs under an `O_EXCL` lock file (`channels/.lock`; one older
+than 10 s is renamed aside and removed only if it is still the file seen stale), so several controllers may share a directory. Times are epoch seconds; `at` defaults
+to now, `until` to the next `clear`.
+
+- `channel(name, stint=, commentator=, status=)` creates or updates a channel, and a new
+  one is live. A directory holds at most 255 channels, since the identity strip carries an
+  8-bit code; the 256th is refused. A status other than `live` ends the running pulls.
+- `cut(name, at=None)`: the pulls running at `at` end like a finished stream (exit 0);
+  later pulls play, so the relay recovers at once.
+- `stall(name, at=None, until=None)`: pulls in the window send nothing. The relay's
+  byte-stall watchdog kills a pull that had sent bytes; one that sent none, such as the
+  re-pull inside the window, gives up after `stream_timeout` (60 s, streamlink's default
+  `--stream-timeout`, set by `StreamStub(stream_timeout=)` or `install --stream-timeout`
+  and stored in the directory) with a read timeout and exit 1.
+- `freeze(name, at=None, until=None)`: pulls in the window send still colour bars with
+  the identity and the tone at the normal rate, a freeze only the picture shows.
+- `clear(name)` ends a stall and a freeze, running or scheduled.
+
+```bash
+python3 tools/event-sim/fakes/stream_stub.py DIR install
+python3 tools/event-sim/fakes/stream_stub.py DIR set comms2 --stint 2 --commentator Ben
+python3 tools/event-sim/fakes/stream_stub.py DIR freeze comms2 --until 1790000000
+```
+
+Windows: racecast starts the stand-in by its absolute path (`simulation.tool`), and a
+stand-in there must be an `.exe`. Each stand-in there is distlib's console launcher, `t64.exe`, `t64-arm.exe` or `t32.exe`, the
+one pip's own scripts use. The stub reads it from the pip wheel ensurepip bundles or from
+an installed pip and appends `#!<python>` and a zip with `__main__.py`; the launcher runs
+the interpreter on its own file. Elsewhere a stand-in is an sh/Python script, mode 0o700. `install()` may run again while
+pulls run: it writes each stand-in to a temporary file and replaces it, moving a running
+`.exe` aside on Windows (a later install removes it), and removes only the work dirs
+(`pulls/<pid>-<thread>`) of stand-ins that have ended; a pull recreates its own if it goes
+missing. A relative `--ffmpeg` path is made absolute.
+The CI e2e job sets `OBS_SIM_REQUIRE_FFMPEG=1`, so the real-ffmpeg tests cannot skip there,
+and only there do they also require drawtext to find a default font.
+
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
 Up to 15 simulated senders for a running relay: they register on the event's invite,

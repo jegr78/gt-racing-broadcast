@@ -282,7 +282,7 @@ def _streamlink_help():
             # cannot decode streamlink's help text, and the failure lands in
             # subprocess's reader thread, where the except below never sees it.
             _STREAMLINK_HELP = subprocess.run(
-                ["streamlink", "--help"], capture_output=True, text=True,
+                [simulation.tool("streamlink"), "--help"], capture_output=True, text=True,
                 errors="replace", timeout=10, env=external_tool_env()).stdout or ""
         except Exception:                     # noqa: BLE001  best-effort probe
             _STREAMLINK_HELP = ""
@@ -3480,7 +3480,7 @@ def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
     ID or yt-dlp's "not currently live" style error); `None` when it failed
     (the JSON was unreadable and `/live` failed too)."""
     ids = []
-    streams_cmd = ["yt-dlp", "--flat-playlist", "--no-warnings",
+    streams_cmd = [simulation.tool("yt-dlp"), "--flat-playlist", "--no-warnings",
                    "--playlist-items", "1-15", "-J"]
     if cookies:
         streams_cmd += ["--cookies", cookies]
@@ -3495,7 +3495,7 @@ def yt_live_video_lookup(channel, cookies, timeout=25, logger=None):
     if ids:
         return ids
     # Fallback: the single primary /live stream (videoId only, no manifest).
-    one_cmd = ["yt-dlp", "--print", "id", "--no-warnings", "--no-playlist"]
+    one_cmd = [simulation.tool("yt-dlp"), "--print", "id", "--no-warnings", "--no-playlist"]
     if cookies:
         one_cmd += ["--cookies", cookies]
     one_cmd += ["--", broadcast_chat.channel_live_url(channel)]
@@ -3524,7 +3524,7 @@ _YT_CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 def yt_channel_id(channel, cookies, timeout=25):
     """The canonical `UC...` channel id of a YouTube channel (URL / @handle /
     id), read quota-free from yt-dlp's playlist metadata. None on any failure."""
-    cmd = ["yt-dlp", "--flat-playlist", "--no-warnings", "--playlist-items", "0", "-J"]
+    cmd = [simulation.tool("yt-dlp"), "--flat-playlist", "--no-warnings", "--playlist-items", "0", "-J"]
     if cookies:
         cmd += ["--cookies", cookies]
     cmd += ["--", broadcast_chat.channel_streams_url(channel)]
@@ -4470,7 +4470,7 @@ def ytdlp_resolve_cmd(url, cookies, fmt=YTDLP_FORMAT):
     is_channel host allow-list, yt-dlp's --exec etc. would be code execution)."""
     # -g yields the HLS URL; the extra --print emits a "rcq <height> <fps>" line so the
     # relay can show the ACTUALLY-served resolution (YouTube's streamlink only reports "live").
-    cmd = ["yt-dlp", "-g", "-f", fmt, "--no-warnings", "--no-playlist",
+    cmd = [simulation.tool("yt-dlp"), "-g", "-f", fmt, "--no-warnings", "--no-playlist",
            "--extractor-args", f"youtube:player_client={YTDLP_PLAYER_CLIENTS}",
            "--print", "rcq %(height)s %(fps)s"]
     if cookies:
@@ -4485,7 +4485,7 @@ def ytdlp_live_status_cmd(url, cookies):
     --ignore-no-formats-error turns every playability reason (bot check, rate limit,
     'This live event has ended') into a warning that --no-warnings hides, so it must
     never be on the resolve itself. `--` precedes the URL, as in ytdlp_resolve_cmd."""
-    cmd = ["yt-dlp", "--skip-download", "--no-warnings", "--no-playlist",
+    cmd = [simulation.tool("yt-dlp"), "--skip-download", "--no-warnings", "--no-playlist",
            "--ignore-no-formats-error", "--print", "rcs %(live_status)s"]
     if cookies:
         cmd += ["--cookies", cookies]
@@ -4504,7 +4504,7 @@ def streamlink_serve_cmd(target, port, platform="youtube", twitch_token=None,
     so it must carry the same session context yt-dlp used on the resolve, a browser
     User-Agent (always) and the cookies file (when present), or YouTube 403s a
     protected live manifest (#345). Twitch resolves in-process and gets neither."""
-    base = ["streamlink", "--player-external-http", "--player-external-http-port", str(port)]
+    base = [simulation.tool("streamlink"), "--player-external-http", "--player-external-http-port", str(port)]
     base += serve_flags(platform, tier)
     if platform == "twitch":
         if twitch_token:
@@ -4526,7 +4526,7 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
     streamlink_serve_cmd, but the sink is --stdout (the relay reads it and
     re-serves to many consumers) instead of --player-external-http. `--` guards
     the positional URL/stream."""
-    base = ["streamlink", "--stdout"]
+    base = [simulation.tool("streamlink"), "--stdout"]
     base += serve_flags(platform, tier)
     # version-safe: renamed in streamlink 8.1.0. Both platforms, because the factor follows
     # the byte-stall watchdog this path has and direct-serve has not, so the watchdog acts
@@ -5071,7 +5071,7 @@ def preview_pull_streamlink_cmd(target, platform, quality,
     YouTube `target` is a pre-resolved 360p HLS URL and needs the same browser
     UA + cookies context as the real feed (#345); Twitch gets the twitch.tv URL
     and its plugin picks the named quality. `--` guards the positional URL."""
-    cmd = ["streamlink", "--stdout"]
+    cmd = [simulation.tool("streamlink"), "--stdout"]
     if platform != "twitch":
         if user_agent:
             cmd += ["--http-header", "User-Agent=" + user_agent]
@@ -16007,7 +16007,7 @@ def export_cookies(browser, out, platform="youtube"):
     try:
         with cookie_jar.private_export_path(out, warn=LOG.warning) as raw:
             try:
-                proc = subprocess.run(["yt-dlp", "--cookies-from-browser", browser,
+                proc = subprocess.run([simulation.tool("yt-dlp"), "--cookies-from-browser", browser,
                                        "--cookies", raw, "--skip-download", "--no-warnings", url],
                                       timeout=90, stdout=subprocess.DEVNULL,
                                       stderr=subprocess.PIPE, env=external_tool_env(),
@@ -16202,7 +16202,7 @@ def main():
         # which logs + idles if they are absent (best-effort). So solo starts without
         # yt-dlp/streamlink on PATH.
         for _tool in ("yt-dlp", "streamlink"):
-            if not shutil.which(_tool):
+            if not shutil.which(simulation.tool(_tool)):
                 sys.exit(f"ERROR: '{_tool}' not found on PATH "
                          f"(brew install {_tool} / pip install -U {_tool}).")
 

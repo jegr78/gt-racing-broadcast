@@ -217,14 +217,15 @@ jobs:
         run: python tools/e2e.py
       - name: Growing recording replay through the Engineer desk
         run: python tools/engineer-replay.py --check
-      # After the e2e steps, which assume no ffmpeg: the simulated OBS reads a real frame.
-      - name: Simulated OBS feed frames with a real ffmpeg
+      # After the e2e steps, which assume no ffmpeg: the simulated OBS and the stream stub use a real one.
+      - name: Event-sim fakes with a real ffmpeg
         env:
           OBS_SIM_REQUIRE_FFMPEG: "1"
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python tests/test_obs_sim.py
+          python tests/test_stream_stub.py
 
   visual:
     needs: scope
