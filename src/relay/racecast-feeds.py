@@ -5533,9 +5533,19 @@ def toggle_input_mute(obs_ws, name, expect=None):
         return bool(ok), not muted, note, bool(ok)
 
 
+def note_cover(relay, enabled):
+    """Remember the Standby Cover state the relay last switched, read or decided."""
+    if isinstance(enabled, bool):
+        relay.cover_last = enabled
+
+
 def red_flag_on_record(relay, hud):
     """Whether a red flag is on by the relay's own record, for when OBS cannot report
-    the Standby Cover: the HUD banner, or a cover the Race Control desk raised."""
+    the Standby Cover: the last cover state it saw, else the HUD banner or a cover the
+    Race Control desk raised."""
+    last = getattr(relay, "cover_last", None)
+    if last is not None:
+        return last
     banner = hud.data().get("raceControl") if hud is not None else None
     return banner == RED_FLAG_BANNER or bool(getattr(relay, "rc_red_flag_raised", False))
 
@@ -5559,6 +5569,7 @@ def apply_graphic(relay, obs_ws, verb, source):
         return {"ok": False, "error": note}, 503
     if ok and source == STANDBY_COVER_SOURCE:
         relay.rc_red_flag_raised = False
+        note_cover(relay, enabled)
     payload = {"ok": bool(ok), "scene": scene, "source": source, "enabled": enabled}
     if note:
         payload["note"] = str(note)
@@ -9578,6 +9589,7 @@ class Relay:
         self.pov_source = pov_source
         self.pov = None
         self.pov_shown = False          # relay-driven PiP visibility (drives the HUD box)
+        self.cover_last = None          # last Standby Cover state seen, see note_cover
         if pov_source is not None and pov_port is not None:
             self.pov = Feed("POV", pov_port, 0, pov_source.get, logdir, cookies,
                             cookie_dir=cookie_dir)
@@ -10519,6 +10531,7 @@ class Relay:
         scene = state.get("scene")
         src0 = (state.get("sources") or [{}])[0] or {}
         cover_shown = bool(src0.get("enabled"))
+        note_cover(self, src0.get("enabled"))
         action = auto_cover_action(self.auto_cover, ss, off_since, now, AUTO_COVER_SETTLE_S,
                                    cover_shown, self._cover_auto_owned, self._cover_fired,
                                    scene, on_air_scene=on_air_scene)
@@ -10530,6 +10543,7 @@ class Relay:
             self._cover_fired = True
             self._cover_auto_owned = True
             self.rc_red_flag_raised = False
+            note_cover(self, True)
             LOG.warning("Auto-cover: on-air feed %s source %s -> raised Standby Cover (#495)",
                         f.name, ss)
         elif action == "lower":
@@ -10538,6 +10552,7 @@ class Relay:
                 self.obs_note = note or self.obs_note
                 return
             self._cover_auto_owned = False
+            note_cover(self, False)
             LOG.info("Auto-cover: on-air source recovered -> lowered Standby Cover (#495)")
         elif maybe_raise and cover_shown:
             # A cover is already up (the director raised it) during this outage. Adopt the
@@ -15320,6 +15335,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 cover, note = True, None
                             elif state is not None:
                                 cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
+                            if state is not None:
+                                note_cover(relay, on if cover else was_up)
                             # A second raise keeps the claim; a failed lower keeps it too.
                             relay.rc_red_flag_raised = (
                                 bool(owned or (cover and not was_up)) if on else not cover)
@@ -15424,6 +15441,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if ok and cover and (changed and not enabled if toggle else True):
                         relay.rc_red_flag_raised = False
                     if ok:
+                        if cover:
+                            note_cover(relay, enabled)
                         return self._send({"ok": True, "enabled": enabled, "changed": changed})
                     payload = {"ok": False, "error": note}
                     if toggle and cover:
@@ -15432,6 +15451,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             relay, getattr(setup_ctl, "hud", None) or hud_source)
                         payload["changed"] = enabled is None and shown in (None, raised)
                         payload["red_flag"] = not raised if payload["changed"] else raised
+                        note_cover(relay, payload["red_flag"])   # so the next press sees this one
                     return self._send(payload, 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:
@@ -15488,6 +15508,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     state, note = relay._obs.read_obs_state(sources, body.get("inputs") or [])
                     if state is None:
                         return self._send({"ok": False, "error": note}, 503)
+                    for (_scene, name), item in zip(sources, state.get("sources") or [], strict=False):
+                        if name == STANDBY_COVER_SOURCE:
+                            note_cover(relay, (item or {}).get("enabled"))
                     return self._send({"ok": True, **state})
                 if p == ["obs", "refresh"]:
                     # Reload the relay-served OBS browser sources (HUD / overlay /

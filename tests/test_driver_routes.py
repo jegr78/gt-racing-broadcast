@@ -1746,24 +1746,64 @@ def t_red_flag_toggle_without_a_readable_cover_takes_the_relays_own_state():
     orig_obs, g.m._obs_ws = g.m._obs_ws, _ItemObs({"Standings": None})
     srv, post = _toggle_server(g.m._obs_ws, hud_source=hud)
     toggle = lambda source, **body: post("/obs/source", scene="Stint", source=source, toggle=True, **body)
+
+    def forget(banner="", claim=False):
+        hud.banner, srv.relay.rc_red_flag_raised, srv.relay.cover_last = banner, claim, None
     try:
         for obs in (g.m._obs_ws, None):                  # OBS cannot report the item, then no OBS at all
             g.m._obs_ws = obs
-            hud.banner, srv.relay.rc_red_flag_raised = "", False
+            forget()
             st, d = toggle("Standby Cover", **{"from": False})
             assert st == 503 and d["ok"] is False and d["error"] and (d["red_flag"], d["changed"]) == (True, True), \
                 f"no red flag on record: the press raises one, and says the cover was not switched: {d}"
-            hud.banner = g.m.RED_FLAG_BANNER
             d = toggle("Standby Cover", **{"from": False})[1]
             assert (d["red_flag"], d["changed"]) == (True, False), \
-                f"a second panel that still shows it down does not end the red flag on record: {d}"
+                f"the relay remembers its own decision: a second panel does not end the red flag: {d}"
             assert toggle("Standby Cover", **{"from": True})[1]["red_flag"] is False, "the panel that shows it ends it"
-            hud.banner, srv.relay.rc_red_flag_raised = "Driver Swaps", True
-            assert toggle("Standby Cover")[1]["red_flag"] is False, "a cover the desk raised counts as raised too"
+            forget(banner=g.m.RED_FLAG_BANNER)
+            assert toggle("Standby Cover")[1]["red_flag"] is False, "without a known cover state the banner decides"
+            forget(banner="Driver Swaps", claim=True)
+            assert toggle("Standby Cover")[1]["red_flag"] is False, "or a cover the desk raised"
             st, d = toggle("Standings", **{"from": False})
             assert st == 503 and "red_flag" not in d, f"a graphic key gets no direction to act on: {d}"
             if obs is not None:
                 assert obs.sets == [], "nothing was switched in OBS"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
+def t_red_flag_fallback_prefers_the_last_cover_state_the_relay_saw():
+    hud, obs = _BannerHud(), _ItemObs({"Standby Cover": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv, post = _toggle_server(obs, hud_source=hud)
+    press = lambda shown: post("/obs/source", scene="Stint", source="Standby Cover", toggle=True,
+                               **{"from": shown})[1]
+
+    def lost(cover_in_obs=None):
+        """OBS drops out; with a state, the relay read it through /obs/state just before."""
+        g.m._obs_ws = obs
+        if cover_in_obs is not None:
+            obs.items["Standby Cover"] = cover_in_obs
+            post("/obs/state", sources=[{"scene": "Stint", "source": "Standby Cover"}], inputs=[])
+        g.m._obs_ws = None
+    try:
+        assert press(False)["enabled"] is True
+        lost()
+        hud.banner = ""                                   # the banner write never arrived
+        d = press(True)
+        assert (d["red_flag"], d["changed"]) == (False, True), \
+            f"the cover the relay itself raised counts, whatever the banner says: {d}"
+        lost(cover_in_obs=True)                           # raised in OBS by hand meanwhile
+        d = press(False)
+        assert (d["red_flag"], d["changed"]) == (True, False), \
+            f"a cover read as up through /obs/state is not raised again: {d}"
+        lost(cover_in_obs=False)
+        hud.banner = g.m.RED_FLAG_BANNER                  # an old banner over a lowered cover
+        d = press(False)
+        assert (d["red_flag"], d["changed"]) == (True, True), \
+            f"the cover state read through /obs/state wins over the banner: {d}"
     finally:
         g.m._obs_ws = orig_obs
         srv.shutdown()
