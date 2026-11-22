@@ -368,24 +368,6 @@ own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSourc
 Assets tab, the Discord payload builders, the relay's own `Relay._discord_post`,
 `http_util.post_multipart`).
 
-## Driver replay (`tools/driver-replay.py`, #1115)
-
-Up to 15 simulated senders for a running relay: they register on the event's invite,
-approve themselves on the tailnet route `/drivers/requests/approve` (so the relay must
-listen on the tailnet or loopback, as the default `--relay` does) and post encrypted GT7 packets along the picked layout's line through the real ingest
-route, with lap times, best laps and fuel. `--gap` sets the start spacing (small values
-give a dense pack for the track map). Needs `racecast event invite --new` and the same
-`racecast event track ID`; screenshots of the dashboard, desks and cockpit use it with
-the demo profile. Never point it at a league during an event: its senders take real
-entries and its laps reach the race and the fastest lap; a profile other than `demo`
-needs `--force`. `--pending N` registers N more drivers for the second stint and leaves
-them waiting for approval (the desks' Driver requests). `tests/test_driver_replay.py`
-pins its packets to the GT7 layout.
-
-```bash
-python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4
-```
-
 ## Stream stub (`tools/event-sim/fakes/stream_stub.py`, #1231)
 
 Stand-ins for `yt-dlp` and `streamlink` that serve `sim://<name>` channels and refuse
@@ -442,6 +424,24 @@ one pip's own scripts use. The stub reads it from the pip wheel ensurepip bundle
 an installed pip and appends `#!<python>` and a zip with `__main__.py`; the launcher runs
 the interpreter on its own file. Elsewhere a stand-in is an sh/Python script, mode 0o700.
 The CI e2e job sets `OBS_SIM_REQUIRE_FFMPEG=1`, so the real-ffmpeg test cannot skip there.
+
+## Driver replay (`tools/driver-replay.py`, #1115)
+
+Up to 15 simulated senders for a running relay: they register on the event's invite,
+approve themselves on the tailnet route `/drivers/requests/approve` (so the relay must
+listen on the tailnet or loopback, as the default `--relay` does) and post encrypted GT7 packets along the picked layout's line through the real ingest
+route, with lap times, best laps and fuel. `--gap` sets the start spacing (small values
+give a dense pack for the track map). Needs `racecast event invite --new` and the same
+`racecast event track ID`; screenshots of the dashboard, desks and cockpit use it with
+the demo profile. Never point it at a league during an event: its senders take real
+entries and its laps reach the race and the fastest lap; a profile other than `demo`
+needs `--force`. `--pending N` registers N more drivers for the second stint and leaves
+them waiting for approval (the desks' Driver requests). `tests/test_driver_replay.py`
+pins its packets to the GT7 layout.
+
+```bash
+python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4
+```
 
 ## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
 Two maintainer gates for a pass that is supposed to touch comments and prose only.
