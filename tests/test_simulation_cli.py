@@ -445,6 +445,15 @@ def t_relay_identity_uses_the_start_recorded_next_to_the_pid_file():
             assert seen[-1] == (4242, None), "a new start drops the old relay's marker"
 
 
+def t_a_verified_start_records_the_relay_start():
+    recorded = []
+    with _patched((m.sv, "start_detached", lambda *a, **k: 4242), (m, "_relay_http_ok", lambda: True),
+                  (m.sv, "pid_alive", lambda pid: True), (m.sv, "_reap_zombie", lambda pid: None),
+                  (m, "_relay_boot_log_size", lambda: 0), (m, "_record_relay_start", recorded.append)):
+        assert m._spawn_relay_verified(["relay"]) == 4242
+    assert recorded == [4242]
+
+
 def t_start_signals_treat_an_unknown_process_as_a_relay():
     for identity, expected in (("relay", True), ("unknown", True), ("other", False)):
         with _patched((m.pt, "pids_on_port", lambda port: []), (m.sv, "read_pid", lambda p: 4242),
