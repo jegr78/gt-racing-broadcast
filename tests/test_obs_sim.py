@@ -586,6 +586,24 @@ def t_grabber_reads_only_the_relay_feeds():
     assert isinstance(obs_sim.ObsSim().state.grabber, obs_grab.FeedGrabber), "ffmpeg by default"
 
 
+def t_a_failed_read_says_why():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp, Feeds(1) as feeds:
+        url = feeds.urls[0]
+        cmd, _ = _stub(tmp, "fail")
+        grab = _grabber(cmd, feeds)
+        assert grab.frames([url])[url] is None
+        assert grab.errors[url].startswith("ffmpeg exit 1"), grab.errors
+        ok, _ = _stub(tmp, "ok")
+        grab.cmd = ok
+        grab.feeds.clear()
+        assert grab.frames([url])[url] and url not in grab.errors, grab.errors
+    with Feeds(1, redirect_to="http://127.0.0.1:9/") as feeds:
+        grab = _grabber([sys.executable, "-c", "pass"], feeds)
+        assert grab.frames(feeds.urls)[feeds.urls[0]] is None
+        assert grab.errors[feeds.urls[0]] == "HTTP 302", grab.errors
+
+
 def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:
@@ -601,7 +619,7 @@ def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
         assert _wait(lambda: not grab.procs, timeout=20)
         time.sleep(0.3)  # past the 0.2 s interval
         assert grab.frames([a])[a] and grab.feeds[a]["busy"] is not None, "the last frame at once while a new read runs"
-        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20), _calls(calls)
+        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20), (_calls(calls), grab.reads, grab.errors, feeds.hits)
         assert _wait(lambda: grab.feeds[a]["busy"] is None, timeout=20) and grab.frames([a])[a], grab.feeds[a]
         assert _wait(lambda: not grab.procs, timeout=20)
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:

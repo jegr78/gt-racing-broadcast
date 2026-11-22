@@ -36,6 +36,7 @@ class FeedGrabber:
         self.max_age = 3 * interval + timeout if max_age is None else max_age
         self.feeds = {}             # url -> {"frame", "at", "busy": Event or None, "used"}
         self.procs = set()
+        self.errors = {}  # url -> why its last read gave no frame
         self.lock = threading.Lock()
         self.closed = False
         self.reads = 0
@@ -75,16 +76,19 @@ class FeedGrabber:
 
     def _run(self, url):
         w, h = self.size
+        self.errors.pop(url, None)
         u = urlsplit(url)
         conn = http.client.HTTPConnection(u.hostname, u.port, timeout=self.timeout)
         try:
             conn.request("GET", "/")
             resp = conn.getresponse()
             if resp.status != 200:
+                self.errors[url] = f"HTTP {resp.status}"
                 return None
             proc = subprocess.Popen(self.argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL)
-        except (OSError, http.client.HTTPException):
+        except (OSError, http.client.HTTPException) as exc:
+            self.errors[url] = f"{type(exc).__name__}: {exc}"
             conn.close()
             return None
         with self.lock:
@@ -100,6 +104,7 @@ class FeedGrabber:
         try:
             proc.wait(timeout=self.timeout)
         except subprocess.TimeoutExpired:
+            self.errors[url] = "timeout"
             proc.kill()
             proc.wait()
         finally:
@@ -109,7 +114,9 @@ class FeedGrabber:
                 self.procs.discard(proc)
         frame = out[0] if out else b""
         if proc.returncode != 0 or len(frame) < w * h * 3:
+            self.errors.setdefault(url, f"ffmpeg exit {proc.returncode}, {len(frame)} bytes")
             return None
+        self.errors.pop(url, None)
         return frame[:w * h * 3], w, h
 
     def _grab(self, url, done):

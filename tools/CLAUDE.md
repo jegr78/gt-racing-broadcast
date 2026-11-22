@@ -245,7 +245,7 @@ redirect and pipes the bytes into ffmpeg, which may only read its stdin (`pipe` 
 one allowed protocol, MPEG-TS demuxer forced) and is killed after 4 s. Each feed is read in the
 background at most once per `--grab-interval` (5 s); a screenshot waits only for a
 feed's first frame, up to 1 s. `--no-grab` turns the reads off, `ObsSim.stop()` kills
-running ones. A read is a short-lived consumer on the relay's fan-out port: while it
+running ones. `FeedGrabber.errors` keeps, per feed, why its last read gave no frame. A read is a short-lived consumer on the relay's fan-out port: while it
 runs, `consumer_attached` is true (a relay restart in that moment rebuilds the feed
 input, here in the simulated OBS), and `consumer_backlog`, the backlog floor and
 `consumer_starved` count it like OBS. Opaque by default are the full-page
