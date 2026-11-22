@@ -214,6 +214,8 @@ def t_injected_faults_answer_instead_of_recording():
         assert (status, json.loads(body)) == (400, {"message": "Unknown Webhook", "code": 0}), body
         assert sleeps == [3] and sink.messages() == [], "a faulted message is not recorded"
         sink.clear_faults()
+        assert _status(sink.http_url + "/_sim/fail", b'{"target": 5}',
+                       {"Content-Type": "application/json"})[0] == 400, "a target is a string"
         webhook_sink.fetch(sink.http_url, "/_sim/fail", {"target": "hook", "status": 500})
         assert _status(sink.url, b'{"content": "x"}', {"Content-Type": "application/json"})[0] == 500
         req = urllib.request.Request(sink.http_url + "/_sim/fail", data=b"", method="POST",
@@ -226,11 +228,11 @@ def t_injected_faults_answer_instead_of_recording():
 def t_shapes_discord_refuses_are_400_invalid_form_body():
     with webhook_sink.WebhookSink().start() as sink:
         json_ct = {"Content-Type": "application/json"}
-        for bad in ({"content": 5}, {"embeds": "x"}, {"embeds": [1]}, {"embeds": [{}] * 11},
+        for bad in ({"content": 5}, {"embeds": "x"}, {"embeds": 5}, {"embeds": [1]}, {"embeds": [{}] * 11},
                     {"content": "x", "username": 5}):
             status, body = _status(sink.url, json.dumps(bad).encode(), json_ct)
             assert status == 400 and json.loads(body)["code"] == 50035, (bad, body)
-        assert sink.messages() == [] and sink.rejected == 5
+        assert sink.messages() == [] and sink.rejected == 6
 
 
 def t_a_report_upload_above_the_old_limit_arrives_and_one_above_discords_is_refused():

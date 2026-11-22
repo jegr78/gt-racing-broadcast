@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The simulated Sheet and its Apps Script webhook (#1230). Run: python3 tests/test_sheet_sim.py"""
 import csv
+import http.client
 import importlib.util
 import io
 import json
@@ -361,7 +362,8 @@ def t_payloads_that_are_no_plain_object_behave_like_v7():
         assert _post(sim, {"action": "setup", "fields": "ab"}) == {"error": "unknown setup field: 0"}
         assert _post(sim, {"action": "schedule", "row": [2], "url": "sim://list"})["ok"] is True
         assert sim.tab("Schedule")[1][0] == "sim://list", "Number([2]) is 2"
-        assert _post(sim, {"action": "schedule", "row": "1_0"}) == {"error": "row out of range: 1_0"}
+        assert _post(sim, {"action": "schedule", "row": "0_2"}) == {"error": "row out of range: 0_2"}, \
+            "Number() takes no digit separators"
         assert _post(sim, {"action": "schedule", "row": "0x2", "url": "sim://hex"})["ok"] is True
         assert sim.tab("Schedule")[1][0] == "sim://hex", "Number('0x2') is 2"
         assert _post(sim, {"action": "schedule", "row": "inf"}) == {"error": "row out of range: inf"}
@@ -441,6 +443,7 @@ def t_stop_interrupts_an_injected_delay_and_refuses_new_work():
     worker.join(timeout=30)
     assert not worker.is_alive(), "stop() ends a handler inside an injected delay"
     assert answers.get_nowait() != 200 and sim.writes() == [], "a stopped fake runs no request"
+    assert sim.active_handlers() == 0, "no handler outlives stop()"
 
 
 def t_crew_columns_follow_the_last_column_of_the_whole_tab():
@@ -474,9 +477,15 @@ def t_stream_keys_are_seeded_over_http_and_never_read_back():
 
 def t_the_exec_redirect_is_followed_like_apps_script():
     with _sim(redirect=True) as sim:
+        conn = http.client.HTTPConnection("127.0.0.1", sim.port, timeout=5)
+        conn.request("POST", sim.push_url.split(str(sim.port), 1)[1], body=b'{"action": "pov"}',
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        assert resp.status == 302 and "/macros/echo?" in resp.getheader("Location", ""), resp.status
+        conn.close()
         body = m.post_webhook(sim.push_url, {"action": "pov", "url": "sim://r"}, timeout=5)
         assert m.check_webhook_response(body, "pov") == (True, None), body
-        assert sim.tab("POV")[1][0] == "sim://r" and len(sim.writes()) == 1, "the GET after the 302 runs nothing"
+        assert sim.tab("POV")[1][0] == "sim://r" and len(sim.writes()) == 2, "the GET after the 302 runs nothing"
         assert m.probe_webhook(sim.push_url)
 
 
@@ -526,6 +535,15 @@ def t_check_endpoints_refuse_a_bad_tab():
         assert _status(url, json.dumps({"name": 5}).encode(), json_ct)[0] == 400
         assert _status(url, json.dumps({"name": "X", "rows": ["a"]}).encode(), json_ct)[0] == 400
         assert sim.tab("X") is None
+
+
+def t_a_body_shorter_than_its_length_is_never_run():
+    with _sim() as sim, socket.create_connection(("127.0.0.1", sim.port), timeout=5) as conn:
+        conn.sendall((f"POST {sheet_sim.EXEC_PATH}?key=sim HTTP/1.1\r\nHost: 127.0.0.1:{sim.port}\r\n"
+                      "Content-Type: application/json\r\nContent-Length: 50\r\n\r\n{\"a\"").encode())
+        conn.shutdown(socket.SHUT_WR)
+        assert conn.recv(64) == b"", "a cut body gets no answer"
+        assert sim.writes() == [], "a cut body never reaches the script"
 
 
 def t_check_endpoints_seed_tabs_and_list_writes():
@@ -617,7 +635,7 @@ def t_faults_over_http_set_list_and_clear():
             assert json.loads(resp.read())["faults"] == [], "an empty body clears every fault"
         assert _rows(sim, "Crew") == CREW
         json_ct = {"Content-Type": "application/json"}
-        for bad in ({"target": 5}, {"target": "push", "status": 99}, {"target": "push", "delay": -1},
+        for bad in ({"target": 5}, {"target": ""}, {"target": "push", "status": 99}, {"target": "push", "delay": -1},
                     {"target": "push", "times": 0}, {"target": "push", "error": 5}):
             assert _status(sim.http_url + "/_sim/fail", json.dumps(bad).encode(), json_ct)[0] == 400, bad
         assert sim.snapshot()["faults"] == []

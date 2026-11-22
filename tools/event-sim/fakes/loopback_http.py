@@ -186,6 +186,11 @@ class LoopbackServer:
                 thread.join(0.05)
         timer.cancel()
 
+    def active_handlers(self):
+        """How many request handlers are running."""
+        with self._live_lock:
+            return sum(1 for t in self._live if t.is_alive())
+
     def __enter__(self):
         return self if self._server else self.start()
 
