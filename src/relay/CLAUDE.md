@@ -388,7 +388,8 @@ Tests: tests/test_intermission_live.py and tools/e2e-intermission.py.
 
 **Simulation mode (#1228).** Under `RACECAST_SIMULATION` the relay's `main` refuses to
 start without the `RACECAST_SIM_*` endpoints (`simulation_startup`), puts the stream
-stand-ins first on `PATH` and installs the network guard. Every Sheet tab URL goes through
+stand-ins first on `PATH` (every argv names them by absolute path, `simulation.tool`) and
+installs the network guard. Every Sheet tab URL goes through
 `_sheet_tab_csv_url` (`simulation.sheet_csv_url`), `is_channel` also accepts `sim://<name>`
 and `channel_url` passes it unchanged to the stand-ins (`yt-dlp ... -- sim://<name>`),
 `_timing_host_env_file` returns "" so the timing host stays off, `resolve_bind_addresses`

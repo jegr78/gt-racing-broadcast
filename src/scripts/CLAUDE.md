@@ -134,9 +134,12 @@ never the real one.
 - Endpoints: `RACECAST_SIM_SHEET_URL` (required) replaces the origin
   `https://docs.google.com/spreadsheets/d/<id>` of every fetched Sheet URL
   (`sheet_base`/`sheet_csv_url`; `tests/test_simulation.py` fails on a Sheet URL built
-  anywhere else); `RACECAST_SIM_STREAM_BIN` (required) is put first on `PATH` so
-  `yt-dlp`/`streamlink` resolve to stand-ins (`stand_in_present`: `.exe` on Windows, where
-  a bare-name call skips a `.bat` and would run the real tool); `RACECAST_SIM_OBS_WS` (`ws://127.0.0.1:<port>`,
+  anywhere else); `RACECAST_SIM_STREAM_BIN` (required) holds the
+  `yt-dlp`/`streamlink` stand-ins (`stand_in_present`: `.exe` on Windows). Every argv starts
+  them as `simulation.tool(name)`, their absolute path in simulation, because Windows'
+  CreateProcess searches the program's own folder and the working directory before `PATH`
+  (`tests/test_simulation.py` fails on a bare `["yt-dlp"` or `["streamlink"` under `src/`);
+  the directory is also put first on `PATH`; `RACECAST_SIM_OBS_WS` (`ws://127.0.0.1:<port>`,
   read in `obs_ws._connect`, no password; unset = OBS off, `wait_until_ready` returns at
   once); `RACECAST_SIM_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL` replace the
   league values in `config.resolve_config` (`config_overrides`), which also blanks Discord

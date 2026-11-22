@@ -129,7 +129,7 @@ def main():
     sdir = a.state_dir
     logdir = os.path.join(sdir, "logs")
     os.makedirs(logdir, exist_ok=True)
-    if not shutil.which("streamlink"):
+    if not shutil.which(simulation.tool("streamlink")):
         sys.exit("streamlink not found (brew install streamlink / pip install -U streamlink).")
     loop = os.path.join(here, "loopstream.py")
     frozen = bool(getattr(sys, "frozen", False))

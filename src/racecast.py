@@ -10921,7 +10921,7 @@ def _smoke_fingerprint():
     out = {}
     for name, args in (("yt-dlp", ["--version"]), ("streamlink", ["--version"]),
                        ("ffmpeg", ["-version"]), ("deno", ["--version"])):
-        rc, txt = _smoke_capture([name] + args, timeout=30)
+        rc, txt = _smoke_capture([simulation.tool(name)] + args, timeout=30)
         first = (txt.strip().splitlines() or [""])[0].strip()
         # Distinguish absent from broken: reporting a tool that IS installed as
         # "not on PATH" sends the operator hunting for the wrong problem.
@@ -10942,7 +10942,7 @@ def _smoke_js_runtime(url):
     if not _sm().stream_host(url or ""):
         return "unknown"
     _rc, txt = _smoke_capture(
-        ["yt-dlp", "-v", "--simulate", "--no-warnings", "--", url], timeout=60)
+        [simulation.tool("yt-dlp"), "-v", "--simulate", "--no-warnings", "--", url], timeout=60)
     return _sm().parse_js_runtimes(txt) or "unknown"
 
 
@@ -10979,7 +10979,7 @@ def _smoke_yt_candidates(query):
     search path uses the same tool the feed path does."""
     sm = _sm()
     rc, txt = _smoke_capture(
-        ["yt-dlp", "--flat-playlist", "--no-warnings", "--playlist-end",
+        [simulation.tool("yt-dlp"), "--flat-playlist", "--no-warnings", "--playlist-end",
          str(SMOKE_SEARCH_LIMIT), "--print", "%(url)s\t%(title)s\t%(channel)s",
          "--", sm.youtube_live_search_url(query)], timeout=120)
     if rc != 0:
@@ -10998,7 +10998,7 @@ def _smoke_yt_probe(url, cookies):
     proof that the live path works. It is the exact operation the relay runs on
     air. Returns (height, note)."""
     sm = _sm()
-    cmd = ["yt-dlp", "-g", "-f", "b[height<=1080]/b", "--no-warnings",
+    cmd = [simulation.tool("yt-dlp"), "-g", "-f", "b[height<=1080]/b", "--no-warnings",
            "--no-playlist", "--print", "rcq %(height)s %(fps)s"]
     if cookies and os.path.exists(cookies):
         cmd += ["--cookies", cookies]
@@ -11042,7 +11042,7 @@ def _smoke_twitch_probe(login):
     """streamlink's own view of a channel. Plugin, quality ladder, category.
     Pulls no bytes. Returns (plugin, qualities, category, note)."""
     rc, txt = _smoke_capture(
-        ["streamlink", "--json", f"https://www.twitch.tv/{login}"], timeout=60)
+        [simulation.tool("streamlink"), "--json", f"https://www.twitch.tv/{login}"], timeout=60)
     try:
         data = json.loads(txt)
     except ValueError:
