@@ -204,7 +204,7 @@ def build_music_cmd(url, out_path, cookies=None):
     """Argv to extract audio to an mp3 at out_path's dir, stem 'intermission'.
     `--` precedes the URL so a sheet cell starting with '-' cannot be a flag."""
     stem = os.path.join(os.path.dirname(out_path), "intermission.%(ext)s")
-    cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--no-warnings", "-o", stem]
+    cmd = [simulation.tool("yt-dlp"), "-x", "--audio-format", "mp3", "--no-warnings", "-o", stem]
     if cookies and os.path.exists(cookies):
         cmd += ["--cookies", cookies]
     cmd += ["--", url]
@@ -293,7 +293,7 @@ def build_download_cmd(url, out_path, cookies=None):
     # resolved URL. yt-dlp's default skips an existing output file and exits 0, which
     # silently froze a clip whenever one was already there, such as a placeholder
     # written before the URL was set.
-    cmd = ["yt-dlp", "-f", YTDLP_FORMAT, "--merge-output-format", "mp4",
+    cmd = [simulation.tool("yt-dlp"), "-f", YTDLP_FORMAT, "--merge-output-format", "mp4",
            "--no-warnings", "--force-overwrites", "--no-continue", "-o", out_path]
     if cookies and os.path.exists(cookies):
         cmd += ["--cookies", cookies]

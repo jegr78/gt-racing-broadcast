@@ -48,12 +48,17 @@ def _stub(**kw):
 
 
 def _on_path(stub):
-    """Put the stand-ins first on this process's PATH, as the relay does."""
-    old = os.environ.get("PATH", "")
+    """Point this process at the stand-ins as the relay does: RACECAST_SIM_STREAM_BIN,
+    and the directory first on PATH."""
+    saved = {k: os.environ.get(k) for k in ("PATH", simulation.STREAM_BIN)}
     os.environ.update(simulation.with_stream_bin(dict(os.environ, **stub.env())))
 
     def restore():
-        os.environ["PATH"] = old
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
     return restore
 
 

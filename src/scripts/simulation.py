@@ -132,6 +132,17 @@ def stand_in_present(path, tool, windows=None):
     return bool(shutil.which(tool, path=path))
 
 
+def tool(name, environ=None):
+    """The program to start for `name`. In simulation a stream tool is its stand-in's
+    absolute path, since Windows looks in the program's own folder and the working
+    directory before PATH; anything else is returned unchanged."""
+    environ = os.environ if environ is None else environ
+    path = (environ.get(STREAM_BIN) or "").strip()
+    if name not in STREAM_TOOLS or not (active(environ) and path):
+        return name
+    return os.path.join(path, name + (".exe" if os.name == "nt" else ""))
+
+
 def _stream_bin_problem(path):
     if not path:
         return f"{STREAM_BIN} is not set (a directory holding stand-ins for yt-dlp and streamlink)"

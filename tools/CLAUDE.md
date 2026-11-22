@@ -434,8 +434,8 @@ python3 tools/event-sim/fakes/stream_stub.py DIR set comms2 --stint 2 --commenta
 python3 tools/event-sim/fakes/stream_stub.py DIR freeze comms2 --until 1790000000
 ```
 
-Windows: the relay starts `yt-dlp` by bare name, and CreateProcess adds only `.exe`. Each
-stand-in there is distlib's console launcher, `t64.exe`, `t64-arm.exe` or `t32.exe`, the
+Windows: racecast starts the stand-in by its absolute path (`simulation.tool`), and a
+stand-in there must be an `.exe`. Each stand-in there is distlib's console launcher, `t64.exe`, `t64-arm.exe` or `t32.exe`, the
 one pip's own scripts use. The stub reads it from the pip wheel ensurepip bundles or from
 an installed pip and appends `#!<python>` and a zip with `__main__.py`; the launcher runs
 the interpreter on its own file. Elsewhere a stand-in is an sh/Python script, mode 0o700. `install()` may run again while

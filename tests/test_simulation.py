@@ -460,6 +460,101 @@ def t_endpoints_with_userinfo_or_fragment_are_refused():
     assert sim.endpoint(sim.SHEET_URL, env) == "http://127.0.0.1:9/s#", "an empty fragment is harmless"
 
 
+def _load_script(name, *path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, "src", *path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _stand_in(d, tool):
+    return os.path.join(d, tool + (".exe" if os.name == "nt" else ""))
+
+
+def t_stream_tools_start_by_absolute_path_in_simulation():
+    d = _stream_bin()
+    assert sim.tool("yt-dlp", {}) == "yt-dlp", "outside simulation the tool is looked up as before"
+    on = dict(ON, RACECAST_SIM_STREAM_BIN=d)
+    assert sim.tool("yt-dlp", on) == _stand_in(d, "yt-dlp")
+    assert sim.tool("streamlink", on) == _stand_in(d, "streamlink")
+    assert sim.tool("ffmpeg", on) == "ffmpeg", "only the stream tools have stand-ins"
+    assert sim.tool("yt-dlp", dict(RACECAST_SIM_STREAM_BIN=d)) == "yt-dlp", "the directory alone changes nothing"
+
+
+def t_every_stream_tool_call_uses_the_stand_in_path():
+    """Windows' CreateProcess searches the program's folder and the working directory
+    before PATH, so a bare name could still start a real yt-dlp.exe there."""
+    import subprocess
+    d = _stream_bin()
+    yt, sl = _stand_in(d, "yt-dlp"), _stand_in(d, "streamlink")
+    restore = _patched_env(**ON, RACECAST_SIM_STREAM_BIN=d, PATH=os.environ.get("PATH", ""))
+    seen = []
+
+    class Done:
+        returncode, stdout, stderr = 1, "", b""
+
+    def run(argv, **_kw):
+        seen.append(list(argv))
+        return Done()
+    real = subprocess.run
+    try:
+        m = _relay()
+        m._STREAMLINK_HELP = None
+        import loopstream
+        media = _load_script("sim_get_media", "relay", "get-media.py")
+        built = [m.ytdlp_resolve_cmd("sim://c", None), m.ytdlp_live_status_cmd("sim://c", None),
+                 m.streamlink_fanout_cmd("http://x/y"), m.streamlink_serve_cmd("http://x/y", 53001),
+                 m.preview_pull_streamlink_cmd("http://x/y", "youtube", "best"),
+                 loopstream.streamlink_argv("sim://c", "53001"),
+                 loopstream.streamlink_argv("https://www.twitch.tv/x", "53001", platform="twitch"),
+                 media.build_music_cmd("sim://c", os.path.join(d, "i.mp3")),
+                 media.build_download_cmd("sim://c", os.path.join(d, "c.mp4"))]
+        subprocess.run = run
+        m._STREAMLINK_HELP = None
+        m._streamlink_help()
+        m.yt_live_video_lookup("sim://c", None)
+        m.yt_channel_id("sim://c", None)
+        m.export_cookies("firefox", os.path.join(tempfile.mkdtemp(), "yt-cookies.txt"))
+        import preflight
+        preflight.tool_version("yt-dlp", run=run, which=lambda name: name)
+        rc = _load_script("sim_racecast", "racecast.py")
+        rc._smoke_capture = lambda argv, timeout=30: (seen.append(list(argv)), (1, ""))[1]
+        rc._smoke_fingerprint()
+        rc._smoke_js_runtime("https://www.youtube.com/watch?v=abc")
+        rc._smoke_yt_candidates("gt7")
+        rc._smoke_yt_probe("https://www.youtube.com/watch?v=abc", None)
+        rc._smoke_twitch_probe("someone")
+        cookies = _load_script("sim_get_cookies", "relay", "get-cookies.py")
+        argv = sys.argv
+        sys.argv = ["get-cookies.py", "firefox", "--runtime-dir", tempfile.mkdtemp()]
+        try:
+            cookies.main()
+        except SystemExit:
+            pass  # the export "failed": only its argv matters
+        finally:
+            sys.argv = argv
+    finally:
+        subprocess.run = real
+        restore()
+    calls = [a for a in built + seen if os.path.basename(a[0]).split(".")[0] in sim.STREAM_TOOLS]
+    assert len(calls) >= 22, len(calls)
+    bare = [a[:2] for a in calls if a[0] not in (yt, sl)]
+    assert not bare, f"started by bare name in simulation: {bare}"
+
+
+def t_no_bare_stream_tool_argv_in_src():
+    import re
+    pattern = re.compile(r"""\[\s*["'](yt-dlp|streamlink)["']""")
+    hits = []
+    for base, _dirs, files in os.walk(os.path.join(ROOT, "src")):
+        for f in files:
+            if f.endswith(".py"):
+                with open(os.path.join(base, f), encoding="utf-8") as fh:
+                    hits += [f"{f}:{n}" for n, line in enumerate(fh, 1) if pattern.search(line)]
+    assert not hits, f"build the argv with simulation.tool(...): {hits}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

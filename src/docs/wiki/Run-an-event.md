@@ -73,7 +73,7 @@ start.
   | Variable | Stands in for | Required |
   |---|---|---|
   | `RACECAST_SIM_SHEET_URL` | `https://docs.google.com/spreadsheets/d/<SHEET_ID>`; tabs are read from `<url>/gviz/tq?tqx=out:csv&sheet=<Tab>` | yes |
-  | `RACECAST_SIM_STREAM_BIN` | a directory holding stand-ins for `yt-dlp` and `streamlink` (`.exe` on Windows), put first on `PATH` | yes |
+  | `RACECAST_SIM_STREAM_BIN` | a directory holding stand-ins for `yt-dlp` and `streamlink` (`.exe` on Windows); racecast starts them by their path there, never a `yt-dlp` found elsewhere | yes |
   | `RACECAST_SIM_OBS_WS` | the OBS WebSocket, as `ws://127.0.0.1:<port>`, no password | no |
   | `RACECAST_SIM_SHEET_PUSH_URL` | the league `SHEET_PUSH_URL` | no |
   | `RACECAST_SIM_DISCORD_WEBHOOK_URL` | the league `DISCORD_WEBHOOK_URL` | no |
