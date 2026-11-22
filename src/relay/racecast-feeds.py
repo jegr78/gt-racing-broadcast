@@ -5493,6 +5493,27 @@ def apply_split_audio(relay, obs_ws):
     return payload, status
 
 
+_ITEM_SWITCH_LOCK = threading.Lock()
+
+
+def switch_scene_item(obs_ws, scene, source, on=None):
+    """Show or hide one scene item. `on` None flips the state OBS reports and
+    switches nothing when OBS cannot report it. Returns (ok, enabled, note), with
+    enabled None for that refusal. The lock keeps two toggles from reading the same
+    state."""
+    with _ITEM_SWITCH_LOCK:
+        if on is None:
+            state, note = obs_ws.read_obs_state([(scene, source)], [])
+            if state is None:
+                return False, None, note or "obs unreachable"
+            enabled = (state.get("sources") or [{}])[0].get("enabled")
+            if enabled is None:
+                return False, None, f"no scene item {source!r} in {scene!r}"
+            on = not enabled
+        ok, note = obs_ws.set_scene_item_enabled(scene, source, on)
+        return bool(ok), on, note
+
+
 def apply_graphic(relay, obs_ws, verb, source):
     """GET /obs/graphic/<show|hide|toggle>/<source> (Companion, #706): switch one
     full-screen graphic in the scene the loaded collection keeps it in, Stint for
@@ -5506,18 +5527,13 @@ def apply_graphic(relay, obs_ws, verb, source):
     if source not in _OBS_WS_MODULE.GRAPHIC_SOURCES:
         return {"ok": False, "error": f"unknown graphic: {source!r}"}, 400
     scene = _OBS_WS_MODULE.graphic_scene(getattr(relay, "solo", False))
-    if verb == "toggle":
-        state, note = obs_ws.read_obs_state([(scene, source)], [])
-        if state is None:
-            return {"ok": False, "error": note or "obs unreachable"}, 503
-        enabled = (state.get("sources") or [{}])[0].get("enabled")
-        if enabled is None:
-            return {"ok": False, "error": f"no scene item {source!r} in {scene!r}"}, 503
-        verb = "hide" if enabled else "show"
-    ok, note = obs_ws.set_scene_item_enabled(scene, source, verb == "show")
+    ok, enabled, note = switch_scene_item(obs_ws, scene, source,
+                                          None if verb == "toggle" else verb == "show")
+    if enabled is None:
+        return {"ok": False, "error": note}, 503
     if ok and source == STANDBY_COVER_SOURCE:
         relay.rc_red_flag_raised = False
-    payload = {"ok": bool(ok), "scene": scene, "source": source, "enabled": verb == "show"}
+    payload = {"ok": bool(ok), "scene": scene, "source": source, "enabled": enabled}
     if note:
         payload["note"] = str(note)
     return payload, (200 if ok else 503)
@@ -15367,11 +15383,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
                     _crew_takes.forget(body.get("source"))
-                    ok, note = relay._obs.set_scene_item_enabled(
-                        body.get("scene"), body.get("source"), bool(body.get("on")))
+                    # `toggle: true` flips the state OBS reports (the panel's keys);
+                    # without it `on` decides, as before.
+                    ok, enabled, note = switch_scene_item(
+                        relay._obs, body.get("scene"), body.get("source"),
+                        None if body.get("toggle") is True else bool(body.get("on")))
                     if ok and body.get("source") == STANDBY_COVER_SOURCE:
                         relay.rc_red_flag_raised = False
-                    return self._send({"ok": True} if ok
+                    return self._send({"ok": True, "enabled": enabled} if ok
                                       else {"ok": False, "error": note}, 200 if ok else 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:

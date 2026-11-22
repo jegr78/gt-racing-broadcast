@@ -1257,22 +1257,27 @@ function relayGated(item){
   return item.relay === "telemetry" || item.relay === "telemetry/record" || item.relay === "telemetry/replay-marker";
 }
 
-/* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
-   using the last-known state from /obs/state. Built once and re-appended to #pgmBus
-   by every buildControls() call, so a solo rebuild never drops it; buildControls
-   retargets redFlagItem from cfg.redFlag when that is present. */
+/* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint; the
+   relay decides the direction from the state OBS reports. Built once and re-appended
+   to #pgmBus by every buildControls() call, so a solo rebuild never drops it;
+   buildControls retargets redFlagItem from cfg.redFlag when that is present. */
 const redFlagItem = {scene:"Stint", source:"Standby Cover"};
-const redFlagBtn = mkKey("RED FLAG", "alarm", async ()=>{
-  const last = obsState.sources.find(s=>s.scene===redFlagItem.scene && s.source===redFlagItem.source);
-  const on = last ? !last.enabled : true;
-  await obsSource(redFlagItem.scene, redFlagItem.source, on);
+async function redFlagPress(){
+  let on;
+  try{ on = await obsToggle(redFlagItem); }
+  catch(e){
+    log("RED FLAG failed: " + (e.message||e), "err");
+    toast("RED FLAG not switched: " + (e.message||e));
+    return;
+  }
   log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
   setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
   // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
   if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
                                            body: "{}"}).catch(() => {});
   obsStatePoll();
-});
+}
+const redFlagBtn = mkKey("RED FLAG", "alarm", redFlagPress);
 redFlagBtn.classList.add("redflag");
 redFlagBtn._item = redFlagItem;
 
@@ -1875,12 +1880,20 @@ async function runMacro(m){
   obsStatePoll();
 }
 
+/* Flips one source in the relay, which reads OBS first, so a press never acts on the
+   panel's last poll. Returns the new state; throws when the relay refused. */
+async function obsToggle(item){
+  const d = await obsPost("source", {scene: item.scene, source: item.source, toggle: true});
+  if (!d.ok) throw new Error(d.error || "OBS did not answer");
+  const last = obsState.sources.find(s=>s.scene===item.scene && s.source===item.source);
+  if (last) last.enabled = d.enabled;
+  else obsState.sources.push({scene: item.scene, source: item.source, enabled: d.enabled});
+  return d.enabled;
+}
+
 async function toggleSource(item, btn){
   try{
-    const last = obsState.sources.find(s=>s.scene===item.scene && s.source===item.source);
-    const on = last ? !last.enabled : true;
-    await obsSource(item.scene, item.source, on);
-    btn.classList.toggle("on", on);
+    btn.classList.toggle("on", await obsToggle(item));
   }catch(e){ log(`Toggle "${assetLabel(item.source)}" in "${item.scene}" failed: ${e.message||e}`, "err"); }
 }
 

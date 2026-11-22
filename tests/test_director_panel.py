@@ -642,6 +642,74 @@ console.log([live, down, warnDown, state()].join('|'));""")
         assert gone.startswith("true "), f"a relay without telemetry hides REC: {gone}"
 
 
+_TOGGLE_HARNESS = r"""
+let obsState = {scene: '', sources: [{scene: 'Stint', source: 'Standings', enabled: false}], audio: []};
+const sent = [], logs = [], setup = [], fetched = [], answers = [];
+const obsPost = async (path, body) => { sent.push(path + ' ' + JSON.stringify(body)); return answers.shift(); };
+const log = (msg, kind) => logs.push((kind || 'info') + ': ' + msg);
+const toast = msg => logs.push('toast: ' + msg);
+const setupSet = (field, value) => setup.push(field + '=' + value);
+const fetch = async path => { fetched.push(path); };
+const obsStatePoll = () => {};
+const assetLabel = source => source;
+const redFlagItem = {scene: 'Stint', source: 'Standby Cover'};
+const btn = {on: null, classList: {toggle: (_c, on) => { btn.on = on; }}};
+"""
+
+
+def _toggle_js(html, body):
+    return _run_js(_TOGGLE_HARNESS + "".join("async " + _func_src(html, n) + "\n}\n" for n in
+                                             ("obsToggle", "redFlagPress", "toggleSource")) + body)
+
+
+def t_graphic_keys_toggle_from_the_relays_answer():
+    html = _html()
+    assert "!last.enabled" not in "".join(_func_src(html, n) for n in ("obsToggle", "toggleSource", "redFlagPress")), \
+        "a press never derives its direction from the panel's last /obs/state poll"
+    out = _toggle_js(html, """
+(async () => {
+  const item = {scene: 'Stint', source: 'Standings'};
+  answers.push({ok: true, enabled: true}, {ok: true, enabled: false}, {ok: false, error: 'obs unreachable'});
+  await toggleSource(item, btn);
+  const first = btn.on;
+  await toggleSource(item, btn);
+  const second = [btn.on, obsState.sources[0].enabled];
+  await toggleSource(item, btn);
+  console.log(JSON.stringify({first, second, third: btn.on, sent, logs}));
+})();""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["sent"] == ['source {"scene":"Stint","source":"Standings","toggle":true}'] * 3, d["sent"]
+        assert d["first"] is True and d["second"] == [False, False], \
+            f"two presses inside one poll interval flip the key twice: {d}"
+        assert d["third"] is False and d["logs"] == ['err: Toggle "Standings" in "Stint" failed: obs unreachable'], \
+            f"a refused toggle leaves the key as it was and says why: {d}"
+
+
+def t_red_flag_follows_the_relays_answer():
+    out = _toggle_js(_html(), """
+(async () => {
+  answers.push({ok: true, enabled: false}, {ok: true, enabled: true}, {ok: false, error: 'obs unreachable'});
+  obsState.sources.push({scene: 'Stint', source: 'Standby Cover', enabled: false});
+  await redFlagPress();
+  const down = {setup: setup.splice(0), fetched: fetched.splice(0)};
+  await redFlagPress();
+  const up = {setup: setup.splice(0), fetched: fetched.splice(0)};
+  await redFlagPress();
+  console.log(JSON.stringify({down, up, refused: {setup, fetched}, sent, logs}));
+})();""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["sent"] == ['source {"scene":"Stint","source":"Standby Cover","toggle":true}'] * 3, d["sent"]
+        assert d["down"] == {"setup": ["racecontrol="], "fetched": []}, \
+            f"the relay lowered a cover the panel had not seen raised, so the banner clears: {d['down']}"
+        assert d["up"] == {"setup": ["racecontrol=Red Flag - Race Suspended"],
+                           "fetched": ["/drivers/race/red-flag"]}, d["up"]
+        assert d["refused"] == {"setup": [], "fetched": []}, \
+            f"a refused toggle writes no banner and holds no race: {d['refused']}"
+        assert any(line.startswith("toast: RED FLAG") for line in d["logs"]), d["logs"]
+
+
 def t_relay_driven_keys_start_hidden():
     html = _html()
     out = _run_js(_func_src(html, "relayGated") + """

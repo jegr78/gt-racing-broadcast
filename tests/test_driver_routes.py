@@ -1567,6 +1567,53 @@ def t_race_control_lowers_only_a_cover_it_raised():
         srv.shutdown()
 
 
+class _ItemObs:
+    """OBS with scene items: a source maps to its state, None when OBS cannot report it."""
+    def __init__(self, items):
+        self.items, self.sets = dict(items), []
+
+    def read_obs_state(self, items, _inputs):
+        return {"scene": "Stint", "sources": [{"enabled": self.items.get(src)} for _sc, src in items]}, None
+
+    def set_scene_item_enabled(self, _scene, source, on):
+        self.items[source] = bool(on)
+        self.sets.append((source, bool(on)))
+        return True, None
+
+
+def t_obs_source_toggle_flips_the_state_obs_reports():
+    import json as _json
+    obs = _ItemObs({"Standings": False, "Standby Cover": True})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv = g._serve()
+    port = srv.server_address[1]
+
+    def post(source, **extra):
+        st, text, _h = _req(port, "/obs/source", _json.dumps(
+            {"scene": "Stint", "source": source, **extra}).encode(), {"Content-Type": "application/json"})
+        return st, _json.loads(text)
+    try:
+        assert post("Standings", toggle=True) == (200, {"ok": True, "enabled": True})
+        assert post("Standings", toggle=True) == (200, {"ok": True, "enabled": False}), \
+            "a second press flips the item back, whatever the caller last polled"
+        obs.items["Standings"] = True
+        assert post("Standings", toggle=True)[1]["enabled"] is False, "the toggle reads OBS, not a cached state"
+        srv.relay.rc_red_flag_raised = True
+        assert post("Standby Cover", toggle=True) == (200, {"ok": True, "enabled": False})
+        assert srv.relay.rc_red_flag_raised is False, "a director toggle of the cover ends the desk's claim"
+        obs.sets.clear()
+        st, d = post("Missing", toggle=True)
+        assert st == 503 and d["ok"] is False and "Missing" in d["error"], (st, d)
+        assert obs.sets == [], "an item OBS cannot report is never switched on a guess"
+        assert post("Standings", on=True) == (200, {"ok": True, "enabled": True})
+        assert post("Standings")[1]["enabled"] is False and obs.sets == [("Standings", True), ("Standings", False)], \
+            "without toggle the body keeps its meaning: on shows, anything else hides"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
 class _Setup:
     """The Setup tab control: `banner` is the Sheet, the HUD shows its last poll."""
     def __init__(self):
