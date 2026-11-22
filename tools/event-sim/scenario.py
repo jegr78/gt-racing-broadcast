@@ -69,7 +69,7 @@ def parse_at(text):
         return Trigger("after", parse_duration(m.group(2)) if m.group(2) else 0.0, ref=m.group(1))
     m = _LAP.match(text)
     if m:
-        return Trigger("race", condition=f"race.lap >= {int(m.group(1))}")
+        return Trigger("race", condition=f"race.lap.leader >= {int(m.group(1))}")
     m = _STATE.match(text)
     if m:
         return Trigger("race", condition=f"race.state == '{m.group(1)}'")
