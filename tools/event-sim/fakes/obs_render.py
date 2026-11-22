@@ -4,6 +4,7 @@ The picture paints the scene's layers bottom first at their canvas rects: a test
 per feed (its grabbed frame, or else colour bars plus the input name or its label) and a
 solid panel per opaque
 item, under a top bar with the scene name. The same layers always give the same bytes."""
+import operator
 import struct
 import zlib
 
@@ -109,6 +110,19 @@ def _label(canvas, x0, y0, w, h, text):
     canvas.text(lx, ly, label, scale)
 
 
+def scale_rgb(rgb, sw, sh, dw, dh):
+    """Nearest-neighbour resize of a sw*sh RGB image to dw*dh."""
+    if (sw, sh) == (dw, dh):
+        return rgb
+    cols = [min(sw - 1, x * sw // dw) * 3 + c for x in range(dw) for c in range(3)]
+    pick = operator.itemgetter(*cols)
+    rows = []
+    for y in range(dh):
+        start = min(sh - 1, y * sh // dh) * sw * 3
+        rows.append(bytes(pick(rgb[start:start + sw * 3])))
+    return b"".join(rows)
+
+
 def size(width):
     """The picture size for a requested screenshot width."""
     width = max(64, min(int(width or 640), 1920))
@@ -123,14 +137,15 @@ def pixel_rect(rect, width):
 
 def render_program(scene, layers, width=640, labels=None):
     """PNG bytes of `scene`. `layers` are {kind: feed|opaque, name, rect: [x, y, w, h],
-    frame: RGB bytes of the pixel rect or None} on the 1920x1080 canvas, bottom first;
+    frame: (rgb, w, h) or None} on the 1920x1080 canvas, bottom first, a frame scaled
+    to its rect;
     `labels` maps a feed to the text its pattern shows."""
     width, height = size(width)
     canvas = Canvas(width, height, _tint(scene))
     for layer in layers:
         x, y, w, h = pixel_rect(layer["rect"], width)
-        if layer.get("frame") and len(layer["frame"]) == w * h * 3:
-            canvas.blit(x, y, w, h, layer["frame"])
+        if layer.get("frame") and w > 0 and h > 0:
+            canvas.blit(x, y, w, h, scale_rgb(*layer["frame"], w, h))
             continue
         x0, y0 = max(0, x), max(0, y)
         w, h = min(width, x + w) - x0, min(height, y + h) - y0

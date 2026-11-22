@@ -19,7 +19,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from obs_render import pixel_rect, render_program
+from obs_render import render_program
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
@@ -144,6 +144,17 @@ def demo_collection_name(path=DEMO_PROFILE_ENV):
     return ""
 
 
+class _Shot:
+    """A screenshot planned under the state lock, drawn by `finish()` after it."""
+
+    def __init__(self, state, plan):
+        self.state, self.plan = state, plan
+
+    def finish(self):
+        raw, fmt = self.state._shot_draw(self.plan)
+        return {"imageData": f"data:image/{fmt};base64," + base64.b64encode(raw).decode()}
+
+
 def _contains(outer, inner, slack=0.5):
     ox, oy, ow, oh = outer
     ix, iy, iw, ih = inner
@@ -168,8 +179,8 @@ class ObsState:
         """`collection_names` are further names OBS lists for the loaded collection
         (default: the demo profile's OBS_COLLECTION), so a profile's switch succeeds.
         `opaque` names the inputs that hide what lies below them (default OPAQUE_DEFAULT).
-        `grabber(url, w, h)` returns a feed's current frame as RGB bytes or None; without
-        one, screenshots show the synthetic pattern."""
+        `grabber.frames(urls)` returns {url: (rgb, w, h) or None}, each feed's newest
+        frame; without a grabber, screenshots show the synthetic pattern."""
         self.strict, self.clock = strict, clock
         self.lock = threading.RLock()
         self.listeners = []
@@ -279,8 +290,21 @@ class ObsState:
 
     # -- the request entry point ----------------------------------------------------
     def request(self, request_type, data=None, origin="ws"):
-        """Apply one request. Returns the responseData dict or raises ObsError."""
-        data = data or {}
+        """Apply one request. Returns the responseData dict or raises ObsError. A
+        screenshot is planned under the lock and drawn after it, so a feed read never
+        holds up another client."""
+        result = self._locked_request(request_type, data or {}, origin)
+        if isinstance(result, _Shot):
+            try:
+                return result.finish()
+            except ObsError:
+                raise
+            except Exception as exc:  # noqa: BLE001  answered, never dropped
+                raise ObsError(INVALID_FIELD, f"{request_type}: {str(exc) or exc.__class__.__name__}") \
+                    from exc
+        return result
+
+    def _locked_request(self, request_type, data, origin):
         with self.lock:
             self.tick()
             entry = {"code": SUCCESS}
@@ -833,39 +857,47 @@ class ObsState:
         frame comes from the grabber, outside the lock; `feed_sources` records whether
         the picture used that `frame` or the `synthetic` pattern (None: hidden)."""
         with self.lock:
-            if self.image is not None:
-                return self.image, "png" if self.image[:8] == b"\x89PNG\r\n\x1a\n" else "jpg"
-            if source in self.scenes:
-                layers = self.layers(source)
-                hidden = {f["input"] for f in self.feeds(source) if f["occluded"]}
-            else:
-                inp = self.inputs.get(source) or {}
-                kind = "feed" if feed_url(inp.get("settings") or {}) else "opaque"
-                layers, hidden = [{"kind": kind, "name": source, "rect": [0.0, 0.0, *CANVAS]}], set()
-            for layer in layers:
-                if layer["kind"] == "feed":
-                    layer["url"] = feed_url(self.inputs[layer["name"]]["settings"])
-            labels, grabber = dict(self.labels), self.grabber
-        used = {}
+            plan = self._shot_plan(source, width)
+        return self._shot_draw(plan)
+
+    def _shot_plan(self, source, width):
+        """What a screenshot of `source` paints, taken under the lock."""
+        if self.image is not None:
+            return {"image": self.image}
+        if source in self.scenes:
+            layers = self.layers(source)
+            hidden = {f["input"] for f in self.feeds(source) if f["occluded"]}
+        else:
+            inp = self.inputs.get(source) or {}
+            kind = "feed" if feed_url(inp.get("settings") or {}) else "opaque"
+            layers, hidden = [{"kind": kind, "name": source, "rect": [0.0, 0.0, *CANVAS]}], set()
         for layer in layers:
-            if layer["kind"] != "feed":
-                continue
-            if layer["name"] in hidden:
-                used[layer["name"]] = None
-                continue
-            _, _, w, h = pixel_rect(layer["rect"], width)
-            layer["frame"] = grabber(layer["url"], w, h) if grabber else None
+            if layer["kind"] == "feed":
+                layer["url"] = feed_url(self.inputs[layer["name"]]["settings"])
+        return {"image": None, "source": source, "width": width, "layers": layers,
+                "hidden": hidden, "labels": dict(self.labels), "grabber": self.grabber}
+
+    def _shot_draw(self, plan):
+        """Read the shown feeds' frames and draw the plan, without the lock."""
+        if plan["image"] is not None:
+            image = plan["image"]
+            return image, "png" if image[:8] == b"\x89PNG\r\n\x1a\n" else "jpg"
+        shown = [la for la in plan["layers"] if la["kind"] == "feed" and la["name"] not in plan["hidden"]]
+        urls = sorted({la["url"] for la in shown})
+        frames = plan["grabber"].frames(urls) if plan["grabber"] else {}
+        used = {la["name"]: None for la in plan["layers"] if la["kind"] == "feed"}
+        for layer in shown:
+            layer["frame"] = frames.get(layer["url"])
             used[layer["name"]] = "frame" if layer["frame"] else "synthetic"
         with self.lock:
             self.feed_sources.update(used)
-        return render_program(source, layers, width, labels), "png"
+        return render_program(plan["source"], plan["layers"], plan["width"], plan["labels"]), "png"
 
     def _r_GetSourceScreenshot(self, data):
         source, _ = _need(data, "sourceName", "imageFormat")
         if self.image is None and source not in self.scenes and source not in self.inputs:
             raise ObsError(NOT_FOUND, f"No source was found by the name of `{source}`.")
-        raw, fmt = self.screenshot(source, data.get("imageWidth") or 640)
-        return {"imageData": f"data:image/{fmt};base64," + base64.b64encode(raw).decode()}
+        return _Shot(self, self._shot_plan(source, data.get("imageWidth") or 640))
 
     # -- what checks read ------------------------------------------------------------
     def visible(self, scene):

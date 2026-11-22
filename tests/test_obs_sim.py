@@ -7,6 +7,7 @@ import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 import zlib
 
@@ -407,13 +408,19 @@ args = sys.argv[1:]
 with open(args[0], "a") as fh:
     fh.write(args[args.index("-i") + 1] + "\\n")
 mode = args[1]
-if mode == "sleep":
-    time.sleep(5)
+if mode.startswith("sleep"):
+    time.sleep(float(mode[5:] or 30))
+    mode = "ok"
 if mode not in ("ok", "short"):
     sys.exit(1)
 w, h = (int(v) for v in args[args.index("-vf") + 1].split("=")[1].split(":"))
 sys.stdout.buffer.write(bytes((10, 200, 30)) * (w * h - (mode == "short")))
 """
+FEED_A, FEED_B = "http://127.0.0.1:53001", "http://127.0.0.1:53002"
+
+
+class Skip(Exception):
+    pass
 
 
 def _stub(tmp, mode):
@@ -431,37 +438,94 @@ def _calls(path):
         return fh.read().split()
 
 
-def t_grabber_reads_one_frame_from_a_loopback_feed():
+def _grabber(cmd, **kw):
+    kw.setdefault("size", (4, 2))
+    return obs_grab.FeedGrabber(cmd, **kw)
+
+
+def t_grabber_reads_only_the_relay_feeds():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         cmd, calls = _stub(tmp, "ok")
-        grab = obs_grab.FfmpegGrabber(cmd, ttl=60)
-        assert grab("http://127.0.0.1:53001", 4, 2) == bytes((10, 200, 30)) * 8
-        assert grab("http://127.0.0.1:53001", 4, 2) is not None and len(_calls(calls)) == 1, "cached"
-        assert grab("http://192.0.2.7:53001", 4, 2) is None, "never a non-loopback feed"
-        assert grab("file://localhost/etc/passwd", 4, 2) is None, "never a local file"
-        assert _calls(calls) == ["http://127.0.0.1:53001"], _calls(calls)
+        grab = _grabber(cmd, interval=60)
+        refused = ["http://192.0.2.7:53001", "http://127.0.0.1:8088", "http://127.0.0.1:53001/timer/reset",
+                   "http://127.0.0.1:53001/?x=1", "file://localhost/etc/passwd", "tcp://127.0.0.1:53001",
+                   "http://user@127.0.0.1:53001"]
+        got = grab.frames([FEED_A] + refused)
+        assert got[FEED_A] == (bytes((10, 200, 30)) * 8, 4, 2), got[FEED_A]
+        assert all(got[u] is None for u in refused), got
+        assert _calls(calls) == [FEED_A], "only the feed itself is ever read"
+        assert grab.frames([FEED_A])[FEED_A] is not None and grab.reads == 1, "one read per interval"
+        argv = grab.argv(FEED_A)
+        for flag, value in (("-protocol_whitelist", "http,tcp,udp"), ("-reconnect", "0"),
+                            ("-rw_timeout", "4000000"), ("-f", "mpegts")):
+            assert argv[argv.index(flag) + 1] == value, (flag, argv)
+        assert argv.index("-f") < argv.index("-i"), "the demuxer is forced before the input"
     with tempfile.TemporaryDirectory() as tmp:
-        cmd, _ = _stub(tmp, "fail")
-        assert obs_grab.FfmpegGrabber(cmd)("http://127.0.0.1:53001", 4, 2) is None, "a failed grab"
+        cmd, _ = _stub(tmp, "ok")
+        grab = _grabber(cmd, ports=[9000])
+        assert grab.frames(["http://127.0.0.1:9000/"])["http://127.0.0.1:9000/"], "configured ports"
+        assert grab.frames([FEED_A])[FEED_A] is None, "a configured set replaces the default"
+        many = _grabber(cmd, ports=range(9000, 9040), wait=0)
+        many.frames([f"http://127.0.0.1:{p}" for p in range(9000, 9040)])
+        assert len(many.feeds) <= obs_grab.MAX_FEEDS, "the feed cache is bounded"
+        many.close()
+    for mode in ("fail", "short"):
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd, _ = _stub(tmp, mode)
+            assert _grabber(cmd).frames([FEED_A])[FEED_A] is None, mode
+    missing = _grabber([os.path.join(ROOT, "no-such-ffmpeg")])
+    assert missing.frames([FEED_A])[FEED_A] is None, "no ffmpeg"
+    assert isinstance(obs_sim.ObsSim().state.grabber, obs_grab.FeedGrabber), "ffmpeg by default"
+
+
+def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
+    import tempfile
     with tempfile.TemporaryDirectory() as tmp:
-        cmd, _ = _stub(tmp, "short")
-        assert obs_grab.FfmpegGrabber(cmd)("http://127.0.0.1:53001", 4, 2) is None, "a short frame"
-    assert isinstance(obs_sim.ObsSim().state.grabber, obs_grab.FfmpegGrabber), "ffmpeg by default"
-    with tempfile.TemporaryDirectory() as tmp:
-        cmd, _ = _stub(tmp, "sleep")
+        cmd, calls = _stub(tmp, "sleep1")
+        grab = _grabber(cmd, wait=3, interval=0.2)
         started = time.monotonic()
-        assert obs_grab.FfmpegGrabber(cmd, timeout=0.5)("http://127.0.0.1:53001", 4, 2) is None
-        assert time.monotonic() - started < 4, "a stalled feed is cut off"
-    missing = obs_grab.FfmpegGrabber([os.path.join(ROOT, "no-such-ffmpeg")])
-    assert missing("http://127.0.0.1:53001", 4, 2) is None, "no ffmpeg"
+        got = grab.frames([FEED_A, FEED_B])
+        assert got[FEED_A] and got[FEED_B] and time.monotonic() - started < 1.8, "both feeds at once"
+        time.sleep(0.3)
+        started = time.monotonic()
+        assert grab.frames([FEED_A])[FEED_A], "the last frame while a new read runs"
+        assert time.monotonic() - started < 0.5, "a refresh never blocks the screenshot"
+        assert _wait(lambda: len(_calls(calls)) == 3) and grab.frames([FEED_A])[FEED_A]
+        _wait(lambda: not grab.procs)
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd, _ = _stub(tmp, "sleep30")
+        grab = _grabber(cmd, wait=0.2, timeout=60)
+        assert grab.frames([FEED_A])[FEED_A] is None, "the first frame is waited for only briefly"
+        assert _wait(lambda: len(grab.procs) == 1)
+        proc = next(iter(grab.procs))
+        grab.close()
+        assert _wait(lambda: proc.poll() is not None), "close kills a running ffmpeg"
+        assert grab.frames([FEED_B])[FEED_B] is None and grab.reads == 1, "no reads after close"
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd, _ = _stub(tmp, "sleep30")
+        grab = _grabber(cmd, wait=0.1, timeout=0.5)
+        grab.frames([FEED_A])
+        assert _wait(lambda: grab.feeds[FEED_A]["busy"] is None, 3), "a stalled feed is cut off"
+
+
+def t_a_stale_frame_is_dropped():
+    import tempfile
+    clock = Clock()
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd, _ = _stub(tmp, "ok")
+        grab = _grabber(cmd, interval=1, max_age=10, clock=clock)
+        assert grab.frames([FEED_A])[FEED_A], "the first frame"
+        grab.cmd = [os.path.join(ROOT, "no-such-ffmpeg")]
+        clock.now += 5
+        assert grab.frames([FEED_A])[FEED_A], "a recent frame stands in while reads fail"
+        clock.now += 6
+        assert grab.frames([FEED_A])[FEED_A] is None, "a frame older than max_age is not shown"
 
 
 def t_real_ffmpeg_grabs_a_frame_over_http():
-    import functools
     import http.server
     import tempfile
-    import threading
     with tempfile.TemporaryDirectory() as tmp:
         clip = os.path.join(tmp, "red.ts")
         try:
@@ -471,37 +535,91 @@ def t_real_ffmpeg_grabs_a_frame_over_http():
         except (OSError, subprocess.SubprocessError):
             made = False
         if not made:
-            print("skip t_real_ffmpeg_grabs_a_frame_over_http: no working ffmpeg")
-            return
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=tmp)
-        handler.log_message = lambda *a: None
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+            assert not os.environ.get("OBS_SIM_REQUIRE_FFMPEG"), "this CI job installs ffmpeg"
+            raise Skip("no working ffmpeg on PATH")
+        with open(clip, "rb") as fh:
+            payload = fh.read()
+
+        class Feed(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp2t")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass  # quiet test output
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Feed)
+        server.daemon_threads = False
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
         try:
-            frame = obs_grab.FfmpegGrabber()(f"http://127.0.0.1:{server.server_address[1]}/red.ts", 8, 4)
+            port = server.server_address[1]
+            grab = obs_grab.FeedGrabber(ports=[port], size=(8, 4), wait=10, timeout=10)
+            frame = grab.frames([f"http://127.0.0.1:{port}/"])[f"http://127.0.0.1:{port}/"]
+            grab.close()
         finally:
             server.shutdown()
             server.server_close()
-        assert frame and len(frame) == 8 * 4 * 3, "one rgb24 frame of the asked size"
-        r, g, b = frame[0], frame[1], frame[2]
+            thread.join()
+        assert frame and len(frame[0]) == 8 * 4 * 3, "one rgb24 frame of the asked size"
+        r, g, b = frame[0][0], frame[0][1], frame[0][2]
         assert r > 180 and g < 70 and b < 70, (r, g, b)
 
 
-def t_screenshot_composites_grabbed_frames_and_reports_the_source():
-    frames = {"http://127.0.0.1:53001": True}
+class FakeGrabber:
+    def __init__(self, live, block=None):
+        self.live, self.block, self.asked = live, block, []
 
-    def grabber(url, w, h):
-        return bytes((10, 200, 30)) * (w * h) if frames.get(url) else None
+    def frames(self, urls):
+        self.asked.append(sorted(urls))
+        if self.block is not None:
+            self.block.wait(5)
+        return {u: (bytes((10, 200, 30)) * 16, 4, 4) if u in self.live else None for u in urls}
+
+
+def t_screenshot_composites_grabbed_frames_and_reports_the_source():
+    grabber = FakeGrabber({FEED_A})
     st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION, grabber=grabber)
     assert [f["source"] for f in st.snapshot()["program"]["feeds"]] == [None, None], "nothing rendered yet"
     shot, _ = st.screenshot("Splitscreen", 320)
-    assert _png_pixel(shot, 2, 100) == (10, 200, 30), "Feed A shows its grabbed frame"
+    assert _png_pixel(shot, 2, 100) == (10, 200, 30), "Feed A shows its grabbed frame, scaled to its half"
+    assert _png_pixel(shot, 158, 100) == (10, 200, 30), "the frame fills the whole half"
     assert _png_pixel(shot, 162, 100) == (192, 192, 192), "Feed B falls back to the pattern"
     sources = {f["input"]: f["source"] for f in st.snapshot()["program"]["feeds"]}
     assert sources == {"Feed A": "frame", "Feed B": "synthetic"}, sources
     _enable(st, "Stint", "Standby Cover")
     st.screenshot("Stint", 320)
-    assert {f["input"]: f["source"] for f in st.feeds("Stint")} == {"Feed A": None}, "a hidden feed is not grabbed"
+    assert grabber.asked[-1] == [], "a hidden feed is not grabbed"
+    assert {f["input"]: f["source"] for f in st.feeds("Stint")} == {"Feed A": None}
+
+
+def t_a_slow_grab_never_blocks_obs():
+    release = threading.Event()
+    sim = _sim(grabber=FakeGrabber({FEED_A}, block=release))
+    shooter = RawClient(sim.port)
+    other = RawClient(sim.port)
+    try:
+        results = []
+        worker = threading.Thread(target=lambda: results.append(
+            shooter.request("GetSourceScreenshot", {"sourceName": "Splitscreen", "imageFormat": "png"})))
+        worker.start()
+        assert _wait(lambda: sim.state.grabber.asked), "the screenshot is grabbing"
+        started = time.monotonic()
+        resp, _ = other.request("SetCurrentProgramScene", {"sceneName": "Standby"})
+        assert resp["requestStatus"]["result"] and obs_sim.fetch(sim.http_url)["scene"] == "Standby"
+        assert time.monotonic() - started < 1.0, "requests and /state run while a grab waits"
+        release.set()
+        worker.join(5)
+        assert results and results[0][0]["requestStatus"]["result"], results
+    finally:
+        release.set()
+        shooter.close()
+        other.close()
+        sim.stop()
+
 
 
 def t_relay_helpers_drive_the_sim_over_the_wire():
@@ -693,5 +811,10 @@ def t_obs_sim_py_still_serves_a_fixed_image():
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
-            fn(); print("ok", name)
+            try:
+                fn()
+            except Skip as why:
+                print("SKIP", name, "-", why)
+                continue
+            print("ok", name)
     print("ALL PASS")

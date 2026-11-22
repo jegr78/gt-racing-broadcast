@@ -183,7 +183,7 @@ class ObsSim:
                  image=None, port=0, clock=time.monotonic, collection_names=None, opaque=None,
                  grabber=DEFAULT_GRABBER):
         if grabber is DEFAULT_GRABBER:
-            grabber = obs_grab.FfmpegGrabber()
+            grabber = obs_grab.FeedGrabber()
         self.state = obs_state.ObsState(collection, scene=scene, strict=strict, clock=clock,
                                         collection_names=collection_names, opaque=opaque,
                                         grabber=grabber)
@@ -224,6 +224,8 @@ class ObsSim:
 
     def stop(self):
         self.stopping.set()
+        if getattr(self.state.grabber, "close", None):
+            self.state.grabber.close()
         with self.lock:
             socks = [self.sock] + list(self.conns)
         for s in socks:
@@ -403,6 +405,10 @@ def build_parser():
     ap.add_argument("--no-grab", action="store_true",
                     help="never read feed frames; screenshots show the synthetic pattern")
     ap.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg binary for feed frames (default: on PATH)")
+    ap.add_argument("--grab-interval", type=float, default=5.0,
+                    help="seconds between two reads of one feed (default 5)")
+    ap.add_argument("--feed-port", type=int, action="append",
+                    help="a feed port frames may be read from, repeatable (default 53001-53003)")
     ap.add_argument("--ready-file", help="write {port, url, state_url} here once listening")
     return ap
 
@@ -431,7 +437,9 @@ def main(argv=None):
     image = read_image(args.image) if args.image else None
     run(ObsSim(args.collection, scene=args.scene, image=image, port=args.port,
                collection_names=args.collection_names, opaque=args.opaque,
-               grabber=None if args.no_grab else obs_grab.FfmpegGrabber([args.ffmpeg])),
+               grabber=None if args.no_grab else obs_grab.FeedGrabber(
+                   [args.ffmpeg], ports=args.feed_port or obs_ws.RELAY_PORTS,
+                   interval=args.grab_interval)),
         args.ready_file)
 
 
