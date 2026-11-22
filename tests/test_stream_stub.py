@@ -357,10 +357,13 @@ def t_splicer_forwards_whole_packets_and_keeps_counters_and_time_rising():
     off = sp.next_offset(0.01)
     assert abs(off - ((129600 - 126000) / 90000 + 0.08)) < 1e-9, "two frames after the last PTS sent"
     sp.start(off)   # the run was killed mid-packet: its tail is dropped
-    run2 = _ts_packet(256, 0, pts=126000 + round(off * 90000)) + _ts_packet(256, 1, payload=False)
+    early = 126000 - 3600 + round(off * 90000)   # this run starts a frame earlier than the first
+    run2 = _ts_packet(256, 0, pts=early) + _ts_packet(256, 1, payload=False)
     out = list(stream_stub.parse_ts(sp.feed(run2)))
     assert [p.cc for p in out] == [2, 2], "counters continue, a packet without payload keeps its counter"
     assert out[0].pts > 129600, "time keeps rising across the seam"
+    assert abs(sp.next_offset(0.0) - (early / 90000 - (122400 / 90000) + 0.08)) < 1e-6, \
+        "the earliest run start seen sets the room for the next one"
     assert sp.next_offset(100.0) == 100.0, "after a long gap the wall clock wins"
     raw = stream_stub.TsSplicer()
     raw.start(0.0)
