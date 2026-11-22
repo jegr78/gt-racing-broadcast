@@ -311,6 +311,89 @@ def t_solo_preview_tiles_follow_the_template():
     assert 'tile.dataset.src ? "/preview/source/" + tile.dataset.src' in _func_src(h, "pvPollFeed")
 
 
+_PV_TILE_HARNESS = r"""
+const requested = [], PV_BACKOFF_TICKS = 30;
+let fail = false;
+class Image { set src(u) { requested.push(u.split('?')[0]); fail ? this.onerror() : this.onload(); } }
+const RC_API = p => p;
+const tile = (feed, src) => {
+  const cls = new Set(['loaded']), txt = {textContent: 'Load still'};
+  const ph = {cls: new Set(), classList: {add: c => ph.cls.add(c), remove: c => ph.cls.delete(c)},
+              querySelector: () => txt};
+  const frame = {classList: {add: c => cls.add(c), remove: c => cls.delete(c)},
+                 querySelector: sel => sel === 'img' ? {} : ph};
+  return {dataset: src ? {feed, src} : {feed}, querySelector: () => frame,
+          shown: () => [cls.has('loaded'), ph.cls.has('err'), txt.textContent].join('/')};
+};
+"""
+
+
+def _pv_js(html, body):
+    return _run_js(_PV_TILE_HARNESS + "let pvIdle = null;\n" + _func_src(html, "pvIdleFeeds") + "\n}\n"
+                   + _func_src(html, "pvPollFeed") + "\n}\n" + body)
+
+
+def t_idle_feed_tiles_request_no_still():
+    html = _html()
+    poll = _func_src(html, "pvPollFeed")
+    assert "if(!pvIdle) return;" in poll and "pvIdle[feed]" in poll \
+        and "pvIdle = pvIdleFeeds(d);" in _func_src(html, "relayPoll"), \
+        "pvPollFeed asks /status before it asks for a still"
+    out = _pv_js(html, """
+const feeds = (a, ai, b, bi) => ({A: {state: a, index: ai}, B: {state: b, index: bi}});
+const idle = [pvIdleFeeds({feeds: feeds('stopped', 0, 'stopped', 1), pov: {state: 'stopped', shown: false}}),
+              pvIdleFeeds({feeds: feeds('stopped', 2, 'stopped', 1), pov: {state: 'stopped', shown: true}}),
+              pvIdleFeeds({feeds: feeds('serving', 0, 'connecting', 1), pov: {state: 'serving', shown: true}}),
+              pvIdleFeeds({solo: true}), pvIdleFeeds({feeds: feeds('serving', 0, 'serving', 1)})];
+const a = tile('A'), b = tile('B'), cap = tile('CAPTURE', 'capture');
+pvPollFeed(a); pvPollFeed(b); pvPollFeed(cap);
+const unknown = requested.splice(0), unknownTile = a.shown();
+pvIdle = idle[0];
+pvPollFeed(a); pvPollFeed(b); pvPollFeed(tile('POV')); pvPollFeed(cap);
+const stopped = requested.splice(0), stoppedTile = b.shown();
+pvIdle = idle[2];
+pvPollFeed(b); pvPollFeed(tile('POV'));
+console.log(JSON.stringify({idle, unknown, unknownTile, stopped, stoppedTile, running: requested}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["idle"] == [{"A": False, "B": True, "POV": True}, {"A": True, "B": False, "POV": False},
+                             {"A": False, "B": False, "POV": False}, {},
+                             {"A": False, "B": False, "POV": True}], \
+            f"idle is the stopped feed off air and the POV that is not shown or not configured: {d['idle']}"
+        assert d["unknown"] == ["/preview/source/capture"] and d["unknownTile"] == "true/false/Load still", \
+            f"before the first /status a feed tile waits untouched: {d['unknown']} {d['unknownTile']}"
+        assert d["stopped"] == ["/preview/feed/A", "/preview/source/capture"], \
+            f"only the on-air feed and the OBS source tiles ask while everything is stopped: {d['stopped']}"
+        assert d["stoppedTile"] == "false/true/Unavailable", \
+            f"the skipped tile drops its last still: {d['stoppedTile']}"
+        assert d["running"] == ["/preview/feed/B", "/preview/feed/POV"], \
+            f"a feed that starts gets its still on the next tick: {d['running']}"
+
+
+def t_a_feed_status_does_not_describe_backs_off_after_a_failed_load():
+    out = _pv_js(_html(), """
+pvIdle = {};
+const ticks = (t, n) => { const at = []; for (let i = 0; i < n; i++) { pvPollFeed(t); if (requested.splice(0).length) at.push(i); } return at; };
+fail = true;
+const failing = ticks(tile('POV'), 100);
+const pov = tile('POV');
+const once = ticks(pov, 3);
+fail = false;
+const back = ticks(pov, 4);
+pvIdle = {B: false};
+fail = true;
+const described = ticks(tile('B'), 5), source = ticks(tile('CAPTURE', 'capture'), 5);
+console.log(JSON.stringify({failing, once, back, described, source}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["failing"] == [0, 3, 8, 17, 34, 65, 96], \
+            f"each failed load doubles the wait up to PV_BACKOFF_TICKS: {d['failing']}"
+        assert d["once"] == [0] and d["back"] == [0, 1, 2, 3], \
+            f"a load that works ends the back-off: {d}"
+        assert d["described"] == [0, 1, 2, 3, 4] and d["source"] == [0, 1, 2, 3, 4], \
+            f"a feed /status describes and an OBS source tile keep the 1 s tick: {d}"
+
+
 def t_removed_duplicate_keys():
     h = _html()
     for name in ("CONFIG", "CONFIG_SOLO"):

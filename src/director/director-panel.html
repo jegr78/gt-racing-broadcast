@@ -2287,6 +2287,7 @@ async function relayPoll(){
     // On-air feed = the lower stint index (mirrors the relay's live_feed()).
     pvMarkOnAir(!solo && d.feeds && d.feeds.A
       ? (d.feeds.A.index <= d.feeds.B.index ? "A" : "B") : null);
+    pvIdle = pvIdleFeeds(d);
     // Aggregate health pill from the relay heartbeat. An older relay without d.health
     // shows a dash.
     const HP = {green:["OK","ok"], yellow:["DEGRADED","warn"], red:["CRITICAL","air"]};
@@ -3368,7 +3369,9 @@ document.getElementById("subSave").addEventListener("click", async ()=>{
 // Live Preview
 const PV_KEY = "rc_preview_open";
 const PV_FEED_MS = 1000;
+const PV_BACKOFF_TICKS = 30;
 const pvFeedTimers = {};
+let pvIdle = null;
 let pvTimer = null;
 let pvLevelTimer = null;
 // Bumped by every SHOW and HIDE. A program probe still in flight when the preview
@@ -3451,15 +3454,39 @@ $("#pvToggle").onclick = () => {
   if(opening){ pvStart(); } else { pvStop(); }
   try{ localStorage.setItem(PV_KEY, opening ? "1" : "0"); }catch(e){}
 };
+// The feeds the relay has no still for: a stopped feed that is not on air (the on-air
+// one is an OBS shot) and a POV that is not shown.
+function pvIdleFeeds(d){
+  const idle = {};
+  if (d.feeds && d.feeds.A && d.feeds.B){
+    const live = d.feeds.A.index <= d.feeds.B.index ? "A" : "B";
+    for (const k of ["A", "B"]) idle[k] = k !== live && d.feeds[k].state === "stopped";
+  }
+  if (d.pov) idle.POV = !d.pov.shown;
+  else if (!d.solo) idle.POV = true;    // a relay without a POV feed
+  return idle;
+}
 function pvPollFeed(tile){
   const feed = tile.dataset.feed, frame = tile.querySelector(".pvframe"),
         img = frame.querySelector("img"), ph = frame.querySelector(".pvph"),
         txt = ph.querySelector(".pvphtxt");
+  // An idle feed would answer every tick with a 503.
+  if(!tile.dataset.src){
+    if(!pvIdle) return;               // no /status yet
+    if(pvIdle[feed]){
+      frame.classList.remove("loaded"); ph.classList.add("err"); txt.textContent = "Unavailable";
+      return;
+    }
+    // A feed /status does not describe backs off after a failed load instead.
+    if(!(feed in pvIdle) && tile._pvSkip > 0){ tile._pvSkip--; return; }
+  }
   const probe = new Image();
   probe.onload = () => { img.src = probe.src; frame.classList.add("loaded");
-                         ph.classList.remove("err"); };
+                         ph.classList.remove("err"); tile._pvWait = 0; };
   probe.onerror = () => { frame.classList.remove("loaded");
-                          ph.classList.add("err"); txt.textContent = "Unavailable"; };
+                          ph.classList.add("err"); txt.textContent = "Unavailable";
+                          tile._pvWait = Math.min((tile._pvWait || 1) * 2, PV_BACKOFF_TICKS);
+                          tile._pvSkip = tile._pvWait; };
   probe.src = RC_API(tile.dataset.src ? "/preview/source/" + tile.dataset.src
                                        : "/preview/feed/" + feed) + "?ts=" + Date.now();
 }

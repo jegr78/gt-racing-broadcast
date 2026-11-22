@@ -1,8 +1,5 @@
 [
   {"surface": "director-panel", "rule": "console", "selector": "console",
-   "detail": "status of 503 \\(Service Unavailable\\) \\(http://127\\.0\\.0\\.1:\\d+/preview/feed/(B|POV)\\?ts=\\d+\\)$",
-   "reason": "the relay answers 503 for a feed without a preview still and the tile shows Unavailable; the synthetic run never serves feed B or POV"},
-  {"surface": "director-panel", "rule": "console", "selector": "console",
    "detail": "status of 404 \\(Not Found\\) \\(http://127\\.0\\.0\\.1:\\d+/preview/program-audio\\?probe=1\\)$",
    "reason": "the program-audio probe answers 404 without fan-out and the player bar stays hidden"},
   {"surface": "director-panel", "rule": "console", "selector": "console",
