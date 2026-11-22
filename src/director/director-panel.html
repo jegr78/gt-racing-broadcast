@@ -1275,17 +1275,15 @@ async function redFlagPress(){
       return;
     }
     redFlagBtn.classList.toggle("on", on);
-    if (d.changed === false){      // someone else switched it first: take the state, change nothing
-      log("RED FLAG is already " + (on ? "up" : "down") + ", nothing switched", "warn");
-      obsStatePoll();
-      return;
-    }
-    if (!d.ok){
+    // The cover was already there (auto-cover, Companion, another panel): banner and
+    // race hold below are idempotent and still follow the press.
+    if (d.changed === false) log("RED FLAG: the cover is already " + (on ? "up" : "down"), "warn");
+    else if (!d.ok){
       const note = "RED FLAG " + (on ? "raised" : "over") + ", but the Standby Cover was not switched in OBS ("
                    + (d.error || "no answer") + ")";
       log(note, "err"); toast(note);
     }
-    log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
+    else log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
     setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
     // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
     if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},

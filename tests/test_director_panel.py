@@ -813,18 +813,25 @@ def t_a_double_tap_sends_one_toggle():
 def t_red_flag_follows_the_relays_answer():
     out = _toggle_js(_html(), """
   answers.push({ok: true, enabled: true, changed: false}, {ok: true, enabled: false, changed: true},
-               {ok: true, enabled: true, changed: true});
+               {ok: true, enabled: true, changed: true}, {ok: true, enabled: false, changed: false});
   const step = async () => { await redFlagPress();
     return {lit: redFlagBtn.lit(), setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)}; };
   const desk = await step(), down = await step(), up = await step();
-  console.log(JSON.stringify({desk, down, up, sent}));""")
+  const lowered = await step();
+  console.log(JSON.stringify({desk, down, up, lowered, sent: sent.slice(0, 3)}));""")
     if out is not None:
         d = json.loads(out)
         body = 'source {"scene":"Stint","source":"Standby Cover","toggle":true,"from":%s}'
         assert d["sent"] == [body % f for f in ("false", "true", "false")], d["sent"]
-        assert d["desk"]["lit"] is True and d["desk"]["setup"] == [] and d["desk"]["fetched"] == [] \
-            and any("already" in line for line in d["desk"]["logs"]), \
-            f"a cover Race Control raised meanwhile is taken over, never lowered by the press: {d['desk']}"
+        assert d["desk"]["lit"] is True and any("already" in line for line in d["desk"]["logs"]), \
+            f"a cover that came up meanwhile is taken over, never lowered by the press: {d['desk']}"
+        assert d["desk"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
+            and d["desk"]["fetched"] == ["/drivers/race/red-flag"], \
+            f"the press meant a red flag: over a cover that is already up it still sets banner and race: {d['desk']}"
+        assert d["lowered"]["lit"] is False and d["lowered"]["setup"] == ["racecontrol="] \
+            and d["lowered"]["fetched"] == [], f"a cover lowered meanwhile still clears the banner: {d['lowered']}"
+        assert not [line for part in d.values() if isinstance(part, dict) for line in part["logs"]
+                    if line.startswith("toast")], "none of these is an error"
         assert d["down"]["lit"] is False and d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], \
             d["down"]
         assert d["up"]["lit"] is True and d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
@@ -848,8 +855,9 @@ def t_red_flag_without_the_cover_still_sets_banner_and_race():
         assert d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
             and d["up"]["fetched"] == ["/drivers/race/red-flag"] and d["up"]["lit"] is True, \
             f"a red flag the relay decided without OBS still sets the banner and holds the race: {d['up']}"
-        assert d["other"] == dict(d["other"], lit=True, setup=[], fetched=[]), \
-            f"a second panel takes the raised state over and changes nothing: {d['other']}"
+        assert d["other"] == dict(d["other"], lit=True, setup=["racecontrol=Red Flag - Race Suspended"],
+                                  fetched=["/drivers/race/red-flag"]), \
+            f"a second panel takes the raised state over and repeats banner and hold: {d['other']}"
         assert d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], d["down"]
         for part in (d["up"], d["down"]):
             assert any(line.startswith("toast: ") and "Standby Cover was not switched" in line

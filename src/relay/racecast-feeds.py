@@ -5534,7 +5534,7 @@ def toggle_input_mute(obs_ws, name, expect=None):
 
 
 def note_cover(relay, enabled):
-    """Remember the Standby Cover state the relay last switched, read or decided."""
+    """Remember the Standby Cover state the relay last switched or read in OBS."""
     if isinstance(enabled, bool):
         relay.cover_last = enabled
 
@@ -15448,11 +15448,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     payload = {"ok": False, "error": note}
                     if toggle and cover:
                         # RED FLAG still needs a direction for the banner and the race.
-                        raised = enabled if enabled is not None else red_flag_on_record(
-                            relay, getattr(setup_ctl, "hud", None) or hud_source)
-                        payload["changed"] = enabled is None and shown in (None, raised)
-                        payload["red_flag"] = not raised if payload["changed"] else raised
-                        note_cover(relay, payload["red_flag"])   # so the next press sees this one
+                        if enabled is not None:      # read, but not switched: the press counts
+                            note_cover(relay, not enabled)
+                            payload.update(red_flag=enabled, changed=True)
+                        else:
+                            raised = red_flag_on_record(
+                                relay, getattr(setup_ctl, "hud", None) or hud_source)
+                            payload["changed"] = shown in (None, raised)
+                            payload["red_flag"] = not raised if payload["changed"] else raised
                     return self._send(payload, 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:

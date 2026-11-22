@@ -1756,9 +1756,11 @@ def t_red_flag_toggle_without_a_readable_cover_takes_the_relays_own_state():
             st, d = toggle("Standby Cover", **{"from": False})
             assert st == 503 and d["ok"] is False and d["error"] and (d["red_flag"], d["changed"]) == (True, True), \
                 f"no red flag on record: the press raises one, and says the cover was not switched: {d}"
+            assert srv.relay.cover_last is None, "a decision without OBS is no cover state the relay saw"
+            forget(banner=g.m.RED_FLAG_BANNER)
             d = toggle("Standby Cover", **{"from": False})[1]
             assert (d["red_flag"], d["changed"]) == (True, False), \
-                f"the relay remembers its own decision: a second panel does not end the red flag: {d}"
+                f"a second panel that still shows it down does not end the red flag on record: {d}"
             assert toggle("Standby Cover", **{"from": True})[1]["red_flag"] is False, "the panel that shows it ends it"
             forget(banner=g.m.RED_FLAG_BANNER)
             assert toggle("Standby Cover")[1]["red_flag"] is False, "without a known cover state the banner decides"
@@ -1768,6 +1770,30 @@ def t_red_flag_toggle_without_a_readable_cover_takes_the_relays_own_state():
             assert st == 503 and "red_flag" not in d, f"a graphic key gets no direction to act on: {d}"
             if obs is not None:
                 assert obs.sets == [], "nothing was switched in OBS"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
+class _StuckObs(_ItemObs):
+    """OBS that reports its items but refuses to switch them."""
+    def set_scene_item_enabled(self, _scene, source, on):
+        self.sets.append((source, bool(on)))
+        return False, "switch refused"
+
+
+def t_red_flag_counts_when_obs_reads_the_cover_but_cannot_switch_it():
+    obs = _StuckObs({"Standby Cover": False, "Standings": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv, post = _toggle_server(obs)
+    try:
+        st, d = post("/obs/source", scene="Stint", source="Standby Cover", toggle=True, **{"from": False})
+        assert st == 503 and d == {"ok": False, "error": "switch refused", "red_flag": True, "changed": True}, \
+            f"the press still raises the red flag and names the failed switch: {(st, d)}"
+        assert srv.relay.cover_last is False, "the relay keeps the state it read, not the one it failed to set"
+        st, d = post("/obs/source", scene="Stint", source="Standings", toggle=True, **{"from": False})
+        assert st == 503 and "red_flag" not in d, f"a graphic key just fails: {d}"
     finally:
         g.m._obs_ws = orig_obs
         srv.shutdown()
