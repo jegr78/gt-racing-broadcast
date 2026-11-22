@@ -378,6 +378,105 @@ def t_the_engine_skips_an_unavailable_step_and_what_depends_on_it():
     assert not any("shot" in m for m in soft), "a skipped step asks for no screenshot"
 
 
+class Boom(roles.Role):
+    kind = "boom"
+
+    def act_go(self, args):
+        raise RuntimeError(f"Page.goto: net::ERR at http://127.0.0.1:1/console/timing?l={self.ctx.event_link('timing')}"
+                           f" and /cockpit?t={self.ctx.token('Comms 1')} code D1:abcDEF123.sig_456 key {args.get('k')}")
+
+    def act_echo(self, args):
+        return {"url": "http://127.0.0.1:1/console/drive?i=" + self.ctx.event_link("invite"),
+                "nested": [{"token": self.ctx.token("Comms 1")}], "n": 3}
+
+    def page(self):
+        return {"link": self.ctx.event_link("timing")}
+
+    def shot(self, path, element=""):
+        raise RuntimeError("no shot for ?t=" + self.ctx.token("Comms 1"))
+
+    def close(self):
+        return [("soft", "closing with " + self.ctx.token("Comms 1"))]
+
+
+def t_no_credential_reaches_what_the_engine_writes():
+    reg = {"boom": Boom}
+    ctx = engine.RunContext(token=lambda who: "TOKENCANARY", event_link=lambda kind: "LINKCANARY" + kind,
+                            secrets=["SECRETCANARY"])
+    scn_ = scenario.from_dict({"step": [
+        {"id": "a", "role": "boom", "do": "go", "args": {"k": "SECRETCANARY"}},
+        {"id": "b", "role": "boom", "do": "echo", "expect": ["page('boom').link == 'x'"], "timeout": "1s",
+         "shot": "b-shot"}]}, reg)
+    clock = Clock()
+
+    def sleep(s):
+        clock.t += max(s, 0.001)
+    tmp = tempfile.mkdtemp(prefix="racecast-roles-test-")
+    try:
+        data = engine.Engine(scn_, ctx, {}, registry=reg, clock=clock, sleep=sleep, shots_dir=tmp).run()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    text = json.dumps(data)
+    for canary in ("TOKENCANARY", "LINKCANARY", "SECRETCANARY", "abcDEF123"):
+        assert canary not in text, f"{canary} reached the report: {text[:600]}"
+    by = {s["id"]: s for s in data["steps"]}
+    assert by["a"]["status"] == "failed" and "RuntimeError" in by["a"]["error"], "the error itself stays readable"
+    assert by["b"]["result"]["n"] == 3 and "REDACTED" in by["b"]["result"]["url"], by["b"]["result"]
+    assert engine.scrub("x ?t=abc.def y", ()) == "x ?t=REDACTED y"
+
+
+def t_a_failed_navigation_is_a_step_error_without_the_link():
+    role, page, _ = make(party.ViewerRole, links={"timing": "LINKCANARY"})
+
+    def refuse(url, timeout=None):
+        raise RuntimeError(f'Page.goto: net::ERR_CONNECTION_REFUSED at {url}\nCall log:\n  - navigating to "{url}"')
+    page.goto = refuse
+    msg = fails(lambda: role.do("read", {}), "net::ERR_CONNECTION_REFUSED")
+    assert "LINKCANARY" not in msg and "Call log" not in msg, msg
+    role2, page2, _ = make(party.CommentatorRole, "commentator:Comms 1")
+    page2.goto = refuse
+    assert "tok-" not in fails(lambda: role2.do("open", {}), "open /cockpit")
+
+
+def t_a_plain_page_without_a_browser_is_skipped_and_masks_the_links_in_a_shot():
+    role, _, _ = make(builtin.PageRole, "page:x", browser=False)
+    try:
+        role.do("open", {"path": "/panel"})
+    except roles.Unavailable as exc:
+        assert "browser" in str(exc)
+    else:
+        raise AssertionError("a page without a browser is a skip, which --no-skips can fail")
+    role, page, _ = make(builtin.PageRole, "page:x")
+    role.do("open", {"path": "/panel"})
+    role.shot("p.png")
+    assert page.shots == [("p.png", "", list(roles.selectors.LINKS))], page.shots
+
+
+def t_no_skips_also_fails_a_missing_screenshot():
+    class Probe(roles.Role):
+        kind = "probe"
+
+        def act_go(self, args):
+            return {}
+
+    reg = {"probe": Probe}
+    raw = {"step": [{"id": "a", "role": "probe", "do": "go", "shot": "a-shot"}]}
+    for strict in (False, True):
+        clock = Clock()
+
+        def sleep(s, clock=clock):
+            clock.t += max(s, 0.001)
+        tmp = tempfile.mkdtemp(prefix="racecast-roles-test-")
+        try:
+            data = engine.Engine(scenario.from_dict(raw, reg), engine.RunContext(), {}, registry=reg, clock=clock,
+                                 sleep=sleep, shots_dir=tmp, no_skips=strict).run()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        shot = [f for f in data["findings"] if "shot a-shot" in f["message"]]
+        assert len(shot) == 1 and shot[0]["severity"] == ("hard" if strict else "soft"), (strict, shot)
+        assert data["ok"] is not strict
+
+
 def t_no_skips_turns_a_skipped_step_into_a_hard_failure():
     class Probe(roles.Role):
         kind = "probe"
@@ -659,6 +758,9 @@ def t_a_failed_job_fails_the_step_with_its_log():
     role, _, _ = producer(job="failed (exit 1)", log="Pre-flight gate: cannot start /cockpit?t=tok.sig")
     msg = fails(lambda: role.do("start_event", {}), "failed (exit 1)", "Pre-flight gate")
     assert "tok.sig" not in msg, "a job log is redacted"
+    role, _, _ = producer(job="failed (exit 1)", log="see /cockpit?t=" + "A" * 700)
+    assert "AAAA" not in fails(lambda: role.do("start_event", {}), "failed (exit 1)"), \
+        "a token cut by the log tail is still a token: redact first, then cut"
 
 
 def t_start_event_takes_stint_and_qualifying():
@@ -1153,6 +1255,32 @@ def t_refused_telemetry_is_a_soft_finding_at_the_end():
     role.runner.run(1.0)
     out = role.close()
     assert len(out) == 1 and out[0][0] == "soft" and "telemetry posts" in out[0][1], out
+
+
+def t_an_unexpected_error_in_the_field_is_a_clear_step_error():
+    role = drivers_role()
+    role.do("register", {"stints": 1})
+    role.do("start", {})
+
+    def boom():
+        raise TypeError("'<' not supported between 'float' and 'NoneType'")
+    role.field.release = boom
+    fails(lambda: role.do("release", {}), "the drivers could not release", "TypeError")
+
+
+def t_a_failed_registration_leaves_nothing_half_done():
+    role = drivers_role()
+
+    class Flaky(Relay):
+        def register(self, invite, entry, name, segment=None, device=None):
+            if len(self.registered) == 2:
+                raise drive.DriveError("register 'Driver 33-1' on 'Cedar Motorsport #33': HTTP 429")
+            return super().register(invite, entry, name, segment, device)
+    role.client_factory = Flaky
+    msg = fails(lambda: role.do("register", {"stints": 1}), "HTTP 429", "2 registrations")
+    assert "stay waiting" in msg, "the requests the relay already holds are named"
+    assert role.registered == 0 and role.field is None and role.page() == {"registered": 0, "cars": []}
+    fails(lambda: role.do("start", {}), "not registered yet")
 
 
 def t_a_dead_sender_thread_is_a_hard_finding():

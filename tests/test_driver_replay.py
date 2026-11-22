@@ -31,6 +31,24 @@ def t_the_line_wraps_at_its_length():
     assert line.at(25.0) == (25.0, 0.0) and line.at(125.0) == (25.0, 0.0) and line.at(-10.0) == (90.0, 0.0)
 
 
+def t_a_dead_runner_or_refused_posts_end_the_replay_with_an_error():
+    assert replay.outcome("", 0) == (0, "")
+    code, text = replay.outcome("ZeroDivisionError: division by zero", 0)
+    assert code == 1 and "ZeroDivisionError" in text, "a replay that stopped driving must not look finished"
+    code, text = replay.outcome("", 7)
+    assert code == 1 and "7 telemetry posts" in text
+
+
+def t_a_bad_relay_address_is_a_message_not_a_traceback():
+    try:
+        replay.connect("ftp://relay")
+    except SystemExit as exc:
+        assert "driver-replay:" in str(exc.code) and "http://host:port" in str(exc.code), exc.code
+    else:
+        raise AssertionError("a relay address that is no http URL must end the tool with a message")
+    assert replay.connect("http://192.0.2.9:8088").host == "192.0.2.9"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

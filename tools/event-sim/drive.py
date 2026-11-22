@@ -228,6 +228,7 @@ class Field:
         self._release = False
         self.box_station = self.line.length - BOX_BACK_M
         self.errors = 0
+        self.outbox = []
 
     def add(self, entry, drivers):
         """A car on the next grid slot; `drivers` names its driver per stint (the same
@@ -298,10 +299,11 @@ class Field:
     def release(self):
         """The held cars leave the box in box order, each by the gap it arrived with."""
         held = [c for c in self.cars if c.mode in ("pit_in", "stand") and c.pit.get("hold")]
-        stood = [c.pit["stood"] for c in held if "stood" in c.pit]
+        stood = [c.pit["stood"] for c in held if c.pit.get("stood") is not None]
         first = min(stood) if stood else None
         for c in held:
-            gap = c.pit["stood"] - first if "stood" in c.pit and first is not None else 0.0
+            # A car still on its way in, or stopped this very tick, leaves once it stood.
+            gap = c.pit["stood"] - first if c.pit.get("stood") is not None else 0.0
             c.pit["delay"] = max(0.0, gap - c.pit["stall"] * STALL_M / self.pace)
         self._release = True
 
@@ -339,11 +341,27 @@ class Field:
                 for c in self.cars]
 
     # -- the clock -----------------------------------------------------------------
-    def step(self, now, dt):
+    def step(self, now, dt, flush=True):
+        """Move every car one tick. The batches go out at once, or with `flush=False`
+        wait in `outbox` for a `flush()` outside the caller's lock."""
         if self._release:
             self._release, self.released_at = False, now
         for car in self.cars:
             self._step(car, now, dt)
+        if flush:
+            self.flush(self.take())
+
+    def take(self):
+        batches, self.outbox = self.outbox, []
+        return batches
+
+    def flush(self, batches):
+        """Post `batches` ((code, body) pairs); a refused or failed post only counts."""
+        for code, body in batches:
+            try:
+                self.send(code, body)
+            except (OSError, http.client.HTTPException):
+                self.errors += 1
 
     def _crossed(self, car, now):
         s = car.sender
@@ -425,26 +443,24 @@ class Field:
         for _ in range(PACKETS_PER_TICK):
             sender.pid += 1
             batch.append(packet(sender.pid, lap, speed, x, z, sender.last_ms, sender.best_ms, fuel))
-        try:
-            self.send(sender.code, telemetry_probe.encode_batch(batch))
-        except (OSError, http.client.HTTPException):
-            self.errors += 1
+        self.outbox.append((sender.code, telemetry_probe.encode_batch(batch)))
 
 
 class Client:
     """The driver's side of a relay: the invite's data, a registration and the ingest
     route. Loopback only, unless the caller names another relay on purpose."""
 
-    def __init__(self, base, timeout=10.0, loopback_only=True):
+    def __init__(self, base, timeout=10.0, loopback_only=True, ingest_timeout=2.0):
         u = urlsplit(base)
         if u.scheme != "http" or not u.hostname:
             raise ValueError(f"a relay address is http://host:port, not {base!r}")
         if loopback_only and u.hostname not in ("127.0.0.1", "localhost"):
             raise ValueError(f"the simulated drivers post to a loopback relay only, not {base!r}")
         self.host, self.port, self.timeout = u.hostname, u.port, timeout
+        self.ingest_timeout = ingest_timeout     # a stuck post must not stall the field
 
-    def call(self, method, path, body=None, headers=None):
-        conn = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
+    def call(self, method, path, body=None, headers=None, timeout=None):
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=timeout or self.timeout)
         try:
             conn.request(method, path, body=body, headers=headers or {})
             resp = conn.getresponse()
@@ -476,7 +492,8 @@ class Client:
         return data["code"]
 
     def ingest(self, code, body):
-        status, _ = self.call("POST", "/console/drive/ingest", body, {"X-Driver-Code": code})
+        status, _ = self.call("POST", "/console/drive/ingest", body, {"X-Driver-Code": code},
+                              timeout=self.ingest_timeout)
         if status != 200:
             raise OSError(f"ingest: HTTP {status}")
 
@@ -499,7 +516,9 @@ class Runner:
             now = self.clock()
             try:
                 with self.lock:
-                    self.field.step(now, min(0.5, max(now - last, 0.0)) or self.tick_s)
+                    self.field.step(now, min(0.5, max(now - last, 0.0)) or self.tick_s, flush=False)
+                    batches = self.field.take()
+                self.field.flush(batches)        # outside the lock: an instruction never waits for HTTP
             except Exception as exc:  # a dead sender thread must not look like quiet cars
                 self.error = f"{type(exc).__name__}: {exc}"
                 return

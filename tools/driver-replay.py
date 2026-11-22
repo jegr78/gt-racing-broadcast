@@ -44,6 +44,23 @@ def approve(client, name):
                         {"Content-Type": "application/json"})
 
 
+def connect(relay):
+    """The client for `relay`, or the tool's exit with the reason."""
+    try:
+        return drive.Client(relay, loopback_only=False)
+    except ValueError as exc:
+        sys.exit(f"driver-replay: {exc}")
+
+
+def outcome(runner_error, post_errors):
+    """(exit code, message) once the drive ended."""
+    if runner_error:
+        return 1, f"driver-replay: the cars stopped driving: {runner_error}"
+    if post_errors:
+        return 1, f"driver-replay: {post_errors} telemetry posts were refused or failed"
+    return 0, ""
+
+
 def main():
     ap = argparse.ArgumentParser(description="Simulated driver senders for a running relay.")
     ap.add_argument("--profile", default="demo", help="profile whose runtime holds the driver invite")
@@ -66,7 +83,7 @@ def main():
                                     os.path.join(ROOT, "src", "assets", "gt7")).reference_trace(args.track)
     if not trace:
         sys.exit(f"no racing line for {args.track}: run racecast gt7-data update")
-    client = drive.Client(args.relay, loopback_only=False)
+    client = connect(args.relay)
     try:
         data = client.data(invite)
         segments = data.get("segments") or []
@@ -84,9 +101,12 @@ def main():
     except (drive.DriveError, ValueError, OSError, http.client.HTTPException) as exc:
         sys.exit(f"driver-replay: {exc}")
     field.start()
-    drive.Runner(field, tick_s=TICK_S).loop(until=time.monotonic() + args.seconds)
-    if field.errors:
-        print(f"{field.errors} telemetry posts were refused or failed", file=sys.stderr)
+    runner = drive.Runner(field, tick_s=TICK_S)
+    runner.loop(until=time.monotonic() + args.seconds)
+    code, text = outcome(runner.error, field.errors)
+    if text:
+        print(text, file=sys.stderr)
+    sys.exit(code)
 
 
 if __name__ == "__main__":

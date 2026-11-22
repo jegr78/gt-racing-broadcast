@@ -258,7 +258,7 @@ class ProducerRole(Surface):
         self.until(lambda: self.shown(chip), f"{what}: the job's result", timeout=JOB_S, slow=None)
         result = self.text(chip)
         if result != "done":
-            tail = builtin.redact(self.text(self.sel("job_log"))[-600:])
+            tail = builtin.redact(self.text(self.sel("job_log")), self.ctx.secrets)[-600:]
             raise StepError(f"{what}: the job ended {result!r}: {tail}")
         return {"job": result}
 

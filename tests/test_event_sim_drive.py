@@ -216,6 +216,47 @@ def t_box_holds_every_car_until_release_and_the_next_lobby_takes_over():
     assert [c.entry for c in order] == TEAMS[:3], "cars leave in the order they arrived, each by its gap"
 
 
+def t_release_right_when_a_car_stops_or_before_it_stops_does_not_crash():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    run(f, wire, 5.0)
+    f.box()
+    assert run(f, wire, 80.0, lambda: f.cars[0].mode == "stand"), "the first car stops in its box"
+    assert f.cars[0].pit["stood"] is None, "its stop time is set one tick later"
+    assert any(c.mode == "pit_in" for c in f.cars) or any(c.mode == "drive" for c in f.cars), \
+        "the others are still on their way"
+    f.release()
+    assert all("delay" in c.pit for c in f.cars if c.pit), "every held car got a release delay"
+    assert run(f, wire, 90.0, lambda: all(c.mode == "drive" and c.left_at is not None for c in f.cars)), \
+        f"every car stops and leaves again: {f.snapshot()}"
+
+
+def t_a_step_posts_outside_the_runners_lock():
+    held = []
+    runner = None
+
+    def send(code, body):
+        free = runner.lock.acquire(blocking=False)
+        held.append(not free)
+        if free:
+            runner.lock.release()
+    f = drive.Field(drive.trace(drive.synthetic_path(LENGTH)), send, seed=7)
+    f.add(TEAMS[0], ["a"])
+    f.set_code(TEAMS[0], 0, "c")
+    f.start()
+    t = [0.0]
+
+    def sleep(s):
+        t[0] += drive.TICK_S
+        if t[0] > 1.0:
+            runner.halt.set()
+    runner = drive.Runner(f, clock=lambda: t[0], sleep=sleep)
+    runner.loop()
+    assert held and not any(held), "a slow relay must not block an instruction waiting for the lock"
+    assert drive.Client("http://127.0.0.1:5").ingest_timeout <= 3.0, "one stuck post is bounded"
+
+
 def t_a_driver_staying_on_keeps_the_code_and_restarts_the_counter():
     wire = Wire()
     f = drive.Field(drive.trace(drive.synthetic_path(LENGTH)), wire, seed=7)
@@ -325,7 +366,7 @@ def t_the_runner_steps_on_its_clock_and_stops():
 
 def t_a_step_that_raises_ends_the_runner_with_its_reason():
     f = field(Wire(), cars=1)
-    f.step = lambda now, dt: 1 / 0
+    f.step = lambda now, dt, flush=True: 1 / 0
     runner = drive.Runner(f, clock=lambda: 1.0, sleep=lambda s: None)
     runner.loop()
     assert runner.error.startswith("ZeroDivisionError"), f"the loop ends and says why: {runner.error!r}"

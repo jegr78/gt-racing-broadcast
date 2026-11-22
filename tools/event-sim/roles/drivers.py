@@ -37,7 +37,7 @@ class DriversRole(Role):
             raise StepError(f"no car {value!r} (the grid: {', '.join(c.entry for c in cars)})")
         return value
 
-    def _do(self, act):
+    def _do(self, act, what="act"):
         """One instruction to the field, between two of the runner's ticks."""
         try:
             if self.runner is None:
@@ -46,6 +46,8 @@ class DriversRole(Role):
                 return act()
         except drive.DriveError as exc:
             raise StepError(str(exc)) from None
+        except Exception as exc:  # a bug in the field is this step's failure, named as such
+            raise StepError(f"the drivers could not {what}: {type(exc).__name__}: {exc}") from None
 
     def act_register(self, args):
         """Every driver of `stints` (default: all) registers on the invite."""
@@ -74,10 +76,12 @@ class DriversRole(Role):
                     field.set_code(entry, s, self.client.register(
                         invite, entry, drive.driver_name(entry, s), segment, drive.device_address(k, s)))
                     self.registered += 1
-        except (drive.DriveError, ValueError) as exc:
-            raise StepError(str(exc)) from None
-        except (OSError, http.client.HTTPException) as exc:
-            raise StepError(f"the relay did not answer the drivers: {exc}") from None
+        except (drive.DriveError, ValueError, OSError, http.client.HTTPException) as exc:
+            made, self.registered = self.registered, 0
+            why = str(exc) if isinstance(exc, (drive.DriveError, ValueError)) else \
+                f"the relay did not answer the drivers: {exc}"
+            left = f" {made} registrations were already made and stay waiting at the relay." if made else ""
+            raise StepError(why + "." + left + " No driver of this role is registered.") from None
         self.field = field
         return {"registered": self.registered, "entries": entries, "stints": stints}
 
@@ -87,11 +91,11 @@ class DriversRole(Role):
         if self.runner is None:
             self.runner = self.runner_factory(field)
             self.runner.start()
-        self._do(field.start)
+        self._do(field.start, "start")
 
     def act_pit(self, args):
         entry = self._entry(args.get("entry"))
-        self._do(lambda: self._field().pit(entry, float(args.get("seconds", 10))))
+        self._do(lambda: self._field().pit(entry, float(args.get("seconds", 10))), "pit")
 
     def _race_order(self):
         try:
@@ -115,7 +119,7 @@ class DriversRole(Role):
             entries = [self._entry(e) for e in order]
         else:
             raise StepError("box order is 'race', 'grid' or a list of entries")
-        self._do(lambda: self._field().box(entries))
+        self._do(lambda: self._field().box(entries), "box")
         return {"order": entries or [c.entry for c in self._field().cars]}
 
     def act_lobby(self, args):
@@ -123,27 +127,27 @@ class DriversRole(Role):
         stint = args.get("stint")
         if type(stint) is not int or stint < 1:
             raise StepError("lobby needs args.stint, counted from 1")
-        self._do(lambda: self._field().lobby(stint - 1))
+        self._do(lambda: self._field().lobby(stint - 1), "open the lobby")
 
     def act_release(self, args):
-        self._do(self._field().release)
+        self._do(lambda: self._field().release(), "release")
 
     def act_drop(self, args):
         entry = self._entry(args.get("entry"))
-        self._do(lambda: self._field().drop(entry))
+        self._do(lambda: self._field().drop(entry), "drop")
 
     def act_rejoin(self, args):
         entry = self._entry(args.get("entry"))
-        self._do(lambda: self._field().rejoin(entry, float(args.get("seconds", 5))))
+        self._do(lambda: self._field().rejoin(entry, float(args.get("seconds", 5))), "rejoin")
 
     def act_stop(self, args):
         entries = [self._entry(e) for e in args["entries"]] if args.get("entries") else None
-        self._do(lambda: self._field().stop(entries))
+        self._do(lambda: self._field().stop(entries), "stop")
 
     def page(self):
         if self.field is None:
             return {"registered": 0, "cars": []}
-        cars = self._do(self.field.snapshot)
+        cars = self._do(self.field.snapshot, "report")
         modes = [c["mode"] for c in cars]
         return {"registered": self.registered, "cars": cars, "driving": modes.count("drive"),
                 "standing": modes.count("stand"), "sending": sum(1 for c in cars if c["sending"]),

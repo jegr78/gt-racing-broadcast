@@ -8,10 +8,12 @@ import time
 from dataclasses import asdict, dataclass, field
 
 import expect
+import redaction
 import roles
 from scenario import TEMPLATE_RE as _TEMPLATE, template_refs
 
 HARD, SOFT = "hard", "soft"
+scrub = redaction.scrub
 POLL_S = 0.25
 
 
@@ -51,7 +53,7 @@ class RunContext:
     sink) to base URLs; `token(name)` mints a console token for a crew member."""
 
     def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir="",
-                 event=None, event_link=None):
+                 event=None, event_link=None, secrets=()):
         self.urls = dict(urls or {})
         self._token = token
         self.stub = stub
@@ -60,7 +62,12 @@ class RunContext:
         self.out_dir = out_dir
         self.event = dict(event or {})
         self._event_link = event_link
+        self.secrets = set(secrets)      # every credential handed out, for `scrub`
         self.findings = []
+
+    def scrub(self, value):
+        """`value` without credentials: the one filter for everything the run writes."""
+        return redaction.scrub(value, self.secrets)
 
     def url(self, service):
         if service not in self.urls:
@@ -70,7 +77,9 @@ class RunContext:
     def token(self, name):
         if self._token is None:
             raise roles.StepError("this run mints no console tokens")
-        return self._token(name)
+        token = self._token(name)
+        self.secrets.add(token)
+        return token
 
     def event_link(self, kind):
         """The id of the event's driver invite ("invite") or public timing link
@@ -78,6 +87,7 @@ class RunContext:
         link = self._event_link(kind) if self._event_link is not None else None
         if not link:
             raise roles.StepError(f"the event has no {kind} link yet (Start event creates it)")
+        self.secrets.add(link)
         return link
 
     def browser(self):
@@ -246,7 +256,8 @@ class Engine:
             return
         role_name = shot.role or step.role
         if self.shots_dir is None:
-            self.findings.append(Finding(SOFT, f"shot {shot.name}: no shots directory", step.id, role_name))
+            self.findings.append(Finding(HARD if self.no_skips else SOFT,
+                                         f"shot {shot.name}: no shots directory", step.id, role_name))
             return
         os.makedirs(self.shots_dir, exist_ok=True)
         path = os.path.join(self.shots_dir, shot.name + ".png")
@@ -254,7 +265,9 @@ class Engine:
             self._role(role_name).shot(path, shot.element)
             res.shot = f"shots/{shot.name}.png"
         except Exception as exc:  # ShotUnavailable or a broken page: a screenshot never decides the run
-            self.findings.append(Finding(SOFT, f"shot {shot.name}: {exc}", step.id, role_name))
+            # A run that must have its browser (--no-skips) must have its pictures too.
+            self.findings.append(Finding(HARD if self.no_skips else SOFT, f"shot {shot.name}: {exc}",
+                                         step.id, role_name))
 
     def _checks(self, step, res):
         slow = self.scenario.tolerances.get("state_s", 2.0)
@@ -340,7 +353,8 @@ class Engine:
                          for s in steps if s.status == "skipped"]
         hard = [f for f in findings if f.severity == HARD]
         failed = [s for s in steps if s.status == "failed"]
-        return {"scenario": self.scenario.name, "description": self.scenario.description,
-                "ok": not hard and not failed, "duration": round(self.now(), 3),
-                "steps": [asdict(s) for s in steps],
-                "findings": [asdict(f) for f in sorted(findings, key=lambda f: f.severity != HARD)]}
+        return self.ctx.scrub({
+            "scenario": self.scenario.name, "description": self.scenario.description,
+            "ok": not hard and not failed, "duration": round(self.now(), 3),
+            "steps": [asdict(s) for s in steps],
+            "findings": [asdict(f) for f in sorted(findings, key=lambda f: f.severity != HARD)]})

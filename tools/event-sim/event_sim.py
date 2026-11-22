@@ -58,7 +58,8 @@ def run(scn, out, keep_work=False, headed=False, no_skips=False):
             print(f"event-sim: the stack did not start: {exc}", file=sys.stderr)
             return 2
         ctx = engine.RunContext(urls=st.urls, token=st.token, stub=st.stub, obs=st.obs,
-                                browser=br, out_dir=out, event=scn.event, event_link=st.event_link)
+                                browser=br, out_dir=out, event=scn.event, event_link=st.event_link,
+                                secrets=[st.secret])
         eng = engine.Engine(scn, ctx, st.probes(), registry=roles.default_registry(),
                             shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks],
                             no_skips=no_skips)
@@ -68,13 +69,13 @@ def run(scn, out, keep_work=False, headed=False, no_skips=False):
             data = eng.data([r for r in eng.results.values()])
             data["ok"] = False
             data["findings"].insert(0, {"severity": "hard", "role": "", "step": "",
-                                        "message": "engine error: " + traceback.format_exc(limit=3)})
+                                        "message": ctx.scrub("engine error: " + traceback.format_exc(limit=3))})
     finally:
         br.close()
         problems = st.stop(logs_to=os.path.join(out, "logs"))
         if data is not None:
             for p in problems:
-                data["findings"].append({"severity": "soft", "role": "", "step": "", "message": p})
+                data["findings"].append({"severity": "soft", "role": "", "step": "", "message": ctx.scrub(p)})
             report.write(out, data)
         if keep_work:
             print(f"event-sim: work dir kept at {work}")

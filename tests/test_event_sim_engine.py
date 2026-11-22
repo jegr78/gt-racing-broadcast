@@ -709,8 +709,12 @@ class _FakePage:
     def title(self):
         return "Panel"
 
-    def screenshot(self, path, full_page=False):
+    def locator(self, selector):
+        return selector
+
+    def screenshot(self, path, mask=(), timeout=None):
         self.shots.append(path)
+        self.masks = list(mask)
 
 
 class _FakeBrowser:
@@ -796,12 +800,15 @@ def t_page_role_keeps_to_its_service():
     assert br.page.url == "http://127.0.0.1:9/panel?x=@y"
 
 
-def t_page_role_without_a_browser_is_soft():
+def t_page_role_without_a_browser_is_a_skip():
     ctx = engine.RunContext(urls={"relay": "http://127.0.0.1:9"})
     role = builtin.PageRole(ctx, "page")
     role.open()
-    assert role.do("open", {"path": "/"}) is None
-    assert ctx.findings and ctx.findings[0][0] == "soft"
+    try:
+        role.do("open", {"path": "/"})
+        raise AssertionError("without a browser the step is skipped, which --no-skips fails")
+    except roles.Unavailable as exc:
+        assert "browser" in str(exc)
     try:
         role.shot("x.png")
         raise AssertionError("no page, no shot")
