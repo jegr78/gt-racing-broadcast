@@ -190,11 +190,11 @@ def t_a_longer_lifetime_reaches_the_unit_the_owner_watcher_and_the_child():
     with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
          patch.object(safety,'owner_identity',return_value=(12345,'42')), \
          patch.object(safety,'current_group',return_value=Path('/outside')),patch.object(safety.subprocess,'run',run):
-        safety.enter(__file__,['--x'],seconds=safety.LONG_MAX_SECONDS)
-        for bad in (0,-1,safety.LONG_MAX_SECONDS+1,float('nan')):
-            try:safety.enter(__file__,[],seconds=bad)
+        safety.enter(__file__,['--x'],seconds=safety.LONG_MAX_SECONDS,long=True)
+        for bad,long in ((0,True),(-1,True),(safety.LONG_MAX_SECONDS+1,True),(float('nan'),True),(901,False)):
+            try:safety.enter(__file__,[],seconds=bad,long=long)
             except ValueError:continue
-            raise AssertionError(f'lifetime {bad} admitted')
+            raise AssertionError(f'lifetime {bad} admitted (long={long})')
     command=calls[0]
     assert len(calls)==1 and f'--property=RuntimeMaxSec={safety.LONG_MAX_SECONDS}' in command, command
     i=command.index('--exec')
@@ -207,6 +207,26 @@ def t_a_longer_lifetime_reaches_the_unit_the_owner_watcher_and_the_child():
         try:child.supervise(['x'],safety.LONG_MAX_SECONDS+1,limit=safety.LONG_MAX_SECONDS)
         except ValueError:pass  # past the cap
         else:raise AssertionError('a lifetime past the cap was admitted')
+    assert child.parse_cli(['900','--','x','y'])==(900.0,900,['x','y'])
+    assert child.parse_cli(['7800','--long','--','x'])==(7800.0,safety.LONG_MAX_SECONDS,['x'])
+    for bad in (['7800','--long','x'],['900','x'],['900','--other','--','x'],['900']):
+        try:child.parse_cli(bad)
+        except ValueError:continue
+        raise AssertionError(f'{bad} accepted')
+
+
+def t_the_default_lifetime_is_read_at_call_time():
+    calls=[]
+    def run(command,**kw):calls.append(command);return SimpleNamespace(returncode=0)
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
+         patch.object(safety,'owner_identity',return_value=(12345,'42')),patch.object(safety,'MAX_SECONDS',240), \
+         patch.object(safety,'current_group',return_value=Path('/outside')),patch.object(safety.subprocess,'run',run):
+        safety.enter(__file__,[])
+    assert '--property=RuntimeMaxSec=240' in calls[0],'a caller that lowers MAX_SECONDS keeps its lifetime'
+    with patch.object(safety.select,'select',return_value=([101],[],[])) as select, \
+         patch.object(safety,'MAX_SECONDS',240),patch.object(safety.os,'close'),patch.object(safety.os,'write',return_value=1):
+        safety.watch_owner(101,202)
+    select.assert_called_once_with([101],[],[],240)
 
 
 def t_every_e2e_script_enters_containment():

@@ -46,7 +46,17 @@ def supervise(argv,seconds=900,limit=900):
         else:tree.close()
 
 
-if __name__=='__main__':
-    if len(sys.argv)<4 or sys.argv[2]!='--':raise SystemExit('Expected lifetime -- command')
+def parse_cli(argv):
+    """`SECONDS [--long] -- COMMAND...` -> (seconds, limit, command). Only `--long` (the
+    event simulation) lifts the 900 s cap to e2e_safety.LONG_MAX_SECONDS."""
+    long=len(argv)>1 and argv[1]=='--long'
+    rest=argv[2:] if long else argv[1:]
+    if not argv or not rest or rest[0]!='--' or len(rest)<2:raise ValueError('Expected lifetime [--long] -- command')
     import e2e_safety
-    raise SystemExit(supervise(sys.argv[3:],float(sys.argv[1]),limit=e2e_safety.LONG_MAX_SECONDS))
+    return float(argv[0]),e2e_safety.LONG_MAX_SECONDS if long else 900,rest[1:]
+
+
+if __name__=='__main__':
+    try:seconds,limit,command=parse_cli(sys.argv[1:])
+    except ValueError as error:raise SystemExit(str(error)) from None
+    raise SystemExit(supervise(command,seconds,limit=limit))

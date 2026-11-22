@@ -41,14 +41,16 @@ def owner_identity():
     return os.getpid(),Path('/proc/self/stat').read_text(encoding='utf8',errors='replace').rsplit(')',1)[1].split()[19]
 
 
-def lifetime(seconds):
-    if not math.isfinite(seconds) or not 0<seconds<=LONG_MAX_SECONDS:
-        raise ValueError(f'E2E lifetime must be between 0 and {LONG_MAX_SECONDS} seconds')
+def lifetime(seconds,long=True):
+    """`seconds` as a whole lifetime; above 900 s only for a caller that opts in (`long`)."""
+    cap=LONG_MAX_SECONDS if long else 900
+    if not math.isfinite(seconds) or not 0<seconds<=cap:
+        raise ValueError(f'E2E lifetime must be between 0 and {cap} seconds')
     return int(seconds)
 
 
-def watch_owner(fd,kill_fd,seconds=MAX_SECONDS):
-    try:select.select([fd],[],[],seconds)
+def watch_owner(fd,kill_fd,seconds=None):
+    try:select.select([fd],[],[],MAX_SECONDS if seconds is None else seconds)
     finally:
         os.close(fd)
         # This descriptor was opened inside the verified test cgroup. It cannot
@@ -57,7 +59,7 @@ def watch_owner(fd,kill_fd,seconds=MAX_SECONDS):
         finally:os.close(kill_fd)
 
 
-def owner_watchdog(pid,start,seconds=MAX_SECONDS):
+def owner_watchdog(pid,start,seconds=None):
     if type(pid) is not int or pid<=1:raise RuntimeError('Invalid E2E admission owner')
     path=Path('/proc')/str(pid)
     fd=os.pidfd_open(pid)
@@ -68,17 +70,18 @@ def owner_watchdog(pid,start,seconds=MAX_SECONDS):
         group=current_group()
         if not limited(group):raise RuntimeError('E2E owner watchdog requires verified containment')
         kill_fd=os.open(group/'cgroup.kill',os.O_WRONLY)
-        subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--watch-owner',str(fd),str(kill_fd),str(lifetime(seconds))],
+        subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--watch-owner',str(fd),str(kill_fd),str(lifetime(MAX_SECONDS if seconds is None else seconds))],
                          pass_fds=(fd,kill_fd),stdin=subprocess.DEVNULL)
     finally:
         os.close(fd)
         if kill_fd is not None:os.close(kill_fd)
 
 
-def enter(script,argv,seconds=MAX_SECONDS):
+def enter(script,argv,seconds=None,long=False):
     """Return the contained run's exit code, or None inside an admitted worker.
-    `seconds` bounds the unit and the owner watcher (at most LONG_MAX_SECONDS)."""
-    seconds=lifetime(seconds)
+    `seconds` (default MAX_SECONDS, read now) bounds the unit and the owner watcher;
+    more than 900 s only with `long` (the event simulation)."""
+    seconds=lifetime(MAX_SECONDS if seconds is None else seconds,long)
     if sys.platform!='linux':return None
     if os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted':return None
     if limited(current_group()):return None
