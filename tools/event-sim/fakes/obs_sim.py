@@ -3,7 +3,8 @@
 
 One loopback port carries both. A WebSocket upgrade is an OBS client (no authentication,
 events per the client's `eventSubscriptions`); any other HTTP request reads or pokes the
-state:
+state. Requests must name this port on 127.0.0.1 or localhost in `Host`, carry no
+`Origin` and POST `application/json`, so a web page cannot reach it:
 
     GET  /state                  ObsState.snapshot(); `scene` is the program scene
     GET  /events?since=N         events emitted after sequence N
@@ -64,13 +65,15 @@ class _Closed(Exception):
 
 class _Client:
     """One WebSocket client. A writer thread owns the socket's send side, so an event
-    never waits on a slow reader while the state lock is held."""
+    never waits on a slow reader while the state lock is held. A client whose queue
+    fills is closed, as OBS drops a client that stops reading."""
+    QUEUE_MAX = 1024
 
     def __init__(self, conn, state):
         self.conn, self.state = conn, state
         self.buf = b""
         self.mask = 0
-        self.out = queue.Queue()
+        self.out = queue.Queue(self.QUEUE_MAX)
         self.writer = threading.Thread(target=self._write, daemon=True)
 
     def _write(self):
@@ -83,8 +86,17 @@ class _Client:
             except OSError:
                 return
 
+    def _put(self, data):
+        try:
+            self.out.put_nowait(data)
+        except queue.Full:
+            try:
+                self.conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass  # already gone
+
     def send(self, obj):
-        self.out.put(frame(json.dumps(obj).encode()))
+        self._put(frame(json.dumps(obj).encode()))
 
     def on_event(self, event):
         if self.mask & event["eventIntent"]:
@@ -103,10 +115,10 @@ class _Client:
                 continue
             opcode, payload, self.buf = parsed
             if opcode == 0x8:
-                self.out.put(frame(payload[:2], 0x8))
+                self._put(frame(payload[:2], 0x8))
                 raise _Closed()
             if opcode == 0x9:
-                self.out.put(frame(payload, 0xA))
+                self._put(frame(payload, 0xA))
             elif opcode == 0x1:
                 return json.loads(payload)
 
@@ -154,7 +166,10 @@ class _Client:
             pass  # the client went away or sent garbage: end this session
         finally:
             self.state.unsubscribe(self.on_event)
-            self.out.put(None)
+            try:
+                self.out.put(None, timeout=2)
+            except queue.Full:
+                pass  # the writer is stuck on a dead socket; it is a daemon
             self.writer.join(timeout=2)
 
 
@@ -209,7 +224,9 @@ class ObsSim:
 
     def stop(self):
         self.stopping.set()
-        for s in [self.sock] + list(self.conns):
+        with self.lock:
+            socks = [self.sock] + list(self.conns)
+        for s in socks:
             try:
                 s.shutdown(socket.SHUT_RDWR)
             except (OSError, AttributeError):
@@ -252,6 +269,11 @@ class ObsSim:
             lines = head.decode("iso-8859-1").split("\r\n")
             headers = {k.strip().lower(): v.strip() for k, _, v in
                        (line.partition(":") for line in lines[1:])}
+            refused = self.refusal(lines[0].split(" ")[0], headers)
+            if refused:
+                conn.sendall((f"HTTP/1.1 {refused}\r\nContent-Length: 0\r\n"
+                              "Connection: close\r\n\r\n").encode())
+                return
             if headers.get("upgrade", "").lower() == "websocket":
                 conn.sendall(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
                               "Connection: Upgrade\r\nSec-WebSocket-Accept: "
@@ -272,6 +294,17 @@ class ObsSim:
             except OSError:
                 pass  # already torn down
 
+    def refusal(self, method, headers):
+        """The status line refusing a request a web page could have sent, or ""."""
+        if "origin" in headers:
+            return "403 Forbidden"
+        if headers.get("host", "").lower() not in (f"127.0.0.1:{self.port}", f"localhost:{self.port}"):
+            return "403 Forbidden"
+        if method == "POST" and headers.get("content-type", "").split(";")[0].strip().lower() \
+                != "application/json":
+            return "415 Unsupported Media Type"
+        return ""
+
     def _http(self, conn, request_line, headers, body):
         method, target = (request_line.split(" ") + ["", ""])[:2]
         length = min(int(headers.get("content-length") or 0), MAX_BODY)
@@ -280,7 +313,12 @@ class ObsSim:
             if not chunk:
                 break
             body += chunk
-        status, ctype, payload = self.route(method, target, body[:length])
+        try:
+            status, ctype, payload = self.route(method, target, body[:length])
+        except Exception as exc:  # noqa: BLE001  a bad request gets an answer, not a dropped socket
+            status, ctype = "400 Bad Request", "application/json"
+            payload = json.dumps({"ok": False, "code": obs_state.INVALID_FIELD,
+                                  "comment": str(exc) or exc.__class__.__name__}).encode()
         conn.sendall((f"HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\n"
                       f"Content-Length: {len(payload)}\r\nCache-Control: no-store\r\n"
                       "Connection: close\r\n\r\n").encode() + payload)
@@ -313,6 +351,11 @@ class ObsSim:
             raw, fmt = st.screenshot(st.snapshot()["scene"], number("width", 640))
             return "200 OK", "image/" + ("jpeg" if fmt == "jpg" else fmt), raw
         if method == "POST" and u.path == "/request" and isinstance(data, dict):
+            if not isinstance(data.get("requestType"), str) or \
+                    not isinstance(data.get("requestData", {}), dict):
+                return "400 Bad Request", "application/json", json.dumps(
+                    {"ok": False, "code": obs_state.INVALID_FIELD,
+                     "comment": "requestType must be a string and requestData an object"}).encode()
             try:
                 resp = st.request(data.get("requestType"), data.get("requestData") or {},
                                   origin="http")

@@ -30,6 +30,7 @@ DEMO_PROFILE_ENV = os.path.join(ROOT, "profiles", "demo", "profile.env")
 SUCCESS = 100
 UNKNOWN_REQUEST = 204
 MISSING_FIELD = 300
+INVALID_FIELD = 400
 OUT_OF_RANGE = 402
 OUTPUT_RUNNING = 500
 OUTPUT_NOT_RUNNING = 501
@@ -298,7 +299,13 @@ class ObsState:
             try:
                 if handler is None:
                     raise ObsError(UNKNOWN_REQUEST, f"Your request type is not valid: {request_type}")
-                return handler(data)
+                try:
+                    return handler(data)
+                except ObsError:
+                    raise
+                except Exception as exc:  # noqa: BLE001  a malformed field is answered, never dropped
+                    raise ObsError(INVALID_FIELD, f"{request_type}: {str(exc) or exc.__class__.__name__}") \
+                        from exc
             except ObsError as exc:
                 if not self.strict and exc.code in (UNKNOWN_REQUEST, NOT_FOUND):
                     return copy.deepcopy(_LEGACY.get(request_type, {}))

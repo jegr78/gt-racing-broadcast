@@ -93,7 +93,9 @@ class RawClient:
             if parsed:
                 _, payload, self.buf = parsed
                 return json.loads(payload)
-            self.buf += self.sock.recv(65536)
+            chunk = self.sock.recv(65536)
+            assert chunk, "the server closed the session"
+            self.buf += chunk
 
     def request(self, rtype, data=None):
         self.send({"op": 6, "d": {"requestType": rtype, "requestId": "x", "requestData": data or {}}})
@@ -573,6 +575,89 @@ def t_http_endpoint_reads_and_pokes_state():
         assert sim.route("GET", "/nope")[0].startswith("404")
         assert sim.env() == {"RACECAST_SIM_OBS_WS": sim.url}
     finally:
+        sim.stop()
+
+
+def _raw_http(port, request):
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as c:
+        c.sendall(request.encode())
+        data = b""
+        while True:
+            chunk = c.recv(65536)
+            if not chunk:
+                return data.decode("iso-8859-1")
+            data += chunk
+
+
+def t_a_browser_page_cannot_reach_the_endpoint():
+    sim = _sim()
+    try:
+        port = sim.port
+        body = json.dumps({"requestType": "SetCurrentProgramScene", "requestData": {"sceneName": "Standby"}})
+        post = ("POST /request HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{extra}"
+                "Content-Length: {n}\r\n\r\n{body}")
+        plain = post.format(port=port, extra="Content-Type: text/plain\r\n", n=len(body), body=body)
+        assert _raw_http(port, plain).startswith("HTTP/1.1 415"), "a form post is refused"
+        origin = post.format(port=port, n=len(body), body=body,
+                             extra="Content-Type: application/json\r\nOrigin: http://evil.example\r\n")
+        assert _raw_http(port, origin).startswith("HTTP/1.1 403"), "any Origin is refused"
+        rebound = post.format(port=port, n=len(body), body=body,
+                              extra="Content-Type: application/json\r\n").replace(
+            f"Host: 127.0.0.1:{port}", f"Host: evil.example:{port}")
+        assert _raw_http(port, rebound).startswith("HTTP/1.1 403"), "a rebound Host is refused"
+        img = "GET /program.png HTTP/1.1\r\nHost: attacker.example\r\n\r\n"
+        assert _raw_http(port, img).startswith("HTTP/1.1 403"), "a foreign Host never renders"
+        assert sim.state.snapshot()["scene"] == "Splitscreen", "nothing reached the state"
+        local = post.format(port=port, n=len(body), body=body,
+                            extra="Content-Type: application/json; charset=utf-8\r\n").replace(
+            f"Host: 127.0.0.1:{port}", f"Host: localhost:{port}")
+        assert _raw_http(port, local).startswith("HTTP/1.1 200"), "a local tool still gets through"
+        key = base64.b64encode(os.urandom(16)).decode()
+        upgrade = obs_ws.handshake_request("127.0.0.1", port, key, headers={"Origin": "http://evil.example"})
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as c:
+            c.sendall(upgrade)
+            assert c.recv(4096).startswith(b"HTTP/1.1 403"), "a browser WebSocket is refused"
+    finally:
+        sim.stop()
+
+
+def t_a_failing_handler_answers_400_and_keeps_the_session():
+    sim = _sim()
+    client = RawClient(sim.port)
+    try:
+        resp, _ = client.request("SetInputVolume", {"inputName": "Feed A", "inputVolumeDb": "loud"})
+        assert resp["requestStatus"]["code"] == 400 and not resp["requestStatus"]["result"], resp
+        resp, _ = client.request("GetCurrentProgramScene")
+        assert resp["requestStatus"]["result"], "the session survives"
+        status, _, payload = sim.route("POST", "/freeze", b'{"input": "Feed A", "frozen": {"a": 1}}')
+        assert status.startswith("200") or status.startswith("400"), status
+        status, _, payload = sim.route("POST", "/labels", b'{"Feed A": {"x": [1]}}')
+        assert status.startswith("200"), (status, payload)
+        status, _, payload = sim.route("GET", "/events?since=x")
+        assert status.startswith("200"), status
+        status, ctype, payload = sim.route("POST", "/request", b'{"requestType": 5, "requestData": []}')
+        assert status.startswith("400") and json.loads(payload)["code"] == 400, (status, payload)
+    finally:
+        client.close()
+        sim.stop()
+
+
+def t_a_client_that_stops_reading_is_dropped():
+    old = obs_sim._Client.QUEUE_MAX
+    obs_sim._Client.QUEUE_MAX = 4
+    sim = _sim()
+    try:
+        slow = RawClient(sim.port)
+        slow.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        big = {"blob": "x" * 65536}
+        for _ in range(400):
+            sim.state.request("SetInputSettings", {"inputName": "Feed A", "inputSettings": big})
+            if len(sim.conns) == 0:
+                break
+        assert _wait(lambda: len(sim.conns) == 0), "a client that never reads is closed"
+        slow.close()
+    finally:
+        obs_sim._Client.QUEUE_MAX = old
         sim.stop()
 
 
