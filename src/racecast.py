@@ -5458,9 +5458,30 @@ def relay_stop(rest):
     else:
         print("relay may still be running.")
 
+def _restart_stint_args(rest):
+    """["--stint", N] so a restarted relay comes back on the race stint it was on: the
+    running relay's /status, else the on-air record of an unstopped event. [] with an
+    explicit --stint, in qualifying or solo, or when neither source knows a stint."""
+    if _stint_args(rest):
+        return []
+    status = _relay_status_probe() if _relay_already_running_for_active_profile() else None
+    if status is not None:
+        live = status.get("live")
+        stint = live.get("stint") if isinstance(live, dict) and live.get("mode") == "race" else None
+    else:
+        stint = (_read_positive(_on_air_record_path(), "stint")
+                 if _unstopped_event_continues() else None)
+    if isinstance(stint, int) and not isinstance(stint, bool) and stint >= 1:
+        return ["--stint", str(stint)]
+    return []
+
+
 def relay_restart(rest):
+    resume = _restart_stint_args(rest)   # before the stop: afterwards nothing answers
     relay_stop([])
-    relay_start(rest)
+    if resume:
+        print(f"relay: resuming stint {resume[1]}.")
+    relay_start(resume + rest)
 
 def relay_status(rest):
     d = relay_status_data()

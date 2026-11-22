@@ -160,7 +160,8 @@ apps (OBS, Companion, Tailscale, Discord). Each line is `PASS` / `WARN` / `INFO`
 
 ![Control Center: Relay](images/cc-relay.png)
 
-**Relay** starts / stops / restarts the commentator-feed relay (the normal mode)
+**Relay** starts / stops / restarts the commentator-feed relay (the normal mode;
+**Restart** comes back on the race stint that was on air)
 and shows its live status. It reads its schedule and HUD data from the **active
 profile's** Google Sheet, and applies that profile's overlay CSS; there are no local
 relay knobs: ports and bind mode use safe defaults.
