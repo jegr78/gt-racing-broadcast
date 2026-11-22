@@ -157,8 +157,9 @@ never the real one.
   (profile + holders, each a pid with its process start time where the OS gives one) and
   sets `RACECAST_SIM_FORCE=<profile>:<nonce>`; a child passes only while that record
   matches and a holder is alive (`_simulation_forced_profile`), so a stale export or a
-  reused pid does not. The granting run drops itself at exit (`atexit`), and every check
-  prunes records without a live holder. The machine `.env` never supplies it. A subcommand's own `--force`
+  reused pid does not. The granting run drops itself at exit (`atexit`), `relay start`
+  adds the relay it spawned (`_hold_simulation_force`) so the relay's own `event stop`
+  still passes, and every check prunes records without a live holder. The machine `.env` never supplies it. A subcommand's own `--force`
   keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
 - Driver Radio and AI: `env_overrides` blanks `RACECAST_GCLOUD_TTS_KEY`/`STT_KEY` and

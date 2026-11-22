@@ -2949,6 +2949,8 @@ def relay_start(rest):
     newpid = _spawn_relay_verified(argv)
     if newpid is None:
         return None                   # honest failure already reported; never claim success
+    if simulation.active() and os.environ.get(simulation.FORCE):
+        _hold_simulation_force(newpid)
     print(f"relay started (pid {newpid}). Watch it: racecast relay logs -f")
     _append_tailscale_snapshot()
     _refresh_obs_pages(wait=0)    # relay already confirmed up -> refresh OBS pages now
@@ -10701,7 +10703,8 @@ def _release_simulation_force(path, pid):
 
 
 def _grant_simulation_force(name, environ, force_dir):
-    """Record this forced run so its children pass for `name` while it lives."""
+    """Record this forced run so its children pass for `name` while it, or a relay it
+    started, lives."""
     import secrets
     nonce = secrets.token_hex(16)
     os.makedirs(force_dir, exist_ok=True)
@@ -10719,9 +10722,19 @@ def _force_record_path(environ, force_dir):
     return name, os.path.join(force_dir, nonce + ".json")
 
 
+def _hold_simulation_force(pid, environ=None, force_dir=None):
+    """A relay started under a pass keeps it alive, so its own `event stop` passes."""
+    environ = os.environ if environ is None else environ
+    name, path = _force_record_path(environ, force_dir or _simulation_force_dir())
+    record = _read_force_record(path) if path else None
+    if record is not None and record.get("profile") == name:
+        record["holders"].append(_force_holder(pid))
+        _write_force_record(path, record)
+
+
 def _simulation_forced_profile(environ, force_dir):
     """The profile an inherited RACECAST_SIM_FORCE allows, or None. It counts only while
-    a holder of its record is alive."""
+    a holder of its record (the forcing run or its relay) is alive."""
     _prune_simulation_force(force_dir)
     name, path = _force_record_path(environ, force_dir)
     record = _read_force_record(path) if path else None

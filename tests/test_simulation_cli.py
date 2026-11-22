@@ -422,6 +422,10 @@ def _sim_ok_env():
     return dict(SIM_ENV, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=d)
 
 
+def _sleeper():
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
 def _grant(fdir):
     env = _sim_ok_env()
     with _patched((m.atexit, "register", lambda *a, **k: None)):
@@ -476,6 +480,41 @@ def t_dead_force_records_are_pruned_on_every_check():
         json.dump({"profile": "league", "holders": [{"pid": p.pid, "started": None}]}, fh)
     m._simulation_gate(["relay", "start"], _sim_ok_env(), "demo", {}, force_dir=fdir)
     assert not os.path.exists(stale), "a record without a live holder must go"
+
+
+def t_the_forced_relay_keeps_the_pass_after_the_cli_exits():
+    fdir = tempfile.mkdtemp()
+    env, path = _grant(fdir)
+    relay = _sleeper()
+    try:
+        renamed = dict(env, RACECAST_SIM_FORCE="other:" + env[sim.FORCE].split(":")[1])
+        m._hold_simulation_force(relay.pid, renamed, fdir)
+        with open(path) as fh:
+            assert len(json.load(fh)["holders"]) == 1, "a renamed pass must not gain holders"
+        m._hold_simulation_force(relay.pid, env, fdir)
+        m._release_simulation_force(path, os.getpid())   # the forcing CLI exits
+        assert m._simulation_gate(["event", "stop"], dict(env), "league", {}, force_dir=fdir) is None, \
+            "the Director Panel's Stop event must pass while the forced relay runs"
+    finally:
+        relay.kill(); relay.wait()
+    assert m._simulation_gate(["event", "stop"], dict(env), "league", {}, force_dir=fdir), \
+        "the pass ends with the relay"
+
+
+def t_relay_start_registers_the_relay_as_a_holder():
+    held = []
+    signals = dict(port_pids=[], feed_pids=[], pidfile_pid=None, pidfile_alive=False,
+                   running_profile="", active_profile="demo", http_ok=False)
+    noop = lambda *a, **k: None   # noqa: E731
+    with _env(**SIM_ENV, RACECAST_SIM_FORCE="league:" + "b" * 32), _patched(
+            (m, "_relay_start_signals", lambda: dict(signals)), (m.pt, "FEED_PORTS", ()),
+            (m, "_ensure_active_console_secret", noop), (m, "_resolve_producer_name", lambda: "P"),
+            (m, "_write_relay_profile_stamp", noop), (m, "_spawn_relay_verified", lambda argv: 4242),
+            (m, "_append_tailscale_snapshot", noop), (m, "_refresh_obs_pages", noop),
+            (m, "_hold_simulation_force", lambda pid, *a: held.append(pid))), \
+            contextlib.redirect_stdout(io.StringIO()):
+        m.relay_start([])
+    assert held == [4242], held
 
 
 if __name__ == "__main__":

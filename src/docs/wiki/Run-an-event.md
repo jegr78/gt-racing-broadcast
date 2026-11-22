@@ -101,7 +101,8 @@ start.
   `SIMULATION=1`. Any other profile needs `--force` in the global position,
   `racecast --simulation --force <command>`, because the run writes that profile's
   runtime state (driver codes, chat, timing). The processes it starts inherit the pass
-  for that one profile, and only while the forcing command (or Control Center) runs; a
+  for that one profile, and only while the forcing command, the Control Center or the
+  relay it started runs; a
   `RACECAST_SIM_FORCE` from the machine `.env` or a shell export does not count. A command's own `--force`
   (`event start --force` skips the pre-flight gate) keeps its usual meaning and does not
   override the profile check.
