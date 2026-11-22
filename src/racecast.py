@@ -2834,7 +2834,9 @@ def _relay_start_signals():
     own = len(set(port_pids)) == 1 and alive and pid in port_pids
     return {"port_pids": port_pids,
             "pidfile_relay": bool(alive and _relay_identity(pid) != "other"),
-            "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
+            # 53001-53003 are a live relay's ports: a simulated start never kills their holders.
+            "feed_pids": [] if simulation.active() else
+            sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",

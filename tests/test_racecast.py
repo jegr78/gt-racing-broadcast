@@ -3146,6 +3146,24 @@ def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
     return restore
 
 
+def t_a_simulated_relay_start_never_counts_the_live_feed_ports():
+    restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
+    saved = (m.pt.pids_on_port, m.simulation.active)
+    m.pt.pids_on_port = lambda port: [4242] if port == m._relay_port() else [777]
+    try:
+        m.simulation.active = lambda environ=None: False
+        assert m._relay_start_signals()["feed_pids"] == [777], "a live start heals its own feed ports"
+        m.simulation.active = lambda environ=None: True
+        signals = m._relay_start_signals()
+        assert signals["feed_pids"] == [], \
+            "53001-53003 belong to a live relay: a simulated start must never put their holders on a kill list"
+        action, kill, _ = m.relay_start_plan(**dict(signals, http_ok=False, running_mode="simulation"))
+        assert action == "heal" and kill == [4242], f"a hung simulation relay heals itself only: {action} {kill}"
+    finally:
+        m.pt.pids_on_port, m.simulation.active = saved
+        restore()
+
+
 def t_relay_already_running_for_active_profile_requires_both():
     cases = [
         ((4242,), 4242, True, "demo", "demo", True, "our healthy relay on the active profile"),

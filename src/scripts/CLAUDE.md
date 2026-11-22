@@ -198,7 +198,8 @@ never the real one.
   stale PID file and says the relay is not running. On macOS the marker is `ps -o lstart=`
   run with `LC_ALL=C`, `LANG=C` and `TZ=UTC`, so the locale never changes it. A
   simulation start also refuses an unstamped port holder and never kills it; a stale stamp
-  with a dead relay heals as before. `event start` runs the same plan before it launches
+  with a dead relay heals as before, and a heal in simulation kills the control port's holder
+  only, never a holder of 53001-53003 (`_relay_start_signals` reports no `feed_pids` there). `event start` runs the same plan before it launches
   anything; `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop`
   before it touches a live relay. In simulation `freeport` and the Control Center's Kill
   relay (`_simulated_freeport`) only stop this install's own simulation relay through its
