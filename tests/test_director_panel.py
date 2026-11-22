@@ -344,7 +344,9 @@ const feeds = (a, ai, b, bi) => ({A: {state: a, index: ai}, B: {state: b, index:
 const idle = [pvIdleFeeds({feeds: feeds('stopped', 0, 'stopped', 1), pov: {state: 'stopped', shown: false}}),
               pvIdleFeeds({feeds: feeds('stopped', 2, 'stopped', 1), pov: {state: 'stopped', shown: true}}),
               pvIdleFeeds({feeds: feeds('serving', 0, 'connecting', 1), pov: {state: 'serving', shown: true}}),
-              pvIdleFeeds({solo: true}), pvIdleFeeds({feeds: feeds('serving', 0, 'serving', 1)})];
+              pvIdleFeeds({solo: true}), pvIdleFeeds({feeds: feeds('serving', 0, 'serving', 1)}),
+              pvIdleFeeds({fanout: false, feeds: feeds('stopped', 0, 'stopped', 1), pov: {shown: false}}),
+              pvIdleFeeds({fanout: true, feeds: feeds('stopped', 0, 'stopped', 1), pov: {shown: false}})];
 const a = tile('A'), b = tile('B'), cap = tile('CAPTURE', 'capture');
 pvPollFeed(a); pvPollFeed(b); pvPollFeed(cap);
 const unknown = requested.splice(0), unknownTile = a.shown();
@@ -358,8 +360,10 @@ console.log(JSON.stringify({idle, unknown, unknownTile, stopped, stoppedTile, ru
         d = json.loads(out)
         assert d["idle"] == [{"A": False, "B": True, "POV": True}, {"A": True, "B": False, "POV": False},
                              {"A": False, "B": False, "POV": False}, {},
-                             {"A": False, "B": False, "POV": True}], \
-            f"idle is the stopped feed off air and the POV that is not shown or not configured: {d['idle']}"
+                             {"A": False, "B": False, "POV": True},
+                             {"A": False, "POV": True}, {"A": False, "B": True, "POV": True}], \
+            f"idle is the stopped feed off air (unknown without fan-out, where the preview pulls on its own) " \
+            f"and the POV that is not shown or not configured: {d['idle']}"
         assert d["unknown"] == ["/preview/source/capture"] and d["unknownTile"] == "true/false/Load still", \
             f"before the first /status a feed tile waits untouched: {d['unknown']} {d['unknownTile']}"
         assert d["stopped"] == ["/preview/feed/A", "/preview/source/capture"], \

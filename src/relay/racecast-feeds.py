@@ -11012,6 +11012,7 @@ class Relay:
         live = self.live_feed()
         out["live"] = {"feed": live, "stint": self.on_air_row_idx() + 1, "mode": self.mode}
         out["manual_feed_arm"] = self.manual_feed_arm
+        out["fanout"] = bool(self.fanout)
         if self.mic_device is not None:
             out["mic"] = dict(self.mic_device)          # #668: commentary mic device check
         out["league"] = {"sheet_id": self.sheet_id, "name": self.league_name}

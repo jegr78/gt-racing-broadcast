@@ -3504,12 +3504,16 @@ $("#pvToggle").onclick = () => {
   try{ localStorage.setItem(PV_KEY, opening ? "1" : "0"); }catch(e){}
 };
 // The feeds the relay has no still for: a stopped feed that is not on air (the on-air
-// one is an OBS shot) and a POV that is not shown.
+// one is an OBS shot) and a POV that is not shown. Without fan-out the preview pulls
+// a stopped feed on its own: that one stays out of the answer, so it backs off.
 function pvIdleFeeds(d){
   const idle = {};
   if (d.feeds && d.feeds.A && d.feeds.B){
     const live = d.feeds.A.index <= d.feeds.B.index ? "A" : "B";
-    for (const k of ["A", "B"]) idle[k] = k !== live && d.feeds[k].state === "stopped";
+    for (const k of ["A", "B"]){
+      const stopped = k !== live && d.feeds[k].state === "stopped";
+      if (!stopped || d.fanout !== false) idle[k] = stopped;
+    }
   }
   if (d.pov) idle.POV = !d.pov.shown;
   else if (!d.solo) idle.POV = true;    // a relay without a POV feed
