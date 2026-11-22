@@ -12,8 +12,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import ai_jobs
 
 
-def supervise(argv,seconds=900):
-    if not math.isfinite(seconds) or not 0<seconds<=900:raise ValueError('Invalid E2E child lifetime')
+def supervise(argv,seconds=900,limit=900):
+    if not math.isfinite(seconds) or not 0<seconds<=limit:raise ValueError('Invalid E2E child lifetime')
     stopped=threading.Event()
     def stop(_signal,_frame):stopped.set()
     for name in ('SIGTERM','SIGINT','SIGHUP'):
@@ -48,4 +48,5 @@ def supervise(argv,seconds=900):
 
 if __name__=='__main__':
     if len(sys.argv)<4 or sys.argv[2]!='--':raise SystemExit('Expected lifetime -- command')
-    raise SystemExit(supervise(sys.argv[3:],float(sys.argv[1])))
+    import e2e_safety
+    raise SystemExit(supervise(sys.argv[3:],float(sys.argv[1]),limit=e2e_safety.LONG_MAX_SECONDS))

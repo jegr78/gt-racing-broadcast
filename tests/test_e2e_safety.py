@@ -184,6 +184,31 @@ def t_disposable_hosted_runner_uses_its_ci_job_boundary():
         assert admitted is None
 
 
+def t_a_longer_lifetime_reaches_the_unit_the_owner_watcher_and_the_child():
+    calls=[]
+    def run(command,**kw):calls.append(command);return SimpleNamespace(returncode=0)
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
+         patch.object(safety,'owner_identity',return_value=(12345,'42')), \
+         patch.object(safety,'current_group',return_value=Path('/outside')),patch.object(safety.subprocess,'run',run):
+        safety.enter(__file__,['--x'],seconds=safety.LONG_MAX_SECONDS)
+        for bad in (0,-1,safety.LONG_MAX_SECONDS+1,float('nan')):
+            try:safety.enter(__file__,[],seconds=bad)
+            except ValueError:continue
+            raise AssertionError(f'lifetime {bad} admitted')
+    command=calls[0]
+    assert len(calls)==1 and f'--property=RuntimeMaxSec={safety.LONG_MAX_SECONDS}' in command, command
+    i=command.index('--exec')
+    assert command[i+3]==str(safety.LONG_MAX_SECONDS),'the contained run carries its lifetime to the owner watcher'
+    with patch.object(safety.select,'select',return_value=([101],[],[])) as select, \
+         patch.object(safety.os,'close'),patch.object(safety.os,'write',return_value=1):
+        safety.watch_owner(101,202,safety.LONG_MAX_SECONDS)
+    select.assert_called_once_with([101],[],[],safety.LONG_MAX_SECONDS)
+    with patch.object(child.subprocess,'Popen',side_effect=AssertionError('reached a process')):
+        try:child.supervise(['x'],safety.LONG_MAX_SECONDS+1,limit=safety.LONG_MAX_SECONDS)
+        except ValueError:pass  # past the cap
+        else:raise AssertionError('a lifetime past the cap was admitted')
+
+
 def t_every_e2e_script_enters_containment():
     tools=Path(__file__).resolve().parents[1]/'tools'
     scripts=sorted(tools.glob('e2e-*.py'))+[tools/'e2e.py']
