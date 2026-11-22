@@ -3,9 +3,12 @@
 import importlib.util
 import json
 import os
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
+import types
 import urllib.error
 import urllib.request
 
@@ -40,7 +43,12 @@ class Clock:
 
 
 def _relay_post(url, payload):
-    """The relay's own Discord POST (`_discord_post`): JSON, its User-Agent, 5 s."""
+    """The relay's own best-effort Discord POST, `Relay._discord_post`."""
+    m.Relay._discord_post(types.SimpleNamespace(discord_webhook_url=url), payload, "test")
+
+
+def _post_json(url, payload):
+    """(status, body) of a JSON POST shaped like the relay's."""
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
                                  headers={"Content-Type": "application/json",
                                           "User-Agent": "racecast-feeds/1.0"})
@@ -57,6 +65,24 @@ def _status(url, data=None, headers=None):
         return exc.code, exc.read()
 
 
+def _banner(proc, timeout=30):
+    """The CLI's first stdout line, or an AssertionError once `timeout` passes."""
+    lines = queue.Queue()
+    threading.Thread(target=lambda: lines.put(proc.stdout.readline()), daemon=True).start()
+    try:
+        return lines.get(timeout=timeout).decode("utf-8", "replace")
+    except queue.Empty:
+        raise AssertionError("the CLI printed no banner") from None
+
+
+def _stop_cli(proc, ready):
+    proc.terminate()
+    proc.wait(timeout=10)
+    proc.stdout.close()
+    if os.name != "nt":   # TerminateProcess leaves no chance to clean up
+        assert not os.path.exists(ready), "the CLI removes its ready-file on exit"
+
+
 def t_env_is_a_valid_simulation_endpoint():
     with webhook_sink.WebhookSink().start() as sink:
         env = sink.env()
@@ -69,7 +95,7 @@ def t_env_is_a_valid_simulation_endpoint():
 def t_records_relay_messages_with_time_and_answers_204():
     clock = Clock()
     with webhook_sink.WebhookSink(clock=clock).start() as sink:
-        status, body = _relay_post(sink.url, m.cockpit_submission_payload(ENTRY, 1, "Sim Cup"))
+        status, body = _post_json(sink.url, m.cockpit_submission_payload(ENTRY, 1, "Sim Cup"))
         assert (status, body) == (204, b""), "Discord answers a plain webhook POST with 204"
         clock.now += 10
         _relay_post(sink.url, m.cockpit_approval_payload(ENTRY))
@@ -157,7 +183,7 @@ def t_cli_writes_a_ready_file():
                                  "--port", "0", "--ready-file", ready],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
-            assert "webhook-sink" in proc.stdout.readline().decode("utf-8", "replace")
+            assert "webhook-sink" in _banner(proc)
             with open(ready, encoding="utf-8") as fh:
                 info = json.load(fh)
             _relay_post(info["url"], {"content": "hello"})
@@ -165,9 +191,7 @@ def t_cli_writes_a_ready_file():
             assert got["messages"][0]["content"] == "hello", got
             assert info["env"] == {simulation.FLAG: "1", simulation.DISCORD_WEBHOOK_URL: info["url"]}
         finally:
-            proc.terminate()
-            proc.wait(timeout=5)
-            proc.stdout.close()
+            _stop_cli(proc, ready)
 
 
 class Sleeps(list):
@@ -180,7 +204,7 @@ def t_injected_faults_answer_instead_of_recording():
     with webhook_sink.WebhookSink(sleep=sleeps).start() as sink:
         sink.fail("hook", status=429, times=1)
         try:
-            _relay_post(sink.url, {"content": "one"})
+            _post_json(sink.url, {"content": "one"})
         except urllib.error.HTTPError as exc:
             assert exc.code == 429, exc.code
         else:
@@ -195,8 +219,36 @@ def t_injected_faults_answer_instead_of_recording():
         req = urllib.request.Request(sink.http_url + "/_sim/fail", data=b"", method="POST",
                                      headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=5).close()
-        assert _relay_post(sink.url, {"content": "three"})[0] == 204 and sink.count("three") == 1
+        assert _post_json(sink.url, {"content": "three"})[0] == 204 and sink.count("three") == 1
         assert sink.snapshot()["faults_hit"] == 3, sink.snapshot()
+
+
+def t_shapes_discord_refuses_are_400_invalid_form_body():
+    with webhook_sink.WebhookSink().start() as sink:
+        json_ct = {"Content-Type": "application/json"}
+        for bad in ({"content": 5}, {"embeds": "x"}, {"embeds": [1]}, {"embeds": [{}] * 11},
+                    {"content": "x", "username": 5}):
+            status, body = _status(sink.url, json.dumps(bad).encode(), json_ct)
+            assert status == 400 and json.loads(body)["code"] == 50035, (bad, body)
+        assert sink.messages() == [] and sink.rejected == 5
+
+
+def t_a_report_upload_above_the_old_limit_arrives_and_one_above_discords_is_refused():
+    with webhook_sink.WebhookSink().start() as sink:
+        payload = json.dumps({"content": "report"})
+        http_util.post_multipart(sink.url, fields={"payload_json": payload},
+                                 files=[("files[0]", "big.zip", b"z" * (12 << 20), "application/zip")],
+                                 timeout=30)
+        assert sink.messages()[0]["files"][0]["size"] == 12 << 20
+        try:
+            http_util.post_multipart(sink.url, fields={"payload_json": payload},
+                                     files=[("files[0]", "huge.zip", b"z" * (21 << 20), "application/zip")],
+                                     timeout=30)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 413 and json.loads(exc.read())["code"] == 40005
+        else:
+            raise AssertionError("a file over the per-file limit must be refused")
+        assert sink.count() == 1
 
 
 if __name__ == "__main__":

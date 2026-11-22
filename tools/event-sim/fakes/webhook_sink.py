@@ -3,8 +3,9 @@
 
 Any POST path outside /_sim/ is a webhook; `WebhookSink.url` is the one racecast gets.
 JSON bodies and multipart bodies (`payload_json` plus files, as the report send posts)
-are accepted. A message is answered with 204 like Discord; an empty, unparseable or
-over-long one with Discord's 400 error body, and it is not recorded.
+are accepted. A message is answered with 204 like Discord. An empty or unparseable one,
+or one with a field of the wrong type or size, gets Discord's 400 error body; a file
+over the 20 MiB per-file limit a 413. Neither is recorded.
 
     GET  /_sim/messages?since=N     messages after sequence N
     GET  /_sim/state                counters and fault rules
@@ -29,11 +30,15 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import loopback_http  # noqa: E402
+import logsetup  # noqa: E402
 
 FLAG_ENV = "RACECAST_SIMULATION"                       # simulation.FLAG
 WEBHOOK_URL_ENV = "RACECAST_SIM_DISCORD_WEBHOOK_URL"   # simulation.DISCORD_WEBHOOK_URL
 HOOK_PATH = "/api/webhooks/1/sim"
 MAX_CONTENT = 2000
+MAX_EMBEDS = 10
+FILE_LIMIT = 20 << 20                 # Discord's default per-file upload limit
+TOO_LARGE = {"message": "Request entity too large", "code": 40005}
 EMPTY = {"message": "Cannot send an empty message", "code": 50006}
 BAD_JSON = {"message": "The request body contains invalid JSON.", "code": 50109}
 
@@ -71,12 +76,39 @@ def parse_multipart(content_type, body):
     return payload, files
 
 
+def _form_error(code, message):
+    return {"_errors": [{"code": code, "message": message}]}
+
+
+def form_errors(payload):
+    """Discord's `errors` object for fields of the wrong type or size, or {}."""
+    errors = {}
+    content, username, embeds = (payload.get(k) for k in ("content", "username", "embeds"))
+    if content is not None and not isinstance(content, str):
+        errors["content"] = _form_error("BASE_TYPE_STRING", "Must be a string.")
+    elif isinstance(content, str) and len(content) > MAX_CONTENT:
+        errors["content"] = _form_error("BASE_TYPE_MAX_LENGTH",
+                                        f"Must be {MAX_CONTENT} or fewer in length.")
+    if username is not None and not isinstance(username, str):
+        errors["username"] = _form_error("BASE_TYPE_STRING", "Must be a string.")
+    if embeds is not None:
+        if not isinstance(embeds, list):
+            errors["embeds"] = _form_error("BASE_TYPE_ARRAY", "Must be an array.")
+        elif len(embeds) > MAX_EMBEDS:
+            errors["embeds"] = _form_error("BASE_TYPE_MAX_LENGTH",
+                                           f"Must be {MAX_EMBEDS} or fewer in length.")
+        elif not all(isinstance(e, dict) for e in embeds):
+            errors["embeds"] = _form_error("MODEL_TYPE_CONVERT", "Only dictionaries may be used.")
+    return errors
+
+
 class WebhookSink(loopback_http.LoopbackServer):
     """A running simulated Discord webhook. Messages carry seq, time (`clock`), path,
     username, content, embeds, files, the full payload and `text` (message_text)."""
     POST_TYPES = ("application/json", "multipart/form-data")
+    MAX_BODY = 2 * FILE_LIMIT + (1 << 20)   # an oversized file still reaches the per-file check
 
-    def __init__(self, port=0, clock=time.time, faults=None, sleep=time.sleep):
+    def __init__(self, port=0, clock=time.time, faults=None, sleep=None):
         super().__init__(port, faults=faults, sleep=sleep)
         self.clock = clock
         self.lock = threading.Lock()
@@ -139,13 +171,14 @@ class WebhookSink(loopback_http.LoopbackServer):
             return self._reject(BAD_JSON)
         if not isinstance(payload, dict):
             payload = {}
+        if any(f["size"] > FILE_LIMIT for f in files):
+            return self._reject(TOO_LARGE, 413)
+        shape = form_errors(payload)
+        if shape:
+            return self._reject({"message": "Invalid Form Body", "code": 50035, "errors": shape})
         content = payload.get("content")
         if not (content or payload.get("embeds") or files):
             return self._reject(EMPTY)
-        if isinstance(content, str) and len(content) > MAX_CONTENT:
-            return self._reject({"message": "Invalid Form Body", "code": 50035, "errors": {
-                "content": {"_errors": [{"code": "BASE_TYPE_MAX_LENGTH",
-                                         "message": f"Must be {MAX_CONTENT} or fewer in length."}]}}})
         with self.lock:
             self.seq += 1
             self._messages.append({
@@ -155,10 +188,15 @@ class WebhookSink(loopback_http.LoopbackServer):
                 "payload": payload, "text": message_text(payload)})
         return 204, "", b""
 
-    def _reject(self, error):
+    def too_large(self, length):
         with self.lock:
             self.rejected += 1
-        return loopback_http.json_reply(error, 400)
+        return loopback_http.json_reply(TOO_LARGE, 413)
+
+    def _reject(self, error, status=400):
+        with self.lock:
+            self.rejected += 1
+        return loopback_http.json_reply(error, status)
 
 
 def build_parser():
@@ -169,19 +207,12 @@ def build_parser():
 
 
 def main(argv=None):
+    logsetup.harden_stdio()
     args = build_parser().parse_args(argv)
     sink = WebhookSink(port=args.port).start()
-    if args.ready_file:
-        loopback_http.write_ready_file(args.ready_file, {
-            "port": sink.port, "url": sink.url, "http_url": sink.http_url, "env": sink.env()})
-    print(f"webhook-sink: {sink.url}", flush=True)
-    try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        pass  # Ctrl+C ends the run
-    finally:
-        sink.stop()
+    loopback_http.serve_cli(sink, args.ready_file, {
+        "port": sink.port, "url": sink.url, "http_url": sink.http_url, "env": sink.env()},
+        f"webhook-sink: {sink.url}")
 
 
 fetch = loopback_http.fetch

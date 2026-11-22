@@ -38,6 +38,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))   # obs_ws imports its siblings
 import obs_grab  # noqa: E402
+import loopback_http  # noqa: E402
+import logsetup  # noqa: E402
 import obs_state  # noqa: E402
 import obs_ws  # noqa: E402
 
@@ -432,24 +434,14 @@ def build_parser():
 
 def run(sim, ready_file=None, banner=""):
     sim.start()
-    info = {"port": sim.port, "url": sim.url, "state_url": sim.state_url}
-    if ready_file:
-        tmp = ready_file + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(info, fh)
-        os.replace(tmp, ready_file)
-    print(f"obs-sim: {banner or 'collection ' + sim.state.collection} on {sim.url}, "
-          f"state {sim.state_url}", flush=True)
-    try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        pass  # Ctrl+C ends the run
-    finally:
-        sim.stop()
+    loopback_http.serve_cli(sim, ready_file, {"port": sim.port, "url": sim.url,
+                                              "state_url": sim.state_url},
+                            f"obs-sim: {banner or 'collection ' + sim.state.collection} on {sim.url}, "
+                            f"state {sim.state_url}")
 
 
 def main(argv=None):
+    logsetup.harden_stdio()
     args = build_parser().parse_args(argv)
     image = read_image(args.image) if args.image else None
     run(ObsSim(args.collection, scene=args.scene, image=image, port=args.port,

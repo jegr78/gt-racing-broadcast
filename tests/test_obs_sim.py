@@ -1190,6 +1190,28 @@ def t_obs_sim_py_still_serves_a_fixed_image():
         proc.stdout.close()
 
 
+def t_cli_writes_and_removes_its_ready_file():
+    import queue
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        ready = os.path.join(tmp, "obs.json")
+        proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "tools", "event-sim", "fakes", "obs_sim.py"),
+                                 "--port", "0", "--no-grab", "--ready-file", ready],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        lines = queue.Queue()
+        threading.Thread(target=lambda: lines.put(proc.stdout.readline()), daemon=True).start()
+        try:
+            assert "obs-sim" in lines.get(timeout=60).decode("utf-8", "replace")
+            with open(ready, encoding="utf-8") as fh:
+                assert json.load(fh)["url"].startswith("ws://127.0.0.1:")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+            proc.stdout.close()
+        if os.name != "nt":   # TerminateProcess leaves no chance to clean up
+            assert not os.path.exists(ready), "the CLI removes its ready-file on exit"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
