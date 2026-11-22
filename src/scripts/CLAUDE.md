@@ -168,7 +168,9 @@ never the real one.
   frozen `_radio-*` entrypoints install the guard before they dispatch.
 - `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`.
   `relay_start_plan` answers `refuse` (no kill, no reuse) when the port holder runs in the
-  other mode, and a simulation start never kills an unstamped holder;
+  other mode, and a simulation start never kills an unstamped holder. A live start
+  refuses only while the stamped simulation relay is alive and holds the port; a stale
+  stamp heals as before. `event start` runs the same plan before it launches anything;
   `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop` before it
   touches a live relay. `relay_status_data` carries `mode`.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,

@@ -74,6 +74,9 @@ def _start_seams(tmp):
         (m, "_event_gate_results", lambda e, p: []),
         (m, "_runtime_dir", lambda: tmp),
         (m, "_relay_already_running_for_active_profile", lambda: False),
+        (m, "_relay_start_signals", lambda: dict(
+            port_pids=[], feed_pids=[], pidfile_pid=None, pidfile_alive=False,
+            running_profile="", active_profile="demo", http_ok=False)),
         (m, "_unstopped_event_continues", lambda: False),
         (m, "_clear_on_air_record", noop), (m, "_write_part_reset", noop),
         (m, "_start_driver_invite", noop), (m, "_write_session_start", noop),
@@ -314,6 +317,33 @@ def t_relay_start_never_crosses_simulation_and_live():
     assert _plan("", "live", pidfile_alive=False, pidfile_pid=None)[0] == "heal", \
         "a live start keeps healing an orphan"
     assert _plan("", "simulation", port_pids=[])[0] == "start"
+    action, _kill, reason = _plan("simulation", "live")
+    assert "racecast relay stop" in reason and "--simulation" not in reason, \
+        "a live operator must be able to run the hint as printed"
+    assert _plan("simulation", "live", pidfile_alive=False, pidfile_pid=None)[0] == "heal", \
+        "a stale simulation stamp with a dead relay must not block a live start"
+    assert _plan("simulation", "live", port_pids=[555])[0] == "heal", \
+        "a stale simulation stamp says nothing about a foreign holder"
+    assert _plan("simulation", "live", port_pids=[])[0] == "start"
+
+
+def t_event_start_refuses_a_crossed_relay_before_any_launch():
+    calls = []
+    signals = dict(port_pids=[4242], feed_pids=[], pidfile_pid=4242, pidfile_alive=True,
+                   running_profile="demo", active_profile="demo", http_ok=True,
+                   running_mode="simulation", active_mode="live")
+    os.environ.pop("RACECAST_SIMULATION", None)
+    with _patched(*_external(calls), (m, "_event_gate_results", lambda e, p: []),
+                  (m, "_relay_start_signals", lambda: dict(signals)),
+                  (m, "_tailscale_connect", lambda ev=None: calls.append("tailscale"))):
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.event_start([])
+        except SystemExit as exc:
+            assert "racecast relay stop" in str(exc.code), exc.code
+        else:
+            raise AssertionError("event start went past a simulation relay")
+    assert calls == [], f"event start launched before it refused: {calls}"
 
 
 def t_relay_start_refuses_without_killing():

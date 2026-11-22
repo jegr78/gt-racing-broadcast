@@ -2743,9 +2743,9 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
         if simulated:
             return ("refuse", [], f"port {RELAY_PORT} is held by a relay outside simulation "
                                   f"mode. Stop it first: racecast relay stop")
-        if running_mode == "simulation":
+        if pidfile_alive and pidfile_pid in port_set:   # a stale stamp alone never blocks
             return ("refuse", [], "a simulation relay is running. Stop it first: "
-                                  "racecast --simulation relay stop")
+                                  "racecast relay stop")
     single = len(port_set) == 1
     ours = single and pidfile_alive and (pidfile_pid in port_set)
     if ours and http_ok and running_profile and running_profile == active_profile:
@@ -6926,6 +6926,9 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # self-heal and would otherwise surface as black sources / unresolved feeds
     # mid-broadcast. WARNs (stale cookies, missing media) do not block. `--force`
     # skips the gate for a deliberate degraded start.
+    action, _kill, reason = relay_start_plan(**_relay_start_signals())
+    if action == "refuse":   # before any launch: the relay start would refuse anyway
+        sys.exit(f"racecast: {reason}")
     if "--force" not in rest:
         blockers = ev.gate_blockers(_event_gate_results(ev, pf))
         if blockers:
