@@ -12093,20 +12093,26 @@ DEFAULT_FEED_PORTS = (53001, 53002, 53003)
 
 
 def feed_ports(ports, pov, environ):
-    """([Feed A, Feed B], POV) from --ports and --pov-port; a value not given is the
-    simulated feed port in simulation, else the product default. In simulation an explicit
-    product port raises: a simulated relay never binds 53001-53003."""
+    """([Feed A, Feed B], POV) from --ports and --pov-port. A value not given is the
+    product default 53001/53002/53003, or in simulation the matching port of
+    RACECAST_SIM_FEED_PORTS when that is set (the event simulation always sets it; unset,
+    a simulated relay keeps the product ports). In simulation an explicit port that is a
+    product feed port, 8088, the Control Center's port or the simulated control port raises."""
     try:
         chosen = [int(x) for x in ports.split(",")] if ports else None
     except ValueError:
         chosen = []
     if chosen is not None and len(chosen) != 2:
         raise ValueError(f"--ports takes two port numbers A,B, not {ports!r}")
-    named = (chosen or []) + ([pov] if pov is not None else [])
-    product = [p for p in named if p in DEFAULT_FEED_PORTS]
-    if simulation.active(environ) and product:
-        raise ValueError(f"simulation mode: port {product[0]} is a product feed port (53001-53003); "
-                         "name free ports or set RACECAST_SIM_FEED_PORTS")
+    if simulation.active(environ):
+        taken = {simulation.ui_port(environ): "the Control Center's port",
+                 simulation.relay_port(environ): "the simulated relay control port",
+                 simulation.DEFAULT_RELAY_PORT: "the live relay's control port (8088)"}
+        taken.update(dict.fromkeys(DEFAULT_FEED_PORTS, "a product feed port (53001-53003)"))
+        for port in (chosen or []) + ([pov] if pov is not None else []):
+            if port in taken:
+                raise ValueError(f"simulation mode: port {port} is {taken[port]}; "
+                                 "name free ports or set RACECAST_SIM_FEED_PORTS")
     default = simulation.feed_ports(environ, default=DEFAULT_FEED_PORTS)
     return (chosen if chosen is not None else list(default[:2])), (pov if pov is not None else default[2])
 

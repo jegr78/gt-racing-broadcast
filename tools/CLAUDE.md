@@ -633,7 +633,9 @@ and the RED FLAG banner in the Race Control vocabulary. `ctx.event_link("invite"
 `redaction.py` is the one filter for them: `Engine.data` passes everything the run writes
 (step errors, results, check details, findings, and so the printed lines and both report
 files) through `ctx.scrub`, which removes `t=`, `i=` and `l=` values and driver codes by
-shape and every token, link id and the console secret the run handed out by value. So an
+shape and every token, link id and the console secret of the run by value. It reads the
+event's current invite and timing ids itself (`ctx.learn`, after every step and before a
+scrub), so an id no role asked for, or one renewed mid-run, is covered too. So an
 exception text, a navigation error or an `api` response body cannot carry one out. Every
 page screenshot blacks out the link texts (`selectors.LINKS`).
 

@@ -137,7 +137,7 @@ def _port_problem(value, environ=None):
     port = int(value)
     if port in LIVE_PORTS:
         return f"{RELAY_PORT}={port} is a port of the live relay (8088, 53001-53003); pick a free one"
-    if port == _ui_port(environ):
+    if port == ui_port(environ):
         return f"{RELAY_PORT}={port} is the Control Center's port; pick another one"
     return ""
 
@@ -146,7 +146,8 @@ LIVE_FEED_PORTS = LIVE_PORTS[1:]
 SERVICE_PORTS = {4455: "OBS WebSocket", 8000: "Companion"}   # what preflight probes on this machine
 
 
-def _ui_port(environ):
+def ui_port(environ=None):
+    environ = os.environ if environ is None else environ
     ui = (environ.get("RACECAST_UI_PORT") or "").strip()
     return int(ui) if ui.isascii() and ui.isdigit() else DEFAULT_UI_PORT
 
@@ -164,8 +165,8 @@ def _feed_ports_problem(value, environ=None):
     live = [p for p in ports if p in LIVE_PORTS]
     if live:
         return f"{FEED_PORTS}: {live[0]} is a port of the live relay (8088, 53001-53003); pick a free one"
-    if _ui_port(environ) in ports:
-        return f"{FEED_PORTS}: {_ui_port(environ)} is the Control Center's port; pick another one"
+    if ui_port(environ) in ports:
+        return f"{FEED_PORTS}: {ui_port(environ)} is the Control Center's port; pick another one"
     control = (environ.get(RELAY_PORT) or "").strip()
     if control.isascii() and control.isdigit() and int(control) in ports:
         return f"{FEED_PORTS}: {control} is the simulated relay control port; pick another one"

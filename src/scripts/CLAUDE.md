@@ -155,7 +155,9 @@ never the real one.
   the Control Center's port, the simulated control port, preflight's service ports 4455 and
   8000 or a port of another `RACECAST_SIM_*` endpoint) moves the feed ports. The relay reads
   it itself (`feed_ports` beside `control_port`) when `--ports`/`--pov-port` are not given,
-  so every way of starting it agrees, and it refuses an explicit 53001-53003 in simulation.
+  so every way of starting it agrees, and in simulation it refuses an explicit 53001-53003,
+  8088, Control Center port or simulated control port. `--ports` takes exactly two numbers
+  (anything else is a start error), and an empty `--ports` means the defaults.
   `RACECAST_SIM_RELAY_PORT` without it is a `problems()` entry: two relays would share the
   product feed ports (on Windows `SO_REUSEADDR` lets both bind). `racecast._feed_ports()`
   feeds the busy-port warning, preflight's `relay_ports`, the stop-time

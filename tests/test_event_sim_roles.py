@@ -425,6 +425,46 @@ def t_no_credential_reaches_what_the_engine_writes():
     assert engine.scrub("x ?t=abc.def y", ()) == "x ?t=REDACTED y"
 
 
+def t_a_bare_link_id_in_a_result_is_redacted_even_if_no_role_asked_for_it_and_after_a_renewal():
+    links = {"invite": "INVITEid-0001", "timing": "TIMINGid-0001"}
+
+    class Api(roles.Role):
+        kind = "apiish"
+
+        def act_get(self, args):
+            return {"id": links["timing"], "active": True, "invite": links["invite"]}
+
+        def act_renew(self, args):
+            links["timing"] = "TIMINGid-0002"
+            return {"id": links["timing"]}
+
+    reg = {"apiish": Api}
+    ctx = engine.RunContext(event_link=links.get)
+    scn_ = scenario.from_dict({"step": [{"id": "a", "role": "apiish", "do": "get"},
+                                        {"id": "b", "role": "apiish", "do": "renew", "at": "after:a"},
+                                        {"id": "c", "role": "apiish", "do": "get", "at": "after:b"}]}, reg)
+    clock = Clock()
+
+    def sleep(s):
+        clock.t += max(s, 0.001)
+    data = engine.Engine(scn_, ctx, {}, registry=reg, clock=clock, sleep=sleep).run()
+    text = json.dumps(data)
+    for canary in ("TIMINGid-0001", "TIMINGid-0002", "INVITEid-0001"):
+        assert canary not in text, f"{canary} reached the report: {text[:400]}"
+    assert data["steps"][0]["result"]["active"] is True
+    none = engine.RunContext(event_link=lambda kind: None)
+    assert none.scrub({"x": "plain"}) == {"x": "plain"}, "no link yet is no error"
+
+    def broken(kind):
+        raise OSError("unreadable")
+    assert engine.RunContext(event_link=broken).scrub("still ?t=abc") == "still ?t=REDACTED"
+    reads = []
+    counted = engine.RunContext(event_link=lambda kind: reads.append(kind) or "LINKID-" + kind, clock=lambda: 5.0)
+    for _ in range(50):
+        counted.scrub("x")
+    assert len(reads) == 2, f"the ids are read once per moment, not per string: {len(reads)}"
+
+
 def t_a_failed_navigation_is_a_step_error_without_the_link():
     role, page, _ = make(party.ViewerRole, links={"timing": "LINKCANARY"})
 

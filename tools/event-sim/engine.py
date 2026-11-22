@@ -13,6 +13,8 @@ import roles
 from scenario import TEMPLATE_RE as _TEMPLATE, template_refs
 
 HARD, SOFT = "hard", "soft"
+EVENT_LINKS = ("invite", "timing")
+LEARN_EVERY_S = 1.0
 scrub = redaction.scrub
 POLL_S = 0.25
 
@@ -53,7 +55,7 @@ class RunContext:
     sink) to base URLs; `token(name)` mints a console token for a crew member."""
 
     def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir="",
-                 event=None, event_link=None, secrets=()):
+                 event=None, event_link=None, secrets=(), clock=time.monotonic):
         self.urls = dict(urls or {})
         self._token = token
         self.stub = stub
@@ -62,11 +64,30 @@ class RunContext:
         self.out_dir = out_dir
         self.event = dict(event or {})
         self._event_link = event_link
-        self.secrets = set(secrets)      # every credential handed out, for `scrub`
+        self.secrets = set(secrets)      # every credential of the run, for `scrub`
+        self._clock, self._learned_at = clock, None
         self.findings = []
+
+    def learn(self, force=False):
+        """Note the event's current invite and timing ids as credentials, whoever read
+        them: an `api` answer carries them bare. A renewed link is learned too and the
+        old one kept. Read at most once per LEARN_EVERY_S unless `force`."""
+        now = self._clock()
+        if self._event_link is None or (not force and self._learned_at is not None
+                                        and now - self._learned_at < LEARN_EVERY_S):
+            return
+        self._learned_at = now
+        for kind in EVENT_LINKS:
+            try:
+                link = self._event_link(kind)
+            except Exception:
+                continue  # no readable link is no credential to hide
+            if isinstance(link, str) and link:
+                self.secrets.add(link)
 
     def scrub(self, value):
         """`value` without credentials: the one filter for everything the run writes."""
+        self.learn()
         return redaction.scrub(value, self.secrets)
 
     def url(self, service):
@@ -311,6 +332,7 @@ class Engine:
         if res.status != "skipped":
             self._shoot(step, res)
         self._take_findings(step)
+        self.ctx.learn(force=True)      # a link this step created or renewed
         res.duration = round(self.clock() - begin, 3)
         return res
 

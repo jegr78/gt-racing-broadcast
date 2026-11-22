@@ -336,6 +336,19 @@ def t_the_relay_takes_its_feed_ports_from_the_simulation_and_refuses_the_product
             assert "53001-53003" in str(exc), exc
             continue
         raise AssertionError(f"--ports {ports} --pov-port {pov} must be refused in simulation")
+    full = dict(sim_env, RACECAST_SIM_RELAY_PORT="41000", RACECAST_UI_PORT="41004")
+    for ports, pov, needle in (("8088,42002", None, "live relay's control port"), ("42001,41004", None, "Control Center"),
+                               ("42001,42002", 41000, "simulated relay control port"), ("42001,42002", 8089 + 0, None)):
+        if needle is None:
+            assert m.feed_ports(ports, pov, full) == ([42001, 42002], 8089), "8089 is free when the UI runs elsewhere"
+            continue
+        try:
+            m.feed_ports(ports, pov, full)
+        except ValueError as exc:
+            assert needle in str(exc) and str(exc).startswith("simulation mode: port "), exc
+            continue
+        raise AssertionError(f"--ports {ports} --pov-port {pov} must be refused in simulation")
+    assert m.feed_ports("8088,8089", None, {}) == ([8088, 8089], 53003), "outside simulation nothing is refused"
     try:
         m.feed_ports("abc", None, {})
     except ValueError as exc:
