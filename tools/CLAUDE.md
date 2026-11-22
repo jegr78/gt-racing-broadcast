@@ -386,6 +386,60 @@ pins its packets to the GT7 layout.
 python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4
 ```
 
+## Stream stub (`tools/event-sim/fakes/stream_stub.py`, #1231)
+
+Stand-ins for `yt-dlp` and `streamlink` that serve `sim://<name>` channels and refuse
+every other address; they open no connection. `StreamStub(dir).install()` writes them into
+`dir`, and `.env()` gives `RACECAST_SIMULATION=1` and `RACECAST_SIM_STREAM_BIN=dir`.
+
+- yt-dlp resolves a live channel to `http://sim.invalid/<name>/<height>.m3u8` and prints
+  `rcq <height> 25`, the height being the `-f` cap and at most 360. `.invalid` never resolves, so the
+  relay's one manifest probe fails at the network guard and reports nothing. Offline,
+  upcoming and ended exit 1 with the text `classify_source_state` reads; the live-status
+  print answers `is_upcoming` or `was_live`. Downloads, `--cookies-from-browser` and real
+  URLs exit 1, an unknown flag exits 2.
+- streamlink maps only that URL or a bare `sim://<name>` back to a channel. It writes
+  MPEG-TS on `--stdout`, or serves it on `127.0.0.1` at `--player-external-http-port`, where the
+  real tool binds every interface. It reports version 8.2.0, and its help lists
+  `--stream-segmented-queue-deadline`.
+- `tests/test_stream_stub.py` feeds every yt-dlp and streamlink argv the relay and
+  `loopstream` build through the stand-ins' parsers, so a new flag in `src/` fails there.
+
+The picture comes from ffmpeg: `testsrc2` at 640x360 and 25 fps, mpeg2video and mp2 in
+MPEG-TS. It carries stint, commentator and channel as drawtext from `label.txt` in
+fontconfig's default font; if drawtext fails, the pull logs it and goes on without text.
+An 18-cell strip at the bottom holds the channel's `code` and stint, and the audio is a
+sine at `tone_hz(code)`.
+`decode_identity(rgb, w, h)` reads `(code, stint)` back from a grabbed frame. The stand-in
+copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe.
+
+Control for the scenario engine: each channel is `<dir>/channels/<name>.json`, which every
+running pull reads every 0.2 s. Times are epoch seconds; `at` defaults to now, `until` to
+the next `clear`.
+
+- `channel(name, stint=, commentator=, status=)` creates or updates a channel, and a new
+  one is live. A status other than `live` ends the running pulls.
+- `cut(name, at=None)`: the pulls running at `at` end like a finished stream (exit 0);
+  later pulls play, so the relay recovers at once.
+- `stall(name, at=None, until=None)`: pulls in the window send nothing and stay alive,
+  which is the relay's byte-stall watchdog case.
+- `freeze(name, at=None, until=None)`: pulls in the window send still colour bars with
+  the identity and the tone at the normal rate, a freeze only the picture shows.
+- `clear(name)` ends a stall and a freeze, running or scheduled.
+
+```bash
+python3 tools/event-sim/fakes/stream_stub.py DIR install
+python3 tools/event-sim/fakes/stream_stub.py DIR set comms2 --stint 2 --commentator Ben
+python3 tools/event-sim/fakes/stream_stub.py DIR freeze comms2 --until 1790000000
+```
+
+Windows: the relay starts `yt-dlp` by bare name, and CreateProcess adds only `.exe`. Each
+stand-in there is distlib's console launcher, `t64.exe`, `t64-arm.exe` or `t32.exe`, the
+one pip's own scripts use. The stub reads it from the pip wheel ensurepip bundles or from
+an installed pip and appends `#!<python>` and a zip with `__main__.py`; the launcher runs
+the interpreter on its own file. Elsewhere a stand-in is an sh/Python script, mode 0o700.
+The CI e2e job sets `OBS_SIM_REQUIRE_FFMPEG=1`, so the real-ffmpeg test cannot skip there.
+
 ## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
 Two maintainer gates for a pass that is supposed to touch comments and prose only.
 Both compare the working tree against a base ref and are read-only.
