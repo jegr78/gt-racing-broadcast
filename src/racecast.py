@@ -805,7 +805,7 @@ def _recorded_relay_start():
     try:
         with open(_relay_start_path(), encoding="utf-8") as fh:
             return fh.read().strip() or None
-    except OSError:
+    except (OSError, ValueError):   # unreadable or not UTF-8: no marker
         return None
 
 
@@ -5424,7 +5424,25 @@ def relay_stop(rest):
         _clear_relay_profile_stamp()        # no relay -> no running-profile stamp
         print("relay is not running.")
         return
-    if sv.stop_pid(pid, _relay_pid_path(), is_target=_relay_is_target):
+    target = _relay_is_target
+    if not _relay_is_target(pid):
+        port = _relay_port()
+        holders = sorted(set(pt.pids_on_port(port)))
+        if pid in holders:
+            target = None    # it holds the relay control port, so it is the relay
+        elif holders:
+            print(f"relay: PID {pid} in the PID file is not the relay, and port {port} is held "
+                  f"by PID {', '.join(map(str, holders))}. Nothing was stopped; check that "
+                  f"process before freeing the port.")
+            raise SystemExit(1)
+        else:
+            if os.path.exists(_relay_pid_path()):
+                os.remove(_relay_pid_path())
+            _clear_relay_profile_stamp()
+            print(f"relay: PID {pid} in the PID file is not the relay and nothing listens on "
+                  f"port {port}, so the relay is not running. Removed the stale PID file.")
+            return
+    if sv.stop_pid(pid, _relay_pid_path(), is_target=target):
         _clear_relay_profile_stamp()
         print("relay stopped.")
         _release_obs_feeds()                # AFTER the kill, see docstring

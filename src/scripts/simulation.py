@@ -290,18 +290,21 @@ def _windows_started(pid):
         kernel.CloseHandle(handle)
 
 
-def process_started(pid):
+def process_started(pid, run=subprocess.run, platform=None):
     """An opaque start marker for `pid` so a reused pid is not mistaken for it, or None
     when the process is gone or the OS does not answer."""
+    platform = sys.platform if platform is None else platform
     try:
-        if os.name == "nt":
+        if platform == "win32":
             return _windows_started(pid)
-        if sys.platform.startswith("linux"):
+        if platform.startswith("linux"):
             with open(f"/proc/{int(pid)}/stat", encoding="utf-8", errors="replace") as fh:
                 return fh.read().rsplit(")", 1)[1].split()[19]
-        if sys.platform == "darwin":
-            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))],
-                                 capture_output=True, text=True, errors="replace", timeout=5)
+        if platform == "darwin":
+            # lstart follows the locale and time zone; pin both so every caller agrees.
+            env = dict(os.environ, LC_ALL="C", LANG="C", TZ="UTC")
+            out = run(["ps", "-o", "lstart=", "-p", str(int(pid))], capture_output=True,
+                      text=True, errors="replace", timeout=5, env=env)
             return out.stdout.strip() or None
     except (OSError, ValueError, IndexError, AttributeError, subprocess.SubprocessError):
         return None

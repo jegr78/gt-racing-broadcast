@@ -454,6 +454,61 @@ def t_a_verified_start_records_the_relay_start():
     assert recorded == [4242]
 
 
+def t_a_marker_that_does_not_decode_is_no_marker():
+    with tempfile.TemporaryDirectory() as tmp, _patched((m, "_runtime_base_dir", lambda: tmp)):
+        with open(m._relay_start_path(), "wb") as fh:
+            fh.write(b"\xff\xfe\x00bad")
+        assert m._recorded_relay_start() is None
+
+
+def t_macos_start_marker_ignores_locale_and_time_zone():
+    calls = []
+
+    def run(argv, **kw):
+        calls.append((argv, kw.get("env")))
+        return subprocess.CompletedProcess(argv, 0, "Sat Nov 22 14:00:01 2026\n", "")
+    with _env(LANG="de_DE.UTF-8", LC_ALL="de_DE.UTF-8", TZ="Europe/Berlin"):
+        mark = sim.process_started(4242, run=run, platform="darwin")
+    assert mark == "Sat Nov 22 14:00:01 2026", mark
+    argv, env = calls[0]
+    assert argv[:3] == ["ps", "-o", "lstart="], argv
+    assert env and env.get("LC_ALL") == "C" and env.get("LANG") == "C" and env.get("TZ") == "UTC", env
+
+
+def _stop_case(identity, holders):
+    out, stopped, removed = io.StringIO(), [], []
+    seams = ((m.sv, "read_pid", lambda p: 4242), (m.sv, "pid_alive", lambda pid: True),
+             (m, "_relay_identity", lambda pid: identity), (m.pt, "pids_on_port", lambda port: list(holders)),
+             (m.sv, "stop_pid", lambda pid, path=None, is_target=None:
+                 stopped.append((pid, is_target)) or (is_target is None or is_target(pid))),
+             (m, "_clear_relay_profile_stamp", lambda: removed.append("stamps")),
+             (m, "_release_obs_feeds", lambda: None), (m, "_running_relay_mode", lambda: "live"))
+    code = 0
+    with tempfile.TemporaryDirectory() as tmp, _patched(*seams, (m, "_runtime_base_dir", lambda: tmp)):
+        open(m._relay_pid_path(), "w").close()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.relay_stop([])
+        except SystemExit as exc:
+            code = exc.code
+        pidfile = os.path.exists(m._relay_pid_path())
+    return out.getvalue(), stopped, removed, code, pidfile
+
+
+def t_relay_stop_never_reports_success_while_the_relay_runs():
+    text, stopped, removed, code, _pf = _stop_case("other", [4242])
+    assert stopped and stopped[0][1] is None and "relay stopped." in text, \
+        "a stale marker on the process that holds the relay port is still the relay"
+    text, stopped, removed, code, pidfile = _stop_case("other", [777])
+    assert stopped == [] and removed == [] and code and pidfile, (text, stopped, removed, code)
+    assert "relay stopped." not in text and "4242" in text and "777" in text, text
+    text, stopped, removed, code, pidfile = _stop_case("other", [])
+    assert stopped == [] and not pidfile and removed and "relay stopped." not in text, text
+    assert "not running" in text, text
+    text, stopped, removed, code, _pf = _stop_case("relay", [4242])
+    assert stopped and "relay stopped." in text
+
+
 def t_start_signals_treat_an_unknown_process_as_a_relay():
     for identity, expected in (("relay", True), ("unknown", True), ("other", False)):
         with _patched((m.pt, "pids_on_port", lambda port: []), (m.sv, "read_pid", lambda p: 4242),

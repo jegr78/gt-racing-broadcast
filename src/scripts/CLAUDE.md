@@ -192,7 +192,11 @@ never the real one.
   after a verified start and dropped with the stamps; `services.relay_identity` compares it
   first and falls back to the command line, so a recycled PID is "other" (the start heals,
   `relay stop` never signals it) and a failed probe is "unknown" (it still blocks a start
-  across modes, but `relay stop` does not signal it). A
+  across modes, but `relay stop` does not signal it). When the check rejects a live PID,
+  `relay stop` asks the control port: the same PID there is the relay and is stopped; another
+  holder is named and the stop exits 1 without touching the stamps; no holder removes the
+  stale PID file and says the relay is not running. On macOS the marker is `ps -o lstart=`
+  run with `LC_ALL=C`, `LANG=C` and `TZ=UTC`, so the locale never changes it. A
   simulation start also refuses an unstamped port holder and never kills it; a stale stamp
   with a dead relay heals as before. `event start` runs the same plan before it launches
   anything; `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop`
