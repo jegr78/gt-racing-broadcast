@@ -717,8 +717,12 @@ def streamlink_main(directory, argv, out, err):
     stdout = out.buffer
 
     def write(chunk):
-        stdout.write(chunk)
-        stdout.flush()
+        try:
+            stdout.write(chunk)
+            stdout.flush()
+        except OSError:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), stdout.fileno())   # no flush error at exit
+            raise
     return Pull(directory, name, height, ffmpeg, write, log).run()
 
 

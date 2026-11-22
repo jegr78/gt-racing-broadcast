@@ -281,12 +281,19 @@ def t_control_api_writes_what_the_stand_ins_read():
     assert ch["freeze"] is None and ch["stall"] is None, "clear ends running and scheduled windows"
     again = stream_stub.StreamStub(stub.directory).channel("comms3")
     assert again["code"] not in (a["code"], b["code"]), "a second controller keeps the codes unique"
-    for bad in ("sim://x", "../x", "", "x" * 65):
+    for bad in ({"name": "sim://x"}, {"name": "../x"}, {"name": ""}, {"name": "x" * 65},
+                {"name": "ok", "status": "gone"}, {"name": "ok", "stint": 256}, {"name": "ok", "stint": "2"}):
         try:
-            stub.channel(bad)
+            stub.channel(**bad)
         except ValueError:
             continue
-        raise AssertionError(f"{bad!r} is not a channel name")
+        raise AssertionError(f"{bad!r} must be refused")
+    try:
+        stub.cut("nobody")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a fault needs an existing channel")
 
 
 def t_identity_strip_round_trips_through_a_frame():
@@ -299,6 +306,11 @@ def t_identity_strip_round_trips_through_a_frame():
                 px[(yy * w + x) * 3:(yy * w + x + bw) * 3] = bytes((v,)) * (bw * 3)
         assert stream_stub.decode_identity(bytes(px), w, h) == (code, stint)
     assert stream_stub.decode_identity(bytes(w * h * 3), w, h) is None, "a black frame carries no identity"
+    assert stream_stub.decode_identity(b"\xff" * (w * h * 3), w, h) is None, "a white frame fails the end marker"
+    x, y, bw, bh, _white = stream_stub.identity_boxes(w, h, 173, 3)[4]
+    for yy in range(y, y + bh):
+        px[(yy * w + x) * 3:(yy * w + x + bw) * 3] = b"\x80" * (bw * 3)
+    assert stream_stub.decode_identity(bytes(px), w, h) is None, "a grey cell is not read as a bit"
 
 
 def t_ffmpeg_argv_is_conservative():
@@ -336,10 +348,12 @@ def t_ytdlp_stand_in_answers_the_relay_resolve():
         hls, err, _q = relay.resolve_hls("https://www.youtube.com/watch?v=abc", None, LOG)
         assert hls is None and "sim://" in err, "a real URL is never resolved"
         assert relay.yt_live_video_lookup("sim://comms1", None) is None, "the chat lookup wraps the name: refused"
-        r = subprocess.run(["yt-dlp", "--cookies-from-browser", "firefox", "--cookies", "x", "--skip-download",
-                            "--no-warnings", "https://www.youtube.com"], capture_output=True, text=True,
+        stub.channel("comms1", status="live")
+        jar = os.path.join(stub.directory, "jar.txt")
+        r = subprocess.run(["yt-dlp", "--cookies-from-browser", "firefox", "--cookies", jar, "--skip-download",
+                            "--no-warnings", "sim://comms1"], capture_output=True, text=True,
                            errors="replace", timeout=WAIT)
-        assert r.returncode == 1 and not os.path.exists("x"), "no cookie export in simulation"
+        assert r.returncode == 1 and not os.path.exists(jar), "no cookie export in simulation"
         assert preflight.tool_version("yt-dlp").startswith("20")
     finally:
         restore()
@@ -458,6 +472,23 @@ def t_killing_the_stand_in_ends_its_ffmpeg():
         assert _eventually(lambda: not _alive(pid)), "the orphaned ffmpeg stops on its broken pipe"
     finally:
         pull.close()
+        restore()
+
+
+def t_a_closed_consumer_ends_the_pull():
+    stub = _stub()
+    stub.channel("comms1")
+    restore = _on_path(stub)
+    proc = subprocess.Popen(relay.streamlink_fanout_cmd("sim://comms1"), stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL)
+    try:
+        assert proc.stdout.read(4), "bytes flow"
+        proc.stdout.close()
+        assert proc.wait(timeout=WAIT) == 1, "the stand-in exits once nobody reads its stdout"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=WAIT)
         restore()
 
 
