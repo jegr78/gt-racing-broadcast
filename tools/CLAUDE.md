@@ -297,8 +297,11 @@ is only counted as `key_reads`, never logged with its key. Every other call land
 
 `webhook_sink.py` takes any POST path outside `/_sim/` as a Discord webhook (JSON, or
 multipart with `payload_json` and files as the report send posts) and answers 204. An
-empty, unparseable or over-2000-character message gets Discord's 400 body (code 50006,
-50109, 50035) and is counted in `rejected`, not recorded. Each message keeps seq, time,
+empty or unparseable message gets Discord's 400 body (50006, 50109); a field of the
+wrong type or size (content not a string or over 2000 characters, username not a
+string, embeds not a list of at most 10 objects) gets 400 50035 with the field under
+`errors`; a file over Discord's documented 20 MiB per-file default a 413 40005. None of
+them is recorded; `rejected` counts them. Each message keeps seq, time,
 path, username, content, embeds, file names and sizes, and `text`: content, username and
 the embeds' titles, descriptions, fields, footers. `count(needle)` matches `text`
 without case.
@@ -317,13 +320,26 @@ Failure injection: a rule `{"target", "delay", "status", "error", "times"}` from
 constructor (`faults=[...]`), `.fail(target, ...)` or `POST /_sim/fail` (one rule or a
 list; an empty body clears them, as `.clear_faults()` does). Targets: the Sheet's
 `tab:<Tab>` and `read` for gviz reads, `action:<action>` and `push` for script calls;
-the sink's `path:<path>` and `hook`. The first matching rule sleeps `delay` through the
-`sleep` seam (tests pass a recorder, never the wall clock), then answers in place of
-the request when it has a status or an error: the Sheet's script error is HTTP 200
-`{"error": ...}`, the sink's is 400 `{"message": ..., "code": 0}`, a bare status gets
-`{"error": "simulated failure"}`. A faulted request never reaches the tabs or the
-message log. `times` spends a rule after that many hits; `faults_hit` in `/_sim/state`
-counts them.
+the sink's `path:<path>` and `hook`. Every matching rule adds its `delay`, slept through
+the `sleep` seam (tests pass a recorder, never the wall clock; the default wait ends on
+`stop()`). The first matching rule with a status (400-599 only) or an error answers in
+place of the request, and rules behind it are not hit: the Sheet's script error is HTTP
+200 `{"error": ...}`, a read error needs a status and answers an HTML error page, the
+sink's error is 400 `{"message": ..., "code": 0}`, a bare status gets `{"error":
+"simulated failure"}`. A faulted request never reaches the tabs or the message log.
+`times` spends a rule after that many hits; `faults_hit` in `/_sim/state` counts every
+rule hit.
+
+Script Properties can be seeded out of process with `--stream-keys FILE` (JSON
+`{ref: key}`) or `POST /_sim/stream-keys`, which answers only the number of refs; no
+route reads a key back. `redirect=True` (`--redirect`) answers the push URL the way
+Apps Script does, with a 302 to a one-time echo URL that urllib follows as a GET.
+Seeded cells are formatted like `setValue` writes them (`TRUE`/`FALSE`, null empty).
+`stop()` refuses new requests with 503, wakes handlers in a delay and joins them for
+at most 5 s. Bodies are capped (Sheet 1 MiB, sink 41 MiB so an oversized file still
+reaches the per-file check); a refused body is drained up to 1 MiB first, so the
+client receives the answer. The CLIs remove their ready-file on Ctrl+C or SIGTERM
+(`obs_sim.py` too).
 
 Unverified against the real services (from memory or chosen, not measured):
 - gviz on an unknown `sheet=` name: the fake answers an empty 200. Forum reports of
@@ -332,18 +348,25 @@ Unverified against the real services (from memory or chosen, not measured):
 - gviz without `headers=1` may merge leading rows into a header; the fake never does.
 - Discord's `?wait=true` (200 with the message object) is ignored: the sink always
   answers 204.
-- The Discord 400 bodies (50006, 50109, 50035) are written from memory; no racecast
-  caller reads them.
+- The Discord 400 and 413 bodies (50006, 50109, 50035, 40005) and the `errors` shapes
+  are written from memory; no racecast caller reads them. The 20 MiB per-file limit is
+  from Discord's API reference; Nitro and boost tiers raise it, the fake does not.
+- gviz types each column by its majority and exports minority-type cells blank (why the
+  script pins every written cell to text with `setNumberFormat('@')`); the fake keeps
+  every cell as text.
+- `/exec` answers a POST with a 302 to `script.googleusercontent.com`; the fake answers
+  directly unless `redirect=True`, and its echo URL stays on loopback.
 
 ```bash
-python3 tools/event-sim/fakes/sheet_sim.py --port 0 --tabs DIR --ready-file sheet.json
+python3 tools/event-sim/fakes/sheet_sim.py --port 0 --tabs DIR --stream-keys keys.json --ready-file sheet.json
 python3 tools/event-sim/fakes/webhook_sink.py --port 0 --ready-file sink.json
 ```
 
 `tests/test_sheet_sim.py` and `tests/test_webhook_sink.py` drive them through the relay's
 own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSource`,
 `parse_timer_tab`, `apply_stream_service_for_ref` on the Channel tab, get-graphics on the
-Assets tab, the Discord payload builders, `http_util.post_multipart`).
+Assets tab, the Discord payload builders, the relay's own `Relay._discord_post`,
+`http_util.post_multipart`).
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
