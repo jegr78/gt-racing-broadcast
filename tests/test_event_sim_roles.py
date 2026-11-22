@@ -990,6 +990,14 @@ def t_refused_telemetry_is_a_soft_finding_at_the_end():
     assert len(out) == 1 and out[0][0] == "soft" and "telemetry posts" in out[0][1], out
 
 
+def t_a_dead_sender_thread_is_a_hard_finding():
+    role = drivers_role()
+    role.do("register", {"stints": 1})
+    role.do("start", {})
+    role.runner.error = "ZeroDivisionError: division by zero"
+    assert ("hard", "the drivers stopped sending: ZeroDivisionError: division by zero") in role.close()
+
+
 # -- the stack's part -------------------------------------------------------------------
 def scn(event):
     return scenario.from_dict({"event": event, "step": [{"role": "api", "do": "get", "args": {"path": "/status"}}]}, REG)

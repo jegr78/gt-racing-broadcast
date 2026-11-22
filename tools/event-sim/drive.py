@@ -490,14 +490,19 @@ class Runner:
         self.lock = threading.Lock()
         self.halt = threading.Event()
         self.thread = None
+        self.error = ""          # why the loop ended on its own
 
     def loop(self, until=None):
         """Step until halted, or until the clock reaches `until`."""
         last = self.clock()
         while not self.halt.is_set() and (until is None or self.clock() < until):
             now = self.clock()
-            with self.lock:
-                self.field.step(now, min(0.5, max(now - last, 0.0)) or self.tick_s)
+            try:
+                with self.lock:
+                    self.field.step(now, min(0.5, max(now - last, 0.0)) or self.tick_s)
+            except Exception as exc:  # a dead sender thread must not look like quiet cars
+                self.error = f"{type(exc).__name__}: {exc}"
+                return
             last = now
             self.sleep(max(0.0, self.tick_s - (self.clock() - now)))
 

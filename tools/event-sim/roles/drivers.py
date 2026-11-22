@@ -153,6 +153,8 @@ class DriversRole(Role):
         out = []
         if self.runner is not None and not self.runner.close():
             out.append(("soft", "the drivers' sender thread did not stop in time"))
+        if self.runner is not None and getattr(self.runner, "error", ""):
+            out.append(("hard", f"the drivers stopped sending: {self.runner.error}"))
         if self.field is not None and self.field.errors:
             out.append(("soft", f"{self.field.errors} telemetry posts were refused or failed"))
         return out

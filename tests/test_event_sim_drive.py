@@ -323,6 +323,14 @@ def t_the_runner_steps_on_its_clock_and_stops():
     runner.close()
 
 
+def t_a_step_that_raises_ends_the_runner_with_its_reason():
+    f = field(Wire(), cars=1)
+    f.step = lambda now, dt: 1 / 0
+    runner = drive.Runner(f, clock=lambda: 1.0, sleep=lambda s: None)
+    runner.loop()
+    assert runner.error.startswith("ZeroDivisionError"), f"the loop ends and says why: {runner.error!r}"
+
+
 def t_the_runner_ends_at_its_deadline():
     wire = Wire()
     f = field(wire, cars=1)
