@@ -166,10 +166,14 @@ Report: the numbers per platform, every interruption with its time, what iOS did
 ## 7. Android emulator with Termux and forced Doze
 
 Question: does Termux run the script in the Android emulator with the host forwarding
-UDP 33740, and does it survive forced Doze? Needs Android Studio with an emulator
-(not on the producer PC today; the Mac works).
+UDP 33740, and does it survive forced Doze? Needs the Android CLI (`winget install
+Google.AndroidCLI`, `brew install --cask android-cli`, or the binary from
+dl.google.com on Linux) and one virtual device: `android emulator create medium_phone`
+downloads the emulator, `adb` and a system image. Android Studio is not needed. Do not
+run the emulator during a broadcast: it takes CPU and RAM next to OBS.
 
-1. Start an emulator, install Termux (F-Droid APK, `adb install`).
+1. `android emulator list`, then `android emulator start <name>`. Install Termux
+   (F-Droid APK, `adb install`).
 2. In Termux: `pkg install python`, `termux-wake-lock`, get the script
    (`curl -o` from the invite page link, or `adb push` and `termux-setup-storage`).
 3. Host forwarding: `adb emu redir add udp:33740:33740`, inbound UDP 33740 allowed on
