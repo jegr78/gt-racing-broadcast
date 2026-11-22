@@ -12089,6 +12089,28 @@ def simulation_startup(environ):
     return None
 
 
+DEFAULT_FEED_PORTS = (53001, 53002, 53003)
+
+
+def feed_ports(ports, pov, environ):
+    """([Feed A, Feed B], POV) from --ports and --pov-port; a value not given is the
+    simulated feed port in simulation, else the product default. In simulation an explicit
+    product port raises: a simulated relay never binds 53001-53003."""
+    try:
+        chosen = [int(x) for x in ports.split(",")] if ports else None
+    except ValueError:
+        chosen = []
+    if chosen is not None and len(chosen) != 2:
+        raise ValueError(f"--ports takes two port numbers A,B, not {ports!r}")
+    named = (chosen or []) + ([pov] if pov is not None else [])
+    product = [p for p in named if p in DEFAULT_FEED_PORTS]
+    if simulation.active(environ) and product:
+        raise ValueError(f"simulation mode: port {product[0]} is a product feed port (53001-53003); "
+                         "name free ports or set RACECAST_SIM_FEED_PORTS")
+    default = simulation.feed_ports(environ, default=DEFAULT_FEED_PORTS)
+    return (chosen if chosen is not None else list(default[:2])), (pov if pov is not None else default[2])
+
+
 def control_port(value, environ):
     """--http-port, else the simulated relay port in simulation, else 8088."""
     return value if value is not None else simulation.relay_port(environ)
@@ -16069,8 +16091,9 @@ def main():
                     help="Full CSV URL (overrides sheet-id/tab; e.g. publish-to-web)")
     ap.add_argument("--pov-tab", default=DEFAULT_POV_TAB,
                     help="Google-Sheet tab holding the ad-hoc driver-POV URL (cell A2).")
-    ap.add_argument("--pov-port", type=int, default=53003,
-                    help="Local port for the driver-POV PiP feed (OBS 'Feed POV').")
+    ap.add_argument("--pov-port", type=int, default=None,
+                    help="Local port for the driver-POV PiP feed (OBS 'Feed POV'); default 53003, "
+                         "in simulation the third port of RACECAST_SIM_FEED_PORTS.")
     ap.add_argument("--no-pov", action="store_true",
                     help="Disable the driver-POV PiP feed entirely.")
     ap.add_argument("--qualifying-tab", default=DEFAULT_QUALIFYING_TAB,
@@ -16167,7 +16190,9 @@ def main():
     ap.add_argument("--runtime-base", default=None,
                     help="machine runtime dir (shared GT7 data); default: parent of "
                          "--runtime-dir")
-    ap.add_argument("--ports", default="53001,53002")
+    ap.add_argument("--ports", default=None,
+                    help="Feed A and Feed B ports as A,B; default 53001,53002, in simulation "
+                         "the first two ports of RACECAST_SIM_FEED_PORTS.")
     ap.add_argument("--stint", type=int, default=1,
                     help="1-based stint that is ON AIR right now (producer takeover): "
                          "Feed A serves it, Feed B preloads the next one. Default 1.")
@@ -16200,6 +16225,11 @@ def main():
     if _sim_error:
         sys.exit(f"ERROR: {_sim_error}")
     args.http_port = control_port(args.http_port, os.environ)
+    try:
+        ports, args.pov_port = feed_ports(args.ports, args.pov_port, os.environ)
+    except ValueError as exc:
+        sys.exit(f"ERROR: {exc}")
+    args.ports = ",".join(str(p) for p in ports)
     if simulation.install_network_guard():
         print("Simulation mode: loopback endpoints only, no outbound connection.", flush=True)
 
@@ -16233,8 +16263,6 @@ def main():
 
     local = args.schedule if os.path.isabs(args.schedule) else os.path.join(runtime, args.schedule)
     cache = os.path.join(runtime, "schedule.cache.txt")
-    ports = [int(x) for x in args.ports.split(",")]
-
     csv_url = args.sheet_csv_url or _sheet_tab_csv_url(args.sheet_id, args.sheet_tab)
 
     LOG.info("relay starting: profile=%s bind=%s ports=%s mode=%s schedule=%s",

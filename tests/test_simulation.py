@@ -308,6 +308,40 @@ def t_feed_ports_move_only_in_simulation_and_never_onto_a_live_port():
     assert any("control port" in p for p in sim.problems(clash)), sim.problems(clash)
     ui = dict(base, RACECAST_SIM_FEED_PORTS="41001,41002,41003", RACECAST_UI_PORT="41003")
     assert any("Control Center" in p for p in sim.problems(ui)), sim.problems(ui)
+    for port, what in ((4455, "OBS WebSocket"), (8000, "Companion")):
+        taken = sim.problems(dict(base, RACECAST_SIM_FEED_PORTS=f"41001,{port},41003"))
+        assert any(sim.FEED_PORTS in p and what in p for p in taken), (port, taken)
+    for var, url in (("RACECAST_SIM_OBS_WS", "ws://127.0.0.1:41002"), ("RACECAST_SIM_SHEET_URL", "http://127.0.0.1:41001/s"),
+                     ("RACECAST_SIM_SHEET_PUSH_URL", "http://localhost:41003/exec"),
+                     ("RACECAST_SIM_DISCORD_WEBHOOK_URL", "http://127.0.0.1:41003/hook")):
+        clash = sim.problems(dict(base, RACECAST_SIM_FEED_PORTS="41001,41002,41003", **{var: url}))
+        assert any(sim.FEED_PORTS in p and var in p for p in clash), (var, clash)
+    import preflight
+    assert {p for p, _ in preflight.SERVICE_PORTS} <= set(sim.SERVICE_PORTS), "the feed ports avoid every service preflight probes"
+
+
+def t_the_relay_takes_its_feed_ports_from_the_simulation_and_refuses_the_product_ones():
+    m = _relay()
+    sim_env = dict(ON, RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+    assert m.feed_ports(None, None, {}) == ([53001, 53002], 53003)
+    assert m.feed_ports(None, None, sim_env) == ([41001, 41002], 41003), \
+        "a relay started directly in simulation never binds the product ports"
+    assert m.feed_ports("42001,42002", 42003, sim_env) == ([42001, 42002], 42003), "explicit ports still win"
+    assert m.feed_ports("42001,42002", None, sim_env) == ([42001, 42002], 41003)
+    assert m.feed_ports("53001,53002", 53003, {}) == ([53001, 53002], 53003), "a live relay may name its own ports"
+    for ports, pov in (("53001,42002", None), ("42001,53002", None), (None, 53003), ("42001,42002", 53001)):
+        try:
+            m.feed_ports(ports, pov, sim_env)
+        except ValueError as exc:
+            assert "53001-53003" in str(exc), exc
+            continue
+        raise AssertionError(f"--ports {ports} --pov-port {pov} must be refused in simulation")
+    try:
+        m.feed_ports("abc", None, {})
+    except ValueError as exc:
+        assert "two port numbers" in str(exc), exc
+    else:
+        raise AssertionError("--ports must be two port numbers")
 
 
 def t_relay_port_moves_only_in_simulation():
@@ -316,7 +350,11 @@ def t_relay_port_moves_only_in_simulation():
     assert sim.relay_port({"RACECAST_SIM_RELAY_PORT": "41234"}) == 8088, "outside simulation nothing changes"
     assert sim.relay_port(dict(ON)) == 8088, "unset keeps 8088"
     assert sim.relay_port(dict(ON, RACECAST_SIM_RELAY_PORT=" 41234 ")) == 41234
-    base = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin())
+    bare = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin())
+    alone = sim.problems(dict(bare, RACECAST_SIM_RELAY_PORT="41234"))
+    assert len(alone) == 1 and sim.FEED_PORTS in alone[0] and "53001-53003" in alone[0], \
+        f"a moved control port without moved feed ports would share 53001-53003 with a live relay: {alone}"
+    base = dict(bare, RACECAST_SIM_FEED_PORTS="41001,41002,41003")
     assert sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="41234")) == []
     assert "8088" in " ".join(sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="8088"))), \
         "the live relay's port is no simulation port"

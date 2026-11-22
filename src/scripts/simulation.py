@@ -143,6 +143,7 @@ def _port_problem(value, environ=None):
 
 
 LIVE_FEED_PORTS = LIVE_PORTS[1:]
+SERVICE_PORTS = {4455: "OBS WebSocket", 8000: "Companion"}   # what preflight probes on this machine
 
 
 def _ui_port(environ):
@@ -168,6 +169,16 @@ def _feed_ports_problem(value, environ=None):
     control = (environ.get(RELAY_PORT) or "").strip()
     if control.isascii() and control.isdigit() and int(control) in ports:
         return f"{FEED_PORTS}: {control} is the simulated relay control port; pick another one"
+    for port in ports:
+        if port in SERVICE_PORTS:
+            return f"{FEED_PORTS}: {port} is the {SERVICE_PORTS[port]} port; pick another one"
+    for var in SCHEMES:
+        try:
+            taken = urlparse((environ.get(var) or "").strip()).port
+        except ValueError:
+            taken = None
+        if taken in ports:
+            return f"{FEED_PORTS}: {taken} is the port of {var}; pick another one"
     return ""
 
 
@@ -251,6 +262,9 @@ def problems(environ=None):
     feeds = (environ.get(FEED_PORTS) or "").strip()
     if feeds and _feed_ports_problem(feeds, environ):
         out.append(_feed_ports_problem(feeds, environ))
+    if port and not feeds:
+        out.append(f"{RELAY_PORT} is set without {FEED_PORTS}: this relay would share the feed "
+                   "ports 53001-53003 with a live relay; set three free ports")
     return out
 
 

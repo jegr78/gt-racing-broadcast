@@ -3163,47 +3163,71 @@ def _sim_env(**values):
     return restore
 
 
-def t_a_simulated_relay_start_never_counts_the_live_feed_ports():
+def t_a_simulated_relay_start_never_kills_a_feed_port_holder():
     restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
     saved = m.pt.pids_on_port
-    holders = {53001: [777], 53002: [777], 53003: [777], 41001: [4242], 41002: [4242], 41003: [4243]}
+    holders = {53001: [777], 53002: [777], 53003: [777], 41001: [888], 41002: [888], 41003: [889]}
     env = _sim_env()
     try:
         m.pt.pids_on_port = lambda port: [4242] if port == m._relay_port() else holders.get(port, [])
         assert m._relay_start_signals()["feed_pids"] == [777], "a live start heals its own feed ports"
         os.environ["RACECAST_SIMULATION"] = "1"
-        signals = m._relay_start_signals()
-        assert signals["feed_pids"] == [], \
-            "53001-53003 belong to a live relay: a simulated start must never put their holders on a kill list"
-        action, kill, _ = m.relay_start_plan(**dict(signals, http_ok=False, running_mode="simulation"))
-        assert action == "heal" and kill == [4242], f"a hung simulation relay heals itself only: {action} {kill}"
-        os.environ["RACECAST_SIM_FEED_PORTS"] = "41001,41002,41003"
-        assert m._relay_start_signals()["feed_pids"] == [4242, 4243], \
-            "with simulated feed ports a heal frees those, and only those"
+        for feeds in (None, "41001,41002,41003"):
+            if feeds:
+                os.environ["RACECAST_SIM_FEED_PORTS"] = feeds
+            signals = m._relay_start_signals()
+            assert signals["feed_pids"] == [], \
+                f"a simulated start cannot prove who holds a feed port, so it kills none of them ({feeds})"
+            action, kill, _ = m.relay_start_plan(**dict(signals, http_ok=False, running_mode="simulation"))
+            assert action == "heal" and kill == [4242], f"a hung simulation relay heals itself only: {action} {kill}"
     finally:
         env()
         m.pt.pids_on_port = saved
         restore()
 
 
-def t_a_simulated_relay_gets_the_simulated_feed_ports_on_every_start_path():
+def t_simulated_feed_ports_reach_the_helpers_and_the_relay_reads_them_itself():
     env = _sim_env()
     try:
-        assert "--ports" not in m._relay_runtime_args(), "a live relay keeps its default feed ports"
-        os.environ["RACECAST_SIM_FEED_PORTS"] = "41001,41002,41003"
-        assert "--ports" not in m._relay_runtime_args(), "the variable means nothing outside simulation"
-        os.environ["RACECAST_SIMULATION"] = "1"
-        args = m._relay_runtime_args()
-        assert args[args.index("--ports") + 1] == "41001,41002" and args[args.index("--pov-port") + 1] == "41003", args
-        daemon = m._relay_daemon_argv(["--stint", "2"], False)
-        assert "41001,41002" in daemon and daemon[-2:] == ["--stint", "2"], \
-            f"relay start, restart and a heal all spawn through here: {daemon}"
+        assert m._feed_ports() == (53001, 53002, 53003)
+        os.environ.update(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003")
         assert m._feed_ports() == (41001, 41002, 41003)
-        assert m.freeport_owner(41002, True, set()) == "relay" and m.freeport_owner(53002, True, set()) is None, \
-            "in simulation the relay owns the simulated feed ports, not the product ones"
-        del os.environ["RACECAST_SIM_FEED_PORTS"]
-        assert "--ports" not in m._relay_runtime_args(), "unset keeps the relay's defaults"
+        assert "--ports" not in m._relay_runtime_args(), \
+            "the relay reads the variable itself, so every way of starting it agrees"
     finally:
+        env()
+
+
+def t_simulated_freeport_defaults_to_the_simulated_feed_ports():
+    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+    seen, saved = [], m._simulated_freeport
+    m._simulated_freeport = lambda ports: seen.append(list(ports)) or 0
+    try:
+        try:
+            m.freeport_cmd([])
+        except SystemExit as exc:
+            assert exc.code == 0
+        assert seen == [[41001, 41002, 41003]], f"freeport without ports looks at the simulated ones: {seen}"
+        assert m.freeport_owner(53002, True, set()) == "relay", "outside simulation the owner check is unchanged"
+    finally:
+        m._simulated_freeport = saved
+        env()
+
+
+def t_static_streams_refuse_to_start_in_simulation():
+    env = _sim_env(RACECAST_SIMULATION="1")
+    ran, saved = [], m._run_script
+    m._run_script = lambda *a, **k: ran.append(a) or 0
+    try:
+        try:
+            m.streams_start([])
+        except SystemExit as exc:
+            assert "simulation" in str(exc.code) and "53001" in str(exc.code), exc.code
+        else:
+            raise AssertionError("streams start binds 53001/53002: it must refuse in simulation")
+        assert ran == [], "nothing is started"
+    finally:
+        m._run_script = saved
         env()
 
 

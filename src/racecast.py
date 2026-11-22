@@ -1079,21 +1079,14 @@ def _relay_runtime_args():
     explicit flag in rest still wins."""
     return (["--runtime-dir", _runtime_dir(), "--runtime-base", _runtime_base_dir(),
              "--cookies", _cookies_path()]
-            + _overlay_relay_args(_active_overlay_dir()) + _simulated_feed_args())
+            + _overlay_relay_args(_active_overlay_dir()))
 
 
 def _feed_ports():
-    """The relay's feed ports (Feed A, Feed B, POV): RACECAST_SIM_FEED_PORTS in simulation."""
+    """The relay's feed ports (Feed A, Feed B, POV): RACECAST_SIM_FEED_PORTS in simulation,
+    which the relay reads itself when it starts."""
     return simulation.feed_ports(default=pt.FEED_PORTS)
 
-
-def _simulated_feed_args():
-    """`--ports`/`--pov-port` for a simulated relay with its own feed ports, so no start
-    path binds 53001-53003; [] otherwise (the relay's defaults)."""
-    feeds = _feed_ports()
-    if feeds == tuple(pt.FEED_PORTS):
-        return []
-    return ["--ports", f"{feeds[0]},{feeds[1]}", "--pov-port", str(feeds[2])]
 
 RELAY_PORT = 8088
 
@@ -2848,9 +2841,9 @@ def _relay_start_signals():
     own = len(set(port_pids)) == 1 and alive and pid in port_pids
     return {"port_pids": port_pids,
             "pidfile_relay": bool(alive and _relay_identity(pid) != "other"),
-            # 53001-53003 are a live relay's ports: a simulated start never kills their holders.
-            "feed_pids": [] if simulation.active() and _feed_ports() == tuple(pt.FEED_PORTS) else
-            sorted({p for fp in _feed_ports() for p in pt.pids_on_port(fp)}),
+            # A simulated start cannot prove who holds a feed port, so it kills none of them.
+            "feed_pids": [] if simulation.active() else
+            sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
@@ -5729,6 +5722,9 @@ def _streams_static_dir():
     return os.path.join(_runtime_dir(), "static")
 
 def streams_start(rest):
+    if simulation.active():
+        sys.exit("racecast: static streams serve on the product feed ports 53001/53002, "
+                 "so they do not start in simulation mode.")
     _append_tailscale_snapshot()
     raise SystemExit(_run_script("scripts/start-streams.py",
                                  ["--state-dir", _streams_static_dir()] + rest))
@@ -7439,7 +7435,7 @@ def freeport_owner(port, relay_alive, static_alive_ports):
     """Which RUNNING racecast service legitimately owns `port` right now (so freeing
     it would cut a live feed): 'relay' (it binds the feed ports + control port),
     'streams' (a tracked static feed is alive on it), or None (orphan/foreign)."""
-    if relay_alive and (port in _feed_ports() or port == _relay_port()):
+    if relay_alive and (port in pt.FEED_PORTS or port == _relay_port()):
         return "relay"
     if port in static_alive_ports:
         return "streams"
@@ -7471,7 +7467,7 @@ def freeport_cmd(rest):
     or static-streams owns it (then refuse, stop that service, or --force). Default
     targets 53001-53003. Exit 1 if any port was refused, else 0."""
     try:
-        chosen, force = parse_freeport_args(rest)
+        chosen, force = parse_freeport_args(rest, default_ports=_feed_ports())
     except ValueError as exc:
         sys.exit(f"racecast: {exc}")
     if simulation.active():

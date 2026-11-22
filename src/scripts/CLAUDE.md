@@ -151,13 +151,17 @@ never the real one.
   `RELAY_PORT` (`tests/test_simulation_cli.py` counts the uses), the relay's
   `--http-port` default (`control_port`), preflight and the Control Center's Kill relay.
   An invalid value is a `problems()` entry and `relay_port` raises, never 8088.
-  `RACECAST_SIM_FEED_PORTS` (three different ports `A,B,POV`, unset = 53001-53003; none of
-  8088, 53001-53003, the Control Center's port or the simulated control port) moves the
-  feed ports: `simulation.feed_ports` feeds `racecast._feed_ports()`, and
-  `_relay_runtime_args` appends `--ports`/`--pov-port` for every relay spawn (`relay run`,
-  `relay start`, `restart`, a heal, the Control Center's jobs), so no start path binds the
-  product ports. The heal's `feed_pids`, the busy-port warning, `freeport_owner`,
-  preflight's `relay_ports` and the stop-time `release_feed_inputs` read the same ports.
+  `RACECAST_SIM_FEED_PORTS` (three different ports `A,B,POV`; none of 8088, 53001-53003,
+  the Control Center's port, the simulated control port, preflight's service ports 4455 and
+  8000 or a port of another `RACECAST_SIM_*` endpoint) moves the feed ports. The relay reads
+  it itself (`feed_ports` beside `control_port`) when `--ports`/`--pov-port` are not given,
+  so every way of starting it agrees, and it refuses an explicit 53001-53003 in simulation.
+  `RACECAST_SIM_RELAY_PORT` without it is a `problems()` entry: two relays would share the
+  product feed ports (on Windows `SO_REUSEADDR` lets both bind). `racecast._feed_ports()`
+  feeds the busy-port warning, preflight's `relay_ports`, the stop-time
+  `release_feed_inputs` and `freeport`'s default ports. A simulated start reports no
+  `feed_pids`, since it cannot prove who holds a feed port: a heal kills the control
+  port's holder only. `streams start` refuses in simulation (it serves on 53001/53002).
   The OBS collection still names 53001-53003: whoever sets the variable points OBS's feed
   inputs at the new ports (the event simulation rewrites its simulated collection).
   In simulation `_invite_hosts` answers the loopback address without asking Tailscale, so
@@ -211,7 +215,7 @@ never the real one.
   run with `LC_ALL=C`, `LANG=C` and `TZ=UTC`, so the locale never changes it. A
   simulation start also refuses an unstamped port holder and never kills it; a stale stamp
   with a dead relay heals as before, and a heal in simulation kills the control port's holder
-  only, never a holder of 53001-53003 (`_relay_start_signals` reports no `feed_pids` there). `event start` runs the same plan before it launches
+  only, never a feed port's (`_relay_start_signals` reports no `feed_pids` there). `event start` runs the same plan before it launches
   anything; `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop`
   before it touches a live relay. In simulation `freeport` and the Control Center's Kill
   relay (`_simulated_freeport`) only stop this install's own simulation relay through its
