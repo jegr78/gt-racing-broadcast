@@ -12086,6 +12086,11 @@ def simulation_startup(environ):
     return None
 
 
+def control_port(value, environ):
+    """--http-port, else the simulated relay port in simulation, else 8088."""
+    return value if value is not None else simulation.relay_port(environ)
+
+
 def _timing_host_env_file():
     """The league profile.env the timing host keys come from; none in simulation."""
     return "" if simulation.active() else os.environ.get("RACECAST_PROFILE_ENV_FILE", "")
@@ -16101,7 +16106,8 @@ def main():
                     help="Do not build the qualifying schedule source at all.")
     ap.add_argument("--poll", type=int, default=30, help="Sheet poll interval (seconds)")
     ap.add_argument("--schedule", default="schedule.txt", help="Local offline fallback")
-    ap.add_argument("--http-port", type=int, default=8088)
+    ap.add_argument("--http-port", type=int, default=None,
+                    help="Control port (default 8088; RACECAST_SIM_RELAY_PORT in simulation)")
     ap.add_argument("--runtime-dir", default=None,
                     help="Directory for runtime data (yt-cookies.txt, logs/, *.cache.txt). "
                          "Default: next to this script (keeps the distributed package "
@@ -16187,6 +16193,7 @@ def main():
     _sim_error = simulation_startup(os.environ)
     if _sim_error:
         sys.exit(f"ERROR: {_sim_error}")
+    args.http_port = control_port(args.http_port, os.environ)
     if simulation.install_network_guard():
         print("Simulation mode: loopback endpoints only, no outbound connection.", flush=True)
 

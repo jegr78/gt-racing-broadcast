@@ -599,6 +599,32 @@ def t_a_plain_gate_check_leaves_no_force_dir_behind():
     assert not os.path.exists(fdir), "a check without a pass must not create the record dir"
 
 
+def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
+    import preflight
+    sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
+    import ui_ops
+    urls = []
+    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234"), \
+            _patched((m.http_util, "get_bytes", lambda url, **k: urls.append(url) or b"")):
+        assert m._relay_port() == 41234
+        m._fetch_relay_page("/hud")
+        data = m.relay_status_data(read_pid=lambda p: None, alive=lambda p: False)
+        assert data["port"] == 41234, data
+        assert ui_ops.build_argv("kill-relay")[2] == "41234", "Kill relay frees the simulated port"
+        assert preflight.relay_status_url() == "http://127.0.0.1:41234/status"
+        assert 41234 in preflight.relay_ports() and 8088 not in preflight.relay_ports()
+    assert urls == ["http://127.0.0.1:41234/hud"], urls
+    assert m._relay_port() == 8088 and ui_ops.build_argv("kill-relay")[2] == "8088"
+    assert preflight.relay_status_url() == "http://127.0.0.1:8088/status"
+
+
+def t_every_relay_port_reader_goes_through_the_helper():
+    import re
+    with open(os.path.join(ROOT, "src", "racecast.py"), encoding="utf-8") as fh:
+        uses = re.findall(r"\bRELAY_PORT\b", fh.read())
+    assert len(uses) == 2, f"RELAY_PORT is read outside _relay_port(): {len(uses)} uses"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

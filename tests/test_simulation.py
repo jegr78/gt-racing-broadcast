@@ -282,6 +282,31 @@ def _relay():
     return _RELAY
 
 
+def t_relay_port_moves_only_in_simulation():
+    assert sim.RELAY_PORT == "RACECAST_SIM_RELAY_PORT" and sim.DEFAULT_RELAY_PORT == 8088
+    assert sim.relay_port({}) == 8088
+    assert sim.relay_port({"RACECAST_SIM_RELAY_PORT": "41234"}) == 8088, "outside simulation nothing changes"
+    assert sim.relay_port(dict(ON)) == 8088, "unset keeps 8088"
+    assert sim.relay_port(dict(ON, RACECAST_SIM_RELAY_PORT=" 41234 ")) == 41234
+    base = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin())
+    assert sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="41234")) == []
+    for bad in ("0", "65536", "abc", "8088.5", "-1", "127.0.0.1:41234"):
+        env = dict(base, RACECAST_SIM_RELAY_PORT=bad)
+        assert any(sim.RELAY_PORT in p for p in sim.problems(env)), bad
+        try:
+            sim.relay_port(env)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} must never fall back to the live relay's port")
+
+
+def t_relay_control_port_default_follows_simulation():
+    m = _relay()
+    assert m.control_port(None, {}) == 8088
+    assert m.control_port(None, dict(ON, RACECAST_SIM_RELAY_PORT="41234")) == 41234
+    assert m.control_port(5000, dict(ON, RACECAST_SIM_RELAY_PORT="41234")) == 5000, "--http-port still wins"
+
+
 def t_relay_reads_every_sheet_tab_from_the_simulated_sheet():
     m = _relay()
     restore = _patched_env(RACECAST_SIMULATION="1",

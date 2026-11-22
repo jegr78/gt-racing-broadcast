@@ -25,6 +25,8 @@ SHEET_PUSH_URL = "RACECAST_SIM_SHEET_PUSH_URL"      # stands in for the league S
 DISCORD_WEBHOOK_URL = "RACECAST_SIM_DISCORD_WEBHOOK_URL"
 STREAM_BIN = "RACECAST_SIM_STREAM_BIN"              # directory with yt-dlp and streamlink stand-ins
 FORCE = "RACECAST_SIM_FORCE"                        # the one profile a --force run allowed
+RELAY_PORT = "RACECAST_SIM_RELAY_PORT"              # the relay control port, on 127.0.0.1
+DEFAULT_RELAY_PORT = 8088
 
 SCHEMES = {OBS_WS: ("ws",), SHEET_URL: ("http",), SHEET_PUSH_URL: ("http",),
            DISCORD_WEBHOOK_URL: ("http",)}
@@ -123,6 +125,25 @@ def obs_target(environ=None):
     return (u.hostname, u.port) if u.port else None
 
 
+def _port_problem(value):
+    if not value.isdigit() or not 1 <= int(value) <= 65535:
+        return f"{RELAY_PORT} must be a port number 1-65535, not {value!r}"
+    return ""
+
+
+def relay_port(environ=None, default=DEFAULT_RELAY_PORT):
+    """The relay control port: RACECAST_SIM_RELAY_PORT in simulation, else `default`.
+    An invalid value raises instead of falling back to a live relay's port."""
+    environ = os.environ if environ is None else environ
+    value = (environ.get(RELAY_PORT) or "").strip()
+    if not (active(environ) and value):
+        return default
+    problem = _port_problem(value)
+    if problem:
+        raise ValueError(problem)
+    return int(value)
+
+
 def stand_in_present(path, tool, windows=None):
     """Whether `path` holds a stand-in that a bare `tool` call resolves to. Windows only
     launches an `.exe` by bare name; a `.bat` there would fall through to the real tool."""
@@ -171,6 +192,9 @@ def problems(environ=None):
     stream = _stream_bin_problem((environ.get(STREAM_BIN) or "").strip())
     if stream:
         out.append(stream)
+    port = (environ.get(RELAY_PORT) or "").strip()
+    if port and _port_problem(port):
+        out.append(_port_problem(port))
     return out
 
 

@@ -146,6 +146,11 @@ never the real one.
   OAuth/voice and the timing host keys; `env_overrides` does the same for the env vars
   (`_apply_profile_env`, `_bootstrap`, the relay's `simulation_startup`), so a value from
   the shell or the machine `.env` cannot leak through.
+  `RACECAST_SIM_RELAY_PORT` (a port, unset = 8088) moves the relay control port:
+  `simulation.relay_port` feeds `racecast._relay_port()`, the only reader of
+  `RELAY_PORT` (`tests/test_simulation_cli.py` counts the uses), the relay's
+  `--http-port` default (`control_port`), preflight and the Control Center's Kill relay.
+  An invalid value is a `problems()` entry and `relay_port` raises, never 8088.
 - Skips print `<what>: skipped (simulation).` at the leaves, so CLI and Control Center
   jobs report alike: `_event_launch`, `app launch|quit`, `_tailscale_connect`,
   `tailscale down`, `_tailscale_ip`/`_tailscale_magicdns` (None), `companion_start/stop`,

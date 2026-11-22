@@ -250,6 +250,9 @@ def build_argv(name, params=None):
     if name not in OPS:
         raise ValueError(f"unknown operation: {name}")
     argv = list(OPS[name])
+    if name == "kill-relay":
+        import simulation   # src/scripts; the relay control port moves in simulation
+        argv = [str(simulation.relay_port()) if a == "8088" else a for a in argv]
     spec = PARAMS.get(name, {})
     if params is None:
         params = {}
