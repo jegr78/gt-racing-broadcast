@@ -35,7 +35,9 @@ id = "cc_status"
 role = "api"
 do = "get"
 args = { service = "ui", path = "/api/status" }
-expect = ["result('cc_status').relay.port == relay.port", "result('cc_status').simulation"]
+expect = ["result('cc_status').relay.port == relay.port", "result('cc_status').relay.alive",
+          "result('cc_status').relay.http_ok", "result('cc_status').relay.mode == 'simulation'",
+          "result('cc_status').simulation"]
 
 [[step]]
 id = "submit"

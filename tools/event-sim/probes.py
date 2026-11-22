@@ -43,7 +43,9 @@ def _get(base, path):
 
 
 class RelayProbe(Probe):
-    """`relay.status` (GET /status), `relay.up`, `relay.port`, `relay.get('/path')`."""
+    """`relay.status` (GET /status), `relay.up`, `relay.port`, `relay.get('/path')`. A check
+    may poll many times: `get` only read-only paths (`/status`, `.../data`), never a
+    control such as `/next` or `/feed/A/activate`."""
     fields = ("status", "up", "port")
     calls = ("get",)
 

@@ -11,8 +11,13 @@ from dataclasses import dataclass, field
 
 import expect
 
-NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-CHANNEL_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")      # names that become file names
+ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")          # no dot: `${id.key}` splits at the first
+CHANNEL_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+ROLE_RE = re.compile(r"([a-z][a-z0-9_]{0,31})(?::([A-Za-z0-9][A-Za-z0-9 ._-]{0,63}))?")
+TEMPLATE_RE = re.compile(r"\$\{([A-Za-z0-9._-]+)\}")
+WINDOWS_DEVICES = {"con", "prn", "aux", "nul", *(f"com{n}" for n in range(1, 10)),
+                   *(f"lpt{n}" for n in range(1, 10))}
 _DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)")
 _UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
 _AFTER = re.compile(r"^after:([A-Za-z0-9._-]+)(?:\+(.+))?$")
@@ -122,6 +127,23 @@ class Scenario:
         return self.max_minutes * 60.0
 
 
+def name_ok(name, pattern=NAME_RE):
+    """A whole-string match that Windows can also use as a file name."""
+    return (isinstance(name, str) and bool(pattern.fullmatch(name))
+            and name.split(".", 1)[0].lower() not in WINDOWS_DEVICES)
+
+
+def template_refs(value):
+    """The step ids that `${id.key}` placeholders in `value` refer to."""
+    if isinstance(value, dict):
+        return set().union(set(), *(template_refs(v) for v in value.values()))
+    if isinstance(value, list):
+        return set().union(set(), *(template_refs(v) for v in value))
+    if isinstance(value, str):
+        return {m.group(1).split(".", 1)[0] for m in TEMPLATE_RE.finditer(value)}
+    return set()
+
+
 def role_kind(role):
     return role.split(":", 1)[0]
 
@@ -137,7 +159,7 @@ def _commentators(event):
         stint = raw.get("stint", i + 1)
         if not isinstance(name, str) or not name.strip():
             raise ScenarioError(f"{where}.name must be a non-empty string")
-        if not isinstance(channel, str) or not CHANNEL_RE.match(channel):
+        if not name_ok(channel, CHANNEL_RE):
             raise ScenarioError(f"{where}.channel must match {CHANNEL_RE.pattern}")
         if not isinstance(stint, int) or not 1 <= stint <= 255:
             raise ScenarioError(f"{where}.stint must be an integer 1-255")
@@ -183,8 +205,9 @@ def _shot(raw, where):
     if not isinstance(raw, dict) or set(raw) - {"name", "role", "element"}:
         raise ScenarioError(f"{where}: shot must be a name or a table with name, role, element")
     name = raw.get("name")
-    if not isinstance(name, str) or not NAME_RE.match(name):
-        raise ScenarioError(f"{where}: shot name must match {NAME_RE.pattern}")
+    if not name_ok(name):
+        raise ScenarioError(f"{where}: shot name {name!r} must match {NAME_RE.pattern} "
+                            "and not be a Windows device name")
     return Shot(name, str(raw.get("role") or ""), str(raw.get("element") or ""))
 
 
@@ -196,13 +219,15 @@ def _step(i, raw, registry, roots, default_wait=None):
     if unknown:
         raise ScenarioError(f"{where}: unknown key(s) {', '.join(sorted(unknown))}")
     role, do = raw.get("role"), raw.get("do")
-    if not isinstance(role, str) or not role:
-        raise ScenarioError(f"{where}: role is required")
+    if not isinstance(role, str) or not ROLE_RE.fullmatch(role):
+        raise ScenarioError(f"{where}: role {role!r} must be `kind` or `kind:instance` "
+                            f"({ROLE_RE.pattern})")
     if not isinstance(do, str) or not do:
         raise ScenarioError(f"{where}: do is required")
     sid = raw.get("id", do)
-    if not isinstance(sid, str) or not NAME_RE.match(sid):
-        raise ScenarioError(f"{where}: id {sid!r} must match {NAME_RE.pattern}")
+    if not name_ok(sid, ID_RE):
+        raise ScenarioError(f"{where}: id {sid!r} must match {ID_RE.pattern} "
+                            "and not be a Windows device name")
     where = f"step {i + 1} ({sid})"
     cls = registry.get(role_kind(role))
     if cls is None:
@@ -216,6 +241,8 @@ def _step(i, raw, registry, roots, default_wait=None):
     timeout = parse_duration(raw["timeout"]) if "timeout" in raw else DEFAULT_CHECK_TIMEOUT
     wait = parse_duration(raw["wait"]) if "wait" in raw else default_wait
     shot = _shot(raw.get("shot"), where)
+    if shot and shot.role and not ROLE_RE.fullmatch(shot.role):
+        raise ScenarioError(f"{where}: shot role {shot.role!r} must be `kind` or `kind:instance`")
     if shot and shot.role and role_kind(shot.role) not in registry:
         raise ScenarioError(f"{where}: shot role {shot.role!r} is unknown")
     try:
@@ -233,8 +260,8 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     if unknown:
         raise ScenarioError(f"unknown top-level key(s) {', '.join(sorted(unknown))}")
     name = data.get("name", name)
-    if not isinstance(name, str) or not NAME_RE.match(name):
-        raise ScenarioError(f"name {name!r} must match {NAME_RE.pattern}")
+    if not name_ok(name):
+        raise ScenarioError(f"name {name!r} must match {NAME_RE.pattern} and not be a Windows device name")
     event = data.get("event") or {}
     if not isinstance(event, dict):
         raise ScenarioError("event must be a table")
@@ -254,6 +281,10 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
         if step.at.kind == "after" and step.at.ref not in ids:
             raise ScenarioError(f"{step.label}: at refers to {step.at.ref!r}, which is not an "
                                 "earlier step")
+        for ref in sorted(template_refs(step.args)):
+            if ref not in ids:
+                raise ScenarioError(f"{step.label}: args refers to {ref!r}, which is not an "
+                                    "earlier step")
         ids[step.id] = i
         steps.append(step)
     tolerances = data.get("tolerances") or {}
@@ -278,7 +309,7 @@ def find(name_or_path, directory):
     """A bundled scenario by name, or a path to a TOML file."""
     if os.path.isfile(name_or_path):
         return name_or_path
-    if not NAME_RE.match(name_or_path):
+    if not name_ok(name_or_path):
         raise ScenarioError(f"no scenario {name_or_path!r}")
     path = os.path.join(directory, name_or_path + ".toml")
     if not os.path.isfile(path):

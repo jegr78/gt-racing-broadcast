@@ -108,7 +108,7 @@ def main(argv=None):
     # The contained run starts in tools/, so it gets absolute paths.
     contained = e2e_safety.enter(__file__, ["--scenario", scn.path, "--out", out]
                                  + ["--keep-work"] * args.keep_work + ["--headed"] * args.headed,
-                                 seconds=stack.lifetime(scn))
+                                 seconds=stack.lifetime(scn), long=True)
     if contained is not None:
         return contained
     return run(scn, out, keep_work=args.keep_work, headed=args.headed)

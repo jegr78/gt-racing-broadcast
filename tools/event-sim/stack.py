@@ -29,6 +29,7 @@ import console_auth  # noqa: E402
 import e2e_safety  # noqa: E402
 import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
+import ports  # noqa: E402
 import probes  # noqa: E402
 import sheet_sim  # noqa: E402
 import stream_stub  # noqa: E402
@@ -52,6 +53,22 @@ def _any_port():
 def lifetime(scn):
     """Seconds the services and the containment unit may live: the run plus a margin."""
     return e2e_safety.lifetime(int(scn.run_seconds) + TEARDOWN_MARGIN_S)
+
+
+def port_map(feeds, control):
+    """The live relay's ports -> this run's: the three feeds and the control port, so the
+    collection's feed inputs and browser sources reach the simulated relay."""
+    return {53001: feeds[0], 53002: feeds[1], 53003: feeds[2], 8088: control}
+
+
+def stamp_relay(home, pid):
+    """Write the PID file and the profile and mode stamps `relay start` would, so the
+    Control Center in this app home sees the relay that `relay run` started."""
+    runtime = os.path.join(home, "runtime")
+    os.makedirs(runtime, exist_ok=True)
+    for name, text in (("relay.pid", str(pid)), ("relay.profile", PROFILE), ("relay.mode", "simulation")):
+        with open(os.path.join(runtime, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
 
 
 def free_port(taken=(), pick=_any_port):
@@ -144,7 +161,7 @@ class Child:
         self.name, self.log_path = name, log_path
         self.log = open(log_path, "wb")  # noqa: SIM115  closed in stop()
         try:
-            self.proc = subprocess.Popen([sys.executable, CHILD, str(seconds), "--", *argv],
+            self.proc = subprocess.Popen([sys.executable, CHILD, str(seconds), "--long", "--", *argv],
                                          cwd=cwd, env=env, stdin=subprocess.PIPE,
                                          stdout=self.log, stderr=subprocess.STDOUT)
         except BaseException:
@@ -245,7 +262,7 @@ class Stack:
         for c in self.scn.commentators:
             self.stub.channel(c.channel, stint=c.stint, commentator=c.name)
         with open(COLLECTION, encoding="utf-8") as fh:
-            collection = rewrite_feed_urls(json.load(fh), {53001: feed_a, 53002: feed_b, 53003: pov})
+            collection = rewrite_feed_urls(json.load(fh), port_map((feed_a, feed_b, pov), http_port))
         grabber = obs_grab.FeedGrabber(ports=(feed_a, feed_b, pov), interval=2.0)
         self.obs = obs_sim.ObsSim(collection=collection, grabber=grabber).start()
 
@@ -267,6 +284,10 @@ class Stack:
         self.urls = {"relay": f"http://127.0.0.1:{http_port}", "ui": f"http://127.0.0.1:{ui_port}",
                      "obs": self.obs.http_url, "sheet": self.sheet.http_url, "sink": self.sink.http_url}
         wait_http(self.urls["relay"], "/status", relay, self.ready_timeout)
+        holders = ports.pids_on_port(http_port)
+        if len(holders) != 1:
+            raise RuntimeError(f"expected one relay on port {http_port}, found PIDs {holders}")
+        stamp_relay(home, holders[0])
         ui = self._child("ui", [self.python, racecast, "--simulation", "ui", "--no-browser"], env, home)
         wait_http(self.urls["ui"], "/api/ping", ui, self.ready_timeout)
         self.feed_ports = (feed_a, feed_b, pov)

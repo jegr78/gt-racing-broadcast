@@ -4,17 +4,16 @@
 action at a time, and returns the report data (see report.py). It never spawns anything:
 `stack.Stack` builds the context and the probes, tests pass fakes and a fake clock."""
 import os
-import re
 import time
 from dataclasses import asdict, dataclass, field
 
 import expect
 import roles
+from scenario import TEMPLATE_RE as _TEMPLATE, template_refs
 from roles import StepError
 
 HARD, SOFT = "hard", "soft"
 POLL_S = 0.25
-_TEMPLATE = re.compile(r"\$\{([A-Za-z0-9._-]+)\}")
 
 
 @dataclass
@@ -82,17 +81,6 @@ class RunContext:
 
     def finding(self, severity, message):
         self.findings.append((severity, message))
-
-
-def template_refs(value):
-    """The step ids that `${...}` placeholders in `value` refer to."""
-    if isinstance(value, dict):
-        return set().union(*(template_refs(v) for v in value.values())) if value else set()
-    if isinstance(value, list):
-        return set().union(*(template_refs(v) for v in value)) if value else set()
-    if isinstance(value, str):
-        return {m.group(1).split(".", 1)[0] for m in _TEMPLATE.finditer(value)}
-    return set()
 
 
 def resolve_args(value, results):
@@ -202,29 +190,35 @@ class Engine:
             return False
 
     def _trigger_state(self, step):
-        """("run", ""), ("wait", ""), ("skip", why) or ("fail", why) for a pending step."""
-        now, end = self.now(), self.scenario.run_seconds
-        refs = template_refs(step.args)
-        if step.at.kind == "after":
-            refs = refs | {step.at.ref}
+        """("run", ""), ("wait", ""), ("skip", why) or ("fail", why) for a pending step.
+        A trigger is armed at its earliest moment (its time, the referenced step's end
+        plus the offset, or the run start); `wait` counts from then."""
+        now, end, at = self.now(), self.scenario.run_seconds, step.at
+        refs = template_refs(step.args) | ({at.ref} if at.kind == "after" else set())
         failed = sorted(r for r in refs if r in self.results and self.results[r].status != "ok")
         if failed:
             return "skip", f"skipped: {', '.join(failed)} did not succeed"
-        unfinished = [r for r in refs if r not in self.results]
-        armed = 0.0
-        at = step.at
-        if at.kind == "after" and at.ref in self.results:
+        if at.kind == "after" and at.ref not in self.results:
+            armed, origin = None, ""
+        elif at.kind == "after":
             ref = self.results[at.ref]
-            armed = ref.started + ref.duration
-        target = {"time": at.seconds, "after": armed + at.seconds}.get(at.kind, 0.0)
-        if target > end:
-            return "fail", f"trigger at {target:.1f}s is past the end of the run ({end:g}s)"
-        limit = min(end, armed + step.wait) if step.wait is not None else end
-        if not unfinished and now >= target and (at.kind != "race" or self._check_once(at.condition)):
+            armed, origin = ref.started + ref.duration + at.seconds, f"the end of {at.ref}"
+        elif at.kind == "time":
+            armed, origin = at.seconds, f"{at.seconds:g}s"
+        else:
+            armed, origin = 0.0, "the run start"
+        if armed is not None and armed > end:
+            return "fail", f"trigger at {armed:.1f}s is past the end of the run ({end:g}s)"
+        if now >= end:
+            return "fail", f"the run ended ({self.scenario.max_minutes} min) before the step ran"
+        unfinished = [r for r in refs if r not in self.results]
+        if armed is None or now < armed:
+            return "wait", ""
+        if not unfinished and (at.kind != "race" or self._check_once(at.condition)):
             return "run", ""
-        if now >= limit:
-            what = at.condition if at.kind == "race" else f"after {', '.join(unfinished) or at.ref}"
-            return "fail", f"trigger {what!r} never met within {limit - armed:g}s"
+        if step.wait is not None and now >= armed + step.wait:
+            what = at.condition if at.kind == "race" else f"after {', '.join(sorted(unfinished))}"
+            return "fail", f"trigger {what!r} did not fire within {step.wait:g}s of {origin}"
         return "wait", ""
 
     def _settle(self, step, status, why):
@@ -255,7 +249,10 @@ class Engine:
         slow = self.scenario.tolerances.get("state_s", 2.0)
         for soft, exprs in ((False, step.expect), (True, step.soft)):
             for text in exprs:
-                ok, elapsed, detail = self.wait_for(text, step.timeout)
+                left = max(0.0, self.scenario.run_seconds - self.now())
+                ok, elapsed, detail = self.wait_for(text, min(step.timeout, left))
+                if not ok and left < step.timeout:
+                    detail += " (cut at the end of the run)"
                 res.checks.append(Check(text, ok, soft, round(elapsed, 3), detail))
                 if not ok:
                     sev = SOFT if soft else HARD

@@ -48,13 +48,16 @@ class Clock:
 
 class Box(expect.Probe):
     fields = ("value", "data")
-    calls = ("twice",)
+    calls = ("twice", "kind")
 
     def __init__(self, value=0, data=None):
         self.value, self.data = value, expect.View(data if data is not None else {})
 
     def twice(self, n):
         return n * 2
+
+    def kind(self, v):
+        return type(v).__name__
 
 
 class Recorder(roles.Role):
@@ -141,6 +144,18 @@ def t_scenario_refuses_what_cannot_run():
     _refused([dict(go, expect=["box.__class__"])], "not allowed")
     _refused([dict(go, colour="red")], "unknown key")
     _refused([], "at least one")
+    _refused([go, dict(go, id="b", args={"v": "${tpyo.id}"})], "refers to 'tpyo'")
+    _refused([dict(go, args={"v": "${b.id}"}), dict(go, id="b")], "refers to 'b'")
+    _refused([dict(go, id="a", args={"v": "${b.id}"}), dict(go, id="b", args={"v": "${a.id}"})], "refers to 'b'")
+    _refused([dict(go, id="a.b")], "must match")
+    for bad in ("ok\n", ".", "..", "CON", "nul", "Com1", "lpt9", "aux.png", "-x"):
+        _refused([dict(go, shot=bad)], "shot name")
+        _refused([dict(go, id=bad)], "id")
+        _refused([go], "name", name=bad)
+    for role in ("rec:../../x", "rec:a\n<script>", "rec:", "rec:" + "x" * 65):
+        _refused([dict(go, role=role)], "role")
+        _refused([dict(go, shot={"name": "s", "role": role})], "shot role")
+    _scn([dict(go, role="rec:Comms 2", shot={"name": "tower-1.final", "role": "rec:Sim Director"})])
     _refused([go], "unknown top-level", extra=1)
 
 
@@ -203,6 +218,19 @@ def t_expect_refuses_everything_else():
     _refused([{"role": "rec", "do": "go", "expect": ["relya.up"]}], "unknown name 'relya'")
 
 
+def t_only_plain_values_leave_a_probe():
+    names = {"box": Box(1, {"a": [1, 2]}), "page": expect.Func(lambda r: {"r": r})}
+    for text in ("box.twice(box) == 1", "box.twice(page) == 1", "box.twice == 1", "len == 1", "box == 1",
+                 "page == 1", "box.twice(box.data) == 1", "box", "box.twice", "[box] == [1]",
+                 "box and True", "not box", "box.kind(box) == 'Box'", "box.kind(page) == 'Func'"):
+        try:
+            expect.truth(text, names)
+        except expect.Unresolved:
+            continue
+        raise AssertionError(f"{text!r} must not hand a probe or a function around")
+    assert expect.truth("box.twice(box.data.a) == [1, 2, 1, 2]", names)[0], "plain data may pass"
+
+
 def t_missing_values_are_unresolved_not_false():
     names = {"box": Box(1, {"a": 1})}
     for text in ("box.data.b == 1", "box.nothing", "box.data.a.b", "box.data[3]", "box.value < 'x'"):
@@ -258,13 +286,29 @@ def t_a_waiting_race_trigger_does_not_hold_back_later_steps():
     assert data["ok"], data["findings"]
 
 
+def t_wait_counts_from_when_the_trigger_is_armed():
+    slow = {"id": "a", "role": "rec", "do": "bump", "at": "30s"}
+    data, _, _ = _run([slow, {"id": "b", "role": "rec", "do": "go", "at": "after:a", "wait": "20s"}])
+    assert _by_id(data)["b"]["status"] == "ok", "an unarmed after: does not count its wait"
+    data, _, _ = _run([{"id": "t", "role": "rec", "do": "go", "at": "30s"}], wait="20s")
+    assert _by_id(data)["t"]["status"] == "ok", "a time trigger fires at its time"
+    data, _, _ = _run([{"id": "a", "role": "rec", "do": "go", "at": "30s"},
+                       {"id": "b", "role": "rec", "do": "go", "at": "after:a+40s", "wait": "20s"}])
+    b = _by_id(data)["b"]
+    assert b["status"] == "ok" and b["started"] >= 70, b
+    data, _, _ = _run([{"id": "r", "role": "rec", "do": "go", "at": "lap:leader=9", "wait": "15s"}],
+                      race=_race_box())
+    r = _by_id(data)["r"]
+    assert r["status"] == "failed" and "within 15s of the run start" in r["error"], r
+
+
 def t_a_trigger_that_never_fires_fails_at_its_own_timeout():
     data, _, _ = _run([{"id": "lap", "role": "rec", "do": "go", "at": "lap:leader=99", "wait": "20s"},
                        {"id": "default", "role": "rec", "do": "go", "at": "state:finished"},
                        {"id": "fine", "role": "rec", "do": "go", "at": "40s"}],
                       max_minutes=2, race=_race_box())
     s = _by_id(data)
-    assert s["lap"]["status"] == "failed" and "never met" in s["lap"]["error"], s["lap"]
+    assert s["lap"]["status"] == "failed" and "did not fire" in s["lap"]["error"], s["lap"]
     assert 20 <= s["lap"]["started"] < 21, "it fails at its own wait, not at the end of the run"
     assert s["fine"]["status"] == "ok"
     assert s["default"]["status"] == "failed" and s["default"]["started"] >= 119, \
@@ -341,7 +385,7 @@ def t_race_triggers_wait_for_their_condition():
     data = eng.run()
     s = _by_id(data)
     assert s["go"]["status"] == "ok" and s["go"]["started"] >= 30, s["go"]
-    assert s["never"]["status"] == "failed" and "never met" in s["never"]["error"]
+    assert s["never"]["status"] == "failed" and "did not fire" in s["never"]["error"]
 
 
 def t_a_page_that_raises_keeps_the_check_pending_and_the_run_going():
@@ -369,6 +413,17 @@ def t_the_run_ends_at_max_minutes():
     s = _by_id(data)
     assert s["late"]["status"] == "failed" and "past the end of the run" in s["late"]["error"], s["late"]
     assert s["slow"]["status"] == "failed" and s["after_slow"]["status"] == "skipped", data["steps"]
+    assert s["slow"]["checks"][0]["elapsed"] <= 10.5, "a check stops at the end of the run"
+    assert data["duration"] <= 60 + engine.POLL_S, data["duration"]
+
+
+def t_a_check_never_outlasts_the_run():
+    data, _, _ = _run([{"id": "long", "role": "rec", "do": "go", "expect": ["box.value == 1"], "timeout": "3h"},
+                       {"id": "next", "role": "rec", "do": "go", "at": "30s"}], max_minutes=1)
+    s = _by_id(data)
+    assert data["duration"] <= 60 + engine.POLL_S, data["duration"]
+    assert s["long"]["status"] == "failed" and "end of the run" in s["long"]["checks"][0]["detail"], s["long"]
+    assert s["next"]["status"] == "failed" and "run ended" in s["next"]["error"], s["next"]
 
 
 def t_max_minutes_bounds_the_run():
@@ -513,6 +568,30 @@ def t_make_home_copies_into_the_temp_dir():
         assert os.path.isfile(os.path.join(home, "profiles", "demo", "profile.env"))
         assert os.path.isfile(os.path.join(home, "runtime", "yt-cookies.txt"))
         assert not os.path.exists(os.path.join(home, "src", "__pycache__"))
+
+
+def t_the_relay_browser_sources_move_with_the_relay():
+    col = {"sources": [{"settings": {"url": "http://127.0.0.1:8088/hud"}},
+                       {"settings": {"url": "http://127.0.0.1:8088/splitscreen?x=1"}}]}
+    out = stack.rewrite_feed_urls(col, stack.port_map((41001, 41002, 41003), 41000))
+    assert [s["settings"]["url"] for s in out["sources"]] == ["http://127.0.0.1:41000/hud",
+                                                              "http://127.0.0.1:41000/splitscreen?x=1"]
+    with open(stack.COLLECTION, encoding="utf-8") as fh:
+        real = json.dumps(stack.rewrite_feed_urls(json.load(fh), stack.port_map((41001, 41002, 41003), 41000)))
+    for old in ("127.0.0.1:8088", "127.0.0.1:53001", "127.0.0.1:53002", "127.0.0.1:53003"):
+        assert old not in real, old
+
+
+def t_the_control_center_sees_the_engine_relay():
+    with tempfile.TemporaryDirectory() as home:
+        stack.stamp_relay(home, 4242)
+        rt = os.path.join(home, "runtime")
+        with open(os.path.join(rt, "relay.pid"), encoding="utf-8") as fh:
+            assert fh.read().strip() == "4242"
+        with open(os.path.join(rt, "relay.mode"), encoding="utf-8") as fh:
+            assert fh.read() == "simulation"
+        with open(os.path.join(rt, "relay.profile"), encoding="utf-8") as fh:
+            assert fh.read() == "demo"
 
 
 def t_tracebacks_in_a_log_are_hard():
@@ -692,6 +771,21 @@ def t_page_role_keeps_tokens_out_of_what_it_reports():
         raise AssertionError("pages open on loopback only")
     except roles.StepError:
         pass  # expected
+
+
+def t_page_role_keeps_to_its_service():
+    br = _FakeBrowser()
+    ctx = engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, token=lambda n: "tok", browser=br)
+    role = builtin.PageRole(ctx, "page")
+    role.open()
+    for bad in ("x", "@example.org/", "//example.org/", "/\\example.org", "/a\nb", ""):
+        try:
+            role.do("open", {"path": bad})
+        except roles.StepError:
+            continue
+        raise AssertionError(f"path {bad!r} must be refused (went to {br.page.url})")
+    role.do("open", {"path": "/panel?x=@y"})
+    assert br.page.url == "http://127.0.0.1:9/panel?x=@y"
 
 
 def t_page_role_without_a_browser_is_soft():

@@ -148,7 +148,10 @@ class PageRole(Role):
             self.pg = self.context.new_page()
             self.pg.on("console", self._console)
             self.pg.on("pageerror", lambda e: self.errors.append(redact(e)))
-        path = str(args.get("path") or "/")
+        path = args.get("path", "/")
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//") \
+                or any(c in path for c in "\\\r\n\t"):
+            raise StepError(f"args.path must be a path on the service starting with '/', not {path!r}")
         if args.get("as"):
             path += ("&" if "?" in path else "?") + "t=" + quote(self.ctx.token(str(args["as"])))
         base = self.ctx.url(args.get("service", "relay"))

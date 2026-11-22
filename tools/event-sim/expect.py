@@ -135,9 +135,17 @@ def names_in(tree):
     return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
 
 
+def plain(value):
+    """`value` if it is data (a literal or a View), else Unresolved: a probe, a method or
+    a function never becomes a value, a call argument or a list element."""
+    if isinstance(value, (Probe, Func)) or callable(value) and not isinstance(value, View):
+        raise Unresolved(f"{short(value)} is not a value")
+    return value
+
+
 def evaluate(tree, names):
     """The value of a compiled expression with `names` as its roots."""
-    return _eval(tree.body, names)
+    return plain(_eval(tree.body, names))
 
 
 def explain(tree, names):
@@ -173,21 +181,21 @@ def _eval(node, names):
             return BUILTINS[node.id]
         raise Unresolved(f"unknown name {node.id!r}")
     if isinstance(node, (ast.List, ast.Tuple)):
-        return [raw(_eval(e, names)) for e in node.elts]
+        return [raw(plain(_eval(e, names))) for e in node.elts]
     if isinstance(node, ast.BoolOp):
         combine = _BOOL[type(node.op)]
-        return combine(bool(raw(_eval(v, names))) for v in node.values)
+        return combine(bool(raw(plain(_eval(v, names)))) for v in node.values)
     if isinstance(node, ast.UnaryOp):
-        value = raw(_eval(node.operand, names))
+        value = raw(plain(_eval(node.operand, names)))
         if isinstance(node.op, ast.Not):
             return not value
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return -value
         raise Unresolved(f"cannot negate {short(value)}")
     if isinstance(node, ast.Compare):
-        left = raw(_eval(node.left, names))
+        left = raw(plain(_eval(node.left, names)))
         for op, comp in zip(node.ops, node.comparators, strict=True):
-            right = raw(_eval(comp, names))
+            right = raw(plain(_eval(comp, names)))
             try:
                 if not _CMP[type(op)](left, right):
                     return False
@@ -204,7 +212,7 @@ def _eval(node, names):
             return obj.index(key)
         raise Unresolved(f"{short(obj)} cannot be indexed")
     if isinstance(node, ast.Call):
-        args = [raw(_eval(a, names)) for a in node.args]
+        args = [raw(plain(_eval(a, names))) for a in node.args]
         if isinstance(node.func, ast.Attribute):
             owner = _eval(node.func.value, names)
             if not (isinstance(owner, Probe) and node.func.attr in owner.calls):
