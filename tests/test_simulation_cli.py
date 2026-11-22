@@ -322,7 +322,9 @@ def t_relay_start_refuses_without_killing():
                    running_profile="demo", active_profile="demo", http_ok=True,
                    running_mode="live", active_mode="simulation")
     with _env(**SIM_ENV), _patched((m, "_relay_start_signals", lambda: dict(signals)),
-                                   (m.pt, "kill_pid", killed.append)):
+                                   (m.pt, "kill_pid", killed.append),
+                                   (m, "_write_relay_profile_stamp", lambda: killed.append("stamp")),
+                                   (m, "_spawn_relay_verified", lambda argv: killed.append("spawn"))):
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 m.relay_start([])
