@@ -159,7 +159,10 @@ never the real one.
   matches and a holder is alive (`_simulation_forced_profile`), so a stale export or a
   reused pid does not. The granting run drops itself at exit (`atexit`), `relay start`
   adds the relay it spawned (`_hold_simulation_force`) so the relay's own `event stop`
-  still passes, and every check prunes records without a live holder. The machine `.env` never supplies it. A subcommand's own `--force`
+  still passes, and every check prunes records without a live holder. Every
+  read-modify-write runs under `_force_lock` (an `O_CREAT|O_EXCL` lock file, broken after
+  `FORCE_LOCK_STALE_S`), `os.replace` retries a Windows sharing violation, and the gate
+  ignores prune failures but refuses the pass when the record cannot be read. The machine `.env` never supplies it. A subcommand's own `--force`
   keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
 - Driver Radio and AI: `env_overrides` blanks `RACECAST_GCLOUD_TTS_KEY`/`STT_KEY` and

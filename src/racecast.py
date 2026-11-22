@@ -10660,46 +10660,96 @@ def _holder_alive(holder):
     return started is None or simulation.process_started(holder["pid"]) in (None, started)
 
 
-def _read_force_record(path):
+FORCE_LOCK_WAIT_S = 2.0      # how long a force-record update waits for the lock
+FORCE_LOCK_STALE_S = 10.0    # a lock older than this was left by a crashed process
+FORCE_IO_RETRIES = 10        # Windows refuses a replace while another process reads
+
+
+@contextmanager
+def _force_lock(force_dir):
+    """Serialize force-record updates across processes with an O_EXCL lock file."""
+    os.makedirs(force_dir, exist_ok=True)
+    lock = os.path.join(force_dir, ".lock")
+    deadline = time.monotonic() + FORCE_LOCK_WAIT_S
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(lock) > FORCE_LOCK_STALE_S:
+                    os.remove(lock)
+                    continue
+            if time.monotonic() >= deadline:
+                raise OSError(f"force record lock {lock} is held") from None
+            time.sleep(0.05)
     try:
-        with open(path, encoding="utf-8") as fh:
-            record = json.load(fh)
-    except (OSError, ValueError):
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(lock)
+
+
+def _retry_io(fn, *args):
+    for _ in range(FORCE_IO_RETRIES - 1):
+        try:
+            return fn(*args)
+        except FileNotFoundError:
+            raise
+        except PermissionError:
+            time.sleep(0.05)
+    return fn(*args)
+
+
+def _load_force_record(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _read_force_record(path):
+    """The record, or None when it is missing or malformed. Other OSErrors raise."""
+    try:
+        record = _retry_io(_load_force_record, path)
+    except (FileNotFoundError, ValueError):
         return None
     ok = isinstance(record, dict) and isinstance(record.get("holders"), list)
     return record if ok else None
 
 
 def _write_force_record(path, record):
-    """Keep only live holders; a record without one is removed."""
+    """Keep only live holders; a record without one is removed. Call under the lock."""
     record["holders"] = [h for h in record["holders"] if _holder_alive(h)]
     if not record["holders"]:
         with contextlib.suppress(OSError):
             os.remove(path)
         return None
-    tmp = path + ".tmp"
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(record, fh)
-    os.replace(tmp, path)
+    _retry_io(os.replace, tmp, path)
     return record
 
 
 def _prune_simulation_force(force_dir):
-    for path in glob.glob(os.path.join(force_dir, "*.json")):
-        record = _read_force_record(path)
-        if record is None:
-            with contextlib.suppress(OSError):
-                os.remove(path)
-        else:
-            _write_force_record(path, record)
+    if not os.path.isdir(force_dir):
+        return
+    with _force_lock(force_dir):
+        for path in glob.glob(os.path.join(force_dir, "*.json")):
+            record = _read_force_record(path)
+            if record is None:
+                with contextlib.suppress(OSError):
+                    os.remove(path)
+            else:
+                _write_force_record(path, record)
 
 
 def _release_simulation_force(path, pid):
     """Drop `pid` as a holder of the pass in `path` (the forcing run's normal exit)."""
-    record = _read_force_record(path)
-    if record is not None:
-        record["holders"] = [h for h in record["holders"] if h.get("pid") != pid]
-        _write_force_record(path, record)
+    with contextlib.suppress(OSError), _force_lock(os.path.dirname(path)):
+        record = _read_force_record(path)
+        if record is not None:
+            record["holders"] = [h for h in record["holders"] if h.get("pid") != pid]
+            _write_force_record(path, record)
 
 
 def _grant_simulation_force(name, environ, force_dir):
@@ -10707,10 +10757,11 @@ def _grant_simulation_force(name, environ, force_dir):
     started, lives."""
     import secrets
     nonce = secrets.token_hex(16)
-    os.makedirs(force_dir, exist_ok=True)
-    _prune_simulation_force(force_dir)
+    with contextlib.suppress(OSError):
+        _prune_simulation_force(force_dir)
     path = os.path.join(force_dir, nonce + ".json")
-    _write_force_record(path, {"profile": name, "holders": [_force_holder(os.getpid())]})
+    with _force_lock(force_dir):
+        _write_force_record(path, {"profile": name, "holders": [_force_holder(os.getpid())]})
     atexit.register(_release_simulation_force, path, os.getpid())
     environ[simulation.FORCE] = f"{name}:{nonce}"
 
@@ -10725,17 +10776,23 @@ def _force_record_path(environ, force_dir):
 def _hold_simulation_force(pid, environ=None, force_dir=None):
     """A relay started under a pass keeps it alive, so its own `event stop` passes."""
     environ = os.environ if environ is None else environ
-    name, path = _force_record_path(environ, force_dir or _simulation_force_dir())
-    record = _read_force_record(path) if path else None
-    if record is not None and record.get("profile") == name:
-        record["holders"].append(_force_holder(pid))
-        _write_force_record(path, record)
+    force_dir = force_dir or _simulation_force_dir()
+    name, path = _force_record_path(environ, force_dir)
+    if not path:
+        return
+    with _force_lock(force_dir):
+        record = _read_force_record(path)
+        if record is not None and record.get("profile") == name:
+            record["holders"].append(_force_holder(pid))
+            _write_force_record(path, record)
 
 
 def _simulation_forced_profile(environ, force_dir):
     """The profile an inherited RACECAST_SIM_FORCE allows, or None. It counts only while
-    a holder of its record (the forcing run or its relay) is alive."""
-    _prune_simulation_force(force_dir)
+    a holder of its record (the forcing run or its relay) is alive. Raises OSError when
+    the record exists but cannot be read."""
+    with contextlib.suppress(OSError):
+        _prune_simulation_force(force_dir)
     name, path = _force_record_path(environ, force_dir)
     record = _read_force_record(path) if path else None
     if record is None or record.get("profile") != name:
@@ -10762,8 +10819,11 @@ def _simulation_gate(argv, environ=None, profile=None, values=None, force=False,
         _grant_simulation_force(name, environ, force_dir)
         return None
     values = _simulation_profile_values(name) if values is None and name else (values or {})
-    return simulation.profile_refusal(name, values,
-                                      _simulation_forced_profile(environ, force_dir))
+    try:
+        forced = _simulation_forced_profile(environ, force_dir)
+    except OSError as exc:
+        return f"simulation mode: the force record could not be read ({exc}); no pass granted."
+    return simulation.profile_refusal(name, values, forced)
 
 
 def _bootstrap(argv):

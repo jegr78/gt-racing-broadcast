@@ -3,7 +3,7 @@
 Discord, Companion, Tailscale or the Funnel, and the mode refuses a league profile.
 Every external leaf is replaced by a recorder, so a broken guard records instead of
 acting on this machine. Run: python3 tests/test_simulation_cli.py"""
-import contextlib, importlib.util, io, json, os, subprocess, sys, tempfile
+import contextlib, importlib.util, io, json, os, subprocess, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -333,7 +333,9 @@ def t_event_start_refuses_a_crossed_relay_before_any_launch():
                    running_profile="demo", active_profile="demo", http_ok=True,
                    running_mode="simulation", active_mode="live")
     os.environ.pop("RACECAST_SIMULATION", None)
-    with _patched(*_external(calls), (m, "_event_gate_results", lambda e, p: []),
+    tmp = tempfile.mkdtemp()
+    seams = [t for t in _start_seams(tmp) if t[1] != "_relay_start_signals"]
+    with _patched(*_external(calls), *seams,
                   (m, "_relay_start_signals", lambda: dict(signals)),
                   (m, "_tailscale_connect", lambda ev=None: calls.append("tailscale"))):
         try:
@@ -515,6 +517,86 @@ def t_relay_start_registers_the_relay_as_a_holder():
             contextlib.redirect_stdout(io.StringIO()):
         m.relay_start([])
     assert held == [4242], held
+
+
+def t_force_record_updates_are_serialized():
+    fdir = tempfile.mkdtemp()
+    env, path = _grant(fdir)
+    relay = _sleeper()
+    paused, go = threading.Event(), threading.Event()
+    real_read = m._read_force_record
+
+    def slow_read(p):
+        record = real_read(p)
+        if threading.current_thread().name == "pruner":
+            paused.set(); go.wait(5)
+        return record
+    try:
+        with _patched((m, "_read_force_record", slow_read)):
+            pruner = threading.Thread(target=m._prune_simulation_force, args=(fdir,), name="pruner")
+            pruner.start(); paused.wait(5)
+            holder = threading.Thread(target=m._hold_simulation_force, args=(relay.pid, env, fdir))
+            holder.start(); holder.join(0.5)
+            go.set(); pruner.join(5); holder.join(5)
+        with open(path) as fh:
+            pids = [h["pid"] for h in json.load(fh)["holders"]]
+        assert relay.pid in pids, f"a concurrent prune dropped the relay holder: {pids}"
+    finally:
+        relay.kill(); relay.wait()
+
+
+def t_force_lock_breaks_a_stale_lock_and_times_out_on_a_live_one():
+    fdir = tempfile.mkdtemp()
+    lock = os.path.join(fdir, ".lock")
+    open(lock, "w").close()
+    old = time.time() - m.FORCE_LOCK_STALE_S - 5
+    os.utime(lock, (old, old))
+    with m._force_lock(fdir):
+        assert os.path.exists(lock)
+    assert not os.path.exists(lock), "the lock is released"
+    open(lock, "w").close()
+    with _patched((m, "FORCE_LOCK_WAIT_S", 0.2)):
+        try:
+            with m._force_lock(fdir):
+                raise AssertionError("took a lock another process holds")
+        except OSError:
+            pass  # a live lock times out
+    os.remove(lock)
+
+
+def t_force_record_replace_retries_a_windows_sharing_violation():
+    fdir = tempfile.mkdtemp()
+    path = os.path.join(fdir, "c" * 32 + ".json")
+    real, fails = os.replace, []
+
+    def flaky(src, dst):
+        if len(fails) < 2:
+            fails.append(1)
+            raise PermissionError("in use")
+        return real(src, dst)
+    with _patched((m.os, "replace", flaky)):
+        m._write_force_record(path, {"profile": "x", "holders": [m._force_holder(os.getpid())]})
+    assert os.path.exists(path) and len(fails) == 2
+
+
+def t_gate_never_tracebacks_on_a_force_record_error():
+    fdir = tempfile.mkdtemp()
+    env, _path = _grant(fdir)
+
+    def boom(*a, **k):
+        raise PermissionError("locked by another process")
+    with _patched((m, "_prune_simulation_force", boom)):
+        assert m._simulation_gate(["event", "stop"], dict(env), "league", {}, force_dir=fdir) is None, \
+            "a failed prune is ignored"
+    with _patched((m, "_read_force_record", boom)):
+        refused = m._simulation_gate(["event", "stop"], dict(env), "league", {}, force_dir=fdir)
+    assert refused and "force record" in refused, refused
+
+
+def t_a_plain_gate_check_leaves_no_force_dir_behind():
+    fdir = os.path.join(tempfile.mkdtemp(), "simulation-force")
+    m._simulation_gate(["relay", "start"], _sim_ok_env(), "demo", {}, force_dir=fdir)
+    assert not os.path.exists(fdir), "a check without a pass must not create the record dir"
 
 
 if __name__ == "__main__":
