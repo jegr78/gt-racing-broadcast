@@ -68,6 +68,13 @@ def port_map(feeds, control):
     return {53001: feeds[0], 53002: feeds[1], 53003: feeds[2], 8088: control}
 
 
+def port_env(feeds, control, ui):
+    """The variables that keep every relay start of the app home, the Control Center's
+    Restart included, on this run's ports."""
+    return {"RACECAST_UI_PORT": str(ui), "RACECAST_SIM_RELAY_PORT": str(control),
+            "RACECAST_SIM_FEED_PORTS": ",".join(str(p) for p in feeds)}
+
+
 def stamp_relay(home, pid):
     """Write the PID file, the profile and mode stamps and the start marker `relay start`
     would, so the Control Center in this app home sees the relay that `relay run` started."""
@@ -328,12 +335,10 @@ class Stack:
         fakes = {}
         for fake in (self.sheet, self.sink, self.stub, self.obs):
             fakes.update(fake.env())
-        env = child_env(os.environ, {**fakes, "RACECAST_PROFILE": PROFILE,
-                                     "RACECAST_UI_PORT": str(ui_port),
+        env = child_env(os.environ, {**fakes, **port_env((feed_a, feed_b, pov), http_port, ui_port),
+                                     "RACECAST_PROFILE": PROFILE,
                                      "RACECAST_UPDATE_CHECK": "0",
                                      "RACECAST_CONSOLE_SECRET": self.secret,
-                                     "RACECAST_SIM_RELAY_PORT": str(http_port),
-                                     "RACECAST_SIM_FEED_PORTS": f"{feed_a},{feed_b},{pov}",
                                      "PYTHONDONTWRITEBYTECODE": "1"})
         home = os.path.dirname(os.path.dirname(racecast))
         self.racecast, self.env, self.home = racecast, env, home

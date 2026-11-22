@@ -1248,6 +1248,15 @@ def t_event_links_come_from_the_app_home_and_never_before_start_event():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def t_the_runs_ports_reach_every_relay_start_as_simulation_variables():
+    import simulation
+    env = dict(stack.port_env((41001, 41002, 41003), 41000, 41004), RACECAST_SIMULATION="1")
+    assert simulation.feed_ports(env) == (41001, 41002, 41003) and simulation.relay_port(env) == 41000
+    assert not [p for p in simulation.problems(env) if "PORT" in p], simulation.problems(env)
+    with open(os.path.join(SIM, "stack.py"), encoding="utf-8") as fh:
+        assert '"--ports"' not in fh.read(), "the feed ports travel in the environment, so a restart keeps them"
+
+
 def t_the_stack_stops_a_relay_the_control_center_restarted():
     tmp = tempfile.mkdtemp(prefix="racecast-roles-test-")
     try:
