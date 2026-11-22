@@ -10,7 +10,6 @@ from dataclasses import asdict, dataclass, field
 import expect
 import roles
 from scenario import TEMPLATE_RE as _TEMPLATE, template_refs
-from roles import StepError
 
 HARD, SOFT = "hard", "soft"
 POLL_S = 0.25
@@ -62,12 +61,12 @@ class RunContext:
 
     def url(self, service):
         if service not in self.urls:
-            raise StepError(f"unknown service {service!r} (known: {', '.join(sorted(self.urls))})")
+            raise roles.StepError(f"unknown service {service!r} (known: {', '.join(sorted(self.urls))})")
         return self.urls[service]
 
     def token(self, name):
         if self._token is None:
-            raise StepError("this run mints no console tokens")
+            raise roles.StepError("this run mints no console tokens")
         return self._token(name)
 
     def browser(self):
@@ -96,7 +95,7 @@ def resolve_args(value, results):
     def lookup(path):
         head, *rest = path.split(".")
         if head not in results:
-            raise StepError(f"${{{path}}}: no earlier step {head!r} with a result")
+            raise roles.StepError(f"${{{path}}}: no earlier step {head!r} with a result")
         cur = results[head]
         for part in rest:
             if isinstance(cur, dict) and part in cur:
@@ -104,7 +103,7 @@ def resolve_args(value, results):
             elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
                 cur = cur[int(part)]
             else:
-                raise StepError(f"${{{path}}}: {part!r} is not in the result of {head!r}")
+                raise roles.StepError(f"${{{path}}}: {part!r} is not in the result of {head!r}")
         return cur
 
     whole = _TEMPLATE.fullmatch(value)
@@ -271,7 +270,7 @@ class Engine:
                                             if r.result is not None})
             res.result = self._role(step.role).do(step.do, args)
             res.status = "ok"
-        except StepError as exc:
+        except roles.StepError as exc:
             res.status, res.error = "failed", str(exc)
         except Exception as exc:  # a role bug must not hide the rest of the report
             res.status, res.error = "failed", f"{type(exc).__name__}: {exc}"
