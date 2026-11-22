@@ -15,7 +15,8 @@ methods and read by every running stand-in about five times a second:
 - status: live, offline, upcoming or ended. Anything but live ends running pulls, and
   yt-dlp answers with the error text the relay classifies.
 - cut(at): every pull running at `at` ends like a finished stream (exit 0); later pulls play.
-- stall(at, until): pulls in the window send no bytes and stay alive.
+- stall(at, until): pulls in the window send no bytes; after `stream_timeout` seconds
+  without one a pull gives up with a read timeout (exit 1), as streamlink does.
 - freeze(at, until): pulls in the window send a still picture, with the tone and the
   identity, at the normal rate.
 Times are epoch seconds (`time.time()`), shared by the processes; `at` defaults to now,
@@ -48,6 +49,7 @@ RESOLVED_HOST = "sim.invalid"
 MAX_HEIGHT = 360
 FPS = 25
 POLL = 0.2
+STREAM_TIMEOUT = 60.0      # streamlink's default --stream-timeout
 MAX_CUTS = 32
 CELLS = 18
 YTDLP_VERSION = "2026.01.01"
@@ -157,9 +159,11 @@ def pull_action(channel, started, now):
 class StreamStub:
     """The control side: installs the stand-ins and sets each channel's state."""
 
-    def __init__(self, directory, ffmpeg=("ffmpeg",), python=None, clock=time.time, windows=None):
+    def __init__(self, directory, ffmpeg=("ffmpeg",), python=None, clock=time.time, windows=None,
+                 stream_timeout=STREAM_TIMEOUT):
         self.directory = os.path.abspath(directory)
         self.ffmpeg, self.python, self.clock = list(ffmpeg), python or sys.executable, clock
+        self.stream_timeout = stream_timeout
         self.windows = os.name == "nt" if windows is None else windows
         self.lock = threading.Lock()
 
@@ -170,7 +174,8 @@ class StreamStub:
             os.chmod(self.directory, 0o700)
         except OSError:
             pass  # best effort, as for runtime dirs
-        _write_json(os.path.join(self.directory, "stub.json"), {"ffmpeg": self.ffmpeg})
+        _write_json(os.path.join(self.directory, "stub.json"), {"ffmpeg": self.ffmpeg,
+                                                                    "stream_timeout": self.stream_timeout})
         for tool in simulation.STREAM_TOOLS:
             source = stand_in_source(tool, self.directory)
             if self.windows:
@@ -466,17 +471,21 @@ class Pull:
     """One stream read: runs ffmpeg for the channel's current action and copies its bytes
     to `write`, restarting it when the action changes. run() returns the exit code."""
 
-    def __init__(self, directory, name, height, ffmpeg, write, log, started=None, clock=time.time, poll=POLL):
+    def __init__(self, directory, name, height, ffmpeg, write, log, started=None, clock=time.time, poll=POLL,
+                 stream_timeout=STREAM_TIMEOUT):
         self.directory, self.name, self.height, self.ffmpeg = directory, name, height, list(ffmpeg)
         self.write, self.log, self.clock, self.poll = write, log, clock, poll
         self.started = clock() if started is None else started
-        self.last = None
+        self.stream_timeout = stream_timeout
+        self.last, self.unreadable = None, False
 
     def channel(self):
         try:
             self.last = load_channel(self.directory, self.name)
         except (OSError, ValueError):
-            pass  # a write in progress: keep the last state
+            if not self.unreadable:
+                self.unreadable = True
+                self.log("[sim][warning] channel state unreadable, keeping the last one")
         return self.last
 
     def action(self):
@@ -500,7 +509,11 @@ class Pull:
                 return 0
             if act == "stall":
                 self.log("[sim][info] stall")
+                since = self.clock()
                 while self.action() == "stall":
+                    if self.clock() - since >= self.stream_timeout:
+                        self.log("error: Error when reading from stream: Read timeout, exiting")
+                        return 1
                     tick.wait(self.poll)
                 continue
             ch = self.last
@@ -630,7 +643,7 @@ def ytdlp_main(directory, argv, out, err):
     return 0
 
 
-def serve_http(directory, name, height, ffmpeg, port, log, clock=time.time):
+def serve_http(directory, name, height, ffmpeg, port, log, clock=time.time, stream_timeout=STREAM_TIMEOUT):
     """--player-external-http: one ffmpeg per client on 127.0.0.1:port until the stream ends."""
     started, ended = clock(), threading.Event()
 
@@ -643,7 +656,8 @@ def serve_http(directory, name, height, ffmpeg, port, log, clock=time.time):
             def write(chunk):
                 self.wfile.write(chunk)
                 self.wfile.flush()
-            if Pull(directory, name, height, ffmpeg, write, log, started=started, clock=clock).run() == 0:
+            if Pull(directory, name, height, ffmpeg, write, log, started=started, clock=clock,
+                    stream_timeout=stream_timeout).run() == 0:
                 ended.set()
 
         def log_message(self, *args):
@@ -712,9 +726,10 @@ def streamlink_main(directory, argv, out, err):
     log(f"[cli][info] Found matching plugin sim for URL {o['target']}")
     log("[cli][info] Available streams: live (worst, best)")
     log("[cli][info] Opening stream: live (hls)")
-    ffmpeg = _config(directory).get("ffmpeg") or ["ffmpeg"]
+    cfg = _config(directory)
+    ffmpeg, timeout = cfg.get("ffmpeg") or ["ffmpeg"], float(cfg.get("stream_timeout", STREAM_TIMEOUT))
     if o["http"]:
-        return serve_http(directory, name, height, ffmpeg, o["http_port"] or 0, log)
+        return serve_http(directory, name, height, ffmpeg, o["http_port"] or 0, log, stream_timeout=timeout)
     stdout = out.buffer
 
     def write(chunk):
@@ -724,7 +739,7 @@ def streamlink_main(directory, argv, out, err):
         except OSError:
             os.dup2(os.open(os.devnull, os.O_WRONLY), stdout.fileno())   # no flush error at exit
             raise
-    return Pull(directory, name, height, ffmpeg, write, log).run()
+    return Pull(directory, name, height, ffmpeg, write, log, stream_timeout=timeout).run()
 
 
 def main_tool(tool, directory, argv):

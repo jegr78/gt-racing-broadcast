@@ -218,7 +218,7 @@ def t_streamlink_maps_back_only_urls_the_stub_issued():
     for url in ("http://example.com/comms1/360.m3u8", "https://sim.invalid/comms1/360.m3u8",
                 "http://sim.invalid:80/comms1/360.m3u8", "http://user@sim.invalid/comms1/360.m3u8",
                 "http://sim.invalid/comms1/360.m3u8?x=1", "http://sim.invalid/../360.m3u8",
-                "http://sim.invalid/comms1/x.m3u8", "http://sim.invalid.example.com/comms1/360.m3u8"):
+                "http://sim.invalid/comms1/x.m3u8", "http://sim.invalid/comms1/360.m3u8#x", "http://sim.invalid.example.com/comms1/360.m3u8"):
         assert stream_stub.resolved_channel(url) is None, url
 
 
@@ -429,6 +429,34 @@ def t_pull_plays_freezes_stalls_and_cuts():
     finally:
         again.close()
         restore()
+
+
+def t_a_stalled_pull_gives_up_after_the_stream_timeout():
+    stub = _stub(stream_timeout=0)
+    stub.channel("comms1")
+    stub.stall("comms1")
+    restore = _on_path(stub)
+    try:
+        r = subprocess.run(relay.streamlink_fanout_cmd("sim://comms1"), capture_output=True, timeout=WAIT)
+        err = r.stderr.decode("utf-8", "replace")
+        assert r.returncode == 1 and not r.stdout and "Read timeout" in err, err
+        assert relay.classify_source_state(err) is None, "a read timeout is a plain drop"
+    finally:
+        restore()
+
+
+def t_an_unreadable_state_file_keeps_the_last_state():
+    stub = stream_stub.StreamStub(tempfile.mkdtemp(prefix="stub1231-")).install()
+    stub.channel("comms1", commentator="Anna")
+    lines = []
+    pull = stream_stub.Pull(stub.directory, "comms1", 360, ["ffmpeg"], None, lines.append)
+    assert pull.action() == "play"
+    with open(stream_stub.channel_path(stub.directory, "comms1"), "w") as fh:
+        fh.write("{not json")
+    assert pull.action() == "play" and pull.channel()["commentator"] == "Anna", "a torn write is not an end"
+    assert lines == ["[sim][warning] channel state unreadable, keeping the last one"], lines
+    os.remove(stream_stub.channel_path(stub.directory, "comms1"))
+    assert pull.action() == "end", "a removed channel ends the pull"
 
 
 def t_ffmpeg_gets_the_label_and_identity():

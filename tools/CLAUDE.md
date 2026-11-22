@@ -394,7 +394,8 @@ every other address; they open no connection. `StreamStub(dir).install()` writes
 
 - yt-dlp resolves a live channel to `http://sim.invalid/<name>/<height>.m3u8` and prints
   `rcq <height> 25`, the height being the `-f` cap and at most 360. `.invalid` never resolves, so the
-  relay's one manifest probe fails at the network guard and reports nothing. Offline,
+  relay's one manifest probe per resolve fails at the network guard and reports nothing;
+  that refused lookup is expected, not a leak. Offline,
   upcoming and ended exit 1 with the text `classify_source_state` reads; the live-status
   print answers `is_upcoming` or `was_live`. Downloads, `--cookies-from-browser` and real
   URLs exit 1, an unknown flag exits 2.
@@ -414,15 +415,17 @@ sine at `tone_hz(code)`.
 copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe.
 
 Control for the scenario engine: each channel is `<dir>/channels/<name>.json`, which every
-running pull reads every 0.2 s. Times are epoch seconds; `at` defaults to now, `until` to
+running pull reads every 0.2 s; an unreadable file keeps the last state. Times are epoch seconds; `at` defaults to now, `until` to
 the next `clear`.
 
 - `channel(name, stint=, commentator=, status=)` creates or updates a channel, and a new
   one is live. A status other than `live` ends the running pulls.
 - `cut(name, at=None)`: the pulls running at `at` end like a finished stream (exit 0);
   later pulls play, so the relay recovers at once.
-- `stall(name, at=None, until=None)`: pulls in the window send nothing and stay alive,
-  which is the relay's byte-stall watchdog case.
+- `stall(name, at=None, until=None)`: pulls in the window send nothing. The relay's
+  byte-stall watchdog kills a pull that had sent bytes; one that sent none, such as the
+  re-pull inside the window, gives up after `stream_timeout` (60 s, streamlink's default
+  `--stream-timeout`, set on `StreamStub`) with a read timeout and exit 1.
 - `freeze(name, at=None, until=None)`: pulls in the window send still colour bars with
   the identity and the tone at the normal rate, a freeze only the picture shows.
 - `clear(name)` ends a stall and a freeze, running or scheduled.
