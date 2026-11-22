@@ -654,6 +654,13 @@ def t_next_auto_real_handover_stop_freed_never_armed_is_noop():
     assert r.A.paused is True                       # freed disarmed cleanly
 
 
+def t_status_reports_whether_the_feeds_fan_out():
+    r = _relay(["s1", "s2"])
+    for fanout in (True, False):
+        r.fanout = fanout
+        assert r.status()["fanout"] is fanout, "the panel's preview gate needs to know the pull path"
+
+
 def t_status_live_stint_reports_display_row_on_continuation():
     # Normal (all-distinct) schedule: /status live.stint == the physical pull index.
     r = _relay(["s1", "s2", "s3", "s4"])

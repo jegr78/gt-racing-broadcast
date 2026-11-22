@@ -1240,6 +1240,39 @@ def t_the_on_air_record_waits_for_the_schedule():
             assert json.load(fh) == {"stint": 1, "alive": 101.0}, "a loaded schedule records its row"
 
 
+def t_the_on_air_record_follows_a_live_mode_switch():
+    import tempfile
+
+    class Source:
+        def get_rows(self):
+            return [("u", "A", "S1", 2), ("u", "B", "S2", 3)]
+
+    class Relay:
+        solo, mode, race_source = False, "race", Source()
+
+        def on_air_row_idx(self):
+            return 1
+
+    def record(path):
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "on-air.json")
+        state, relay = {"stint": None, "at": None}, Relay()
+        g.m._on_air_tick(relay, path, state, lambda: 100.0)
+        assert record(path) == {"stint": 2, "alive": 100.0}
+        relay.mode = "qualifying"
+        g.m._on_air_tick(relay, path, state, lambda: 101.0)
+        assert record(path) == {"stint": 2, "alive": 101.0, "mode": "qualifying"}, \
+            "a switch to qualifying is recorded on the next tick, with the race stint kept"
+        relay.mode = "race"
+        g.m._on_air_tick(relay, path, state, lambda: 102.0)
+        assert record(path) == {"stint": 2, "alive": 102.0}, "and so is the switch back"
+        g.m._on_air_tick(relay, path, state, lambda: 103.0)
+        assert record(path)["alive"] == 102.0, "an unchanged tick writes nothing"
+
+
 def t_main_hands_the_profiles_invite_to_the_stint_watch():
     import inspect
 
@@ -1565,6 +1598,242 @@ def t_race_control_lowers_only_a_cover_it_raised():
     finally:
         g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()
+
+
+class _ItemObs:
+    """OBS with scene items: a source maps to its state, None when OBS cannot report it."""
+    def __init__(self, items):
+        self.items, self.sets = dict(items), []
+
+    def read_obs_state(self, items, _inputs):
+        return {"scene": "Stint", "sources": [{"enabled": self.items.get(src)} for _sc, src in items]}, None
+
+    def set_scene_item_enabled(self, _scene, source, on):
+        self.items[source] = bool(on)
+        self.sets.append((source, bool(on)))
+        return True, None
+
+
+def _toggle_server(obs, **extra):
+    """(srv, post) for one relay over `obs`; post(path, **body) returns (status, json)."""
+    import json as _json
+    srv, port, _path, _hub = _serve(**extra)
+
+    def post(path, **body):
+        st, text, _h = _req(port, path, _json.dumps(body).encode(), {"Content-Type": "application/json"})
+        return st, _json.loads(text)
+    return srv, post
+
+
+def t_obs_source_toggle_switches_only_from_the_state_the_caller_shows():
+    obs = _ItemObs({"Standings": False, "Standby Cover": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv, post = _toggle_server(obs)
+    key = lambda source, **body: post("/obs/source", scene="Stint", source=source, **body)
+    try:
+        assert key("Standings", toggle=True, **{"from": False}) == \
+            (200, {"ok": True, "enabled": True, "changed": True})
+        assert key("Standings", toggle=True, **{"from": False}) == \
+            (200, {"ok": True, "enabled": True, "changed": False}), \
+            "a second panel that still shows the old state changes nothing and learns the real one"
+        assert obs.sets == [("Standings", True)], obs.sets
+        assert key("Standings", toggle=True, **{"from": True})[1] == {"ok": True, "enabled": False, "changed": True}
+        assert key("Standings", toggle=True)[1] == {"ok": True, "enabled": True, "changed": True}, \
+            "without from the toggle flips what OBS reports"
+        obs.sets.clear()
+        st, d = key("Missing", toggle=True, **{"from": False})
+        assert st == 503 and d["ok"] is False and "Missing" in d["error"] and obs.sets == [], \
+            f"an item OBS cannot report is never switched on a guess: {(st, d)}"
+        assert key("Standings", on=False)[1] == {"ok": True, "enabled": False, "changed": True}
+        assert key("Standings")[1]["enabled"] is False and obs.sets == [("Standings", False)] * 2, \
+            "without toggle the body keeps its meaning: on shows, anything else hides"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
+def t_a_panel_red_flag_never_lowers_a_cover_it_did_not_see():
+    obs, hdr = _CoverObs(up=False), {"Content-Type": "application/json"}
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, obs, 0.0
+    srv, post = _toggle_server(obs)
+    port, rc = srv.server_address[1], g._tok("dave")
+    desk = lambda on: _req(port, f"/console/race-control/red-flag?t={rc}", json.dumps({"on": on}).encode(), hdr)
+    panel = lambda shown: post("/obs/source", scene="Stint", source="Standby Cover", toggle=True,
+                               **{"from": shown})[1]
+    try:
+        desk(True)
+        assert panel(False) == {"ok": True, "enabled": True, "changed": False} and obs.up, \
+            "the desk raised the cover a moment ago: a panel that still shows it down does not lower it"
+        assert srv.relay.rc_red_flag_raised is True, "and the desk keeps its claim on the cover"
+        desk(False)
+        assert not obs.up, "so the desk can still lower it"
+        assert panel(False)["changed"] is True and obs.up
+        assert panel(False) == {"ok": True, "enabled": True, "changed": False} and obs.up, \
+            "a second director with the same old state does not undo the first one's red flag"
+        srv.relay.rc_red_flag_raised = True
+        assert panel(True) == {"ok": True, "enabled": False, "changed": True}
+        assert srv.relay.rc_red_flag_raised is False, "a panel that lowered the cover ends the desk's claim"
+        srv.relay.rc_red_flag_raised = True
+        assert panel(False)["enabled"] is True and srv.relay.rc_red_flag_raised is True, \
+            "raising it does not"
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
+        srv.shutdown()
+        srv.server_close()
+
+
+class _MuteObs:
+    """OBS with audio inputs: an input maps to its mute state, None when OBS cannot report it."""
+    def __init__(self, inputs):
+        self.inputs, self.sets = dict(inputs), []
+
+    def read_obs_state(self, _items, inputs):
+        return {"scene": "Stint", "sources": [],
+                "audio": [{"input": n, "muted": self.inputs.get(n), "volumeDb": 0.0} for n in inputs]}, None
+
+    def set_input_mute(self, name, muted):
+        self.inputs[name] = bool(muted)
+        self.sets.append((name, bool(muted)))
+        return True, None
+
+
+def t_obs_audio_toggle_switches_only_from_the_mute_the_caller_shows():
+    obs = _MuteObs({"Feed A": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv, post = _toggle_server(obs)
+    noted = []
+    srv.relay.note_director_mute = lambda name, muted: noted.append((name, muted))
+    key = lambda name, **body: post("/obs/audio", input=name, **body)
+    try:
+        assert key("Feed A", toggle=True, **{"from": False}) == (200, {"ok": True, "muted": True, "changed": True})
+        assert key("Feed A", toggle=True, **{"from": False}) == \
+            (200, {"ok": True, "muted": True, "changed": False}), \
+            "a second panel that still shows unmuted changes nothing and learns the real state"
+        assert key("Feed A", toggle=True, **{"from": True})[1] == {"ok": True, "muted": False, "changed": True}
+        assert key("Feed A", toggle=True)[1] == {"ok": True, "muted": True, "changed": True}, \
+            "without from the toggle flips what OBS reports"
+        assert noted == [("Feed A", True), ("Feed A", False), ("Feed A", True)], \
+            f"the relay notes each mute that was switched, and only those: {noted}"
+        obs.sets.clear()
+        st, d = key("Missing", toggle=True, **{"from": False})
+        assert st == 503 and d["ok"] is False and "Missing" in d["error"] and obs.sets == [], \
+            f"an input OBS cannot report is never switched on a guess: {(st, d, obs.sets)}"
+        assert key("Feed A", mute=True) == (200, {"ok": True}) and obs.sets == [("Feed A", True)], \
+            "an explicit mute keeps its contract"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
+class _BannerHud:
+    def __init__(self, banner=""):
+        self.banner = banner
+
+    def data(self):
+        return {"raceControl": self.banner}
+
+    def roster_names(self):
+        return []
+
+    def roster_details(self):
+        return {}
+
+
+def t_red_flag_toggle_without_a_readable_cover_takes_the_relays_own_state():
+    hud = _BannerHud()
+    orig_obs, g.m._obs_ws = g.m._obs_ws, _ItemObs({"Standings": None})
+    srv, post = _toggle_server(g.m._obs_ws, hud_source=hud)
+    toggle = lambda source, **body: post("/obs/source", scene="Stint", source=source, toggle=True, **body)
+
+    def forget(banner="", claim=False):
+        hud.banner, srv.relay.rc_red_flag_raised, srv.relay.cover_last = banner, claim, None
+    try:
+        for obs in (g.m._obs_ws, None):                  # OBS cannot report the item, then no OBS at all
+            g.m._obs_ws = obs
+            forget()
+            st, d = toggle("Standby Cover", **{"from": False})
+            assert st == 503 and d["ok"] is False and d["error"] and (d["red_flag"], d["changed"]) == (True, True), \
+                f"no red flag on record: the press raises one, and says the cover was not switched: {d}"
+            assert srv.relay.cover_last is None, "a decision without OBS is no cover state the relay saw"
+            forget(banner=g.m.RED_FLAG_BANNER)
+            d = toggle("Standby Cover", **{"from": False})[1]
+            assert (d["red_flag"], d["changed"]) == (True, False), \
+                f"a second panel that still shows it down does not end the red flag on record: {d}"
+            assert toggle("Standby Cover", **{"from": True})[1]["red_flag"] is False, "the panel that shows it ends it"
+            forget(banner=g.m.RED_FLAG_BANNER)
+            assert toggle("Standby Cover")[1]["red_flag"] is False, "without a known cover state the banner decides"
+            forget(banner="Driver Swaps", claim=True)
+            assert toggle("Standby Cover")[1]["red_flag"] is False, "or a cover the desk raised"
+            st, d = toggle("Standings", **{"from": False})
+            assert st == 503 and "red_flag" not in d, f"a graphic key gets no direction to act on: {d}"
+            if obs is not None:
+                assert obs.sets == [], "nothing was switched in OBS"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
+class _StuckObs(_ItemObs):
+    """OBS that reports its items but refuses to switch them."""
+    def set_scene_item_enabled(self, _scene, source, on):
+        self.sets.append((source, bool(on)))
+        return False, "switch refused"
+
+
+def t_red_flag_counts_when_obs_reads_the_cover_but_cannot_switch_it():
+    obs = _StuckObs({"Standby Cover": False, "Standings": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv, post = _toggle_server(obs)
+    try:
+        st, d = post("/obs/source", scene="Stint", source="Standby Cover", toggle=True, **{"from": False})
+        assert st == 503 and d == {"ok": False, "error": "switch refused", "red_flag": True, "changed": True}, \
+            f"the press still raises the red flag and names the failed switch: {(st, d)}"
+        assert srv.relay.cover_last is False, "the relay keeps the state it read, not the one it failed to set"
+        st, d = post("/obs/source", scene="Stint", source="Standings", toggle=True, **{"from": False})
+        assert st == 503 and "red_flag" not in d, f"a graphic key just fails: {d}"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
+def t_red_flag_fallback_prefers_the_last_cover_state_the_relay_saw():
+    hud, obs = _BannerHud(), _ItemObs({"Standby Cover": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv, post = _toggle_server(obs, hud_source=hud)
+    press = lambda shown: post("/obs/source", scene="Stint", source="Standby Cover", toggle=True,
+                               **{"from": shown})[1]
+
+    def lost(cover_in_obs=None):
+        """OBS drops out; with a state, the relay read it through /obs/state just before."""
+        g.m._obs_ws = obs
+        if cover_in_obs is not None:
+            obs.items["Standby Cover"] = cover_in_obs
+            post("/obs/state", sources=[{"scene": "Stint", "source": "Standby Cover"}], inputs=[])
+        g.m._obs_ws = None
+    try:
+        assert press(False)["enabled"] is True
+        lost()
+        hud.banner = ""                                   # the banner write never arrived
+        d = press(True)
+        assert (d["red_flag"], d["changed"]) == (False, True), \
+            f"the cover the relay itself raised counts, whatever the banner says: {d}"
+        lost(cover_in_obs=True)                           # raised in OBS by hand meanwhile
+        d = press(False)
+        assert (d["red_flag"], d["changed"]) == (True, False), \
+            f"a cover read as up through /obs/state is not raised again: {d}"
+        lost(cover_in_obs=False)
+        hud.banner = g.m.RED_FLAG_BANNER                  # an old banner over a lowered cover
+        d = press(False)
+        assert (d["red_flag"], d["changed"]) == (True, True), \
+            f"the cover state read through /obs/state wins over the banner: {d}"
+    finally:
+        g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
 
 
 class _Setup:

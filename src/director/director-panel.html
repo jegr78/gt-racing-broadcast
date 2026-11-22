@@ -1257,22 +1257,41 @@ function relayGated(item){
   return item.relay === "telemetry" || item.relay === "telemetry/record" || item.relay === "telemetry/replay-marker";
 }
 
-/* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
-   using the last-known state from /obs/state. Built once and re-appended to #pgmBus
-   by every buildControls() call, so a solo rebuild never drops it; buildControls
-   retargets redFlagItem from cfg.redFlag when that is present. */
+/* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint; the
+   relay decides the direction from the state OBS reports. Built once and re-appended
+   to #pgmBus by every buildControls() call, so a solo rebuild never drops it;
+   buildControls retargets redFlagItem from cfg.redFlag when that is present. */
 const redFlagItem = {scene:"Stint", source:"Standby Cover"};
-const redFlagBtn = mkKey("RED FLAG", "alarm", async ()=>{
-  const last = obsState.sources.find(s=>s.scene===redFlagItem.scene && s.source===redFlagItem.source);
-  const on = last ? !last.enabled : true;
-  await obsSource(redFlagItem.scene, redFlagItem.source, on);
-  log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
-  setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
-  // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
-  if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
-                                           body: "{}"}).catch(() => {});
-  obsStatePoll();
-});
+async function redFlagPress(){
+  await keyOnce(redFlagBtn, async ()=>{
+    let d;
+    try{ d = await obsToggle(redFlagItem, redFlagBtn.classList.contains("on")); }
+    catch(e){ d = e.answer || {ok: false, error: e.message||e}; }
+    // Without a readable cover the relay still names the direction from its own record.
+    const on = d.ok ? d.enabled : d.red_flag;
+    if (typeof on !== "boolean"){
+      log("RED FLAG failed: " + (d.error || "no answer"), "err");
+      toast("RED FLAG not switched: " + (d.error || "no answer"));
+      return;
+    }
+    redFlagBtn.classList.toggle("on", on);
+    // The cover was already there (auto-cover, Companion, another panel): banner and
+    // race hold below are idempotent and still follow the press.
+    if (d.changed === false) log("RED FLAG: the cover is already " + (on ? "up" : "down"), "warn");
+    else if (!d.ok){
+      const note = "RED FLAG " + (on ? "raised" : "over") + ", but the Standby Cover was not switched in OBS ("
+                   + (d.error || "no answer") + ")";
+      log(note, "err"); toast(note);
+    }
+    else log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
+    setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
+    // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
+    if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
+                                             body: "{}"}).catch(() => {});
+    obsStatePoll();
+  });
+}
+const redFlagBtn = mkKey("RED FLAG", "alarm", redFlagPress);
 redFlagBtn.classList.add("redflag");
 redFlagBtn._item = redFlagItem;
 
@@ -1363,11 +1382,8 @@ function buildControls(cfg){
     row.querySelector(".rst").addEventListener("click", async ()=>{
       await obsVol(a.input, 0); obsStatePoll();
     });
-    row.querySelector(".mute").addEventListener("click", async ()=>{
-      const last = obsState.audio.find(x=>x.input===a.input);
-      const muted = last ? !last.muted : true;
-      await obsMute(a.input, muted); obsStatePoll();
-    });
+    const mute = row.querySelector(".mute");
+    mute.addEventListener("click", ()=>muteToggle(a.input, mute));
   });
   relabelAssetControls();
 }
@@ -1875,13 +1891,57 @@ async function runMacro(m){
   obsStatePoll();
 }
 
+/* One request per key at a time, so a double tap sends one toggle. */
+async function keyOnce(btn, fn){
+  if (btn._busy) return;
+  btn._busy = true;
+  try{ await fn(); }
+  finally{ btn._busy = false; }
+}
+
+/* Flips one source in the relay, which switches only while OBS still reports `shown`,
+   the state the key shows. Returns the relay's answer ({enabled, changed}) and throws
+   when the relay refused, with that answer in `answer`. */
+async function obsToggle(item, shown){
+  const d = await obsPost("source", {scene: item.scene, source: item.source, toggle: true, from: shown});
+  if (!d.ok) throw Object.assign(new Error(d.error || "OBS did not answer"), {answer: d});
+  const last = obsState.sources.find(s=>s.scene===item.scene && s.source===item.source);
+  if (last) last.enabled = d.enabled;
+  else obsState.sources.push({scene: item.scene, source: item.source, enabled: d.enabled});
+  return d;
+}
+
+/* The Mute key, with the same rules as obsToggle. */
+async function muteToggle(input, btn){
+  await keyOnce(btn, async ()=>{
+    const d = await obsPost("audio", {input, toggle: true, from: btn.classList.contains("muted")})
+      .catch(e=>({ok: false, error: e.message||e}));
+    if (!d.ok){
+      log(`Mute "${input}" failed: ${d.error || "OBS did not answer"}`, "err");
+      toast(`Mute "${input}" not switched: ${d.error || "OBS did not answer"}`);
+      return;
+    }
+    const last = obsState.audio.find(x=>x.input===input);
+    if (last) last.muted = d.muted;
+    btn.classList.toggle("muted", d.muted);
+    btn.textContent = d.muted ? "Muted" : "Mute";
+    if (d.changed === false) log(`"${input}" was already ${d.muted ? "muted" : "unmuted"}, nothing switched`, "warn");
+    obsStatePoll();
+  });
+}
+
 async function toggleSource(item, btn){
-  try{
-    const last = obsState.sources.find(s=>s.scene===item.scene && s.source===item.source);
-    const on = last ? !last.enabled : true;
-    await obsSource(item.scene, item.source, on);
-    btn.classList.toggle("on", on);
-  }catch(e){ log(`Toggle "${assetLabel(item.source)}" in "${item.scene}" failed: ${e.message||e}`, "err"); }
+  await keyOnce(btn, async ()=>{
+    const label = assetLabel(item.source);
+    try{
+      const d = await obsToggle(item, btn.classList.contains("on"));
+      btn.classList.toggle("on", d.enabled);
+      if (d.changed === false) log(`"${label}" was already ${d.enabled ? "shown" : "hidden"}, nothing switched`, "warn");
+    }catch(e){
+      log(`Toggle "${label}" in "${item.scene}" failed: ${e.message||e}`, "err");
+      toast(`"${label}" not switched: ${e.message||e}`);
+    }
+  });
 }
 
 /* Relay actions, no OBS needed */
@@ -2274,6 +2334,7 @@ async function relayPoll(){
     // On-air feed = the lower stint index (mirrors the relay's live_feed()).
     pvMarkOnAir(!solo && d.feeds && d.feeds.A
       ? (d.feeds.A.index <= d.feeds.B.index ? "A" : "B") : null);
+    pvIdle = pvIdleFeeds(d);
     // Aggregate health pill from the relay heartbeat. An older relay without d.health
     // shows a dash.
     const HP = {green:["OK","ok"], yellow:["DEGRADED","warn"], red:["CRITICAL","air"]};
@@ -3355,7 +3416,9 @@ document.getElementById("subSave").addEventListener("click", async ()=>{
 // Live Preview
 const PV_KEY = "rc_preview_open";
 const PV_FEED_MS = 1000;
+const PV_BACKOFF_TICKS = 30;
 const pvFeedTimers = {};
+let pvIdle = null;
 let pvTimer = null;
 let pvLevelTimer = null;
 // Bumped by every SHOW and HIDE. A program probe still in flight when the preview
@@ -3438,15 +3501,43 @@ $("#pvToggle").onclick = () => {
   if(opening){ pvStart(); } else { pvStop(); }
   try{ localStorage.setItem(PV_KEY, opening ? "1" : "0"); }catch(e){}
 };
+// The feeds the relay has no still for: a stopped feed that is not on air (the on-air
+// one is an OBS shot) and a POV that is not shown. Without fan-out the preview pulls
+// a stopped feed on its own: that one stays out of the answer, so it backs off.
+function pvIdleFeeds(d){
+  const idle = {};
+  if (d.feeds && d.feeds.A && d.feeds.B){
+    const live = d.feeds.A.index <= d.feeds.B.index ? "A" : "B";
+    for (const k of ["A", "B"]){
+      const stopped = k !== live && d.feeds[k].state === "stopped";
+      if (!stopped || d.fanout !== false) idle[k] = stopped;
+    }
+  }
+  if (d.pov) idle.POV = !d.pov.shown;
+  else if (!d.solo) idle.POV = true;    // a relay without a POV feed
+  return idle;
+}
 function pvPollFeed(tile){
   const feed = tile.dataset.feed, frame = tile.querySelector(".pvframe"),
         img = frame.querySelector("img"), ph = frame.querySelector(".pvph"),
         txt = ph.querySelector(".pvphtxt");
+  // An idle feed would answer every tick with a 503.
+  if(!tile.dataset.src){
+    if(!pvIdle) return;               // no /status yet
+    if(pvIdle[feed]){
+      frame.classList.remove("loaded"); ph.classList.add("err"); txt.textContent = "Unavailable";
+      return;
+    }
+    // A feed /status does not describe backs off after a failed load instead.
+    if(!(feed in pvIdle) && tile._pvSkip > 0){ tile._pvSkip--; return; }
+  }
   const probe = new Image();
   probe.onload = () => { img.src = probe.src; frame.classList.add("loaded");
-                         ph.classList.remove("err"); };
+                         ph.classList.remove("err"); tile._pvWait = 0; };
   probe.onerror = () => { frame.classList.remove("loaded");
-                          ph.classList.add("err"); txt.textContent = "Unavailable"; };
+                          ph.classList.add("err"); txt.textContent = "Unavailable";
+                          tile._pvWait = Math.min((tile._pvWait || 1) * 2, PV_BACKOFF_TICKS);
+                          tile._pvSkip = tile._pvWait; };
   probe.src = RC_API(tile.dataset.src ? "/preview/source/" + tile.dataset.src
                                        : "/preview/feed/" + feed) + "?ts=" + Date.now();
 }

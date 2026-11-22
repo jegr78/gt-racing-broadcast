@@ -5493,6 +5493,63 @@ def apply_split_audio(relay, obs_ws):
     return payload, status
 
 
+_ITEM_SWITCH_LOCK = threading.Lock()
+
+
+def switch_scene_item(obs_ws, scene, source, on=None, expect=None):
+    """Show or hide one scene item. `on` None flips the state OBS reports and switches
+    nothing when OBS cannot report it; with `expect`, the state the caller shows, it
+    flips only while OBS still reports that state. Returns (ok, enabled, note, changed),
+    with enabled None for the refusal. The lock keeps two toggles from reading the same
+    state."""
+    with _ITEM_SWITCH_LOCK:
+        if on is None:
+            state, note = obs_ws.read_obs_state([(scene, source)], [])
+            if state is None:
+                return False, None, note or "obs unreachable", False
+            enabled = (state.get("sources") or [{}])[0].get("enabled")
+            if enabled is None:
+                return False, None, f"no scene item {source!r} in {scene!r}", False
+            if isinstance(expect, bool) and bool(enabled) != expect:
+                return True, bool(enabled), "", False
+            on = not enabled
+        ok, note = obs_ws.set_scene_item_enabled(scene, source, on)
+        return bool(ok), on, note, bool(ok)
+
+
+def toggle_input_mute(obs_ws, name, expect=None):
+    """Flip an audio input's mute from the state OBS reports, under the rules of
+    switch_scene_item's toggle. Returns (ok, muted, note, changed)."""
+    with _ITEM_SWITCH_LOCK:
+        state, note = obs_ws.read_obs_state([], [name])
+        if state is None:
+            return False, None, note or "obs unreachable", False
+        muted = (state.get("audio") or [{}])[0].get("muted")
+        if muted is None:
+            return False, None, f"no audio input {name!r}", False
+        if isinstance(expect, bool) and bool(muted) != expect:
+            return True, bool(muted), "", False
+        ok, note = obs_ws.set_input_mute(name, not muted)
+        return bool(ok), not muted, note, bool(ok)
+
+
+def note_cover(relay, enabled):
+    """Remember the Standby Cover state the relay last switched or read in OBS."""
+    if isinstance(enabled, bool):
+        relay.cover_last = enabled
+
+
+def red_flag_on_record(relay, hud):
+    """Whether a red flag is on by the relay's own record, for when OBS cannot report
+    the Standby Cover: the last cover state it saw, else the HUD banner or a cover the
+    Race Control desk raised."""
+    last = getattr(relay, "cover_last", None)
+    if last is not None:
+        return last
+    banner = hud.data().get("raceControl") if hud is not None else None
+    return banner == RED_FLAG_BANNER or bool(getattr(relay, "rc_red_flag_raised", False))
+
+
 def apply_graphic(relay, obs_ws, verb, source):
     """GET /obs/graphic/<show|hide|toggle>/<source> (Companion, #706): switch one
     full-screen graphic in the scene the loaded collection keeps it in, Stint for
@@ -5506,18 +5563,14 @@ def apply_graphic(relay, obs_ws, verb, source):
     if source not in _OBS_WS_MODULE.GRAPHIC_SOURCES:
         return {"ok": False, "error": f"unknown graphic: {source!r}"}, 400
     scene = _OBS_WS_MODULE.graphic_scene(getattr(relay, "solo", False))
-    if verb == "toggle":
-        state, note = obs_ws.read_obs_state([(scene, source)], [])
-        if state is None:
-            return {"ok": False, "error": note or "obs unreachable"}, 503
-        enabled = (state.get("sources") or [{}])[0].get("enabled")
-        if enabled is None:
-            return {"ok": False, "error": f"no scene item {source!r} in {scene!r}"}, 503
-        verb = "hide" if enabled else "show"
-    ok, note = obs_ws.set_scene_item_enabled(scene, source, verb == "show")
+    ok, enabled, note, _changed = switch_scene_item(obs_ws, scene, source,
+                                                    None if verb == "toggle" else verb == "show")
+    if enabled is None:
+        return {"ok": False, "error": note}, 503
     if ok and source == STANDBY_COVER_SOURCE:
         relay.rc_red_flag_raised = False
-    payload = {"ok": bool(ok), "scene": scene, "source": source, "enabled": verb == "show"}
+        note_cover(relay, enabled)
+    payload = {"ok": bool(ok), "scene": scene, "source": source, "enabled": enabled}
     if note:
         payload["note"] = str(note)
     return payload, (200 if ok else 503)
@@ -9536,6 +9589,7 @@ class Relay:
         self.pov_source = pov_source
         self.pov = None
         self.pov_shown = False          # relay-driven PiP visibility (drives the HUD box)
+        self.cover_last = None          # last Standby Cover state seen, see note_cover
         if pov_source is not None and pov_port is not None:
             self.pov = Feed("POV", pov_port, 0, pov_source.get, logdir, cookies,
                             cookie_dir=cookie_dir)
@@ -10477,6 +10531,7 @@ class Relay:
         scene = state.get("scene")
         src0 = (state.get("sources") or [{}])[0] or {}
         cover_shown = bool(src0.get("enabled"))
+        note_cover(self, src0.get("enabled"))
         action = auto_cover_action(self.auto_cover, ss, off_since, now, AUTO_COVER_SETTLE_S,
                                    cover_shown, self._cover_auto_owned, self._cover_fired,
                                    scene, on_air_scene=on_air_scene)
@@ -10488,6 +10543,7 @@ class Relay:
             self._cover_fired = True
             self._cover_auto_owned = True
             self.rc_red_flag_raised = False
+            note_cover(self, True)
             LOG.warning("Auto-cover: on-air feed %s source %s -> raised Standby Cover (#495)",
                         f.name, ss)
         elif action == "lower":
@@ -10496,6 +10552,7 @@ class Relay:
                 self.obs_note = note or self.obs_note
                 return
             self._cover_auto_owned = False
+            note_cover(self, False)
             LOG.info("Auto-cover: on-air source recovered -> lowered Standby Cover (#495)")
         elif maybe_raise and cover_shown:
             # A cover is already up (the director raised it) during this outage. Adopt the
@@ -10955,6 +11012,7 @@ class Relay:
         live = self.live_feed()
         out["live"] = {"feed": live, "stint": self.on_air_row_idx() + 1, "mode": self.mode}
         out["manual_feed_arm"] = self.manual_feed_arm
+        out["fanout"] = bool(self.fanout)
         if self.mic_device is not None:
             out["mic"] = dict(self.mic_device)          # #668: commentary mic device check
         out["league"] = {"sheet_id": self.sheet_id, "name": self.league_name}
@@ -15278,6 +15336,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 cover, note = True, None
                             elif state is not None:
                                 cover, note = relay._obs.set_scene_item_enabled(scene, STANDBY_COVER_SOURCE, on)
+                            if state is not None:
+                                note_cover(relay, on if cover else was_up)
                             # A second raise keeps the claim; a failed lower keeps it too.
                             relay.rc_red_flag_raised = (
                                 bool(owned or (cover and not was_up)) if on else not cover)
@@ -15364,20 +15424,53 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     _takes_state["value"] = None
                     return self._send(payload, status)
                 if p == ["obs", "source"]:
-                    if _obs_ws is None:
+                    # `toggle: true` flips the state OBS reports (the panel's keys), with
+                    # `from` only while OBS still reports the state the key shows;
+                    # without toggle `on` decides, as before.
+                    toggle = body.get("toggle") is True
+                    shown = body.get("from") if toggle and isinstance(body.get("from"), bool) else None
+                    cover = body.get("source") == STANDBY_COVER_SOURCE
+                    if _obs_ws is None and not (toggle and cover):
                         return self._send({"error": "obs unavailable"}, 503)
-                    _crew_takes.forget(body.get("source"))
-                    ok, note = relay._obs.set_scene_item_enabled(
-                        body.get("scene"), body.get("source"), bool(body.get("on")))
-                    if ok and body.get("source") == STANDBY_COVER_SOURCE:
+                    ok, enabled, note, changed = False, None, "obs unavailable", False
+                    if _obs_ws is not None:
+                        _crew_takes.forget(body.get("source"))
+                        ok, enabled, note, changed = switch_scene_item(
+                            relay._obs, body.get("scene"), body.get("source"),
+                            None if toggle else bool(body.get("on")), shown)
+                    # A toggle ends the desk's claim on the cover only by lowering it.
+                    if ok and cover and (changed and not enabled if toggle else True):
                         relay.rc_red_flag_raised = False
-                    return self._send({"ok": True} if ok
-                                      else {"ok": False, "error": note}, 200 if ok else 503)
+                    if ok:
+                        if cover:
+                            note_cover(relay, enabled)
+                        return self._send({"ok": True, "enabled": enabled, "changed": changed})
+                    payload = {"ok": False, "error": note}
+                    if toggle and cover:
+                        # RED FLAG still needs a direction for the banner and the race.
+                        if enabled is not None:      # read, but not switched: the press counts
+                            note_cover(relay, not enabled)
+                            payload.update(red_flag=enabled, changed=True)
+                        else:
+                            raised = red_flag_on_record(
+                                relay, getattr(setup_ctl, "hud", None) or hud_source)
+                            payload["changed"] = shown in (None, raised)
+                            payload["red_flag"] = not raised if payload["changed"] else raised
+                    return self._send(payload, 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
                     inp = body.get("input")
-                    if "mute" in body:
+                    if body.get("toggle") is True:
+                        # The panel's Mute key: flips the mute OBS reports, like /obs/source.
+                        ok, muted, note, changed = toggle_input_mute(
+                            relay._obs, inp, body.get("from") if isinstance(body.get("from"), bool) else None)
+                        note_mute = getattr(relay, "note_director_mute", None)
+                        if changed and note_mute is not None:
+                            note_mute(inp, muted)
+                        if ok:
+                            return self._send({"ok": True, "muted": muted, "changed": changed})
+                    elif "mute" in body:
                         ok, note = relay._obs.set_input_mute(inp, bool(body.get("mute")))
                         note_mute = getattr(relay, "note_director_mute", None)
                         if ok and note_mute is not None:
@@ -15419,6 +15512,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     state, note = relay._obs.read_obs_state(sources, body.get("inputs") or [])
                     if state is None:
                         return self._send({"ok": False, "error": note}, 503)
+                    for (_scene, name), item in zip(sources, state.get("sources") or [], strict=False):
+                        if name == STANDBY_COVER_SOURCE:
+                            note_cover(relay, (item or {}).get("enabled"))
                     return self._send({"ok": True, **state})
                 if p == ["obs", "refresh"]:
                     # Reload the relay-served OBS browser sources (HUD / overlay /
@@ -15738,9 +15834,12 @@ def _read_on_air_stint(path):
     return stint if isinstance(stint, int) and not isinstance(stint, bool) else None
 
 
-def write_on_air_record(path, stint, alive):
-    """Write {"stint", "alive"} (no stint while none is known). True on success."""
+def write_on_air_record(path, stint, alive, mode=None):
+    """Write {"stint", "alive"} (no stint while none is known), plus "mode" when it is
+    not race. True on success."""
     doc = {"alive": float(alive)} if stint is None else {"stint": int(stint), "alive": float(alive)}
+    if mode:
+        doc["mode"] = mode
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -15753,15 +15852,18 @@ def write_on_air_record(path, stint, alive):
 
 
 def _on_air_tick(relay, path, state, clock):
-    """Refresh the on-air record when the race stint changes or the stamp is due."""
+    """Refresh the on-air record when the race stint or the mode changes or the stamp
+    is due. The mode is what a restart of a relay that no longer answers resumes."""
     now = clock()
     stint = state["stint"]
+    mode = "qualifying" if not relay.solo and relay.mode == "qualifying" else None
     if (not relay.solo and relay.mode == "race" and relay.race_source
             and relay.race_source.get_rows()):   # an empty cache would read as stint 1
         stint = relay.on_air_row_idx() + 1
-    if stint != state["stint"] or state["at"] is None or now - state["at"] >= ON_AIR_ALIVE_S:
-        if write_on_air_record(path, stint, now):
-            state["stint"], state["at"] = stint, now
+    if (stint != state["stint"] or mode != state.get("mode") or state["at"] is None
+            or now - state["at"] >= ON_AIR_ALIVE_S):
+        if write_on_air_record(path, stint, now, mode):
+            state["stint"], state["at"], state["mode"] = stint, now, mode
 
 
 def _on_air_watch_kwargs(runtime, invite_cache):

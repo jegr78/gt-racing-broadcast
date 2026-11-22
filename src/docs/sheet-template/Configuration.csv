@@ -2,3 +2,5 @@ Teams,Number,Brand Key,Stints,Streamers,Session,Race Control,Cue Preset,Flag
 Sample Team Alpha #11,11,porsche,Stint 1,Sample Commentator,Practice,GREEN,Stand by,Green Flag
 Sample Team Bravo #22,22,bmw,Stint 2,Second Commentator,Qualifying,YELLOW,Wrap in 30s,Yellow Flag
 Sample Team Charlie #33,33,ferrari,Stint 3,Third Commentator,Race,SAFETY CAR,Throw to break,Safety Car
+,,,,,,Red Flag - Race Suspended,,Full Course Yellow
+,,,,,,Driver Swaps,,Red Flag

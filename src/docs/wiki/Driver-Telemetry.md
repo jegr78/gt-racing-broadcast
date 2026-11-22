@@ -45,7 +45,15 @@ race stint that was on air and the broadcast Part (`resuming stint 5, Part 2`).
 one, so a stint typed into the Control Center's Start event field keeps the Part. A Part resumes only in the mode it was saved in,
 so `--qualifying` resumes a qualifying Part and never a race stint. A Start event
 while the event's relay still runs keeps all of this as well and leaves the relay's
-stint and Part alone. On a relay that runs without an unstopped event (none, or one
+stint and Part alone. A relay restart (`racecast relay restart`, the Control Center's
+relay **Restart**) comes back on the race stint that was on air as well: it reads the
+stint from the running relay, or from the event's record when the relay no longer
+answers, and says `resuming stint 5`. A relay in qualifying mode comes back in
+qualifying mode instead (`resuming qualifying mode`); when it no longer answers, the
+event's record decides, which follows a live mode switch within a second. The Part pointer survives a restart on its own.
+A relay whose schedule is empty takes the stint from the event's record too. The feeds
+start stopped, as on every relay start with manual arm. `--stint N` sets the stint by
+hand and means a race stint, so it ends qualifying unless `--qualifying` is given as well. On a relay that runs without an unstopped event (none, or one
 past the limits above) Start event begins a new event: a new invite and timing link
 and a new report window. It also asks that relay to drop the last race's data, as a
 new event does, and to start a new race recording. The first continued event after upgrading to this version

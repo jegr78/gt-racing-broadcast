@@ -164,7 +164,7 @@ class Surface(builtin.PageRole):
     def toggle(self, key, what, route, args, poll=None):
         """Press a toggle key whose light is the class `on`. With `on` in `args`, let the
         page finish its next `poll` and wait for the light to read the opposite first: the
-        key toggles from the state the page last polled."""
+        page sends the state its light shows, and the relay switches only from that state."""
         if "on" in args:
             want = bool(args["on"])
             if poll:
@@ -357,7 +357,7 @@ class DirectorRole(Surface):
         return {"scene": scene}
 
     def act_red_flag(self, args):
-        """Press RED FLAG, a toggle on the cover state the panel last polled."""
+        """Press RED FLAG, a toggle from the cover state the key shows."""
         return self.toggle(self.sel("red_flag"), "RED FLAG", "/obs/source", args, poll="/obs/state")
 
     def _one(self, key, what):

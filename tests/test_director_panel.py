@@ -311,6 +311,93 @@ def t_solo_preview_tiles_follow_the_template():
     assert 'tile.dataset.src ? "/preview/source/" + tile.dataset.src' in _func_src(h, "pvPollFeed")
 
 
+_PV_TILE_HARNESS = r"""
+const requested = [], PV_BACKOFF_TICKS = 30;
+let fail = false;
+class Image { set src(u) { requested.push(u.split('?')[0]); fail ? this.onerror() : this.onload(); } }
+const RC_API = p => p;
+const tile = (feed, src) => {
+  const cls = new Set(['loaded']), txt = {textContent: 'Load still'};
+  const ph = {cls: new Set(), classList: {add: c => ph.cls.add(c), remove: c => ph.cls.delete(c)},
+              querySelector: () => txt};
+  const frame = {classList: {add: c => cls.add(c), remove: c => cls.delete(c)},
+                 querySelector: sel => sel === 'img' ? {} : ph};
+  return {dataset: src ? {feed, src} : {feed}, querySelector: () => frame,
+          shown: () => [cls.has('loaded'), ph.cls.has('err'), txt.textContent].join('/')};
+};
+"""
+
+
+def _pv_js(html, body):
+    return _run_js(_PV_TILE_HARNESS + "let pvIdle = null;\n" + _func_src(html, "pvIdleFeeds") + "\n}\n"
+                   + _func_src(html, "pvPollFeed") + "\n}\n" + body)
+
+
+def t_idle_feed_tiles_request_no_still():
+    html = _html()
+    poll = _func_src(html, "pvPollFeed")
+    assert "if(!pvIdle) return;" in poll and "pvIdle[feed]" in poll \
+        and "pvIdle = pvIdleFeeds(d);" in _func_src(html, "relayPoll"), \
+        "pvPollFeed asks /status before it asks for a still"
+    out = _pv_js(html, """
+const feeds = (a, ai, b, bi) => ({A: {state: a, index: ai}, B: {state: b, index: bi}});
+const idle = [pvIdleFeeds({feeds: feeds('stopped', 0, 'stopped', 1), pov: {state: 'stopped', shown: false}}),
+              pvIdleFeeds({feeds: feeds('stopped', 2, 'stopped', 1), pov: {state: 'stopped', shown: true}}),
+              pvIdleFeeds({feeds: feeds('serving', 0, 'connecting', 1), pov: {state: 'serving', shown: true}}),
+              pvIdleFeeds({solo: true}), pvIdleFeeds({feeds: feeds('serving', 0, 'serving', 1)}),
+              pvIdleFeeds({fanout: false, feeds: feeds('stopped', 0, 'stopped', 1), pov: {shown: false}}),
+              pvIdleFeeds({fanout: true, feeds: feeds('stopped', 0, 'stopped', 1), pov: {shown: false}})];
+const a = tile('A'), b = tile('B'), cap = tile('CAPTURE', 'capture');
+pvPollFeed(a); pvPollFeed(b); pvPollFeed(cap);
+const unknown = requested.splice(0), unknownTile = a.shown();
+pvIdle = idle[0];
+pvPollFeed(a); pvPollFeed(b); pvPollFeed(tile('POV')); pvPollFeed(cap);
+const stopped = requested.splice(0), stoppedTile = b.shown();
+pvIdle = idle[2];
+pvPollFeed(b); pvPollFeed(tile('POV'));
+console.log(JSON.stringify({idle, unknown, unknownTile, stopped, stoppedTile, running: requested}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["idle"] == [{"A": False, "B": True, "POV": True}, {"A": True, "B": False, "POV": False},
+                             {"A": False, "B": False, "POV": False}, {},
+                             {"A": False, "B": False, "POV": True},
+                             {"A": False, "POV": True}, {"A": False, "B": True, "POV": True}], \
+            f"idle is the stopped feed off air (unknown without fan-out, where the preview pulls on its own) " \
+            f"and the POV that is not shown or not configured: {d['idle']}"
+        assert d["unknown"] == ["/preview/source/capture"] and d["unknownTile"] == "true/false/Load still", \
+            f"before the first /status a feed tile waits untouched: {d['unknown']} {d['unknownTile']}"
+        assert d["stopped"] == ["/preview/feed/A", "/preview/source/capture"], \
+            f"only the on-air feed and the OBS source tiles ask while everything is stopped: {d['stopped']}"
+        assert d["stoppedTile"] == "false/true/Unavailable", \
+            f"the skipped tile drops its last still: {d['stoppedTile']}"
+        assert d["running"] == ["/preview/feed/B", "/preview/feed/POV"], \
+            f"a feed that starts gets its still on the next tick: {d['running']}"
+
+
+def t_a_feed_status_does_not_describe_backs_off_after_a_failed_load():
+    out = _pv_js(_html(), """
+pvIdle = {};
+const ticks = (t, n) => { const at = []; for (let i = 0; i < n; i++) { pvPollFeed(t); if (requested.splice(0).length) at.push(i); } return at; };
+fail = true;
+const failing = ticks(tile('POV'), 100);
+const pov = tile('POV');
+const once = ticks(pov, 3);
+fail = false;
+const back = ticks(pov, 4);
+pvIdle = {B: false};
+fail = true;
+const described = ticks(tile('B'), 5), source = ticks(tile('CAPTURE', 'capture'), 5);
+console.log(JSON.stringify({failing, once, back, described, source}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["failing"] == [0, 3, 8, 17, 34, 65, 96], \
+            f"each failed load doubles the wait up to PV_BACKOFF_TICKS: {d['failing']}"
+        assert d["once"] == [0] and d["back"] == [0, 1, 2, 3], \
+            f"a load that works ends the back-off: {d}"
+        assert d["described"] == [0, 1, 2, 3, 4] and d["source"] == [0, 1, 2, 3, 4], \
+            f"a feed /status describes and an OBS source tile keep the 1 s tick: {d}"
+
+
 def t_removed_duplicate_keys():
     h = _html()
     for name in ("CONFIG", "CONFIG_SOLO"):
@@ -640,6 +727,163 @@ console.log([live, down, warnDown, state()].join('|'));""")
             f"a down relay must not leave REC red with a frozen elapsed time: {down}"
         assert warn_down.startswith("false - "), f"nor amber: {warn_down}"
         assert gone.startswith("true "), f"a relay without telemetry hides REC: {gone}"
+
+
+_TOGGLE_HARNESS = r"""
+let obsState = {scene: '', sources: [{scene: 'Stint', source: 'Standings', enabled: false}],
+                audio: [{input: 'Feed A', muted: false}]};
+const sent = [], logs = [], setup = [], fetched = [], answers = [];
+let hold = null;   // set to a promise to keep a request in flight
+const obsPost = async (path, body) => {
+  sent.push(path + ' ' + JSON.stringify(body));
+  if (hold) await hold;
+  return answers.shift();
+};
+const log = (msg, kind) => logs.push((kind || 'info') + ': ' + msg);
+const toast = msg => logs.push('toast: ' + msg);
+const setupSet = (field, value) => setup.push(field + '=' + value);
+const fetch = async path => { fetched.push(path); };
+const obsStatePoll = () => {};
+const assetLabel = source => source;
+const redFlagItem = {scene: 'Stint', source: 'Standby Cover'};
+const key = cls => {
+  const k = {cls: new Set(), textContent: 'Mute', lit: () => k.cls.has(cls),
+             classList: {toggle: (c, on) => on ? k.cls.add(c) : k.cls.delete(c), contains: c => k.cls.has(c)}};
+  return k;
+};
+const btn = key('on'), redFlagBtn = key('on'), muteBtn = key('muted');
+const item = {scene: 'Stint', source: 'Standings'};
+"""
+
+
+def _toggle_js(html, body):
+    names = ("keyOnce", "obsToggle", "redFlagPress", "toggleSource", "muteToggle")
+    return _run_js(_TOGGLE_HARNESS + "".join("async " + _func_src(html, n) + "\n}\n" for n in names)
+                   + "(async () => {" + body + "})();")
+
+
+def t_graphic_keys_toggle_from_the_state_they_show():
+    html = _html()
+    assert "!last.enabled" not in html and "!last.muted" not in html, \
+        "a press never derives its direction from the panel's last /obs/state poll"
+    out = _toggle_js(html, """
+  answers.push({ok: true, enabled: true, changed: true}, {ok: true, enabled: false, changed: true},
+               {ok: true, enabled: true, changed: false}, {ok: false, error: 'obs unreachable'});
+  const lit = [];
+  for (let i = 0; i < 3; i++) { await toggleSource(item, btn); lit.push(btn.lit()); }
+  const adopted = {state: obsState.sources[0].enabled, logs: logs.splice(0)};
+  await toggleSource(item, btn);
+  console.log(JSON.stringify({lit, adopted, refused: btn.lit(), sent, logs}));""")
+    if out is not None:
+        d = json.loads(out)
+        body = 'source {"scene":"Stint","source":"Standings","toggle":true,"from":%s}'
+        assert d["sent"] == [body % f for f in ("false", "true", "false", "true")], \
+            f"each press names the state the key shows: {d['sent']}"
+        assert d["lit"] == [True, False, True], d["lit"]
+        assert d["adopted"]["state"] is True and len(d["adopted"]["logs"]) == 1 \
+            and d["adopted"]["logs"][0].startswith("warn: ") and "already" in d["adopted"]["logs"][0], \
+            f"a key that showed an old state takes the real one and says nothing was switched: {d['adopted']}"
+        assert d["refused"] is True and d["logs"][0].startswith("err: ") \
+            and d["logs"][1].startswith("toast: ") and "obs unreachable" in d["logs"][1], \
+            f"a refused toggle leaves the key as it was and says why in a toast: {d}"
+
+
+def t_a_double_tap_sends_one_toggle():
+    out = _toggle_js(_html(), """
+  let release;
+  hold = new Promise(r => { release = r; });
+  answers.push({ok: true, enabled: true, changed: true}, {ok: true, enabled: true, changed: true},
+               {ok: true, muted: true, changed: true});
+  const taps = [toggleSource(item, btn), toggleSource(item, btn), redFlagPress(), redFlagPress(),
+                muteToggle('Feed A', muteBtn), muteToggle('Feed A', muteBtn)];
+  release();
+  await Promise.all(taps);
+  hold = null;
+  answers.push({ok: true, enabled: false, changed: true});
+  await toggleSource(item, btn);
+  console.log(JSON.stringify({sent: sent.map(s => s.split(' ')[0] + (s.includes('Cover') ? ' cover' : '')),
+                              setup, lit: [btn.lit(), redFlagBtn.lit(), muteBtn.lit()]}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["sent"] == ["source", "source cover", "audio", "source"], \
+            f"a second tap while the first request runs sends nothing, and the key works again after: {d['sent']}"
+        assert d["setup"] == ["racecontrol=Red Flag - Race Suspended"] and d["lit"] == [False, True, True], d
+
+
+def t_red_flag_follows_the_relays_answer():
+    out = _toggle_js(_html(), """
+  answers.push({ok: true, enabled: true, changed: false}, {ok: true, enabled: false, changed: true},
+               {ok: true, enabled: true, changed: true}, {ok: true, enabled: false, changed: false});
+  const step = async () => { await redFlagPress();
+    return {lit: redFlagBtn.lit(), setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)}; };
+  const desk = await step(), down = await step(), up = await step();
+  const lowered = await step();
+  console.log(JSON.stringify({desk, down, up, lowered, sent: sent.slice(0, 3)}));""")
+    if out is not None:
+        d = json.loads(out)
+        body = 'source {"scene":"Stint","source":"Standby Cover","toggle":true,"from":%s}'
+        assert d["sent"] == [body % f for f in ("false", "true", "false")], d["sent"]
+        assert d["desk"]["lit"] is True and any("already" in line for line in d["desk"]["logs"]), \
+            f"a cover that came up meanwhile is taken over, never lowered by the press: {d['desk']}"
+        assert d["desk"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
+            and d["desk"]["fetched"] == ["/drivers/race/red-flag"], \
+            f"the press meant a red flag: over a cover that is already up it still sets banner and race: {d['desk']}"
+        assert d["lowered"]["lit"] is False and d["lowered"]["setup"] == ["racecontrol="] \
+            and d["lowered"]["fetched"] == [], f"a cover lowered meanwhile still clears the banner: {d['lowered']}"
+        assert not [line for part in d.values() if isinstance(part, dict) for line in part["logs"]
+                    if line.startswith("toast")], "none of these is an error"
+        assert d["down"]["lit"] is False and d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], \
+            d["down"]
+        assert d["up"]["lit"] is True and d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
+            and d["up"]["fetched"] == ["/drivers/race/red-flag"], d["up"]
+
+
+def t_red_flag_without_the_cover_still_sets_banner_and_race():
+    out = _toggle_js(_html(), """
+  answers.push({ok: false, error: 'obs unreachable', red_flag: true, changed: true},
+               {ok: false, error: 'obs unreachable', red_flag: true, changed: false},
+               {ok: false, error: 'obs unreachable', red_flag: false, changed: true},
+               {ok: false, error: 'bad response'});
+  const step = async () => { await redFlagPress();
+    return {lit: redFlagBtn.lit(), setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)}; };
+  const up = await step();
+  redFlagBtn.classList.toggle('on', false);       // a second panel that still shows it down
+  const other = await step(), down = await step(), lost = await step();
+  console.log(JSON.stringify({up, other, down, lost}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
+            and d["up"]["fetched"] == ["/drivers/race/red-flag"] and d["up"]["lit"] is True, \
+            f"a red flag the relay decided without OBS still sets the banner and holds the race: {d['up']}"
+        assert d["other"] == dict(d["other"], lit=True, setup=["racecontrol=Red Flag - Race Suspended"],
+                                  fetched=["/drivers/race/red-flag"]), \
+            f"a second panel takes the raised state over and repeats banner and hold: {d['other']}"
+        assert d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], d["down"]
+        for part in (d["up"], d["down"]):
+            assert any(line.startswith("toast: ") and "Standby Cover was not switched" in line
+                       and "obs unreachable" in line for line in part["logs"]), part["logs"]
+        assert d["lost"]["setup"] == [] and d["lost"]["fetched"] == [] \
+            and any(line.startswith("toast: RED FLAG not switched") for line in d["lost"]["logs"]), \
+            f"an answer without a direction changes nothing and says so: {d['lost']}"
+
+
+def t_mute_key_toggles_from_the_state_it_shows():
+    out = _toggle_js(_html(), """
+  answers.push({ok: true, muted: true, changed: true}, {ok: true, muted: false, changed: true},
+               {ok: true, muted: true, changed: false}, {ok: false, error: 'obs unreachable'});
+  const shown = [];
+  for (let i = 0; i < 3; i++) { await muteToggle('Feed A', muteBtn); shown.push(muteBtn.lit() + ' ' + muteBtn.textContent); }
+  const adopted = {state: obsState.audio[0].muted, logs: logs.splice(0)};
+  await muteToggle('Feed A', muteBtn);
+  console.log(JSON.stringify({shown, adopted, refused: muteBtn.lit(), sent, logs}));""")
+    if out is not None:
+        d = json.loads(out)
+        body = 'audio {"input":"Feed A","toggle":true,"from":%s}'
+        assert d["sent"] == [body % f for f in ("false", "true", "false", "true")], d["sent"]
+        assert d["shown"] == ["true Muted", "false Mute", "true Muted"], d["shown"]
+        assert d["adopted"]["state"] is True and any("already" in line for line in d["adopted"]["logs"]), d["adopted"]
+        assert d["refused"] is True and any(line.startswith("toast: ") for line in d["logs"]), \
+            f"a refused toggle leaves the key as it was and says why: {d}"
 
 
 def t_relay_driven_keys_start_hidden():
