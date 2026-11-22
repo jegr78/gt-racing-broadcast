@@ -172,7 +172,8 @@ never the real one.
   refuses only while the stamped simulation relay is alive and holds the port; a stale
   stamp heals as before. `event start` runs the same plan before it launches anything;
   `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop` before it
-  touches a live relay. `relay_status_data` carries `mode`.
+  touches a live relay, and a simulated `freeport --force` never frees a live relay's
+  ports. `relay_status_data` carries `mode`.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
   getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
   It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every

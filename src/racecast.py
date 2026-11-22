@@ -7360,11 +7360,13 @@ def freeport_cmd(rest):
     relay_alive = _relay_is_alive()
     static_alive = {int(f["label"]) for f in streams_status_data()
                     if f["alive"] and str(f["label"]).isdigit()}
+    live_relay = simulation.active() and relay_alive and _running_relay_mode() != "simulation"
     refused = False
     for port in chosen:
         pids = pt.pids_on_port(port)
         owner = freeport_owner(port, relay_alive, static_alive)
-        action, found = pt.decide_free(pids, owned=bool(owner), force=force)
+        action, found = pt.decide_free(pids, owned=bool(owner),
+                                       force=force and not (live_relay and owner == "relay"))
         shown = ", ".join(str(p) for p in found)
         if action == "clear":
             print(f"port {port}: already free")
@@ -7372,8 +7374,12 @@ def freeport_cmd(rest):
             refused = True
             who = "relay" if owner == "relay" else "static streams"
             stop = "racecast relay stop" if owner == "relay" else "racecast streams stop"
-            print(f"port {port}: held by the running {who} (PID {shown}). "
-                  f"{stop}, or re-run with --force")
+            if live_relay and owner == "relay":
+                print(f"port {port}: held by a live relay (PID {shown}). Simulation mode "
+                      f"never frees it: {stop}")
+            else:
+                print(f"port {port}: held by the running {who} (PID {shown}). "
+                      f"{stop}, or re-run with --force")
         else:
             for pid in found:
                 pt.kill_pid(pid)

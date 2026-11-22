@@ -397,6 +397,23 @@ def t_relay_mode_stamp_round_trip():
         assert m._running_relay_mode() == ""
 
 
+def t_simulated_freeport_never_kills_a_live_relay():
+    killed = []
+    seams = ((m, "_relay_is_alive", lambda: True), (m, "streams_status_data", lambda: []),
+             (m.pt, "pids_on_port", lambda port: [4242]), (m.pt, "kill_pid", killed.append))
+    with _env(**SIM_ENV), _patched(*seams, (m, "_running_relay_mode", lambda: "live")):
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.freeport_cmd(["--force"])
+        except SystemExit as exc:
+            assert exc.code == 1, exc.code
+    assert killed == [], "a simulated freeport --force killed a live relay"
+    with _env(**SIM_ENV), _patched(*seams, (m, "_running_relay_mode", lambda: "simulation")):
+        with contextlib.suppress(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+            m.freeport_cmd(["--force"])
+    assert killed, "--force still frees the ports of a simulation relay"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
