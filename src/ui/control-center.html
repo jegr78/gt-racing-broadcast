@@ -81,11 +81,11 @@
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Restart</button>
             <a class="linkbtn" id="rel-panel-open" target="_blank" rel="noopener" hidden>Open panel ↗</a></div>
           <div class="row"><span class="name">Stale relay</span>
-            <span class="dim grow">control port <span class="relay-port">8088</span>: force-free a stale/orphaned relay the Stop button can't reach (unknown PID); a healthy relay is left untouched</span>
+            <span class="dim grow"><span class="live-only">control port <span class="relay-port">8088</span>: force-free a stale/orphaned relay the Stop button can't reach (unknown PID); a healthy relay is left untouched</span><span class="sim-only" hidden>simulation: stops this installation's own simulation relay on port <span class="relay-port">8088</span>; a process it cannot prove is its own is left alone</span></span>
             <button class="danger" onclick="op('kill-relay', true)">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>Kill stale relay</button></div>
           <div class="row"><span class="name">Feed ports</span>
-            <span class="dim grow">53001–53003: clear a port a stale/orphaned process is holding so a feed can bind</span>
+            <span class="dim grow"><span class="live-only">53001–53003: clear a port a stale/orphaned process is holding so a feed can bind</span><span class="sim-only" hidden>simulation: stops this installation's own simulation relay; a process on a feed port it cannot prove is its own is left alone</span></span>
             <button class="danger" onclick="op('free-ports', true)">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>Free feed ports</button></div>
           <div class="row"><span class="name">Crew chat</span>
@@ -1688,6 +1688,8 @@ async function refresh() {
   $('ver').textContent = s.version;
   $('sim-badge').hidden = !s.simulation;
   document.querySelectorAll('.relay-port').forEach(el => { el.textContent = String(s.relay.port); });
+  document.querySelectorAll('.live-only').forEach(el => { el.hidden = !!s.simulation; });
+  document.querySelectorAll('.sim-only').forEach(el => { el.hidden = !s.simulation; });
   const relayUp = s.relay.alive;
   setBadge('relay', relayUp, 'RUNNING', 'stopped',
     relayUp ? relayDetail(s.relay) : '');
@@ -1875,12 +1877,16 @@ const CONFIRM_TEXT = {
   'obs-collection-set': 'Switch OBS to the GT Racing Endurance scene collection? This rebuilds all sources (incl. the relay feeds).',
   'chat-clear': 'Clear all crew-chat messages? This cannot be undone.',
   'free-ports': 'Free the feed ports (53001–53003)? Kills any orphaned process holding them. A running relay or static stream is left untouched.',
+  'free-ports-simulation': 'Stop this installation\'s simulation relay to free its feed ports? In simulation mode Free feed ports never kills a process it cannot prove is its own simulation relay.',
+  'kill-relay-simulation': 'Stop this installation\'s simulation relay (control port {port})? In simulation mode Kill relay never kills a process it cannot prove is its own simulation relay.',
   'kill-relay': 'Kill a stale relay? Frees the relay control port {port} by killing the process holding it — use this when the relay is orphaned (unknown PID) and the Stop button can\'t reach it. A healthy, running relay is left untouched (use Stop Relay instead).'
 };
 
 async function op(name, confirmFirst, params, confirmation) {
   const relayPort = String((lastStatus && lastStatus.relay && lastStatus.relay.port) || 8088);
-  const ask = (CONFIRM_TEXT[name] || ('Run ' + name + '?')).replace('{port}', relayPort);
+  const simulated = lastStatus && lastStatus.simulation && (name === 'kill-relay' || name === 'free-ports');
+  const key = simulated ? name + '-simulation' : name;
+  const ask = (CONFIRM_TEXT[key] || ('Run ' + name + '?')).replace('{port}', relayPort);
   if (confirmFirst && !(await confirmModal(ask))) return;
   let r;
   try {

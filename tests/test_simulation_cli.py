@@ -646,6 +646,10 @@ def t_kill_relay_text_names_the_actual_port():
     assert "control port 8088" not in html and "relay control port 8088" not in html, \
         "the Kill relay texts show the port the Control Center reads from the relay status"
     assert 'class="relay-port"' in html
+    assert "'free-ports-simulation':" in html and html.count('class="sim-only"') == 2, \
+        "Free feed ports says the same in simulation"
+    assert "'kill-relay-simulation':" in html and 'class="sim-only"' in html, \
+        "in simulation Kill relay says it only stops this installation's simulation relay"
 
 
 def t_every_relay_port_reader_goes_through_the_helper():
