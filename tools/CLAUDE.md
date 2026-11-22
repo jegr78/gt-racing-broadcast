@@ -214,6 +214,13 @@ simulated PS5 cannot share a host on the default ports: both need UDP 33740 or
 sender's own upload code; `--status` adds the relay's counts to its JSON report and
 `--reset` clears the probe's counters first.
 
+`tools/timing-viewer-load.py LINK --viewers N` runs simulated viewers of the public
+timing page (#1128) against an event's timing link: one page load each, then the page's
+own poll (gzip, `If-None-Match`, the wait from `X-Poll-After`). Its JSON report gives
+the upload in kbit/s, the status counts, and how often a viewer's data refreshed
+(`refresh_s`) and how old it was (`data_age_s`). Run it from outside the tailnet against
+the Funnel link. It skips the brand logos, which a browser caches.
+
 ## Simulated OBS (`tools/event-sim/fakes/obs_sim.py`, #1229)
 
 The event simulation's stand-in OBS (spec
