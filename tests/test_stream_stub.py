@@ -844,6 +844,15 @@ def t_a_held_lock_blocks_and_a_stale_one_is_broken():
         t.start()
         assert not done.wait(0.5), "a change waits for the lock"
     assert done.wait(WAIT), "and goes ahead once it is free"
+    cut = threading.Event()
+
+    def cut_late():
+        stub.cut("late")
+        cut.set()
+    with stream_stub.state_lock(stub.directory):
+        threading.Thread(target=cut_late, daemon=True).start()
+        assert not cut.wait(0.5), "a fault waits for the lock too"
+    assert cut.wait(WAIT)
     lock = os.path.join(stub.directory, "channels", ".lock")
     open(lock, "w").close()
     old = time.time() - stream_stub.LOCK_STALE - 5
