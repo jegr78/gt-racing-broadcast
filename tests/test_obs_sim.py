@@ -590,17 +590,19 @@ def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:
         a, b = feeds.urls
-        cmd, calls = _stub(tmp, "sleep1")
-        grab = _grabber(cmd, feeds, wait=3, interval=0.2)
-        started = time.monotonic()
-        got = grab.frames([a, b])
-        assert got[a] and got[b] and time.monotonic() - started < 1.8, "both feeds at once"
-        time.sleep(0.3)
-        started = time.monotonic()
-        assert grab.frames([a])[a], "the last frame while a new read runs"
-        assert time.monotonic() - started < 0.5, "a refresh never blocks the screenshot"
-        assert _wait(lambda: len(_calls(calls)) == 3) and grab.frames([a])[a]
-        assert _wait(lambda: not grab.procs)
+        cmd, calls = _stub(tmp, "sleep2")
+        grab = _grabber(cmd, feeds, wait=30, interval=0.2)
+        got = {}
+        first = threading.Thread(target=lambda: got.update(grab.frames([a, b])))
+        first.start()
+        assert _wait(lambda: len(grab.procs) == 2, timeout=20), "both feeds are read at once"
+        first.join(30)
+        assert got[a] and got[b], got
+        assert _wait(lambda: not grab.procs, timeout=20)
+        time.sleep(0.3)  # past the 0.2 s interval
+        assert grab.frames([a])[a] and grab.feeds[a]["busy"] is not None, "the last frame at once while a new read runs"
+        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20) and grab.frames([a])[a]
+        assert _wait(lambda: not grab.procs, timeout=20)
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:
         a, b = feeds.urls
         cmd, _ = _stub(tmp, "sleep30")
