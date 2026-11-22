@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools", "event-sim", "fakes"))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
+import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
 import obs_state  # noqa: E402
 import obs_ws  # noqa: E402
@@ -32,6 +33,7 @@ class Clock:
 
 
 def _sim(**kw):
+    kw.setdefault("grabber", None)
     sim = obs_sim.ObsSim(**kw).start()
     os.environ["RACECAST_SIM_OBS_WS"] = sim.url
     return sim
@@ -396,6 +398,108 @@ def t_a_feed_cover_hides_only_its_own_half():
         assert _feeds(sim.state, "Splitscreen") == {"Feed A": (True, "Feed A Cover"), "Feed B": (False, None)}
     finally:
         sim.stop()
+
+
+STUB = """import sys, time
+args = sys.argv[1:]
+with open(args[0], "a") as fh:
+    fh.write(args[args.index("-i") + 1] + "\\n")
+mode = args[1]
+if mode == "sleep":
+    time.sleep(5)
+if mode not in ("ok", "short"):
+    sys.exit(1)
+w, h = (int(v) for v in args[args.index("-vf") + 1].split("=")[1].split(":"))
+sys.stdout.buffer.write(bytes((10, 200, 30)) * (w * h - (mode == "short")))
+"""
+
+
+def _stub(tmp, mode):
+    path = os.path.join(tmp, "ffmpeg_stub.py")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(STUB)
+    calls = os.path.join(tmp, "calls.txt")
+    return [sys.executable, path, calls, mode], calls
+
+
+def _calls(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as fh:
+        return fh.read().split()
+
+
+def t_grabber_reads_one_frame_from_a_loopback_feed():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd, calls = _stub(tmp, "ok")
+        grab = obs_grab.FfmpegGrabber(cmd, ttl=60)
+        assert grab("http://127.0.0.1:53001", 4, 2) == bytes((10, 200, 30)) * 8
+        assert grab("http://127.0.0.1:53001", 4, 2) is not None and len(_calls(calls)) == 1, "cached"
+        assert grab("http://192.0.2.7:53001", 4, 2) is None, "never a non-loopback feed"
+        assert grab("file://localhost/etc/passwd", 4, 2) is None, "never a local file"
+        assert _calls(calls) == ["http://127.0.0.1:53001"], _calls(calls)
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd, _ = _stub(tmp, "fail")
+        assert obs_grab.FfmpegGrabber(cmd)("http://127.0.0.1:53001", 4, 2) is None, "a failed grab"
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd, _ = _stub(tmp, "short")
+        assert obs_grab.FfmpegGrabber(cmd)("http://127.0.0.1:53001", 4, 2) is None, "a short frame"
+    assert isinstance(obs_sim.ObsSim().state.grabber, obs_grab.FfmpegGrabber), "ffmpeg by default"
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd, _ = _stub(tmp, "sleep")
+        started = time.monotonic()
+        assert obs_grab.FfmpegGrabber(cmd, timeout=0.5)("http://127.0.0.1:53001", 4, 2) is None
+        assert time.monotonic() - started < 4, "a stalled feed is cut off"
+    missing = obs_grab.FfmpegGrabber([os.path.join(ROOT, "no-such-ffmpeg")])
+    assert missing("http://127.0.0.1:53001", 4, 2) is None, "no ffmpeg"
+
+
+def t_real_ffmpeg_grabs_a_frame_over_http():
+    import functools
+    import http.server
+    import tempfile
+    import threading
+    with tempfile.TemporaryDirectory() as tmp:
+        clip = os.path.join(tmp, "red.ts")
+        try:
+            made = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                                   "color=c=red:s=64x36:d=1", "-c:v", "mpeg2video", "-f", "mpegts", clip],
+                                  capture_output=True, timeout=60).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            made = False
+        if not made:
+            print("skip t_real_ffmpeg_grabs_a_frame_over_http: no working ffmpeg")
+            return
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=tmp)
+        handler.log_message = lambda *a: None
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            frame = obs_grab.FfmpegGrabber()(f"http://127.0.0.1:{server.server_address[1]}/red.ts", 8, 4)
+        finally:
+            server.shutdown()
+            server.server_close()
+        assert frame and len(frame) == 8 * 4 * 3, "one rgb24 frame of the asked size"
+        r, g, b = frame[0], frame[1], frame[2]
+        assert r > 180 and g < 70 and b < 70, (r, g, b)
+
+
+def t_screenshot_composites_grabbed_frames_and_reports_the_source():
+    frames = {"http://127.0.0.1:53001": True}
+
+    def grabber(url, w, h):
+        return bytes((10, 200, 30)) * (w * h) if frames.get(url) else None
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION, grabber=grabber)
+    assert [f["source"] for f in st.snapshot()["program"]["feeds"]] == [None, None], "nothing rendered yet"
+    shot, _ = st.screenshot("Splitscreen", 320)
+    assert _png_pixel(shot, 2, 100) == (10, 200, 30), "Feed A shows its grabbed frame"
+    assert _png_pixel(shot, 162, 100) == (192, 192, 192), "Feed B falls back to the pattern"
+    sources = {f["input"]: f["source"] for f in st.snapshot()["program"]["feeds"]}
+    assert sources == {"Feed A": "frame", "Feed B": "synthetic"}, sources
+    _enable(st, "Stint", "Standby Cover")
+    st.screenshot("Stint", 320)
+    assert {f["input"]: f["source"] for f in st.feeds("Stint")} == {"Feed A": None}, "a hidden feed is not grabbed"
 
 
 def t_relay_helpers_drive_the_sim_over_the_wire():

@@ -225,8 +225,12 @@ including OBS's error codes for a missing scene, item or input. OBS lists the lo
 collection under its own name and the demo profile's `OBS_COLLECTION`
 (`--collection-name` adds more), so `event start` can switch to it. Each client gets the
 events its `eventSubscriptions` asks for; `obs_ws` asks for none. `obs_render.py` draws
-program screenshots as PNG at each item's canvas rect: colour bars per visible feed, a
-solid panel per opaque item, the scene name on top. Opaque by default are the full-page
+program screenshots as PNG at each item's canvas rect: per visible feed one frame read
+from its loopback URL with ffmpeg (`obs_grab.py`, 4 s timeout, cached for 1 s), or colour
+bars with the input name or its `/labels` text when ffmpeg is missing or the read fails;
+a solid panel per opaque item; the scene name on top. `program.feeds[].source` says which
+the last screenshot used (`frame`, `synthetic`, or null for a hidden feed); `--no-grab`
+turns the frames off. Opaque by default are the full-page
 graphics of `obs_ws.GRAPHIC_SOURCES` except the transparent Grid Rows, plus the feed
 covers (`--opaque` replaces the list); `program.feeds` marks a feed such an item covers
 as `occluded` and names it in `occluded_by`.

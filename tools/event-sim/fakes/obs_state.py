@@ -19,7 +19,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from obs_render import render_program
+from obs_render import pixel_rect, render_program
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
@@ -163,10 +163,12 @@ class ObsState:
     """One simulated OBS instance. Thread-safe; every public method takes the lock."""
 
     def __init__(self, collection=None, scene=None, strict=True, clock=time.monotonic,
-                 collection_names=None, opaque=None):
+                 collection_names=None, opaque=None, grabber=None):
         """`collection_names` are further names OBS lists for the loaded collection
         (default: the demo profile's OBS_COLLECTION), so a profile's switch succeeds.
-        `opaque` names the inputs that hide what lies below them (default OPAQUE_DEFAULT)."""
+        `opaque` names the inputs that hide what lies below them (default OPAQUE_DEFAULT).
+        `grabber(url, w, h)` returns a feed's current frame as RGB bytes or None; without
+        one, screenshots show the synthetic pattern."""
         self.strict, self.clock = strict, clock
         self.lock = threading.RLock()
         self.listeners = []
@@ -185,6 +187,8 @@ class ObsState:
         self.media_started = {}
         self.image, self.labels = None, {}
         self.opaque = set(OPAQUE_DEFAULT if opaque is None else opaque)
+        self.grabber = grabber
+        self.feed_sources = {}
         if collection is not None:
             self._load(collection)
         extra = [demo_collection_name()] if collection_names is None else list(collection_names)
@@ -818,17 +822,36 @@ class ObsState:
                     self.labels[name] = str(text)
 
     def screenshot(self, source, width=640):
-        """(PNG or fixed image bytes, format) of a scene or input."""
+        """(PNG or fixed image bytes, format) of a scene or input. Each shown feed's
+        frame comes from the grabber, outside the lock; `feed_sources` records whether
+        the picture used that `frame` or the `synthetic` pattern (None: hidden)."""
         with self.lock:
             if self.image is not None:
                 return self.image, "png" if self.image[:8] == b"\x89PNG\r\n\x1a\n" else "jpg"
             if source in self.scenes:
                 layers = self.layers(source)
+                hidden = {f["input"] for f in self.feeds(source) if f["occluded"]}
             else:
                 inp = self.inputs.get(source) or {}
                 kind = "feed" if feed_url(inp.get("settings") or {}) else "opaque"
-                layers = [{"kind": kind, "name": source, "rect": [0.0, 0.0, *CANVAS]}]
-            return render_program(source, layers, width, self.labels), "png"
+                layers, hidden = [{"kind": kind, "name": source, "rect": [0.0, 0.0, *CANVAS]}], set()
+            for layer in layers:
+                if layer["kind"] == "feed":
+                    layer["url"] = feed_url(self.inputs[layer["name"]]["settings"])
+            labels, grabber = dict(self.labels), self.grabber
+        used = {}
+        for layer in layers:
+            if layer["kind"] != "feed":
+                continue
+            if layer["name"] in hidden:
+                used[layer["name"]] = None
+                continue
+            _, _, w, h = pixel_rect(layer["rect"], width)
+            layer["frame"] = grabber(layer["url"], w, h) if grabber else None
+            used[layer["name"]] = "frame" if layer["frame"] else "synthetic"
+        with self.lock:
+            self.feed_sources.update(used)
+        return render_program(source, layers, width, labels), "png"
 
     def _r_GetSourceScreenshot(self, data):
         source, _ = _need(data, "sourceName", "imageFormat")
@@ -901,7 +924,8 @@ class ObsState:
                              None)
                 out.append({"input": layer["name"], "url": url, "port": urlsplit(url).port,
                             "muted": inp["muted"], "rect": layer["rect"],
-                            "occluded": cover is not None, "occluded_by": cover})
+                            "occluded": cover is not None, "occluded_by": cover,
+                            "source": self.feed_sources.get(layer["name"])})
             return out
 
     def snapshot(self):

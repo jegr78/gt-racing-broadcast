@@ -36,11 +36,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))   # obs_ws imports its siblings
+import obs_grab  # noqa: E402
 import obs_state  # noqa: E402
 import obs_ws  # noqa: E402
 
 OBS_WS_ENV = "RACECAST_SIM_OBS_WS"        # simulation.OBS_WS
 HANDSHAKE_TIMEOUT_S = 10
+DEFAULT_GRABBER = object()
 MAX_BODY = 1 << 20
 
 
@@ -159,12 +161,17 @@ class _Client:
 class ObsSim:
     """A running simulated OBS. `collection` is a scene-collection JSON path or dict
     (None: an empty OBS with one `scene`); `strict=False` keeps the screenshot
-    stand-in's lenient answers; `image` serves fixed bytes for every screenshot."""
+    stand-in's lenient answers; `image` serves fixed bytes for every screenshot;
+    `grabber` reads feed frames (default ffmpeg, None: always the synthetic pattern)."""
 
     def __init__(self, collection=obs_state.DEFAULT_COLLECTION, scene=None, strict=True,
-                 image=None, port=0, clock=time.monotonic, collection_names=None, opaque=None):
+                 image=None, port=0, clock=time.monotonic, collection_names=None, opaque=None,
+                 grabber=DEFAULT_GRABBER):
+        if grabber is DEFAULT_GRABBER:
+            grabber = obs_grab.FfmpegGrabber()
         self.state = obs_state.ObsState(collection, scene=scene, strict=strict, clock=clock,
-                                        collection_names=collection_names, opaque=opaque)
+                                        collection_names=collection_names, opaque=opaque,
+                                        grabber=grabber)
         if image is not None:
             self.state.set_image(image)
         self.requested_port = port
@@ -350,6 +357,9 @@ def build_parser():
     ap.add_argument("--opaque", action="append",
                     help="an input that hides the feeds below it, repeatable "
                          "(default: the full-page graphics and feed covers)")
+    ap.add_argument("--no-grab", action="store_true",
+                    help="never read feed frames; screenshots show the synthetic pattern")
+    ap.add_argument("--ffmpeg", default="ffmpeg", help="ffmpeg binary for feed frames (default: on PATH)")
     ap.add_argument("--ready-file", help="write {port, url, state_url} here once listening")
     return ap
 
@@ -377,7 +387,9 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     image = read_image(args.image) if args.image else None
     run(ObsSim(args.collection, scene=args.scene, image=image, port=args.port,
-               collection_names=args.collection_names, opaque=args.opaque), args.ready_file)
+               collection_names=args.collection_names, opaque=args.opaque,
+               grabber=None if args.no_grab else obs_grab.FfmpegGrabber([args.ffmpeg])),
+        args.ready_file)
 
 
 if __name__ == "__main__":

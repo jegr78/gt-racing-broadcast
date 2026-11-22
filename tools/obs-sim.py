@@ -27,7 +27,8 @@ def main(argv=None):
     ap.add_argument("--scene", default="Race", help="reported program scene name")
     args = ap.parse_args(argv)
     raw = obs_sim.read_image(args.image)
-    sim = obs_sim.ObsSim(None, scene=args.scene, strict=False, image=raw, port=args.port)
+    sim = obs_sim.ObsSim(None, scene=args.scene, strict=False, image=raw, port=args.port,
+                         grabber=None)
     obs_sim.run(sim, banner=f"serving {args.image} ({len(raw)} B) as program scene {args.scene!r}")
 
 

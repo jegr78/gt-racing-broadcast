@@ -1,7 +1,8 @@
 """Program screenshots of the simulated OBS as PNG, stdlib only.
 
 The picture paints the scene's layers bottom first at their canvas rects: a test pattern
-per feed (colour bars plus the input name or its label) and a solid panel per opaque
+per feed (its grabbed frame, or else colour bars plus the input name or its label) and a
+solid panel per opaque
 item, under a top bar with the scene name. The same layers always give the same bytes."""
 import struct
 import zlib
@@ -58,6 +59,16 @@ class Canvas:
             start = (yy * self.w + x0) * 3
             self.px[start:start + len(row)] = row
 
+    def blit(self, x, y, w, h, rgb):
+        """Copy a w*h RGB image to (x, y), clipped to the canvas."""
+        x0, x1 = max(0, x), min(self.w, x + w)
+        if x1 <= x0:
+            return
+        for row in range(max(0, -y), min(h, self.h - y)):
+            src = (row * w + (x0 - x)) * 3
+            dst = ((y + row) * self.w + x0) * 3
+            self.px[dst:dst + (x1 - x0) * 3] = rgb[src:src + (x1 - x0) * 3]
+
     def text(self, x, y, text, scale, colour=TEXT):
         for ch in text.upper():
             glyph = FONT.get(ch, FONT["?"])
@@ -98,15 +109,29 @@ def _label(canvas, x0, y0, w, h, text):
     canvas.text(lx, ly, label, scale)
 
 
-def render_program(scene, layers, width=640, labels=None):
-    """PNG bytes of `scene`. `layers` are {kind: feed|opaque, name, rect: [x, y, w, h]}
-    on the 1920x1080 canvas, bottom first; `labels` maps a feed to the text it shows."""
+def size(width):
+    """The picture size for a requested screenshot width."""
     width = max(64, min(int(width or 640), 1920))
-    height = width * 9 // 16
-    k = width / CANVAS_W
+    return width, width * 9 // 16
+
+
+def pixel_rect(rect, width):
+    """A canvas rect [x, y, w, h] in pixels of a picture `width` wide, unclipped."""
+    k = size(width)[0] / CANVAS_W
+    return tuple(round(v * k) for v in rect)
+
+
+def render_program(scene, layers, width=640, labels=None):
+    """PNG bytes of `scene`. `layers` are {kind: feed|opaque, name, rect: [x, y, w, h],
+    frame: RGB bytes of the pixel rect or None} on the 1920x1080 canvas, bottom first;
+    `labels` maps a feed to the text its pattern shows."""
+    width, height = size(width)
     canvas = Canvas(width, height, _tint(scene))
     for layer in layers:
-        x, y, w, h = (round(v * k) for v in layer["rect"])
+        x, y, w, h = pixel_rect(layer["rect"], width)
+        if layer.get("frame") and len(layer["frame"]) == w * h * 3:
+            canvas.blit(x, y, w, h, layer["frame"])
+            continue
         x0, y0 = max(0, x), max(0, y)
         w, h = min(width, x + w) - x0, min(height, y + h) - y0
         if w <= 0 or h <= 0:
