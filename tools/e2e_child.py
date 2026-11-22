@@ -12,8 +12,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import ai_jobs
 
 
-def supervise(argv,seconds=900):
-    if not math.isfinite(seconds) or not 0<seconds<=900:raise ValueError('Invalid E2E child lifetime')
+def supervise(argv,seconds=900,limit=900):
+    if not math.isfinite(seconds) or not 0<seconds<=limit:raise ValueError('Invalid E2E child lifetime')
     stopped=threading.Event()
     def stop(_signal,_frame):stopped.set()
     for name in ('SIGTERM','SIGINT','SIGHUP'):
@@ -46,6 +46,17 @@ def supervise(argv,seconds=900):
         else:tree.close()
 
 
+def parse_cli(argv):
+    """`SECONDS [--long] -- COMMAND...` -> (seconds, limit, command). Only `--long` (the
+    event simulation) lifts the 900 s cap to e2e_safety.LONG_MAX_SECONDS."""
+    long=len(argv)>1 and argv[1]=='--long'
+    rest=argv[2:] if long else argv[1:]
+    if not argv or not rest or rest[0]!='--' or len(rest)<2:raise ValueError('Expected lifetime [--long] -- command')
+    import e2e_safety
+    return float(argv[0]),e2e_safety.LONG_MAX_SECONDS if long else 900,rest[1:]
+
+
 if __name__=='__main__':
-    if len(sys.argv)<4 or sys.argv[2]!='--':raise SystemExit('Expected lifetime -- command')
-    raise SystemExit(supervise(sys.argv[3:],float(sys.argv[1])))
+    try:seconds,limit,command=parse_cli(sys.argv[1:])
+    except ValueError as error:raise SystemExit(str(error)) from None
+    raise SystemExit(supervise(command,seconds,limit=limit))

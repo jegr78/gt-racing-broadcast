@@ -687,6 +687,54 @@ def t_real_ffmpeg_grabs_a_frame_over_http():
         assert _jpeg_size(encoded) == (16, 8), "ffmpeg encodes a JPEG of the picture"
 
 
+def t_real_ffmpeg_grabs_a_frame_from_a_feed_that_stays_open():
+    import http.server
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        clip = os.path.join(tmp, "red.ts")
+        try:
+            made = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                                   "color=c=red:s=64x36:d=3:r=25", "-c:v", "mpeg2video", "-f", "mpegts", clip],
+                                  capture_output=True, timeout=60).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            made = False
+        if not made:
+            assert not os.environ.get("OBS_SIM_REQUIRE_FFMPEG"), "this CI job installs ffmpeg"
+            raise Skip("no working ffmpeg on PATH")
+        with open(clip, "rb") as fh:
+            payload = fh.read()
+        release = threading.Event()
+
+        class Feed(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp2t")
+                self.end_headers()
+                self.wfile.write(payload)
+                self.wfile.flush()
+                release.wait(30)
+
+            def log_message(self, *args):
+                pass  # quiet test output
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Feed)
+        server.daemon_threads = False
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            grab = obs_grab.FeedGrabber(ports=[port], size=(8, 4), wait=20, timeout=20)
+            frame = grab.frames([f"http://127.0.0.1:{port}/"])[f"http://127.0.0.1:{port}/"]
+            grab.close()
+        finally:
+            release.set()
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        assert frame and len(frame[0]) == 8 * 4 * 3, \
+            "a live feed sends less than ffmpeg's default probe window before it waits; the grab still gets a frame"
+
+
 class FakeGrabber:
     def __init__(self, live, block=None):
         self.live, self.block, self.asked = live, block, []

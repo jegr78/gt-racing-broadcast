@@ -9803,7 +9803,10 @@ class Relay:
     def _start_av_watcher(self):
         """Start the A/V sync watcher on OBS's own log directory. Entirely optional:
         without OBS installed there is no directory and the relay simply runs without
-        the detector (#619)."""
+        the detector (#619). Off in simulation: the host's OBS is not the simulated one."""
+        if simulation.active():
+            LOG.info(simulation.skipped("A/V sync watcher on the OBS log"))
+            return
         try:
             d = logsetup.obs_log_dir(sys.platform)
             if not d or not os.path.isdir(d):
@@ -12084,6 +12087,11 @@ def simulation_startup(environ):
     environ.update(simulation.with_stream_bin(environ))
     environ.update(simulation.env_overrides(environ))
     return None
+
+
+def control_port(value, environ):
+    """--http-port, else the simulated relay port in simulation, else 8088."""
+    return value if value is not None else simulation.relay_port(environ)
 
 
 def _timing_host_env_file():
@@ -15889,7 +15897,10 @@ def twitch_cookies_needed(urls):
 
 def cookie_refresh_browser(environ):
     """The browser named by RACECAST_COOKIES_BROWSER (machine .env), or None: unset,
-    or not a bare name from COOKIE_BROWSERS (#1092)."""
+    or not a bare name from COOKIE_BROWSERS (#1092). None in simulation: the real
+    browser's cookie store stays untouched."""
+    if simulation.active(environ):
+        return None
     value = (environ.get("RACECAST_COOKIES_BROWSER") or "").strip().lower()
     return value if value in COOKIE_BROWSERS else None
 
@@ -16101,7 +16112,8 @@ def main():
                     help="Do not build the qualifying schedule source at all.")
     ap.add_argument("--poll", type=int, default=30, help="Sheet poll interval (seconds)")
     ap.add_argument("--schedule", default="schedule.txt", help="Local offline fallback")
-    ap.add_argument("--http-port", type=int, default=8088)
+    ap.add_argument("--http-port", type=int, default=None,
+                    help="Control port (default 8088; RACECAST_SIM_RELAY_PORT in simulation)")
     ap.add_argument("--runtime-dir", default=None,
                     help="Directory for runtime data (yt-cookies.txt, logs/, *.cache.txt). "
                          "Default: next to this script (keeps the distributed package "
@@ -16187,6 +16199,7 @@ def main():
     _sim_error = simulation_startup(os.environ)
     if _sim_error:
         sys.exit(f"ERROR: {_sim_error}")
+    args.http_port = control_port(args.http_port, os.environ)
     if simulation.install_network_guard():
         print("Simulation mode: loopback endpoints only, no outbound connection.", flush=True)
 
@@ -16521,6 +16534,8 @@ def main():
             LOG.warning("yt-cookies.txt is %.0f h old. Cookies rotate; "
                         "run 'racecast cookies firefox' before the event.", _ch['age_h'])
     _refresh_browser = cookie_refresh_browser(os.environ)
+    if simulation.active() and (os.environ.get("RACECAST_COOKIES_BROWSER") or "").strip():
+        LOG.info(simulation.skipped("cookie refresh from the browser"))
     if _refresh_browser:
         threading.Thread(target=CookieRefresher(
             relay, _refresh_browser,

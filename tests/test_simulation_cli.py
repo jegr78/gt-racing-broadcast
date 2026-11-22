@@ -316,15 +316,25 @@ def t_relay_start_never_crosses_simulation_and_live():
     assert action == "refuse" and kill == [], "simulation never kills an unknown holder"
     assert _plan("", "live", pidfile_alive=False, pidfile_pid=None)[0] == "heal", \
         "a live start keeps healing an orphan"
-    assert _plan("", "simulation", port_pids=[])[0] == "start"
+    assert _plan("", "simulation", port_pids=[], pidfile_alive=False)[0] == "start"
     action, _kill, reason = _plan("simulation", "live")
     assert "racecast relay stop" in reason and "--simulation" not in reason, \
         "a live operator must be able to run the hint as printed"
     assert _plan("simulation", "live", pidfile_alive=False, pidfile_pid=None)[0] == "heal", \
         "a stale simulation stamp with a dead relay must not block a live start"
-    assert _plan("simulation", "live", port_pids=[555])[0] == "heal", \
+    assert _plan("simulation", "live", port_pids=[555], pidfile_alive=False)[0] == "heal", \
         "a stale simulation stamp says nothing about a foreign holder"
-    assert _plan("simulation", "live", port_pids=[])[0] == "start"
+    assert _plan("simulation", "live", port_pids=[], pidfile_alive=False)[0] == "start"
+
+
+def t_a_relay_of_the_other_mode_blocks_a_start_on_any_port():
+    for running, active in (("live", "simulation"), ("", "simulation"), ("simulation", "live")):
+        for ports in ([], [555]):
+            action, kill, reason = _plan(running, active, port_pids=ports)
+            assert action == "refuse" and kill == [], (running, active, ports, action)
+            assert "relay stop" in reason, reason
+    assert _plan("live", "simulation", port_pids=[], pidfile_relay=False)[0] == "start", \
+        "a recycled PID that is no relay blocks nothing"
 
 
 def t_event_start_refuses_a_crossed_relay_before_any_launch():
@@ -399,21 +409,130 @@ def t_relay_mode_stamp_round_trip():
         assert m._running_relay_mode() == ""
 
 
-def t_simulated_freeport_never_kills_a_live_relay():
-    killed = []
-    seams = ((m, "_relay_is_alive", lambda: True), (m, "streams_status_data", lambda: []),
-             (m.pt, "pids_on_port", lambda port: [4242]), (m.pt, "kill_pid", killed.append))
-    with _env(**SIM_ENV), _patched(*seams, (m, "_running_relay_mode", lambda: "live")):
+def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
+    killed, stopped = [], []
+    seams = ((m, "streams_status_data", lambda: []), (m.sv, "read_pid", lambda p: 4242),
+             (m.sv, "pid_alive", lambda pid: pid_alive),
+             (m, "_relay_identity", lambda pid: "relay" if is_relay else "other"),
+             (m.pt, "pids_on_port", lambda port: [4242, 777]), (m.pt, "kill_pid", killed.append),
+             (m.sv, "stop_pid", lambda pid, path=None, **k: stopped.append(pid) or True),
+             (m, "_running_relay_mode", lambda: mode), (m, "_release_obs_feeds", lambda: None))
+    code, out = 0, io.StringIO()
+    with _env(**SIM_ENV), _patched(*seams):
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                m.freeport_cmd(["--force"])
+            with contextlib.redirect_stdout(out):
+                m.freeport_cmd(list(args))
         except SystemExit as exc:
-            assert exc.code == 1, exc.code
-    assert killed == [], "a simulated freeport --force killed a live relay"
-    with _env(**SIM_ENV), _patched(*seams, (m, "_running_relay_mode", lambda: "simulation")):
-        with contextlib.suppress(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-            m.freeport_cmd(["--force"])
-    assert killed, "--force still frees the ports of a simulation relay"
+            code = exc.code
+    return killed, stopped, code, out.getvalue()
+
+
+def t_relay_identity_uses_the_start_recorded_next_to_the_pid_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = []
+        with _patched((m, "_runtime_base_dir", lambda: tmp),
+                      (m.sv, "relay_identity", lambda pid, recorded: seen.append((pid, recorded)) or "relay"),
+                      (m.simulation, "process_started", lambda pid: "start-77")):
+            m._record_relay_start(4242)
+            assert m._relay_identity(4242) == "relay" and seen == [(4242, "start-77")], seen
+            m._clear_relay_profile_stamp()
+            m._relay_identity(4242)
+            assert seen[-1] == (4242, None), "the marker goes with the stamps"
+            m._record_relay_start(4242)
+            with _patched((m, "_active_profile_name", lambda: "demo")):
+                m._write_relay_profile_stamp()
+            m._relay_identity(4242)
+            assert seen[-1] == (4242, None), "a new start drops the old relay's marker"
+
+
+def t_a_verified_start_records_the_relay_start():
+    recorded = []
+    with _patched((m.sv, "start_detached", lambda *a, **k: 4242), (m, "_relay_http_ok", lambda: True),
+                  (m.sv, "pid_alive", lambda pid: True), (m.sv, "_reap_zombie", lambda pid: None),
+                  (m, "_relay_boot_log_size", lambda: 0), (m, "_record_relay_start", recorded.append)):
+        assert m._spawn_relay_verified(["relay"]) == 4242
+    assert recorded == [4242]
+
+
+def t_a_marker_that_does_not_decode_is_no_marker():
+    with tempfile.TemporaryDirectory() as tmp, _patched((m, "_runtime_base_dir", lambda: tmp)):
+        with open(m._relay_start_path(), "wb") as fh:
+            fh.write(b"\xff\xfe\x00bad")
+        assert m._recorded_relay_start() is None
+
+
+def t_macos_start_marker_ignores_locale_and_time_zone():
+    calls = []
+
+    def run(argv, **kw):
+        calls.append((argv, kw.get("env")))
+        return subprocess.CompletedProcess(argv, 0, "Sat Nov 22 14:00:01 2026\n", "")
+    with _env(LANG="de_DE.UTF-8", LC_ALL="de_DE.UTF-8", TZ="Europe/Berlin"):
+        mark = sim.process_started(4242, run=run, platform="darwin")
+    assert mark == "Sat Nov 22 14:00:01 2026", mark
+    argv, env = calls[0]
+    assert argv[:3] == ["ps", "-o", "lstart="], argv
+    assert env and env.get("LC_ALL") == "C" and env.get("LANG") == "C" and env.get("TZ") == "UTC", env
+
+
+def _stop_case(identity, holders):
+    out, stopped, removed = io.StringIO(), [], []
+    seams = ((m.sv, "read_pid", lambda p: 4242), (m.sv, "pid_alive", lambda pid: True),
+             (m, "_relay_identity", lambda pid: identity), (m.pt, "pids_on_port", lambda port: list(holders)),
+             (m.sv, "stop_pid", lambda pid, path=None, is_target=None:
+                 stopped.append((pid, is_target)) or (is_target is None or is_target(pid))),
+             (m, "_clear_relay_profile_stamp", lambda: removed.append("stamps")),
+             (m, "_release_obs_feeds", lambda: None), (m, "_running_relay_mode", lambda: "live"))
+    code = 0
+    with tempfile.TemporaryDirectory() as tmp, _patched(*seams, (m, "_runtime_base_dir", lambda: tmp)):
+        open(m._relay_pid_path(), "w").close()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.relay_stop([])
+        except SystemExit as exc:
+            code = exc.code
+        pidfile = os.path.exists(m._relay_pid_path())
+    return out.getvalue(), stopped, removed, code, pidfile
+
+
+def t_relay_stop_never_reports_success_while_the_relay_runs():
+    text, stopped, removed, code, _pf = _stop_case("other", [4242])
+    assert stopped and stopped[0][1] is None and "relay stopped." in text, \
+        "a stale marker on the process that holds the relay port is still the relay"
+    text, stopped, removed, code, pidfile = _stop_case("other", [777])
+    assert stopped == [] and removed == [] and code and pidfile, (text, stopped, removed, code)
+    assert "relay stopped." not in text and "4242" in text and "777" in text, text
+    text, stopped, removed, code, pidfile = _stop_case("other", [])
+    assert stopped == [] and not pidfile and removed and "relay stopped." not in text, text
+    assert "not running" in text, text
+    text, stopped, removed, code, _pf = _stop_case("relay", [4242])
+    assert stopped and "relay stopped." in text
+
+
+def t_start_signals_treat_an_unknown_process_as_a_relay():
+    for identity, expected in (("relay", True), ("unknown", True), ("other", False)):
+        with _patched((m.pt, "pids_on_port", lambda port: []), (m.sv, "read_pid", lambda p: 4242),
+                      (m.sv, "pid_alive", lambda pid: True), (m, "_relay_identity", lambda pid, _i=identity: _i),
+                      (m, "_running_relay_profile", lambda: "demo"), (m, "_running_relay_mode", lambda: "simulation")):
+            assert m._relay_start_signals()["pidfile_relay"] is expected, identity
+
+
+def t_relay_stop_signals_only_a_proven_relay():
+    for identity, target in (("relay", True), ("unknown", False), ("other", False)):
+        with _patched((m, "_relay_identity", lambda pid, _i=identity: _i)):
+            assert m._relay_is_target(4242) is target, identity
+
+
+def t_simulated_freeport_acts_only_on_its_own_simulation_relay():
+    killed, stopped, code, out = _sim_freeport("simulation", True)
+    assert killed == [] and stopped == [4242], "it stops this app home's simulation relay, never a port holder"
+    killed, stopped, code, out = _sim_freeport("live", True)
+    assert killed == stopped == [] and code == 1, "a live relay is never touched"
+    killed, stopped, code, out = _sim_freeport("simulation", False, args=("--force", "8088", "53001"))
+    assert killed == stopped == [] and code == 1, "a holder it cannot prove is its own stays"
+    assert "cannot prove" in out, out
+    killed, stopped, code, out = _sim_freeport("simulation", True, is_relay=False)
+    assert killed == stopped == [] and code == 1, "a recycled PID is no simulation relay"
 
 
 def _sim_ok_env():
@@ -456,7 +575,7 @@ def t_force_record_ties_pid_to_its_start_and_is_released_on_exit():
 def t_process_start_marker():
     p = subprocess.Popen([sys.executable, "-c", "pass"]); p.wait()
     assert sim.process_started(p.pid) is None, "a gone process has no start marker"
-    if sys.platform.startswith("linux") or sys.platform == "darwin":
+    if sys.platform.startswith("linux") or sys.platform in ("darwin", "win32"):
         mark = sim.process_started(os.getpid())
         assert mark and mark == sim.process_started(os.getpid()), mark
 
@@ -597,6 +716,58 @@ def t_a_plain_gate_check_leaves_no_force_dir_behind():
     fdir = os.path.join(tempfile.mkdtemp(), "simulation-force")
     m._simulation_gate(["relay", "start"], _sim_ok_env(), "demo", {}, force_dir=fdir)
     assert not os.path.exists(fdir), "a check without a pass must not create the record dir"
+
+
+def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
+    import preflight
+    sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
+    import ui_ops
+    urls = []
+    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234"), \
+            _patched((m.http_util, "get_bytes", lambda url, **k: urls.append(url) or b"")):
+        assert m._relay_port() == 41234
+        m._fetch_relay_page("/hud")
+        data = m.relay_status_data(read_pid=lambda p: None, alive=lambda p: False)
+        assert data["port"] == 41234, data
+        assert ui_ops.build_argv("kill-relay")[2] == "41234", "Kill relay frees the simulated port"
+        assert preflight.relay_status_url() == "http://127.0.0.1:41234/status"
+        assert 41234 in preflight.relay_ports() and 8088 not in preflight.relay_ports()
+    assert urls == ["http://127.0.0.1:41234/hud"], urls
+    assert m._relay_port() == 8088 and ui_ops.build_argv("kill-relay")[2] == "8088"
+    assert preflight.relay_status_url() == "http://127.0.0.1:8088/status"
+
+
+def t_kill_relay_text_names_the_actual_port():
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    assert "control port 8088" not in html and "relay control port 8088" not in html, \
+        "the Kill relay texts show the port the Control Center reads from the relay status"
+    assert 'class="relay-port"' in html
+    assert "'free-ports-simulation':" in html and html.count('class="sim-only"') == 2, \
+        "Free feed ports says the same in simulation"
+    assert "'kill-relay-simulation':" in html and 'class="sim-only"' in html, \
+        "in simulation Kill relay says it only stops this installation's simulation relay"
+
+
+def t_every_relay_port_reader_goes_through_the_helper():
+    import re
+    with open(os.path.join(ROOT, "src", "racecast.py"), encoding="utf-8") as fh:
+        uses = re.findall(r"\bRELAY_PORT\b", fh.read())
+    assert len(uses) == 2, f"RELAY_PORT is read outside _relay_port(): {len(uses)} uses"
+
+
+def t_log_viewer_shows_no_host_logs_in_simulation():
+    import logsetup
+    with tempfile.TemporaryDirectory() as tmp:
+        log = os.path.join(tmp, "obs.txt")
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        with _patched((logsetup, "obs_log_dir", lambda p: tmp), (logsetup, "newest_log", lambda d: log),
+                      (m, "_companion_log_path", lambda: log)):
+            assert m._obs_files() == [log] and m._companion_files() == [log]
+            with _env(RACECAST_SIMULATION="1"):
+                assert m._obs_files() == [] and m._companion_files() == [], \
+                    "the host's OBS and Companion logs are not the rehearsal's"
 
 
 if __name__ == "__main__":

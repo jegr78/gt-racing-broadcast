@@ -353,11 +353,14 @@ def cookies_needed(kind=None, relay_status=None):
     return None
 
 
-RELAY_STATUS_URL = "http://127.0.0.1:8088/status"
+def relay_status_url():
+    """The local relay's /status URL; its port moves in simulation."""
+    return f"http://127.0.0.1:{simulation.relay_port()}/status"
 
 
-def relay_status(url=RELAY_STATUS_URL, timeout=2):
+def relay_status(url=None, timeout=2):
     """The local relay's /status dict, or None when no relay answers. Best-effort."""
+    url = url or relay_status_url()
     try:
         data = http_util.get_json(url, timeout=timeout)
     except Exception:                           # noqa: BLE001  no relay is the normal case
@@ -612,7 +615,12 @@ COLORS = {PASS: "\033[32m", WARN: "\033[33m", FAIL: "\033[31m", INFO: "\033[36m"
 RESET = "\033[0m"
 
 # ports the relay binds (must be FREE) and services we probe (should be REACHABLE)
-FEED_PORTS = (53001, 53002, 53003, 8088)
+FEED_PORTS = (53001, 53002, 53003)
+
+
+def relay_ports():
+    """The feed ports plus the relay control port (moved in simulation)."""
+    return (*FEED_PORTS, simulation.relay_port())
 SERVICE_PORTS = ((4455, "OBS WebSocket"), (8000, "Companion"))
 REQUIRED_TOOLS = ("streamlink", "yt-dlp", "ffmpeg", "deno")
 
@@ -748,7 +756,7 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
         except Exception:
             pass  # never let the plugin probe break the report
     ports = []
-    for port in FEED_PORTS:
+    for port in relay_ports():
         # "In use" is normal once the relay and feeds are running, so report it as
         # INFO rather than a warning. `racecast status` shows whether the occupant
         # is the relay; only a foreign app is a real conflict.

@@ -249,7 +249,8 @@ request.
 `obs_grab.py` reads the frames only from the relay's feed URLs (http, loopback, ports
 53001-53003 or `--feed-port`, path `/`). It makes the HTTP request itself, follows no
 redirect and pipes the bytes into ffmpeg, which may only read its stdin (`pipe` is the
-one allowed protocol, MPEG-TS demuxer forced) and is killed after 4 s. Each feed is read in the
+one allowed protocol, MPEG-TS demuxer forced, 1 s probe window since a live feed never
+ends) and is killed after 4 s. Each feed is read in the
 background at most once per `--grab-interval` (5 s); a screenshot waits only for a
 feed's first frame, up to 1 s. `--no-grab` turns the reads off, `ObsSim.stop()` kills
 running ones. A read is a short-lived consumer on the relay's fan-out port: while it
@@ -453,6 +454,111 @@ pulls run: it writes each stand-in to a temporary file and replaces it, moving a
 missing. A relative `--ffmpeg` path is made absolute.
 The CI e2e job sets `OBS_SIM_REQUIRE_FFMPEG=1`, so the real-ffmpeg tests cannot skip there,
 and only there do they also require drawtext to find a default font.
+
+## Event simulation engine (`tools/event-sim/event_sim.py`, #1232)
+
+Runs a scenario against the fakes above plus the real relay and Control Center, and writes
+`OUT/report.html`, `OUT/report.json`, `OUT/shots/` and `OUT/logs/` (spec
+`docs/superpowers/specs/2026-11-21-event-simulation-design.md`). Exit 0: no hard finding;
+1: a hard finding; 2: the scenario or the stack did not start. Not in `tools/run-tests.py`;
+`tests/test_event_sim_engine.py` covers the engine with in-process fakes and a fake clock.
+
+```bash
+python3 tools/event-sim/event_sim.py --scenario smoke --out DIR   # bundled name or a .toml path
+python3 tools/event-sim/event_sim.py --scenario smoke --check     # validate only, starts nothing
+```
+
+`stack.Stack` runs the Sheet, sink, stream stub and OBS in process. It copies `src/` and
+`profiles/demo` into a temporary app home and starts `racecast --simulation relay run` and
+`racecast --simulation ui` there, so the relay.mode stamp, the console secret
+(`secrets.token_hex`, passed as `RACECAST_CONSOLE_SECRET`) and every runtime file stay out of
+the checkout. Inherited `RACECAST_*` values are dropped. Ports are free loopback ports,
+never 8088, 8089 or 53001-53003: `RACECAST_SIM_RELAY_PORT` points the relay and the Control
+Center at the same control port, and the OBS collection's feed inputs and relay browser
+sources are rewritten to this run's ports (`port_map`). Once the relay answers, the stack
+writes `relay.pid` (the control port's holder) and the `relay.profile`/`relay.mode` stamps
+into the temporary app home, as `relay start` would, so the Control Center reports it alive. `--keep-work` keeps the app home. Screenshots of pages use Playwright's
+own Chromium, as `tools/e2e.py --visual` does (local setup there); without it they are soft
+findings.
+
+Lifetimes: a scenario's `max_minutes` (default 12, at most 120, the spec's CI timeout for
+`full`) ends the run. Each service runs under `tools/e2e_child.py` and, on local Linux, the
+whole run inside `e2e_safety` containment, both for `max_minutes` plus 10 minutes for start,
+teardown and report. Only the event simulation opts into more than 900 s
+(`e2e_safety.enter(..., long=True)`, `e2e_child.py SECONDS --long -- ...`), capped at
+`e2e_safety.LONG_MAX_SECONDS` = 7800; everyone else keeps 900 s or the `MAX_SECONDS` they set.
+A check's timeout is cut at the end of the run, and a step that has not run by then fails,
+so the report is written inside the lifetime.
+It shares the one E2E unit: run it after, not beside, `tools/e2e.py`.
+
+Scenario (`scenario.py`, TOML): `name`, `description`, `max_minutes`, `wait` (default
+trigger timeout), `[event]` with `stints` and `[[event.commentators]]` (`name`, `channel` for
+`sim://<channel>`, `stint`, `scheduled` = the Schedule row has the link from the start),
+`[sheet.tabs]` (replaces tabs built from the event), `[tolerances] state_s` (default 2) and
+`[[step]]`: `id` (default `do`, unique, letters, digits, `_` and `-`, no dot), `at`, `role`
+(`kind` or `kind:instance`, the instance letters, digits, space, `.`, `_`, `-`), `do`, `args`,
+`expect`, `soft`, `timeout` (per check, default 5 s), `wait` and `shot` (a name, or
+`{name, role, element}`). `at` is a duration since the run started, `after:<id>[+dur]`
+(after that step ended; skipped when it failed), `lap:leader=N` (`race.lap >= N`) or
+`state:<name>` (`race.state`). `${id.key}` in args reads an earlier step's result; such a
+step waits for that step and is skipped when it failed. `after:` and `${...}` must name an
+earlier step in the file (a typo, a forward or a mutual reference is refused at load).
+Names that become files (scenario, shot) are letters, digits, `.`, `_`, `-`, start with a
+letter or digit, and are no Windows device name (`con`, `nul`, `com1`, ...).
+
+Scheduling: one executor, one action at a time. Each tick it runs the first step in file
+order whose trigger fired, so a step that waits never holds back a later one whose trigger
+fires first; `after:` gives an explicit order. A trigger is armed at its earliest moment:
+its time, the referenced step's end plus the offset for `after:` (unarmed until that step
+ran), or the run start for a race trigger. One that has not fired within `wait` of being
+armed (default: until the run ends) fails the step hard. A step's own `expect` checks run
+inside its action.
+
+`expect` (`expect.py`) is a restricted expression over the roots `relay` (`status`, `up`,
+`port`, `get(path)`), `obs` (`scene`, `preview`, `streaming`, `recording`, `state`,
+`program_feeds`, `program_channels`: the stub channels whose identity strip the visible
+program feeds show), `sheet` (`tab(name)` or `sheet.<tab>`: records, index 0 is the first row
+under the header; `writes`, `write_count(action)`), `webhook` (`count(text)`, `messages`,
+`rejected`), `race` (the relay's `/drivers/race`), `page(role)` and `result(step_id)`. Keys
+match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, literals, attribute
+and index access, probe methods and `len` parse; anything else, a `_` name or an unknown root
+is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
+A probe, a method or a function is never a value or an argument. Checks are polled, so they
+must have no side effects: `relay.get` reads `/status` or a `.../data` path, never a control
+such as `/next` or `/feed/A/activate`.
+
+Findings (the report's legend says the same): hard is an action error, an `expect` still
+false at its timeout, a trigger that never fires, a script error on a page, a traceback in a
+service log (the captured output and the relay's own `runtime/demo/logs`). Soft is a `soft`
+check, a check slower than `state_s`, a failed resource load on a page, an ERROR line in a
+service log (each distinct line once, with its count), a missing screenshot.
+
+Writing scenarios against the relay:
+- A cockpit submission names the stint by its Schedule label: `stint = "Stint 2"`, not `2`.
+- Feeds start disarmed (`RACECAST_MANUAL_FEED_ARM` is on by default): a feed pulls only after
+  `GET /feed/A/activate` (the director's arm), so arm it before checking the program picture.
+- The relay's feed cover hides a feed for about 25 s after it starts, so a program identity
+  check needs a timeout of a minute or more.
+
+Roles (`roles/`): a class with `kind`, registered with `@roles.register`; a step's `role`
+is `kind` or `kind:instance`, one instance per string, opened on first use and closed at
+the end. `do = "x"` calls `act_x(args)`; a dict it returns is the step's result.
+`StepError` is a hard failure, `ctx.finding("soft", text)` a soft one, `page()` feeds
+`page(role)`, `shot(path, element)` writes a PNG or raises `ShotUnavailable`, `close()`
+returns late findings. `ctx` (`engine.RunContext`) has `url(service)` (`relay`, `ui`, `obs`,
+`sheet`, `sink`), `token(name)` (a console token for a crew name), `stub`, `obs` and
+`browser()` (a shared headless Chromium, None without Playwright). Built in
+(`roles/builtin.py`): `api` (`get`/`post` with `service`, `path`, `as`, `json`, `status`),
+`obs` (`scene`, `request`; its shot is the program), `stream` (`channel`, `cut`, `stall`,
+`freeze`, `clear`) and `page` (`open` with `service`, `path` starting with one `/` on that
+service, `as`, `wait_for`; tokens are redacted from what it reports; the base for the party
+roles of #1233).
+
+`scenarios/smoke.toml` uses only those: relay up, the Control Center reporting the relay
+alive and answering on its simulated port, a commentator's link submission (webhook), its approval (Sheet `schedule`
+write, webhook), arming Feed A, the scene switch through the relay's `/obs/scene` and
+`'comms1' in obs.program_channels`, plus shots of the program, the Director Panel and the
+Control Center.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 

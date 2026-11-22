@@ -146,10 +146,18 @@ never the real one.
   OAuth/voice and the timing host keys; `env_overrides` does the same for the env vars
   (`_apply_profile_env`, `_bootstrap`, the relay's `simulation_startup`), so a value from
   the shell or the machine `.env` cannot leak through.
+  `RACECAST_SIM_RELAY_PORT` (a port, unset = 8088) moves the relay control port:
+  `simulation.relay_port` feeds `racecast._relay_port()`, the only reader of
+  `RELAY_PORT` (`tests/test_simulation_cli.py` counts the uses), the relay's
+  `--http-port` default (`control_port`), preflight and the Control Center's Kill relay.
+  An invalid value is a `problems()` entry and `relay_port` raises, never 8088.
 - Skips print `<what>: skipped (simulation).` at the leaves, so CLI and Control Center
   jobs report alike: `_event_launch`, `app launch|quit`, `_tailscale_connect`,
   `tailscale down`, `_tailscale_ip`/`_tailscale_magicdns` (None), `companion_start/stop`,
-  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check. `_gui_spawn`
+  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check, and the relay's
+  host integrations: the A/V sync watcher on the OBS log, the keep-awake block
+  (`systemd-inhibit`, `caffeinate`, `SetThreadExecutionState`) and the cookie refresh from
+  the browser; the log viewer lists no OBS or Companion log. `_gui_spawn`
   refuses outright. `_obs_up` replaces the OBS process check with the simulated
   WebSocket, and `_event_sections` lists OBS/Discord/Tailscale/Companion as INFO. A
   takeover in simulation accepts only a loopback host, never `--funnel`.
@@ -175,14 +183,27 @@ never the real one.
   `RACECAST_SIMULATION`, and `driver_radio_process.run_process` and
   `driver_radio_voice_process.Owned` start Python workers through `guard_python_argv`; the
   frozen `_radio-*` entrypoints install the guard before they dispatch.
-- `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`.
-  `relay_start_plan` answers `refuse` (no kill, no reuse) when the port holder runs in the
-  other mode, and a simulation start never kills an unstamped holder. A live start
-  refuses only while the stamped simulation relay is alive and holds the port; a stale
-  stamp heals as before. `event start` runs the same plan before it launches anything;
-  `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop` before it
-  touches a live relay, and a simulated `freeport --force` never frees a live relay's
-  ports. `relay_status_data` carries `mode`.
+- `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`; both modes share
+  `relay.pid` and the stamps. `relay_start_plan` answers `refuse` (no kill, no reuse) while
+  the PID file names a live relay process of the other mode, on any control port (a
+  simulation relay may run on `RACECAST_SIM_RELAY_PORT`), so neither start overwrites the
+  other's PID file and stamps. `runtime/relay.started` holds the relay's
+  `simulation.process_started` marker (also on Windows, from `GetProcessTimes`), written
+  after a verified start and dropped with the stamps; `services.relay_identity` compares it
+  first and falls back to the command line, so a recycled PID is "other" (the start heals,
+  `relay stop` never signals it) and a failed probe is "unknown" (it still blocks a start
+  across modes, but `relay stop` does not signal it). When the check rejects a live PID,
+  `relay stop` asks the control port: the same PID there is the relay and is stopped; another
+  holder is named and the stop exits 1 without touching the stamps; no holder removes the
+  stale PID file and says the relay is not running. On macOS the marker is `ps -o lstart=`
+  run with `LC_ALL=C`, `LANG=C` and `TZ=UTC`, so the locale never changes it. A
+  simulation start also refuses an unstamped port holder and never kills it; a stale stamp
+  with a dead relay heals as before. `event start` runs the same plan before it launches
+  anything; `_refuse_live_relay_in_simulation` stops a simulated `relay stop`/`event stop`
+  before it touches a live relay. In simulation `freeport` and the Control Center's Kill
+  relay (`_simulated_freeport`) only stop this install's own simulation relay through its
+  PID file and never kill a port holder they cannot prove is theirs. `relay_status_data`
+  carries `mode`.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
   getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
   It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every

@@ -2716,7 +2716,8 @@ def t_relay_stop_releases_obs_feeds_after_kill():
     # Against the dead relay it just drops the half-dead connection, freeing
     # the feed ports (otherwise FIN_WAIT_1 -> preflight "port in use").
     calls = []
-    old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds)
+    old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds, m._relay_identity)
+    m._relay_identity = lambda pid: "relay"
     m.sv.read_pid = lambda path: 4242
     m.sv.pid_alive = lambda pid: True
     m.sv.stop_pid = lambda pid, path, is_target=None: (
@@ -2725,16 +2726,17 @@ def t_relay_stop_releases_obs_feeds_after_kill():
     try:
         with contextlib.redirect_stdout(io.StringIO()):
             m.relay_stop([])
-        assert calls == [("stop_pid", m.sv.pid_is_relay), "obs"], \
+        assert calls == [("stop_pid", m._relay_is_target), "obs"], \
             "the relay stop must verify process identity before killing (#102)"
     finally:
-        m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds = old
+        m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds, m._relay_identity = old
 
 
 def t_relay_stop_skips_obs_release_when_kill_failed():
     # Relay may still be alive -> a rebuild would reconnect. Don't release.
     calls = []
-    old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds)
+    old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds, m._relay_identity)
+    m._relay_identity = lambda pid: "relay"
     m.sv.read_pid = lambda path: 4242
     m.sv.pid_alive = lambda pid: True
     m.sv.stop_pid = lambda pid, path, is_target=None: (calls.append("stop_pid"), False)[1]
@@ -2744,7 +2746,7 @@ def t_relay_stop_skips_obs_release_when_kill_failed():
             m.relay_stop([])
         assert calls == ["stop_pid"]
     finally:
-        m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds = old
+        m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds, m._relay_identity = old
 
 
 def t_relay_stop_skips_obs_when_relay_not_running():

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A relay started in simulation mode reads its Sheet tabs from the loopback stand-in and
 nothing else. Run: python3 tests/test_simulation_relay.py"""
-import json, os, socket, subprocess, sys, tempfile, threading, time, urllib.request
+import json, os, shutil, socket, subprocess, sys, tempfile, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -101,14 +101,15 @@ def t_simulated_relay_reads_only_the_loopback_sheet():
             proc.kill(); proc.wait()
         log.close()
         srv.shutdown(); srv.server_close()
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def t_simulated_relay_refuses_to_start_without_its_endpoints():
     env = {k: v for k, v in os.environ.items() if not k.startswith("RACECAST_SIM")}
     env["RACECAST_SIMULATION"] = "1"
-    tmp = tempfile.mkdtemp(prefix="racecast-sim-relay-")
-    out = subprocess.run([sys.executable, RELAY] + _isolated_args(tmp) + ["--sheet-id", "X"],
-                         env=env, capture_output=True, text=True, errors="replace", timeout=60)
+    with tempfile.TemporaryDirectory(prefix="racecast-sim-relay-") as tmp:
+        out = subprocess.run([sys.executable, RELAY] + _isolated_args(tmp) + ["--sheet-id", "X"],
+                             env=env, capture_output=True, text=True, errors="replace", timeout=60)
     assert out.returncode != 0, "the relay started in simulation without a simulated Sheet"
     assert "RACECAST_SIM_SHEET_URL" in out.stderr, out.stderr[-2000:]
 

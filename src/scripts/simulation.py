@@ -25,6 +25,8 @@ SHEET_PUSH_URL = "RACECAST_SIM_SHEET_PUSH_URL"      # stands in for the league S
 DISCORD_WEBHOOK_URL = "RACECAST_SIM_DISCORD_WEBHOOK_URL"
 STREAM_BIN = "RACECAST_SIM_STREAM_BIN"              # directory with yt-dlp and streamlink stand-ins
 FORCE = "RACECAST_SIM_FORCE"                        # the one profile a --force run allowed
+RELAY_PORT = "RACECAST_SIM_RELAY_PORT"              # the relay control port, on 127.0.0.1
+DEFAULT_RELAY_PORT = 8088
 
 SCHEMES = {OBS_WS: ("ws",), SHEET_URL: ("http",), SHEET_PUSH_URL: ("http",),
            DISCORD_WEBHOOK_URL: ("http",)}
@@ -123,6 +125,36 @@ def obs_target(environ=None):
     return (u.hostname, u.port) if u.port else None
 
 
+LIVE_PORTS = (DEFAULT_RELAY_PORT, 53001, 53002, 53003)   # the live relay's control and feed ports
+DEFAULT_UI_PORT = 8089
+
+
+def _port_problem(value, environ=None):
+    environ = os.environ if environ is None else environ
+    if not (value.isascii() and value.isdigit()) or not 1 <= int(value) <= 65535:
+        return f"{RELAY_PORT} must be a port number 1-65535, not {value!r}"
+    port = int(value)
+    if port in LIVE_PORTS:
+        return f"{RELAY_PORT}={port} is a port of the live relay (8088, 53001-53003); pick a free one"
+    ui = (environ.get("RACECAST_UI_PORT") or "").strip()
+    if port == (int(ui) if ui.isascii() and ui.isdigit() else DEFAULT_UI_PORT):
+        return f"{RELAY_PORT}={port} is the Control Center's port; pick another one"
+    return ""
+
+
+def relay_port(environ=None, default=DEFAULT_RELAY_PORT):
+    """The relay control port: RACECAST_SIM_RELAY_PORT in simulation, else `default`.
+    An invalid value raises instead of falling back to a live relay's port."""
+    environ = os.environ if environ is None else environ
+    value = (environ.get(RELAY_PORT) or "").strip()
+    if not (active(environ) and value):
+        return default
+    problem = _port_problem(value, environ)
+    if problem:
+        raise ValueError(problem)
+    return int(value)
+
+
 def stand_in_present(path, tool, windows=None):
     """Whether `path` holds a stand-in that a bare `tool` call resolves to. Windows only
     launches an `.exe` by bare name; a `.bat` there would fall through to the real tool."""
@@ -171,6 +203,9 @@ def problems(environ=None):
     stream = _stream_bin_problem((environ.get(STREAM_BIN) or "").strip())
     if stream:
         out.append(stream)
+    port = (environ.get(RELAY_PORT) or "").strip()
+    if port and _port_problem(port, environ):
+        out.append(_port_problem(port, environ))
     return out
 
 
@@ -231,18 +266,47 @@ def is_channel(value, environ=None):
     return active(environ) and isinstance(value, str) and bool(CHANNEL_RE.match(value.strip()))
 
 
-def process_started(pid):
-    """An opaque start marker for `pid` so a reused pid is not mistaken for it, or None
-    where the OS gives none (Windows) or the process is gone."""
+def _windows_started(pid):
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
     try:
-        if sys.platform.startswith("linux"):
+        code = wintypes.DWORD()
+        if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value != 259:
+            return None                                       # 259: STILL_ACTIVE
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return None
+        return str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def process_started(pid, run=subprocess.run, platform=None):
+    """An opaque start marker for `pid` so a reused pid is not mistaken for it, or None
+    when the process is gone or the OS does not answer."""
+    platform = sys.platform if platform is None else platform
+    try:
+        if platform == "win32":
+            return _windows_started(pid)
+        if platform.startswith("linux"):
             with open(f"/proc/{int(pid)}/stat", encoding="utf-8", errors="replace") as fh:
                 return fh.read().rsplit(")", 1)[1].split()[19]
-        if sys.platform == "darwin":
-            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))],
-                                 capture_output=True, text=True, errors="replace", timeout=5)
+        if platform == "darwin":
+            # lstart follows the locale and time zone; pin both so every caller agrees.
+            env = dict(os.environ, LC_ALL="C", LANG="C", TZ="UTC")
+            out = run(["ps", "-o", "lstart=", "-p", str(int(pid))], capture_output=True,
+                      text=True, errors="replace", timeout=5, env=env)
             return out.stdout.strip() or None
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+    except (OSError, ValueError, IndexError, AttributeError, subprocess.SubprocessError):
         return None
     return None
 

@@ -775,7 +775,12 @@ def _running_relay_mode():
         return ""
 
 def _write_relay_profile_stamp():
-    """Stamp the active profile and the mode as the relay's, just before spawn."""
+    """Stamp the active profile and the mode as the relay's, just before spawn; the
+    previous relay's start marker goes."""
+    try:
+        os.remove(_relay_start_path())
+    except OSError:
+        pass  # no marker from an earlier relay
     path = _relay_profile_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -783,8 +788,39 @@ def _write_relay_profile_stamp():
     with open(_relay_mode_path(), "w", encoding="utf-8") as fh:
         fh.write(_relay_run_mode())
 
+def _relay_start_path():
+    """The relay process's start marker (simulation.process_started), next to relay.pid,
+    so a recycled PID is not taken for the relay."""
+    return os.path.join(_runtime_base_dir(), "relay.started")
+
+
+def _record_relay_start(pid):
+    marker = simulation.process_started(pid)
+    if marker:
+        with open(_relay_start_path(), "w", encoding="utf-8") as fh:
+            fh.write(marker)
+
+
+def _recorded_relay_start():
+    try:
+        with open(_relay_start_path(), encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except (OSError, ValueError):   # unreadable or not UTF-8: no marker
+        return None
+
+
+def _relay_identity(pid):
+    """"relay", "other" or "unknown" for the PID file's process (services.relay_identity)."""
+    return sv.relay_identity(pid, _recorded_relay_start())
+
+
+def _relay_is_target(pid):
+    """Whether `relay stop` may signal `pid`: only a process proven to be the relay."""
+    return _relay_identity(pid) == "relay"
+
+
 def _clear_relay_profile_stamp():
-    for path in (_relay_profile_path(), _relay_mode_path()):
+    for path in (_relay_profile_path(), _relay_mode_path(), _relay_start_path()):
         try:
             os.remove(path)
         except OSError:
@@ -912,11 +948,15 @@ def _streams_files():
 
 def _obs_files():
     import logsetup
+    if simulation.active():   # the host's OBS is not the simulated one
+        return []
     d = logsetup.obs_log_dir(sys.platform)
     newest = logsetup.newest_log(d)
     return [newest] if newest else []
 
 def _companion_files():
+    if simulation.active():   # Companion is skipped in simulation
+        return []
     p = _companion_log_path()
     return [p] if p else []
 
@@ -1042,6 +1082,13 @@ def _relay_runtime_args():
             + _overlay_relay_args(_active_overlay_dir()))
 
 RELAY_PORT = 8088
+
+
+def _relay_port():
+    """The relay control port this command talks to: RACECAST_SIM_RELAY_PORT in
+    simulation, so a simulated CLI or Control Center never reaches a live relay."""
+    return simulation.relay_port(default=RELAY_PORT)
+
 OVERLAY_BUILDER_PAGES = ("hud", "intermission", "splitscreen", "drivers")
 STANDBY_SCENE = "Standby"   # canonical scene name in src/obs/GT_Racing_Endurance.json
 
@@ -1054,7 +1101,7 @@ OBS_PAGE_PATHS = ("/hud", "/hud/override.css",
 
 
 def _fetch_relay_page(path):
-    return http_util.get_bytes(f"http://127.0.0.1:{RELAY_PORT}{path}", timeout=3)
+    return http_util.get_bytes(f"http://127.0.0.1:{_relay_port()}{path}", timeout=3)
 
 
 def relay_serves_pages(fetch=None, paths=OBS_PAGE_PATHS):
@@ -1393,7 +1440,7 @@ def health_cmd(rest):
         if not args:
             sys.exit("usage: racecast health pull <tailscale-ip> [--port N] [--from TS]")
         host = args[0]
-        port = RELAY_PORT
+        port = _relay_port()
         if "--port" in args[1:]:
             i = args.index("--port", 1)
             try:
@@ -1766,7 +1813,7 @@ def _relay_mode():
     when the relay is unreachable. Best-effort. The report title marker degrades
     gracefully. Reuses the loopback JSON helper (no bare urllib)."""
     try:
-        data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/status")
+        data = _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/status")
         mode = data.get("mode")
         return mode if mode in ("race", "qualifying") else None
     except Exception:  # noqa: BLE001  best-effort
@@ -1800,7 +1847,7 @@ def _report_name_map():
     (which runs the canonical schedule parser). Only the `name` field is used. The
     `url` is ignored (redaction). Empty dict when the relay is unreachable."""
     try:
-        data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/schedule/data")
+        data = _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/schedule/data")
         return {r["row"]: (r.get("name") or "").strip()
                 for r in (data.get("rows") or [])
                 if isinstance(r.get("row"), int) and (r.get("name") or "").strip()}
@@ -2125,7 +2172,7 @@ def chat_cmd(rest):
         if not args:
             sys.exit("usage: racecast chat pull <tailscale-ip> [--port N]")
         host = args[0]
-        port = RELAY_PORT
+        port = _relay_port()
         if "--port" in args[1:]:
             port_idx = args.index("--port", 1)
             if port_idx + 1 >= len(args):
@@ -2185,7 +2232,7 @@ def _set_env_key(path, key, value):
 def _console_roster():
     """Distinct streamer names from the active schedule (first-seen order), read
     from the running relay's /schedule/data. Raises on an unreachable relay."""
-    data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/schedule/data")
+    data = _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/schedule/data")
     seen, roster = set(), []
     for row in (data or {}).get("rows", []):
         name = (row.get("name") or "").strip()
@@ -2200,7 +2247,7 @@ def _crew_roster():
     """Distinct crew names (Director/Producer) from the running relay's
     /crew/data (first-seen order). Raises on an unreachable relay. Mirrors
     _console_roster. Empty list when the league has no Crew tab."""
-    data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/crew/data")
+    data = _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/crew/data")
     seen, roster = set(), []
     for row in (data or {}).get("rows", []):
         name = (row.get("name") or "").strip()
@@ -2236,7 +2283,7 @@ def _links_roster():
 
 def _post_chat_message(text):
     """Best-effort POST of one crew-chat message to the local relay."""
-    http_util.post_json(f"http://127.0.0.1:{RELAY_PORT}/chat/send",
+    http_util.post_json(f"http://127.0.0.1:{_relay_port()}/chat/send",
                         {"user": "Producer", "text": text}, timeout=3)
 
 
@@ -2267,7 +2314,7 @@ def funnel_cmd(rest):
             "  2. Access Controls -> grant the 'funnel' nodeAttr, e.g.:\n"
             '       "nodeAttrs": [{ "target": ["autogroup:member"], "attr": ["funnel"] }]\n'
             "Then re-run 'racecast funnel on'. (Use --force to skip this check.)")
-    ok, detail = ts.funnel(binary, path="/console", target_port=RELAY_PORT,
+    ok, detail = ts.funnel(binary, path="/console", target_port=_relay_port(),
                            enable=enable)
     if not ok:
         sys.exit(f"racecast: funnel {'on' if enable else 'off'} failed: {detail}\n"
@@ -2301,7 +2348,7 @@ def links_cmd(rest):
         key = cpa.streamer_key(name)
         tok = cpa.mint_token(secret, key, cpadm.current_version(versions, key))
         url = f"https://{magic}/console?t={tok}"                # Funnel host
-        lan = f"http://{host}:{RELAY_PORT}/console?t={tok}"      # tailnet fallback
+        lan = f"http://{host}:{_relay_port()}/console?t={tok}"      # tailnet fallback
         print(f"{name}:\n  funnel:  {url}\n  tailnet: {lan}")
         lines.append(f"{name}: {url}")
     print()
@@ -2525,7 +2572,7 @@ def _relay_http_ok():
     """True iff the relay control server answers on localhost."""
     try:
         # .read() drains the socket; we only care whether the request succeeds
-        http_util.get_bytes(f"http://127.0.0.1:{RELAY_PORT}/status", timeout=3)
+        http_util.get_bytes(f"http://127.0.0.1:{_relay_port()}/status", timeout=3)
         return True
     except Exception:
         return False
@@ -2542,7 +2589,7 @@ def _relay_telemetry_source():
     disabled -> 404, timeout, non-dict body)."""
     try:
         data = http_util.get_json(
-            f"http://127.0.0.1:{RELAY_PORT}/telemetry/data", timeout=2)
+            f"http://127.0.0.1:{_relay_port()}/telemetry/data", timeout=2)
     except Exception:
         return None
     if not isinstance(data, dict):
@@ -2645,7 +2692,7 @@ def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
     is_alive = alive(pid)
     status = probe() if is_alive else None
     awake = status.get("keep_awake") if isinstance(status, dict) else None
-    return {"pid": pid, "alive": is_alive, "port": RELAY_PORT,
+    return {"pid": pid, "alive": is_alive, "port": _relay_port(),
             "http_ok": status is not None,
             "keep_awake": awake if isinstance(awake, dict) else None,
             "mode": ((mode or _running_relay_mode)() or "live") if is_alive else None}
@@ -2654,7 +2701,7 @@ def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
 def _relay_status_probe():
     """The relay's /status as a dict, {} for a non-dict answer, None when it does not answer."""
     try:
-        status = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/status")
+        status = _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/status")
     except Exception:
         return None
     return status if isinstance(status, dict) else {}
@@ -2719,7 +2766,7 @@ def _frozen_child_env():
 
 def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
                      running_profile, active_profile, http_ok, running_mode="",
-                     active_mode="live"):
+                     active_mode="live", pidfile_relay=True):
     """Pure: decide what `relay start` must do, from the gathered signals.
 
     Returns (action, kill_pids, reason):
@@ -2734,14 +2781,23 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
 
     An EMPTY/unknown running_profile counts as a mismatch (heal): a current-binary
     relay always writes its stamp, so a stampless holder is a pre-stamp/old daemon.
+    A live relay of the other mode in this install's PID file refuses on any port: a
+    simulation relay may run on another control port, and a start would overwrite the
+    PID file and stamps of the other one.
     """
     port_set = set(port_pids)
+    simulated = active_mode == "simulation"
+    if pidfile_alive and pidfile_relay and simulated != (running_mode == "simulation"):
+        if simulated:
+            return ("refuse", [], f"a live relay is running (PID {pidfile_pid}). Stop it "
+                                  "first without simulation mode: racecast relay stop")
+        return ("refuse", [], f"a simulation relay is running (PID {pidfile_pid}). Stop it "
+                              "first: racecast relay stop")
     if not port_set:
         return ("start", [], "")
-    simulated = active_mode == "simulation"
     if simulated != (running_mode == "simulation"):
         if simulated:
-            return ("refuse", [], f"port {RELAY_PORT} is held by a relay outside simulation "
+            return ("refuse", [], f"port {_relay_port()} is held by a relay outside simulation "
                                   f"mode. Stop it first: racecast relay stop")
         if pidfile_alive and pidfile_pid in port_set:   # a stale stamp alone never blocks
             return ("refuse", [], "a simulation relay is running. Stop it first: "
@@ -2753,13 +2809,13 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
     kill = sorted(port_set | set(feed_pids))
     holders = ", ".join(str(p) for p in sorted(port_set))
     if len(port_set) > 1:
-        reason = f"split-brain: {len(port_set)} listeners on port {RELAY_PORT}"
+        reason = f"split-brain: {len(port_set)} listeners on port {_relay_port()}"
     elif not pidfile_alive:
-        reason = f"dead pidfile but port {RELAY_PORT} held by PID {holders}"
+        reason = f"dead pidfile but port {_relay_port()} held by PID {holders}"
     elif pidfile_pid not in port_set:
         reason = f"foreign holder PID {holders}"
     elif not http_ok:
-        reason = f"relay not responding on port {RELAY_PORT}"
+        reason = f"relay not responding on port {_relay_port()}"
     else:
         reason = f"serving profile {running_profile or '(none)'!r}, active is {active_profile!r}"
     return ("heal", kill, reason)
@@ -2772,11 +2828,12 @@ def _relay_start_signals():
     tracked relay even across a profile switch; pids_on_port finds EVERY listener
     (incl. an untracked orphan / a Windows dual-bind split-brain) the PID file
     cannot see."""
-    port_pids = pt.pids_on_port(RELAY_PORT)
+    port_pids = pt.pids_on_port(_relay_port())
     pid = sv.read_pid(_relay_pid_path())
     alive = sv.pid_alive(pid)
     own = len(set(port_pids)) == 1 and alive and pid in port_pids
     return {"port_pids": port_pids,
+            "pidfile_relay": bool(alive and _relay_identity(pid) != "other"),
             "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
@@ -2837,6 +2894,7 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
         started = time.monotonic()
         wait_for(_settled, verify_s)
         if up:
+            _record_relay_start(pid)
             return pid
         reason = relay_boot_failure_line(_relay_boot_log_since(offset))
         # A slow startup may still be fetching Sheet tabs. Reap this owned
@@ -2854,14 +2912,14 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
         if reason and not re.search(r"\bport\b", reason, re.IGNORECASE):
             break   # a config/tool error: a respawn would fail the same way
         if attempt < attempts:
-            print(f"  relay not responding on port {RELAY_PORT} yet. The port may still "
+            print(f"  relay not responding on port {_relay_port()} yet. The port may still "
                   f"be clearing; retrying ({attempt + 1}/{attempts})…")
             # A child that died at once on a still-clearing port needs the rest of
             # the window before the respawn, as the full verify wait used to give it.
             wait_for(lambda: False, max(0.0, verify_s - (time.monotonic() - started)))
     if reason:
         print(f"  relay exited during startup: {reason}")
-    print(f"  ERROR: relay failed to come up on port {RELAY_PORT} after {attempt} "
+    print(f"  ERROR: relay failed to come up on port {_relay_port()} after {attempt} "
           f"attempt(s). Check: racecast relay logs")
     return None
 
@@ -2914,7 +2972,7 @@ def relay_start(rest):
         print(f"relay already running (pid {pid}).")
         if stint:
             print(f"  --stint ignored (relay keeps its position). To reposition the "
-                  f"running relay open http://127.0.0.1:{RELAY_PORT}/set/stint/{stint[1]}")
+                  f"running relay open http://127.0.0.1:{_relay_port()}/set/stint/{stint[1]}")
         relay_status([])
         return None
     if action == "heal":
@@ -2922,13 +2980,13 @@ def relay_start(rest):
         # unresponsive). Kill by port, not via the PID file or `freeport`, which
         # refuses while a relay is alive, so a cross-profile or old-binary orphan
         # is actually cleared instead of deadlocking the start (#273 follow-up).
-        print(f"relay: clearing stale holder(s) of port {RELAY_PORT} "
+        print(f"relay: clearing stale holder(s) of port {_relay_port()} "
               f"({reason}). Killing PID {', '.join(map(str, kill_pids))}, then restarting.")
         for kpid in kill_pids:
             pt.kill_pid(kpid)
-        left = sorted({p for p in pt.pids_on_port(RELAY_PORT)})
+        left = sorted({p for p in pt.pids_on_port(_relay_port())})
         if left:
-            print(f"  WARNING: port {RELAY_PORT} STILL held by PID "
+            print(f"  WARNING: port {_relay_port()} STILL held by PID "
                   f"{', '.join(map(str, left))} after kill. Start may fail.")
         if os.path.exists(_relay_pid_path()):
             os.remove(_relay_pid_path())
@@ -2956,9 +3014,9 @@ def relay_start(rest):
     _refresh_obs_pages(wait=0)    # relay already confirmed up -> refresh OBS pages now
     # Post-start verification: exactly one process should now hold 8088. More than
     # one means a residual dual-bind split-brain survived -> surface it, don't hide it.
-    holders = sorted({p for p in pt.pids_on_port(RELAY_PORT)})
+    holders = sorted({p for p in pt.pids_on_port(_relay_port())})
     if len(holders) > 1:
-        print(f"  WARNING: {len(holders)} processes listen on port {RELAY_PORT} "
+        print(f"  WARNING: {len(holders)} processes listen on port {_relay_port()} "
               f"(PID {', '.join(map(str, holders))}). Possible split-brain; "
               f"re-run 'racecast relay start' to reconcile.")
     return None
@@ -3035,14 +3093,14 @@ def _refresh_obs_pages(wait=0):
     wait: seconds to allow a just-spawned relay to open its control port, because a
     refresh against a closed port would itself load that error page."""
     if not wait_for(_relay_http_ok, wait):
-        print(f"obs: page refresh skipped. Relay not responding on port {RELAY_PORT}.")
+        print(f"obs: page refresh skipped. Relay not responding on port {_relay_port()}.")
         return
     if not relay_serves_pages():
         print("obs: page refresh skipped. Could not read /hud from the relay.")
         return
     try:
         import obs_ws
-        names, note = obs_ws.refresh_browser_inputs(needle=f"127.0.0.1:{RELAY_PORT}")
+        names, note = obs_ws.refresh_browser_inputs(needle=f"127.0.0.1:{_relay_port()}")
         if note:
             print(f"obs: page refresh skipped. {note}")
             return
@@ -3152,7 +3210,7 @@ def obs_refresh_cmd(_rest):
     # Upfront probe for a real exit code + directive message; _refresh_obs_pages
     # re-probes internally (best-effort, exit 0), an accepted localhost double GET.
     if not _relay_http_ok():
-        sys.exit(f"obs: relay not responding on port {RELAY_PORT}. Start it first "
+        sys.exit(f"obs: relay not responding on port {_relay_port()}. Start it first "
                  "(refreshing against a dead relay loads an error page in OBS).")
     _refresh_obs_pages()
 
@@ -3260,7 +3318,7 @@ class _BenchmarkRelay:
     """The two relay calls `obs benchmark` needs, over the loopback control port."""
 
     def __init__(self, base=None):
-        self.base = base or f"http://127.0.0.1:{RELAY_PORT}"
+        self.base = base or f"http://127.0.0.1:{_relay_port()}"
 
     def status(self):
         return _relay_fetch_json(self.base + "/status")
@@ -3320,7 +3378,7 @@ def obs_benchmark_cmd(rest):
     except ValueError as exc:
         sys.exit(str(exc))
     if not _relay_http_ok():
-        sys.exit(f"obs: relay not responding on port {RELAY_PORT}. Start it with a "
+        sys.exit(f"obs: relay not responding on port {_relay_port()}. Start it with a "
                  "live stint first.")
     session, note = obs_ws._connect("127.0.0.1", None, None, 10.0)
     if session is None:
@@ -3630,7 +3688,7 @@ def _relay_record_call(verb):
     """GET /telemetry/record/<verb> on the local relay; None when unreachable or 404."""
     try:
         return http_util.get_json(
-            f"http://127.0.0.1:{RELAY_PORT}/telemetry/record/{verb}", timeout=5)
+            f"http://127.0.0.1:{_relay_port()}/telemetry/record/{verb}", timeout=5)
     except Exception:
         return None
 
@@ -3638,7 +3696,7 @@ def _relay_record_call(verb):
 def _relay_record_status():
     """The running relay's telemetry.record block from /status, or None."""
     try:
-        st = http_util.get_json(f"http://127.0.0.1:{RELAY_PORT}/status", timeout=3)
+        st = http_util.get_json(f"http://127.0.0.1:{_relay_port()}/status", timeout=3)
     except Exception:
         return None
     return ((st or {}).get("telemetry") or {}).get("record")
@@ -3956,7 +4014,7 @@ def telemetry_replay_cmd(rest):
         parser.error("stop and status take no recording name")
     try:
         out = http_util.get_json(
-            f"http://127.0.0.1:{RELAY_PORT}/telemetry/replay/{args.action}?" + urlencode(query), timeout=15)
+            f"http://127.0.0.1:{_relay_port()}/telemetry/replay/{args.action}?" + urlencode(query), timeout=15)
     except Exception as exc:
         try:
             error = json.load(exc).get("error")
@@ -5366,7 +5424,25 @@ def relay_stop(rest):
         _clear_relay_profile_stamp()        # no relay -> no running-profile stamp
         print("relay is not running.")
         return
-    if sv.stop_pid(pid, _relay_pid_path(), is_target=sv.pid_is_relay):
+    target = _relay_is_target
+    if not _relay_is_target(pid):
+        port = _relay_port()
+        holders = sorted(set(pt.pids_on_port(port)))
+        if pid in holders:
+            target = None    # it holds the relay control port, so it is the relay
+        elif holders:
+            print(f"relay: PID {pid} in the PID file is not the relay, and port {port} is held "
+                  f"by PID {', '.join(map(str, holders))}. Nothing was stopped; check that "
+                  f"process before freeing the port.")
+            raise SystemExit(1)
+        else:
+            if os.path.exists(_relay_pid_path()):
+                os.remove(_relay_pid_path())
+            _clear_relay_profile_stamp()
+            print(f"relay: PID {pid} in the PID file is not the relay and nothing listens on "
+                  f"port {port}, so the relay is not running. Removed the stale PID file.")
+            return
+    if sv.stop_pid(pid, _relay_pid_path(), is_target=target):
         _clear_relay_profile_stamp()
         print("relay stopped.")
         _release_obs_feeds()                # AFTER the kill, see docstring
@@ -5776,13 +5852,13 @@ def _open_url(url, which=shutil.which, platform=None, popen=None, sleep=None,
 
 
 def relay_open_panel(rest):
-    _open_url(_http_url("127.0.0.1", RELAY_PORT, "/panel"))
+    _open_url(_http_url("127.0.0.1", _relay_port(), "/panel"))
 
 def relay_open_hud(rest):
-    _open_url(_http_url("127.0.0.1", RELAY_PORT, "/hud"))
+    _open_url(_http_url("127.0.0.1", _relay_port(), "/hud"))
 
 def relay_open_status(rest):
-    _open_url(_http_url("127.0.0.1", RELAY_PORT, "/status"))
+    _open_url(_http_url("127.0.0.1", _relay_port(), "/status"))
 
 def _companion_open(path):
     # Companion listens on its bind_ip (the Tailscale IP), not 127.0.0.1. Open that.
@@ -5918,7 +5994,7 @@ def _event_sections(ev, pf):
     # Services
     pid = sv.read_pid(_relay_pid_path())
     alive = sv.pid_alive(pid)
-    services = [ev.classify_relay(alive, _relay_http_ok() if alive else False, RELAY_PORT)]
+    services = [ev.classify_relay(alive, _relay_http_ok() if alive else False, _relay_port())]
     try:
         if sim:
             services.append(skip("Companion"))
@@ -5982,7 +6058,7 @@ def event_track_read_data(alive=None, fetch=None, path=None, tracks=None, layout
     if is_alive:
         fetch = fetch or _relay_fetch_json
         try:
-            st = fetch(f"http://127.0.0.1:{RELAY_PORT}/event/track"
+            st = fetch(f"http://127.0.0.1:{_relay_port()}/event/track"
                        + ("?layouts=1" if layouts else ""))
             if isinstance(st, dict) and "pick" in st:
                 return {"ok": True, "source": "relay", "relay_alive": True,
@@ -6020,7 +6096,7 @@ def event_track_write_data(value, alive=None, post=None, path=None, tracks=None,
         if _relay_runs_active_profile(alive, foreign):
             post = post or _relay_post_json
             try:
-                res = post(f"http://127.0.0.1:{RELAY_PORT}/event/track", {"id": official_id})
+                res = post(f"http://127.0.0.1:{_relay_port()}/event/track", {"id": official_id})
             except Exception as exc:  # noqa: BLE001  surface as a clean error to the UI
                 return {"ok": False, "error": f"relay rejected the layout: {exc}"}
             if not isinstance(res, dict) or res.get("error"):
@@ -6100,7 +6176,7 @@ def event_race_write_data(changes, alive=None, post=None, path=None, foreign=Non
     if _relay_runs_active_profile(alive, foreign):
         post = post or _relay_post_json
         try:
-            res = post(f"http://127.0.0.1:{RELAY_PORT}/drivers/race/settings", changes)
+            res = post(f"http://127.0.0.1:{_relay_port()}/drivers/race/settings", changes)
         except Exception as exc:  # noqa: BLE001  surface as a clean error to the UI
             return {"ok": False, "error": f"relay rejected the settings: {exc}"}
         if not isinstance(res, dict) or not res.get("ok"):
@@ -6196,7 +6272,7 @@ def _invite_links(invite_id, magic=None, host=None):
     if magic is None and host is None:
         magic, host = _invite_hosts()
     return {"funnel": f"https://{magic}/console/drive?i={invite_id}" if magic else None,
-            "tailnet": f"http://{host}:{RELAY_PORT}/console/drive?i={invite_id}" if host else None}
+            "tailnet": f"http://{host}:{_relay_port()}/console/drive?i={invite_id}" if host else None}
 
 
 def event_invite_data(new=False, path=None, links=None):
@@ -6243,7 +6319,7 @@ def _relay_new_event():
     """Ask the running relay to drop the last event's race data and start a new
     recording; returns what the output line says about it."""
     try:
-        reply = _relay_post_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/race/new-event", {})
+        reply = _relay_post_json(f"http://127.0.0.1:{_relay_port()}/drivers/race/new-event", {})
         if reply.get("ok"):
             return "race data cleared and a new race recording"
         note = reply.get("error") or "refused"
@@ -6269,7 +6345,7 @@ def _timing_links(link_id, magic=None, host=None):
     if magic is None and host is None:
         magic, host = _invite_hosts()
     return {"funnel": f"https://{magic}/console/timing?l={link_id}" if magic else None,
-            "tailnet": f"http://{host}:{RELAY_PORT}/console/timing?l={link_id}" if host else None}
+            "tailnet": f"http://{host}:{_relay_port()}/console/timing?l={link_id}" if host else None}
 
 
 def timing_link_mod():
@@ -6280,7 +6356,7 @@ def timing_link_mod():
 def _relay_timing_link():
     """The running relay's /drivers/timing-link (served path, hosted link, host status)."""
     try:
-        return _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/timing-link", timeout=2)
+        return _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/drivers/timing-link", timeout=2)
     except Exception:
         return None
 
@@ -6288,7 +6364,7 @@ def _relay_timing_link():
 def _nudge_relay_timing_host():
     """Let a running relay's timing host publisher act on a change now (best effort)."""
     try:
-        _relay_post_json(f"http://127.0.0.1:{RELAY_PORT}/drivers/timing-host/reload", {}, timeout=2)
+        _relay_post_json(f"http://127.0.0.1:{_relay_port()}/drivers/timing-host/reload", {}, timeout=2)
     except Exception:
         pass  # no relay running: it reads the files at start
 
@@ -6853,7 +6929,7 @@ def _reload_busy_local_feeds(fetch=None):
     the Director Panel's RELOAD button. A playing feed is never touched. Best effort:
     each failure prints one line and nothing raises. Returns the reloaded feeds."""
     fetch = fetch or _relay_fetch_json
-    base = f"http://127.0.0.1:{RELAY_PORT}"
+    base = f"http://127.0.0.1:{_relay_port()}"
     try:
         status = fetch(f"{base}/status")
     except Exception as exc:                         # noqa: BLE001  best effort
@@ -7070,7 +7146,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     _switch_to_standby()          # park OBS on Standby, ready to Start Streaming
     print()
     for line in ev.director_urls(_tailscale_ip(), _companion_tablet_port(),
-                                 relay_port=RELAY_PORT):
+                                 relay_port=_relay_port()):
         print(line)
     # Discord voice auto-join (default on, RACECAST_DISCORD_AUTOJOIN=0 kills it):
     # best-effort, only for the top-level `event start` verb (see _autojoin docstring).
@@ -7139,7 +7215,7 @@ def event_stop(rest):
 
 
 def _takeover_port(args):
-    """--port N from a takeover arg list, default RELAY_PORT."""
+    """--port N from a takeover arg list, default _relay_port()."""
     if "--port" in args:
         i = args.index("--port")
         if i + 1 >= len(args):
@@ -7148,7 +7224,7 @@ def _takeover_port(args):
             return int(args[i + 1])
         except ValueError:
             sys.exit(f"racecast: --port must be an integer, got {args[i + 1]!r}")
-    return RELAY_PORT
+    return _relay_port()
 
 
 def event_takeover(rest):
@@ -7344,11 +7420,31 @@ def freeport_owner(port, relay_alive, static_alive_ports):
     """Which RUNNING racecast service legitimately owns `port` right now (so freeing
     it would cut a live feed): 'relay' (it binds the feed ports + control port),
     'streams' (a tracked static feed is alive on it), or None (orphan/foreign)."""
-    if relay_alive and (port in pt.FEED_PORTS or port == RELAY_PORT):
+    if relay_alive and (port in pt.FEED_PORTS or port == _relay_port()):
         return "relay"
     if port in static_alive_ports:
         return "streams"
     return None
+
+
+def _simulated_freeport(ports):
+    """Simulation mode frees ports only by stopping this app home's own simulation relay
+    (its PID file, stamped simulation, a relay process); it never kills a port holder it
+    cannot prove is its own. Returns the exit code."""
+    pid = sv.read_pid(_relay_pid_path())
+    if sv.pid_alive(pid) and _relay_identity(pid) == "relay" and _running_relay_mode() == "simulation":
+        print(f"simulation: stopping this install's simulation relay (PID {pid}) to free "
+              f"its ports instead of killing port holders.")
+        relay_stop([])
+        return 0
+    held = [(port, pt.pids_on_port(port)) for port in ports]
+    held = [(port, pids) for port, pids in held if pids]
+    for port, pids in held:
+        print(f"port {port}: held by PID {', '.join(map(str, pids))}, which this simulation "
+              f"cannot prove is its own relay; left alone. Stop it where it was started.")
+    if not held:
+        print("simulation: no port held and no simulation relay of this install running.")
+    return 1 if held else 0
 
 
 def freeport_cmd(rest):
@@ -7359,16 +7455,16 @@ def freeport_cmd(rest):
         chosen, force = parse_freeport_args(rest)
     except ValueError as exc:
         sys.exit(f"racecast: {exc}")
+    if simulation.active():
+        raise SystemExit(_simulated_freeport(chosen))
     relay_alive = _relay_is_alive()
     static_alive = {int(f["label"]) for f in streams_status_data()
                     if f["alive"] and str(f["label"]).isdigit()}
-    live_relay = simulation.active() and relay_alive and _running_relay_mode() != "simulation"
     refused = False
     for port in chosen:
         pids = pt.pids_on_port(port)
         owner = freeport_owner(port, relay_alive, static_alive)
-        action, found = pt.decide_free(pids, owned=bool(owner),
-                                       force=force and not (live_relay and owner == "relay"))
+        action, found = pt.decide_free(pids, owned=bool(owner), force=force)
         shown = ", ".join(str(p) for p in found)
         if action == "clear":
             print(f"port {port}: already free")
@@ -7376,12 +7472,8 @@ def freeport_cmd(rest):
             refused = True
             who = "relay" if owner == "relay" else "static streams"
             stop = "racecast relay stop" if owner == "relay" else "racecast streams stop"
-            if live_relay and owner == "relay":
-                print(f"port {port}: held by a live relay (PID {shown}). Simulation mode "
-                      f"never frees it: {stop}")
-            else:
-                print(f"port {port}: held by the running {who} (PID {shown}). "
-                      f"{stop}, or re-run with --force")
+            print(f"port {port}: held by the running {who} (PID {shown}). "
+                  f"{stop}, or re-run with --force")
         else:
             for pid in found:
                 pt.kill_pid(pid)
@@ -7693,8 +7785,8 @@ def relay_live_data(fetch=None, started=None):
     are test seams."""
     fetch = fetch or _relay_fetch_json
     try:
-        status = fetch(f"http://127.0.0.1:{RELAY_PORT}/status")
-        timer = fetch(f"http://127.0.0.1:{RELAY_PORT}/timer/data")
+        status = fetch(f"http://127.0.0.1:{_relay_port()}/status")
+        timer = fetch(f"http://127.0.0.1:{_relay_port()}/timer/data")
     except Exception:
         return {"ok": False}
     if not isinstance(status, dict):
@@ -7731,7 +7823,7 @@ def event_title_read_data(alive=None, fetch=None, path=None, default=None):
     is_alive = bool(alive())
     if is_alive:
         try:
-            st = fetch(f"http://127.0.0.1:{RELAY_PORT}/status")
+            st = fetch(f"http://127.0.0.1:{_relay_port()}/status")
             if isinstance(st, dict) and isinstance(st.get("event_title"), str):
                 return {"ok": True, "title": st["event_title"],
                         "source": "relay", "relay_alive": True}
@@ -7775,7 +7867,7 @@ def event_title_write_data(value, alive=None, post=None, path=None, sanitize=Non
     if alive():
         post = post or _relay_post_json
         try:
-            res = post(f"http://127.0.0.1:{RELAY_PORT}/event/title", {"title": title})
+            res = post(f"http://127.0.0.1:{_relay_port()}/event/title", {"title": title})
             stored = res.get("title", title) if isinstance(res, dict) else title
             return {"ok": True, "title": stored, "applied": "relay"}
         except Exception as exc:  # noqa: BLE001  surface as a clean error to the UI
@@ -7956,7 +8048,7 @@ def _cookies_needed():
     try:
         pf = _event_modules()[1]
         alive = sv.pid_alive(sv.read_pid(_relay_pid_path()))
-        status = pf.relay_status(f"http://127.0.0.1:{RELAY_PORT}/status") if alive else None
+        status = pf.relay_status(f"http://127.0.0.1:{_relay_port()}/status") if alive else None
         return pf.cookies_needed(os.environ.get("RACECAST_KIND"), status)
     except Exception:                           # noqa: BLE001  unknown keeps today's warning
         return None
@@ -8579,7 +8671,7 @@ def crew_entries_data():
     """Crew roster for the Control Center, read live from the running relay's
     /crew/data. {ok, entries:[{row,name,director,producer}]} or {ok:false, error}."""
     try:
-        data = _relay_fetch_json("http://127.0.0.1:%d/crew/data" % RELAY_PORT)
+        data = _relay_fetch_json("http://127.0.0.1:%d/crew/data" % _relay_port())
     except Exception as exc:
         return {"ok": False,
                 "error": "relay not reachable (start the relay): %s" % exc}
@@ -8605,7 +8697,7 @@ def crew_write_data(row, name, director, producer, commentator=False,
     try:
         extra={} if race_engineer is None else {"race_engineer":bool(race_engineer)}
         return _relay_post_json(
-            "http://127.0.0.1:%d/crew/set" % RELAY_PORT,
+            "http://127.0.0.1:%d/crew/set" % _relay_port(),
             {"row": row, "name": name,
              "director": bool(director), "producer": bool(producer),
              "commentator": bool(commentator), "race_control": bool(race_control),
@@ -8618,7 +8710,7 @@ def crew_write_data(row, name, director, producer, commentator=False,
 def crew_delete_data(row):
     """Delete one crew row via the relay's /crew/delete."""
     try:
-        return _relay_post_json("http://127.0.0.1:%d/crew/delete" % RELAY_PORT,
+        return _relay_post_json("http://127.0.0.1:%d/crew/delete" % _relay_port(),
                                 {"row": row})
     except Exception as exc:
         return {"ok": False,
@@ -8659,7 +8751,7 @@ def console_status_data():
                 tok = cpa.mint_token(secret, key, cpadm.current_version(versions, key))
                 links.append({
                     "name": name,
-                    "internal": f"http://{host}:{RELAY_PORT}/console?t={tok}",
+                    "internal": f"http://{host}:{_relay_port()}/console?t={tok}",
                     "funnel": (f"https://{magic}/console?t={tok}" if magic
                                else f"https://<magicdns-host>/console?t={tok}")})
         funnel_on = funnel_capable = False
@@ -8889,7 +8981,7 @@ def _audience_provider_client(active, provider="youtube"):
     pid = sv.read_pid(_relay_pid_path())
     if not active or _running_relay_profile() != active or not pid or not sv.pid_is_relay(pid):
         raise ValueError("Start the relay for this profile before connecting audience metrics")
-    return audience_proxy.Client(active, RELAY_PORT, provider=provider)
+    return audience_proxy.Client(active, _relay_port(), provider=provider)
 
 
 def _audience_connection_data(provider, body=None):
@@ -8916,7 +9008,7 @@ def driver_radio_data(body=None, native=False, coach=False):
             raise ValueError("Start the relay for this profile before changing driver radio")
         if body is not None and (not isinstance(body, dict) or body.get("expectedProfile") != active):
             raise ValueError("Active profile changed; reload driver radio settings")
-        client = driver_radio_admin.Client(active, RELAY_PORT)
+        client = driver_radio_admin.Client(active, _relay_port())
         settings = client.request()
         if coach:
             if _active_profile_name() != active:
@@ -9406,7 +9498,7 @@ def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None,
         if page == "splitscreen":
             # Preflight (list only), then geometry, then reload: a failed sync must
             # not leave OBS half-updated with new pages over old feed bounds.
-            needle = f"127.0.0.1:{RELAY_PORT}/splitscreen"
+            needle = f"127.0.0.1:{_relay_port()}/splitscreen"
             names, note = refresh(needle=needle, press=False)
             if note or not {"Splitscreen Labels", split_layout.HUD_SOURCE} <= set(names):
                 return {"ok": False, "page": page, "refreshed": [],
@@ -9421,13 +9513,13 @@ def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None,
                 result.update(ok=False, error=f"Layout applied, but the page refresh failed: {note}")
             return result
         result = _sync_scene_layouts(set_transform, set_enabled, page=page, explicit=True)
-        names, note = refresh(needle=f"127.0.0.1:{RELAY_PORT}/intermission")
+        names, note = refresh(needle=f"127.0.0.1:{_relay_port()}/intermission")
         result["refreshed"] = names
         if note or not names:
             result.update(ok=False, error=note or "Intermission browser source missing; update the OBS collection")
         if result["ok"]:
             restored = (restore or (lambda: _relay_post_json(
-                f"http://127.0.0.1:{RELAY_PORT}/obs/intermission", {"action": "restore"})))()
+                f"http://127.0.0.1:{_relay_port()}/obs/intermission", {"action": "restore"})))()
             if not restored.get("ok"):
                 result.update(ok=False, error=restored.get("error") or "Could not restore Intermission defaults")
         return result
@@ -11233,7 +11325,7 @@ def _smoke_error_payload(exc):
 
 def _smoke_relay_get(path, timeout=15):
     try:
-        return http_util.get_json(f"http://127.0.0.1:{RELAY_PORT}/{path}", timeout=timeout)
+        return http_util.get_json(f"http://127.0.0.1:{_relay_port()}/{path}", timeout=timeout)
     except http_util.HTTPError as exc:
         return _smoke_error_payload(exc)
     except Exception as exc:                     # noqa: BLE001  reported as a check
@@ -11242,7 +11334,7 @@ def _smoke_relay_get(path, timeout=15):
 
 def _smoke_relay_post(path, body, timeout=20):
     try:
-        return _smoke_post_json(f"http://127.0.0.1:{RELAY_PORT}/{path}", body,
+        return _smoke_post_json(f"http://127.0.0.1:{_relay_port()}/{path}", body,
                                 timeout=timeout)
     except http_util.HTTPError as exc:
         return _smoke_error_payload(exc)
@@ -11256,7 +11348,7 @@ def _smoke_program_audio_sample(want=16384, timeout=25):
     return, and `?probe=1` only reports that the endpoint exists. It explicitly
     does not start the encoder, which is the thing an ffmpeg major bump puts in
     doubt. Returns (bytes, note)."""
-    url = f"http://127.0.0.1:{RELAY_PORT}/preview/program-audio"
+    url = f"http://127.0.0.1:{_relay_port()}/preview/program-audio"
     try:
         with http_util.open_url(url, timeout=timeout) as resp:
             return resp.read(want) or b"", ""

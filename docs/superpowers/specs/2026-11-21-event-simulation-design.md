@@ -116,7 +116,7 @@ seed = 7
 at = "0s"
 role = "producer"
 do = "start_event"
-expect = ["obs.scene == 'Standby'", "relay.status.ok"]
+expect = ["obs.scene == 'Standby'", "relay.up"]
 
 [[step]]
 at = "after:start_event+20s"
@@ -129,7 +129,7 @@ at = "after:submit_link+10s"
 role = "director"
 do = "approve_link"
 args = { stint = 2 }
-expect = ["webhook.count('approved') == 1", "sheet.schedule[2].link == 'sim://comms2'"]
+expect = ["webhook.count('approved') == 1", "sheet.schedule[1].url == 'sim://comms2'"]
 
 [[step]]
 at = "lap:leader=3"
@@ -140,8 +140,13 @@ do = "final_lap"
 - `at` is a duration since start, an offset after another step, or a race condition
   (`lap:leader=N`, `state:finishing`).
 - `expect` lists hard checks in a small expression language over named probes: `obs`,
-  `relay`, `sheet`, `webhook`, `race`, `page(role)`. Each check has a default timeout
-  (5 s) that a step may override.
+  `relay`, `sheet`, `webhook`, `race`, `page(role)`, `result(step)`. Each check has a
+  default timeout (5 s) that a step may override. A Sheet tab reads as records keyed by
+  its header, 0-based: `sheet.schedule[1]` is the second row under the header,
+  stint 2, and its link column is `URL` (`.url`). The probe fields are listed in
+  `tools/CLAUDE.md` (Event simulation engine).
+- A step runs once its trigger fires, one action at a time; a waiting step does not hold
+  back a later one. A trigger that never fires within the step's `wait` fails it.
 - Steps may name a screenshot (`shot = "dc-tower-1"`, with a role and an optional element),
   which lands in `shots/` under that name.
 - Every bundled scenario runs three stints, each in its own GT7 lobby, with one
