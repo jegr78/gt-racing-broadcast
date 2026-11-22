@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -300,6 +301,14 @@ def t_refuses_requests_a_web_page_could_send():
         assert _status(url, headers={"Host": "sheet.example.test"})[0] == 403
         assert _status(sim.push_url, data=b"{}", headers={"Content-Type": "text/plain"})[0] == 415
         assert sim.writes() == [], "a refused request never reaches the script"
+
+
+def t_refuses_an_oversized_body_before_reading_it():
+    with _sim() as sim, socket.create_connection(("127.0.0.1", sim.port), timeout=5) as conn:
+        conn.sendall((f"POST {sheet_sim.EXEC_PATH}?key=sim HTTP/1.1\r\nHost: 127.0.0.1:{sim.port}\r\n"
+                      "Content-Type: application/json\r\nContent-Length: 999999999\r\n\r\n").encode())
+        assert conn.recv(64).startswith(b"HTTP/1.1 413"), "a body over the limit is refused"
+        assert sim.writes() == []
 
 
 def t_check_endpoints_seed_tabs_and_list_writes():

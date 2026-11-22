@@ -140,6 +140,8 @@ def t_check_endpoint_lists_messages():
     with webhook_sink.WebhookSink().start() as sink:
         _relay_post(sink.url, {"content": "one"})
         _relay_post(sink.url + "?wait=false", {"content": "two"})
+        assert _status(sink.http_url + "/_sim/messages", b'{"content": "x"}',
+                       {"Content-Type": "application/json"})[0] == 404, "the check path is no webhook"
         got = webhook_sink.fetch(sink.http_url, "/_sim/messages?since=1")
         assert [g["content"] for g in got["messages"]] == ["two"] and got["seq"] == 2, got
 
