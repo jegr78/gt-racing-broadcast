@@ -291,7 +291,7 @@ def t_control_api_writes_what_the_stand_ins_read():
     try:
         stub.cut("nobody")
     except ValueError:
-        pass
+        pass  # refused as it should be
     else:
         raise AssertionError("a fault needs an existing channel")
 
