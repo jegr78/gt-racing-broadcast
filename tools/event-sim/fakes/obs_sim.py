@@ -12,7 +12,7 @@ state. Requests must name this port on 127.0.0.1 or localhost in `Host`, carry n
     GET  /program.png?width=W    the program screenshot
     POST /request                {"requestType", "requestData"}: an operator acting in OBS
     POST /labels                 {"Feed A": "Stint 1 Comms 1"}: text of a feed's pattern
-    POST /freeze                 {"input": "Feed A", "frozen": true, "state": ...}: stop a media cursor
+    POST /freeze                 {"input", "frozen", "state", "sticky"}: stop a media cursor
 
 Point the relay at it with `RACECAST_SIM_OBS_WS=ws://127.0.0.1:<port>` in simulation
 mode (`ObsSim.env()`), or with the RACECAST_OBS_WS_HOST/PORT overrides otherwise.
@@ -309,7 +309,13 @@ class ObsSim:
 
     def _http(self, conn, request_line, headers, body):
         method, target = (request_line.split(" ") + ["", ""])[:2]
-        length = min(int(headers.get("content-length") or 0), MAX_BODY)
+        raw_length = headers.get("content-length") or "0"
+        if not raw_length.isdigit():
+            payload = b'{"error": "invalid Content-Length"}'
+            conn.sendall(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n"
+                         b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(payload) + payload)
+            return
+        length = min(int(raw_length), MAX_BODY)
         while len(body) < length:
             chunk = conn.recv(65536)
             if not chunk:
@@ -369,8 +375,8 @@ class ObsSim:
             return ok({"labels": st.snapshot()["labels"]})
         if method == "POST" and u.path == "/freeze" and isinstance(data, dict):
             st.freeze_media(str(data.get("input")), bool(data.get("frozen", True)),
-                            str(data.get("state") or obs_state.PLAYING))
-            return ok({"frozen": sorted(st.media_frozen)})
+                            str(data.get("state") or obs_state.PLAYING), bool(data.get("sticky")))
+            return ok({"frozen": sorted(st.media_frozen), "sticky": sorted(st.media_sticky)})
         return "404 Not Found", "application/json", b'{"error": "not found"}'
 
 

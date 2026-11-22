@@ -229,9 +229,12 @@ program screenshots at each item's canvas rect: per visible feed its newest fram
 colour bars with the input name or its `/labels` text when there is none; a solid panel
 per opaque item; the scene name on top. `program.feeds[].source` says which the last
 screenshot used (`frame`, `synthetic`, or null for a hidden feed). `GetSourceScreenshot`
-answers like OBS: `png`, `jpg` or `jpeg` (a stdlib baseline JPEG encoder; any other
-format is code 400), the canvas fitted inside `imageWidth`/`imageHeight` (8-4096, the
-full 1920x1080 without either) and `imageCompressionQuality`. A fixed `--image` is sent
+answers like OBS: `png`, `jpg` or `jpeg` (any other format is code 400). A JPEG of a
+picture with a grabbed frame comes from ffmpeg, which works when frames do; otherwise
+from a stdlib baseline encoder that writes one-colour 16x16 blocks without a DCT (a
+synthetic 1920x1080 picture in well under a second). An unchanged picture reuses its
+last JPEG. The picture is the canvas fitted inside `imageWidth`/`imageHeight` (8-4096, the
+full 1920x1080 without either), at `imageCompressionQuality`. A fixed `--image` is sent
 as it is, labelled with its own type. A screenshot is
 planned under the state lock and drawn after it, so a feed read never holds up another
 request.
@@ -255,7 +258,9 @@ One loopback port carries the WebSocket and a JSON endpoint for checks: `GET /st
 requests; `Get*` reads are only counted, under `reads` in the state), `/program.png`,
 and `POST /request` (an operator acting in OBS), `/labels` (text a feed's pattern shows)
 and `/freeze` (stop a feed's media cursor; `state` sets what OBS reports, PLAYING by
-default as for a stalled stream; new input settings reopen the media and end it). As in
+default as for a stalled stream). New input settings reopen the media and end a plain
+freeze, including the relay's own `close_when_inactive` write; `"sticky": true` keeps it
+through any rebuild until `"frozen": false`, for a source that stays stalled. As in
 OBS, a transition reports `CurrentProgramSceneChanged` when it ends, and switching to
 the scene already on air (or already faded to) starts nothing. The stream key never reaches the state or the
 request log. A web page must not reach the port: a request needs `Host` 127.0.0.1 or

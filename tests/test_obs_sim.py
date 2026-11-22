@@ -670,6 +670,7 @@ def t_real_ffmpeg_grabs_a_frame_over_http():
             port = server.server_address[1]
             grab = obs_grab.FeedGrabber(ports=[port], size=(8, 4), wait=10, timeout=10)
             frame = grab.frames([f"http://127.0.0.1:{port}/"])[f"http://127.0.0.1:{port}/"]
+            encoded = grab.encode_jpeg(16, 8, bytes((200, 0, 0)) * 128, 75)
             grab.close()
         finally:
             server.shutdown()
@@ -678,6 +679,7 @@ def t_real_ffmpeg_grabs_a_frame_over_http():
         assert frame and len(frame[0]) == 8 * 4 * 3, "one rgb24 frame of the asked size"
         r, g, b = frame[0][0], frame[0][1], frame[0][2]
         assert r > 180 and g < 70 and b < 70, (r, g, b)
+        assert _jpeg_size(encoded) == (16, 8), "ffmpeg encodes a JPEG of the picture"
 
 
 class FakeGrabber:
@@ -870,12 +872,69 @@ def t_jpeg_stuffs_ff_bytes_and_averages_chroma():
     import obs_render
     bits = obs_render._Bits()
     bits.put(0xFF, 8)
+    bits.flush()
     assert bytes(bits.out) == b"\xff\x00", "a 0xFF byte in the scan is followed by 0x00"
     rows = [(200, 30, 30) if y % 2 == 0 else (30, 30, 200) for y in range(16)]
     px = bytes(c for y in range(16) for _ in range(16) for c in rows[y])
     _, _, pixels = _decode_fixed_jpeg(obs_render.jpeg(16, 16, px, 95))
     drift = sum(r - b for r, _, b in pixels) / len(pixels)
     assert abs(drift) < 20, f"chroma is the mean of each 2x2 cell, red minus blue drifts by {drift}"
+
+
+def t_full_size_jpeg_is_fast_and_cached():
+    import obs_render
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
+    st.set_labels({"Feed A": "Stint 1 Comms 1"})
+    started = time.monotonic()
+    raw = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg"))
+    took = time.monotonic() - started
+    assert _jpeg_size(raw) == (1920, 1080) and took < 1.8, f"a full-size JPEG in {took:.2f} s, under obs_ws's 2 s"
+    calls = []
+    real = obs_render.jpeg
+    obs_render.jpeg = lambda *a, **k: calls.append(1) or real(*a, **k)
+    try:
+        again = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg"))
+        assert again == raw and calls == [], "an unchanged picture is not encoded again"
+        st.set_labels({"Feed A": "Stint 2 Comms 2"})
+        assert obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg")) != raw and calls == [1]
+    finally:
+        obs_render.jpeg = real
+
+
+def t_a_picture_with_frames_is_encoded_by_ffmpeg():
+    class Encoding(FakeGrabber):
+        def __init__(self):
+            super().__init__({FEED_A})
+            self.encoded = []
+
+        def encode_jpeg(self, w, h, px, quality):
+            self.encoded.append((w, h, quality, len(px)))
+            return b"\xff\xd8ffmpeg\xff\xd9"
+    grabber = Encoding()
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION, grabber=grabber)
+    uri = _shot(st, imageFormat="jpg", imageCompressionQuality=60)
+    assert obs_ws.parse_screenshot_data_uri(uri) == b"\xff\xd8ffmpeg\xff\xd9", "frames mean ffmpeg works"
+    assert grabber.encoded == [(1920, 1080, 60, 1920 * 1080 * 3)], grabber.encoded
+    grabber.encode_jpeg = lambda *a: None
+    st.set_labels({"Feed B": "x"})
+    assert _jpeg_size(obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg", imageWidth=64))) == (64, 36), \
+        "a failed ffmpeg encode falls back to the stdlib encoder"
+
+
+def t_jpeg_flat_and_busy_blocks_decode_alike():
+    import obs_render
+    import random
+    rnd = random.Random(3)
+    w, h = 48, 32
+    px = bytearray(bytes((90, 140, 200)) * (w * h))
+    for y in range(16, 32):
+        for x in range(16, 32):
+            px[(y * w + x) * 3:(y * w + x) * 3 + 3] = bytes(rnd.randrange(100, 160) for _ in range(3))
+    _, _, pixels = _decode_fixed_jpeg(obs_render.jpeg(w, h, bytes(px), 95))
+    flat = [pixels[y * w + x] for y in range(16) for x in range(w)]
+    assert all(abs(r - 90) < 6 and abs(g - 140) < 6 and abs(b - 200) < 6 for r, g, b in flat), flat[:3]
+    busy = [pixels[y * w + x] for y in range(18, 30) for x in range(18, 30)]
+    assert all(80 < c < 180 for p in busy for c in p), "the busy block keeps its range"
 
 
 def t_relay_program_monitor_gets_a_jpeg():
@@ -1001,6 +1060,43 @@ def t_a_browser_page_cannot_reach_the_endpoint():
         with socket.create_connection(("127.0.0.1", port), timeout=3) as c:
             c.sendall(upgrade)
             assert c.recv(4096).startswith(b"HTTP/1.1 403"), "a browser WebSocket is refused"
+    finally:
+        sim.stop()
+
+
+def t_a_bad_content_length_is_answered():
+    sim = _sim()
+    try:
+        bad = (f"POST /request HTTP/1.1\r\nHost: 127.0.0.1:{sim.port}\r\nContent-Type: application/json\r\n"
+               "Content-Length: lots\r\n\r\n{}")
+        assert _raw_http(sim.port, bad).startswith("HTTP/1.1 400"), "a bad length gets 400, not a dropped socket"
+    finally:
+        sim.stop()
+
+
+def t_a_sticky_freeze_survives_new_settings():
+    clock = Clock()
+    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION, clock=clock)
+    st.freeze_media("Feed A", sticky=True)
+    clock.now += 2
+    st.request("SetInputSettings", {"inputName": "Feed A", "inputSettings": {"close_when_inactive": True}})
+    clock.now += 1
+    held = _media(st, "Feed A")["mediaCursor"]
+    clock.now += 1
+    assert _media(st, "Feed A")["mediaCursor"] == held == 0, "a sticky freeze holds through a rebuild"
+    assert st.snapshot()["inputs"]["Feed A"]["frozen"]
+    st.freeze_media("Feed A", False)
+    clock.now += 1
+    assert _media(st, "Feed A")["mediaCursor"] == 1000, "unfreezing lets it run"
+    st.request("SetInputSettings", {"inputName": "Feed A", "inputSettings": {"close_when_inactive": True}})
+    assert _media(st, "Feed A")["mediaCursor"] == 0, "after unfreezing, new settings reopen the media again"
+    st.freeze_media("Feed A")
+    st.request("SetInputSettings", {"inputName": "Feed A", "inputSettings": {"close_when_inactive": False}})
+    assert not st.snapshot()["inputs"]["Feed A"]["frozen"], "a plain freeze ends with new settings"
+    sim = _sim()
+    try:
+        out = obs_sim.fetch(sim.http_url, "/freeze", {"input": "Feed B", "sticky": True})
+        assert out["frozen"] == ["Feed B"] and out["sticky"] == ["Feed B"], out
     finally:
         sim.stop()
 

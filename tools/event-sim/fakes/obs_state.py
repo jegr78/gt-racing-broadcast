@@ -11,6 +11,7 @@ effect) for callers that only want a picture.
 Stdlib only; time comes from an injectable clock in seconds."""
 import base64
 import copy
+import hashlib
 import json
 import math
 import os
@@ -19,7 +20,8 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from obs_render import FORMATS, render_program, size
+import obs_render
+from obs_render import FORMATS, size
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
@@ -76,6 +78,7 @@ OPAQUE_DEFAULT = tuple(n for n in obs_ws.GRAPHIC_SOURCES if not n.startswith("Gr
 TRANSITIONS_BUILTIN = (("Cut", "cut_transition", True), ("Fade", "fade_transition", False))
 TRANSITION_KINDS = {name: kind for name, kind, _ in TRANSITIONS_BUILTIN}
 LOG_LIMIT = 5000
+JPEG_CACHE = 8
 _LEGACY = {"GetSceneItemId": {"sceneItemId": 1}, "GetSceneItemEnabled": {"sceneItemEnabled": True},
            "GetInputMute": {"inputMuted": False}, "GetInputList": {"inputs": []},
            "GetSceneItemList": {"sceneItems": []},
@@ -204,6 +207,7 @@ class ObsState:
         self.image, self.labels = None, {}
         self.opaque = set(OPAQUE_DEFAULT if opaque is None else opaque)
         self.grabber = grabber
+        self.jpegs = {}         # (picture digest, w, h, quality) -> JPEG bytes, a few recent ones
         self.feed_sources = {}
         if collection is not None:
             self._load(collection)
@@ -648,9 +652,13 @@ class ObsState:
         return {}
 
     def _media_open(self, name):
-        """(Re)open a media input as OBS does on creation and on new settings."""
+        """(Re)open a media input as OBS does on creation and on new settings; a sticky
+        freeze stays, as a source that is still stalled after the rebuild."""
+        entry = self.media.get(name)
+        if entry and entry.get("sticky"):
+            return
         if self.inputs[name]["kind"] == "ffmpeg_source":
-            self.media[name] = {"start": self.clock(), "held": None, "state": PLAYING}
+            self.media[name] = {"start": self.clock(), "held": None, "state": PLAYING, "sticky": False}
 
     def _cursor(self, entry):
         if entry["held"] is not None:
@@ -671,17 +679,23 @@ class ObsState:
         return {"mediaState": entry["state"], "mediaDuration": LIVE_DURATION if live else FILE_DURATION,
                 "mediaCursor": self._cursor(entry)}
 
-    def freeze_media(self, name, frozen=True, state=PLAYING):
+    def freeze_media(self, name, frozen=True, state=PLAYING, sticky=False):
         """Stop a media input's cursor with OBS reporting `state` (PLAYING: a stalled
-        stream, the relay's freeze signal), or let it run on from where it stopped."""
+        stream, the relay's freeze signal), or let it run on from where it stopped. New
+        input settings end a freeze unless it is `sticky`."""
         with self.lock:
             entry = self.media.get(name)
             if entry is None:
                 return
             if frozen:
-                entry["held"], entry["state"] = self._cursor(entry), state
+                entry["held"], entry["state"], entry["sticky"] = self._cursor(entry), state, sticky
             elif entry["held"] is not None:
-                entry.update(start=self.clock() - entry["held"] / 1000.0, held=None, state=PLAYING)
+                entry.update(start=self.clock() - entry["held"] / 1000.0, held=None, state=PLAYING,
+                             sticky=False)
+
+    @property
+    def media_sticky(self):
+        return {n for n, e in self.media.items() if e.get("sticky")}
 
     @property
     def media_frozen(self):
@@ -918,9 +932,31 @@ class ObsState:
             used[layer["name"]] = "frame" if layer["frame"] else "synthetic"
         with self.lock:
             self.feed_sources.update(used)
-        fmt = "png" if plan["fmt"] == "png" else "jpg"
-        return render_program(plan["source"], plan["layers"], plan["picture"], plan["labels"], fmt,
-                              plan["quality"]), plan["fmt"]
+        canvas = obs_render.render_canvas(plan["source"], plan["layers"], plan["picture"], plan["labels"])
+        if plan["fmt"] == "png":
+            return canvas.png(), "png"
+        framed = any(source == "frame" for source in used.values())
+        return self._jpeg(canvas, plan["quality"], plan["grabber"] if framed else None), plan["fmt"]
+
+    def _jpeg(self, canvas, quality, ffmpeg):
+        """JPEG bytes of `canvas`, reused while the picture is unchanged. A picture with
+        a grabbed frame goes to ffmpeg, which then works; the stdlib encoder is the
+        fallback and fast only on flat synthetic pictures."""
+        key = (hashlib.blake2b(canvas.px, digest_size=16).digest(), canvas.w, canvas.h, quality)
+        with self.lock:
+            hit = self.jpegs.get(key)
+        if hit is not None:
+            return hit
+        raw = None
+        if ffmpeg is not None and getattr(ffmpeg, "encode_jpeg", None):
+            raw = ffmpeg.encode_jpeg(canvas.w, canvas.h, bytes(canvas.px), quality)
+        if raw is None:
+            raw = obs_render.jpeg(canvas.w, canvas.h, canvas.px, quality)
+        with self.lock:
+            self.jpegs[key] = raw
+            while len(self.jpegs) > JPEG_CACHE:
+                del self.jpegs[next(iter(self.jpegs))]
+        return raw
 
     def _r_GetSourceScreenshot(self, data):
         source, fmt = _need(data, "sourceName", "imageFormat")

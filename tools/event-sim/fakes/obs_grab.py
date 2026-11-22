@@ -159,6 +159,20 @@ class FeedGrabber:
                 found[url] = entry.get("frame") if young else None
         return found
 
+    def encode_jpeg(self, width, height, rgb, quality=75):
+        """JPEG bytes of a width*height RGB picture from ffmpeg's encoder, or None."""
+        qscale = str(round(2 + (100 - max(0, min(100, quality))) * 29 / 100))
+        argv = self.cmd + ["-hide_banner", "-loglevel", "error", "-protocol_whitelist", "pipe",
+                           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}",
+                           "-i", "pipe:0", "-frames:v", "1", "-pix_fmt", "yuvj420p",
+                           "-q:v", qscale, "-f", "mjpeg", "pipe:1"]
+        try:
+            out = subprocess.run(argv, input=rgb, capture_output=True, timeout=self.timeout, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        good = out.returncode == 0 and out.stdout[:2] == b"\xff\xd8"
+        return out.stdout if good else None
+
     def close(self):
         """Stop new reads and kill the running ffmpeg processes."""
         with self.lock:
