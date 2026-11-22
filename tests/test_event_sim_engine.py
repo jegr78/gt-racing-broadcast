@@ -92,14 +92,15 @@ def _scn(steps, **top):
     return scenario.from_dict(data, _reg(), name="t", roots=ROOTS)
 
 
-def _run(steps, box=None, **top):
+def _run(steps, box=None, race=None, **top):
     Recorder.log = []
     clock = Clock()
     ctx = engine.RunContext()
     ctx.box = box or Box()
+    probes_ = {"box": ctx.box, **({"race": race} if race else {})}
     tmp = tempfile.mkdtemp(prefix="event-sim-test-")
     atexit.register(shutil.rmtree, tmp, True)
-    eng = engine.Engine(_scn(steps, **top), ctx, {"box": ctx.box}, registry=_reg(), clock=clock,
+    eng = engine.Engine(_scn(steps, **top), ctx, probes_, registry=_reg(), clock=clock,
                         sleep=clock.sleep, shots_dir=os.path.join(tmp, "shots"))
     return eng.run(), clock, tmp
 
@@ -213,14 +214,63 @@ def t_missing_values_are_unresolved_not_false():
 
 
 # -- engine ----------------------------------------------------------------------
-def t_steps_run_in_order_no_earlier_than_their_trigger():
+def _by_id(data):
+    return {s["id"]: s for s in data["steps"]}
+
+
+def t_steps_start_when_their_trigger_fires_not_in_file_order():
     data, clock, _ = _run([{"id": "a", "role": "rec", "do": "go", "at": "10s"},
                            {"id": "b", "role": "rec:x", "do": "go", "at": "after:a+5s"},
                            {"id": "c", "role": "rec", "do": "go", "at": "1s"}])
-    started = {s["id"]: s["started"] for s in data["steps"]}
-    assert started["a"] >= 10 and started["b"] >= started["a"] + 5, started
-    assert started["c"] >= started["b"], "a past time starts at once, in file order"
-    assert data["ok"] and [n for n, _ in Recorder.log] == ["rec", "rec:x", "rec"]
+    started = {k: v["started"] for k, v in _by_id(data).items()}
+    assert 1 <= started["c"] < 2, started
+    assert 10 <= started["a"] < 11 and started["b"] >= started["a"] + 5, started
+    assert [s["id"] for s in data["steps"]] == ["c", "a", "b"], "the timeline is in execution order"
+    assert data["ok"] and [n for n, _ in Recorder.log] == ["rec", "rec", "rec:x"]
+
+
+def t_steps_ready_together_run_in_file_order_one_at_a_time():
+    data, _, _ = _run([{"id": "x", "role": "rec", "do": "go", "at": "5s"},
+                       {"id": "y", "role": "rec", "do": "go", "at": "5s"},
+                       {"id": "z", "role": "rec", "do": "go"}])
+    assert [s["id"] for s in data["steps"]] == ["z", "x", "y"], data["steps"]
+    s = _by_id(data)
+    assert s["y"]["started"] >= s["x"]["started"] + s["x"]["duration"], "one action at a time"
+
+
+def t_a_waiting_race_trigger_does_not_hold_back_later_steps():
+    race = Box(0)
+    race.resolve = lambda name: {"lap": race.value, "state": "racing"}[name]
+    clock = Clock()
+
+    def sleep(s):
+        clock.sleep(s)
+        race.value = int(clock.t - 1000) // 10
+    eng = engine.Engine(_scn([{"id": "final", "role": "rec", "do": "go", "at": "lap:leader=3"},
+                              {"id": "early", "role": "rec", "do": "go", "at": "10s"},
+                              {"id": "chained", "role": "rec", "do": "go", "args": {"v": "${final.id}"}}]),
+                        engine.RunContext(), {"race": race}, registry=_reg(), clock=clock, sleep=sleep)
+    data = eng.run()
+    s = _by_id(data)
+    assert 10 <= s["early"]["started"] < 11, s["early"]
+    assert s["final"]["started"] >= 30 > s["early"]["started"], s["final"]
+    assert s["chained"]["started"] >= s["final"]["started"], "a placeholder waits for its step"
+    assert data["ok"], data["findings"]
+
+
+def t_a_trigger_that_never_fires_fails_at_its_own_timeout():
+    data, _, _ = _run([{"id": "lap", "role": "rec", "do": "go", "at": "lap:leader=99", "wait": "20s"},
+                       {"id": "default", "role": "rec", "do": "go", "at": "state:finished"},
+                       {"id": "fine", "role": "rec", "do": "go", "at": "40s"}],
+                      max_minutes=2, race=_race_box())
+    s = _by_id(data)
+    assert s["lap"]["status"] == "failed" and "never met" in s["lap"]["error"], s["lap"]
+    assert 20 <= s["lap"]["started"] < 21, "it fails at its own wait, not at the end of the run"
+    assert s["fine"]["status"] == "ok"
+    assert s["default"]["status"] == "failed" and s["default"]["started"] >= 119, \
+        "without a wait the trigger may fire until the run ends"
+    hard = [f["step"] for f in data["findings"] if f["severity"] == "hard"]
+    assert sorted(hard) == ["default", "lap"], data["findings"]
 
 
 def t_expect_is_retried_until_true_and_slowness_is_soft():
@@ -270,6 +320,12 @@ def t_results_feed_later_args_and_a_failed_source_skips_its_users():
         "only the root cause is a hard finding"
 
 
+def _race_box():
+    race = Box(0)
+    race.resolve = lambda name: {"lap": 0, "state": "racing"}[name]
+    return race
+
+
 def t_race_triggers_wait_for_their_condition():
     race = Box(0)
     race.resolve = lambda name: {"lap": race.value, "state": "racing"}[name]
@@ -283,8 +339,9 @@ def t_race_triggers_wait_for_their_condition():
                               {"id": "never", "role": "rec", "do": "go", "at": "state:finished", "wait": "30s"}]),
                         ctx, {"race": race}, registry=_reg(), clock=clock, sleep=sleep)
     data = eng.run()
-    assert data["steps"][0]["status"] == "ok" and data["steps"][0]["started"] >= 30, data["steps"][0]
-    assert data["steps"][1]["status"] == "failed" and "never met" in data["steps"][1]["error"]
+    s = _by_id(data)
+    assert s["go"]["status"] == "ok" and s["go"]["started"] >= 30, s["go"]
+    assert s["never"]["status"] == "failed" and "never met" in s["never"]["error"]
 
 
 def t_a_page_that_raises_keeps_the_check_pending_and_the_run_going():
@@ -300,17 +357,28 @@ def t_a_page_that_raises_keeps_the_check_pending_and_the_run_going():
                                        {"id": "next", "role": "rec", "do": "go"}]}, reg)
     data = engine.Engine(scn, engine.RunContext(), {}, registry=reg, clock=clock, sleep=clock.sleep).run()
     assert [s["status"] for s in data["steps"]] == ["failed", "ok"], data["steps"]
+    assert data["steps"][1]["id"] == "next"
     assert "navigation in progress" in data["steps"][0]["checks"][0]["detail"]
 
 
-def t_run_timeout_skips_the_rest():
-    data, _, _ = _run([{"id": "a", "role": "rec", "do": "go", "at": "20s"},
-                       {"id": "b", "role": "rec", "do": "go", "at": "8s", "expect": ["box.value == 1"]},
-                       {"id": "c", "role": "rec", "do": "go"}], timeout="10s")
-    status = {s["id"]: s["status"] for s in data["steps"]}
-    assert status == {"a": "failed", "b": "failed", "c": "skipped"}, status
-    assert data["steps"][0]["error"].endswith("past the run timeout")
-    assert any(f["message"].startswith("run timeout") for f in data["findings"]), data["findings"]
+def t_the_run_ends_at_max_minutes():
+    data, _, _ = _run([{"id": "late", "role": "rec", "do": "go", "at": "2m"},
+                       {"id": "slow", "role": "rec", "do": "go", "at": "50s", "expect": ["box.value == 1"],
+                        "timeout": "30s"},
+                       {"id": "after_slow", "role": "rec", "do": "go", "at": "after:slow"}], max_minutes=1)
+    s = _by_id(data)
+    assert s["late"]["status"] == "failed" and "past the end of the run" in s["late"]["error"], s["late"]
+    assert s["slow"]["status"] == "failed" and s["after_slow"]["status"] == "skipped", data["steps"]
+
+
+def t_max_minutes_bounds_the_run():
+    assert _scn([{"role": "rec", "do": "go"}]).max_minutes == 12
+    scn = _scn([{"role": "rec", "do": "go"}], max_minutes=90)
+    assert scn.max_minutes == 90 and stack.lifetime(scn) == 90 * 60 + 600
+    assert stack.lifetime(_scn([{"role": "rec", "do": "go"}], max_minutes=120)) <= stack.e2e_safety.LONG_MAX_SECONDS
+    for bad in (0, 121, "12", 1.5, True):
+        _refused([{"role": "rec", "do": "go"}], "max_minutes", max_minutes=bad)
+    _refused([{"role": "rec", "do": "go"}], "unknown top-level", timeout="5m")
 
 
 def t_shots_land_under_their_name_and_a_missing_one_is_soft():
@@ -345,6 +413,17 @@ def t_role_findings_and_close_and_final_checks():
         assert want in msgs, (want, msgs)
 
 
+def t_result_probe_reads_an_earlier_step():
+    data, _, _ = _run([{"id": "make", "role": "rec", "do": "go"},
+                       {"id": "check", "role": "rec", "do": "go",
+                        "expect": ["result('make').nested.k == 'v'"], "soft": ["result('later').id == 7"],
+                        "timeout": "1s"},
+                       {"id": "later", "role": "rec", "do": "go", "at": "1m"}])
+    s = _by_id(data)
+    assert s["check"]["checks"][0]["ok"] and not s["check"]["checks"][1]["ok"], s["check"]["checks"]
+    assert "'later' has no result yet" in s["check"]["checks"][1]["detail"], s["check"]["checks"][1]
+
+
 def t_page_probe_reads_an_acting_role():
     class Paged(Recorder):
         kind = "paged"
@@ -371,6 +450,8 @@ def t_report_writes_json_and_escaped_html():
         text = fh.read()
     assert "&lt;b&gt;" in text and "<b>'" not in text, "expressions are escaped"
     assert "FAIL" in text and "shots/s1.png" in text
+    for rule in ("traceback", "ERROR line", "script error", "failed resource load"):
+        assert rule in text, f"the legend explains {rule!r}"
 
 
 # -- stack helpers ---------------------------------------------------------------
@@ -437,7 +518,11 @@ def t_make_home_copies_into_the_temp_dir():
 def t_tracebacks_in_a_log_are_hard():
     text = "INFO up\nTraceback (most recent call last):\n  File \"x\", line 1\nValueError: bad\nINFO on\n"
     assert stack.log_findings(text, "relay") == [("hard", "relay log: traceback ValueError: bad")]
-    assert stack.log_findings("ERROR [streamlink] gone\n", "relay") == []
+    errors = ("2026-11-22 14:25:43 ERROR [streamlink] gone\n"
+              "2026-11-22 14:25:53 ERROR [streamlink] gone\n"
+              "2026-11-22 14:26:00 ERROR other\n2026-11-22 14:26:00 INFO fine\n")
+    assert stack.log_findings(errors, "relay") == [("soft", "relay log: ERROR [streamlink] gone (2x)"),
+                                                   ("soft", "relay log: ERROR other")]
 
 
 # -- probes and built-in roles against in-process fakes --------------------------
@@ -502,6 +587,10 @@ def t_api_role_adds_tokens_and_fails_on_http_errors():
         srv.shutdown()
         srv.server_close()
         th.join()
+
+
+def t_relay_probe_names_its_port():
+    assert expect.truth("relay.port == 41234", {"relay": probes.RelayProbe("http://127.0.0.1:41234")})[0]
 
 
 def t_http_json_refuses_non_loopback_hosts():

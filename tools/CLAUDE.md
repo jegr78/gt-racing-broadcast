@@ -473,37 +473,57 @@ python3 tools/event-sim/event_sim.py --scenario smoke --check     # validate onl
 `racecast --simulation ui` there, so the relay.mode stamp, the console secret
 (`secrets.token_hex`, passed as `RACECAST_CONSOLE_SECRET`) and every runtime file stay out of
 the checkout. Inherited `RACECAST_*` values are dropped. Ports are free loopback ports,
-never 8088, 8089 or 53001-53003; the OBS collection's feed URLs are rewritten to the relay's
-feed ports. Each service runs under `tools/e2e_child.py` (900 s lifetime), and on local
-Linux the whole run enters `e2e_safety` containment, so it shares the one E2E unit: run it
-after, not beside, `tools/e2e.py`. `--keep-work` keeps the app home; `--chromium PATH`
-hands Playwright a Chromium of another build.
+never 8088, 8089 or 53001-53003: `RACECAST_SIM_RELAY_PORT` points the relay and the Control
+Center at the same control port, and the OBS collection's feed URLs are rewritten to the
+relay's feed ports. `--keep-work` keeps the app home. Screenshots of pages use Playwright's
+own Chromium, as `tools/e2e.py --visual` does (local setup there); without it they are soft
+findings.
 
-Scenario (`scenario.py`, TOML): `name`, `description`, `timeout` (default 12 min),
-`[event]` with `stints` and `[[event.commentators]]` (`name`, `channel` for `sim://<channel>`,
-`stint`, `scheduled` = the Schedule row has the link from the start), `[sheet.tabs]`
-(replaces tabs built from the event), `[tolerances] state_s` (default 2) and `[[step]]`:
-`id` (default `do`, unique, `[A-Za-z0-9._-]`), `at`, `role`, `do`, `args`, `expect`, `soft`,
-`timeout` (per check, default 5 s), `wait` (race trigger, default 10 min) and `shot` (a name,
-or `{name, role, element}`). Steps run in file order; `at` is the earliest start: a
-duration since the run started, `after:<id>[+dur]` (after that step ended; skipped when it
-failed), `lap:leader=N` (`race.lap >= N`) or `state:<name>` (`race.state`). `${id.key}` in
-args reads an earlier step's result; a step that refers to a failed one is skipped.
+Lifetimes: a scenario's `max_minutes` (default 12, at most 120, the spec's CI timeout for
+`full`) ends the run. Each service runs under `tools/e2e_child.py` and, on local Linux, the
+whole run inside `e2e_safety` containment, both for `max_minutes` plus 10 minutes for start,
+teardown and report (`e2e_safety.LONG_MAX_SECONDS` = 7800 caps it; `tools/e2e.py` keeps 900 s).
+It shares the one E2E unit: run it after, not beside, `tools/e2e.py`.
+
+Scenario (`scenario.py`, TOML): `name`, `description`, `max_minutes`, `wait` (default
+trigger timeout), `[event]` with `stints` and `[[event.commentators]]` (`name`, `channel` for
+`sim://<channel>`, `stint`, `scheduled` = the Schedule row has the link from the start),
+`[sheet.tabs]` (replaces tabs built from the event), `[tolerances] state_s` (default 2) and
+`[[step]]`: `id` (default `do`, unique, `[A-Za-z0-9._-]`), `at`, `role`, `do`, `args`,
+`expect`, `soft`, `timeout` (per check, default 5 s), `wait` and `shot` (a name, or
+`{name, role, element}`). `at` is a duration since the run started, `after:<id>[+dur]`
+(after that step ended; skipped when it failed), `lap:leader=N` (`race.lap >= N`) or
+`state:<name>` (`race.state`). `${id.key}` in args reads an earlier step's result; such a
+step waits for that step and is skipped when it failed.
+
+Scheduling: one executor, one action at a time. Each tick it runs the first step in file
+order whose trigger fired, so a step that waits never holds back a later one whose trigger
+fires first; `after:` gives an explicit order. A trigger that has not fired within `wait`
+(counted from the run start, or from the referenced step's end for `after:`; default: the
+end of the run) fails the step hard. A step's own `expect` checks run inside its action.
 
 `expect` (`expect.py`) is a restricted expression over the roots `relay` (`status`, `up`,
-`get(path)`), `obs` (`scene`, `preview`, `streaming`, `recording`, `state`, `program_feeds`,
-`program_channels`: the stub channels whose identity strip the visible program feeds show),
-`sheet` (`tab(name)` or `sheet.<tab>`: records, index 0 is the first row under the header;
-`writes`, `write_count(action)`), `webhook` (`count(text)`, `messages`, `rejected`), `race`
-(the relay's `/drivers/race`) and `page(role)`. Keys match without case, spaces as `_`.
-Only comparisons, `and`/`or`/`not`, literals, attribute and index access, probe methods and
-`len` parse; anything else, a `_` name or an unknown root is refused at load. A value that
-cannot be read yet keeps the check pending until its timeout.
+`port`, `get(path)`), `obs` (`scene`, `preview`, `streaming`, `recording`, `state`,
+`program_feeds`, `program_channels`: the stub channels whose identity strip the visible
+program feeds show), `sheet` (`tab(name)` or `sheet.<tab>`: records, index 0 is the first row
+under the header; `writes`, `write_count(action)`), `webhook` (`count(text)`, `messages`,
+`rejected`), `race` (the relay's `/drivers/race`), `page(role)` and `result(step_id)`. Keys
+match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, literals, attribute
+and index access, probe methods and `len` parse; anything else, a `_` name or an unknown root
+is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
 
-Findings: hard is an action error, an `expect` still false at its timeout, a script error
-on a page, a traceback in a service log (the captured output and the relay's own
-`runtime/demo/logs`). Soft is a `soft` check, a check slower than `state_s`, a failed
-resource load on a page, a missing screenshot (no Playwright, or a role without a picture).
+Findings (the report's legend says the same): hard is an action error, an `expect` still
+false at its timeout, a trigger that never fires, a script error on a page, a traceback in a
+service log (the captured output and the relay's own `runtime/demo/logs`). Soft is a `soft`
+check, a check slower than `state_s`, a failed resource load on a page, an ERROR line in a
+service log (each distinct line once, with its count), a missing screenshot.
+
+Writing scenarios against the relay:
+- A cockpit submission names the stint by its Schedule label: `stint = "Stint 2"`, not `2`.
+- Feeds start disarmed (`RACECAST_MANUAL_FEED_ARM` is on by default): a feed pulls only after
+  `GET /feed/A/activate` (the director's arm), so arm it before checking the program picture.
+- The relay's feed cover hides a feed for about 25 s after it starts, so a program identity
+  check needs a timeout of a minute or more.
 
 Roles (`roles/`): a class with `kind`, registered with `@roles.register`; a step's `role`
 is `kind` or `kind:instance`, one instance per string, opened on first use and closed at
@@ -515,13 +535,14 @@ returns late findings. `ctx` (`engine.RunContext`) has `url(service)` (`relay`, 
 `browser()` (a shared headless Chromium, None without Playwright). Built in
 (`roles/builtin.py`): `api` (`get`/`post` with `service`, `path`, `as`, `json`, `status`),
 `obs` (`scene`, `request`; its shot is the program), `stream` (`channel`, `cut`, `stall`,
-`freeze`, `clear`) and `page` (`open` with `service`, `path`, `as`, `wait_for`; the base for
-the party roles of #1233).
+`freeze`, `clear`) and `page` (`open` with `service`, `path`, `as`, `wait_for`; tokens are
+redacted from what it reports; the base for the party roles of #1233).
 
-`scenarios/smoke.toml` uses only those: relay up, a commentator's link submission (webhook),
-its approval (Sheet `schedule` write, webhook), arming Feed A, the scene switch through the
-relay's `/obs/scene` and `'comms1' in obs.program_channels`, plus shots of the program, the
-Director Panel and the Control Center.
+`scenarios/smoke.toml` uses only those: relay up, the Control Center reading the relay's
+simulated port, a commentator's link submission (webhook), its approval (Sheet `schedule`
+write, webhook), arming Feed A, the scene switch through the relay's `/obs/scene` and
+`'comms1' in obs.program_channels`, plus shots of the program, the Director Panel and the
+Control Center.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 

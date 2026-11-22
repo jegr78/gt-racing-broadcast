@@ -1,8 +1,8 @@
 """Load and validate an event-simulation scenario (TOML, read with tomllib).
 
-A scenario has an optional `name`, `description` and `timeout`, an `[event]` table, an
-optional `[sheet.tabs]` table of extra or replaced tabs, optional `[tolerances]` and a
-list of `[[step]]` tables. Steps run in file order; `at` gives a step's earliest start.
+A scenario has an optional `name`, `description`, `max_minutes` and `wait`, an `[event]`
+table, an optional `[sheet.tabs]` table of extra or replaced tabs, optional `[tolerances]`
+and a list of `[[step]]` tables. A step runs once its `at` trigger fires.
 See tools/CLAUDE.md (Event simulation engine) for the format."""
 import os
 import re
@@ -19,10 +19,10 @@ _AFTER = re.compile(r"^after:([A-Za-z0-9._-]+)(?:\+(.+))?$")
 _LAP = re.compile(r"^lap:leader=(\d{1,4})$")
 _STATE = re.compile(r"^state:([a-z_]{1,32})$")
 DEFAULT_CHECK_TIMEOUT = 5.0
-DEFAULT_RUN_TIMEOUT = 720.0        # leaves start, teardown and report inside a service's 900 s
-DEFAULT_TRIGGER_WAIT = 600.0
+DEFAULT_MAX_MINUTES = 12
+MAX_MAX_MINUTES = 120              # the spec's CI timeout for the longest scenario, `full`
 STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wait", "shot"}
-TOP_KEYS = {"name", "description", "timeout", "event", "sheet", "tolerances", "step"}
+TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step"}
 
 
 class ScenarioError(ValueError):
@@ -89,7 +89,7 @@ class Step:
     expect: list = field(default_factory=list)
     soft: list = field(default_factory=list)
     timeout: float = DEFAULT_CHECK_TIMEOUT
-    wait: float = DEFAULT_TRIGGER_WAIT
+    wait: float = None                 # seconds a trigger may take to fire; None: until the run ends
     shot: Shot = None
 
     @property
@@ -109,13 +109,17 @@ class Commentator:
 class Scenario:
     name: str
     description: str
-    timeout: float
+    max_minutes: int
     event: dict
     commentators: list
     tabs: dict
     tolerances: dict
     steps: list
     path: str = ""
+
+    @property
+    def run_seconds(self):
+        return self.max_minutes * 60.0
 
 
 def role_kind(role):
@@ -184,7 +188,7 @@ def _shot(raw, where):
     return Shot(name, str(raw.get("role") or ""), str(raw.get("element") or ""))
 
 
-def _step(i, raw, registry, roots):
+def _step(i, raw, registry, roots, default_wait=None):
     where = f"step {i + 1}"
     if not isinstance(raw, dict):
         raise ScenarioError(f"{where} must be a table")
@@ -210,7 +214,7 @@ def _step(i, raw, registry, roots):
     if not isinstance(args, dict):
         raise ScenarioError(f"{where}: args must be a table")
     timeout = parse_duration(raw["timeout"]) if "timeout" in raw else DEFAULT_CHECK_TIMEOUT
-    wait = parse_duration(raw["wait"]) if "wait" in raw else DEFAULT_TRIGGER_WAIT
+    wait = parse_duration(raw["wait"]) if "wait" in raw else default_wait
     shot = _shot(raw.get("shot"), where)
     if shot and shot.role and role_kind(shot.role) not in registry:
         raise ScenarioError(f"{where}: shot role {shot.role!r} is unknown")
@@ -234,12 +238,16 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     event = data.get("event") or {}
     if not isinstance(event, dict):
         raise ScenarioError("event must be a table")
+    max_minutes = data.get("max_minutes", DEFAULT_MAX_MINUTES)
+    if type(max_minutes) is not int or not 1 <= max_minutes <= MAX_MAX_MINUTES:
+        raise ScenarioError(f"max_minutes must be a whole number 1-{MAX_MAX_MINUTES}, not {max_minutes!r}")
+    default_wait = parse_duration(data["wait"]) if "wait" in data else None
     raw_steps = data.get("step") or []
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ScenarioError("a scenario needs at least one [[step]]")
     steps, ids = [], {}
     for i, raw in enumerate(raw_steps):
-        step = _step(i, raw, registry, roots)
+        step = _step(i, raw, registry, roots, default_wait)
         if step.id in ids:
             raise ScenarioError(f"{step.label}: id {step.id!r} is not unique "
                                 f"(also step {ids[step.id] + 1}); give one of them an id")
@@ -254,8 +262,7 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     slow = tolerances.get("state_s", 2.0)
     if not isinstance(slow, (int, float)) or slow < 0:
         raise ScenarioError("tolerances.state_s must be a non-negative number")
-    timeout = parse_duration(data["timeout"]) if "timeout" in data else DEFAULT_RUN_TIMEOUT
-    return Scenario(name, str(data.get("description") or ""), timeout, event,
+    return Scenario(name, str(data.get("description") or ""), max_minutes, event,
                     _commentators(event), _tabs(data.get("sheet")), {"state_s": float(slow)},
                     steps, path)
 

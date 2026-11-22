@@ -5,9 +5,8 @@ is missing; the caller then records a soft finding instead of a screenshot."""
 
 
 class Browser:
-    def __init__(self, headless=True, executable=None):
+    def __init__(self, headless=True):
         self.headless = headless
-        self.executable = executable
         self._pw = None
         self._browser = None
         self.problem = ""
@@ -22,7 +21,7 @@ class Browser:
             return None
         try:
             self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch(headless=self.headless, executable_path=self.executable)
+            self._browser = self._pw.chromium.launch(headless=self.headless)
         except Exception as exc:  # a missing Chromium download is the common case
             self.problem = f"Chromium did not start: {exc}"
             self.close()

@@ -36,11 +36,10 @@ def build_parser():
     ap.add_argument("--keep-work", action="store_true",
                     help="keep the temporary app home and fake state after the run")
     ap.add_argument("--headed", action="store_true", help="show the browser (local only)")
-    ap.add_argument("--chromium", help="a Chromium executable for Playwright instead of its own download")
     return ap
 
 
-def run(scn, out, keep_work=False, headed=False, chromium=None):
+def run(scn, out, keep_work=False, headed=False):
     import browser
     import engine
     import report
@@ -48,7 +47,7 @@ def run(scn, out, keep_work=False, headed=False, chromium=None):
     os.makedirs(out, exist_ok=True)
     work = tempfile.mkdtemp(prefix="racecast-sim-")
     st = stack.Stack(scn, work)
-    br = browser.Browser(headless=not headed, executable=chromium)
+    br = browser.Browser(headless=not headed)
     data = None
     try:
         try:
@@ -105,13 +104,14 @@ def main(argv=None):
         return 2
     out = os.path.abspath(args.out)
     import e2e_safety
+    import stack
     # The contained run starts in tools/, so it gets absolute paths.
     contained = e2e_safety.enter(__file__, ["--scenario", scn.path, "--out", out]
-                                 + ["--keep-work"] * args.keep_work + ["--headed"] * args.headed
-                                 + (["--chromium", os.path.abspath(args.chromium)] if args.chromium else []))
+                                 + ["--keep-work"] * args.keep_work + ["--headed"] * args.headed,
+                                 seconds=stack.lifetime(scn))
     if contained is not None:
         return contained
-    return run(scn, out, keep_work=args.keep_work, headed=args.headed, chromium=args.chromium)
+    return run(scn, out, keep_work=args.keep_work, headed=args.headed)
 
 
 if __name__ == "__main__":

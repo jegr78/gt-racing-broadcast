@@ -12,6 +12,17 @@ img{max-width:240px;display:block}code{font-size:12px}ul{margin:0;padding-left:1
 """
 
 
+LEGEND = (
+    "<h2>How findings are rated</h2><ul>"
+    "<li class='hard'>Hard (the run fails): an action error such as an HTTP error or a missing "
+    "control, a check still false at its timeout, a trigger that never fires, a script error "
+    "on a page, a traceback in a service log.</li>"
+    "<li class='soft'>Soft (reported only): a soft check, a check slower than the tolerance, "
+    "a failed resource load on a page (an idle feed's preview answers 503), an ERROR line "
+    "in a service log (each distinct line once, with its count), a missing screenshot.</li>"
+    "</ul>")
+
+
 def _e(value):
     return html.escape("" if value is None else str(value))
 
@@ -58,7 +69,7 @@ def render_html(data):
             f"<h2>Soft findings</h2>{finding_list(soft)}"
             f"<h2>Timeline</h2><table><tr><th>Time</th><th>Role</th><th>Action</th><th>Result</th>"
             f"<th>Duration</th><th>Checks</th><th>Shot</th></tr>{''.join(rows)}</table>"
-            f"</body></html>\n")
+            f"{LEGEND}</body></html>\n")
 
 
 def write(out_dir, data):

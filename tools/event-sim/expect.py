@@ -18,7 +18,7 @@ _NODES = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast
           ast.Compare, ast.Name, ast.Load, ast.Constant, ast.Attribute, ast.Subscript,
           ast.Call, ast.List, ast.Tuple, *_CMP)
 BUILTINS = {"len": len}
-ROOTS = ("obs", "relay", "sheet", "webhook", "race", "page")
+ROOTS = ("obs", "relay", "sheet", "webhook", "race", "page", "result")
 MAX_LENGTH = 500
 
 

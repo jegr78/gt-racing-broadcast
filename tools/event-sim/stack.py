@@ -9,6 +9,7 @@ or dies. Every port is a free loopback port; 8088, 8089 and 53001-53003 are neve
 import http.client
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -20,11 +21,12 @@ from urllib.parse import urlsplit, urlunsplit
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 FAKES = os.path.join(HERE, "fakes")
-for _p in (FAKES, os.path.join(ROOT, "src", "scripts")):
+for _p in (FAKES, os.path.join(ROOT, "src", "scripts"), os.path.join(ROOT, "tools")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 import console_auth  # noqa: E402
+import e2e_safety  # noqa: E402
 import obs_grab  # noqa: E402
 import obs_sim  # noqa: E402
 import probes  # noqa: E402
@@ -36,7 +38,7 @@ PROFILE = "demo"
 RESERVED_PORTS = frozenset({8088, 8089, 53001, 53002, 53003})
 COLLECTION = os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json")
 CHILD = os.path.join(ROOT, "tools", "e2e_child.py")
-CHILD_LIFETIME_S = 900
+TEARDOWN_MARGIN_S = 600           # start, teardown and the report around the steps
 READY_TIMEOUT_S = 90
 LOG_TAIL = 4000
 
@@ -45,6 +47,11 @@ def _any_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def lifetime(scn):
+    """Seconds the services and the containment unit may live: the run plus a margin."""
+    return e2e_safety.lifetime(int(scn.run_seconds) + TEARDOWN_MARGIN_S)
 
 
 def free_port(taken=(), pick=_any_port):
@@ -133,11 +140,11 @@ class Child:
     """One supervised service. `stop()` closes the control pipe; the supervisor then
     stops the whole tree."""
 
-    def __init__(self, name, argv, env, cwd, log_path):
+    def __init__(self, name, argv, env, cwd, log_path, seconds):
         self.name, self.log_path = name, log_path
         self.log = open(log_path, "wb")  # noqa: SIM115  closed in stop()
         try:
-            self.proc = subprocess.Popen([sys.executable, CHILD, str(CHILD_LIFETIME_S), "--", *argv],
+            self.proc = subprocess.Popen([sys.executable, CHILD, str(seconds), "--", *argv],
                                          cwd=cwd, env=env, stdin=subprocess.PIPE,
                                          stdout=self.log, stderr=subprocess.STDOUT)
         except BaseException:
@@ -189,13 +196,23 @@ def wait_http(base, path, child, timeout, clock=time.monotonic, sleep=time.sleep
                        f"--- {child.name} log ---\n{child.tail()}")
 
 
+_STAMP = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:[.,]\d+)? ")
+
+
 def log_findings(text, name):
-    """Hard findings for tracebacks in a service log."""
-    out, lines = [], text.splitlines()
+    """A hard finding per traceback in a service log, a soft one per distinct ERROR line
+    (with its count)."""
+    out, errors, lines = [], {}, text.splitlines()
     for i, line in enumerate(lines):
         if line.startswith("Traceback (most recent call last)"):
             last = next((ln for ln in lines[i + 1:] if ln and not ln.startswith((" ", "\t"))), "")
             out.append(("hard", f"{name} log: traceback {last.strip()}"))
+            continue
+        bare = _STAMP.sub("", line).strip()
+        if bare.startswith("ERROR"):
+            errors[bare] = errors.get(bare, 0) + 1
+    for bare, n in errors.items():
+        out.append(("soft", f"{name} log: {bare}" + (f" ({n}x)" if n > 1 else "")))
     return out
 
 
@@ -239,6 +256,7 @@ class Stack:
                                      "RACECAST_UI_PORT": str(ui_port),
                                      "RACECAST_UPDATE_CHECK": "0",
                                      "RACECAST_CONSOLE_SECRET": self.secret,
+                                     "RACECAST_SIM_RELAY_PORT": str(http_port),
                                      "PYTHONDONTWRITEBYTECODE": "1"})
         home = os.path.dirname(os.path.dirname(racecast))
         relay = self._child("relay", [self.python, racecast, "--simulation", "relay", "run",
@@ -257,7 +275,7 @@ class Stack:
     def _child(self, name, argv, env, cwd):
         logs = os.path.join(self.work, "logs")
         os.makedirs(logs, exist_ok=True)
-        child = Child(name, argv, env, cwd, os.path.join(logs, name + ".log"))
+        child = Child(name, argv, env, cwd, os.path.join(logs, name + ".log"), lifetime(self.scn))
         self.children.append(child)
         return child
 

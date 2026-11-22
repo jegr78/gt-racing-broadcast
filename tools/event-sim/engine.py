@@ -1,7 +1,7 @@
 """The step runner: triggers, actions, checks, screenshots and findings.
 
-`Engine(scenario, ctx, probes).run()` runs the steps in file order, each no earlier
-than its `at`, and returns the report data (see report.py). It never spawns anything:
+`Engine(scenario, ctx, probes).run()` runs each step once its `at` trigger fires, one
+action at a time, and returns the report data (see report.py). It never spawns anything:
 `stack.Stack` builds the context and the probes, tests pass fakes and a fake clock."""
 import os
 import re
@@ -147,7 +147,14 @@ class Engine:
     def _names(self):
         names = dict(self.probes)
         names["page"] = expect.Func(self._page)
+        names["result"] = expect.Func(self._result)
         return names
+
+    def _result(self, step_id):
+        res = self.results.get(step_id)
+        if res is None or res.result is None:
+            raise expect.Unresolved(f"step {step_id!r} has no result yet")
+        return res.result
 
     def _page(self, role):
         if role not in self.roles:
@@ -166,13 +173,6 @@ class Engine:
         for severity, message in self.ctx.findings:
             self.findings.append(Finding(severity, message, step.id, step.role))
         self.ctx.findings.clear()
-
-    def _deadline_left(self):
-        return self.scenario.timeout - self.now()
-
-    def _wait_until(self, t):
-        while self.now() < t:
-            self.sleep(min(self.poll, t - self.now()))
 
     def wait_for(self, text, timeout):
         """(ok, elapsed, detail): poll `text` until it is true or `timeout` passes."""
@@ -194,27 +194,46 @@ class Engine:
                 return False, elapsed, detail
             self.sleep(min(self.poll, timeout - elapsed))
 
-    # -- one step -----------------------------------------------------------
-    def _trigger(self, step, res):
-        """Wait for the step's trigger; returns an error text, or ""."""
+    # -- triggers -----------------------------------------------------------
+    def _check_once(self, text):
+        try:
+            return bool(expect.raw(expect.evaluate(expect.compile_expr(text), self._names())))
+        except Exception:  # unresolved or a page mid-navigation: not fired yet
+            return False
+
+    def _trigger_state(self, step):
+        """("run", ""), ("wait", ""), ("skip", why) or ("fail", why) for a pending step."""
+        now, end = self.now(), self.scenario.run_seconds
+        refs = template_refs(step.args)
+        if step.at.kind == "after":
+            refs = refs | {step.at.ref}
+        failed = sorted(r for r in refs if r in self.results and self.results[r].status != "ok")
+        if failed:
+            return "skip", f"skipped: {', '.join(failed)} did not succeed"
+        unfinished = [r for r in refs if r not in self.results]
+        armed = 0.0
         at = step.at
-        if at.kind == "time":
-            target = at.seconds
-        elif at.kind == "after":
+        if at.kind == "after" and at.ref in self.results:
             ref = self.results[at.ref]
-            if ref.status != "ok":
-                res.status = "skipped"
-                return f"skipped: {at.ref} did not succeed"
-            target = ref.started + ref.duration + at.seconds
-        elif at.kind == "race":
-            ok, _elapsed, detail = self.wait_for(at.condition, min(step.wait, max(0.0, self._deadline_left())))
-            return "" if ok else f"trigger {at.condition!r} never met: {detail}"
-        else:
-            return ""
-        if target > self.scenario.timeout:
-            return f"trigger at {target:.1f}s is past the run timeout"
-        self._wait_until(target)
-        return ""
+            armed = ref.started + ref.duration
+        target = {"time": at.seconds, "after": armed + at.seconds}.get(at.kind, 0.0)
+        if target > end:
+            return "fail", f"trigger at {target:.1f}s is past the end of the run ({end:g}s)"
+        limit = min(end, armed + step.wait) if step.wait is not None else end
+        if not unfinished and now >= target and (at.kind != "race" or self._check_once(at.condition)):
+            return "run", ""
+        if now >= limit:
+            what = at.condition if at.kind == "race" else f"after {', '.join(unfinished) or at.ref}"
+            return "fail", f"trigger {what!r} never met within {limit - armed:g}s"
+        return "wait", ""
+
+    def _settle(self, step, status, why):
+        res = StepResult(step.id, step.role, step.do, status=status, error=why,
+                         started=round(self.now(), 3))
+        self.results[step.id] = res
+        if status == "failed":
+            self.findings.append(Finding(HARD, why, step.id, step.role))
+        return res
 
     def _shoot(self, step, res):
         shot = step.shot
@@ -247,21 +266,10 @@ class Engine:
                                                  f"(more than {slow:g}s)", step.id, step.role))
 
     def run_step(self, step):
-        res = StepResult(step.id, step.role, step.do)
+        res = StepResult(step.id, step.role, step.do, started=round(self.now(), 3))
         self.results[step.id] = res
-        error = self._trigger(step, res)
-        failed = sorted(r for r in template_refs(step.args)
-                        if r in self.results and self.results[r].status != "ok")
-        if failed and res.status != "skipped":
-            res.status, error = "skipped", f"skipped: {', '.join(failed)} did not succeed"
-        res.started = round(self.now(), 3)
-        if res.status == "skipped":
-            res.error = error
-            return res
         begin = self.clock()
         try:
-            if error:
-                raise StepError(error)
             args = resolve_args(step.args, {k: r.result for k, r in self.results.items()
                                             if r.result is not None})
             res.result = self._role(step.role).do(step.do, args)
@@ -283,19 +291,24 @@ class Engine:
 
     # -- the run ------------------------------------------------------------
     def run(self):
+        """One executor: each tick runs the first pending step (file order) whose trigger
+        fired, settles the ones that can no longer run, and otherwise waits a poll."""
         self.start = self.clock()
-        out = []
+        pending, out = list(self.scenario.steps), []
         try:
-            for step in self.scenario.steps:
-                if self._deadline_left() <= 0:
-                    res = StepResult(step.id, step.role, step.do, status="skipped",
-                                     error="run timeout reached")
-                    self.results[step.id] = res
-                    out.append(res)
-                    continue
-                out.append(self.run_step(step))
-            if any(r.error == "run timeout reached" for r in out):
-                self.findings.append(Finding(HARD, f"run timeout of {self.scenario.timeout:g}s reached"))
+            while pending:
+                for step in pending:
+                    state, why = self._trigger_state(step)
+                    if state == "wait":
+                        continue
+                    pending.remove(step)
+                    if state == "run":
+                        out.append(self.run_step(step))
+                    else:
+                        out.append(self._settle(step, "skipped" if state == "skip" else "failed", why))
+                    break
+                else:
+                    self.sleep(self.poll)
         finally:
             for name, role in reversed(list(self.roles.items())):
                 try:

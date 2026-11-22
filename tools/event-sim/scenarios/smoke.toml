@@ -1,8 +1,9 @@
-# Engine smoke run with the built-in roles only: the relay comes up, a commentator's
-# stream link reaches the webhook and, once approved, the Sheet, the director's scene
-# switch reaches OBS, and the program shows stint 1's commentator.
+# Engine smoke run with the built-in roles only: the relay comes up and the Control
+# Center reads it on its simulated port, a commentator's stream link reaches the webhook
+# and, once approved, the Sheet, the director's scene switch reaches OBS, and the
+# program shows stint 1's commentator.
 description = "Engine smoke run: submission and approval, scene switch, feed identity on program."
-timeout = "5m"
+max_minutes = 5
 
 [event]
 stints = 3
@@ -28,6 +29,13 @@ do = "get"
 args = { path = "/status" }
 expect = ["relay.up"]
 shot = { name = "program-start", role = "obs" }
+
+[[step]]
+id = "cc_status"
+role = "api"
+do = "get"
+args = { service = "ui", path = "/api/status" }
+expect = ["result('cc_status').relay.port == relay.port", "result('cc_status').simulation"]
 
 [[step]]
 id = "submit"

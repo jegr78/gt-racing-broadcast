@@ -43,8 +43,8 @@ def _get(base, path):
 
 
 class RelayProbe(Probe):
-    """`relay.status` (GET /status), `relay.up`, `relay.get('/path')`."""
-    fields = ("status", "up")
+    """`relay.status` (GET /status), `relay.up`, `relay.port`, `relay.get('/path')`."""
+    fields = ("status", "up", "port")
     calls = ("get",)
 
     def __init__(self, base):
@@ -53,6 +53,10 @@ class RelayProbe(Probe):
     @property
     def status(self):
         return View(_get(self.base, "/status"))
+
+    @property
+    def port(self):
+        return urlsplit(self.base).port
 
     @property
     def up(self):
