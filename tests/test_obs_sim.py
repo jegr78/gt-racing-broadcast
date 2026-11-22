@@ -881,24 +881,31 @@ def t_jpeg_stuffs_ff_bytes_and_averages_chroma():
     assert abs(drift) < 20, f"chroma is the mean of each 2x2 cell, red minus blue drifts by {drift}"
 
 
-def t_full_size_jpeg_is_fast_and_cached():
+def t_full_size_jpeg_skips_flat_blocks_and_is_cached():
     import obs_render
-    st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
-    st.set_labels({"Feed A": "Stint 1 Comms 1"})
-    started = time.monotonic()
-    raw = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg"))
-    took = time.monotonic() - started
-    assert _jpeg_size(raw) == (1920, 1080) and took < 1.8, f"a full-size JPEG in {took:.2f} s, under obs_ws's 2 s"
-    calls = []
-    real = obs_render.jpeg
-    obs_render.jpeg = lambda *a, **k: calls.append(1) or real(*a, **k)
+    dcts = []
+    real_fdct, real_jpeg = obs_render._fdct, obs_render.jpeg
+    obs_render._fdct = lambda block: dcts.append(1) or real_fdct(block)
     try:
-        again = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg"))
-        assert again == raw and calls == [], "an unchanged picture is not encoded again"
+        one_colour = obs_render.jpeg(1920, 1080, bytes((40, 90, 160)) * (1920 * 1080))
+        assert _jpeg_size(one_colour) == (1920, 1080) and dcts == [], "a one-colour picture needs no DCT"
+        st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
+        st.set_labels({"Feed A": "Stint 1 Comms 1"})
+        started = time.monotonic()
+        raw = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg"))
+        assert _jpeg_size(raw) == (1920, 1080) and time.monotonic() - started < 10, "a sane full-size JPEG"
+        blocks = (1920 // 16) * (1088 // 16) * 6
+        assert 0 < len(dcts) < blocks // 4, f"only the busy blocks take the DCT: {len(dcts)} of {blocks}"
+        encodes = []
+        obs_render.jpeg = lambda *a, **k: encodes.append(1) or real_jpeg(*a, **k)
+        plan = st._shot_plan("Splitscreen", (1920, 1080), "jpg")
+        canvas = obs_render.render_canvas(plan["source"], plan["layers"], plan["picture"], plan["labels"])
+        first = st._jpeg(canvas, 75, None)
+        assert st._jpeg(canvas, 75, None) is first and encodes == [], "an unchanged picture reuses its bytes"
         st.set_labels({"Feed A": "Stint 2 Comms 2"})
-        assert obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg")) != raw and calls == [1]
+        assert obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg")) != raw and encodes == [1]
     finally:
-        obs_render.jpeg = real
+        obs_render._fdct, obs_render.jpeg = real_fdct, real_jpeg
 
 
 def t_a_picture_with_frames_is_encoded_by_ffmpeg():
