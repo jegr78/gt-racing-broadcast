@@ -151,6 +151,18 @@ never the real one.
   `RELAY_PORT` (`tests/test_simulation_cli.py` counts the uses), the relay's
   `--http-port` default (`control_port`), preflight and the Control Center's Kill relay.
   An invalid value is a `problems()` entry and `relay_port` raises, never 8088.
+  `RACECAST_SIM_FEED_PORTS` (three different ports `A,B,POV`, unset = 53001-53003; none of
+  8088, 53001-53003, the Control Center's port or the simulated control port) moves the
+  feed ports: `simulation.feed_ports` feeds `racecast._feed_ports()`, and
+  `_relay_runtime_args` appends `--ports`/`--pov-port` for every relay spawn (`relay run`,
+  `relay start`, `restart`, a heal, the Control Center's jobs), so no start path binds the
+  product ports. The heal's `feed_pids`, the busy-port warning, `freeport_owner`,
+  preflight's `relay_ports` and the stop-time `release_feed_inputs` read the same ports.
+  The OBS collection still names 53001-53003: whoever sets the variable points OBS's feed
+  inputs at the new ports (the event simulation rewrites its simulated collection).
+  In simulation `_invite_hosts` answers the loopback address without asking Tailscale, so
+  the Control Center's Driver invite and Public timing rows show the links the simulated
+  relay serves (`http://127.0.0.1:<port>/console/...`).
 - Skips print `<what>: skipped (simulation).` at the leaves, so CLI and Control Center
   jobs report alike: `_event_launch`, `app launch|quit`, `_tailscale_connect`,
   `tailscale down`, `_tailscale_ip`/`_tailscale_magicdns` (None), `companion_start/stop`,

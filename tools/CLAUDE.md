@@ -474,7 +474,8 @@ python3 tools/event-sim/event_sim.py --scenario smoke --check     # validate onl
 (`secrets.token_hex`, passed as `RACECAST_CONSOLE_SECRET`) and every runtime file stay out of
 the checkout. Inherited `RACECAST_*` values are dropped. Ports are free loopback ports,
 never 8088, 8089 or 53001-53003: `RACECAST_SIM_RELAY_PORT` points the relay and the Control
-Center at the same control port, and the OBS collection's feed inputs and relay browser
+Center at the same control port, `RACECAST_SIM_FEED_PORTS` gives every relay start of this
+app home (also the Control Center's Restart) the run's feed ports, and the OBS collection's feed inputs and relay browser
 sources are rewritten to this run's ports (`port_map`). Once the relay answers, the stack
 writes `relay.pid` (the control port's holder) and the `relay.profile`/`relay.mode` stamps
 into the temporary app home, as `relay start` would, so the Control Center reports it alive. `--keep-work` keeps the app home. Screenshots of pages use Playwright's
@@ -564,7 +565,7 @@ action and acts on the controls a person uses; the drivers have no page.
 
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
-| `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event` |
+| `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
 | `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene), `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name) |
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `add_lap` (entry, time) |
 | `commentator:<crew name>` | `/cockpit` with that person's token | `open`, `submit_link` (url, stint), `chat` (text) |
@@ -595,11 +596,9 @@ UI or API:
   operator, a channel's failure.
 - A page a role just opened has not polled yet: `read`, `approve_driver`, `approve_drivers`
   and `scene` wait for the rows, requests or keys before they act.
-- Not offered: Start/End Part (the panel hides its Part button in this simulation; why is
-  not established), the Control Center's relay restart (a fresh `relay start` passes no feed
-  ports, so the relay would bind its defaults 53001-53003), and of the spec's examples the
-  HUD, graphics, splitscreen, intermission, corrections, notes and profile controls, which
-  no bundled scenario needs yet.
+- `producer.relay_restart` starts a detached relay, no child of the run: `Stack.stop`
+  runs the app home's own `relay stop` first. A run killed hard leaves it to the local
+  containment unit.
 
 Without a browser a page role raises `roles.Unavailable`: the engine marks the step
 `skipped`, records a soft finding and runs neither its checks nor its shot, and steps

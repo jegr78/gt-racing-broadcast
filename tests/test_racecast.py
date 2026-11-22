@@ -7128,6 +7128,27 @@ def t_event_race_takes_the_lap_time_seconds():
     assert "new lap shows 7 s" in out.getvalue(), out.getvalue()
 
 
+def t_a_simulated_event_hands_out_the_loopback_links_the_relay_serves():
+    old = m._tailscale_magicdns, m._tailscale_ip, dict(m._INVITE_HOSTS)
+    m._tailscale_magicdns, m._tailscale_ip = (lambda: "box.tailnet.ts.net"), (lambda: "100.64.0.7")
+    m._INVITE_HOSTS.update(at=None, magic="", ip=None)
+    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234")
+    try:
+        assert m._invite_links("abc") == {"funnel": None,
+                                          "tailnet": "http://127.0.0.1:41234/console/drive?i=abc"}, \
+            "simulation never names a Tailscale host: the link is the relay's own loopback address"
+        assert m._timing_links("xyz")["tailnet"] == "http://127.0.0.1:41234/console/timing?l=xyz"
+        assert m._INVITE_HOSTS["at"] is None, "a simulated answer is not cached for a later live run"
+        env()
+        env = _sim_env()
+        assert m._invite_links("abc")["funnel"] == "https://box.tailnet.ts.net/console/drive?i=abc", \
+            "outside simulation the Funnel link is unchanged"
+    finally:
+        env()
+        m._tailscale_magicdns, m._tailscale_ip = old[0], old[1]
+        m._INVITE_HOSTS.clear(); m._INVITE_HOSTS.update(old[2])
+
+
 def t_invite_hosts_retry_a_failed_tailscale_lookup_soon():
     answers = [("", None), ("box.tailnet.ts.net", "100.64.0.7"), ("other.ts.net", "100.64.0.8")]
     clock = [100.0]

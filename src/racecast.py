@@ -6275,7 +6275,10 @@ _INVITE_HOSTS = {"at": None, "magic": "", "ip": None}
 def _invite_hosts(clock=time.monotonic):
     """MagicDNS name and Tailscale IP, looked up at most once a minute: the Control
     Center polls the invite every few seconds and each lookup runs `tailscale`. A
-    lookup that found neither is retried 5 s after it ended. `clock` is a test seam."""
+    lookup that found neither is retried 5 s after it ended. `clock` is a test seam.
+    In simulation there is no Tailscale: the links name the relay's own loopback address."""
+    if simulation.active():
+        return "", "127.0.0.1"
     ttl = 60 if _INVITE_HOSTS["magic"] or _INVITE_HOSTS["ip"] else 5
     if _INVITE_HOSTS["at"] is None or clock() - _INVITE_HOSTS["at"] > ttl:
         magic, ip = _tailscale_magicdns(), _tailscale_ip()

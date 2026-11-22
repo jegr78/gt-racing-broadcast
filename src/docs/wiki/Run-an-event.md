@@ -81,11 +81,15 @@ start.
   | `RACECAST_SIM_SHEET_PUSH_URL` | the league `SHEET_PUSH_URL` | no |
   | `RACECAST_SIM_DISCORD_WEBHOOK_URL` | the league `DISCORD_WEBHOOK_URL` | no |
   | `RACECAST_SIM_RELAY_PORT` | the relay control port 8088 on `127.0.0.1`, as a port number | no |
+  | `RACECAST_SIM_FEED_PORTS` | the relay feed ports 53001-53003 (Feed A, Feed B, POV), as three port numbers separated by commas | no |
 
   Each value must point at `127.0.0.1` or `localhost`, and it replaces the league value
   whichever file or shell set that. With `RACECAST_SIM_RELAY_PORT` set, the relay, every
   `racecast` command and the Control Center use that port, so a rehearsal never reaches
-  a live relay on 8088. An invalid port refuses to start.
+  a live relay on 8088. With `RACECAST_SIM_FEED_PORTS` set, every relay start uses those
+  feed ports instead of 53001-53003, and the OBS feed sources have to point at them. An
+  invalid port refuses to start. The Control Center's Driver invite and Public timing
+  rows show loopback links in simulation mode.
 - Off in simulation mode: the league's Discord login and voice channel, the timing
   host, the Director's Companion buttons, the update check, Driver Radio's cloud speech
   (the Google text-to-speech and speech-to-text keys are blanked), the AI agent CLIs
