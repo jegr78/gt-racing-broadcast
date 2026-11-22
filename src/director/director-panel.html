@@ -1263,27 +1263,35 @@ function relayGated(item){
    buildControls retargets redFlagItem from cfg.redFlag when that is present. */
 const redFlagItem = {scene:"Stint", source:"Standby Cover"};
 async function redFlagPress(){
-  let d;
-  try{ d = await obsToggle(redFlagItem, true); }
-  catch(e){ d = {ok: false, error: e.message||e}; }
-  // Without a readable cover the relay still names the direction from its own record.
-  const on = d.ok ? d.enabled : d.red_flag;
-  if (typeof on !== "boolean"){
-    log("RED FLAG failed: " + (d.error || "no answer"), "err");
-    toast("RED FLAG not switched: " + (d.error || "no answer"));
-    return;
-  }
-  if (!d.ok){
-    const note = "RED FLAG " + (on ? "raised" : "over") + ", but the Standby Cover was not switched in OBS ("
-                 + (d.error || "no answer") + ")";
-    log(note, "err"); toast(note);
-  }
-  log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
-  setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
-  // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
-  if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
-                                           body: "{}"}).catch(() => {});
-  obsStatePoll();
+  await keyOnce(redFlagBtn, async ()=>{
+    let d;
+    try{ d = await obsToggle(redFlagItem, redFlagBtn.classList.contains("on")); }
+    catch(e){ d = e.answer || {ok: false, error: e.message||e}; }
+    // Without a readable cover the relay still names the direction from its own record.
+    const on = d.ok ? d.enabled : d.red_flag;
+    if (typeof on !== "boolean"){
+      log("RED FLAG failed: " + (d.error || "no answer"), "err");
+      toast("RED FLAG not switched: " + (d.error || "no answer"));
+      return;
+    }
+    redFlagBtn.classList.toggle("on", on);
+    if (d.changed === false){      // someone else switched it first: take the state, change nothing
+      log("RED FLAG is already " + (on ? "up" : "down") + ", nothing switched", "warn");
+      obsStatePoll();
+      return;
+    }
+    if (!d.ok){
+      const note = "RED FLAG " + (on ? "raised" : "over") + ", but the Standby Cover was not switched in OBS ("
+                   + (d.error || "no answer") + ")";
+      log(note, "err"); toast(note);
+    }
+    log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
+    setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
+    // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
+    if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
+                                             body: "{}"}).catch(() => {});
+    obsStatePoll();
+  });
 }
 const redFlagBtn = mkKey("RED FLAG", "alarm", redFlagPress);
 redFlagBtn.classList.add("redflag");
@@ -1885,40 +1893,57 @@ async function runMacro(m){
   obsStatePoll();
 }
 
-/* Flips one source in the relay, which reads OBS first, so a press never acts on the
-   panel's last poll. Returns the new state and throws when the relay refused; with
-   `raw` it returns the relay's answer either way. */
-async function obsToggle(item, raw){
-  const d = await obsPost("source", {scene: item.scene, source: item.source, toggle: true});
-  if (!d.ok){
-    if (raw) return d;
-    throw new Error(d.error || "OBS did not answer");
-  }
+/* One request per key at a time, so a double tap sends one toggle. */
+async function keyOnce(btn, fn){
+  if (btn._busy) return;
+  btn._busy = true;
+  try{ await fn(); }
+  finally{ btn._busy = false; }
+}
+
+/* Flips one source in the relay, which switches only while OBS still reports `shown`,
+   the state the key shows. Returns the relay's answer ({enabled, changed}) and throws
+   when the relay refused, with that answer in `answer`. */
+async function obsToggle(item, shown){
+  const d = await obsPost("source", {scene: item.scene, source: item.source, toggle: true, from: shown});
+  if (!d.ok) throw Object.assign(new Error(d.error || "OBS did not answer"), {answer: d});
   const last = obsState.sources.find(s=>s.scene===item.scene && s.source===item.source);
   if (last) last.enabled = d.enabled;
   else obsState.sources.push({scene: item.scene, source: item.source, enabled: d.enabled});
-  return raw ? d : d.enabled;
+  return d;
 }
 
-/* Flips an input's mute in the relay, which reads OBS first, like obsToggle. */
+/* The Mute key, with the same rules as obsToggle. */
 async function muteToggle(input, btn){
-  const d = await obsPost("audio", {input, toggle: true}).catch(e=>({ok: false, error: e.message||e}));
-  if (!d.ok){
-    log(`Mute "${input}" failed: ${d.error || "OBS did not answer"}`, "err");
-    toast(`Mute "${input}" not switched: ${d.error || "OBS did not answer"}`);
-    return;
-  }
-  const last = obsState.audio.find(x=>x.input===input);
-  if (last) last.muted = d.muted;
-  btn.classList.toggle("muted", d.muted);
-  btn.textContent = d.muted ? "Muted" : "Mute";
-  obsStatePoll();
+  await keyOnce(btn, async ()=>{
+    const d = await obsPost("audio", {input, toggle: true, from: btn.classList.contains("muted")})
+      .catch(e=>({ok: false, error: e.message||e}));
+    if (!d.ok){
+      log(`Mute "${input}" failed: ${d.error || "OBS did not answer"}`, "err");
+      toast(`Mute "${input}" not switched: ${d.error || "OBS did not answer"}`);
+      return;
+    }
+    const last = obsState.audio.find(x=>x.input===input);
+    if (last) last.muted = d.muted;
+    btn.classList.toggle("muted", d.muted);
+    btn.textContent = d.muted ? "Muted" : "Mute";
+    if (d.changed === false) log(`"${input}" was already ${d.muted ? "muted" : "unmuted"}, nothing switched`, "warn");
+    obsStatePoll();
+  });
 }
 
 async function toggleSource(item, btn){
-  try{
-    btn.classList.toggle("on", await obsToggle(item));
-  }catch(e){ log(`Toggle "${assetLabel(item.source)}" in "${item.scene}" failed: ${e.message||e}`, "err"); }
+  await keyOnce(btn, async ()=>{
+    const label = assetLabel(item.source);
+    try{
+      const d = await obsToggle(item, btn.classList.contains("on"));
+      btn.classList.toggle("on", d.enabled);
+      if (d.changed === false) log(`"${label}" was already ${d.enabled ? "shown" : "hidden"}, nothing switched`, "warn");
+    }catch(e){
+      log(`Toggle "${label}" in "${item.scene}" failed: ${e.message||e}`, "err");
+      toast(`"${label}" not switched: ${e.message||e}`);
+    }
+  });
 }
 
 /* Relay actions, no OBS needed */

@@ -1614,35 +1614,71 @@ class _ItemObs:
         return True, None
 
 
-def t_obs_source_toggle_flips_the_state_obs_reports():
+def _toggle_server(obs, **extra):
+    """(srv, post) for one relay over `obs`; post(path, **body) returns (status, json)."""
     import json as _json
-    obs = _ItemObs({"Standings": False, "Standby Cover": True})
-    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
-    srv = g._serve()
-    port = srv.server_address[1]
+    srv, port, _path, _hub = _serve(**extra)
 
-    def post(source, **extra):
-        st, text, _h = _req(port, "/obs/source", _json.dumps(
-            {"scene": "Stint", "source": source, **extra}).encode(), {"Content-Type": "application/json"})
+    def post(path, **body):
+        st, text, _h = _req(port, path, _json.dumps(body).encode(), {"Content-Type": "application/json"})
         return st, _json.loads(text)
+    return srv, post
+
+
+def t_obs_source_toggle_switches_only_from_the_state_the_caller_shows():
+    obs = _ItemObs({"Standings": False, "Standby Cover": False})
+    orig_obs, g.m._obs_ws = g.m._obs_ws, obs
+    srv, post = _toggle_server(obs)
+    key = lambda source, **body: post("/obs/source", scene="Stint", source=source, **body)
     try:
-        assert post("Standings", toggle=True) == (200, {"ok": True, "enabled": True})
-        assert post("Standings", toggle=True) == (200, {"ok": True, "enabled": False}), \
-            "a second press flips the item back, whatever the caller last polled"
-        obs.items["Standings"] = True
-        assert post("Standings", toggle=True)[1]["enabled"] is False, "the toggle reads OBS, not a cached state"
-        srv.relay.rc_red_flag_raised = True
-        assert post("Standby Cover", toggle=True) == (200, {"ok": True, "enabled": False})
-        assert srv.relay.rc_red_flag_raised is False, "a director toggle of the cover ends the desk's claim"
+        assert key("Standings", toggle=True, **{"from": False}) == \
+            (200, {"ok": True, "enabled": True, "changed": True})
+        assert key("Standings", toggle=True, **{"from": False}) == \
+            (200, {"ok": True, "enabled": True, "changed": False}), \
+            "a second panel that still shows the old state changes nothing and learns the real one"
+        assert obs.sets == [("Standings", True)], obs.sets
+        assert key("Standings", toggle=True, **{"from": True})[1] == {"ok": True, "enabled": False, "changed": True}
+        assert key("Standings", toggle=True)[1] == {"ok": True, "enabled": True, "changed": True}, \
+            "without from the toggle flips what OBS reports"
         obs.sets.clear()
-        st, d = post("Missing", toggle=True)
-        assert st == 503 and d["ok"] is False and "Missing" in d["error"], (st, d)
-        assert obs.sets == [], "an item OBS cannot report is never switched on a guess"
-        assert post("Standings", on=True) == (200, {"ok": True, "enabled": True})
-        assert post("Standings")[1]["enabled"] is False and obs.sets == [("Standings", True), ("Standings", False)], \
+        st, d = key("Missing", toggle=True, **{"from": False})
+        assert st == 503 and d["ok"] is False and "Missing" in d["error"] and obs.sets == [], \
+            f"an item OBS cannot report is never switched on a guess: {(st, d)}"
+        assert key("Standings", on=False)[1] == {"ok": True, "enabled": False, "changed": True}
+        assert key("Standings")[1]["enabled"] is False and obs.sets == [("Standings", False)] * 2, \
             "without toggle the body keeps its meaning: on shows, anything else hides"
     finally:
         g.m._obs_ws = orig_obs
+        srv.shutdown()
+        srv.server_close()
+
+
+def t_a_panel_red_flag_never_lowers_a_cover_it_did_not_see():
+    obs, hdr = _CoverObs(up=False), {"Content-Type": "application/json"}
+    orig_obs, orig_min, g.m._obs_ws, g.m.RED_FLAG_MIN_S = g.m._obs_ws, g.m.RED_FLAG_MIN_S, obs, 0.0
+    srv, post = _toggle_server(obs)
+    port, rc = srv.server_address[1], g._tok("dave")
+    desk = lambda on: _req(port, f"/console/race-control/red-flag?t={rc}", json.dumps({"on": on}).encode(), hdr)
+    panel = lambda shown: post("/obs/source", scene="Stint", source="Standby Cover", toggle=True,
+                               **{"from": shown})[1]
+    try:
+        desk(True)
+        assert panel(False) == {"ok": True, "enabled": True, "changed": False} and obs.up, \
+            "the desk raised the cover a moment ago: a panel that still shows it down does not lower it"
+        assert srv.relay.rc_red_flag_raised is True, "and the desk keeps its claim on the cover"
+        desk(False)
+        assert not obs.up, "so the desk can still lower it"
+        assert panel(False)["changed"] is True and obs.up
+        assert panel(False) == {"ok": True, "enabled": True, "changed": False} and obs.up, \
+            "a second director with the same old state does not undo the first one's red flag"
+        srv.relay.rc_red_flag_raised = True
+        assert panel(True) == {"ok": True, "enabled": False, "changed": True}
+        assert srv.relay.rc_red_flag_raised is False, "a panel that lowered the cover ends the desk's claim"
+        srv.relay.rc_red_flag_raised = True
+        assert panel(False)["enabled"] is True and srv.relay.rc_red_flag_raised is True, \
+            "raising it does not"
+    finally:
+        g.m._obs_ws, g.m.RED_FLAG_MIN_S = orig_obs, orig_min
         srv.shutdown()
         srv.server_close()
 
@@ -1662,32 +1698,28 @@ class _MuteObs:
         return True, None
 
 
-def t_obs_audio_toggle_flips_the_mute_obs_reports():
-    import json as _json
+def t_obs_audio_toggle_switches_only_from_the_mute_the_caller_shows():
     obs = _MuteObs({"Feed A": False})
     orig_obs, g.m._obs_ws = g.m._obs_ws, obs
-    srv = g._serve()
-    port = srv.server_address[1]
+    srv, post = _toggle_server(obs)
     noted = []
     srv.relay.note_director_mute = lambda name, muted: noted.append((name, muted))
-
-    def post(name, **extra):
-        st, text, _h = _req(port, "/obs/audio", _json.dumps({"input": name, **extra}).encode(),
-                            {"Content-Type": "application/json"})
-        return st, _json.loads(text)
+    key = lambda name, **body: post("/obs/audio", input=name, **body)
     try:
-        assert post("Feed A", toggle=True) == (200, {"ok": True, "muted": True})
-        assert post("Feed A", toggle=True) == (200, {"ok": True, "muted": False}), \
-            "a second press unmutes again, whatever the caller last polled"
-        obs.inputs["Feed A"] = True
-        assert post("Feed A", toggle=True)[1]["muted"] is False, "the toggle reads OBS, not a cached state"
-        assert noted == [("Feed A", True), ("Feed A", False), ("Feed A", False)], \
-            f"the relay notes the director's mute as for an explicit one: {noted}"
+        assert key("Feed A", toggle=True, **{"from": False}) == (200, {"ok": True, "muted": True, "changed": True})
+        assert key("Feed A", toggle=True, **{"from": False}) == \
+            (200, {"ok": True, "muted": True, "changed": False}), \
+            "a second panel that still shows unmuted changes nothing and learns the real state"
+        assert key("Feed A", toggle=True, **{"from": True})[1] == {"ok": True, "muted": False, "changed": True}
+        assert key("Feed A", toggle=True)[1] == {"ok": True, "muted": True, "changed": True}, \
+            "without from the toggle flips what OBS reports"
+        assert noted == [("Feed A", True), ("Feed A", False), ("Feed A", True)], \
+            f"the relay notes each mute that was switched, and only those: {noted}"
         obs.sets.clear()
-        st, d = post("Missing", toggle=True)
+        st, d = key("Missing", toggle=True, **{"from": False})
         assert st == 503 and d["ok"] is False and "Missing" in d["error"] and obs.sets == [], \
             f"an input OBS cannot report is never switched on a guess: {(st, d, obs.sets)}"
-        assert post("Feed A", mute=True) == (200, {"ok": True}) and obs.sets == [("Feed A", True)], \
+        assert key("Feed A", mute=True) == (200, {"ok": True}) and obs.sets == [("Feed A", True)], \
             "an explicit mute keeps its contract"
     finally:
         g.m._obs_ws = orig_obs
@@ -1710,28 +1742,25 @@ class _BannerHud:
 
 
 def t_red_flag_toggle_without_a_readable_cover_takes_the_relays_own_state():
-    import json as _json
     hud = _BannerHud()
     orig_obs, g.m._obs_ws = g.m._obs_ws, _ItemObs({"Standings": None})
-    srv = g._serve(hud_source=hud)
-    port = srv.server_address[1]
-
-    def toggle(source):
-        st, text, _h = _req(port, "/obs/source", _json.dumps(
-            {"scene": "Stint", "source": source, "toggle": True}).encode(), {"Content-Type": "application/json"})
-        return st, _json.loads(text)
+    srv, post = _toggle_server(g.m._obs_ws, hud_source=hud)
+    toggle = lambda source, **body: post("/obs/source", scene="Stint", source=source, toggle=True, **body)
     try:
         for obs in (g.m._obs_ws, None):                  # OBS cannot report the item, then no OBS at all
             g.m._obs_ws = obs
             hud.banner, srv.relay.rc_red_flag_raised = "", False
-            st, d = toggle("Standby Cover")
-            assert st == 503 and d["ok"] is False and d["error"] and d["red_flag"] is True, \
+            st, d = toggle("Standby Cover", **{"from": False})
+            assert st == 503 and d["ok"] is False and d["error"] and (d["red_flag"], d["changed"]) == (True, True), \
                 f"no red flag on record: the press raises one, and says the cover was not switched: {d}"
             hud.banner = g.m.RED_FLAG_BANNER
-            assert toggle("Standby Cover")[1]["red_flag"] is False, "the banner on air means the press ends it"
+            d = toggle("Standby Cover", **{"from": False})[1]
+            assert (d["red_flag"], d["changed"]) == (True, False), \
+                f"a second panel that still shows it down does not end the red flag on record: {d}"
+            assert toggle("Standby Cover", **{"from": True})[1]["red_flag"] is False, "the panel that shows it ends it"
             hud.banner, srv.relay.rc_red_flag_raised = "Driver Swaps", True
-            assert toggle("Standby Cover")[1]["red_flag"] is False, "so does a cover the desk raised"
-            st, d = toggle("Standings")
+            assert toggle("Standby Cover")[1]["red_flag"] is False, "a cover the desk raised counts as raised too"
+            st, d = toggle("Standings", **{"from": False})
             assert st == 503 and "red_flag" not in d, f"a graphic key gets no direction to act on: {d}"
             if obs is not None:
                 assert obs.sets == [], "nothing was switched in OBS"

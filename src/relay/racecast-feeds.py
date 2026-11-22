@@ -5496,36 +5496,41 @@ def apply_split_audio(relay, obs_ws):
 _ITEM_SWITCH_LOCK = threading.Lock()
 
 
-def switch_scene_item(obs_ws, scene, source, on=None):
-    """Show or hide one scene item. `on` None flips the state OBS reports and
-    switches nothing when OBS cannot report it. Returns (ok, enabled, note), with
-    enabled None for that refusal. The lock keeps two toggles from reading the same
+def switch_scene_item(obs_ws, scene, source, on=None, expect=None):
+    """Show or hide one scene item. `on` None flips the state OBS reports and switches
+    nothing when OBS cannot report it; with `expect`, the state the caller shows, it
+    flips only while OBS still reports that state. Returns (ok, enabled, note, changed),
+    with enabled None for the refusal. The lock keeps two toggles from reading the same
     state."""
     with _ITEM_SWITCH_LOCK:
         if on is None:
             state, note = obs_ws.read_obs_state([(scene, source)], [])
             if state is None:
-                return False, None, note or "obs unreachable"
+                return False, None, note or "obs unreachable", False
             enabled = (state.get("sources") or [{}])[0].get("enabled")
             if enabled is None:
-                return False, None, f"no scene item {source!r} in {scene!r}"
+                return False, None, f"no scene item {source!r} in {scene!r}", False
+            if isinstance(expect, bool) and bool(enabled) != expect:
+                return True, bool(enabled), "", False
             on = not enabled
         ok, note = obs_ws.set_scene_item_enabled(scene, source, on)
-        return bool(ok), on, note
+        return bool(ok), on, note, bool(ok)
 
 
-def toggle_input_mute(obs_ws, name):
-    """Flip an audio input's mute from the state OBS reports; switches nothing when
-    OBS cannot report it. Returns (ok, muted, note), with muted None for that refusal."""
+def toggle_input_mute(obs_ws, name, expect=None):
+    """Flip an audio input's mute from the state OBS reports, under the rules of
+    switch_scene_item's toggle. Returns (ok, muted, note, changed)."""
     with _ITEM_SWITCH_LOCK:
         state, note = obs_ws.read_obs_state([], [name])
         if state is None:
-            return False, None, note or "obs unreachable"
+            return False, None, note or "obs unreachable", False
         muted = (state.get("audio") or [{}])[0].get("muted")
         if muted is None:
-            return False, None, f"no audio input {name!r}"
+            return False, None, f"no audio input {name!r}", False
+        if isinstance(expect, bool) and bool(muted) != expect:
+            return True, bool(muted), "", False
         ok, note = obs_ws.set_input_mute(name, not muted)
-        return bool(ok), not muted, note
+        return bool(ok), not muted, note, bool(ok)
 
 
 def red_flag_on_record(relay, hud):
@@ -5548,8 +5553,8 @@ def apply_graphic(relay, obs_ws, verb, source):
     if source not in _OBS_WS_MODULE.GRAPHIC_SOURCES:
         return {"ok": False, "error": f"unknown graphic: {source!r}"}, 400
     scene = _OBS_WS_MODULE.graphic_scene(getattr(relay, "solo", False))
-    ok, enabled, note = switch_scene_item(obs_ws, scene, source,
-                                          None if verb == "toggle" else verb == "show")
+    ok, enabled, note, _changed = switch_scene_item(obs_ws, scene, source,
+                                                    None if verb == "toggle" else verb == "show")
     if enabled is None:
         return {"ok": False, "error": note}, 503
     if ok and source == STANDBY_COVER_SOURCE:
@@ -15401,44 +15406,51 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     _takes_state["value"] = None
                     return self._send(payload, status)
                 if p == ["obs", "source"]:
-                    # `toggle: true` flips the state OBS reports (the panel's keys);
-                    # without it `on` decides, as before.
+                    # `toggle: true` flips the state OBS reports (the panel's keys), with
+                    # `from` only while OBS still reports the state the key shows;
+                    # without toggle `on` decides, as before.
                     toggle = body.get("toggle") is True
-                    red_flag = toggle and body.get("source") == STANDBY_COVER_SOURCE
-                    if _obs_ws is None and not red_flag:
+                    shown = body.get("from") if toggle and isinstance(body.get("from"), bool) else None
+                    cover = body.get("source") == STANDBY_COVER_SOURCE
+                    if _obs_ws is None and not (toggle and cover):
                         return self._send({"error": "obs unavailable"}, 503)
-                    ok, enabled, note = False, None, "obs unavailable"
+                    ok, enabled, note, changed = False, None, "obs unavailable", False
                     if _obs_ws is not None:
                         _crew_takes.forget(body.get("source"))
-                        ok, enabled, note = switch_scene_item(
+                        ok, enabled, note, changed = switch_scene_item(
                             relay._obs, body.get("scene"), body.get("source"),
-                            None if toggle else bool(body.get("on")))
-                    if ok and body.get("source") == STANDBY_COVER_SOURCE:
+                            None if toggle else bool(body.get("on")), shown)
+                    # A toggle ends the desk's claim on the cover only by lowering it.
+                    if ok and cover and (changed and not enabled if toggle else True):
                         relay.rc_red_flag_raised = False
                     if ok:
-                        return self._send({"ok": True, "enabled": enabled})
+                        return self._send({"ok": True, "enabled": enabled, "changed": changed})
                     payload = {"ok": False, "error": note}
-                    if red_flag:
+                    if toggle and cover:
                         # RED FLAG still needs a direction for the banner and the race.
-                        payload["red_flag"] = (enabled if enabled is not None else not red_flag_on_record(
-                            relay, getattr(setup_ctl, "hud", None) or hud_source))
+                        raised = enabled if enabled is not None else red_flag_on_record(
+                            relay, getattr(setup_ctl, "hud", None) or hud_source)
+                        payload["changed"] = enabled is None and shown in (None, raised)
+                        payload["red_flag"] = not raised if payload["changed"] else raised
                     return self._send(payload, 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
                     inp = body.get("input")
-                    if body.get("toggle") is True or "mute" in body:
-                        # `toggle: true` flips the mute OBS reports (the panel's key).
-                        if body.get("toggle") is True:
-                            ok, muted, note = toggle_input_mute(relay._obs, inp)
-                        else:
-                            muted = bool(body.get("mute"))
-                            ok, note = relay._obs.set_input_mute(inp, muted)
+                    if body.get("toggle") is True:
+                        # The panel's Mute key: flips the mute OBS reports, like /obs/source.
+                        ok, muted, note, changed = toggle_input_mute(
+                            relay._obs, inp, body.get("from") if isinstance(body.get("from"), bool) else None)
+                        note_mute = getattr(relay, "note_director_mute", None)
+                        if changed and note_mute is not None:
+                            note_mute(inp, muted)
+                        if ok:
+                            return self._send({"ok": True, "muted": muted, "changed": changed})
+                    elif "mute" in body:
+                        ok, note = relay._obs.set_input_mute(inp, bool(body.get("mute")))
                         note_mute = getattr(relay, "note_director_mute", None)
                         if ok and note_mute is not None:
-                            note_mute(inp, muted)
-                        if ok and body.get("toggle") is True:
-                            return self._send({"ok": True, "muted": muted})
+                            note_mute(inp, bool(body.get("mute")))
                     elif "db" in body:
                         ok, note = relay._obs.set_input_volume(inp, body.get("db"))
                     else:

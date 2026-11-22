@@ -726,9 +726,15 @@ console.log([live, down, warnDown, state()].join('|'));""")
 
 
 _TOGGLE_HARNESS = r"""
-let obsState = {scene: '', sources: [{scene: 'Stint', source: 'Standings', enabled: false}], audio: []};
+let obsState = {scene: '', sources: [{scene: 'Stint', source: 'Standings', enabled: false}],
+                audio: [{input: 'Feed A', muted: false}]};
 const sent = [], logs = [], setup = [], fetched = [], answers = [];
-const obsPost = async (path, body) => { sent.push(path + ' ' + JSON.stringify(body)); return answers.shift(); };
+let hold = null;   // set to a promise to keep a request in flight
+const obsPost = async (path, body) => {
+  sent.push(path + ' ' + JSON.stringify(body));
+  if (hold) await hold;
+  return answers.shift();
+};
 const log = (msg, kind) => logs.push((kind || 'info') + ': ' + msg);
 const toast = msg => logs.push('toast: ' + msg);
 const setupSet = (field, value) => setup.push(field + '=' + value);
@@ -736,77 +742,110 @@ const fetch = async path => { fetched.push(path); };
 const obsStatePoll = () => {};
 const assetLabel = source => source;
 const redFlagItem = {scene: 'Stint', source: 'Standby Cover'};
-const btn = {on: null, classList: {toggle: (_c, on) => { btn.on = on; }}};
+const key = cls => {
+  const k = {cls: new Set(), textContent: 'Mute', lit: () => k.cls.has(cls),
+             classList: {toggle: (c, on) => on ? k.cls.add(c) : k.cls.delete(c), contains: c => k.cls.has(c)}};
+  return k;
+};
+const btn = key('on'), redFlagBtn = key('on'), muteBtn = key('muted');
+const item = {scene: 'Stint', source: 'Standings'};
 """
 
 
 def _toggle_js(html, body):
-    return _run_js(_TOGGLE_HARNESS + "".join("async " + _func_src(html, n) + "\n}\n" for n in
-                                             ("obsToggle", "redFlagPress", "toggleSource")) + body)
+    names = ("keyOnce", "obsToggle", "redFlagPress", "toggleSource", "muteToggle")
+    return _run_js(_TOGGLE_HARNESS + "".join("async " + _func_src(html, n) + "\n}\n" for n in names)
+                   + "(async () => {" + body + "})();")
 
 
-def t_graphic_keys_toggle_from_the_relays_answer():
+def t_graphic_keys_toggle_from_the_state_they_show():
     html = _html()
-    assert "!last.enabled" not in "".join(_func_src(html, n) for n in ("obsToggle", "toggleSource", "redFlagPress")), \
+    assert "!last.enabled" not in html and "!last.muted" not in html, \
         "a press never derives its direction from the panel's last /obs/state poll"
     out = _toggle_js(html, """
-(async () => {
-  const item = {scene: 'Stint', source: 'Standings'};
-  answers.push({ok: true, enabled: true}, {ok: true, enabled: false}, {ok: false, error: 'obs unreachable'});
+  answers.push({ok: true, enabled: true, changed: true}, {ok: true, enabled: false, changed: true},
+               {ok: true, enabled: true, changed: false}, {ok: false, error: 'obs unreachable'});
+  const lit = [];
+  for (let i = 0; i < 3; i++) { await toggleSource(item, btn); lit.push(btn.lit()); }
+  const adopted = {state: obsState.sources[0].enabled, logs: logs.splice(0)};
   await toggleSource(item, btn);
-  const first = btn.on;
-  await toggleSource(item, btn);
-  const second = [btn.on, obsState.sources[0].enabled];
-  await toggleSource(item, btn);
-  console.log(JSON.stringify({first, second, third: btn.on, sent, logs}));
-})();""")
+  console.log(JSON.stringify({lit, adopted, refused: btn.lit(), sent, logs}));""")
     if out is not None:
         d = json.loads(out)
-        assert d["sent"] == ['source {"scene":"Stint","source":"Standings","toggle":true}'] * 3, d["sent"]
-        assert d["first"] is True and d["second"] == [False, False], \
-            f"two presses inside one poll interval flip the key twice: {d}"
-        assert d["third"] is False and d["logs"] == ['err: Toggle "Standings" in "Stint" failed: obs unreachable'], \
-            f"a refused toggle leaves the key as it was and says why: {d}"
+        body = 'source {"scene":"Stint","source":"Standings","toggle":true,"from":%s}'
+        assert d["sent"] == [body % f for f in ("false", "true", "false", "true")], \
+            f"each press names the state the key shows: {d['sent']}"
+        assert d["lit"] == [True, False, True], d["lit"]
+        assert d["adopted"]["state"] is True and len(d["adopted"]["logs"]) == 1 \
+            and d["adopted"]["logs"][0].startswith("warn: ") and "already" in d["adopted"]["logs"][0], \
+            f"a key that showed an old state takes the real one and says nothing was switched: {d['adopted']}"
+        assert d["refused"] is True and d["logs"][0].startswith("err: ") \
+            and d["logs"][1].startswith("toast: ") and "obs unreachable" in d["logs"][1], \
+            f"a refused toggle leaves the key as it was and says why in a toast: {d}"
+
+
+def t_a_double_tap_sends_one_toggle():
+    out = _toggle_js(_html(), """
+  let release;
+  hold = new Promise(r => { release = r; });
+  answers.push({ok: true, enabled: true, changed: true}, {ok: true, enabled: true, changed: true},
+               {ok: true, muted: true, changed: true});
+  const taps = [toggleSource(item, btn), toggleSource(item, btn), redFlagPress(), redFlagPress(),
+                muteToggle('Feed A', muteBtn), muteToggle('Feed A', muteBtn)];
+  release();
+  await Promise.all(taps);
+  hold = null;
+  answers.push({ok: true, enabled: false, changed: true});
+  await toggleSource(item, btn);
+  console.log(JSON.stringify({sent: sent.map(s => s.split(' ')[0] + (s.includes('Cover') ? ' cover' : '')),
+                              setup, lit: [btn.lit(), redFlagBtn.lit(), muteBtn.lit()]}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["sent"] == ["source", "source cover", "audio", "source"], \
+            f"a second tap while the first request runs sends nothing, and the key works again after: {d['sent']}"
+        assert d["setup"] == ["racecontrol=Red Flag - Race Suspended"] and d["lit"] == [False, True, True], d
 
 
 def t_red_flag_follows_the_relays_answer():
     out = _toggle_js(_html(), """
-(async () => {
-  answers.push({ok: true, enabled: false}, {ok: true, enabled: true});
-  obsState.sources.push({scene: 'Stint', source: 'Standby Cover', enabled: false});
-  await redFlagPress();
-  const down = {setup: setup.splice(0), fetched: fetched.splice(0)};
-  await redFlagPress();
-  const up = {setup: setup.splice(0), fetched: fetched.splice(0)};
-  console.log(JSON.stringify({down, up, sent, logs}));
-})();""")
+  answers.push({ok: true, enabled: true, changed: false}, {ok: true, enabled: false, changed: true},
+               {ok: true, enabled: true, changed: true});
+  const step = async () => { await redFlagPress();
+    return {lit: redFlagBtn.lit(), setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)}; };
+  const desk = await step(), down = await step(), up = await step();
+  console.log(JSON.stringify({desk, down, up, sent}));""")
     if out is not None:
         d = json.loads(out)
-        assert d["sent"] == ['source {"scene":"Stint","source":"Standby Cover","toggle":true}'] * 2, d["sent"]
-        assert d["down"] == {"setup": ["racecontrol="], "fetched": []}, \
-            f"the relay lowered a cover the panel had not seen raised, so the banner clears: {d['down']}"
-        assert d["up"] == {"setup": ["racecontrol=Red Flag - Race Suspended"],
-                           "fetched": ["/drivers/race/red-flag"]}, d["up"]
-        assert not [line for line in d["logs"] if line.startswith("toast")], d["logs"]
+        body = 'source {"scene":"Stint","source":"Standby Cover","toggle":true,"from":%s}'
+        assert d["sent"] == [body % f for f in ("false", "true", "false")], d["sent"]
+        assert d["desk"]["lit"] is True and d["desk"]["setup"] == [] and d["desk"]["fetched"] == [] \
+            and any("already" in line for line in d["desk"]["logs"]), \
+            f"a cover Race Control raised meanwhile is taken over, never lowered by the press: {d['desk']}"
+        assert d["down"]["lit"] is False and d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], \
+            d["down"]
+        assert d["up"]["lit"] is True and d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
+            and d["up"]["fetched"] == ["/drivers/race/red-flag"], d["up"]
 
 
 def t_red_flag_without_the_cover_still_sets_banner_and_race():
     out = _toggle_js(_html(), """
-(async () => {
-  answers.push({ok: false, error: 'obs unreachable', red_flag: true},
-               {ok: false, error: 'obs unreachable', red_flag: false}, {ok: false, error: 'bad response'});
-  await redFlagPress();
-  const up = {setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)};
-  await redFlagPress();
-  const down = {setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)};
-  await redFlagPress();
-  console.log(JSON.stringify({up, down, lost: {setup, fetched, logs}}));
-})();""")
+  answers.push({ok: false, error: 'obs unreachable', red_flag: true, changed: true},
+               {ok: false, error: 'obs unreachable', red_flag: true, changed: false},
+               {ok: false, error: 'obs unreachable', red_flag: false, changed: true},
+               {ok: false, error: 'bad response'});
+  const step = async () => { await redFlagPress();
+    return {lit: redFlagBtn.lit(), setup: setup.splice(0), fetched: fetched.splice(0), logs: logs.splice(0)}; };
+  const up = await step();
+  redFlagBtn.classList.toggle('on', false);       // a second panel that still shows it down
+  const other = await step(), down = await step(), lost = await step();
+  console.log(JSON.stringify({up, other, down, lost}));""")
     if out is not None:
         d = json.loads(out)
         assert d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
-            and d["up"]["fetched"] == ["/drivers/race/red-flag"], \
+            and d["up"]["fetched"] == ["/drivers/race/red-flag"] and d["up"]["lit"] is True, \
             f"a red flag the relay decided without OBS still sets the banner and holds the race: {d['up']}"
+        assert d["other"] == dict(d["other"], lit=True, setup=[], fetched=[]), \
+            f"a second panel takes the raised state over and changes nothing: {d['other']}"
         assert d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], d["down"]
         for part in (d["up"], d["down"]):
             assert any(line.startswith("toast: ") and "Standby Cover was not switched" in line
@@ -816,28 +855,22 @@ def t_red_flag_without_the_cover_still_sets_banner_and_race():
             f"an answer without a direction changes nothing and says so: {d['lost']}"
 
 
-def t_mute_key_toggles_from_the_relays_answer():
-    html = _html()
-    assert "!last.muted" not in html, "a mute press never derives its direction from the last /obs/state poll"
-    out = _run_js(_TOGGLE_HARNESS + "async " + _func_src(html, "muteToggle") + """
-}
-(async () => {
-  obsState.audio.push({input: 'Feed A', muted: false});
-  const key = {textContent: 'Mute', muted: null, classList: {toggle: (_c, on) => { key.muted = on; }}};
-  answers.push({ok: true, muted: true}, {ok: true, muted: false}, {ok: false, error: 'obs unreachable'});
-  await muteToggle('Feed A', key);
-  const first = [key.muted, key.textContent, obsState.audio[0].muted];
-  await muteToggle('Feed A', key);
-  const second = [key.muted, key.textContent];
-  await muteToggle('Feed A', key);
-  console.log(JSON.stringify({first, second, third: [key.muted, key.textContent], sent, logs}));
-})();""")
+def t_mute_key_toggles_from_the_state_it_shows():
+    out = _toggle_js(_html(), """
+  answers.push({ok: true, muted: true, changed: true}, {ok: true, muted: false, changed: true},
+               {ok: true, muted: true, changed: false}, {ok: false, error: 'obs unreachable'});
+  const shown = [];
+  for (let i = 0; i < 3; i++) { await muteToggle('Feed A', muteBtn); shown.push(muteBtn.lit() + ' ' + muteBtn.textContent); }
+  const adopted = {state: obsState.audio[0].muted, logs: logs.splice(0)};
+  await muteToggle('Feed A', muteBtn);
+  console.log(JSON.stringify({shown, adopted, refused: muteBtn.lit(), sent, logs}));""")
     if out is not None:
         d = json.loads(out)
-        assert d["sent"] == ['audio {"input":"Feed A","toggle":true}'] * 3, d["sent"]
-        assert d["first"] == [True, "Muted", True] and d["second"] == [False, "Mute"], \
-            f"two presses inside one poll interval mute and unmute: {d}"
-        assert d["third"] == [False, "Mute"] and any(line.startswith("toast: ") for line in d["logs"]), \
+        body = 'audio {"input":"Feed A","toggle":true,"from":%s}'
+        assert d["sent"] == [body % f for f in ("false", "true", "false", "true")], d["sent"]
+        assert d["shown"] == ["true Muted", "false Mute", "true Muted"], d["shown"]
+        assert d["adopted"]["state"] is True and any("already" in line for line in d["adopted"]["logs"]), d["adopted"]
+        assert d["refused"] is True and any(line.startswith("toast: ") for line in d["logs"]), \
             f"a refused toggle leaves the key as it was and says why: {d}"
 
 
