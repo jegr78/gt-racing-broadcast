@@ -267,7 +267,7 @@ request log. A web page must not reach the port: a request needs `Host` 127.0.0.
 localhost with this port, no `Origin` (also on the WebSocket upgrade) and a POST
 `application/json`. A handler failure answers code 400 instead of dropping the session,
 and a WebSocket client that stops reading is closed once its queue fills. In-process use: `ObsSim(...).start()`, `.env()` gives
-`RACECAST_SIM_OBS_WS`, `obs_sim.fetch(url, path)` reads the endpoint.
+`RACECAST_SIMULATION=1` and `RACECAST_SIM_OBS_WS`, `obs_sim.fetch(url, path)` reads the endpoint.
 
 ```bash
 python3 tools/event-sim/fakes/obs_sim.py --port 0 --ready-file obs.json
@@ -283,7 +283,8 @@ wiki-screenshots skill use it. `tests/test_obs_sim.py` drives both through the r
 
 `sheet_sim.py` serves seeded tabs the way gviz exports them (every cell quoted, trailing
 blank rows and columns trimmed, `headers=1` changes nothing) under
-`/spreadsheets/d/sim/gviz/tq`; a tab nobody seeded is an empty 200. Its
+`/spreadsheets/d/sim/gviz/tq`; a tab nobody seeded is an empty 200, or the first seeded
+tab with `unknown_tab="first"` (`--unknown-tab first`). Its
 `/macros/s/sim/exec?key=sim` runs the v7 script of the Sheet-Webhook wiki page against
 the same tabs: always HTTP 200, `{"ok":true,"action":...,"v":7}` or the script's own
 `{"error": ...}` strings (`bad key`, `unknown action: x`, `row out of range: 9`, ...),
@@ -308,8 +309,31 @@ also multipart). In-process: `SheetSim(tabs, stream_keys).start()` with `set_tab
 `tab`, `records` (`records(tab)[i]` is physical row i+2) and `writes`;
 `WebhookSink().start()` with `messages(since)` and `count`. `.env()` gives the
 `RACECAST_SIM_SHEET_URL`/`_SHEET_PUSH_URL` and `RACECAST_SIM_DISCORD_WEBHOOK_URL`
-values. Over HTTP: `/_sim/state`, `/_sim/tab?name=`, `POST /_sim/tab` (`rows` or
-`csv`), `/_sim/writes?since=N`, `/_sim/messages?since=N`.
+values plus `RACECAST_SIMULATION=1`, so no caller reaches Google by forgetting the flag.
+Over HTTP: `/_sim/state`, `/_sim/tab?name=`, `POST /_sim/tab` (`rows` or `csv`),
+`/_sim/writes?since=N`, `/_sim/messages?since=N`.
+
+Failure injection: a rule `{"target", "delay", "status", "error", "times"}` from the
+constructor (`faults=[...]`), `.fail(target, ...)` or `POST /_sim/fail` (one rule or a
+list; an empty body clears them, as `.clear_faults()` does). Targets: the Sheet's
+`tab:<Tab>` and `read` for gviz reads, `action:<action>` and `push` for script calls;
+the sink's `path:<path>` and `hook`. The first matching rule sleeps `delay` through the
+`sleep` seam (tests pass a recorder, never the wall clock), then answers in place of
+the request when it has a status or an error: the Sheet's script error is HTTP 200
+`{"error": ...}`, the sink's is 400 `{"message": ..., "code": 0}`, a bare status gets
+`{"error": "simulated failure"}`. A faulted request never reaches the tabs or the
+message log. `times` spends a rule after that many hits; `faults_hit` in `/_sim/state`
+counts them.
+
+Unverified against the real services (from memory or chosen, not measured):
+- gviz on an unknown `sheet=` name: the fake answers an empty 200. Forum reports of
+  gviz answering with the first sheet exist but none tests a missing name, so
+  `unknown_tab="first"` offers that instead.
+- gviz without `headers=1` may merge leading rows into a header; the fake never does.
+- Discord's `?wait=true` (200 with the message object) is ignored: the sink always
+  answers 204.
+- The Discord 400 bodies (50006, 50109, 50035) are written from memory; no racecast
+  caller reads them.
 
 ```bash
 python3 tools/event-sim/fakes/sheet_sim.py --port 0 --tabs DIR --ready-file sheet.json
@@ -319,9 +343,7 @@ python3 tools/event-sim/fakes/webhook_sink.py --port 0 --ready-file sink.json
 `tests/test_sheet_sim.py` and `tests/test_webhook_sink.py` drive them through the relay's
 own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSource`,
 `parse_timer_tab`, `apply_stream_service_for_ref` on the Channel tab, get-graphics on the
-Assets tab, the Discord payload builders, `http_util.post_multipart`). `env()` carries
-only the endpoints: the caller sets `RACECAST_SIMULATION=1`, or the Sheet URL resolves
-to Google.
+Assets tab, the Discord payload builders, `http_util.post_multipart`).
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
