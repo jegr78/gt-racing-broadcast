@@ -53,6 +53,13 @@ def t_parse_overlay_values():
     assert o["race_control"] == "", o
 
 
+def t_the_shipped_overlay_template_parses():
+    with open(os.path.join(ROOT, "src", "docs", "sheet-template", "Overlay.csv"), encoding="utf-8") as fh:
+        o = m.parse_overlay(fh.read())
+    assert o["streamer"] == "Sample Commentator", f"template label column must be the one the relay reads: {o}"
+    assert o["teams"][0] == "Sample Team Alpha #11", o
+
+
 def t_parse_overlay_missing_rows_safe():
     o = m.parse_overlay(",Streamer,JeGr,,,,,,,\n")
     assert o["streamer"] == "JeGr"
