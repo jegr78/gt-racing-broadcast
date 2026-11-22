@@ -449,6 +449,16 @@ def t_an_unrecognised_flag_value_refuses_instead_of_running_for_real():
     assert err and "RACECAST_SIMULATION" in err, "the relay would start for real"
 
 
+def t_endpoints_with_userinfo_or_fragment_are_refused():
+    for url in ("http://evil.com@127.0.0.1:9/s", "http://user:pw@127.0.0.1:9/s",
+                "http://127.0.0.1:9/s#frag"):
+        env = dict(ON, RACECAST_SIM_SHEET_URL=url)
+        assert sim.endpoint(sim.SHEET_URL, env) == "", url
+        assert any(sim.SHEET_URL in p for p in sim.problems(env)), url
+    env = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:9/s#")
+    assert sim.endpoint(sim.SHEET_URL, env) == "http://127.0.0.1:9/s#", "an empty fragment is harmless"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -5,7 +5,8 @@ A rehearsal of the product against simulated parties. Event start, stop and take
 skip OBS, Discord, Companion, Tailscale and the Funnel; OBS WebSocket, the Sheet, the
 Sheet push webhook, Discord webhooks and stream pulls come from the `RACECAST_SIM_*`
 loopback endpoints below. An unset or non-loopback endpoint is off, never the real
-one, and `install_network_guard` refuses every other outbound connection.
+one, and `install_network_guard` refuses every other outbound connection. Code that
+calls the C-level `_socket.socket` directly bypasses that guard and is out of scope.
 
 Stdlib only: the relay and the standalone asset scripts import it too."""
 import ipaddress
@@ -84,6 +85,8 @@ def _checked(var, value):
         return "", f"{var} is not a URL"
     if u.scheme not in SCHEMES[var]:
         return "", f"{var} must be a {'/'.join(SCHEMES[var])}:// URL"
+    if "@" in u.netloc or u.fragment:
+        return "", f"{var} must not carry user info or a fragment"
     if not is_loopback_host(u.hostname):
         return "", f"{var} must point at 127.0.0.1 or localhost"
     return value, ""
