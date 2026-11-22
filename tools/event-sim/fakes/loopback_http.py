@@ -5,13 +5,16 @@ a `Host` other than 127.0.0.1 or localhost with this port, any `Origin`, and a P
 whose Content-Type is not in `POST_TYPES`. Subclasses answer in `route()`.
 
 Faults: a rule {"target", "delay", "status", "error", "times"} applies to the requests
-whose `fault_keys()` contain its target. It sleeps `delay` seconds through the `sleep`
-seam, then answers `fault_reply()` instead of the request when it has a status or an
-error; `times` limits how many requests it hits. POST /_sim/fail sets rules (one or a
-list), an empty body clears them."""
+whose `fault_keys()` contain its target. Every matching rule adds its `delay`, slept
+through the `sleep` seam (by default a wait that stop() ends); the first matching rule
+with a status (400-599) or an error answers `fault_reply()` in place of the request, and
+rules behind it are not hit. `times` limits how many requests a rule hits. POST
+/_sim/fail sets rules (one or a list), an empty body clears them.
+
+stop() refuses new work, wakes handlers that wait in a delay and joins them, bounded."""
 import json
 import os
-import time
+import socket
 import sys
 import threading
 import urllib.request
@@ -23,8 +26,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 from http_server import NumericThreadingHTTPServer  # noqa: E402
 
-MAX_BODY = 8 << 20
 HANDLER_TIMEOUT_S = 10
+DRAIN_LIMIT = 1 << 20
+DRAIN_TIMEOUT_S = 0.5
+STOP_JOIN_S = 5.0
 CONTROL_PREFIX = "/_sim/"
 
 
@@ -32,16 +37,42 @@ def json_reply(obj, status=200):
     return status, "application/json", json.dumps(obj).encode()
 
 
+class _Server(NumericThreadingHTTPServer):
+    """Starts each handler on a thread its owner can wake and join on stop()."""
+    daemon_threads = True
+
+    def __init__(self, address, handler, owner):
+        self.owner = owner
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address):
+        thread = threading.Thread(target=self._run, args=(request, client_address), daemon=True)
+        with self.owner._live_lock:
+            self.owner._live[thread] = request
+        thread.start()
+
+    def _run(self, request, client_address):
+        try:
+            self.process_request_thread(request, client_address)
+        finally:
+            with self.owner._live_lock:
+                self.owner._live.pop(threading.current_thread(), None)
+
+
 class LoopbackServer:
     """start()/stop() or a `with` block; `route(method, path, query, headers, body)`
-    returns (status, content type, bytes)."""
+    returns (status, content type, bytes[, extra headers])."""
     POST_TYPES = ("application/json",)
+    MAX_BODY = 1 << 20
 
-    def __init__(self, port=0, faults=None, sleep=time.sleep):
+    def __init__(self, port=0, faults=None, sleep=None):
         self.requested_port = port
         self.port = None
         self._server = None
-        self.sleep = sleep
+        self._stopping = threading.Event()
+        self.sleep = self._stopping.wait if sleep is None else sleep
+        self._live_lock = threading.Lock()
+        self._live = {}
         self._fault_lock = threading.Lock()
         self._faults = []
         self.faults_hit = 0
@@ -50,11 +81,8 @@ class LoopbackServer:
 
     def fail(self, target, delay=0, status=None, error=None, times=None):
         """Add a fault rule; see the module docstring."""
-        rule = fault_rule({"target": target, "delay": delay, "status": status,
-                           "error": error, "times": times})
-        with self._fault_lock:
-            self._faults.append(rule)
-        return rule
+        return self._add_rules([{"target": target, "delay": delay, "status": status,
+                                 "error": error, "times": times}])[0]
 
     def clear_faults(self):
         with self._fault_lock:
@@ -64,6 +92,9 @@ class LoopbackServer:
         with self._fault_lock:
             return [dict(r) for r in self._faults]
 
+    def validate_fault(self, rule):
+        """Raise ValueError for a rule this fake cannot answer faithfully."""
+
     def fault_keys(self, method, path, query, body):
         """The fault targets a request answers to; none by default."""
         return []
@@ -72,26 +103,38 @@ class LoopbackServer:
         """The answer for a rule with a status or an error."""
         return json_reply({"error": rule["error"] or "simulated failure"}, rule["status"] or 500)
 
-    def _take_fault(self, keys):
+    def _add_rules(self, rules):
+        checked = [fault_rule(r) for r in rules]
+        for rule in checked:
+            self.validate_fault(rule)
         with self._fault_lock:
-            for rule in self._faults:
-                if rule["target"] in keys:
-                    if rule["times"] is not None:
-                        rule["times"] -= 1
-                        if rule["times"] == 0:
-                            self._faults.remove(rule)
-                    self.faults_hit += 1
-                    return dict(rule)
-        return None
+            self._faults.extend(checked)
+        return [dict(r) for r in checked]
+
+    def _take_faults(self, keys):
+        """(total delay, the answering rule or None) for one request."""
+        delay, answer = 0, None
+        with self._fault_lock:
+            for rule in list(self._faults):
+                if rule["target"] not in keys:
+                    continue
+                self.faults_hit += 1
+                if rule["times"] is not None:
+                    rule["times"] -= 1
+                    if rule["times"] == 0:
+                        self._faults.remove(rule)
+                delay += rule["delay"]
+                if rule["status"] or rule["error"] is not None:
+                    answer = dict(rule)
+                    break
+        return delay, answer
 
     def _fail_route(self, body):
         data = json.loads(body) if body.strip() else None
         if data is None:
             self.clear_faults()
         else:
-            for rule in [fault_rule(r) for r in (data if isinstance(data, list) else [data])]:
-                with self._fault_lock:
-                    self._faults.append(rule)
+            self._add_rules(data if isinstance(data, list) else [data])
         return json_reply({"faults": self.faults()})
 
     @property
@@ -114,17 +157,34 @@ class LoopbackServer:
             def do_POST(self):
                 owner._handle(self, "POST")
 
-        self._server = NumericThreadingHTTPServer(("127.0.0.1", self.requested_port), Handler)
-        self._server.daemon_threads = True
+        self._stopping.clear()
+        self._server = _Server(("127.0.0.1", self.requested_port), Handler, self)
         self.port = self._server.server_address[1]
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
         return self
 
     def stop(self):
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
+        """Refuse new work, wake every handler and join them, at most STOP_JOIN_S in all."""
+        self._stopping.set()
+        server, self._server = self._server, None
+        if server is None:
+            return
+        server.shutdown()
+        server.server_close()
+        with self._live_lock:
+            live = dict(self._live)
+        for request in live.values():
+            try:
+                request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass  # already closed
+        deadline = threading.Event()
+        timer = threading.Timer(STOP_JOIN_S, deadline.set)
+        timer.start()
+        for thread in live:
+            while thread.is_alive() and not deadline.is_set():
+                thread.join(0.05)
+        timer.cancel()
 
     def __enter__(self):
         return self if self._server else self.start()
@@ -147,17 +207,44 @@ class LoopbackServer:
     def route(self, method, path, query, headers, body):
         raise NotImplementedError
 
+    def too_large(self, length):
+        """The answer for a body over MAX_BODY."""
+        return json_reply({"error": "Payload Too Large"}, 413)
+
+    @staticmethod
+    def _drain(req, limit):
+        """Read up to `limit` waiting bytes, so closing does not reset the connection."""
+        try:
+            req.connection.settimeout(DRAIN_TIMEOUT_S)
+            while limit > 0:
+                chunk = req.rfile.read1(min(limit, 65536))
+                if not chunk:
+                    return
+                limit -= len(chunk)
+        except OSError:
+            pass  # nothing more arrives in time
+
     def _handle(self, req, method):
+        if self._stopping.is_set():
+            self._send(req, *json_reply({"error": "stopped"}, 503))
+            return
         raw_length = req.headers.get("Content-Length") or "0"
-        refused = None
-        if not raw_length.isdigit():
-            refused = 400, "Bad Request"
-        elif int(raw_length) > MAX_BODY:
-            refused = 413, "Payload Too Large"
-        # A refusal still reads the body: closing on unread data resets the connection,
-        # and on Windows the client then loses the answer.
-        body = req.rfile.read(int(raw_length)) if refused is None else b""
-        refused = refused or self.refusal(method, req.headers)
+        if not (raw_length.isascii() and raw_length.isdigit()):
+            self._drain(req, DRAIN_LIMIT)
+            self._send(req, *json_reply({"error": "Bad Request"}, 400))
+            return
+        length = int(raw_length)
+        if length > self.MAX_BODY:
+            self._drain(req, min(length, DRAIN_LIMIT))
+            self._send(req, *self.too_large(length))
+            return
+        try:
+            body = req.rfile.read(length)
+        except OSError:
+            return  # the client went away or stalled past the handler timeout
+        if len(body) < length:
+            return
+        refused = self.refusal(method, req.headers)
         if refused is not None:
             self._send(req, *json_reply({"error": refused[1]}, refused[0]))
             return
@@ -167,10 +254,12 @@ class LoopbackServer:
             if method == "POST" and u.path == CONTROL_PREFIX + "fail":
                 reply = self._fail_route(body)
             else:
-                rule = self._take_fault(self.fault_keys(method, u.path, query, body))
-                if rule and rule["delay"]:
-                    self.sleep(rule["delay"])
-                if rule and (rule["status"] or rule["error"] is not None):
+                delay, rule = self._take_faults(self.fault_keys(method, u.path, query, body))
+                if delay:
+                    self.sleep(delay)
+                if self._stopping.is_set():
+                    reply = json_reply({"error": "stopped"}, 503)
+                elif rule:
                     reply = self.fault_reply(rule)
                 else:
                     reply = self.route(method, u.path, query, req.headers, body)
@@ -179,15 +268,17 @@ class LoopbackServer:
         self._send(req, *reply)
 
     @staticmethod
-    def _send(req, status, ctype, payload):
+    def _send(req, status, ctype, payload, headers=None):
         try:
-            LoopbackServer._write(req, status, ctype, payload)
-        except ConnectionError:
+            LoopbackServer._write(req, status, ctype, payload, headers or {})
+        except OSError:
             pass  # the client hung up before the answer
 
     @staticmethod
-    def _write(req, status, ctype, payload):
+    def _write(req, status, ctype, payload, headers):
         req.send_response(status)
+        for name, value in headers.items():
+            req.send_header(name, value)
         if status != 204:
             req.send_header("Content-Type", ctype)
             req.send_header("Content-Length", str(len(payload)))
@@ -208,8 +299,8 @@ def fault_rule(data):
     if isinstance(delay, bool) or not isinstance(delay, (int, float)) or not 0 <= delay <= 600:
         raise ValueError("delay must be 0-600 seconds")
     if status is not None and (isinstance(status, bool) or not isinstance(status, int)
-                               or not 100 <= status <= 599):
-        raise ValueError("status must be an HTTP status 100-599")
+                               or not 400 <= status <= 599):
+        raise ValueError("status must be an HTTP error status 400-599")
     if error is not None and not isinstance(error, str):
         raise ValueError("error must be a string")
     if times is not None and (isinstance(times, bool) or not isinstance(times, int) or times < 1):
@@ -223,6 +314,34 @@ def write_ready_file(path, info):
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(info, fh)
     os.replace(tmp, path)
+
+
+def remove_ready_file(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass  # never written or already gone
+
+
+def serve_cli(server, ready_file, info, banner):
+    """Run a started fake until Ctrl+C or SIGTERM: write the ready-file, print the
+    banner, and on exit stop the fake and remove the ready-file."""
+    import signal
+
+    def terminate(*_):
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        if ready_file:
+            write_ready_file(ready_file, info)
+        print(banner, flush=True)
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass  # Ctrl+C ends the run
+    finally:
+        server.stop()
+        if ready_file:
+            remove_ready_file(ready_file)
 
 
 def fetch(base_url, path, data=None, timeout=5.0):
