@@ -329,12 +329,12 @@ def t_every_selector_names_something_the_shipped_page_has():
 def t_desk_labels_the_actions_press_exist_in_the_desk():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         desk = fh.read()
-    for label in ("Approve", "Final lap", "Finish", "RED FLAG", "Restart released", "Retire (DNF)",
-                  "Mark rejoin", "Set estimate", "Add lap", "Show dashboard", "Hide dashboard",
-                  "Entry to retire", "Team to rejoin", "Quiet entry to estimate", "Reference entry",
-                  "Behind or ahead of the reference", "Seconds from the reference", "Qualifying entry",
-                  "Qualifying time", '"Confirm "'):
-        assert label in desk, f"the driver desk has no {label!r} any more"
+    for key, label in roles.selectors.DESK.items():
+        assert f'"{label}"' in desk, f"the driver desk has no {label!r} ({key}) any more"
+    with open(os.path.join(SIM, "roles", "party.py"), encoding="utf-8") as fh:
+        code = fh.read()
+    assert not re.search(r"""['"]#[A-Za-z]|data-label|aria-label""", code), \
+        "selectors and desk labels live in roles/selectors.py only (#1267 will move the desks)"
 
 
 # -- the page helpers ---------------------------------------------------------------

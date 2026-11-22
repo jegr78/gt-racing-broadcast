@@ -8,7 +8,7 @@ An action is a mechanism (click this, submit that); the scenario decides the ord
 import time
 from urllib.parse import quote, urlsplit
 
-from roles import ShotUnavailable, StepError, Unavailable, builtin, register
+from roles import ShotUnavailable, StepError, Unavailable, builtin, register, selectors
 
 CONTROL_MS = 8000
 CONFIRM_S = 10.0
@@ -16,6 +16,7 @@ SLOW_S = 2.0             # the spec's soft threshold for a page showing a new st
 JOB_S = 240.0
 FEED_S = 120.0
 POLL_MS = 100
+DESK = selectors.DESK
 STALE_S = 1.0
 HUD_FIELDS = ("stint", "streamer", "session", "flag", "racecontrol")
 URI_SAFE = "!'()*~"      # what the page's encodeURIComponent leaves as it is
@@ -198,21 +199,9 @@ class ProducerRole(Surface):
     (formation, finish_mode, laps), `start_event` (qualifying, stint), `stop_event`,
     `relay_restart`."""
     kind = "producer"
-    service, ready = "ui", "#evt-track"
-    sources = ("src/ui/control-center.html",)
-    selectors = {
-        "track": "#evt-track", "track_option": '#evt-track option[value="{track}"]',
-        "track_error": "#evt-track-err",
-        "formation": "#evt-race-formation", "finish_mode": "#evt-race-mode", "laps": "#evt-race-laps",
-        "race_error": "#evt-race-err",
-        "stint": "#stint", "qualifying": "#event-qualifying",
-        "start": 'button:has-text("Start event")', "stop": 'button:has-text("Stop event")',
-        "confirm": "#cmodal-ok", "confirm_text": "#cmodal-body",
-        "job": "#jobchip", "job_log": "#joblog", "summary": "#home-summary", "relay": "#h-relay",
-        "view": '.navitem[data-nav="{view}"]',
-        "relay_restart": """[data-view="services"] button[onclick="op('relay-restart', true)"]""",
-        "invite": "#evt-invite-text", "timing": "#evt-timing-text",
-    }
+    service, ready = "ui", selectors.READY["PRODUCER"]
+    sources = selectors.SOURCES["PRODUCER"]
+    selectors = selectors.PRODUCER
     masked = ("invite", "timing")
 
     def view(self, name):
@@ -304,30 +293,9 @@ class DirectorRole(Surface):
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
     target, level), `chat` (text, name)."""
     kind = "director"
-    path, ready = "/panel", "#nextBtn"
-    sources = ("src/director/director-panel.html", "src/console/driver-desk.js")
-    selectors = {
-        "area": '.navbtn[data-area="{area}"]',
-        "approve": '#hoUpcoming .hrow:has-text("{stint}") button:has-text("APPROVE")',
-        "handover_row": '#hoUpcoming .hrow:has-text("{stint}")',
-        "feed_arm": '#feedQuality .armbtn[data-feed="{feed}"][data-on="1"]', "feed_state": "#st{feed}",
-        "arm": "#armBtn", "next": "#nextBtn", "next_ready": "#nextBtn.ready", "next_sub": "#nextSub",
-        "on_air": "#liveOnAir", "next_step": "#nextStepText",
-        "scene": '#pgmBus button.k:has-text("{scene}")',
-        "red_flag": "#pgmBus button.redflag",
-        "desk_open": "#driverBox > summary", "links": "#driverBox .mono.grow",
-        "dashboard": '#driverBox button[data-label="Show dashboard"]',
-        "cue_target": "#cueTarget", "cue_level": "#cueLevel", "cue_text": "#cueText", "cue_send": "#cueSend",
-        "chat_name": "#chatName", "chat_text": "#chatInput", "chat_send": "#chatSendBtn", "chat_log": "#chatLog",
-        "graphic": ':is(#gfxBus, #gfxPreRaceBus, #gfxGridTopBus, #gfxGridBus) button.k:has-text("{name}")',
-        "graphic_in": ':is(#gfxBus, #gfxPreRaceBus, #gfxGridTopBus, #gfxGridBus) '
-                      'button.k:has(.tag:text-is("{scene}")):has-text("{name}")',
-        "pov": '#scnVisBus button.k:has-text("POV")',
-        "hud_field": 'select[data-setup="{field}"]',
-        "mode_switch": "#modeSwitch", "mode_chip": "#modeChip",
-        "part_button": "#partActionBtn", "part_status": "#partStatus", "part_phrase": "#partModalPhrase",
-        "part_input": "#partModalInput", "part_confirm": "#partModalConfirm",
-    }
+    path, ready = "/panel", selectors.READY["DIRECTOR"]
+    sources = selectors.SOURCES["DIRECTOR"]
+    selectors = selectors.DIRECTOR
     masked = ("links",)
 
     def area(self, name):
@@ -468,7 +436,8 @@ class DirectorRole(Surface):
         self.area("setup")
         if not self.pg.locator(self.sel("dashboard")).first.is_visible():
             self.click(self.sel("desk_open"), "Driver telemetry")
-        want, shown = ("Hide dashboard", "Show dashboard") if on else ("Show dashboard", "Hide dashboard")
+        show, hide = DESK["dashboard_show"], DESK["dashboard_hide"]
+        want, shown = (hide, show) if on else (show, hide)
         button = self.sel("dashboard")
         self.control(button, "Show dashboard")
         if self.text(button) != shown:
@@ -511,22 +480,10 @@ class RaceControlRole(Surface):
     `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
     `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target)."""
     kind = "race_control"
-    path, ready, crew = "/console/race-control", "#driverCard", "Sim Race Control"
+    path, ready, crew = "/console/race-control", selectors.READY["RACE_CONTROL"], "Sim Race Control"
     base = "/race-control"
-    sources = ("src/racecontrol/race-control.html", "src/console/driver-desk.js")
-    selectors = {
-        "waiting": "#driverCard .req.waiting",
-        "waiting_name": "#driverCard .req.waiting strong",
-        "request": '#driverCard .req.waiting:has(strong[title="{name}"])',
-        "request_entry": '#driverCard .req.waiting select[aria-label="Entry of {name}"]',
-        "request_approve": '#driverCard .req.waiting:has(strong[title="{name}"]) button[data-label="Approve"]',
-        "button": '#driverCard button[data-label="{label}"]',
-        "select": '#driverCard select[aria-label="{label}"]',
-        "input": '#driverCard input[aria-label="{label}"]',
-        "status": '#driverCard .msg[role="status"]',
-        "lap_line": "#driverCard .lapline", "links": "#driverCard .mono.grow",
-        "note_target": "#rcTarget", "note_text": "#rcText", "note_send": "#rcSend", "note_message": "#rcMsg",
-    }
+    sources = selectors.SOURCES["RACE_CONTROL"]
+    selectors = selectors.RACE_CONTROL
     masked = ("links",)
 
     def _line(self):
@@ -555,7 +512,7 @@ class RaceControlRole(Surface):
         before = self._line()
         if armed:
             self.click(button, label)
-            self.until(lambda: self.text(button) == "Confirm " + label, f"{label}: the confirm state")
+            self.until(lambda: self.text(button) == DESK["confirm_prefix"] + label, f"{label}: the confirm state")
         self.answered(lambda: self.click(button, label), self.base + route, label)
         return {"status": self._status(label, done, before)}
 
@@ -584,48 +541,48 @@ class RaceControlRole(Surface):
         return {"approved": len(names), "names": names}
 
     def act_final_lap(self, args):
-        return self._press("Final lap", "/drivers/race/final-lap", "Final lap", armed=True)
+        return self._press(DESK["final_lap"], "/drivers/race/final-lap", "Final lap", armed=True)
 
     def act_finish(self, args):
-        return self._press("Finish", "/drivers/race/finish", "Race finished", armed=True)
+        return self._press(DESK["finish"], "/drivers/race/finish", "Race finished", armed=True)
 
     def act_red_flag(self, args):
-        return self._press("RED FLAG", "/red-flag", "RED FLAG", armed=True)
+        return self._press(DESK["red_flag"], "/red-flag", "RED FLAG", armed=True)
 
     def act_release(self, args):
-        return self._press("Restart released", "/drivers/race/release", "Restart released", armed=True)
+        return self._press(DESK["release"], "/drivers/race/release", "Restart released", armed=True)
 
     def act_retire(self, args):
-        self.choose(self.sel("select", label="Entry to retire"), "Entry to retire", value=args.get("entry"))
-        return self._press("Retire (DNF)", "/drivers/race/retire", "Retired", armed=True)
+        self.choose(self.sel("select", label=DESK["retire_entry"]), "Entry to retire", value=args.get("entry"))
+        return self._press(DESK["retire"], "/drivers/race/retire", "Retired", armed=True)
 
     def act_rejoin(self, args):
-        self.choose(self.sel("select", label="Team to rejoin"), "Team to rejoin", value=args.get("entry"))
-        return self._press("Mark rejoin", "/drivers/race/rejoin", "Rejoin marked")
+        self.choose(self.sel("select", label=DESK["rejoin_entry"]), "Team to rejoin", value=args.get("entry"))
+        return self._press(DESK["rejoin"], "/drivers/race/rejoin", "Rejoin marked")
 
     def act_estimate(self, args):
-        self.choose(self.sel("select", label="Quiet entry to estimate"), "Quiet entry", value=args.get("entry"))
-        self.choose(self.sel("select", label="Behind or ahead of the reference"), "Behind or ahead",
-                    label="ahead of" if args.get("ahead") else "behind")
-        self.choose(self.sel("select", label="Reference entry"), "Reference entry", value=args.get("ref"))
-        self.fill(self.sel("input", label="Seconds from the reference"), args.get("seconds", ""), "Seconds")
-        return self._press("Set estimate", "/drivers/race/estimate", "Estimate set")
+        self.choose(self.sel("select", label=DESK["estimate_entry"]), "Quiet entry", value=args.get("entry"))
+        self.choose(self.sel("select", label=DESK["estimate_side"]), "Behind or ahead",
+                    label=DESK["side_ahead"] if args.get("ahead") else DESK["side_behind"])
+        self.choose(self.sel("select", label=DESK["estimate_ref"]), "Reference entry", value=args.get("ref"))
+        self.fill(self.sel("input", label=DESK["estimate_seconds"]), args.get("seconds", ""), "Seconds")
+        return self._press(DESK["estimate"], "/drivers/race/estimate", "Estimate set")
 
     def act_correction(self, args):
         """Correct an entry's distance (`metres`) or pit stop count (`pits`), with a reason."""
-        self.choose(self.sel("select", label="Entry to correct"), "Entry to correct", value=args.get("entry"))
+        self.choose(self.sel("select", label=DESK["correct_entry"]), "Entry to correct", value=args.get("entry"))
         if "metres" in args:
-            self.fill(self.sel("input", label="Distance correction in metres"), args["metres"], "metres")
+            self.fill(self.sel("input", label=DESK["correct_metres"]), args["metres"], "metres")
         if "pits" in args:
-            self.fill(self.sel("input", label="Pit stop correction"), args["pits"], "pit stops")
-        self.fill(self.sel("input", label="Reason"), args.get("reason", ""), "Reason")
-        return self._press("Apply correction", "/drivers/race/correct", "Correction applied")
+            self.fill(self.sel("input", label=DESK["correct_pits"]), args["pits"], "pit stops")
+        self.fill(self.sel("input", label=DESK["correct_reason"]), args.get("reason", ""), "Reason")
+        return self._press(DESK["correct"], "/drivers/race/correct", "Correction applied")
 
     def act_set_time(self, args):
         """Set an entry's qualifying time (`time` as m:ss.mmm)."""
-        self.choose(self.sel("select", label="Qualifying entry"), "Qualifying entry", value=args.get("entry"))
-        self.fill(self.sel("input", label="Qualifying time"), args.get("time", ""), "Qualifying time")
-        return self._press("Set time", "/drivers/race/quali", "Qualifying time set")
+        self.choose(self.sel("select", label=DESK["quali_entry"]), "Qualifying entry", value=args.get("entry"))
+        self.fill(self.sel("input", label=DESK["quali_time"]), args.get("time", ""), "Qualifying time")
+        return self._press(DESK["set_time"], "/drivers/race/quali", "Qualifying time set")
 
     def act_note(self, args):
         """Send a note to the commentators (`target`: the Send to label, default as shown)."""
@@ -641,9 +598,9 @@ class RaceControlRole(Surface):
         return {"text": text}
 
     def act_add_lap(self, args):
-        self.choose(self.sel("select", label="Qualifying entry"), "Qualifying entry", value=args.get("entry"))
-        self.fill(self.sel("input", label="Qualifying time"), args.get("time", ""), "Qualifying time")
-        return self._press("Add lap", "/drivers/race/quali-lap", "Qualifying lap added")
+        self.choose(self.sel("select", label=DESK["quali_entry"]), "Qualifying entry", value=args.get("entry"))
+        self.fill(self.sel("input", label=DESK["quali_time"]), args.get("time", ""), "Qualifying time")
+        return self._press(DESK["add_lap"], "/drivers/race/quali-lap", "Qualifying lap added")
 
     def facts(self):
         text, error = self._line()
@@ -656,13 +613,9 @@ class CommentatorRole(Surface):
     """A commentator in the cockpit (`commentator:<crew name>`): `submit_link` (url,
     stint), `chat` (text). `page(role)` reads the tally."""
     kind = "commentator"
-    path, ready = "/cockpit", "#tally"
-    sources = ("src/cockpit/cockpit.html",)
-    selectors = {
-        "tally": "#tally", "card": "#submitCard", "stint": "#subStint", "url": "#subUrl",
-        "submit": "#subBtn", "message": "#subMsg", "pending": "#subPending",
-        "chat_text": "#chatin", "chat_send": "#chatsend", "chat_log": "#chatlog",
-    }
+    path, ready = "/cockpit", selectors.READY["COMMENTATOR"]
+    sources = selectors.SOURCES["COMMENTATOR"]
+    selectors = selectors.COMMENTATOR
 
     def open(self):
         super().open()
@@ -700,10 +653,9 @@ class CommentatorRole(Surface):
 class ViewerRole(Surface):
     """A viewer on the public timing page: `read` (cars) returns what the page shows."""
     kind = "viewer"
-    ready = "#timing"
-    sources = ("src/console/timing.html",)
-    selectors = {"rows": "#timing tbody tr", "session": "#session", "state": "#state",
-                 "fastest": "#fastest"}
+    ready = selectors.READY["VIEWER"]
+    sources = selectors.SOURCES["VIEWER"]
+    selectors = selectors.VIEWER
     MAX_ROWS = 20
 
     def target(self):
