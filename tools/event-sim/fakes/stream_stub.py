@@ -22,6 +22,7 @@ methods and read by every running stand-in about five times a second:
 Times are epoch seconds (`time.time()`), shared by the processes; `at` defaults to now,
 `until` to "until clear()"."""
 import argparse
+import contextlib
 import glob
 import importlib.util
 import io
@@ -30,6 +31,7 @@ import os
 import platform
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -37,7 +39,6 @@ import threading
 import time
 import zipfile
 from collections import namedtuple
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -51,6 +52,9 @@ MAX_HEIGHT = 360
 FPS = 25
 POLL = 0.2
 STREAM_TIMEOUT = 60.0      # streamlink's default --stream-timeout
+PLAYER_TIMEOUT = 30.0      # a player that stops reading for this long is dropped
+LOCK_WAIT = 10.0
+LOCK_STALE = 10.0          # a lock older than this was left by a crashed controller
 MAX_CUTS = 32
 CELLS = 18
 YTDLP_VERSION = "2026.01.01"
@@ -106,19 +110,44 @@ class LauncherMissing(RuntimeError):
 
 # --- channel state ---
 
+_DEVICE_NAMES = frozenset(["con", "prn", "aux", "nul"] + [f"{d}{n}" for d in ("com", "lpt") for n in range(1, 10)])
+
+
+def channel_name(name):
+    """The stored form of a channel name (names are case-insensitive), or None if invalid.
+    Windows device names are refused, since they cannot be file names there."""
+    if not isinstance(name, str) or not simulation.CHANNEL_RE.fullmatch("sim://" + name):
+        return None
+    name = name.lower()
+    return None if name in _DEVICE_NAMES else name
+
+
 def _valid_name(name):
-    return isinstance(name, str) and bool(simulation.CHANNEL_RE.match("sim://" + name))
+    return channel_name(name) is not None
 
 
 def channel_path(directory, name):
-    return os.path.join(directory, "channels", name + ".json")
+    return os.path.join(directory, "channels", name.lower() + ".json")
+
+
+def _retry_permission(fn):
+    """fn(), retried for about half a second while Windows reports a sharing violation."""
+    pause = threading.Event()
+    for _ in range(25):
+        try:
+            return fn()
+        except PermissionError:
+            pause.wait(0.02)
+    return fn()
 
 
 def load_channel(directory, name):
     """The channel's state, or None when it does not exist. A read error raises."""
-    try:
+    def read():
         with open(channel_path(directory, name), encoding="utf-8") as fh:
             return json.load(fh)
+    try:
+        return _retry_permission(read)
     except FileNotFoundError:
         return None
 
@@ -127,14 +156,62 @@ def _write_json(path, data):
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh)
-    pause = threading.Event()
-    for _ in range(100):
+    _retry_permission(lambda: os.replace(tmp, path))
+
+
+@contextlib.contextmanager
+def state_lock(directory, wait=LOCK_WAIT, stale=LOCK_STALE):
+    """Serialize read-modify-write of the channel state across processes (O_EXCL lock file)."""
+    lock = os.path.join(directory, "channels", ".lock")
+    deadline, pause = time.monotonic() + wait, threading.Event()
+    while True:
         try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:   # Windows: a reader holds the target open
-            pause.wait(0.02)
-    os.replace(tmp, path)
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(lock) > stale:
+                    os.remove(lock)
+                    continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"channel state lock {lock} is held") from None
+            pause.wait(0.01)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(lock)
+
+
+def pid_alive(pid):
+    """Whether process `pid` runs; a zombie counts as gone."""
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259     # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        with open(f"/proc/{int(pid)}/stat", encoding="utf-8", errors="replace") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        pass  # no procfs: ask ps
+    try:
+        out = subprocess.run(["ps", "-o", "stat=", "-p", str(int(pid))], capture_output=True, text=True,
+                             errors="replace", timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return bool(out) and not out.startswith("Z")
 
 
 def _in_window(window, now):
@@ -158,34 +235,40 @@ def pull_action(channel, started, now):
 
 
 class StreamStub:
-    """The control side: installs the stand-ins and sets each channel's state."""
+    """The control side: installs the stand-ins and sets each channel's state. Every
+    change runs under `state_lock`, so several controllers may share a directory."""
 
     def __init__(self, directory, ffmpeg=("ffmpeg",), python=None, clock=time.time, windows=None,
                  stream_timeout=STREAM_TIMEOUT):
         self.directory = os.path.abspath(directory)
-        self.ffmpeg, self.python, self.clock = list(ffmpeg), python or sys.executable, clock
+        self.ffmpeg = list(ffmpeg)
+        if self.ffmpeg and os.path.dirname(self.ffmpeg[0]):
+            self.ffmpeg[0] = os.path.abspath(self.ffmpeg[0])   # the stand-ins run it from their own cwd
+        self.python, self.clock = python or sys.executable, clock
         self.stream_timeout = stream_timeout
         self.windows = os.name == "nt" if windows is None else windows
         self.lock = threading.Lock()
 
     def install(self):
-        shutil.rmtree(os.path.join(self.directory, "pulls"), ignore_errors=True)   # left by killed stand-ins
+        """Write (or rewrite) the stand-ins; running pulls carry on."""
         os.makedirs(os.path.join(self.directory, "channels"), exist_ok=True)
         try:
             os.chmod(self.directory, 0o700)
         except OSError:
             pass  # best effort, as for runtime dirs
+        prune_pulls(self.directory)
         _write_json(os.path.join(self.directory, "stub.json"), {"ffmpeg": self.ffmpeg,
                                                                     "stream_timeout": self.stream_timeout})
+        for old in glob.glob(os.path.join(self.directory, "*.old")):
+            with contextlib.suppress(OSError):
+                os.remove(old)                  # a renamed .exe whose process has ended
         for tool in simulation.STREAM_TOOLS:
             source = stand_in_source(tool, self.directory)
             if self.windows:
                 path, body = os.path.join(self.directory, tool + ".exe"), windows_stand_in(source, self.python)
             else:
                 path, body = os.path.join(self.directory, tool), posix_stand_in(source, self.python)
-            with open(path, "wb") as fh:
-                fh.write(body)
-            os.chmod(path, 0o700)
+            _replace_executable(path, body)
         return self
 
     def env(self):
@@ -197,43 +280,45 @@ class StreamStub:
     def channels(self):
         out = {}
         for path in sorted(glob.glob(os.path.join(self.directory, "channels", "*.json"))):
-            name = os.path.basename(path)[:-5]
-            ch = load_channel(self.directory, name) if _valid_name(name) else None
+            name = channel_name(os.path.basename(path)[:-5])
+            ch = load_channel(self.directory, name) if name else None
             if ch:
                 out[name] = ch
         return out
 
     def channel(self, name, stint=None, commentator=None, status=None):
         """Create or update `sim://<name>`; None keeps a field (a new channel is live)."""
-        if not _valid_name(name):
+        key = channel_name(name)
+        if key is None:
             raise ValueError(f"not a sim:// channel name: {name!r}")
         if status is not None and status not in STATUSES:
             raise ValueError(f"status must be one of {', '.join(STATUSES)}")
         if stint is not None and not (isinstance(stint, int) and 0 <= stint <= 255):
             raise ValueError("stint must be 0-255")
-        with self.lock:
-            ch = self.get(name)
+        with self.lock, state_lock(self.directory):
+            ch = self.get(key)
             if ch is None:
                 codes = {c.get("code") for c in self.channels().values()}
                 code = next((n for n in range(1, 256) if n not in codes), None)
                 if code is None:
                     raise ValueError("at most 255 simulated channels per directory: "
                                      "the identity strip holds an 8-bit code")
-                ch = {"name": name, "code": code, "stint": 0, "commentator": "", "status": "live",
+                ch = {"name": key, "code": code, "stint": 0, "commentator": "", "status": "live",
                       "cuts": [], "stall": None, "freeze": None}
-            for key, value in (("stint", stint), ("commentator", commentator), ("status", status)):
+            for field, value in (("stint", stint), ("commentator", commentator), ("status", status)):
                 if value is not None:
-                    ch[key] = value
-            _write_json(channel_path(self.directory, name), ch)
+                    ch[field] = value
+            _write_json(channel_path(self.directory, key), ch)
             return ch
 
     def _update(self, name, change):
-        with self.lock:
-            ch = self.get(name)
+        key = channel_name(name)
+        with self.lock, state_lock(self.directory):
+            ch = self.get(key) if key else None
             if ch is None:
                 raise ValueError(f"no simulated channel {name!r}")
             change(ch)
-            _write_json(channel_path(self.directory, name), ch)
+            _write_json(channel_path(self.directory, key), ch)
             return ch
 
     def cut(self, name, at=None):
@@ -254,6 +339,28 @@ class StreamStub:
     def clear(self, name):
         """End a stall and a freeze, running or scheduled."""
         self._update(name, lambda ch: ch.update(stall=None, freeze=None))
+
+
+def prune_pulls(directory):
+    """Remove the work dirs of pulls whose stand-in has ended."""
+    for path in glob.glob(os.path.join(directory, "pulls", "*-*")):
+        pid = os.path.basename(path).split("-", 1)[0]
+        if pid.isdigit() and not pid_alive(int(pid)):
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def _replace_executable(path, body):
+    """Write `path` whole: a running stand-in keeps its old file. Windows cannot replace a
+    running .exe but can rename it, so the old one is moved aside for a later install to remove."""
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(body)
+    os.chmod(tmp, 0o700)
+    try:
+        os.replace(tmp, path)
+    except PermissionError:
+        os.replace(path, f"{path}.{time.time_ns()}.old")
+        os.replace(tmp, path)
 
 
 # --- the stand-in executables ---
@@ -382,8 +489,9 @@ def resolved_url(name, height):
 def resolved_channel(url):
     """(name, height) of a URL the yt-dlp stand-in issued, or of a bare sim:// channel; else None."""
     url = (url or "").strip()
-    if simulation.CHANNEL_RE.match(url):
-        return url[len("sim://"):], MAX_HEIGHT
+    if url.startswith("sim://"):
+        name = channel_name(url[len("sim://"):])
+        return (name, MAX_HEIGHT) if name else None
     try:
         u = urlsplit(url)
         port = u.port
@@ -394,7 +502,7 @@ def resolved_channel(url):
             or u.query or u.fragment or len(parts) != 3 or not _valid_name(parts[1])):
         return None
     m = re.fullmatch(r"(\d{3,4})\.m3u8", parts[2])
-    return (parts[1], min(int(m.group(1)), MAX_HEIGHT)) if m else None
+    return (channel_name(parts[1]), min(int(m.group(1)), MAX_HEIGHT)) if m else None
 
 
 def height_for(fmt):
@@ -470,25 +578,30 @@ def ffmpeg_argv(ffmpeg, mode, height, code, stint, text, offset):
 # --- MPEG-TS splicing ---
 
 TS = 188
-TsPacket = namedtuple("TsPacket", "pid cc payload pts")
+TsPacket = namedtuple("TsPacket", "at pid cc payload pts pcr")
 
 
 def parse_ts(data):
-    """TsPacket per whole 188-byte packet of `data`; `pts` (90 kHz) on a packet that
-    starts an audio or video PES carrying one."""
+    """TsPacket per whole 188-byte packet of `data`, with its byte offset `at`; `pts` on a
+    packet that starts an audio or video PES carrying one, `pcr` where the adaptation field
+    has one (both the 33-bit 90 kHz base: they wrap after about 26.5 hours, longer than any
+    simulated event)."""
     for i in range(0, len(data) - TS + 1, TS):
         pkt = data[i:i + TS]
         if pkt[0] != 0x47:
             continue
         pid, afc = ((pkt[1] & 0x1F) << 8) | pkt[2], (pkt[3] >> 4) & 3
-        pts = None
+        pts = pcr = None
+        if afc & 2 and pkt[4] >= 7 and pkt[5] & 0x10:
+            b = pkt[6:11]
+            pcr = b[0] << 25 | b[1] << 17 | b[2] << 9 | b[3] << 1 | b[4] >> 7
         start = 4 + (1 + pkt[4] if afc & 2 else 0)
         pes = pkt[start:]
         if (pkt[1] & 0x40 and afc & 1 and len(pes) >= 14 and pes[:3] == b"\x00\x00\x01"
                 and 0xC0 <= pes[3] <= 0xEF and pes[7] & 0x80):
             b = pes[9:14]
             pts = ((b[0] >> 1) & 7) << 30 | b[1] << 22 | (b[2] >> 1) << 15 | b[3] << 7 | b[4] >> 1
-        yield TsPacket(pid, pkt[3] & 0x0F, bool(afc & 1), pts)
+        yield TsPacket(i, pid, pkt[3] & 0x0F, bool(afc & 1), pts, pcr)
 
 
 class TsSplicer:
@@ -524,7 +637,7 @@ class TsSplicer:
         cut = len(data) - len(data) % TS
         self.pending = data[cut:]
         out = bytearray(data[:cut])
-        for n, p in enumerate(parse_ts(out)):
+        for p in parse_ts(out):
             if p.pid == 0x1FFF:
                 continue
             if p.pts is not None:
@@ -535,7 +648,7 @@ class TsSplicer:
             prev = self.cc.get(p.pid)
             cc = p.cc if prev is None else ((prev + 1) % 16 if p.payload else prev)
             self.cc[p.pid] = cc
-            out[n * TS + 3] = (out[n * TS + 3] & 0xF0) | cc
+            out[p.at + 3] = (out[p.at + 3] & 0xF0) | cc
         return bytes(out)
 
 
@@ -546,12 +659,12 @@ class Pull:
     to `write`, restarting it when the action changes. run() returns the exit code."""
 
     def __init__(self, directory, name, height, ffmpeg, write, log, started=None, clock=time.time, poll=POLL,
-                 stream_timeout=STREAM_TIMEOUT):
+                 stream_timeout=STREAM_TIMEOUT, channel=None):
         self.directory, self.name, self.height, self.ffmpeg = directory, name, height, list(ffmpeg)
         self.write, self.log, self.clock, self.poll = write, log, clock, poll
         self.started = clock() if started is None else started
         self.stream_timeout = stream_timeout
-        self.last, self.unreadable = None, False
+        self.last, self.unreadable = channel, False    # the state the pull was opened with
         self.splicer = TsSplicer()
 
     def channel(self):
@@ -592,6 +705,7 @@ class Pull:
                     tick.wait(self.poll)
                 continue
             ch = self.last
+            os.makedirs(workdir, exist_ok=True)
             with open(os.path.join(workdir, "label.txt"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(label_text(ch))
             offset = self.splicer.next_offset(max(0.0, self.clock() - self.started))
@@ -685,13 +799,13 @@ def ytdlp_main(directory, argv, out, err):
         err.write("ERROR: [sim] the simulation stand-in exports no browser cookies\n")
         return 1
     url = o["url"].strip()
-    if not simulation.CHANNEL_RE.match(url):
+    name = channel_name(url[len("sim://"):]) if url.startswith("sim://") else None
+    if name is None:
         err.write(f"ERROR: [sim] the simulation stand-in serves only sim:// channels, not {url}\n")
         return 1
     if o["extract_audio"] or o["output"]:
         err.write(f"ERROR: [sim] {url}: a simulated stream cannot be downloaded\n")
         return 1
-    name = url[len("sim://"):]
     try:
         ch = load_channel(directory, name)
     except (OSError, ValueError) as e:
@@ -721,46 +835,77 @@ def ytdlp_main(directory, argv, out, err):
     return 0
 
 
-def serve_http(directory, name, height, ffmpeg, port, log, clock=time.time, stream_timeout=STREAM_TIMEOUT):
-    """--player-external-http: one ffmpeg per client on 127.0.0.1:port until the stream ends."""
-    started, ended = clock(), threading.Event()
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "video/unknown")
-            self.end_headers()
-
-            def write(chunk):
-                self.wfile.write(chunk)
-                self.wfile.flush()
-            if Pull(directory, name, height, ffmpeg, write, log, started=started, clock=clock,
-                    stream_timeout=stream_timeout).run() == 0:
-                ended.set()
-
-        def log_message(self, *args):
-            pass  # streamlink logs no per-request lines
-
+def listen(port):
+    """A socket listening on 127.0.0.1:port that no other process can share, so a busy port
+    fails at once as with the real tool. Windows needs SO_EXCLUSIVEADDRUSE for that."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        if os.name == "nt":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        sock.bind(("127.0.0.1", port))
+        sock.listen(1)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def _request_line(conn):
+    data = b""
+    while b"\r\n\r\n" not in data and len(data) < 65536:
+        chunk = conn.recv(4096)
+        if not chunk:
+            return None
+        data += chunk
+    return data.split(b"\r\n", 1)[0]
+
+
+def serve_http(directory, name, height, ffmpeg, port, log, clock=time.time, stream_timeout=STREAM_TIMEOUT,
+               stop=None):
+    """--player-external-http: one player at a time on 127.0.0.1:port, each with a fresh
+    pull; after a stream ends the server waits for the next player, as streamlink does.
+    Runs until killed or `stop` is set."""
+    try:
+        sock = listen(port)
     except OSError as e:
-        log(f"error: Failed to create HTTP server: {e}")
+        log(f"error: Failed to start HTTP server: {e}")
         return 1
-    server.daemon_threads = True
+    stop = stop or threading.Event()
     log("[cli][info] Starting server, access with one of:")
-    log(f"[cli][info]  http://127.0.0.1:{port}/")
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": POLL}, daemon=True)
-    thread.start()
-    probe = Pull(directory, name, height, ffmpeg, None, log, started=started, clock=clock)
+    log(f"[cli][info]  http://127.0.0.1:{sock.getsockname()[1]}/")
+    sock.settimeout(POLL)
     try:
-        while not ended.wait(POLL):
-            if probe.action() in ("cut", "end"):
-                break
+        while not stop.is_set():
+            try:
+                conn, _addr = sock.accept()
+            except TimeoutError:
+                continue
+            with conn:
+                _serve_player(conn, directory, name, height, ffmpeg, log, clock, stream_timeout)
     finally:
-        server.shutdown()
-        server.server_close()
-    log("[cli][info] Stream ended")
+        sock.close()
     return 0
+
+
+def _serve_player(conn, directory, name, height, ffmpeg, log, clock, stream_timeout):
+    conn.settimeout(PLAYER_TIMEOUT)
+    try:
+        if _request_line(conn) is None:
+            return
+        ch = load_channel(directory, name)
+    except (OSError, ValueError):
+        return  # the player went away, or the state is unreadable: wait for the next one
+    if not ch or ch.get("status") != "live":
+        log(f"error: No playable streams found on this URL: {resolved_url(name, height)}")
+        return
+    log("[cli][info] Got HTTP request from player")
+    try:
+        conn.sendall(b"HTTP/1.0 200 OK\r\nServer: Streamlink\r\nContent-Type: video/unknown\r\n\r\n")
+    except OSError:
+        return
+    Pull(directory, name, height, ffmpeg, conn.sendall, log, clock=clock, stream_timeout=stream_timeout,
+         channel=ch).run()
+    log("[cli][info] Player closed or stream ended, waiting for the next player")
 
 
 def streamlink_main(directory, argv, out, err):
@@ -817,7 +962,7 @@ def streamlink_main(directory, argv, out, err):
         except OSError:
             os.dup2(os.open(os.devnull, os.O_WRONLY), stdout.fileno())   # no flush error at exit
             raise
-    return Pull(directory, name, height, ffmpeg, write, log, stream_timeout=timeout).run()
+    return Pull(directory, name, height, ffmpeg, write, log, stream_timeout=timeout, channel=ch).run()
 
 
 def main_tool(tool, directory, argv):

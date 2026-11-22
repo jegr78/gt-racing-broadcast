@@ -381,12 +381,17 @@ every other address; they open no connection. `StreamStub(dir).install()` writes
   upcoming and ended exit 1 with the text `classify_source_state` reads; the live-status
   print answers `is_upcoming` or `was_live`. Downloads, `--cookies-from-browser` and real
   URLs exit 1, an unknown flag exits 2.
-- streamlink maps only that URL or a bare `sim://<name>` back to a channel. It writes
-  MPEG-TS on `--stdout`, or serves it on `127.0.0.1` at `--player-external-http-port`, where the
-  real tool binds every interface. It reports version 8.2.0, and its help lists
+- streamlink maps only that URL or a bare `sim://<name>` back to a channel and writes
+  MPEG-TS on `--stdout`. It reports version 8.2.0, and its help lists
   `--stream-segmented-queue-deadline`.
-- `tests/test_stream_stub.py` feeds every yt-dlp and streamlink argv the relay and
-  `loopstream` build through the stand-ins' parsers, so a new flag in `src/` fails there.
+- `--player-external-http` behaves like streamlink's: one player at a time, each with a
+  fresh pull, and after a stream ends or goes offline the server waits for the next player
+  until it is killed. It binds `127.0.0.1` only, where the real tool binds every interface,
+  and never shares the port (no `SO_REUSEADDR`, `SO_EXCLUSIVEADDRUSE` on Windows), so a busy
+  port exits 1 at once, the relay's fast-exit case (#143).
+- `tests/test_stream_stub.py` feeds every yt-dlp and streamlink argv the relay,
+  `loopstream`, racecast's smoke probes, `get-media` and both cookie exports build through
+  the stand-ins' parsers, so a new flag in `src/` fails there.
 
 The picture comes from ffmpeg: `testsrc2` at 640x360 and 25 fps, mpeg2video and mp2 in
 MPEG-TS. It carries stint, commentator and channel as drawtext from `label.txt` in
@@ -398,11 +403,16 @@ copies ffmpeg's output itself, so killing it leaves ffmpeg on a broken pipe. A f
 a stall's end or a text fallback starts a new ffmpeg; `TsSplicer` forwards whole 188-byte
 packets only, continues each PID's continuity counter and gives the new run an
 `-output_ts_offset` two frames past the last PTS sent (or the wall clock after a gap), so
-PTS and PCR keep rising across the seam.
+PTS and PCR keep rising across the seam. Both are 33-bit 90 kHz values and would wrap after
+about 26.5 hours of one pull, longer than any simulated event.
 
 Control for the scenario engine: each channel is `<dir>/channels/<name>.json`, which every
-running pull reads every 0.2 s; an unreadable file keeps the last state. Times are epoch seconds; `at` defaults to now, `until` to
-the next `clear`.
+running pull reads every 0.2 s; an unreadable file keeps the last state, and a Windows
+sharing violation is retried briefly. Names are case-insensitive (stored in lower case),
+and the Windows device names `con`, `prn`, `aux`, `nul`, `com1`-`com9` and `lpt1`-`lpt9` are
+refused. Every change runs under an `O_EXCL` lock file (`channels/.lock`, broken after
+10 s), so several controllers may share a directory. Times are epoch seconds; `at` defaults
+to now, `until` to the next `clear`.
 
 - `channel(name, stint=, commentator=, status=)` creates or updates a channel, and a new
   one is live. A directory holds at most 255 channels, since the identity strip carries an
@@ -428,8 +438,13 @@ Windows: the relay starts `yt-dlp` by bare name, and CreateProcess adds only `.e
 stand-in there is distlib's console launcher, `t64.exe`, `t64-arm.exe` or `t32.exe`, the
 one pip's own scripts use. The stub reads it from the pip wheel ensurepip bundles or from
 an installed pip and appends `#!<python>` and a zip with `__main__.py`; the launcher runs
-the interpreter on its own file. Elsewhere a stand-in is an sh/Python script, mode 0o700.
-The CI e2e job sets `OBS_SIM_REQUIRE_FFMPEG=1`, so the real-ffmpeg test cannot skip there.
+the interpreter on its own file. Elsewhere a stand-in is an sh/Python script, mode 0o700. `install()` may run again while
+pulls run: it writes each stand-in to a temporary file and replaces it, moving a running
+`.exe` aside on Windows (a later install removes it), and removes only the work dirs
+(`pulls/<pid>-<thread>`) of stand-ins that have ended; a pull recreates its own if it goes
+missing. A relative `--ffmpeg` path is made absolute.
+The CI e2e job sets `OBS_SIM_REQUIRE_FFMPEG=1`, so the real-ffmpeg tests cannot skip there,
+and only there do they also require drawtext to find a default font.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 

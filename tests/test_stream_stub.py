@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """The event simulation's stream stub (#1231). Run: python3 tests/test_stream_stub.py"""
+import glob
 import importlib.util
 import io
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -110,24 +112,7 @@ class _Pull:
         self.proc.stderr.close()
 
 
-def _alive(pid):
-    if os.name == "nt":
-        import ctypes
-        k = ctypes.windll.kernel32
-        h = k.OpenProcess(0x1000, False, pid)
-        if not h:
-            return False
-        code = ctypes.c_ulong()
-        k.GetExitCodeProcess(h, ctypes.byref(code))
-        k.CloseHandle(h)
-        return code.value == 259
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+_alive = stream_stub.pid_alive
 
 
 def _eventually(pred):
@@ -196,6 +181,71 @@ def t_every_streamlink_command_of_the_relay_parses():
     assert fan["stdout"] and fan["target"] == target and fan["quality"] == "best"
     serve = stream_stub.parse_streamlink(loopstream.streamlink_argv(target, "53002")[1:])
     assert serve["http_port"] == 53002 and serve["target"] == target
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, *path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _other_tool_argvs():
+    """Every yt-dlp/streamlink argv racecast's smoke probes, get-media and the cookie
+    exports (get-cookies and the relay's) build."""
+    seen = []
+    racecast = _load("stubracecast", ("src", "racecast.py"))
+
+    def capture(argv, timeout=30):
+        seen.append(list(argv))
+        return 1, ""
+    racecast._smoke_capture = capture
+    racecast._smoke_fingerprint()
+    racecast._smoke_js_runtime("https://www.youtube.com/watch?v=abc")
+    racecast._smoke_yt_candidates("gt7 endurance")
+    racecast._smoke_yt_probe("https://www.youtube.com/watch?v=abc", "/x/yt-cookies.txt")
+    racecast._smoke_twitch_probe("somechannel")
+    media = _load("stubgetmedia", ("src", "relay", "get-media.py"))
+    jar = os.path.join(tempfile.mkdtemp(prefix="stub1231-"), "yt-cookies.txt")
+    open(jar, "w").close()
+    seen += [media.build_music_cmd("sim://c", os.path.join("x", "intermission.mp3"), jar),
+             media.build_download_cmd("sim://c", os.path.join("x", "clip.mp4"), jar)]
+
+    class Done:
+        returncode, stderr = 1, b""
+
+    def run(argv, **_kw):
+        seen.append(list(argv))
+        return Done()
+    cookies = _load("stubgetcookies", ("src", "relay", "get-cookies.py"))
+    real = subprocess.run   # one module object: patching it patches every importer
+    subprocess.run = run
+    argv = sys.argv
+    sys.argv = ["get-cookies.py", "firefox", "--runtime-dir", tempfile.mkdtemp(prefix="stub1231-")]
+    try:
+        try:
+            cookies.main()
+        except SystemExit:
+            pass  # the export "failed": only its argv matters here
+        relay.export_cookies("firefox", os.path.join(tempfile.mkdtemp(prefix="stub1231-"), "yt-cookies.txt"))
+    finally:
+        sys.argv = argv
+        subprocess.run = real
+    return seen
+
+
+def t_every_other_tool_command_parses():
+    argvs = _other_tool_argvs()
+    tools = [os.path.basename(a[0]) for a in argvs]
+    assert tools.count("streamlink") == 2 and tools.count("yt-dlp") >= 8, tools
+    for argv in argvs:
+        tool = os.path.basename(argv[0])
+        if tool == "yt-dlp":
+            opts = stream_stub.parse_ytdlp(argv[1:])
+            assert opts["url"] or opts["version"], argv
+        elif tool == "streamlink":
+            opts = stream_stub.parse_streamlink(argv[1:])
+            assert opts["target"] or opts["version"], argv
 
 
 def t_an_unknown_flag_is_refused_like_argparse():
@@ -341,12 +391,6 @@ def _ts_packet(pid, cc, pts=None, payload=True):
     return head + body + b"\xff" * (184 - len(body))
 
 
-def t_ts_parse_reads_pid_cc_and_pts():
-    data = _ts_packet(256, 3, pts=90000 * 2) + _ts_packet(256, 4) + _ts_packet(257, 0, pts=(1 << 33) - 1)
-    assert [(p.pid, p.cc, p.pts) for p in stream_stub.parse_ts(data)] == [
-        (256, 3, 180000), (256, 4, None), (257, 0, (1 << 33) - 1)]
-
-
 def t_splicer_forwards_whole_packets_and_keeps_counters_and_time_rising():
     sp = stream_stub.TsSplicer(fps=25)
     assert sp.next_offset(0.0) == 0.0, "the first run starts at the wall clock"
@@ -398,38 +442,6 @@ def t_cli_install_stores_the_stream_timeout():
     with open(os.path.join(d, "stub.json")) as fh:
         assert json.load(fh)["stream_timeout"] == 7, "StreamStub sets it too"
 
-
-def t_direct_serve_binds_loopback_only():
-    stub = _stub()
-    stub.channel("comms1")
-    bound, lines = [], []
-    real = stream_stub.ThreadingHTTPServer
-
-    class Recording(real):
-        def __init__(self, address, handler):
-            bound.append(address)
-            super().__init__(address, handler)
-    stream_stub.ThreadingHTTPServer = Recording
-    started = threading.Event()
-
-    def log(line):
-        lines.append(line)
-        if "Starting server" in line:
-            started.set()
-    t = threading.Thread(target=stream_stub.serve_http, args=(stub.directory, "comms1", 360, ["ffmpeg"], 0, log),
-                         daemon=True)
-    try:
-        t.start()
-        assert started.wait(WAIT), lines
-        assert bound and bound[0][0] == "127.0.0.1", bound
-    finally:
-        stream_stub.ThreadingHTTPServer = real
-        stub.cut("comms1")
-        t.join(WAIT)
-    assert not t.is_alive(), "a cut ends the server"
-
-
-# --- the stand-ins, run by bare name through PATH like the relay runs them ---
 
 def t_ytdlp_stand_in_answers_the_relay_resolve():
     stub = _stub()
@@ -559,6 +571,20 @@ def t_an_unreadable_state_file_keeps_the_last_state():
     assert lines == ["[sim][warning] channel state unreadable, keeping the last one"], lines
     os.remove(stream_stub.channel_path(stub.directory, "comms1"))
     assert pull.action() == "end", "a removed channel ends the pull"
+    stub.channel("comms1")
+    with open(stream_stub.channel_path(stub.directory, "comms1"), "w") as fh:
+        fh.write("{not json")
+    opened = stream_stub.Pull(stub.directory, "comms1", 360, ["ffmpeg"], None, lines.append,
+                              channel={"name": "comms1", "code": 1, "status": "live"})
+    assert opened.action() == "play", "a first read that fails keeps the state the pull opened with"
+    tries = []
+
+    def flaky():
+        tries.append(1)
+        if len(tries) < 3:
+            raise PermissionError("sharing violation")
+        return "read"
+    assert stream_stub._retry_permission(flaky) == "read" and len(tries) == 3, "a sharing violation is retried"
 
 
 def t_ffmpeg_gets_the_label_and_identity():
@@ -604,7 +630,7 @@ def t_killing_the_stand_in_ends_its_ffmpeg():
         assert _eventually(lambda: not _alive(pid)), "the orphaned ffmpeg stops on its broken pipe"
         assert os.listdir(os.path.join(stub.directory, "pulls")), "a killed stand-in leaves its work dir"
         stub.install()
-        assert not os.path.exists(os.path.join(stub.directory, "pulls")), "install clears what killed pulls left"
+        assert os.listdir(os.path.join(stub.directory, "pulls")) == [], "install clears what killed pulls left"
     finally:
         pull.close()
         restore()
@@ -627,25 +653,203 @@ def t_a_closed_consumer_ends_the_pull():
         restore()
 
 
-def t_direct_serve_answers_on_its_port():
+def _free_port():
     import socket
-    import urllib.request
-    stub = _stub()
-    stub.channel("comms1")
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
+        return s.getsockname()[1]
+
+
+def _get(port, size=4096):
+    import socket
+    with socket.create_connection(("127.0.0.1", port), timeout=WAIT) as c:
+        c.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        data = b""
+        while len(data) < size:
+            chunk = c.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        return data
+
+
+def t_direct_serve_reserves_each_player_like_streamlink():
+    stub = _stub()
+    stub.channel("comms1")
+    port = _free_port()
     restore = _on_path(stub)
     pull = _Pull(None, relay.streamlink_serve_cmd("http://sim.invalid/comms1/360.m3u8", port))
     try:
         assert pull.wait_err("Starting server"), pull.err.text()
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=WAIT) as r:  # noqa: S310  loopback test server
-            assert b"PLAY" in r.read(4096)
+        assert b"PLAY" in _get(port), "a player gets the stream"
+        got, done = [], threading.Event()
+
+        def player():
+            got.append(_get(port, 1 << 30))
+            done.set()
+        threading.Thread(target=player, daemon=True).start()
+        assert _eventually(lambda: pull.err.text().count("Got HTTP request from player") >= 2), pull.err.text()
         stub.cut("comms1")
-        assert pull.proc.wait(timeout=WAIT) == 0, "a cut ends the serving process"
+        assert done.wait(WAIT) and b"PLAY" in got[0], "a cut ends that player's stream"
+        assert pull.proc.poll() is None, "the server keeps running after the stream ends"
+        assert b"PLAY" in _get(port), "the next player gets a fresh pull"
+        stub.channel("comms1", status="offline")
+        assert _get(port) == b"", "an offline channel closes the player without data"
+        assert pull.proc.poll() is None
     finally:
         pull.close()
         restore()
+
+
+def t_direct_serve_binds_loopback_only_and_alone():
+    import socket
+    sock = stream_stub.listen(0)
+    try:
+        assert sock.getsockname()[0] == "127.0.0.1"
+        if os.name == "nt":
+            assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE) == 1
+        else:
+            assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) == 0
+    finally:
+        sock.close()
+    stub = _stub()
+    stub.channel("comms1")
+    restore = _on_path(stub)
+    busy = socket.socket()
+    try:
+        busy.bind(("127.0.0.1", 0))
+        busy.listen(1)
+        r = subprocess.run(relay.streamlink_serve_cmd("sim://comms1", busy.getsockname()[1]),
+                           capture_output=True, text=True, errors="replace", timeout=WAIT)
+        assert r.returncode == 1 and "Failed to start HTTP server" in r.stderr, r.stderr
+    finally:
+        busy.close()
+        restore()
+
+
+def t_ts_parse_reads_pid_cc_pts_pcr_and_offset():
+    pcr = bytes((0x47, 0x01, 0x00, 0x20, 183, 0x10, 0x12, 0x34, 0x56, 0x78, 0x80)) + b"\xff" * 177
+    data = _ts_packet(256, 3, pts=90000 * 2) + b"\x00" * 188 + _ts_packet(256, 4) + pcr + \
+        _ts_packet(257, 0, pts=(1 << 33) - 1)
+    assert [(p.at, p.pid, p.cc, p.pts, p.pcr) for p in stream_stub.parse_ts(data)] == [
+        (0, 256, 3, 180000, None), (376, 256, 4, None, None), (564, 256, 0, None, 0x12345678 << 1 | 1),
+        (752, 257, 0, (1 << 33) - 1, None)]
+    sp = stream_stub.TsSplicer()
+    sp.start(0.0)
+    sp.feed(_ts_packet(256, 5))
+    sp.start(0.0)
+    out = sp.feed(_ts_packet(256, 0) + b"\x00" * 188 + _ts_packet(256, 1))
+    assert out[188:376] == b"\x00" * 188, "a packet without sync is left alone"
+    assert [p.cc for p in stream_stub.parse_ts(out)] == [6, 7], "counters land on their own packets"
+
+
+def t_reinstall_over_a_running_pull():
+    stub = _stub()
+    stub.channel("comms1")
+    restore = _on_path(stub)
+    pull = _Pull("sim://comms1")
+    try:
+        assert pull.wait_bytes(b"PLAY"), pull.err.text()
+        stub.install()
+        shutil.rmtree(os.path.join(stub.directory, "pulls"))
+        mark = len(pull.data)
+        stub.freeze("comms1")
+        assert pull.wait_bytes(b"FREEZE", mark), pull.err.text()
+        assert pull.proc.poll() is None, "the pull survives a reinstall and a lost work dir"
+    finally:
+        pull.close()
+        restore()
+    stub.install()
+    assert not glob.glob(os.path.join(stub.directory, "*.old")), "a later install removes moved-aside stand-ins"
+
+
+def t_install_prunes_only_dead_pulls():
+    stub = _stub()
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(timeout=WAIT)
+    live = os.path.join(stub.directory, "pulls", f"{os.getpid()}-1")
+    dead = os.path.join(stub.directory, "pulls", f"{gone.pid}-1")
+    for d in (live, dead):
+        os.makedirs(d)
+    stub.install()
+    assert os.path.isdir(live) and not os.path.exists(dead)
+
+
+def t_a_zombie_is_not_alive():
+    if os.name == "nt":
+        raise Skip("no zombies on Windows")
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        assert _eventually(lambda: not stream_stub.pid_alive(p.pid)), "an exited, unreaped child is gone"
+    finally:
+        p.wait(timeout=WAIT)
+
+
+def t_names_are_case_insensitive_and_never_devices():
+    stub = stream_stub.StreamStub(tempfile.mkdtemp(prefix="stub1231-")).install()
+    a = stub.channel("Comms1", stint=1)
+    assert a["name"] == "comms1" and stub.channel("COMMS1")["code"] == a["code"], "one channel, any case"
+    assert stream_stub.resolved_channel("sim://Comms1") == ("comms1", 360)
+    assert stream_stub.resolved_channel(stream_stub.resolved_url("COMMS1", 360)) == ("comms1", 360)
+    assert stream_stub.channel_name("comms1\n") is None, "a trailing newline is not a name"
+    for bad in ("con", "NUL", "Prn", "aux", "com1", "COM9", "lpt1", "LpT9"):
+        assert stream_stub.channel_name(bad) is None, bad
+        assert stream_stub.resolved_channel("sim://" + bad) is None, bad
+    assert stream_stub.channel_name("com10") == "com10" and stream_stub.channel_name("console") == "console"
+    o, e = io.StringIO(), io.StringIO()
+    assert stream_stub.ytdlp_main(stub.directory, ["-g", "--", "sim://COMMS1"], o, e) == 0, e.getvalue()
+    assert stream_stub.resolved_channel(o.getvalue().strip()) == ("comms1", 360)
+
+
+def t_relative_ffmpeg_is_made_absolute():
+    d = tempfile.mkdtemp(prefix="stub1231-")
+    assert stream_stub.StreamStub(d, ffmpeg=[os.path.join("bin", "ffmpeg")]).ffmpeg[0] == os.path.abspath(
+        os.path.join("bin", "ffmpeg"))
+    assert stream_stub.StreamStub(d, ffmpeg=["ffmpeg"]).ffmpeg == ["ffmpeg"], "a bare name stays a PATH lookup"
+
+
+_RACE = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import stream_stub
+stub = stream_stub.StreamStub(sys.argv[2])
+for n in range(int(sys.argv[4])):
+    stub.channel(f"{sys.argv[3]}{n}")
+    stub.cut("shared")
+"""
+
+
+def t_two_controllers_share_a_directory():
+    stub = stream_stub.StreamStub(tempfile.mkdtemp(prefix="stub1231-")).install()
+    stub.channel("shared")
+    fakes = os.path.dirname(stream_stub.__file__)
+    procs = [subprocess.Popen([sys.executable, "-c", _RACE, fakes, stub.directory, prefix, "12"])
+             for prefix in ("a", "b")]
+    for p in procs:
+        assert p.wait(timeout=WAIT * 2) == 0
+    codes = [c["code"] for c in stub.channels().values()]
+    assert len(codes) == 25 and len(set(codes)) == 25, "every channel gets its own code"
+    assert len(stub.get("shared")["cuts"]) == 24, "no cut is lost to a concurrent write"
+
+
+def t_a_held_lock_blocks_and_a_stale_one_is_broken():
+    stub = stream_stub.StreamStub(tempfile.mkdtemp(prefix="stub1231-")).install()
+    done = threading.Event()
+
+    def create():
+        stub.channel("late")
+        done.set()
+    with stream_stub.state_lock(stub.directory):
+        t = threading.Thread(target=create, daemon=True)
+        t.start()
+        assert not done.wait(0.5), "a change waits for the lock"
+    assert done.wait(WAIT), "and goes ahead once it is free"
+    lock = os.path.join(stub.directory, "channels", ".lock")
+    open(lock, "w").close()
+    old = time.time() - stream_stub.LOCK_STALE - 5
+    os.utime(lock, (old, old))
+    stub.channel("after-crash")
+    assert not os.path.exists(lock), "a lock left by a crashed controller is broken"
 
 
 def t_windows_stand_in_is_a_launcher_with_a_zipped_main():
@@ -670,6 +874,24 @@ def t_windows_stand_in_is_a_launcher_with_a_zipped_main():
         b'#!"C:\\Program Files\\Python\\python.exe"\n', "a path with spaces is quoted like distlib does"
     assert simulation.stand_in_present(stub.directory, "yt-dlp", windows=True)
     assert simulation.stand_in_present(stub.directory, "streamlink", windows=True)
+
+
+def t_stand_in_runs_from_an_interpreter_path_with_spaces():
+    d = tempfile.mkdtemp(prefix="stub1231-")
+    spaced = os.path.join(d, "py with space")
+    home = os.path.dirname(sys.executable)
+    if os.name == "nt":   # a junction needs no admin rights, unlike a symlink
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", spaced, home], capture_output=True, text=True,
+                           errors="replace", timeout=WAIT)
+        if r.returncode != 0:
+            raise Skip(f"no junction: {r.stdout} {r.stderr}")
+    else:
+        os.symlink(home, spaced)
+    python = os.path.join(spaced, os.path.basename(sys.executable))
+    stub = stream_stub.StreamStub(os.path.join(d, "bin"), python=python).install()
+    exe = os.path.join(stub.directory, "yt-dlp" + (".exe" if os.name == "nt" else ""))
+    r = subprocess.run([exe, "--version"], capture_output=True, text=True, errors="replace", timeout=WAIT)
+    assert r.returncode == 0 and r.stdout.startswith("20"), (r.stdout, r.stderr)
 
 
 def t_installed_directory_passes_the_simulation_check():
@@ -707,7 +929,8 @@ def t_real_ffmpeg_pull_carries_the_identity():
                 pull.stderr.close()
             assert len(frame.stdout) == 640 * 360 * 3, (mode, frame.stderr, err)
             assert stream_stub.decode_identity(frame.stdout, 640, 360) == (code, 2), (mode, err)
-            assert "without text" not in err, "drawtext works with the CI ffmpeg: " + err
+            if os.environ.get("OBS_SIM_REQUIRE_FFMPEG"):   # the e2e job's ffmpeg has a default font
+                assert "without text" not in err, "drawtext works with the CI ffmpeg: " + err
     finally:
         restore()
 
@@ -739,17 +962,21 @@ def t_real_ffmpeg_seams_keep_time_and_counters_rising():
         restore()
     data = bytes(pull.data)
     assert len(data) % 188 == 0, "only whole packets are forwarded"
-    last_pts, last_cc = {}, {}
+    last_pts, last_cc, last_pcr = {}, {}, {}
     for p in stream_stub.parse_ts(data):
         if p.pid == 0x1FFF:
             continue
         if p.pts is not None:
             assert p.pts > last_pts.get(p.pid, -1), f"PTS of PID {p.pid} went back: {last_pts[p.pid]} -> {p.pts}"
             last_pts[p.pid] = p.pts
+        if p.pcr is not None:
+            assert p.pcr > last_pcr.get(p.pid, -1), f"PCR of PID {p.pid} went back"
+            last_pcr[p.pid] = p.pcr
         if p.payload and p.pid in last_cc:
             assert p.cc == (last_cc[p.pid] + 1) % 16, f"counter of PID {p.pid} jumped"
         last_cc[p.pid] = p.cc
     assert len(last_pts) >= 2, "video and audio carry PTS"
+    assert last_pcr, "the stream carries a PCR"
 
 
 if __name__ == "__main__":
