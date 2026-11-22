@@ -1,0 +1,77 @@
+# Engine smoke run with the built-in roles only: the relay comes up, a commentator's
+# stream link reaches the webhook and, once approved, the Sheet, the director's scene
+# switch reaches OBS, and the program shows stint 1's commentator.
+description = "Engine smoke run: submission and approval, scene switch, feed identity on program."
+timeout = "5m"
+
+[event]
+stints = 3
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+
+[[event.commentators]]
+name = "Comms 3"
+channel = "comms3"
+scheduled = true
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "program-start", role = "obs" }
+
+[[step]]
+id = "submit"
+at = "after:relay_up+1s"
+role = "api"
+do = "post"
+args = { path = "/cockpit/submit", as = "Comms 2", json = { url = "sim://comms2", stint = "Stint 2" } }
+expect = ["webhook.count('submission') == 1"]
+
+[[step]]
+id = "approve"
+role = "api"
+do = "post"
+args = { path = "/submissions/approve", json = { id = "${submit.id}" } }
+expect = ["sheet.write_count('schedule') == 1",
+          "sheet.schedule[1].url == 'sim://comms2'",
+          "webhook.count('stream link approved') == 1"]
+timeout = "15s"
+
+[[step]]
+id = "arm"
+role = "api"
+do = "get"
+args = { path = "/feed/A/activate" }
+
+[[step]]
+id = "on_air"
+role = "api"
+do = "post"
+args = { path = "/obs/scene", json = { scene = "Stint" } }
+expect = ["obs.scene == 'Stint'", "'comms1' in obs.program_channels"]
+timeout = "90s"
+shot = { name = "program-stint1", role = "obs" }
+
+[[step]]
+id = "panel"
+role = "page:director"
+do = "open"
+args = { path = "/panel" }
+shot = "director-panel"
+
+[[step]]
+id = "control_center"
+role = "page:producer"
+do = "open"
+args = { service = "ui", path = "/" }
+shot = "control-center"
