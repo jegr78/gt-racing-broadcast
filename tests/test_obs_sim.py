@@ -462,10 +462,10 @@ def t_a_feed_cover_hides_only_its_own_half():
         sim.stop()
 
 
-STUB = """import sys, time
+STUB = """import os, sys, time
 args = sys.argv[1:]
 data = sys.stdin.buffer.read(4)
-with open(args[0], "a") as fh:
+with open(args[0] + "." + str(os.getpid()), "w") as fh:  # one file per call: parallel appends lose lines
     fh.write(args[args.index("-i") + 1] + ":" + data.decode("ascii", "replace") + "\\n")
 mode = args[1]
 if mode.startswith("sleep"):
@@ -537,10 +537,12 @@ def _stub(tmp, mode):
 
 
 def _calls(path):
-    if not os.path.exists(path):
-        return []
-    with open(path, encoding="utf-8") as fh:
-        return fh.read().split()
+    import glob
+    out = []
+    for name in glob.glob(glob.escape(path) + ".*"):
+        with open(name, encoding="utf-8") as fh:
+            out += fh.read().split()
+    return out
 
 
 def _grabber(cmd, feeds, **kw):
@@ -601,7 +603,7 @@ def t_grabs_run_in_parallel_in_the_background_and_die_with_the_sim():
         assert _wait(lambda: not grab.procs, timeout=20)
         time.sleep(0.3)  # past the 0.2 s interval
         assert grab.frames([a])[a] and grab.feeds[a]["busy"] is not None, "the last frame at once while a new read runs"
-        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20), _calls(calls)
+        assert _wait(lambda: len(_calls(calls)) >= 3, timeout=20), ("the interval starts a third read", _calls(calls))
         assert _wait(lambda: grab.feeds[a]["busy"] is None, timeout=20) and grab.frames([a])[a], grab.feeds[a]
         assert _wait(lambda: not grab.procs, timeout=20)
     with tempfile.TemporaryDirectory() as tmp, Feeds(2) as feeds:
