@@ -58,7 +58,7 @@ def _stream_bin(tmp):
             p = os.path.join(d, tool)
             with open(p, "w") as fh:
                 fh.write("#!/bin/sh\nexit 1\n")
-            os.chmod(p, 0o755)
+            os.chmod(p, 0o700)
     return d
 
 

@@ -3,6 +3,7 @@
 Run: python3 tests/test_simulation.py"""
 import os, socket, sys, tempfile, threading, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -80,7 +81,7 @@ def _stream_bin():
         p = os.path.join(d, tool + (".exe" if os.name == "nt" else ""))
         with open(p, "w") as fh:
             fh.write("")
-        os.chmod(p, 0o755)
+        os.chmod(p, 0o700)
     return d
 
 
@@ -256,7 +257,7 @@ def t_resolve_config_hands_out_only_simulated_endpoints():
     import config
     root = _root()
     rc = config.resolve_config(root, environ={})
-    assert rc.discord_webhook_url.startswith("https://discord.com"), "fixture sanity"
+    assert urlparse(rc.discord_webhook_url).hostname == "discord.com", "fixture sanity"
     env = dict(ON, RACECAST_SIM_DISCORD_WEBHOOK_URL="http://127.0.0.1:7/hook")
     rc = config.resolve_config(root, environ=env)
     assert rc.discord_webhook_url == "http://127.0.0.1:7/hook"

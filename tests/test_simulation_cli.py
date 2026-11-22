@@ -211,7 +211,7 @@ def t_simulation_flag_and_gate():
     d = tempfile.mkdtemp()
     for tool in sim.STREAM_TOOLS:
         p = os.path.join(d, tool + (".exe" if os.name == "nt" else ""))
-        open(p, "w").close(); os.chmod(p, 0o755)
+        open(p, "w").close(); os.chmod(p, 0o700)
     ok = dict(SIM_ENV, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=d)
     assert m._simulation_gate(["event", "start"], dict(ok), "demo", {}) is None
     assert m._simulation_gate(["event", "start"], {}, "league", {}) is None, "off = no gate"
@@ -420,7 +420,7 @@ def _sim_ok_env():
     d = tempfile.mkdtemp()
     for tool in sim.STREAM_TOOLS:
         p = os.path.join(d, tool + (".exe" if os.name == "nt" else ""))
-        open(p, "w").close(); os.chmod(p, 0o755)
+        open(p, "w").close(); os.chmod(p, 0o700)
     return dict(SIM_ENV, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=d)
 
 
