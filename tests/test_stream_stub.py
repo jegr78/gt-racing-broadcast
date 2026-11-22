@@ -200,7 +200,9 @@ def t_every_streamlink_command_of_the_relay_parses():
 def t_an_unknown_flag_is_refused_like_argparse():
     for parse, argv in ((stream_stub.parse_ytdlp, ["--exec", "x", "--", "sim://c"]),
                         (stream_stub.parse_streamlink, ["--player", "vlc", "--", "sim://c", "best"]),
-                        (stream_stub.parse_streamlink, ["--stdout", "--", "sim://c", "best", "extra"])):
+                        (stream_stub.parse_streamlink, ["--stdout", "--", "sim://c", "best", "extra"]),
+                        (stream_stub.parse_streamlink, ["--stdout", "--bogus", "sim://c"]),
+                        (stream_stub.parse_ytdlp, ["--version", "--bogus"])):
         try:
             parse(argv)
         except stream_stub.Usage:
