@@ -983,7 +983,8 @@ def streamlink_main(directory, argv, out, err):
             stdout.write(chunk)
             stdout.flush()
         except OSError:
-            os.dup2(os.open(os.devnull, os.O_WRONLY), stdout.fileno())   # no flush error at exit
+            with open(os.devnull, "wb") as null:
+                os.dup2(null.fileno(), stdout.fileno())   # no flush error at exit
             raise
     return Pull(directory, name, height, ffmpeg, write, log, stream_timeout=timeout, channel=ch).run()
 
