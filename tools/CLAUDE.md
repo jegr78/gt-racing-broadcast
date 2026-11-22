@@ -387,8 +387,9 @@ every other address; they open no connection. `StreamStub(dir).install()` writes
 - `--player-external-http` behaves like streamlink's: one player at a time, each with a
   fresh pull, and after a stream ends or goes offline the server waits for the next player
   until it is killed. It binds `127.0.0.1` only, where the real tool binds every interface,
-  and never shares the port (no `SO_REUSEADDR`, `SO_EXCLUSIVEADDRUSE` on Windows), so a busy
-  port exits 1 at once, the relay's fast-exit case (#143).
+  and never shares the port with another listener (`SO_EXCLUSIVEADDRUSE` on Windows), so a
+  busy port exits 1 at once, the relay's fast-exit case (#143). `SO_REUSEADDR` on POSIX lets
+  a restart rebind a port a killed server left in TIME_WAIT.
 - `tests/test_stream_stub.py` feeds every yt-dlp and streamlink argv the relay,
   `loopstream`, racecast's smoke probes, `get-media` and both cookie exports build through
   the stand-ins' parsers, so a new flag in `src/` fails there.
@@ -410,8 +411,8 @@ Control for the scenario engine: each channel is `<dir>/channels/<name>.json`, w
 running pull reads every 0.2 s; an unreadable file keeps the last state, and a Windows
 sharing violation is retried briefly. Names are case-insensitive (stored in lower case),
 and the Windows device names `con`, `prn`, `aux`, `nul`, `com1`-`com9` and `lpt1`-`lpt9` are
-refused. Every change runs under an `O_EXCL` lock file (`channels/.lock`, broken after
-10 s), so several controllers may share a directory. Times are epoch seconds; `at` defaults
+refused. Every change runs under an `O_EXCL` lock file (`channels/.lock`; one older
+than 10 s is renamed aside and removed only if it is still the file seen stale), so several controllers may share a directory. Times are epoch seconds; `at` defaults
 to now, `until` to the next `clear`.
 
 - `channel(name, stint=, commentator=, status=)` creates or updates a channel, and a new

@@ -714,7 +714,7 @@ def t_direct_serve_binds_loopback_only_and_alone():
         if os.name == "nt":
             assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE) == 1
         else:
-            assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) == 0
+            assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) != 0, "a restart rebinds over TIME_WAIT"
     finally:
         sock.close()
     stub = _stub()
@@ -729,6 +729,33 @@ def t_direct_serve_binds_loopback_only_and_alone():
         assert r.returncode == 1 and "Failed to start HTTP server" in r.stderr, r.stderr
     finally:
         busy.close()
+        restore()
+
+
+def t_a_killed_server_rebinds_its_port_at_once():
+    stub = _stub()
+    stub.channel("comms1")
+    port = _free_port()
+    restore = _on_path(stub)
+    argv = relay.streamlink_serve_cmd("sim://comms1", port)
+    import socket
+    first = _Pull(None, argv)
+    player = None
+    try:
+        assert first.wait_err("Starting server"), first.err.text()
+        player = socket.create_connection(("127.0.0.1", port), timeout=WAIT)
+        player.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        assert player.recv(4096), "the player is served"
+    finally:
+        first.close()   # the server side closes first, so its port sits in TIME_WAIT
+        if player is not None:
+            player.close()
+    second = _Pull(None, argv)
+    try:
+        assert second.wait_err("Starting server"), second.err.text()
+        assert second.proc.poll() is None and b"PLAY" in _get(port), "the restart serves on the same port"
+    finally:
+        second.close()
         restore()
 
 
@@ -756,7 +783,8 @@ def t_reinstall_over_a_running_pull():
     try:
         assert pull.wait_bytes(b"PLAY"), pull.err.text()
         stub.install()
-        shutil.rmtree(os.path.join(stub.directory, "pulls"))
+        if os.name != "nt":   # Windows cannot remove a running ffmpeg's working directory
+            shutil.rmtree(os.path.join(stub.directory, "pulls"))
         mark = len(pull.data)
         stub.freeze("comms1")
         assert pull.wait_bytes(b"FREEZE", mark), pull.err.text()
@@ -864,6 +892,18 @@ def t_a_held_lock_blocks_and_a_stale_one_is_broken():
     os.utime(lock, (old, old))
     stub.channel("after-crash")
     assert not os.path.exists(lock), "a lock left by a crashed controller is broken"
+    open(lock, "w").close()
+    os.utime(lock, (old, old))
+    seen = os.stat(lock)
+    os.remove(lock)
+    with open(lock, "w") as fh:
+        fh.write("fresh")   # another controller broke it and took the lock meanwhile
+    assert stream_stub._break_stale(lock, seen) is False, "only the lock that was seen stale is broken"
+    with open(lock) as fh:
+        assert fh.read() == "fresh", "the fresh lock stays in place"
+    os.utime(lock, (old, old))
+    assert stream_stub._break_stale(lock, os.stat(lock)) is True and not os.path.exists(lock)
+    assert not glob.glob(lock + ".*"), "nothing is left aside"
 
 
 def t_windows_stand_in_is_a_launcher_with_a_zipped_main():

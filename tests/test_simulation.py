@@ -543,15 +543,58 @@ def t_every_stream_tool_call_uses_the_stand_in_path():
     assert not bare, f"started by bare name in simulation: {bare}"
 
 
+_LAUNCHERS = {"Popen", "run", "call", "check_call", "check_output", "_smoke_capture"}
+
+
+def bare_stream_tool_argvs(source):
+    """Line numbers where `source` starts yt-dlp/streamlink by bare name: a list or tuple
+    whose first element is the name and which carries a flag (or is a list), or a launcher
+    call whose first argument is a string naming the tool."""
+    import ast
+
+    def names_tool(node):
+        return (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and node.value.split(" ", 1)[0] in sim.STREAM_TOOLS)
+
+    def is_flag(node):
+        return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith("-")
+    hits = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.List, ast.Tuple)) and node.elts and names_tool(node.elts[0]):
+            rest = node.elts[1:]
+            names_only = bool(rest) and all(names_tool(e) for e in rest)
+            if (isinstance(node, ast.List) and not names_only) or any(is_flag(e) for e in rest):
+                hits.append(node.lineno)
+        elif isinstance(node, ast.Call):
+            func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if func in _LAUNCHERS and node.args and names_tool(node.args[0]):
+                hits.append(node.lineno)
+    return sorted(hits)
+
+
+def t_bare_stream_tool_scan_catches_every_form():
+    src = """
+import subprocess
+a = ["yt-dlp",
+     "-g", url]
+b = ("streamlink", "--stdout", url)
+c = ["streamlink"] + args
+subprocess.run("yt-dlp --version", shell=True)
+subprocess.Popen("streamlink")
+ok1 = ("yt-dlp", "streamlink")
+ok2 = (("yt-dlp", ["--version"]), ("streamlink", ["--version"]))
+ok3 = [tool("yt-dlp"), "-g"]
+"""
+    assert bare_stream_tool_argvs(src) == [3, 5, 6, 7, 8], bare_stream_tool_argvs(src)
+
+
 def t_no_bare_stream_tool_argv_in_src():
-    import re
-    pattern = re.compile(r"""\[\s*["'](yt-dlp|streamlink)["']""")
     hits = []
     for base, _dirs, files in os.walk(os.path.join(ROOT, "src")):
         for f in files:
             if f.endswith(".py"):
                 with open(os.path.join(base, f), encoding="utf-8") as fh:
-                    hits += [f"{f}:{n}" for n, line in enumerate(fh, 1) if pattern.search(line)]
+                    hits += [f"{f}:{n}" for n in bare_stream_tool_argvs(fh.read())]
     assert not hits, f"build the argv with simulation.tool(...): {hits}"
 
 

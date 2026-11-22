@@ -170,8 +170,8 @@ def state_lock(directory, wait=LOCK_WAIT, stale=LOCK_STALE):
             break
         except FileExistsError:
             with contextlib.suppress(OSError):
-                if time.time() - os.path.getmtime(lock) > stale:
-                    os.remove(lock)
+                seen = os.stat(lock)
+                if time.time() - seen.st_mtime > stale and _break_stale(lock, seen):
                     continue
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"channel state lock {lock} is held") from None
@@ -181,6 +181,25 @@ def state_lock(directory, wait=LOCK_WAIT, stale=LOCK_STALE):
     finally:
         with contextlib.suppress(OSError):
             os.remove(lock)
+
+
+def _break_stale(lock, seen):
+    """Remove `lock` only if it is still the file `seen` (by stat). It is renamed aside
+    first, which one breaker alone can do; a fresh lock taken meanwhile is put back."""
+    aside = f"{lock}.{os.getpid()}.{threading.get_ident()}.stale"
+    try:
+        os.rename(lock, aside)
+    except OSError:
+        return False
+    took = os.stat(aside)
+    if (took.st_ino, took.st_mtime_ns, took.st_size) == (seen.st_ino, seen.st_mtime_ns, seen.st_size):
+        os.remove(aside)
+        return True
+    with contextlib.suppress(OSError):
+        os.link(aside, lock)          # fails if yet another lock exists: that one holds it
+    with contextlib.suppress(OSError):
+        os.remove(aside)
+    return False
 
 
 def pid_alive(pid):
@@ -836,12 +855,16 @@ def ytdlp_main(directory, argv, out, err):
 
 
 def listen(port):
-    """A socket listening on 127.0.0.1:port that no other process can share, so a busy port
-    fails at once as with the real tool. Windows needs SO_EXCLUSIVEADDRUSE for that."""
+    """A socket listening on 127.0.0.1:port. A port another listener holds fails at once, as
+    with the real tool; a port left in TIME_WAIT by a killed server rebinds (SO_REUSEADDR on
+    POSIX, where it never lets two listeners share a port; SO_EXCLUSIVEADDRUSE on Windows,
+    where SO_REUSEADDR would)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         if os.name == "nt":
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("127.0.0.1", port))
         sock.listen(1)
     except OSError:
