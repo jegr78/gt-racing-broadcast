@@ -872,6 +872,69 @@ def t_a_short_window_scrolls_the_live_column_and_hide_lasts_one_session():
         "a hidden preview never survives into the next event's first load"
 
 
+def _desk_page():
+    """race-control.html as the relay serves it at the tailnet root."""
+    page = _src("racecontrol", "race-control.html")
+    for token, value in (("__RC_API_BASE__", ""), ("__RC_VERSION__", "dev"),
+                         ("<!--__CREW_FRAME__-->", _src("console", "crew-frame.html")),
+                         ("<!--__EVENT_INFO__-->", _src("console", "event-info.html"))):
+        page = page.replace(token, value)
+    return page
+
+
+def t_a_parts_status_line_stays_in_view_while_its_area_scrolls():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; the desk's status line is measured with visual acceptance)")
+        return
+    requests = {"requests": [{"conn": f"c{i}", "status": "pending", "ts": i, "name": f"Driver {i}",
+                              "entry": "Team A", "segment": "Stint 1"} for i in range(14)]}
+
+    def serve(route):
+        path = route.request.url.split("://", 1)[1].split("/", 1)[1].split("?", 1)[0]
+        if path == "rc":
+            return route.fulfill(body=_desk_page(), content_type="text/html")
+        if path == "driver-desk.js":
+            return route.fulfill(body=_src("console", "driver-desk.js"), content_type="application/javascript")
+        if path == "race-control/drivers/requests":
+            return route.fulfill(body=json.dumps(requests), content_type="application/json")
+        if path == "race-control/drivers/readiness":
+            return route.fulfill(body='{"rows": []}', content_type="application/json")
+        if route.request.method == "POST":
+            return route.fulfill(status=400, body=json.dumps({"error": "refused by the test"}),
+                                 content_type="application/json")
+        return route.fulfill(body="{}", content_type="application/json")
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return
+        try:
+            tab = browser.new_page(viewport={"width": 1440, "height": 900})
+            tab.route("http://desk.test/**", serve)
+            tab.goto("http://desk.test/rc")
+            tab.click('.navbtn[data-area="drivers"]')
+            reject = tab.locator('.dd-drivers button[data-label="Reject all waiting"]')
+            reject.click()
+            reject.click()
+            line = tab.locator('.dd-drivers .msg.cur[role="status"]')
+            line.wait_for()
+            tab.evaluate("document.getElementById('workspace').scrollTop = 600")
+            tab.wait_for_timeout(200)
+            got = tab.evaluate("""() => {
+              const w = document.getElementById('workspace'), m = document.querySelector('.dd-drivers .msg.cur');
+              return {scrolled: w.scrollTop, line: m.getBoundingClientRect().top, top: w.getBoundingClientRect().top,
+                      text: m.textContent};
+            }""")
+        finally:
+            browser.close()
+    assert got["scrolled"] > 300 and got["text"] == "refused by the test", got
+    assert got["top"] <= got["line"] <= got["top"] + 80, \
+        f"the answer stays at the top of the scrolled area, not {got['line'] - got['top']} px away: {got}"
+
+
 def t_qualifying_preselects_its_area_on_a_switch_only():
     path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
     got = _js_fn(path, "followMode", """(function () {
@@ -882,11 +945,18 @@ def t_qualifying_preselects_its_area_on_a_switch_only():
         followMode(m);
       });
       return {shown: shown, area: deskArea};
-    })()""", prelude="var lastMode = null, deskArea = 'race', shown = [], typing = false;"
+    })()""", prelude="var lastMode = null, deskArea = 'race', shown = [], typing = false, storedArea = true;"
                      "function editing() { return typing; }"
                      "function showArea(n) { shown.push(n); deskArea = n; }\n")
     if got is None:
         return
+    first = [_js_fn(path, "followMode", "(function () { followMode('qualifying'); return shown; })()",
+                    prelude=f"var lastMode = null, deskArea = 'race', shown = [], storedArea = {stored};"
+                            "function editing() { return false; }"
+                            "function showArea(n) { shown.push(n); deskArea = n; }\n")
+             for stored in ("false", "true")]
+    assert first == [["qualifying"], []], \
+        f"a first load in qualifying opens Qualifying unless the browser kept an area: {first}"
     assert got == {"shown": ["qualifying", "race", "qualifying"], "area": "qualifying"}, \
         "the first poll keeps the stored area, typing holds the switch, back to Race only from " \
         f"Qualifying: {got}"
@@ -909,6 +979,23 @@ def t_a_failed_poll_keeps_the_last_known_mode():
         f"a 502 between two polls neither reads as race mode nor clears the waiting count: {got}"
     js = _src("console", "driver-desk.js")
     assert "seen = remember(seen, r, rec, rq);" in js and "deskState(seen.race, seen.rec, seen.reqs" in js
+
+
+def t_the_page_hears_of_the_desk_only_after_a_good_answer():
+    got = _desk_fn("requestRows,remember,deskState,deskReport", """(function () {
+      var seen = {race: null, rec: null, reqs: null}, out = [];
+      [null, {mode: "qualifying"}].forEach(function (race) {
+        seen = remember(seen, race, null, null);
+        var st = deskReport(seen, !race);
+        out.push(st && st.mode);
+      });
+      return out;
+    })()""")
+    if got is None:
+        return
+    assert got == [None, "qualifying"], \
+        f"a failed first poll reports nothing, so the first good one counts as the first: {got}"
+    assert "var report = deskReport(seen, staleNote.hidden === false);" in _src("console", "driver-desk.js")
 
 
 def t_an_answer_shows_in_the_part_it_was_asked_from():

@@ -1011,17 +1011,20 @@ function recall(){ return stored; }
 function setNav(a, level, why){ nav.push([level, why]); }
 function deskDot(){}
 function deskEditing(){ return typing; }
-var DESK_SUB_KEY = "k", deskMode = null;
+var DESK_SUB_KEY = "k", deskMode = null, deskSubStored = true;
 """ + _func_src(h, "deskState") + """
 }
 const st = (mode, extra) => Object.assign({waiting: 0, events: 0, mode: mode, red: false, dashboard: false}, extra);
+deskSubStored = false; deskState(st("qualifying")); const fresh = shown.splice(0);
+deskMode = null; deskSubStored = true; stored = null;
 deskState(st("qualifying")); deskState(st("race")); deskState(st("qualifying"));
 deskState(st("qualifying", {waiting: 2})); typing = true; deskState(st("race")); typing = false;
 deskState(st("qualifying", {red: true})); stored = "corrections"; deskState(st("race"));
-console.log(JSON.stringify({shown, nav}));""")
+console.log(JSON.stringify({shown, nav: nav.slice(1), fresh}));""")
     if out is None:
         return
     got = json.loads(out)
+    assert got["fresh"] == ["qualifying"], f"a first load in qualifying without a kept tab opens Qualifying: {got}"
     assert got["shown"] == ["qualifying", "qualifying"], \
         "the first poll keeps the stored tab, typing holds the switch, back to Race only from Qualifying: " \
         f"{got['shown']}"

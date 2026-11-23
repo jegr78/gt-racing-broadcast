@@ -358,6 +358,12 @@
             gaps: !!(rec && ((rec.dropped || 0) + (rec.failed || 0))), stale: !!stale};
   }
 
+  // What onState gets: nothing until the race answered once, so a failed first poll never
+  // reads as race mode.
+  function deskReport(seen, stale) {
+    return seen.race ? deskState(seen.race, seen.rec, seen.reqs, stale) : null;
+  }
+
   function mount(root, opts) {
     var base = (opts && opts.base) || "";
     var fullRedFlag = !!(opts && opts.fullRedFlag);
@@ -1186,7 +1192,8 @@
       var rq = await reqCall;
       if (rq) renderRequests(rq);
       seen = remember(seen, r, rec, rq);
-      if (onState) onState(deskState(seen.race, seen.rec, seen.reqs, staleNote.hidden === false));
+      var report = deskReport(seen, staleNote.hidden === false);
+      if (onState && report) onState(report);
     }
     async function refreshInvite() {
       var d = await call("/drivers/invite", undefined, true);

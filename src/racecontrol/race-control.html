@@ -105,7 +105,7 @@
       top: 9px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
     .crewtabs button.dot-alarm::after { background: var(--alarm); }
   }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: clip; }   /* clip, not hidden: a sticky status line needs the area as its scroll box */
   /* On-air banner, modelled on the cockpit tally. This is a global monitoring view
      rather than an identity-scoped one, so it always names who is on air. */
   .tally { margin: 0; padding: 10px 12px; text-align: center; font-weight: 800; font-size: 20px;
@@ -456,18 +456,18 @@ function deskDots(st) {
   setDot('trouble', st.stale ? 'alarm' : st.gaps ? 'warn' : 'ok',
          st.stale ? 'relay not answering' : st.gaps ? 'recording gaps' : 'no issues');
 }
-// A switch to qualifying opens its area, never on the first poll and never while someone
-// types or a dialog is open; the Qualifying dot marks the session either way.
+// Qualifying opens its area on a switch, and on the first poll when the browser kept no area;
+// never while someone types or a dialog is open. The Qualifying dot marks the session either way.
 function editing() {
   const a = document.activeElement;
   return !!(a && a.matches && a.matches('input, select, textarea')) || !!document.querySelector('dialog[open]');
 }
-let lastMode = null;
+let lastMode = null, storedArea = false;
 function followMode(mode) {
   if (mode === lastMode) return;
   const first = lastMode === null;
   lastMode = mode;
-  if (first || editing()) return;
+  if (editing() || (first && (storedArea || mode !== 'qualifying'))) return;
   if (mode === 'qualifying') showArea('qualifying');
   else if (deskArea === 'qualifying') showArea('race');
 }
@@ -857,7 +857,8 @@ pgmAudioInit("/cockpit/program-audio");
     if (tab && tab.offsetParent) tab.scrollIntoView({block: 'nearest', inline: 'nearest'});
   };
   try { saved = localStorage.getItem('crewTab:' + location.pathname); } catch (e) { /* private mode */ }
-  applyArea(DESK_AREAS.includes(saved) ? saved : deskArea);
+  storedArea = DESK_AREAS.includes(saved);
+  applyArea(storedArea ? saved : deskArea);
 })();
 /* Driver telemetry controls (#1114), shared with the Director Panel; RED FLAG here is
    the full one: banner, Standby Cover and the race's red flag mode. */

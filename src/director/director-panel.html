@@ -4115,13 +4115,14 @@ function showDeskSub(name){
   store(DESK_SUB_KEY, name);
 }
 document.querySelectorAll("#deskTabs button").forEach(b => b.addEventListener("click", () => showDeskSub(b.dataset.sub)));
+var deskSubStored = DESK_SUBS.includes(recall(DESK_SUB_KEY));
 showDeskSub(recall(DESK_SUB_KEY));
 function deskDot(sub, level){
   const b = document.querySelector(`#deskTabs button[data-sub="${sub}"] .ndot`);
   if (b) b.className = "ndot" + (level ? " " + level : "");
 }
-// A switch to qualifying opens its tab, never on the first poll and never while someone types
-// or a dialog is open; the tab's dot marks the session either way.
+// Qualifying opens its tab on a switch, and on the first poll when the browser kept no tab; never
+// while someone types or a dialog is open. The tab's dot marks the session either way.
 var deskMode = null;
 function deskEditing(){
   const a = document.activeElement;
@@ -4137,7 +4138,7 @@ function deskState(st){
   if (st.mode !== deskMode){
     const first = deskMode === null;
     deskMode = st.mode;
-    if (first || deskEditing()) return;
+    if (deskEditing() || (first && (deskSubStored || st.mode !== "qualifying"))) return;
     if (st.mode === "qualifying") showDeskSub("qualifying");
     else if (recall(DESK_SUB_KEY) === "qualifying") showDeskSub("race");
   }
