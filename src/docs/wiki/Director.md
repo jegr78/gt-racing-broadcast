@@ -42,14 +42,18 @@ for setup and refresh behavior.
 
 The page is a fixed frame of four columns, so nothing you need on air scrolls away:
 
-- **Navigation** (left): the topic areas. **On air**: Handover, Graphics, HUD, Cues,
-  Audio. **Operations**: Broadcast, Schedule, Setup, Troubleshoot. Each entry carries a
+- **Navigation** (left): the topic areas. **On air**: Handover, Graphics, HUD,
+  Intermission, Cues, Audio. **Operations**: Race, Broadcast, Schedule, Setup,
+  Troubleshoot. Each entry carries a
   status dot and a one-line reason, e.g. `stint 4 ready`, `Feed B down`, `stream live`.
   The order is not a procedure; open whichever area you need. The panel remembers the
   last area per browser.
-- **Live column**: the program preview with the feed tiles, what is on air, the PGM
-  scene keys, the transition, and the handover keys **ARM** and **NEXT**. Graphic
-  requests from the crew appear here too, under what is on air (see below).
+- **Live column**: the program preview with the feed tiles, what is on air, the handover
+  keys **ARM** and **NEXT** side by side, the PGM scene keys, the overlays and the
+  transition. Graphic requests from the crew appear here too, under what is on air (see
+  below). At 1440x900 every key row fits without scrolling: when the column runs short,
+  for example while the header pills take a second row, the program tile shrinks, down
+  to half its width.
 - **Workspace** (middle): the area you picked. Above it a "next step" line names the
   next handover step from the relay's state: a missing or submitted link for the next
   stint first, then ARM, then the cut. Only the next stint's missing link turns the
@@ -66,7 +70,7 @@ on a wide screen. Below 1280 px the chats move into a drawer opened by the **Cha
 button in the header, which also counts unread crew messages. Below 900 px (a phone)
 the page becomes one column: live column, navigation, area, chats.
 
-![The director panel: navigation on the left, the live column with program preview, a crew graphic request, ARM, NEXT and scene keys, the Handover area in the middle, and the crew and broadcast chats on the right](images/director-panel.png)
+![The director panel: navigation on the left, the live column with program preview, ARM and NEXT, scene, overlay and transition keys, the Handover area in the middle, and the crew and broadcast chats on the right](images/director-panel.png)
 
 Where each bus lives:
 
@@ -301,17 +305,22 @@ pick the right layout here. The producer usually sets it before the event (see
 
 ### Driver telemetry
 
-The **Setup** area's **Driver telemetry** section holds the race from the drivers' own
-telemetry ([driver guide](Driver-Telemetry)), with the same controls as the Race Control
-desk:
+The **Race** area holds the race from the drivers' own telemetry
+([driver guide](Driver-Telemetry)), with the same controls as the Race Control desk. On
+top sit the race controls (finish mode, lap count, **Final lap**, **Finish**, the red
+flag hold); below them tabs split the rest the way the desk's areas do: **Race**,
+**Drivers**, **Corrections**, **Qualifying**, **Dashboard** and **Links** (invite and
+timing links, race recording). A dot marks waiting requests, an open disconnect or the
+running qualifying, and qualifying opens its tab by itself once per switch. The
+connection line sits under **Troubleshoot**. In short:
 
 - the invite link with **Copy** (on the public Funnel address while Funnel serves the
   console, even when you opened the panel over the tailnet), and who made the last
   change and when
 - **Driver requests**, where each registration waits until you or Race Control approve
   it, with name, entry and stint to correct first. **Reject** revokes its code, and
-  **Reject all waiting** clears every waiting request at once. The approved drivers fold
-  away under **Approved drivers** with **Correct** and **Reject**. See
+  **Reject all waiting** clears every waiting request at once. The approved drivers are
+  listed under **Approved drivers** with **Correct** and **Reject**. See
   [approving drivers](Driver-Telemetry#approving-drivers).
 - the finish mode and lap count, **Final lap** and **Finish**
 - **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
@@ -342,7 +351,7 @@ desk:
 Buttons that change the race for everyone (Final lap, Finish, the red flag, a change,
 a disconnect, a rejection) ask for a second press within four seconds.
 
-![Director Panel: driver telemetry section](images/director-panel-drivers.png)
+![Director Panel: the Race area with the race controls, the desk tabs and the race order](images/director-panel-drivers.png)
 
 ### Warning banners
 

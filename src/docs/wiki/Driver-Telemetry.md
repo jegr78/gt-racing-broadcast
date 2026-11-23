@@ -123,8 +123,8 @@ quiet the sender keeps its place with a short message every five seconds.
 ### Approving drivers
 
 This part is for Race Control and the director. Every registration lands as a request
-under **Driver requests** at the top of the Driver telemetry card, on the Race Control
-desk and in the Director Panel alike. A request shows only what the driver typed and
+under **Driver requests**, in the Race Control desk's **Drivers** area and on the
+Director Panel's **Race** area **Drivers** tab alike. A request shows only what the driver typed and
 when: name, entry and stint. It shows no telemetry, so match it by eye against the car
 in the GT7 lobby.
 
@@ -442,7 +442,7 @@ It never carries connection ids, corrections or who made them.
   page measures on every update; a new layout applies once **Apply in OBS** reloads it.
 - **On air only when switched on.** The page stays empty until the race settings say
   `visible`; a new install starts off air. The director puts it on air with **Show
-  dashboard** in the panel's Driver telemetry section; Race Control cannot, because it
+  dashboard** in the panel's **Race** area (Dashboard tab); Race Control cannot, because it
   is a program change.
 - **Tyre compound**: GT7 sends none, so Race Control and the director set it per entry
   in the desks' **Tyres** section: Racing Soft `RS` (red), Racing Medium `RM` (yellow),

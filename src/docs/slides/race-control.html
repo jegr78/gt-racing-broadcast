@@ -38,9 +38,9 @@ Note: The desk is more than a monitoring page. You can raise the full red flag. 
 
 ![Race Control desk](assets/img/console-race-control.png)
 
-Program preview, schedule with **ON AIR** and **NEXT**, race timer, crew chat, note to commentator, track layout and the **Driver telemetry** card.
+**Areas** (Race, Drivers, Corrections, Qualifying, Dashboard, Graphics, Note, Setup, Troubleshoot) · **live column** with preview, on air and the race controls · the selected area · **chats**.
 
-Note: This is the desk. It shows the program preview, the schedule with the stint on air and the stint loaded next, the race timer and the crew chat. Next to them sit the note to commentator, the track layout card and the driver telemetry card. The schedule is redacted, so stream links never leave the tailnet.
+Note: This is the desk. It is a fixed frame of four columns, like the Director Panel. On the left, the areas: Race, Drivers, Corrections, Qualifying, Dashboard, Graphics, Note, Setup and Troubleshoot. A dot marks an area that needs you, for example three drivers waiting. Next to it, the live column always shows a small program preview, what is on air, and the race controls: the finish mode, Final lap, Finish and the RED FLAG. The middle shows the area you picked, and on the right sit the crew chat and the broadcast chat. The schedule under Graphics is redacted, so stream links never leave the tailnet.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -53,7 +53,7 @@ Note: This is the desk. It shows the program preview, the schedule with the stin
 
 [Driver telemetry: approving drivers](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#approving-drivers)
 
-Note: Every driver who registers on the invite link lands as a request under Driver requests, at the top of the driver telemetry card. The request shows only what the driver typed, the name, the team and the stint. It shows no telemetry, so you match it by eye with the car you see in the G T 7 lobby. Fix a typo or a wrong team in its fields, then press Approve. Reject revokes the driver's code, and it takes a second press. If the invite link leaked and strangers register, Reject all waiting clears every waiting request at once. Approved drivers fold away under Approved drivers, where Correct changes the name, the team or the stint later. Until you approve a driver, the relay uses nothing of that driver's telemetry. It reaches no race order, no recording and no dashboard. The relay logs every decision with your name and the time.
+Note: Every driver who registers on the invite link lands as a request under Driver requests, in the Drivers area. The request shows only what the driver typed, the name, the team and the stint. It shows no telemetry, so you match it by eye with the car you see in the G T 7 lobby. Fix a typo or a wrong team in its fields, then press Approve. Reject revokes the driver's code, and it takes a second press. If the invite link leaked and strangers register, Reject all waiting clears every waiting request at once. Approved drivers fold away under Approved drivers, where Correct changes the name, the team or the stint later. Until you approve a driver, the relay uses nothing of that driver's telemetry. It reaches no race order, no recording and no dashboard. The relay logs every decision with your name and the time.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -145,7 +145,7 @@ The league sets `GRAPHICS_TAKE`. The director can change it per role during the 
 
 [Console: graphics](https://github.com/jegr78/gt-racing-broadcast/wiki/Console#graphics)
 
-Note: Whether you may put graphics on air is a league setting called graphics take, and the director can change it per role during the event. In direct mode each graphic gets Put on air and Take off air, and a new crew graphic replaces the previous one. In request mode you ask the director, who takes or declines it, and a request expires after sixty seconds. Graphics the director put on air are never touched. Flag graphics, such as green, yellow, safety car or chequered, sit in the Act tab and belong to Race Control alone. They go on air directly, also in request mode, and only one shows at a time. Every take posts a line in the crew chat.
+Note: Whether you may put graphics on air is a league setting called graphics take, and the director can change it per role during the event. In direct mode each graphic gets Put on air and Take off air, and a new crew graphic replaces the previous one. In request mode you ask the director, who takes or declines it, and a request expires after sixty seconds. Graphics the director put on air are never touched. Flag graphics, such as green, yellow, safety car or chequered, sit in the Graphics area and belong to Race Control alone. They go on air directly, also in request mode, and only one shows at a time. Every take posts a line in the crew chat.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -161,14 +161,14 @@ Note: The note to commentator sends a short heads-up to one commentator. Pick th
 ## On a phone
 At 820 px wide or less, a tab bar shows one part of the desk at a time:
 
-- **Act**: note to commentator, flag graphic, track layout, driver telemetry.
-- **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule**.
+- **Live**: program and race controls.
+- One tab per area: **Race**, **Drivers**, **Fix**, **Quali**, **Tyres**, **Gfx**, **Note**, **Setup**, **!**, and **Chat**.
 
 The on-air banner, the race timer and a critical cue stay pinned at the top.
 
 [Console: on a phone](https://github.com/jegr78/gt-racing-broadcast/wiki/Console#on-a-phone)
 
-Note: On a phone the desk switches to tabs at the bottom. Act holds the note to commentator, the flag graphic, the track layout and the driver telemetry. The other tabs are Graphics, Chat with the crew and broadcast chat, Program and Schedule. The on-air banner, the race timer and a critical cue stay at the top while you scroll, and the page remembers the last tab.
+Note: On a phone the desk switches to tabs at the bottom. Live holds the program and the race controls. Then each area has its own tab, and the last one is Chat with the crew and broadcast chat. The bar scrolls sideways. The on-air banner, the race timer and a critical cue stay at the top while you scroll, and the page remembers the last tab.
 </script></section>
 
 <section data-markdown><script type="text/template">

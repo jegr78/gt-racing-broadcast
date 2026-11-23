@@ -68,14 +68,32 @@ editor); the role string is `race_control`. The schedule it shows is **redacted*
 URLs never leave the tailnet, the same boundary as the producer-takeover status, so the
 desk is safe over the public Funnel.
 
-![Race Control desk: note to commentator, track layout, driver telemetry with RED FLAG and the race order, program preview, redacted schedule, race timer and crew chat](images/console-race-control.png)
+The desk is a fixed frame of four columns, like the [Director Panel](Director#the-director-panel),
+so the race controls never scroll away:
+
+- **Areas** (left): **Race** (race order, gaps and disconnect events), **Drivers**
+  (requests with Approve and Reject, approved drivers, readiness, senders with Move and
+  Disconnect), **Corrections** (DNF and Undo DNF, rejoin and driver change, estimates,
+  corrections, driver names, fastest lap), **Qualifying** (Set time, Add lap, Delete
+  time), **Dashboard** (delay and tyres), **Graphics** (flag graphic, graphics,
+  schedule), **Note** (note to commentator), **Setup** (track layout, invite and timing
+  links, race recording, race timer) and **Troubleshoot** (the relay connection). A dot
+  marks an area that needs attention, e.g. `3 waiting` on Drivers or an open disconnect
+  on Race. In qualifying the desk opens **Qualifying** by itself, once per switch.
+- **Live column**: a small program preview with **Hide** (hidden, the race controls move
+  up), what is on air, and the race controls: the finish mode and lap count, **Final
+  lap**, **Finish**, **RED FLAG**, and while the red flag is out the restart mode and
+  **Restart released**. The desk's status line and its last change sit below them.
+- **Selected area** (middle) and the **chats** (right): crew chat above the broadcast chat.
+
+![Race Control desk: area navigation, the live column with program preview, on-air line and race controls, the race order in the Race area, and the crew and broadcast chats](images/console-race-control.png)
 
 The schedule marks the stint on air with **ON AIR** and the stint already loaded on the
 other feed with **NEXT**, each with its feed letter. The **Track layout** card shows the
 event's GT7 layout and lets Race Control change it, for example when the card reports that
 the first complete lap matched another layout (see [Telemetry](Telemetry)).
 
-The **Driver telemetry** card has the same controls as the Director Panel's section
+The driver telemetry controls are the same as in the Director Panel's **Race** area
 ([Director](Director#driver-telemetry)), except the dashboard's on-air switch: putting it
 on air stays with the director. Its `RED FLAG` is the full one: it raises the
 Standby Cover, sets the HUD banner *Red Flag - Race Suspended* and holds the race, and
@@ -83,14 +101,14 @@ it says when the cover or the banner could not be set. **Restart released** lowe
 cover when this desk raised it and puts back the banner its RED FLAG replaced (empty if
 there was none); a cover or banner the director raised stays until the director lowers it. Every action is logged with the person's name.
 
-On top of the card, **Driver requests** lists the drivers who registered on the invite
+The **Drivers** area's **Driver requests** lists the drivers who registered on the invite
 link and wait for approval. Compare each with the car in the GT7 lobby, correct the
 name, team or stint if needed and press **Approve**, or **Reject** it. The relay uses no
 telemetry of a driver before the approval. Details are in
 [Driver telemetry](Driver-Telemetry#approving-drivers).
 
-The card also holds the **race recording** and its disconnect events: start and stop
-recording, a CSV download, the event list with **Confirm DC** and **Dismiss**, and **Show
+**Setup** holds the **race recording** (start and stop, a CSV download) and **Race** its
+disconnect events: the event list with **Confirm DC** and **Dismiss**, and **Show
 standings** with a choice of 5 to 30 seconds before the last packet, which opens the frozen
 standings page. Race Control and the director can use all of it. Details:
 [Driver telemetry](Driver-Telemetry#race-recording-and-disconnect-events).
@@ -104,10 +122,10 @@ the top while you scroll. A tab bar at the bottom shows one part of the page at 
 | Page | Tabs |
 |---|---|
 | Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (timing, stint plan, stream-link submission) |
-| Race Control | **Act** (note to commentator, flag graphic, track layout, driver telemetry), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
+| Race Control | **Live** (program, race controls), then one tab per area: **Race**, **Drivers**, **Fix** (Corrections), **Quali**, **Tyres** (Dashboard), **Gfx**, **Note**, **Setup**, **!** (Troubleshoot), and **Chat** (crew and broadcast). The bar scrolls sideways and carries the areas' attention dots |
 
-The page remembers the last tab. On a wider screen both pages keep their multi-column
-layout.
+The page remembers the last tab; on the desk the tab and the area are one choice. On a
+wider screen both pages keep their multi-column layout.
 
 ### Graphics
 
@@ -126,7 +144,7 @@ value when the relay restarts. With `GRAPHICS_TAKE=direct`:
 - A graphic can only go on air while its scene is on air, so a Stint graphic is locked
   during the Splitscreen and the tile says why.
 - Race Control alone sets the **flag graphic** (Green, Yellow, Red, Safety Car, Virtual
-  Safety Car, Checkered) in the **Act** tab. The tab offers only the flags whose
+  Safety Car, Checkered) in the **Graphics** area. The area offers only the flags whose
   `Flag …` row is linked in the Sheet **Assets** tab. One flag is shown at a time.
 - Every take posts a line in the crew chat, for example "RC 2 put Flag Yellow on air".
 
