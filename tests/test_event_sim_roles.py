@@ -1507,6 +1507,19 @@ def t_fit_fails_when_a_live_control_needs_scrolling():
         fails(lambda role=role: role.do("fit", {}), f"1 of {len(need) + 2} live controls need scrolling: CUT 2 37px")
 
 
+def t_fit_lets_the_layout_settle_before_it_fails():
+    role, page, _ = make(party.DirectorRole)
+    need = list(party.DirectorRole.live_required)
+    calls = []
+
+    def later(size):
+        calls.append(size)
+        return _controls(need, cut=22 if len(calls) < 3 else 0)
+    page.fit["#liveCol"] = later
+    assert role.do("fit", {}) == {"controls": len(need)}, "the panel's tile shrinks a frame after a request shows"
+    assert len(calls) == 3, calls
+
+
 def t_fit_in_a_short_window_asks_only_that_scrolling_reaches_every_control():
     role, page, _ = make(party.RaceControlRole)
     need = list(party.RaceControlRole.live_required)

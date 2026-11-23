@@ -198,7 +198,9 @@ class LiveColumn:
     there needs scrolling, the layout promise of the panel and the desk (#1267). It waits
     for the role's `live_required` controls plus `require` (labels) and fails without them.
     `viewport` ([width, height]) measures in that window; `reachable` then only asks that
-    scrolling the column reaches every control, so nothing clips one."""
+    scrolling the column reaches every control, so nothing clips one. The page may still
+    settle its layout (the panel's program tile shrinks a frame later), so it measures
+    again until the controls fit or the time is up."""
     live_required = ()
 
     def _labels_in(self, found, labels):
@@ -214,24 +216,30 @@ class LiveColumn:
         key = "clip" if args.get("reachable") else "cut"
         if size:
             self.pg.set_viewport_size({"width": size[0], "height": size[1]})
+        last = {}
+
+        def settled():
+            found = last["found"] = self.fit_report(self.sel("live"))
+            if not found or self._labels_in(found, want):
+                return None
+            last["cut"] = [(c["label"], c[key]) for c in found if c[key] > builtin.FIT_TOLERANCE_PX]
+            return not last["cut"]
         try:
-            def measured():
-                found = self.fit_report(self.sel("live"))
-                return found if found and not self._labels_in(found, want) else None
             try:
-                found = self.until(measured, f"{self.kind}: the live controls", slow=None)
+                self.until(settled, f"{self.kind}: the live controls", slow=None)
             except StepError:
-                found = self.fit_report(self.sel("live"))
+                found = last.get("found")
                 if found is None:
                     raise StepError(f"{self.kind}: the page has no live column ({self.sel('live')})") from None
                 if not found:
                     raise StepError(f"{self.kind}: the live column shows no control") from None
-                raise StepError(f"{self.kind}: the live column lacks {', '.join(self._labels_in(found, want))}") \
-                    from None
-            cut = [(c["label"], c[key]) for c in found if c[key] > builtin.FIT_TOLERANCE_PX]
+                if self._labels_in(found, want):
+                    raise StepError(f"{self.kind}: the live column lacks {', '.join(self._labels_in(found, want))}") \
+                        from None
         finally:
             if size:
                 self.pg.set_viewport_size(dict(self.viewport))
+        found, cut = last["found"], last.get("cut", [])
         if cut:
             how = "are clipped" if key == "clip" else "need scrolling"
             raise StepError(f"{self.kind}: {len(cut)} of {len(found)} live controls {how}: " +
