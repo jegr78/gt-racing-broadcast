@@ -199,8 +199,9 @@ families (multiclass, tyres, approval corrections and more) still come from thei
 installed, timeout 30 minutes for `quick` and 120 for `full`. The report and the shots are
 uploaded as an artifact kept 14 days. It is not a required check.
 
-`full` runs in this workflow, not inside the local E2E containment unit with its 2 GiB memory
-cap (`tools/e2e_safety.py`).
+In CI the runner is the boundary and no containment unit is used. Locally every scenario runs
+inside the E2E containment unit with its 2 GiB memory cap (`tools/e2e_safety.py`), and `full`
+does not fit there, so `full` runs in this workflow.
 
 ## Security
 

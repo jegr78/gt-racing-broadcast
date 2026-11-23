@@ -503,6 +503,8 @@ whole run inside `e2e_safety` containment, both for `max_minutes` plus 10 minute
 teardown and report. Only the event simulation opts into more than 900 s
 (`e2e_safety.enter(..., long=True)`, `e2e_child.py SECONDS --long -- ...`), capped at
 `e2e_safety.LONG_MAX_SECONDS` = 7800; everyone else keeps 900 s or the `MAX_SECONDS` they set.
+The unit's 2 GiB memory cap still applies: `full` does not fit into it and runs in the
+`event-sim.yml` workflow, where the hosted runner is the boundary and no unit is used.
 A check's timeout is cut at the end of the run, and a step that has not run by then fails,
 so the report is written inside the lifetime.
 It shares the one E2E unit: run it after, not beside, `tools/e2e.py`.
