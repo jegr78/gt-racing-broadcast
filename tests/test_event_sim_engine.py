@@ -741,8 +741,9 @@ def t_a_relay_crash_kills_only_the_relay_its_pid_file_names():
             assert "41000" in str(exc) and "4343" in str(exc), exc
         assert not killed, "nothing is killed on a mismatch"
         seen = []
-        assert st.kill_relay(pids=lambda port: seen.append(port) or [4242],
-                             kill=lambda pid, sig: killed.append((pid, sig))) == 4242
+        pid = st.kill_relay(pids=lambda port: seen.append(port) or [4242],
+                            kill=lambda pid, sig: killed.append((pid, sig)))
+        assert pid == 4242, pid
         assert seen == [41000] and killed == [(4242, stack.KILL_SIGNAL)]
         assert child.expected_exit, "the stack's own relay child may now end without a problem"
     ctx = engine.RunContext(kill_relay=lambda: 4242)
