@@ -3388,22 +3388,24 @@ def t_align_running_relay_mode_switches_an_idle_relay_to_the_mode_start_event_as
     def _switch(mode):
         switched.append(mode)
         return {"mode": mode}
+    idle = {"read_stream": lambda: False}
     note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race"),
-                                       switch=_switch)
+                                       switch=_switch, **idle)
     assert switched == ["qualifying"], switched
     assert "race" in note and "qualifying" in note, note
     switched.clear()
     note = m._align_running_relay_mode("race", read_status=lambda: _relay_status("qualifying"),
-                                       switch=_switch)
+                                       switch=_switch, **idle)
     assert switched == ["race"], "a start without Qualifying brings a qualifying relay back to race"
     assert "qualifying" in note and "race" in note, note
     switched.clear()
     assert m._align_running_relay_mode("race", read_status=lambda: _relay_status("race"),
-                                       switch=_switch) is None
-    assert m._align_running_relay_mode("qualifying", read_status=lambda: None, switch=_switch) is None
+                                       switch=_switch, **idle) is None
+    assert m._align_running_relay_mode("qualifying", read_status=lambda: None, switch=_switch,
+                                       **idle) is None
     assert switched == [], "a relay already in that mode, or unreachable, is left alone"
     note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race"),
-                                       switch=lambda mode: {"error": "no Qualifying tab"})
+                                       switch=lambda mode: {"error": "no Qualifying tab"}, **idle)
     assert "no Qualifying tab" in note and "race" in note, note
 
 
@@ -3414,12 +3416,15 @@ def t_align_running_relay_mode_never_switches_a_live_or_unknown_program():
              (_relay_status("race", streaming=True), "OBS is streaming"),
              (_relay_status("race", streaming=None), "OBS"),
              (dict(_relay_status("race"), obs={"reachable": False}), "OBS"),
+             (dict(_relay_status("race"), obs={"reachable": False, "stream_active": False}), "OBS"),
              (dict(_relay_status("race"), part_live=None), "Part"),
              (unknown, "Part"))
-    for status, why in cases:
+    cases = [(status, why, False) for status, why in cases]
+    cases += [(_relay_status("race"), "OBS is streaming", True), (_relay_status("race"), "OBS", None)]
+    for status, why, now in cases:
         note = m._align_running_relay_mode("qualifying", read_status=lambda s=status: s,
-                                           switch=switched.append)
-        assert switched == [], f"Start event switched the mode under {status}"
+                                           switch=switched.append, read_stream=lambda n=now: n)
+        assert switched == [], f"Start event switched the mode under {status}, OBS now {now}"
         assert note.startswith("WARNING") and why in note, (status, note)
         assert "still in race mode" in note and "Director Panel" in note, note
     assert note.isascii(), "the warning prints on a cp1252 console"
@@ -3436,7 +3441,7 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
                  m._driver_invite_path, m._align_running_relay_mode, m.companion_start,
-                 m._event_launch)
+                 m._event_launch, m.http_util.post_json, m.http_util.get_json, m.http_util.get_bytes)
         restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
         with tempfile.TemporaryDirectory() as tmp:
             m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")
@@ -3447,6 +3452,11 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
             m._sync_live_telemetry_record = lambda: None
             m._wait_for_obs_ready = lambda timeout=0, early=False: False
             m.relay_start = lambda _rest: None
+
+            def _no_relay(url, *a, **k):
+                urls.append(url)
+                raise OSError("no relay in this test")
+            m.http_util.post_json = m.http_util.get_json = m.http_util.get_bytes = _no_relay
 
             def _past(*a, **kw):
                 raise AssertionError("event start went past the mode check without aligning it")
@@ -3466,10 +3476,13 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
                 (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
                  m._driver_invite_path, m._align_running_relay_mode, m.companion_start,
-                 m._event_launch) = saved
+                 m._event_launch, m.http_util.post_json, m.http_util.get_json,
+                 m.http_util.get_bytes) = saved
 
+    urls = []
     assert _drive(["--qualifying"]) == ["qualifying"]
     assert _drive([]) == ["race"]
+    assert all(u.endswith("/drivers/race/new-event") for u in urls), f"only the stubbed new-event call: {urls}"
 
 
 def t_event_start_and_stop_drive_the_invite():

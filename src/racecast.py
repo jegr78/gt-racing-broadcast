@@ -1845,11 +1845,20 @@ def _switch_relay_mode(mode):
     return _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/mode/{mode}")
 
 
-def _program_busy(status):
-    """Why the running relay's program may be on air, from its /status: "" only when it
-    reports no broadcast Part live and OBS not streaming. Unknown counts as on air."""
+def _obs_stream_active():
+    """OBS's stream state read now: True, False, or None when OBS does not answer."""
+    import obs_ws
+    reachable, stats, _note = obs_ws.get_health_stats()
+    return stats.get("stream_active") if reachable else None
+
+
+def _program_busy(status, read_stream=None):
+    """Why the running relay's program may be on air: "" only when its /status reports
+    no broadcast Part live and OBS reachable and not streaming, and OBS read now agrees.
+    Unknown counts as on air."""
     obs = status.get("obs") if isinstance(status.get("obs"), dict) else {}
-    part, stream = status.get("part_live"), obs.get("stream_active")
+    part = status.get("part_live")
+    stream = obs.get("stream_active") if obs.get("reachable") is True else None
     if part is True:
         return "a broadcast Part is live"
     if stream is True:
@@ -1858,10 +1867,15 @@ def _program_busy(status):
         return "the relay did not report whether a broadcast Part is live"
     if stream is not False:
         return "the relay could not read whether OBS is streaming"
+    now = (read_stream or _obs_stream_active)()
+    if now is True:
+        return "OBS is streaming"
+    if now is not False:
+        return "OBS did not answer whether it is streaming"
     return ""
 
 
-def _align_running_relay_mode(requested, read_status=None, switch=None):
+def _align_running_relay_mode(requested, read_status=None, switch=None, read_stream=None):
     """Switch an already running relay to the mode Start event asked for, as the Director
     Panel's toggle does, but only while nothing is on air: the switch re-points both feeds
     to stint 1. Returns what happened for the operator, or None when the relay is already
@@ -1870,7 +1884,7 @@ def _align_running_relay_mode(requested, read_status=None, switch=None):
     actual = status.get("mode") if isinstance(status, dict) else None
     if actual not in ("race", "qualifying") or actual == requested:
         return None
-    busy = _program_busy(status)
+    busy = _program_busy(status, read_stream)
     if busy:
         return (f"WARNING: relay: still in {actual} mode, not switched to {requested} because "
                 f"{busy}. Switching re-points both feeds to stint 1. Switch it between sessions "
