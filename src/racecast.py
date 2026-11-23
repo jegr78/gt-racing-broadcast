@@ -1841,6 +1841,26 @@ def qualifying_mode_mismatch_note(requested_qualifying, actual_mode):
     return None
 
 
+def _switch_relay_mode(mode):
+    return _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/mode/{mode}")
+
+
+def _align_running_relay_mode(requested, read_mode=None, switch=None):
+    """Switch an already running relay to the mode Start event asked for, as the Director
+    Panel's toggle does. Returns what happened for the operator, or None when the relay
+    is already in that mode or cannot be read."""
+    actual = (read_mode or _relay_mode)()
+    if actual is None or actual == requested:
+        return None
+    try:
+        res = (switch or _switch_relay_mode)(requested)
+    except Exception as exc:  # noqa: BLE001  reported to the operator
+        return f"relay: still in {actual} mode, the switch to {requested} failed ({exc})."
+    if isinstance(res, dict) and res.get("error"):
+        return f"relay: still in {actual} mode, the switch to {requested} failed: {res['error']}"
+    return f"relay: was running in {actual} mode, switched to {requested} mode."
+
+
 def _qualifying_title(base):
     """Append ' — Qualifying' to a report/event title when the live relay is in
     qualifying mode; an empty base becomes just 'Qualifying'. Unchanged otherwise."""
@@ -7141,7 +7161,11 @@ def event_start(rest, _autojoin=True, _new_session=True):
             _sync_live_telemetry_record()
     stint_args = _stint_args(rest) or (["--stint", str(resume_stint)] if resume_stint else [])
     relay_start(stint_args + _qualifying_args(rest) + _title_args(rest))
-    if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
+    if relay_was_running:   # relay_start left it as it was: bring it to the mode asked for
+        note = _align_running_relay_mode(mode)
+        if note:
+            print(note)
+    elif _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())
         if _mm:
             print("WARNING: " + _mm)

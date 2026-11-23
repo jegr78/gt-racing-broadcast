@@ -3377,6 +3377,68 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
         "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
 
 
+def t_align_running_relay_mode_switches_to_the_mode_start_event_asked_for():
+    switched = []
+
+    def _switch(mode):
+        switched.append(mode)
+        return {"mode": mode}
+    note = m._align_running_relay_mode("qualifying", read_mode=lambda: "race", switch=_switch)
+    assert switched == ["qualifying"], switched
+    assert "race" in note and "qualifying" in note, note
+    switched.clear()
+    note = m._align_running_relay_mode("race", read_mode=lambda: "qualifying", switch=_switch)
+    assert switched == ["race"], "a start without Qualifying brings a qualifying relay back to race"
+    switched.clear()
+    assert m._align_running_relay_mode("race", read_mode=lambda: "race", switch=_switch) is None
+    assert m._align_running_relay_mode("qualifying", read_mode=lambda: None, switch=_switch) is None
+    assert switched == [], "a relay already in that mode, or unreachable, is left alone"
+    note = m._align_running_relay_mode("qualifying", read_mode=lambda: "race",
+                                       switch=lambda mode: {"error": "no Qualifying tab"})
+    assert "no Qualifying tab" in note and "race" in note, note
+
+
+def t_event_start_aligns_a_running_relay_with_the_requested_mode():
+
+    class _Reached(Exception):
+        pass
+
+    def _drive(rest):
+        ev = m._event_modules()[0]
+        seen = []
+        saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+                 m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
+                 m._driver_invite_path, m._align_running_relay_mode)
+        restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
+        with tempfile.TemporaryDirectory() as tmp:
+            m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")
+            m._event_gate_results = lambda e, p: []
+            m._tailscale_connect = lambda e: "ok"
+            ev.app_running = lambda app, platform=None: True
+            m._runtime_dir = lambda: tmp
+            m._sync_live_telemetry_record = lambda: None
+            m._wait_for_obs_ready = lambda timeout=0, early=False: False
+            m.relay_start = lambda _rest: None
+
+            def _align(mode, **kw):
+                seen.append(mode)
+                raise _Reached()
+            m._align_running_relay_mode = _align
+            try:
+                m.event_start(rest)
+                raise AssertionError("expected the running relay's mode to be aligned")
+            except _Reached:
+                return seen
+            finally:
+                restore()
+                (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
+                 m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
+                 m._driver_invite_path, m._align_running_relay_mode) = saved
+
+    assert _drive(["--qualifying"]) == ["qualifying"]
+    assert _drive([]) == ["race"]
+
+
 def t_event_start_and_stop_drive_the_invite():
     class _Reached(Exception):
         pass
