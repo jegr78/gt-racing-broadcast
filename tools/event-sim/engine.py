@@ -20,6 +20,10 @@ EVENT_LINKS = ("invite", "timing")
 LEARN_EVERY_S = 1.0
 scrub = redaction.scrub
 POLL_S = 0.25
+# A failure whose window the unit spent this share or more waiting on IO or memory is
+# classed "host starved": still a hard failure, the report says why.
+STARVED_SHARE = 0.2
+STARVED = "host starved"
 
 
 @dataclass
@@ -28,6 +32,20 @@ class Finding:
     message: str
     step: str = ""
     role: str = ""
+    cause: str = ""          # STARVED when the host starved the unit in the failure's window
+
+
+def starved(h):
+    """The "host starved" explanation of a window's hoststate.delta, or ""."""
+    seconds = (h or {}).get("seconds")
+    if not seconds:
+        return ""
+    io, mem = h.get("unit_io_stall_s") or 0.0, h.get("unit_memory_stall_s") or 0.0
+    share = max(io, mem) / seconds
+    if share < STARVED_SHARE:
+        return ""
+    return (f"{STARVED}: the unit waited {io:.1f}s on IO and {mem:.1f}s on memory in {seconds:.1f}s "
+            f"({share:.0%}); host swap-in {h.get('swap_in_pages')} pages, CPU throttled {h.get('throttled_s')}s")
 
 
 @dataclass
@@ -324,8 +342,10 @@ class Engine:
             rec["s"] = round(self.clock() - begin, 3)
             self._shot_load(rec, host, procs)
             why = f"shot {shot.name}: {exc}"
+            cause = starved(rec["host"])
             # A run that must have its browser (--no-skips) must have its pictures too.
-            self.findings.append(Finding(HARD if self.no_skips else SOFT, why, step.id, role_name))
+            self.findings.append(Finding(HARD if self.no_skips else SOFT, why + (f" [{cause}]" if cause else ""),
+                                         step.id, role_name, STARVED if cause else ""))
             if not isinstance(exc, roles.ShotUnavailable):
                 self._snapshot(step, res, role_name, why, f"fail-{step.id}-shot.png")
         if rec["s"] is None:
@@ -483,6 +503,11 @@ class Engine:
         if self._noteworthy(res):
             res.cpu = hoststate.cpu_delta(step_procs, self._unit_processes())
         res.host = hoststate.delta(self._step_sample, self._sample())
+        cause = starved(res.host) if res.status == "failed" else ""
+        if cause:
+            for f in self.findings:
+                if f.step == step.id and f.severity == HARD and not f.cause:
+                    f.message, f.cause = f"{f.message} [{cause}]", STARVED
         if res.host.get("oom_kill"):
             # A killed renderer or service surfaces later as a timeout; name the kill itself.
             self.findings.append(Finding(HARD, f"the unit's memory cgroup OOM-killed {res.host['oom_kill']} "

@@ -656,6 +656,19 @@ needed to explain a failure at the moment it happens:
   relay and the browser (quota throttling). Load outside the unit is a different
   mechanism (weight starvation) and not offered.
 
+- Host starved. A failed step or screenshot whose window the unit spent
+  `engine.STARVED_SHARE` (20 %) or more waiting on IO or memory keeps its hard finding,
+  which then carries `cause: "host starved"` and the stall, swap-in and throttle values.
+  The red-flag restart-lobby screenshot timeout was one: over 12 untraced runs its
+  duration followed the unit's IO stall (r 0.99) and the host's swap-in (r 0.90), not
+  the quota throttling (at most 16 % of a long shot).
+- Admission. `e2e_safety.enter` starts no unit while the host is short of memory: it
+  waits up to `PRESSURE_WAIT_SECONDS` (120) for MemAvailable of at least the unit's
+  cap plus `MEMORY_MARGIN` (2.5 GiB) and memory PSI avg10 at most `PSI_SOME_AVG10_MAX`
+  (20 %) some and `PSI_FULL_AVG10_MAX` (5 %) full, then refuses with "host under memory
+  pressure: ..." and the values. A missing PSI file never blocks; a hosted CI runner
+  enters no unit and is not checked. `--repeat` counts a refused run as not run.
+
 How to hunt: run the flaky scenario with `--repeat 12 --no-skips`, then a set with
 `--load cpu:2`. Read `summary.html` for the failing step and the tail of its actions,
 then that run's report: the slow action, its step's `host`, and the snapshot (did the

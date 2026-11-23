@@ -249,7 +249,7 @@ def t_repeat_runs_each_run_in_its_own_unit_one_after_the_other():
         entered.append(argv)
         run_out = argv[argv.index("--out") + 1]
         if len(entered) == 2:
-            return 3                                   # the unit refused: no report
+            raise RuntimeError("host under memory pressure: memory PSI full avg10 9% > 5%")
         os.makedirs(run_out)
         ok = len(entered) == 1
         report.write(run_out, {"scenario": "smoke", "description": "", "ok": ok, "duration": 1.0, "pages": {},
@@ -1397,6 +1397,55 @@ def t_an_oom_kill_in_the_unit_is_its_own_hard_finding():
     assert len(hard) == 1 and hard[0][0] == "b" and "OOM-killed 1 process" in hard[0][1], hard
     assert "2048 MB" in hard[0][1], "the finding names the unit's memory peak"
     assert not data["ok"], "a killed process is a failure of the run, whatever step it hits next"
+
+
+def _stalling(clock, io_share):
+    """A host sampler whose unit waits `io_share` of the time on IO."""
+    def sample():
+        t = clock()
+        return {"t": t, "loadavg": [1, 1, 1], "swap": {"in": int(t), "out": 0},
+                "unit": {"cpu": {"usage_usec": 0, "throttled_usec": 0},
+                         "pressure": {"io": {"some": {"total": int(t * io_share * 1e6)}},
+                                      "memory": {"some": {"total": 0}}, "cpu": {"some": {"total": 0}}}}}
+    return sample
+
+
+def _starved_run(steps, io_share, page=None):
+    clock = Clock()
+    br = _FakeBrowser()
+    for k, v in (page or {}).items():
+        setattr(br.page, k, v)
+    ctx = engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br, clock=clock)
+    tmp = tempfile.mkdtemp(prefix="event-sim-test-")
+    atexit.register(shutil.rmtree, tmp, True)
+    reg = dict(_reg(), paged=_Paged)
+    _Paged.clock = clock
+    return engine.Engine(scenario.from_dict({"step": steps}, reg), ctx, {}, registry=reg, clock=clock,
+                         sleep=clock.sleep, shots_dir=os.path.join(tmp, "shots"), host=_stalling(clock, io_share),
+                         processes=lambda: None, no_skips=True).run()
+
+
+def t_a_failure_while_the_host_starved_the_unit_says_so_and_stays_hard():
+    steps = [{"id": "check", "role": "rec", "do": "go", "expect": ["relay.up"], "timeout": "4s"}]
+    for share, starved in ((0.5, True), (engine.STARVED_SHARE / 2, False)):
+        data = _starved_run(steps, share)
+        hard = [f for f in data["findings"] if f["severity"] == "hard" and f["step"] == "check"]
+        assert hard and all(f["cause"] == ("host starved" if starved else "") for f in hard), (share, hard)
+        if starved:
+            assert "host starved: the unit waited" in hard[0]["message"] and "on IO" in hard[0]["message"], hard
+        assert not data["ok"], "a starved failure is still a failure"
+    shot = [{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
+            {"id": "to_box", "role": "paged", "do": "slow", "args": {"click": 0.1}, "at": "after:open",
+             "shot": {"name": "restart-lobby", "role": "page:rc"}}]
+
+    class SlowFail:
+        def __contains__(self, name):
+            _Paged.clock.t += 8.0           # the screenshot's timeout passes on the fake clock
+            return name == "restart-lobby.png"
+    data = _starved_run(shot, 0.5, page={"fail_shots": SlowFail()})
+    hard = [f for f in data["findings"] if "shot restart-lobby" in f["message"]]
+    assert hard and hard[0]["severity"] == "hard" and hard[0]["cause"] == "host starved", hard
+    assert "swap-in" in hard[0]["message"], hard[0]
 
 
 def t_our_blocked_script_in_a_sandboxed_frame_is_no_page_error():
