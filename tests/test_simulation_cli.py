@@ -828,6 +828,18 @@ def t_simulation_without_a_relay_port_never_reaches_8088():
     assert urls == [], f"a simulation without its relay port reached a relay: {urls}"
 
 
+def t_cookies_export_is_skipped_in_simulation():
+    ran, paused, out = [], [], io.StringIO()
+    with _env(**SIM_ENV), _patched((m, "_run_script", lambda *a, **k: ran.append(a) or 0),
+                                   (m, "_init_pause", lambda *a: paused.append(a))), \
+            contextlib.redirect_stdout(out):
+        assert m._oneshot_code("cookies", ["firefox"]) == 0
+        assert m._oneshot_code("cookies", ["twitch", "firefox"]) == 0
+        assert m._init_cookies_run("firefox") == 0
+    assert ran == [] and paused == [], f"the machine-wide cookie jar is not the rehearsal's: {ran} {paused}"
+    assert out.getvalue().count("cookies: skipped (simulation).") == 3, out.getvalue()
+
+
 def t_kill_relay_text_names_the_actual_port():
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
         html = fh.read()

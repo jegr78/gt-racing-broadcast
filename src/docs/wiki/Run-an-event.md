@@ -68,7 +68,8 @@ start.
   touch Tailscale or the Funnel. Each step prints `skipped (simulation)` in the job log,
   and the readiness report lists those rows as INFO.
 - The relay leaves the machine alone: it does not block idle sleep, does not read OBS's
-  own log for A/V sync and does not refresh cookies from a browser. The Control Center's
+  own log for A/V sync and does not refresh cookies from a browser. `racecast cookies`
+  exports nothing either. The Control Center's
   log viewer shows no OBS or Companion log.
 - Every external endpoint comes from a loopback variable. An endpoint that is unset is
   off, it never falls back to the real one:

@@ -173,7 +173,8 @@ never the real one.
 - Skips print `<what>: skipped (simulation).` at the leaves, so CLI and Control Center
   jobs report alike: `_event_launch`, `app launch|quit`, `_tailscale_connect`,
   `tailscale down`, `_tailscale_ip`/`_tailscale_magicdns` (None), `companion_start/stop`,
-  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check, and the relay's
+  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check, `racecast cookies`
+  (the machine-wide `runtime/yt-cookies.txt`), and the relay's
   host integrations: the A/V sync watcher on the OBS log, the keep-awake block
   (`systemd-inhibit`, `caffeinate`, `SetThreadExecutionState`) and the cookie refresh from
   the browser; the log viewer lists no OBS or Companion log. `_gui_spawn`

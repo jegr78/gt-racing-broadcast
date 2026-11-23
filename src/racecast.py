@@ -7756,6 +7756,9 @@ def _oneshot_code(command, rest):
         for key, val in _read_env_file().items():
             os.environ.setdefault(key, val)
     if command == "cookies":
+        if simulation.active():   # the cookie jar is machine-wide, not the rehearsal's
+            print(simulation.skipped("cookies"))
+            return 0
         rest = _cookies_oneshot_args(rest)
     _od = _active_overlay_dir()
     extra = _oneshot_extra(command, rest, _runtime_dir(), _runtime_base_dir(),
@@ -10389,6 +10392,8 @@ def _init_cookies_run(browser):
     """Gate (YouTube login) + the cookies one-shot. The gate only fires when
     the cookies are actually missing/stale. Under --force a fresh cookie jar
     skips the pause but still re-exports."""
+    if simulation.active():
+        return _oneshot_code("cookies", [browser])
     _pf = _event_modules()[1]
     res = _pf.cookies_status(_cookies_path())
     if ins.cookies_done(res.level, res.detail) is None:
