@@ -235,15 +235,16 @@ args = { gaps = "${before_red.entries}" }
 expect = ["page('drivers').driving == 4", "'comms2' in obs.program_channels"]
 timeout = "90s"
 
-# Each car came out of the box its frozen gap after the leader: same order, gaps within 1 s.
+# Each car came out of the box its frozen gap after the leader, within 1 s. Cars closer
+# than the drivers' 0.2 s tick may swap at the release: the exact order is soft.
 [[step]]
 id = "kept"
 at = "after:leave_box+10s"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
-expect = ["pluck(race.entries, 'entry') == pluck(result('frozen').entries, 'entry')",
-          "drift(result('before_red').entries, race.entries, 'gap_s') <= 1"]
+expect = ["drift(result('before_red').entries, race.entries, 'gap_s') <= 1"]
+soft = ["pluck(race.entries, 'entry') == pluck(result('frozen').entries, 'entry')"]
 shot = { name = "restart-released", role = "race_control" }
 
 [[step]]

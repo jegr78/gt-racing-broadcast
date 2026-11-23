@@ -712,7 +712,7 @@ times on a maintainer machine, start and teardown included:
   count again with no new approval; stint 3 runs to the finish.
 - `red-flag` (5 min): the desk's RED FLAG in stint 2 (cover, banner, race held), a
   restart lobby and Restart released; the drivers leave the box by their gaps of before the
-  flag (the relay shows no gaps while it holds); asserts that order and every gap within 1 s.
+  flag (the relay shows no gaps while it holds); asserts every gap within 1 s (the exact order is soft: cars closer than the 0.2 s driver tick may swap).
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
