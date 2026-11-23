@@ -841,6 +841,17 @@ def t_a_job_that_ends_before_the_first_look_is_still_its_result():
     page.els["#cmodal-ok"].on_click = quick
     assert role.do("stop_event", {}) == {"job": "done"}, "the chip is hidden only while the job runs"
 
+    class Closed(Response):
+        method, failure = "GET", "net::ERR_ABORTED"
+
+    def closed_by_the_page():
+        page.respond("/api/op/event-stop", body={"ok": True, "job_id": "j6"})
+        page.add("#jobchip", text="done")
+        page.handlers["requestfailed"](Closed(f"{BASE}/api/jobs/j6/stream"))
+    page.els["#cmodal-ok"].on_click = closed_by_the_page
+    assert role.do("stop_event", {}) == {"job": "done"}, \
+        "the page's done handler may close the stream before the server does: that ends it too"
+
 
 def t_a_failed_job_fails_the_step_with_its_log():
     role, _, _ = producer(job="failed (exit 1)", log="Pre-flight gate: cannot start /cockpit?t=tok.sig")

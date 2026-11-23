@@ -325,6 +325,11 @@ class ProducerRole(Surface):
         if path.startswith(self.JOBS):
             self.ended.add(path)
 
+    def _requestfailed(self, request):
+        # The page's done handler may close the stream before the server does.
+        super()._requestfailed(request)
+        self._finished(request)
+
     def view(self, name):
         self.click(self.sel("view", view=name), f"view {name}")
 
