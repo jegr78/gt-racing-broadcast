@@ -18,6 +18,7 @@ SIM = os.path.join(ROOT, "tools", "event-sim")
 for _p in (SIM, os.path.join(SIM, "fakes"), os.path.join(ROOT, "src", "scripts")):
     sys.path.insert(0, _p)
 import engine  # noqa: E402
+import event_sim  # noqa: E402
 import expect  # noqa: E402
 import probes  # noqa: E402
 import report  # noqa: E402
@@ -236,6 +237,51 @@ def t_cli_check_validates_without_starting_anything():
     out = subprocess.run([sys.executable, os.path.join(SIM, "event_sim.py"), "--scenario", "nope", "--check"],
                          capture_output=True, text=True, errors="replace", timeout=60)
     assert out.returncode == 2 and "no scenario" in out.stderr, out.stderr
+
+
+def t_repeat_runs_each_run_in_its_own_unit_one_after_the_other():
+    scn = scenario.load(scenario.find("smoke", os.path.join(SIM, "scenarios")), REG)
+    out = tempfile.mkdtemp(prefix="event-sim-repeat-")
+    atexit.register(shutil.rmtree, out, True)
+    entered, waited = [], []
+
+    def enter(script, argv, seconds=None, long=False):
+        entered.append(argv)
+        run_out = argv[argv.index("--out") + 1]
+        if len(entered) == 2:
+            return 3                                   # the unit refused: no report
+        os.makedirs(run_out)
+        ok = len(entered) == 1
+        report.write(run_out, {"scenario": "smoke", "description": "", "ok": ok, "duration": 1.0, "pages": {},
+                               "steps": [{"id": "a", "role": "r", "do": "d", "status": "ok" if ok else "failed",
+                                          "duration": 1.0, "error": "", "checks": [], "actions": []}],
+                               "findings": []})
+        return 0 if ok else 1
+    args = event_sim.build_parser().parse_args(["--scenario", "smoke", "--out", out, "--repeat", "3", "--no-skips",
+                                                "--load", "cpu:2", "--trace", "all"])
+    code = event_sim.repeat(scn, out, args, enter=enter, wait=lambda: waited.append(1) or True)
+    assert code == 1, "a run that failed or did not run fails the set"
+    assert len(entered) == 3 and len(waited) == 3, "each run waits for the unit, then gets its own"
+    for i, argv in enumerate(entered, 1):
+        assert argv[argv.index("--out") + 1] == os.path.join(out, f"run-{i:02d}"), argv
+        assert "--repeat" not in argv, "a run inside the unit is one run"
+        assert argv[argv.index("--load") + 1] == "cpu:2" and argv[argv.index("--trace") + 1] == "all", argv
+        assert "--no-skips" in argv, argv
+    with open(os.path.join(out, "summary.json"), encoding="utf-8") as fh:
+        summary = json.load(fh)
+    assert summary["counts"] == {"pass": 1, "fail": 1, "not-run": 1}, summary["counts"]
+    assert summary["meta"]["load"] == "cpu:2" and summary["meta"]["runs"] == 3, summary["meta"]
+    for bad in (["--repeat", "0"], ["--repeat", "51"], ["--load", "cpu:9"], ["--trace", "some"]):
+        try:
+            with open(os.devnull, "w") as quiet:
+                old, sys.stderr = sys.stderr, quiet
+                try:
+                    event_sim.build_parser().parse_args(["--scenario", "smoke", *bad])
+                finally:
+                    sys.stderr = old
+            raise AssertionError(f"{bad} must be refused")
+        except SystemExit:
+            pass  # argparse refuses it
 
 
 # -- expect ----------------------------------------------------------------------
@@ -918,8 +964,44 @@ class _FakePage:
         return selector
 
     def screenshot(self, path, mask=(), timeout=None):
+        if os.path.basename(path) in self.fail_shots:
+            raise TimeoutError(f"Timeout {timeout}ms exceeded.")
         self.shots.append(path)
         self.masks = list(mask)
+
+    fail_shots = ()
+    hung = False
+    state = {"visibility": "visible", "focus": True, "ready": "complete", "title": "Panel"}
+
+    def wait_for_function(self, script, timeout=None):
+        if self.hung:
+            raise TimeoutError(f"Timeout {timeout}ms exceeded.")
+        state = self.state
+
+        class Handle:
+            def json_value(self):
+                return dict(state)
+        return Handle()
+
+
+class _Tracing:
+    def __init__(self):
+        self.calls = []
+
+    def start(self, screenshots=False, snapshots=False):
+        self.calls.append(("start", screenshots, snapshots))
+
+    def start_chunk(self):
+        self.calls.append(("chunk",))
+
+    def stop_chunk(self, path=None):
+        self.calls.append(("stop_chunk", os.path.basename(path) if path else None))
+        if path:
+            with open(path, "wb") as fh:
+                fh.write(b"PK")
+
+    def stop(self):
+        self.calls.append(("stop",))
 
 
 class _FakeBrowser:
@@ -927,15 +1009,29 @@ class _FakeBrowser:
 
     def __init__(self):
         self.page = _FakePage()
+        self.tracing = _Tracing()
 
     def get(self):
         return self
+
+    def new_browser_cdp_session(self):
+        class Session:
+            def send(self, method):
+                assert method == "SystemInfo.getProcessInfo", method
+                return {"processInfo": [{"type": "renderer", "id": 7, "cpuTime": 12.5}]}
+
+            def detach(self):
+                pass  # nothing to release
+        return Session()
 
     def new_context(self, viewport=None):
         outer = self
         self.viewport = viewport
 
         class C:
+            tracing = outer.tracing
+            browser = outer
+
             def new_page(self):
                 return outer.page
 
@@ -1114,6 +1210,150 @@ def t_page_role_without_a_browser_is_a_skip():
         raise AssertionError("no page, no shot")
     except roles.ShotUnavailable:
         pass  # expected
+
+
+class _Paged(builtin.PageRole):
+    """A page role whose `slow` action clicks and waits on the engine's fake clock."""
+    kind = "paged"
+
+    def act_slow(self, args):
+        with self.timed("request", "NEXT"):
+            with self.timed("click", "NEXT"):
+                self.clock.t += args.get("click", 0)
+            self.clock.t += args.get("answer", 0)
+        with self.timed("wait", "the next stint on air", budget=None):
+            with self.timed("control", "polled inside a wait"):
+                self.clock.t += 9
+        return {}
+
+
+def _diag_run(steps, trace="off", host=None, page=None):
+    br = _FakeBrowser()
+    if page:
+        for k, v in page.items():
+            setattr(br.page, k, v)
+    clock = Clock()
+    ctx = engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br, trace=trace, clock=clock)
+    tmp = tempfile.mkdtemp(prefix="event-sim-test-")
+    atexit.register(shutil.rmtree, tmp, True)
+    reg = dict(_reg(), paged=_Paged)
+    eng = engine.Engine(scenario.from_dict({"step": steps}, reg), ctx, {}, registry=reg, clock=clock,
+                        sleep=clock.sleep, shots_dir=os.path.join(tmp, "shots"),
+                        traces_dir=os.path.join(tmp, "traces"), host=host or (lambda: {"t": clock()}))
+    _Paged.clock = clock
+    return eng.run(), br, tmp
+
+
+def t_every_page_action_and_shot_is_timed_and_a_slow_one_is_soft():
+    data, _, _ = _diag_run([{"id": "open", "role": "paged", "do": "open", "args": {"path": "/panel"}},
+                            {"id": "fast", "role": "paged", "do": "slow", "at": "after:open",
+                             "args": {"click": 0.5, "answer": 0.5}, "shot": "fast"},
+                            {"id": "slowclick", "role": "paged", "do": "slow", "at": "after:fast",
+                             "args": {"click": 5, "answer": 0.5}},
+                            {"id": "slowanswer", "role": "paged", "do": "slow", "at": "after:slowclick",
+                             "args": {"click": 0.1, "answer": 4}},
+                            {"id": "obs", "role": "rec", "do": "go", "at": "after:slowanswer", "shot": "rec-1"}])
+    s = _by_id(data)
+    fast = [(a["role"], a["kind"], a["what"], a["s"], a["depth"]) for a in s["fast"]["actions"]]
+    assert fast == [("paged", "request", "NEXT", 1.0, 0), ("paged", "click", "NEXT", 0.5, 1),
+                    ("paged", "wait", "the next stint on air", 9.0, 0), ("paged", "shot", "fast", 0.0, 0)], \
+        f"each action with its nesting, polls inside a wait are not actions: {fast}"
+    assert [a["kind"] for a in s["open"]["actions"]] == ["open"], s["open"]["actions"]
+    assert s["obs"]["actions"][0]["kind"] == "shot" and s["obs"]["actions"][0]["role"] == "rec", \
+        "a role without a page has its shot timed too"
+    slow = [(f["step"], f["message"]) for f in data["findings"] if "took" in f["message"]]
+    assert len(slow) == 2 and slow[0][0] == "slowclick" and "click 'NEXT' took 5.0s" in slow[0][1], \
+        f"only the slow click, not the request around it: {slow}"
+    assert slow[1][0] == "slowanswer" and "request 'NEXT' took 4.1s" in slow[1][1], slow
+    assert data["ok"], "slowness is a finding, never a failure"
+    assert [a.get("slow", False) for a in s["slowclick"]["actions"]][:2] == [False, True], s["slowclick"]
+    page = report.render_html(data)
+    assert "click NEXT" in page and "5.00s" in page, "the report lists each step's actions"
+
+
+def t_each_step_records_what_the_unit_got_from_the_host():
+    samples = iter([{"t": 0.0, "loadavg": [1, 1, 1], "unit": {"cpu": {"usage_usec": 0, "throttled_usec": 0}}},
+                    {"t": 2.0, "loadavg": [1, 1, 1], "unit": {"cpu": {"usage_usec": 500_000, "throttled_usec": 0}}}])
+    data, _, _ = _diag_run([{"id": "a", "role": "rec", "do": "go"}], host=lambda: next(samples))
+    assert data["steps"][0]["host"]["cpu_s"] == 0.5 and data["steps"][0]["host"]["seconds"] == 2.0, data["steps"][0]
+
+
+def t_a_failed_shot_on_another_page_leaves_a_snapshot_of_that_page():
+    data, br, tmp = _diag_run([{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc?t=abc"}},
+                               {"id": "to_box", "role": "rec", "do": "go", "at": "after:open",
+                                "shot": {"name": "restart-lobby", "role": "page:rc"}}],
+                              page={"fail_shots": ("restart-lobby.png",)})
+    s = _by_id(data)["to_box"]
+    assert any("shot restart-lobby" in f["message"] and "Timeout" in f["message"] for f in data["findings"])
+    assert len(s["snapshots"]) == 1, f"the shot's page was diagnosed although the step's role has no page: {s}"
+    snap = s["snapshots"][0]
+    assert snap["role"] == "page:rc" and "restart-lobby" in snap["why"], snap
+    page = snap["page"]
+    assert page["alive"] and page["visibility"] == "visible" and page["metrics"]["Nodes"] == 1234, page
+    assert page["processes"] == [{"type": "renderer", "id": 7, "cpu_s": 12.5}], page
+    assert "abc" not in json.dumps(snap), "the page URL is scrubbed"
+    assert snap["picture"] == "shots/fail-to_box-shot.png" and s["fail_shot"] == snap["picture"], snap
+    assert os.path.basename(br.page.shots[-1]) == "fail-to_box-shot.png", br.page.shots
+    assert "restart-lobby" in report.render_html(data) and "Failure snapshots" in report.render_html(data)
+
+
+def t_a_hung_page_is_diagnosed_without_waiting_on_it():
+    data, _, _ = _diag_run([{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
+                            {"id": "bad", "role": "page:rc", "do": "open", "args": {"path": "x"}, "at": "after:open"}],
+                           page={"hung": True})
+    snap = _by_id(data)["bad"]["snapshots"][0]
+    assert snap["page"]["alive"] is False and "Timeout" in snap["page"]["error"], snap["page"]
+    assert "metrics" not in snap["page"], "a page that does not answer is not asked for metrics"
+    assert snap["host"] is not None and "since_step" in snap, snap
+
+
+def t_the_page_keeps_its_last_console_lines_and_failed_requests():
+    br = _FakeBrowser()
+    clock = Clock()
+    role = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br), "page:rc")
+    role.open()
+    role.clock = clock
+    role.do("open", {"path": "/rc"})
+
+    class Msg:
+        def __init__(self, i):
+            self.type, self.text, self.location = "log", f"line {i} /x?t=secret", {}
+    for i in range(builtin.RECENT + 5):
+        br.page.handlers["console"](Msg(i))
+
+    class Req:
+        url, method, failure = "http://127.0.0.1:9/status?t=secret", "GET", "net::ERR_ABORTED"
+
+    class Resp:
+        url, status = "http://127.0.0.1:9/next", 503
+    for _ in range(builtin.RECENT):
+        br.page.handlers["requestfailed"](Req())
+    br.page.handlers["response"](Resp())
+    clock.t += 3
+    d = role.diagnose()
+    assert len(d["console"]) == builtin.RECENT and d["console"][-1]["text"].startswith(f"line {builtin.RECENT + 4}")
+    assert d["console"][-1]["age_s"] == 3.0, d["console"][-1]
+    assert len(d["network"]) == builtin.RECENT and d["network"][-1]["status"] == 503, d["network"]
+    assert d["network"][0]["failure"] == "net::ERR_ABORTED", d["network"][0]
+    assert "secret" not in json.dumps(d), d
+
+
+def t_a_trace_chunk_per_step_is_kept_only_for_a_failed_step():
+    steps = [{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
+             {"id": "ok", "role": "rec", "do": "go", "at": "after:open"},
+             {"id": "bad", "role": "page:rc", "do": "open", "args": {"path": "x"}, "at": "after:ok"}]
+    data, br, tmp = _diag_run(steps, trace="fail")
+    calls = br.tracing.calls
+    assert calls[0] == ("start", True, True) and calls[-1] == ("stop",), calls
+    stops = [c[1] for c in calls if c[0] == "stop_chunk"]
+    assert stops == [None, None, "bad-page_rc.zip"], f"a chunk per step, only the failed one kept: {stops}"
+    assert _by_id(data)["bad"]["traces"] == ["traces/bad-page_rc.zip"], _by_id(data)["bad"]
+    assert os.path.isfile(os.path.join(tmp, "traces", "bad-page_rc.zip"))
+    data, br, _ = _diag_run(steps, trace="all")
+    assert [c[1] for c in br.tracing.calls if c[0] == "stop_chunk"] == ["open-page_rc.zip", "ok-page_rc.zip",
+                                                                       "bad-page_rc.zip"], br.tracing.calls
+    data, br, _ = _diag_run(steps, trace="off")
+    assert br.tracing.calls == [], "no trace unless asked"
 
 
 class _State:

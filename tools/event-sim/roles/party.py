@@ -5,7 +5,6 @@ control that is missing, hidden or disabled is a hard failure, and an action ret
 only after the page showed its result. Without a browser every action is skipped.
 
 An action is a mechanism (click this, submit that); the scenario decides the order."""
-import time
 from urllib.parse import quote, urlsplit
 
 from roles import ShotUnavailable, StepError, Unavailable, builtin, register, selectors
@@ -36,7 +35,6 @@ class Surface(builtin.PageRole):
     sources = ()             # the shipped files `selectors` comes from (see the drift test)
     selectors = {}
     masked = ()              # selector keys a screenshot blacks out: invite and timing links
-    clock = staticmethod(time.monotonic)
 
     def open(self):
         super().open()
@@ -65,6 +63,10 @@ class Surface(builtin.PageRole):
 
     def control(self, selector, what):
         """The visible, enabled control at `selector`, scrolled into view."""
+        with self.timed("control", what):
+            return self._control(selector, what)
+
+    def _control(self, selector, what):
         loc = self.pg.locator(selector).first
         try:
             loc.wait_for(state="visible", timeout=CONTROL_MS)
@@ -98,20 +100,23 @@ class Surface(builtin.PageRole):
                                      "viewport, the page has to be scrolled")
 
     def click(self, selector, what):
-        self.control(selector, what).click(timeout=CONTROL_MS)
+        with self.timed("click", what):
+            self.control(selector, what).click(timeout=CONTROL_MS)
 
     def fill(self, selector, text, what):
-        self.control(selector, what).fill(str(text), timeout=CONTROL_MS)
+        with self.timed("fill", what):
+            self.control(selector, what).fill(str(text), timeout=CONTROL_MS)
 
     def choose(self, selector, what, label=None, value=None):
-        loc = self.control(selector, what)
-        try:
-            if label is not None:
-                loc.select_option(label=str(label), timeout=CONTROL_MS)
-            else:
-                loc.select_option(value=str(value), timeout=CONTROL_MS)
-        except Exception:
-            raise StepError(f"{what}: no option {label if label is not None else value!r}") from None
+        with self.timed("choose", what):
+            loc = self.control(selector, what)
+            try:
+                if label is not None:
+                    loc.select_option(label=str(label), timeout=CONTROL_MS)
+                else:
+                    loc.select_option(value=str(value), timeout=CONTROL_MS)
+            except Exception:
+                raise StepError(f"{what}: no option {label if label is not None else value!r}") from None
 
     def text(self, selector):
         """The first match's text on one line, "" when there is none."""
@@ -130,6 +135,10 @@ class Surface(builtin.PageRole):
 
     def until(self, test, what, timeout=CONFIRM_S, slow=SLOW_S):
         """Wait until `test()` is truthy: the page showing the result of an action."""
+        with self.timed("wait", what, budget=None):
+            return self._until(test, what, timeout, slow)
+
+    def _until(self, test, what, timeout, slow):
         begin = self.clock()
         while True:
             try:
@@ -150,6 +159,10 @@ class Surface(builtin.PageRole):
     def answered(self, act, path, what):
         """Run `act` and return the page's own request to a route ending in `path` once
         it is answered (a console page sends it below `/console`)."""
+        with self.timed("request", what):
+            return self._answered(act, path, what)
+
+    def _answered(self, act, path, what):
         try:
             with self.pg.expect_response(lambda r: urlsplit(r.url).path.endswith(path),
                                          timeout=CONTROL_MS) as info:

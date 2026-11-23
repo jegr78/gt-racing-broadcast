@@ -4,10 +4,12 @@
 action at a time, and returns the report data (see report.py). It never spawns anything:
 `stack.Stack` builds the context and the probes, tests pass fakes and a fake clock."""
 import os
+import re
 import time
 from dataclasses import asdict, dataclass, field
 
 import expect
+import hoststate
 import redaction
 import roles
 import roles.builtin
@@ -50,6 +52,10 @@ class StepResult:
     shot: str = ""
     fail_shot: str = ""              # the role's page when the step failed
     result: object = None
+    actions: list = field(default_factory=list)    # each page action and shot with its seconds
+    host: dict = field(default_factory=dict)       # hoststate.delta over the step
+    snapshots: list = field(default_factory=list)  # the state at a failure
+    traces: list = field(default_factory=list)     # Playwright trace zips kept of this step
 
 
 class RunContext:
@@ -57,8 +63,10 @@ class RunContext:
     sink) to base URLs; `token(name)` mints a console token for a crew member."""
 
     def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir="",
-                 event=None, event_link=None, secrets=(), clock=time.monotonic, kill_relay=None):
+                 event=None, event_link=None, secrets=(), clock=time.monotonic, kill_relay=None,
+                 trace="off"):
         self.urls = dict(urls or {})
+        self.trace = trace               # Playwright tracing: "off", "fail" (keep failed steps) or "all"
         self._token = token
         self.stub = stub
         self.obs = obs
@@ -168,7 +176,8 @@ def resolve_args(value, results):
 
 class Engine:
     def __init__(self, scenario, ctx, probes, registry=None, clock=time.monotonic,
-                 sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=(), no_skips=False):
+                 sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=(), no_skips=False,
+                 traces_dir=None, host=hoststate.sample):
         self.scenario = scenario
         self.ctx = ctx
         self.probes = dict(probes)
@@ -177,6 +186,9 @@ class Engine:
         self.shots_dir = shots_dir
         self.final_checks = list(final_checks)
         self.no_skips = no_skips
+        self.traces_dir = traces_dir
+        self._host = host
+        self._step_sample = {}
         self.roles = {}
         self.pages = {}                  # each page role's memory when it closed
         self.findings = []
@@ -295,26 +307,92 @@ class Engine:
             return
         os.makedirs(self.shots_dir, exist_ok=True)
         path = os.path.join(self.shots_dir, shot.name + ".png")
+        begin = self.clock()
+        rec = {"role": role_name, "kind": "shot", "what": shot.name, "s": None, "ok": False, "depth": 0,
+               "budget": roles.builtin.budget_for("shot"), "covered": False}
+        res.actions.append(rec)
         try:
             self._role(role_name).shot(path, shot.element)
             res.shot = f"shots/{shot.name}.png"
+            rec["ok"] = True
         except Exception as exc:  # ShotUnavailable or a broken page: a screenshot never decides the run
+            rec["s"] = round(self.clock() - begin, 3)
+            why = f"shot {shot.name}: {exc}"
             # A run that must have its browser (--no-skips) must have its pictures too.
-            self.findings.append(Finding(HARD if self.no_skips else SOFT, f"shot {shot.name}: {exc}",
-                                         step.id, role_name))
+            self.findings.append(Finding(HARD if self.no_skips else SOFT, why, step.id, role_name))
+            if not isinstance(exc, roles.ShotUnavailable):
+                self._snapshot(step, res, role_name, why, f"fail-{step.id}-shot.png")
+        if rec["s"] is None:
+            rec["s"] = round(self.clock() - begin, 3)
 
-    def _evidence(self, step, res):
-        """A failed page step's whole page as `fail-<step>.png`; never decides the run."""
-        role = self.roles.get(step.role)
-        if self.shots_dir is None or not isinstance(role, roles.builtin.PageRole) or role.pg is None:
+    def _sample(self):
+        try:
+            return self._host() or {}
+        except Exception:  # noqa: BLE001  a diagnostic never decides the run
+            return {}
+
+    def _snapshot(self, step, res, role_name, why, picture):
+        """The state at a failure: the host and the unit, and for a page role its page
+        (`PageRole.diagnose`) and a picture of the whole page as `picture`. Never decides the run."""
+        host = self._sample()
+        snap = {"role": role_name, "why": why, "at": round(self.now(), 3), "host": host,
+                "since_step": hoststate.delta(self._step_sample, host), "page": None,
+                "picture": "", "picture_s": None, "picture_error": ""}
+        res.snapshots.append(snap)
+        role = self.roles.get(role_name)
+        if not isinstance(role, roles.builtin.PageRole) or role.pg is None:
+            return
+        try:
+            snap["page"] = role.diagnose()
+        except Exception as exc:  # noqa: BLE001  a page that broke with the step
+            snap["page"] = {"error": f"{type(exc).__name__}: {exc}"}
+        if self.shots_dir is None:
             return
         os.makedirs(self.shots_dir, exist_ok=True)
-        name = f"fail-{step.id}.png"
+        begin = self.clock()
         try:
-            role.shot(os.path.join(self.shots_dir, name))
-            res.fail_shot = f"shots/{name}"
+            role.shot(os.path.join(self.shots_dir, picture))
+            snap["picture"] = f"shots/{picture}"
+            res.fail_shot = res.fail_shot or snap["picture"]
         except Exception as exc:  # a page that broke with the step
-            self.findings.append(Finding(SOFT, f"no picture of the failure: {exc}", step.id, step.role))
+            snap["picture_error"] = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+            self.findings.append(Finding(SOFT, f"no picture of the failure: {exc}", step.id, role_name))
+        snap["picture_s"] = round(self.clock() - begin, 3)
+
+    def _page_roles(self):
+        return [(n, r) for n, r in self.roles.items() if isinstance(r, roles.builtin.PageRole)]
+
+    def _trace_begin(self, step):
+        for name, role in self._page_roles():
+            try:
+                role.trace_begin()
+            except Exception as exc:  # noqa: BLE001  a trace never decides the run
+                self.findings.append(Finding(SOFT, f"trace of {name}: {exc}", step.id, name))
+
+    def _trace_end(self, step, res):
+        """End every page's chunk; kept as traces/<step>-<role>.zip for a step that
+        failed or left a snapshot, or for every step with trace "all"."""
+        keep = self.traces_dir is not None and (
+            self.ctx.trace == "all" or res.status == "failed" or bool(res.snapshots))
+        for name, role in self._page_roles():
+            file = f"{step.id}-{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}.zip"
+            try:
+                if role.trace_end(os.path.join(self.traces_dir, file) if keep else None):
+                    res.traces.append(f"traces/{file}")
+            except Exception as exc:  # noqa: BLE001  a trace never decides the run
+                self.findings.append(Finding(SOFT, f"trace of {name}: {exc}", step.id, name))
+
+    def _take_actions(self, res):
+        for name, role in self._page_roles():
+            res.actions.extend(dict(a, role=name) for a in role.take_actions())
+
+    def _flag_slow(self, step, res):
+        """A soft finding for each action over its budget whose slowness no inner action explains."""
+        for a in res.actions:
+            if a["budget"] is not None and a["s"] is not None and a["s"] > a["budget"] and not a["covered"]:
+                a["slow"] = True
+                self.findings.append(Finding(SOFT, f"slow: {a['role']} {a['kind']} {a['what']!r} took "
+                                                   f"{a['s']:.1f}s (budget {a['budget']:g}s)", step.id, step.role))
 
     def _checks(self, step, res):
         slow = self.scenario.tolerances.get("state_s", 2.0)
@@ -337,6 +415,8 @@ class Engine:
         res = StepResult(step.id, step.role, step.do, started=round(self.now(), 3))
         self.results[step.id] = res
         begin = self.clock()
+        self._step_sample = self._sample()
+        self._trace_begin(step)
         try:
             args = resolve_args(step.args, {k: r.result for k, r in self.results.items()
                                             if r.result is not None})
@@ -355,11 +435,15 @@ class Engine:
             self._checks(step, res)
             if any(not c.ok and not c.soft for c in res.checks):
                 res.status = "failed"
+        self._take_actions(res)
         if res.status != "skipped":
             self._shoot(step, res)
         if res.status == "failed":
-            self._evidence(step, res)
+            self._snapshot(step, res, step.role, res.error or "a check failed", f"fail-{step.id}.png")
         self._take_findings(step)
+        self._flag_slow(step, res)
+        res.host = hoststate.delta(self._step_sample, self._sample())
+        self._trace_end(step, res)
         self.ctx.learn(force=True)      # a link this step created or renewed
         res.duration = round(self.clock() - begin, 3)
         return res

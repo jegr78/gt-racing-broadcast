@@ -889,6 +889,27 @@ def t_next_needs_a_serving_feed_and_shows_the_new_stint():
     assert role.do("next", {}) == {"on_air": "ON AIR Stint 2 · Feed B"}
 
 
+def t_every_control_action_is_timed_with_what_it_pressed():
+    role, page, _ = make(party.DirectorRole)
+    page.add("#nextSub", text="ready")
+    page.add("#liveOnAir", text="ON AIR\nStint 1 · Feed A")
+    page.add("#nextBtn.ready")
+
+    def go():
+        page.respond("/next")
+        page.after(0.5, lambda: setattr(page.els["#liveOnAir"], "text", "ON AIR\nStint 2 · Feed B"))
+    page.add("#nextBtn", on_click=go)
+    role.do("next", {})
+    acts = [(a["kind"], a["what"], a["depth"]) for a in role.take_actions()]
+    assert acts == [("open", "/panel", 0), ("wait", "NEXT ready", 0), ("request", "NEXT", 0), ("click", "NEXT", 1), ("control", "NEXT", 2),
+                    ("wait", "the next stint on air", 0)], acts
+    assert role.take_actions() == [], "each action is handed over once"
+    page.els["#nextBtn"].visible = False
+    fails(lambda: role.do("next", {}), "missing or hidden")
+    failed = [a for a in role.take_actions() if a["kind"] == "control"]
+    assert failed and not failed[0]["ok"], f"a control that never showed is recorded as failed: {failed}"
+
+
 def t_arm_refuses_a_button_that_would_stop_the_feed():
     role, page, _ = make(party.DirectorRole)
     arm = page.add("#armBtn", text="FEED B SERVING · STOP", attrs={"data-feed": "B", "data-on": "0", "class": "k ready"})
