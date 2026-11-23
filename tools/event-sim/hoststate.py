@@ -83,6 +83,8 @@ def _unit(proc, cgroup_root):
 def _label(cmdline):
     """A short name for a process: its program, and Chromium's --type or a Python script."""
     args = [a for a in cmdline.split("\0") if a]
+    if len(args) == 1:
+        args = args[0].split()      # Chromium rewrites its command line into one string
     if not args:
         return None
     name = os.path.basename(args[0])

@@ -100,7 +100,7 @@ def t_the_units_processes_are_named_and_ranked_by_cpu():
     proc, cg = _host(usage=0, throttled=0, unit_cpu=0, host_cpu=0)
     _write(cg, "app.slice/racecast-e2e.service/cgroup.procs", "11\n12\n13\n14\n")
     _write(proc, "11/stat", _stat(11, "chrome-headless", 300, 100))
-    _write(proc, "11/cmdline", "/x/chrome-headless-shell\0--type=gpu-process\0--no-sandbox\0")
+    _write(proc, "11/cmdline", "/x/chrome-headless-shell --type=gpu-process --no-sandbox\0\0")   # Chromium rewrites it
     _write(proc, "12/stat", _stat(12, "python", 50, 50))
     _write(proc, "12/cmdline", "/venv/bin/python\0/app/src/racecast.py\0relay\0")
     _write(proc, "13/stat", _stat(13, "ffm peg) x", 900, 0))
