@@ -225,7 +225,11 @@ never the real one.
   PID file and never kill a port holder they cannot prove is theirs. `relay_status_data`
   carries `mode`.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
-  getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
+  sendmsg, getaddrinfo, gethostbyname, gethostbyname_ex, gethostbyaddr) to refuse anything
+  that is not loopback (`OutboundRefused`, an `OSError`). It also makes urllib ignore
+  proxies (`getproxies` answers none, the global opener has an empty `ProxyHandler`), since a
+  loopback proxy would carry a request past the socket check; `update` builds its opener
+  per download for the same reason.
   It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every
   subprocess script through `guarded_argv` so the one-shots run behind it too. It covers
   Python only: ffmpeg and the stream stand-ins are outside it. The one documented local

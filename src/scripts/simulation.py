@@ -458,7 +458,8 @@ def _refuse_address(address):
 
 def install_network_guard(environ=None):
     """In simulation, make this process refuse every non-loopback socket connection,
-    datagram and name lookup. Returns whether the guard is in place."""
+    datagram and name lookup, and make urllib ignore proxies. Returns whether the guard
+    is in place."""
     if not active(environ):
         return False
     if getattr(socket, "_racecast_sim_guard", False):
@@ -504,6 +505,14 @@ def install_network_guard(environ=None):
                     "gethostbyaddr": gethostbyaddr}
     for owner, name in GUARDED:
         setattr(owner, name, replacements[name])
+    _ignore_proxies()
     socket._racecast_sim_guard = True
     return True
 
+
+def _ignore_proxies():
+    """A proxy on loopback would carry any request past the guard, so urllib uses none:
+    not from the environment, the Windows registry or macOS settings."""
+    import urllib.request
+    urllib.request.getproxies = lambda: {}
+    urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))

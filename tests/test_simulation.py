@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Simulation mode (RACECAST_SIMULATION): endpoints, profile guard, network guard.
 Run: python3 tests/test_simulation.py"""
-import os, socket, sys, tempfile, threading, urllib.error, urllib.request
+import json, os, socket, sys, tempfile, threading, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
@@ -150,6 +150,67 @@ def _refused(call):
     except sim.OutboundRefused:
         return True
     return False
+
+
+_PROXY_CHILD = r"""
+import json, os, sys, urllib.request
+sys.path.insert(0, sys.argv[1])
+import http_util, simulation, update
+urllib.request.install_opener(urllib.request.build_opener())   # a global opener that holds the proxy
+assert simulation.install_network_guard()
+calls = {"urlopen": lambda: urllib.request.urlopen("http://192.0.2.1/x", timeout=5),
+         "http_util": lambda: http_util.open_url("http://192.0.2.1/x", timeout=5),
+         "http_util no redirect": lambda: http_util.open_url("http://192.0.2.1/x", timeout=5,
+                                                             allow_redirects=False),
+         "update download": lambda: update.download("https://192.0.2.1/x", os.devnull,
+                                                    sleep=lambda s: None)}
+out = {}
+for name, call in calls.items():
+    try:
+        call()
+        out[name] = "reached"
+    except Exception as exc:
+        out[name] = repr(getattr(exc, "reason", exc))
+print(json.dumps(out))
+"""
+
+
+def t_network_guard_ignores_a_proxy():
+    import subprocess
+    seen = []
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    srv.settimeout(0.2)
+    stop = threading.Event()
+
+    def accept():
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                continue
+            seen.append(conn.recv(200))
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            conn.close()
+    thread = threading.Thread(target=accept, daemon=True)
+    thread.start()
+    proxy = f"http://127.0.0.1:{srv.getsockname()[1]}"
+    env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+    env.update(ON, http_proxy=proxy, https_proxy=proxy, HTTP_PROXY=proxy, HTTPS_PROXY=proxy,
+               all_proxy=proxy, no_proxy="")
+    try:
+        out = subprocess.run([sys.executable, "-c", _PROXY_CHILD, os.path.join(ROOT, "src", "scripts")],
+                             env=env, capture_output=True, text=True, errors="replace", timeout=120)
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+        srv.close()
+    assert out.returncode == 0, out.stderr[-2000:]
+    results = json.loads(out.stdout.strip().splitlines()[-1])
+    assert seen == [], f"a request left through the proxy in simulation: {seen}"
+    for name, result in results.items():
+        assert "simulation mode" in result, f"{name} was not refused by the guard: {result}"
 
 
 def t_network_guard_refuses_everything_but_loopback():
