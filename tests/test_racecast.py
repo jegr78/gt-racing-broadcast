@@ -3389,6 +3389,7 @@ def t_align_running_relay_mode_switches_to_the_mode_start_event_asked_for():
     switched.clear()
     note = m._align_running_relay_mode("race", read_mode=lambda: "qualifying", switch=_switch)
     assert switched == ["race"], "a start without Qualifying brings a qualifying relay back to race"
+    assert "qualifying" in note and "race" in note, note
     switched.clear()
     assert m._align_running_relay_mode("race", read_mode=lambda: "race", switch=_switch) is None
     assert m._align_running_relay_mode("qualifying", read_mode=lambda: None, switch=_switch) is None

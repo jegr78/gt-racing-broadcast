@@ -174,6 +174,25 @@ def t_assert_side_effect_repo_is_clean():
     assert lint.check_assert_side_effects(ROOT) == [], lint.check_assert_side_effects(ROOT)
 
 
+def t_import_both_ways_flags_a_module_imported_with_import_and_from():
+    assert lint.find_import_both_ways("import roles\nfrom roles import builtin\n", {"roles"}) == [(1, "roles")]
+    assert lint.find_import_both_ways("def f():\n    from sim import x\nimport sim\n", {"sim"}) == [(3, "sim")], \
+        "an import inside a function counts for the whole module"
+
+
+def t_import_both_ways_leaves_other_shapes_alone():
+    assert lint.find_import_both_ways("import roles\nimport roles.builtin\n", {"roles"}) == [], "two plain imports"
+    assert lint.find_import_both_ways("import roles.a\nfrom roles import b\n", {"roles"}) == [], "different module names"
+    assert lint.find_import_both_ways("from . import x\nimport x\n", {"x"}) == [], "a relative import names no module"
+    assert lint.find_import_both_ways("import os\nfrom os import sep\n", {"roles"}) == [], \
+        "the standard library is out, as CodeQL has no source for it"
+    assert lint.find_import_both_ways("import (\n", {"x"}) == [], "unparseable source is skipped"
+
+
+def t_import_both_ways_repo_is_clean():
+    assert lint.check_import_both_ways(ROOT) == [], lint.check_import_both_ways(ROOT)
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):
