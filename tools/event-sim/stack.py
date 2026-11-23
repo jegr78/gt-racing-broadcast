@@ -8,6 +8,7 @@ every runtime file stay out of the checkout. Each child runs under
 or dies. Every port is a free loopback port; 8088, 8089 and 53001-53003 are never used."""
 import http.client
 import json
+import math
 import os
 import re
 import secrets
@@ -50,6 +51,7 @@ LOG_TAIL = 4000
 PART_KEY_REF = "sim-part-{}"     # a Script Property name; its value is made up per run
 RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended")    # the second is the RED FLAG banner
 EVENT_FILES = {"invite": "driver-invite.json", "timing": "timing-link.json"}
+MAX_TRACK_M = 30000             # above the longest real circuit (about 25 km)
 KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)     # SIGTERM is TerminateProcess on Windows
 
 
@@ -197,8 +199,9 @@ def event_parts(event):
 def event_track(event):
     """(layout id, lap length in metres) of `[event] track`, or None."""
     length = event.get("track_length_m", drive.DEFAULT_TRACK_M)
-    if not isinstance(length, (int, float)) or isinstance(length, bool) or length < drive.MIN_LENGTH_M:
-        raise ValueError(f"event.track_length_m is a lap of at least {drive.MIN_LENGTH_M:.0f} m, not {length!r}")
+    if not isinstance(length, (int, float)) or isinstance(length, bool) or not math.isfinite(length) \
+            or not drive.MIN_LENGTH_M <= length <= MAX_TRACK_M:
+        raise ValueError(f"event.track_length_m is a lap of {drive.MIN_LENGTH_M:.0f}-{MAX_TRACK_M} m, not {length!r}")
     track = event.get("track")
     if track is None:
         return None

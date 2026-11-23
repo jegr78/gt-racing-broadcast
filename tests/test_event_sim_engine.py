@@ -184,6 +184,8 @@ def t_scenario_checks_the_event_keys_and_values_at_load():
                      ("track", "Le Mans"), ("track", 123), ("cars", 0), ("cars", 16), ("cars", True),
                      ("stints", 0), ("stints", "3"), ("seed", "7"), ("seed", 1.5),
                      ("track_length_m", 10), ("track_length_m", "1200"), ("track_length_m", True),
+                     ("track_length_m", float("nan")), ("track_length_m", float("inf")), ("track_length_m", 1e9),
+                     ("track_length_m", 30001),
                      ("qualifying_part", "yes")):
         _refused(go, f"event.{key}", event={key: bad})
     scn = _scn(go, event={"stints": 3, "track": "6e378b", "track_length_m": 1200, "cars": 6,
