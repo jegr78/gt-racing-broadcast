@@ -252,6 +252,48 @@ def t_expect_compares_rows_of_two_readings():
     expect.compile_expr("drift(result('a').entries, race.entries, 'gap_s') <= 1", ROOTS)
 
 
+def t_swaps_names_only_pairs_further_apart_than_the_margin():
+    before = [{"entry": "A", "gap_s": 0.0}, {"entry": "B", "gap_s": 1.0}, {"entry": "C", "gap_s": 1.02},
+              {"entry": "D", "gap_s": None}]
+    near = [{"entry": "A"}, {"entry": "C"}, {"entry": "B"}, {"entry": "D"}]
+    far = [{"entry": "B"}, {"entry": "A"}, {"entry": "C"}, {"entry": "D"}]
+    names = {"box": Box(0, {"before": before, "near": near, "far": far})}
+    assert expect.truth("swaps(box.data.before, box.data.near, 'gap_s', 0.2) == []", names)[0], \
+        "cars 0.02 s apart may swap"
+    assert expect.truth("swaps(box.data.before, box.data.far, 'gap_s', 0.2) == [['A', 'B']]", names)[0], \
+        "a car 1 s ahead that fell behind is a swap"
+    assert expect.truth("swaps(box.data.before, box.data.near, 'gap_s', 0) == [['B', 'C']]", names)[0]
+    assert expect.truth("sorted(pluck(box.data.near, 'entry')) == sorted(pluck(box.data.before, 'entry'))",
+                        names)[0], "sorted compares the set of entries"
+    try:
+        expect.truth("swaps(box.data.before, [], 'gap_s', 0.2) == []", names)
+    except expect.Unresolved:
+        pass  # the expected outcome
+    else:
+        raise AssertionError("an empty reading has no order to keep, so it is no pass")
+
+
+def t_unchanged_names_the_rows_whose_key_kept_its_value():
+    before = [{"entry": "A", "driver": "A-1"}, {"entry": "B", "driver": "B-1"}, {"entry": "C", "driver": "C-1"}]
+    after = [{"entry": "B", "driver": "B-2"}, {"entry": "A", "driver": "A-2"}, {"entry": "C", "driver": "C-1"}]
+    names = {"box": Box(0, {"before": before, "after": after})}
+    assert expect.truth("unchanged(box.data.before, box.data.after, 'driver') == ['C']", names)[0]
+    assert expect.truth("unchanged(box.data.after, box.data.after, 'driver') == ['B', 'A', 'C']", names)[0]
+    try:
+        expect.truth("unchanged(box.data.before, [], 'driver') == []", names)
+    except expect.Unresolved:
+        pass  # the expected outcome
+    else:
+        raise AssertionError("no common row is nothing compared, not 'every driver changed'")
+
+
+def t_having_picks_the_texts_that_contain_every_word():
+    names = {"box": Box(0, {"rows": ["1 Apex Works 1:44", "7 Falcon Engineering DC", "8 Harbor DC"]})}
+    assert expect.truth("having(box.data.rows, 'Falcon', 'DC') == ['7 Falcon Engineering DC']", names)[0]
+    assert expect.truth("len(having(box.data.rows, 'DC')) == 2", names)[0]
+    assert expect.truth("having(box.data.rows, 'Falcon', '1:44') == []", names)[0]
+
+
 def t_only_plain_values_leave_a_probe():
     names = {"box": Box(1, {"a": [1, 2]}), "page": expect.Func(lambda r: {"r": r})}
     for text in ("box.twice(box) == 1", "box.twice(page) == 1", "box.twice == 1", "len == 1", "box == 1",
