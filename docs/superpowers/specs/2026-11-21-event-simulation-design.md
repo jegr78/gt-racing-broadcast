@@ -1,7 +1,7 @@
 # Event simulation
 
 Status: draft for review. Decided in review: three stints and lobbies with one commentator
-each, and the `full` scenario produces the deck's image set.
+each, and the `full` scenario produces the deck's race-day images (50 of its 151).
 
 ## Problem
 
@@ -177,9 +177,9 @@ do = "final_lap"
 `report.html` shows one row per step: time, role, action, result, duration, screenshot
 thumbnail, findings. A summary lists hard failures first, then soft findings by role.
 `report.json` holds the same data for tooling. `shots/` keeps every named screenshot at full
-size. The `full` scenario names its screenshots after the slide deck's image set, so a
-deck update is one run of `full` followed by a copy of `shots/`; this replaces the scratch
-shot lists used so far.
+size. The `full` scenario names its screenshots after the slide deck's image set, so the race-day
+images of a deck update are one run of `full` followed by a copy of `shots/`; the other
+families (multiclass, tyres, approval corrections and more) still come from their own shots.
 
 ## CI
 
