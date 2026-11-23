@@ -11984,7 +11984,7 @@ def _run_action(action):
     if action["kind"] == "aggregate":
         aggregate_status()
         return None
-    sys.exit(f"racecast: {action['kind']} not implemented")
+    raise SystemExit(f"racecast: {action['kind']} not implemented")
 
 
 if __name__ == "__main__":
