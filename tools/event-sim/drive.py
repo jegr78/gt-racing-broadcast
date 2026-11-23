@@ -296,12 +296,19 @@ class Field:
                 c.extra = nxt
                 c.senders[nxt].new_session()
 
-    def release(self):
-        """The held cars leave the box in box order, each by the gap it arrived with."""
+    def release(self, delays=None):
+        """The held cars leave the box in box order, each by the gap it arrived with, or
+        by its seconds in `delays` ({entry: s}, a keep restart's frozen gaps); a held car
+        without one leaves with the last."""
+        for entry in delays or {}:
+            self.car(entry)
         held = [c for c in self.cars if c.mode in ("pit_in", "stand") and c.pit.get("hold")]
         stood = [c.pit["stood"] for c in held if c.pit.get("stood") is not None]
         first = min(stood) if stood else None
         for c in held:
+            if delays is not None:
+                c.pit["delay"] = max(0.0, float(delays.get(c.entry, max(delays.values(), default=0.0))))
+                continue
             # A car still on its way in, or stopped this very tick, leaves once it stood.
             gap = c.pit["stood"] - first if c.pit.get("stood") is not None else 0.0
             c.pit["delay"] = max(0.0, gap - c.pit["stall"] * STALL_M / self.pace)

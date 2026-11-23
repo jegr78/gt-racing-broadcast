@@ -1330,7 +1330,12 @@ def t_driver_actions_reach_the_field():
     assert role.page()["standing"] == 2, role.page()["cars"]
     role.do("lobby", {"stint": 2})
     role.do("rejoin", {"entry": 2, "seconds": 2})
-    role.do("release", {})
+    fails(lambda: role.do("release", {"gaps": [{"entry": drive.roster(3)[0], "gap_s": None}]}),
+          "no gap to release by")
+    fails(lambda: role.do("release", {"gaps": "race"}), "rows of a race reading")
+    teams = drive.roster(3)
+    role.do("release", {"gaps": [{"entry": teams[0], "gap_s": 3.0}, {"entry": teams[2], "gap_s": 4.5}]})
+    assert role.field.car(teams[2]).pit["delay"] == 1.5, "a gap counts from the first car's"
     runner.run(60.0)
     page = role.page()
     assert page["driving"] == 3 and {c["driver"] for c in page["cars"]} == \

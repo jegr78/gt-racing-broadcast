@@ -216,6 +216,28 @@ def t_box_holds_every_car_until_release_and_the_next_lobby_takes_over():
     assert [c.entry for c in order] == TEAMS[:3], "cars leave in the order they arrived, each by its gap"
 
 
+def t_a_keep_restart_releases_each_car_by_its_given_gap():
+    wire = Wire()
+    f = field(wire, cars=3)
+    f.start()
+    run(f, wire, 5.0)
+    f.box([TEAMS[2], TEAMS[0], TEAMS[1]])
+    assert run(f, wire, 80.0, lambda: all(c.mode == "stand" for c in f.cars))
+    f.release({TEAMS[0]: 0.0, TEAMS[2]: 9.0})
+    assert run(f, wire, 60.0, lambda: all(c.mode == "drive" for c in f.cars))
+    left = {c.entry: c.left_at for c in f.cars}
+    assert abs(left[TEAMS[1]] - left[TEAMS[0]] - 9.0) <= drive.TICK_S + 1e-9, \
+        f"a car without a gap leaves with the last: {left}"
+    assert abs(left[TEAMS[2]] - left[TEAMS[0]] - 9.0) <= drive.TICK_S + 1e-9, \
+        f"each car leaves its gap after the first, whatever the box order: {left}"
+    try:
+        f.release({"Nobody #0": 1.0})
+    except drive.DriveError as exc:
+        assert "Nobody #0" in str(exc)
+    else:
+        raise AssertionError("a gap for a car not on the grid must be refused")
+
+
 def t_release_right_when_a_car_stops_or_before_it_stops_does_not_crash():
     wire = Wire()
     f = field(wire, cars=3)
