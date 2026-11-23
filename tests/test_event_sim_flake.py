@@ -41,6 +41,7 @@ def _host(usage, throttled, unit_cpu, host_cpu, oom=0, high=0):
     base = _tmp()
     proc, cg = os.path.join(base, "proc"), os.path.join(base, "cg")
     _write(proc, "loadavg", "2.50 1.25 0.75 3/400 12345\n")
+    _write(proc, "vmstat", f"nr_free_pages 1\npswpin {host_cpu // 1000}\npswpout {usage // 1000}\n")
     _write(proc, "self/cgroup", "0::/app.slice/racecast-e2e.service\n")
     for res in ("cpu", "memory", "io"):
         _write(proc, f"pressure/{res}", _psi(host_cpu if res == "cpu" else 0))
@@ -90,23 +91,25 @@ def t_a_delta_says_how_much_cpu_the_unit_got_and_how_long_it_stalled():
     assert d["cpu_stall_share"] == 0.5, "the unit's tasks waited for a CPU half of the time"
     assert d["oom"] == 1 and d["high"] == 3 and d["max"] == 5, "the unit reached its memory cap"
     assert d["memory_peak_mb"] == 2, d
+    assert (d["swap_in_pages"], d["swap_out_pages"]) == (4000, 2500), "the host swapped meanwhile"
 
 
-def _stat(pid, comm, utime, stime):
-    fields = ["S", "1"] + ["0"] * 9 + [str(utime), str(stime)] + ["0"] * 30
+def _stat(pid, comm, utime, stime, majflt=0):
+    fields = ["S", "1"] + ["0"] * 7 + [str(majflt), "0", str(utime), str(stime)] + ["0"] * 30
     return f"{pid} ({comm}) {' '.join(fields)}\n"
 
 
 def t_the_units_processes_are_named_and_ranked_by_cpu():
     proc, cg = _host(usage=0, throttled=0, unit_cpu=0, host_cpu=0)
     _write(cg, "app.slice/racecast-e2e.service/cgroup.procs", "11\n12\n13\n14\n")
-    _write(proc, "11/stat", _stat(11, "chrome-headless", 300, 100))
+    _write(proc, "11/stat", _stat(11, "chrome-headless", 300, 100, majflt=42))
     _write(proc, "11/cmdline", "/x/chrome-headless-shell --type=gpu-process --no-sandbox\0\0")   # Chromium rewrites it
     _write(proc, "12/stat", _stat(12, "python", 50, 50))
     _write(proc, "12/cmdline", "/venv/bin/python\0/app/src/racecast.py\0relay\0")
     _write(proc, "13/stat", _stat(13, "ffm peg) x", 900, 0))
     _write(proc, "13/cmdline", "ffmpeg\0-i\0pipe:0\0")
     got = hoststate.processes(proc=proc, cgroup_root=cg, ticks=100)
+    assert got[1]["majflt"] == 42, "major page faults: memory read back from swap or disk"
     assert [(p["name"], p["cpu_s"]) for p in got] == [("ffmpeg", 9.0), ("chrome-headless-shell gpu-process", 4.0),
                                                        ("python racecast.py", 1.0)], \
         f"by CPU seconds, a vanished pid left out: {got}"
@@ -115,13 +118,13 @@ def t_the_units_processes_are_named_and_ranked_by_cpu():
 
 
 def t_the_cpu_each_process_used_between_two_readings():
-    before = [{"pid": 1, "name": "gpu", "cpu_s": 10.0}, {"pid": 2, "name": "renderer", "cpu_s": 5.0},
-              {"pid": 3, "name": "gone", "cpu_s": 1.0}]
-    after = [{"pid": 1, "name": "gpu", "cpu_s": 10.5}, {"pid": 2, "name": "renderer", "cpu_s": 7.25},
-             {"pid": 4, "name": "new", "cpu_s": 0.75}]
-    assert hoststate.cpu_delta(before, after) == [{"pid": 2, "name": "renderer", "cpu_s": 2.25},
-                                                  {"pid": 4, "name": "new", "cpu_s": 0.75},
-                                                  {"pid": 1, "name": "gpu", "cpu_s": 0.5}], \
+    before = [{"pid": 1, "name": "gpu", "cpu_s": 10.0, "majflt": 5}, {"pid": 2, "name": "renderer", "cpu_s": 5.0, "majflt": 0},
+              {"pid": 3, "name": "gone", "cpu_s": 1.0, "majflt": 0}]
+    after = [{"pid": 1, "name": "gpu", "cpu_s": 10.5, "majflt": 5}, {"pid": 2, "name": "renderer", "cpu_s": 7.25, "majflt": 900},
+             {"pid": 4, "name": "new", "cpu_s": 0.75, "majflt": 3}]
+    assert hoststate.cpu_delta(before, after) == [{"pid": 2, "name": "renderer", "cpu_s": 2.25, "majflt": 900},
+                                                  {"pid": 4, "name": "new", "cpu_s": 0.75, "majflt": 3},
+                                                  {"pid": 1, "name": "gpu", "cpu_s": 0.5, "majflt": 0}], \
         "most first; a process that started meanwhile counts from zero, one that ended is left out"
     assert hoststate.cpu_delta(None, after) is None
 

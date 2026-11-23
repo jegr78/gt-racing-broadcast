@@ -168,8 +168,9 @@ FIT_TOLERANCE_PX = 1
 # gets ACTION_BUDGET_S, the spec's threshold for a page showing a new state.
 ACTION_BUDGET_S = 2.0
 BUDGETS = {"open": 5.0}
-# Playwright's DOM snapshots run a script in every frame; a sandboxed one refuses it.
-TRACE_SANDBOX = "Blocked script execution in 'about:blank' because the document's frame is sandboxed"
+# The long task observer (an init script) and a trace's DOM snapshots run in every
+# frame; a sandboxed about:blank frame refuses them and Chromium logs this.
+SANDBOX_BLOCKED = "Blocked script execution in 'about:blank' because the document's frame is sandboxed"
 RECENT = 30              # console lines and failed requests a failure snapshot shows
 DIAG_MS = 2000           # how long a failure snapshot waits for the page to answer
 STATE_SCRIPT = ("() => ({visibility: document.visibilityState, focus: document.hasFocus(), "
@@ -323,7 +324,7 @@ class PageRole(Role):
         where = (msg.location or {}).get("url") or ""
         text = redact(f"{msg.text} ({where})" if where else msg.text)
         self.recent.append({"t": self.clock(), "type": msg.type, "text": text})
-        if msg.type == "error" and not (self.tracing and msg.text.startswith(TRACE_SANDBOX)):
+        if msg.type == "error" and not msg.text.startswith(SANDBOX_BLOCKED):
             self.errors.append(text)
 
     def _pageerror(self, error):

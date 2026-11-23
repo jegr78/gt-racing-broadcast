@@ -12,7 +12,7 @@ CGROUP = "/sys/fs/cgroup"
 RESOURCES = ("cpu", "memory", "io")
 DELTA_KEYS = ("seconds", "cpu_s", "throttled_s", "nr_throttled", "unit_cpu_stall_s",
               "unit_memory_stall_s", "unit_io_stall_s", "host_cpu_stall_s", "cpu_stall_share",
-              "oom", "oom_kill", "high", "max", "memory_peak_mb")
+              "oom", "oom_kill", "high", "max", "memory_peak_mb", "swap_in_pages", "swap_out_pages")
 
 
 def _read(path):
@@ -94,8 +94,8 @@ def _label(cmdline):
 
 
 def processes(proc=PROC, cgroup_root=CGROUP, ticks=None):
-    """The processes of this run's cgroup, most CPU first: [{pid, name, cpu_s}]
-    (user and system time so far). None outside Linux."""
+    """The processes of this run's cgroup, most CPU first: [{pid, name, cpu_s, majflt}]
+    (user and system time and major page faults so far). None outside Linux."""
     unit = _unit(proc, cgroup_root)
     pids = _read(os.path.join(cgroup_root, unit["path"].lstrip("/"), "cgroup.procs")) if unit else None
     if pids is None:
@@ -108,22 +108,24 @@ def processes(proc=PROC, cgroup_root=CGROUP, ticks=None):
             continue        # it ended meanwhile
         fields = stat.rsplit(")", 1)[1].split()
         try:
-            cpu = (int(fields[11]) + int(fields[12])) / ticks
+            cpu, majflt = (int(fields[11]) + int(fields[12])) / ticks, int(fields[9])
         except (IndexError, ValueError):
             continue
         name = _label(_read(os.path.join(proc, pid, "cmdline")) or "") or stat.split("(", 1)[1].rsplit(")", 1)[0]
-        out.append({"pid": int(pid), "name": name, "cpu_s": round(cpu, 2)})
+        out.append({"pid": int(pid), "name": name, "cpu_s": round(cpu, 2), "majflt": majflt})
     return sorted(out, key=lambda p: -p["cpu_s"])
 
 
 def cpu_delta(before, after, top=10):
-    """Each process's CPU seconds between two `processes()` readings, most first. A
-    process that started meanwhile counts from zero; None without both readings."""
+    """Each process's CPU seconds and major page faults between two `processes()`
+    readings, most CPU first. A process that started meanwhile counts from zero; None
+    without both readings. A stalled process with many major faults waited for memory."""
     if before is None or after is None:
         return None
-    was = {p["pid"]: p["cpu_s"] for p in before}
-    out = [{"pid": p["pid"], "name": p["name"], "cpu_s": round(p["cpu_s"] - was.get(p["pid"], 0.0), 2)}
-           for p in after]
+    was = {p["pid"]: p for p in before}
+    out = [{"pid": p["pid"], "name": p["name"],
+            "cpu_s": round(p["cpu_s"] - was.get(p["pid"], {}).get("cpu_s", 0.0), 2),
+            "majflt": p.get("majflt", 0) - was.get(p["pid"], {}).get("majflt", 0)} for p in after]
     return sorted(out, key=lambda p: -p["cpu_s"])[:top]
 
 
@@ -134,7 +136,9 @@ def sample(proc=PROC, cgroup_root=CGROUP, clock=time.monotonic):
         loadavg = [float(x) for x in load.split()[:3]] if load else None
     except ValueError:
         loadavg = None
+    vm = _pairs(os.path.join(proc, "vmstat")) or {}
     return {"t": clock(), "loadavg": loadavg,
+            "swap": {"in": vm.get("pswpin"), "out": vm.get("pswpout")} if vm else None,
             "pressure": {r: _psi(os.path.join(proc, "pressure", r)) for r in RESOURCES},
             "unit": _unit(proc, cgroup_root)}
 
@@ -175,6 +179,8 @@ def delta(before, after):
         "oom_kill": _diff(before, after, "unit", "memory_events", "oom_kill"),
         "high": _diff(before, after, "unit", "memory_events", "high"),
         "max": _diff(before, after, "unit", "memory_events", "max"),
+        "swap_in_pages": _diff(before, after, "swap", "in"),
+        "swap_out_pages": _diff(before, after, "swap", "out"),
         "memory_peak_mb": None if _get(after, "unit", "memory_peak") is None
         else round(after["unit"]["memory_peak"] / 1048576),
     })

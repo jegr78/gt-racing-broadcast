@@ -639,9 +639,10 @@ needed to explain a failure at the moment it happens:
   Tracing is not free: Playwright keeps the whole session's screencast and resources in
   its temporary files on `/tmp` (tmpfs, charged to the unit's memory), and a traced
   red-flag reached the unit's 2 GiB cap (memory.max events, reclaim stalls) and was
-  once OOM-killed. Trace a short scenario, or a run outside the unit. Its DOM snapshots
-  make Chromium log "Blocked script execution in 'about:blank'" for a sandboxed frame
-  (the Control Center's report preview); a tracing role drops that line. Open a trace
+  once OOM-killed. Trace a short scenario, or a run outside the unit. The long task observer and a trace's DOM
+  snapshots run in every frame, so Chromium logs "Blocked script execution in
+  'about:blank'" for a sandboxed one (the Control Center's report preview); a page role
+  drops that line. Open a trace
   with `playwright show-trace FILE`. A zip holds what the page sent and received, the
   run's console tokens included: they die with the run's secret, but treat the zip as
   the report's private part.
