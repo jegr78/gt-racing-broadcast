@@ -300,6 +300,13 @@ def t_the_registry_has_every_party_and_its_actions():
         assert set(REG[kind].action_names()) == actions, f"{kind}: {sorted(REG[kind].action_names())}"
 
 
+def t_shared_actions_have_one_implementation():
+    for name in ("area", "act_view", "act_fit"):
+        assert getattr(REG["director"], name) is getattr(REG["race_control"], name), \
+            f"director and race_control share {name}"
+    assert REG["director"].act_chat is REG["commentator"].act_chat, "director and commentator share act_chat"
+
+
 _TOKENS = re.compile(r'#([A-Za-z][\w-]*)|\.([A-Za-z][\w-]*)|\[[\w-]+="([^"]*)"\]|has-text\("([^"]*)"\)')
 
 
