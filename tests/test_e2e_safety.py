@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Resource admission is fail-closed and inspection cannot become detached."""
+import atexit
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -10,6 +12,24 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import e2e_safety as safety
 import e2e_child as child
+
+
+def host(root,available_kb=8*1024**2,some=0.5,full=0.1,psi=True):
+    """A fake /proc with MemAvailable and the memory PSI file."""
+    proc=Path(root);(proc/'pressure').mkdir(parents=True,exist_ok=True)
+    (proc/'meminfo').write_text(f'MemTotal: 16000000 kB\nMemFree: 1 kB\nMemAvailable: {available_kb} kB\n')
+    psi_file=proc/'pressure'/'memory'
+    if psi:psi_file.write_text(f'some avg10={some:.2f} avg60=0.00 avg300=0.00 total=1\nfull avg10={full:.2f} avg60=0.00 avg300=0.00 total=1\n')
+    elif psi_file.exists():psi_file.unlink()
+    return proc
+
+
+# Every admission below reads this calm host and a free unit, never the machine running the test.
+_PROC=tempfile.mkdtemp(prefix='e2e-safety-proc-')
+atexit.register(shutil.rmtree,_PROC,True)
+safety.PROC=host(_PROC)
+_UNIT_BUSY=safety.unit_busy
+safety.unit_busy=lambda:False
 
 
 def limits(root,**values):
@@ -264,6 +284,82 @@ def t_the_internal_entrypoints_keep_a_long_lifetime():
          patch.object(safety.os,'open',return_value=202),patch.object(safety.subprocess,'Popen') as launch:
         safety.owner_watchdog(12345,'42',safety.LONG_MAX_SECONDS)
     assert launch.call_args.args[0][-1]==long,'the watcher process gets the long lifetime'
+
+def refusal(proc):
+    """(the refusal text, the seconds waited) of an admission on a fake clock."""
+    slept=[]
+    def sleep(s):slept.append(s)
+    try:safety.wait_for_memory(proc=proc,clock=lambda:sum(slept),sleep=sleep)
+    except RuntimeError as error:return str(error),sum(slept)
+    return '',sum(slept)
+
+
+def t_a_host_under_memory_pressure_is_waited_for_then_refused_with_its_values():
+    with tempfile.TemporaryDirectory() as root:
+        for kw,word in (({'full':safety.PSI_FULL_AVG10_MAX+1},'full'),({'some':safety.PSI_SOME_AVG10_MAX+1},'some'),
+                        ({'available_kb':(safety.MAX_MEMORY+safety.MEMORY_MARGIN)//1024-1},'MemAvailable')):
+            text,waited=refusal(host(root,**kw))
+            assert text.startswith('host under memory pressure: ') and word in text,(kw,text)
+            assert waited>=safety.PRESSURE_WAIT_SECONDS,'it waited for the host to calm down first'
+            host(root)
+
+
+def t_a_calm_host_or_one_that_calms_down_starts_and_missing_psi_never_blocks():
+    with tempfile.TemporaryDirectory() as root:
+        proc=host(root);slept=[]
+        safety.wait_for_memory(proc=proc,clock=lambda:0.0,sleep=slept.append)
+        assert slept==[],'a calm host starts at once'
+        host(root,psi=False);safety.wait_for_memory(proc=proc,clock=lambda:0.0,sleep=slept.append)
+        assert slept==[],'a kernel without PSI is judged by MemAvailable alone'
+        host(root,full=50.0)
+        def calm(s):slept.append(s);host(root)
+        safety.wait_for_memory(proc=proc,clock=lambda:sum(slept),sleep=calm)
+        assert len(slept)==1,'the run starts once the pressure is gone'
+        state=safety.host_memory(host(root,psi=False))
+        assert state['some'] is None and state['full'] is None and state['available']==8*1024**3,state
+
+
+def t_a_fresh_ci_runner_passes_the_memory_admission():
+    with tempfile.TemporaryDirectory() as root:
+        # ubuntu-latest: 16 GB, about 14 GB available, idle PSI.
+        assert safety.memory_strain(safety.host_memory(host(root,available_kb=14*1024**2,some=0.0,full=0.0)))==''
+        # The smallest hosted Linux runner: 7 GB with a few GB available.
+        assert safety.memory_strain(safety.host_memory(host(root,available_kb=4*1024**2,some=2.0,full=0.5)))==''
+
+
+def t_a_busy_unit_is_named_before_any_memory_wait():
+    waited=[]
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
+         patch.object(safety,'current_group',return_value=Path('/outside')), \
+         patch.object(safety,'unit_busy',return_value=True), \
+         patch.object(safety,'wait_for_memory',side_effect=lambda **kw:waited.append(1)):
+        try:safety.enter(__file__,[])
+        except RuntimeError as error:assert 'busy' in str(error) and safety.UNIT in str(error),error
+        else:raise AssertionError('a busy unit must be refused')
+    assert waited==[],'the memory of a host that runs another E2E is not this run\'s to wait for'
+    calls=[]
+    def run(argv,**kw):calls.append(argv);return SimpleNamespace(returncode=0)
+    with patch.object(safety.subprocess,'run',run):
+        assert _UNIT_BUSY() is True and calls[0][-1]==safety.UNIT and 'is-active' in calls[0],calls
+
+
+def t_admission_checks_the_host_before_it_starts_the_unit():
+    order=[]
+    def run(command,**kw):order.append('unit');return SimpleNamespace(returncode=0)
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
+         patch.object(safety,'owner_identity',return_value=(12345,'42')), \
+         patch.object(safety,'current_group',return_value=Path('/outside')),patch.object(safety.subprocess,'run',run), \
+         patch.object(safety,'wait_for_memory',side_effect=lambda **kw:order.append('memory')):
+        safety.enter(__file__,[])
+    assert order==['memory','unit'],order
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
+         patch.object(safety,'owner_identity',return_value=(12345,'42')), \
+         patch.object(safety,'current_group',return_value=Path('/outside')),patch.object(safety.subprocess,'run',run), \
+         patch.object(safety,'wait_for_memory',side_effect=RuntimeError('host under memory pressure: x')):
+        try:safety.enter(__file__,[])
+        except RuntimeError:pass  # refused before any unit started
+        else:raise AssertionError('a host under pressure must not start the unit')
+    assert order==['memory','unit'],'no unit was started under pressure'
 
 
 if __name__=='__main__':

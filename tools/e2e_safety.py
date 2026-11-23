@@ -14,6 +14,13 @@ MAX_SECONDS=900
 LONG_MAX_SECONDS=7800
 MAX_TASKS=512
 MAX_MEMORY=2*1024**3
+# Host memory admission: a run started while the host swaps stalls on IO.
+PROC=Path('/proc')
+MEMORY_MARGIN=512*1024**2        # MemAvailable must hold the unit's cap plus this
+PSI_SOME_AVG10_MAX=20.0          # % of the last 10 s some task waited for memory
+PSI_FULL_AVG10_MAX=5.0           # % of the last 10 s every task waited for memory
+PRESSURE_WAIT_SECONDS=120
+PRESSURE_POLL_SECONDS=5
 
 
 def current_group():
@@ -35,6 +42,58 @@ def limited(group):
     if not (0<tasks<=MAX_TASKS and 0<memory<=MAX_MEMORY and 0<quota<=2*period and period>0):
         raise RuntimeError('E2E cgroup resource limits are missing or weakened')
     return True
+
+
+def host_memory(proc=None):
+    """{some, full, available}: the memory PSI avg10 values and MemAvailable in bytes;
+    None for what this kernel does not offer."""
+    proc=Path(PROC if proc is None else proc);state={'some':None,'full':None,'available':None}
+    try:
+        for line in (proc/'pressure'/'memory').read_text(encoding='utf8',errors='replace').splitlines():
+            kind,*fields=line.split()
+            values=dict(f.split('=',1) for f in fields if '=' in f)
+            if kind in ('some','full') and 'avg10' in values:state[kind]=float(values['avg10'])
+    except (OSError,ValueError):pass  # no PSI on this kernel: MemAvailable alone decides
+    try:
+        for line in (proc/'meminfo').read_text(encoding='utf8',errors='replace').splitlines():
+            if line.startswith('MemAvailable:'):state['available']=int(line.split()[1])*1024
+    except (OSError,ValueError,IndexError):pass  # no meminfo: PSI alone decides
+    return state
+
+
+def memory_strain(state):
+    """Why the host cannot take a run now, or ''. A missing value never blocks."""
+    reasons=[]
+    if state['available'] is not None and state['available']<MAX_MEMORY+MEMORY_MARGIN:
+        reasons.append(f"MemAvailable {state['available']//1024**2} MiB < {(MAX_MEMORY+MEMORY_MARGIN)//1024**2} MiB")
+    if state['some'] is not None and state['some']>PSI_SOME_AVG10_MAX:
+        reasons.append(f"memory PSI some avg10 {state['some']:g}% > {PSI_SOME_AVG10_MAX:g}%")
+    if state['full'] is not None and state['full']>PSI_FULL_AVG10_MAX:
+        reasons.append(f"memory PSI full avg10 {state['full']:g}% > {PSI_FULL_AVG10_MAX:g}%")
+    return ', '.join(reasons)
+
+
+def unit_busy():
+    """True while another run holds the machine's E2E unit."""
+    try:
+        return subprocess.run(['systemctl','--user','is-active','--quiet',UNIT],stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode==0
+    except OSError:return False  # no systemctl: systemd-run reports it
+
+
+def wait_for_memory(proc=None,clock=time.monotonic,sleep=time.sleep,seconds=PRESSURE_WAIT_SECONDS):
+    """Return once the host has memory for a run; after `seconds` of pressure raise
+    RuntimeError('host under memory pressure: ...') with the values. Never starts silently."""
+    begin=clock();told=False
+    while True:
+        reason=memory_strain(host_memory(proc))
+        if not reason:return
+        if clock()-begin>=seconds:
+            raise RuntimeError(f'host under memory pressure: {reason} (waited {seconds:g}s)')
+        if not told:
+            print(f'E2E admission: host under memory pressure ({reason}); waiting up to {seconds:g}s',file=sys.stderr,flush=True)
+            told=True
+        sleep(PRESSURE_POLL_SECONDS)
 
 
 def owner_identity():
@@ -85,6 +144,9 @@ def enter(script,argv,seconds=None,long=False):
     if sys.platform!='linux':return None
     if os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted':return None
     if limited(current_group()):return None
+    # Another run's memory is no pressure to wait out: name the busy unit instead.
+    if unit_busy():raise RuntimeError(f'E2E unit {UNIT} is busy with another run; start this one after it')
+    wait_for_memory()
     pid,start=owner_identity()
     command=['systemd-run','--user','--quiet','--wait','--collect','--pipe',
              '--unit='+UNIT,'--property=CPUQuota=200%',

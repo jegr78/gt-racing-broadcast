@@ -239,6 +239,9 @@ class Context:
     def new_page(self):
         return self.page
 
+    def add_init_script(self, script):
+        self.page.init_scripts = [*getattr(self.page, "init_scripts", []), script]
+
     def close(self):
         self.closed = True
 
@@ -769,6 +772,11 @@ def t_repeated_and_stopped_service_errors_fold_into_one_finding_each():
 
 
 # -- producer -------------------------------------------------------------------------
+def stream_ended(page, job_id):
+    """The page's event stream of job `job_id` has ended (Playwright's requestfinished)."""
+    page.handlers["requestfinished"](Response(f"{BASE}/api/jobs/{job_id}/stream?profile=demo"))
+
+
 def producer(job="done", log="relay: up", stale=None):
     """A Control Center whose job hides the chip when it starts and shows `job` a second later."""
     role, page, ctx = make(party.ProducerRole, event={"track": "6e378b"})
@@ -779,9 +787,14 @@ def producer(job="done", log="relay: up", stale=None):
         last = page.clicks[-2]
         op = "event-start" if "Start event" in last else "relay-restart" if "relay-restart" in last else "event-stop"
         page.ops.append(op)
-        page.respond("/api/op/" + op, body={"ok": True, "job_id": len(page.ops)})
+        job_id = f"j{len(page.ops)}"
+        page.respond("/api/op/" + op, body={"ok": True, "job_id": job_id})
         page.after(0.2, lambda: page.add("#jobchip", visible=False))
-        page.after(1.2, lambda: page.add("#jobchip", text=job))
+
+        def ended():
+            page.add("#jobchip", text=job)
+            stream_ended(page, job_id)
+        page.after(1.2, ended)
     page.add("#cmodal-ok", on_click=confirm)
     page.add("#joblog", text=log)
     for view in ("home", "services"):
@@ -808,11 +821,36 @@ def t_an_earlier_jobs_chip_is_not_this_jobs_result():
     role, _, _ = producer(job="failed (exit 1)", stale="done")
     fails(lambda: role.do("stop_event", {}), "failed (exit 1)")
     role, page, _ = producer(stale="done")
-    page.els["#cmodal-ok"].on_click = lambda: page.respond("/api/op/event-start")
-    fails(lambda: role.do("start_event", {}), "the job starting")
+    page.els["#cmodal-ok"].on_click = lambda: page.respond("/api/op/event-start", body={"ok": True, "job_id": "j9"})
+    fails(lambda: role.do("start_event", {}), "the job's end")
+    role, page, _ = producer(stale="done")
+    page.els["#cmodal-ok"].on_click = lambda: page.respond("/api/op/event-start", body={"ok": False})
+    fails(lambda: role.do("start_event", {}), "started no job")
     role, page, _ = producer()
     page.els["#cmodal-ok"].on_click = lambda: page.after(0.2, lambda: page.add("#jobchip", text="done"))
     fails(lambda: role.do("start_event", {}), "sent no request to /api/op/event-start")
+
+
+def t_a_job_that_ends_before_the_first_look_is_still_its_result():
+    role, page, _ = producer(stale="done")
+
+    def quick():
+        page.respond("/api/op/event-stop", body={"ok": True, "job_id": "j5"})
+        page.add("#jobchip", text="done")       # hidden and shown again before the role looks
+        stream_ended(page, "j5")
+    page.els["#cmodal-ok"].on_click = quick
+    assert role.do("stop_event", {}) == {"job": "done"}, "the chip is hidden only while the job runs"
+
+    class Closed(Response):
+        method, failure = "GET", "net::ERR_ABORTED"
+
+    def closed_by_the_page():
+        page.respond("/api/op/event-stop", body={"ok": True, "job_id": "j6"})
+        page.add("#jobchip", text="done")
+        page.handlers["requestfailed"](Closed(f"{BASE}/api/jobs/j6/stream"))
+    page.els["#cmodal-ok"].on_click = closed_by_the_page
+    assert role.do("stop_event", {}) == {"job": "done"}, \
+        "the page's done handler may close the stream before the server does: that ends it too"
 
 
 def t_a_failed_job_fails_the_step_with_its_log():
@@ -887,6 +925,27 @@ def t_next_needs_a_serving_feed_and_shows_the_new_stint():
         page.els["#liveOnAir"].text = "ON AIR\nStint 2 · Feed B"
     page.els["#nextBtn"].on_click = go
     assert role.do("next", {}) == {"on_air": "ON AIR Stint 2 · Feed B"}
+
+
+def t_every_control_action_is_timed_with_what_it_pressed():
+    role, page, _ = make(party.DirectorRole)
+    page.add("#nextSub", text="ready")
+    page.add("#liveOnAir", text="ON AIR\nStint 1 · Feed A")
+    page.add("#nextBtn.ready")
+
+    def go():
+        page.respond("/next")
+        page.after(0.5, lambda: setattr(page.els["#liveOnAir"], "text", "ON AIR\nStint 2 · Feed B"))
+    page.add("#nextBtn", on_click=go)
+    role.do("next", {})
+    acts = [(a["kind"], a["what"], a["depth"]) for a in role.take_actions()]
+    assert acts == [("open", "/panel", 0), ("wait", "NEXT ready", 0), ("request", "NEXT", 0), ("click", "NEXT", 1), ("control", "NEXT", 2),
+                    ("wait", "the next stint on air", 0)], acts
+    assert role.take_actions() == [], "each action is handed over once"
+    page.els["#nextBtn"].visible = False
+    fails(lambda: role.do("next", {}), "missing or hidden")
+    failed = [a for a in role.take_actions() if a["kind"] == "control"]
+    assert failed and not failed[0]["ok"], f"a control that never showed is recorded as failed: {failed}"
 
 
 def t_arm_refuses_a_button_that_would_stop_the_feed():

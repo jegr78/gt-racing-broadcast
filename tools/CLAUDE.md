@@ -462,16 +462,16 @@ Runs a scenario against the fakes above plus the real relay and Control Center, 
 `docs/superpowers/specs/2026-11-21-event-simulation-design.md`). Exit 0: no hard finding;
 1: a hard finding; 2: the scenario or the stack did not start. Not in `tools/run-tests.py`;
 `tests/test_event_sim_engine.py` covers the engine with in-process fakes and a fake clock.
-A page role's step that fails hard leaves `shots/fail-<step>.png` of the whole page, and
-each page role's last JS heap, DOM node and event listener counts (Chromium's Performance
+Each page role's last JS heap, DOM node and event listener counts (Chromium's Performance
 metrics, also `page(role)`'s `heap_mb`, `dom_nodes`, `listeners`) go into the report's
-`pages` when it closes.
+`pages` when it closes. Timing, failure snapshots and traces: see "Hunting a flake" below.
 
 ```bash
 python3 tools/event-sim/event_sim.py --scenario smoke --out DIR   # bundled name or a .toml path
 python3 tools/event-sim/event_sim.py --scenario smoke --check     # validate only, starts nothing
 python3 tools/event-sim/event_sim.py --scenario smoke --out DIR --no-skips   # a skipped step fails the run
 python3 tools/event-sim/event_sim.py --scenario desk-fit --out DIR --no-skips   # layout check, #1267
+python3 tools/event-sim/event_sim.py --scenario red-flag --out DIR --no-skips --repeat 12 [--load cpu:2]
 ```
 
 `desk-fit` runs the `fit` action of the Race Control desk and the Director Panel (no live-column
@@ -591,6 +591,92 @@ with `service`, `path` starting with one `/` on that service, `as`, `wait_for`, 
 [width, height] on the first open, e.g. an OBS page at 1920x1080; tokens are redacted from what it reports; the base of the party
 roles below). A page's repeated console error is one finding with its count, and its
 requests after its service stopped are one more.
+
+### Hunting a flake: timing, failure snapshots, traces, `--repeat`
+
+A flaky step is never fixed by a longer timeout or a retry. The run records what is
+needed to explain a failure at the moment it happens.
+
+- Timing. Every step's `actions` in `report.json` lists each page action with its
+  seconds, nested by `depth`: `open`, `control` for a control found, visible, enabled
+  and scrolled to, `click`, `fill`, `choose`, `request` for the page's own request until
+  it is answered, `wait` for the page showing the result, and each `shot`. Calls inside a
+  `wait` are its polls, not actions. An action over its budget, `roles/builtin.py`
+  `BUDGETS` or else 2 s, is a soft `slow:` finding under the role that acted, a parent
+  only when no inner action explains it. A `wait` has no budget: its older 2 s soft
+  finding stays. The report lists the slowest actions of the run.
+- Host state, `hoststate.py`, Linux only and None elsewhere. Each step's `host` says
+  what the run got meanwhile: `cpu_s` of the unit, `unit_cpu_stall_s` and
+  `cpu_stall_share` from the unit's `cpu.pressure`, `throttled_s` from the 200 % quota,
+  the unit's IO and memory stall, the host's CPU, IO and memory stall, the host's swap-in
+  and swap-out pages, new `oom`, `oom_kill`, `high` and `max` memory events and the
+  unit's memory peak. The E2E unit runs at `CPUWeight=10`: other work on the machine
+  starves it without any throttling, which the stall shows and `throttled_s` does not.
+  A step during which this run's memory cgroup OOM-killed a process is a hard finding of
+  its own with the kill, the `memory.max` events and the peak, because a killed renderer
+  otherwise surfaces later as a timeout.
+- Failure snapshot. A step that fails, and a screenshot that fails, also one a step
+  takes of another role's page, leaves one in the step's `snapshots`: the host and unit
+  state, the change since the step began, every process of the run's cgroup with its CPU
+  seconds and major page faults, and for a page role `PageRole.diagnose()`. That is the
+  URL, whether the page answers within 2 s and how fast in `alive` and `answered_s`,
+  `visibility`, `focus`, `ready`, the title, Chromium's Performance metrics, the CPU
+  seconds of each browser process and the last 30 console lines and failed requests. A
+  hung page is asked nothing more. Then a picture of the whole page, `shots/fail-<step>.png`
+  or `fail-<step>-shot.png` for a failed screenshot, with how long it took: a picture
+  that takes 0.1 s right after an 8 s timeout says the page was alive.
+- Long tasks and CPU. Each page records its long tasks, the main thread busy 50 ms or
+  more, and its long animation frames with the scripts that ran in them,
+  `LONG_TASK_OBSERVER`. A step that failed or was slow lists every page's within the
+  step in `long_tasks`, and each process's CPU seconds and major faults over the step in
+  `cpu`. Every shot carries its own `host` and `cpu`. A long task with about as much
+  renderer CPU is page work, one with little CPU is waiting.
+- Failure class. A failed step or screenshot whose window, up to the failure itself,
+  the unit spent `engine.STARVED_SHARE` of or more waiting on IO or memory gets a class
+  on its timeout or failed-check finding. `host starved` needs the host's own IO or
+  memory stall over the same share; new `memory.max` or `memory.high` events of the unit
+  make it `unit at its memory cap`. The finding stays hard and carries the values.
+- Admission. `e2e_safety.enter` names a busy E2E unit and starts no unit while the host
+  is short of memory. It needs MemAvailable of the unit's cap plus `MEMORY_MARGIN`, 512
+  MiB, and memory PSI avg10 of at most `PSI_SOME_AVG10_MAX` some and
+  `PSI_FULL_AVG10_MAX` full. Under more pressure it waits up to `PRESSURE_WAIT_SECONDS`,
+  then refuses with "host under memory pressure:" and the values. A missing PSI file
+  never blocks, and a hosted CI runner enters no unit and is not checked.
+- Traces, off by default. `--trace fail` records a Playwright trace of every page, DOM
+  snapshots and screencast, in one chunk per step and keeps the chunks of a step that
+  failed, left a snapshot or had a slow action as `traces/<step>-<role>.zip`; `--trace
+  all` keeps every step's. Tracing is heavy: Playwright keeps the session's screencast
+  and resources in temporary files, which the run's memory pays for on tmpfs. Trace a
+  short scenario, or a run outside the unit. Open a trace with `playwright show-trace
+  FILE`. A zip holds what the page sent and received, the run's console tokens included:
+  they die with the run's secret, but treat the zip as the report's private part.
+- The long task observer and a trace's DOM snapshots run in every frame, so Chromium
+  logs "Blocked script execution in 'about:blank'" for a sandboxed one, such as the
+  Control Center's report preview. A page role keeps that line out of its script errors
+  and reports how often it came as one soft finding.
+- `--repeat N`, 1 to 50, runs the scenario N times into `DIR/run-NN/`, one contained E2E
+  unit run after the other, and waits up to 30 min while another run holds the unit. A
+  `DIR` that already holds a `run-NN` is refused. `DIR/summary.html` and `summary.json`
+  give pass, fail or not run per run, the failed steps and hard findings, and
+  min/median/p95/max of every step's duration and every top-level page action. A run
+  passes only with exit code 0 and an ok report; one without `report.json` did not run.
+  A shot's tail shows there long before it fails. `--load cpu:K`, K from 1 to 4, starts
+  K busy workers inside the run once the stack is up, under `tools/e2e_child.py`: they
+  share the unit's 2-CPU quota with the relay and the browser. Load outside the unit
+  starves it through its weight instead and is not offered.
+
+How to hunt: run the flaky scenario with `--repeat 12 --no-skips`. Read `summary.html`
+for the failing step and the tail of its actions, then that run's report: the slow
+action, its `host` and `cpu`, the failure class and the snapshot. A rare failure seen
+once is not reproduced until a test forces its cause, and clean runs after a fix prove
+nothing on their own. Do not edit `tools/event-sim/` while a set runs, because each run
+imports it anew: hunt from a separate worktree.
+
+Each run owns one work dir under `/tmp/racecast-sim-*`, with the app home and, through
+`TMPDIR`, the browser's temporary files, and removes it at the end. While it exists,
+`OUT/work-dir.txt` names it; an `OUT` that still names one is refused. After a killed
+run, remove that path. Never clean up `/tmp/racecast-sim-*` or
+`/tmp/playwright-artifacts-*` by pattern: another agent's run may be using its own.
 
 ### Role drivers (`roles/party.py`, `roles/drivers.py`, `drive.py`, #1233)
 

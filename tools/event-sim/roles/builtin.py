@@ -1,8 +1,12 @@
 """Built-in roles that need no person's page: plain HTTP, the simulated OBS operator, the
 stream channels, and a generic browser page. The party roles of #1233 build on these."""
+import collections
+import contextlib
 import http.client
+import os
 import pathlib
 import re
+import time
 from urllib.parse import quote, urlencode, urlsplit
 
 import expect
@@ -160,6 +164,41 @@ FIT_SCRIPT = """(root) => {
 }"""
 # Sub-pixel layout: a control 1 px past its box still shows and takes clicks.
 FIT_TOLERANCE_PX = 1
+# Seconds a page action may take before the report flags it (soft); a kind not listed
+# gets ACTION_BUDGET_S, the spec's threshold for a page showing a new state.
+ACTION_BUDGET_S = 2.0
+BUDGETS = {"open": 5.0}
+# The long task observer (an init script) and a trace's DOM snapshots run in every
+# frame; a sandboxed about:blank frame refuses them and Chromium logs this.
+SANDBOX_BLOCKED = "Blocked script execution in 'about:blank' because the document's frame is sandboxed"
+RECENT = 30              # console lines and failed requests a failure snapshot shows
+DIAG_MS = 2000           # how long a failure snapshot waits for the page to answer
+STATE_SCRIPT = ("() => ({visibility: document.visibilityState, focus: document.hasFocus(), "
+                "ready: document.readyState, title: document.title})")
+# Each page keeps its last long tasks (main thread busy 50 ms or more) and long animation
+# frames (with the scripts that ran in them); LONG_TASKS reads those that started within
+# `arg` ms. Neither changes what the page does.
+LONG_TASK_OBSERVER = """(() => {
+  const keep = window.__simLongTasks = [];
+  const add = (kind, e, scripts) => { keep.push([e.startTime, e.duration, kind, scripts]); if (keep.length > 300) keep.shift(); };
+  try {
+    new PerformanceObserver(l => l.getEntries().forEach(e => add('task', e, []))).observe({type: 'longtask', buffered: true});
+    new PerformanceObserver(l => l.getEntries().forEach(e => add('frame', e, (e.scripts || [])
+      .filter(s => s.duration >= 20).slice(0, 4)
+      .map(s => `${s.invoker || s.invokerType} ${s.sourceFunctionName || ''}@${(s.sourceURL || '').split('?')[0].split('/').pop()}:${s.sourceCharPosition} ${Math.round(s.duration)}ms`))))
+      .observe({type: 'long-animation-frame', buffered: true});
+  } catch (e) { /* a browser without them */ }
+})()"""
+LONG_TASKS = """(ms) => ({tasks: (window.__simLongTasks || [])
+  .filter(t => performance.now() - t[0] <= ms)
+  .map(t => ({ago_s: Math.round(performance.now() - t[0]) / 1000, ms: Math.round(t[1]), kind: t[2], scripts: t[3]}))})"""
+DIAG_METRICS = ("JSHeapUsedSize", "JSHeapTotalSize", "Nodes", "JSEventListeners", "Documents", "Frames",
+                "LayoutCount", "RecalcStyleCount", "LayoutDuration", "RecalcStyleDuration",
+                "ScriptDuration", "TaskDuration")
+
+
+def budget_for(kind):
+    return BUDGETS.get(kind, ACTION_BUDGET_S)
 
 
 @register
@@ -170,10 +209,75 @@ class PageRole(Role):
     is skipped. A screenshot blacks out the invite and timing links of any page."""
     kind = "page"
     viewport = {"width": 1440, "height": 900}
+    clock = staticmethod(time.monotonic)
 
     def open(self):
         self.context = self.pg = self.cdp = None
         self.errors = []
+        self.actions, self._open_actions = [], []
+        self.recent = collections.deque(maxlen=RECENT)
+        self.network = collections.deque(maxlen=RECENT)
+        self.tracing = self.chunk = False
+        self.sandboxed = 0       # SANDBOX_BLOCKED lines: our scripts, not the page's
+
+    # -- timing ---------------------------------------------------------------------
+    @contextlib.contextmanager
+    def timed(self, kind, what, budget=...):
+        """Record how long the block took as one action {kind, what, s, ok, depth,
+        budget}. Calls inside a `wait` are its polls, not actions. A parent whose child
+        ran over its own budget is `covered`: the child is the slow one."""
+        if any(r["kind"] == "wait" for r in self._open_actions):
+            yield
+            return
+        rec = {"kind": kind, "what": redact(what, self.ctx.secrets), "s": None, "ok": False,
+               "depth": len(self._open_actions), "budget": budget_for(kind) if budget is ... else budget,
+               "covered": False}
+        self.actions.append(rec)
+        self._open_actions.append(rec)
+        begin = self.clock()
+        try:
+            yield
+            rec["ok"] = True
+        finally:
+            self._open_actions.pop()
+            rec["s"] = round(self.clock() - begin, 3)
+            if rec["covered"] or (rec["budget"] is not None and rec["s"] > rec["budget"]):
+                for parent in self._open_actions:
+                    parent["covered"] = True
+
+    def take_actions(self):
+        """The actions recorded since the last call."""
+        out, self.actions = self.actions, []
+        return out
+
+    # -- tracing --------------------------------------------------------------------
+    def _trace_start(self):
+        if getattr(self.ctx, "trace", "off") == "off":
+            return
+        try:
+            self.context.tracing.start(screenshots=True, snapshots=True)
+            self.context.tracing.start_chunk()
+            self.tracing = self.chunk = True
+        except Exception as exc:  # an older browser: the run goes on without a trace
+            self.ctx.finding("soft", f"no trace of {self.name}: {redact(exc)}")
+
+    def trace_begin(self):
+        """Start a trace chunk for the next step."""
+        if self.tracing and not self.chunk:
+            self.context.tracing.start_chunk()
+            self.chunk = True
+
+    def trace_end(self, path=None):
+        """End the step's chunk: written to `path`, or dropped without one. True when written."""
+        if not self.chunk:
+            return False
+        self.chunk = False
+        if not path:
+            self.context.tracing.stop_chunk()
+            return False
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.context.tracing.stop_chunk(path=path)
+        return True
 
     def act_open(self, args):
         browser = self.ctx.browser()
@@ -186,9 +290,13 @@ class PageRole(Role):
                     raise StepError(f"open: viewport is [width, height], not {size!r}")
                 self.viewport = {"width": size[0], "height": size[1]}
             self.context = browser.new_context(viewport=dict(self.viewport))
+            self.context.add_init_script(LONG_TASK_OBSERVER)
+            self._trace_start()
             self.pg = self.context.new_page()
             self.pg.on("console", self._console)
-            self.pg.on("pageerror", lambda e: self.errors.append(redact(e)))
+            self.pg.on("pageerror", self._pageerror)
+            self.pg.on("requestfailed", self._requestfailed)
+            self.pg.on("response", self._response)
         path = args.get("path", "/")
         if not isinstance(path, str) or not path.startswith("/") or path.startswith("//") \
                 or any(c in path for c in "\\\r\n\t"):
@@ -198,24 +306,82 @@ class PageRole(Role):
         base = self.ctx.url(args.get("service", "relay"))
         if urlsplit(base).hostname not in ("127.0.0.1", "localhost"):
             raise StepError(f"pages open on loopback only, not {base}")
-        try:
-            resp = self.pg.goto(base + path, timeout=PAGE_TIMEOUT_MS)
-        except Exception as exc:  # Playwright's text names the whole URL, token included
-            why = redact(str(exc).splitlines()[0] if str(exc) else type(exc).__name__, self.ctx.secrets)
-            raise StepError(f"open {redact(path, self.ctx.secrets)}: {why}") from None
-        if resp is not None and resp.status >= 400:
-            raise StepError(f"open {redact(path)}: HTTP {resp.status}")
-        if args.get("wait_for"):
+        with self.timed("open", redact(path.split("?")[0])):
             try:
-                self.pg.wait_for_selector(str(args["wait_for"]), state="visible", timeout=PAGE_TIMEOUT_MS)
-            except Exception as exc:
-                raise StepError(f"{args['wait_for']} not visible: {redact(exc)}") from None
+                resp = self.pg.goto(base + path, timeout=PAGE_TIMEOUT_MS)
+            except Exception as exc:  # Playwright's text names the whole URL, token included
+                why = redact(str(exc).splitlines()[0] if str(exc) else type(exc).__name__, self.ctx.secrets)
+                raise StepError(f"open {redact(path, self.ctx.secrets)}: {why}") from None
+            if resp is not None and resp.status >= 400:
+                raise StepError(f"open {redact(path)}: HTTP {resp.status}")
+            if args.get("wait_for"):
+                try:
+                    self.pg.wait_for_selector(str(args["wait_for"]), state="visible", timeout=PAGE_TIMEOUT_MS)
+                except Exception as exc:
+                    raise StepError(f"{args['wait_for']} not visible: {redact(exc)}") from None
         return {"url": redact(self.pg.url), "title": self.pg.title()}
 
     def _console(self, msg):
-        if msg.type == "error":
-            where = (msg.location or {}).get("url") or ""
-            self.errors.append(redact(f"{msg.text} ({where})" if where else msg.text))
+        where = (msg.location or {}).get("url") or ""
+        text = redact(f"{msg.text} ({where})" if where else msg.text)
+        self.recent.append({"t": self.clock(), "type": msg.type, "text": text})
+        if msg.type == "error" and msg.text.startswith(SANDBOX_BLOCKED):
+            self.sandboxed += 1
+        elif msg.type == "error":
+            self.errors.append(text)
+
+    def _pageerror(self, error):
+        text = redact(error)
+        self.recent.append({"t": self.clock(), "type": "pageerror", "text": text})
+        self.errors.append(text)
+
+    def _requestfailed(self, request):
+        self.network.append({"t": self.clock(), "method": request.method, "url": redact(request.url),
+                             "failure": str(request.failure or "")})
+
+    def _response(self, response):
+        if response.status >= 400:
+            self.network.append({"t": self.clock(), "url": redact(response.url), "status": response.status})
+
+    def long_tasks(self, seconds):
+        """The page's long tasks that started within the last `seconds`: [{ago_s, ms}].
+        A page that does not answer within DIAG_MS raises."""
+        got = self.pg.wait_for_function(LONG_TASKS, arg=round(seconds * 1000), timeout=DIAG_MS).json_value()
+        return got["tasks"]
+
+    def diagnose(self):
+        """The page at a failure: URL, whether it answers within DIAG_MS (and how fast),
+        its visibility, focus and title, Chromium's Performance metrics, the browser's
+        processes' CPU seconds, and its last RECENT console lines and failed requests.
+        A page that does not answer is not asked again."""
+        now = self.clock()
+
+        def aged(entries):
+            return [{**{k: v for k, v in e.items() if k != "t"}, "age_s": round(now - e["t"], 3)} for e in entries]
+        out = {"url": redact(self.pg.url, self.ctx.secrets), "console": aged(self.recent),
+               "network": aged(self.network)}
+        try:
+            state = self.pg.wait_for_function(STATE_SCRIPT, timeout=DIAG_MS).json_value()
+            out.update(alive=True, **{k: state.get(k) for k in ("visibility", "focus", "ready", "title")})
+        except Exception as exc:  # a hung renderer times out here, and nothing else is asked of it
+            out.update(alive=False, error=redact(str(exc).splitlines()[0] if str(exc) else type(exc).__name__))
+        out["answered_s"] = round(self.clock() - now, 3)
+        if out["alive"]:
+            try:
+                got = self._metrics()
+                out["metrics"] = {k: got.get(k) for k in DIAG_METRICS}
+            except Exception as exc:  # noqa: BLE001  a page without metrics
+                out["metrics_error"] = redact(exc)
+        try:
+            session = self.context.browser.new_browser_cdp_session()
+            try:
+                info = session.send("SystemInfo.getProcessInfo")["processInfo"]
+            finally:
+                session.detach()
+            out["processes"] = [{"type": p.get("type"), "id": p.get("id"), "cpu_s": p.get("cpuTime")} for p in info]
+        except Exception as exc:  # noqa: BLE001  another browser has no process info
+            out["processes_error"] = redact(exc)
+        return out
 
     def page(self):
         if self.pg is None:
@@ -223,15 +389,19 @@ class PageRole(Role):
         return {"open": True, "url": redact(self.pg.url), "title": self.pg.title(),
                 "console_errors": list(self.errors), **self._memory()}
 
+    def _metrics(self):
+        """Chromium's Performance metrics of the page as {name: value}."""
+        if self.cdp is None:
+            cdp = self.context.new_cdp_session(self.pg)
+            cdp.send("Performance.enable")
+            self.cdp = cdp
+        return {m["name"]: m["value"] for m in self.cdp.send("Performance.getMetrics")["metrics"]}
+
     def _memory(self):
         """The page's exact JS heap in MB, DOM nodes and event listeners from Chromium's
         Performance metrics; None for what the browser cannot tell."""
         try:
-            if self.cdp is None:
-                cdp = self.context.new_cdp_session(self.pg)
-                cdp.send("Performance.enable")
-                self.cdp = cdp
-            got = {m["name"]: m["value"] for m in self.cdp.send("Performance.getMetrics")["metrics"]}
+            got = self._metrics()
         except Exception:  # noqa: BLE001  a crashed page or another browser has no metrics
             return {"heap_mb": None, "dom_nodes": None, "listeners": None}
         heap = got.get("JSHeapUsedSize")
@@ -266,6 +436,14 @@ class PageRole(Role):
                 f"console error: {e}" + (f" ({n}x)" if n > 1 else "")) for e, n in counts.items()]
         if gone:
             out.append(("soft", f"{gone} requests of the page found its service stopped"))
+        if self.sandboxed:
+            out.append(("soft", f"{self.sandboxed} lines \"{SANDBOX_BLOCKED}\": the run's own scripts "
+                                "(long task observer, trace snapshots) refused in a sandboxed frame"))
+        if self.tracing:
+            try:
+                self.context.tracing.stop()
+            except Exception:  # noqa: BLE001  a browser that went away keeps no trace
+                pass
         if self.context is not None:
             self.context.close()
         return out
