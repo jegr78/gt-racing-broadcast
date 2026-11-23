@@ -12,6 +12,8 @@ import scenario
 from roles import Role, ShotUnavailable, StepError, Unavailable, register, selectors
 
 PAGE_TIMEOUT_MS = 15000
+MEMORY_SCRIPT = ("() => ({heap: performance.memory ? performance.memory.usedJSHeapSize : null,"
+                 " nodes: document.getElementsByTagName('*').length})")
 LOAD_FAILED = "Failed to load resource"
 CONNECTION = "net::ERR_CONNECTION_"
 _QUERY = re.compile(r"\?[^\s)]*")
@@ -221,7 +223,18 @@ class PageRole(Role):
         if self.pg is None:
             return {"open": False, "console_errors": list(self.errors)}
         return {"open": True, "url": redact(self.pg.url), "title": self.pg.title(),
-                "console_errors": list(self.errors)}
+                "console_errors": list(self.errors), **self._memory()}
+
+    def _memory(self):
+        """The page's JS heap in MB (Chromium's performance.memory) and its DOM node
+        count; None for what the page cannot tell."""
+        try:
+            m = self.pg.evaluate(MEMORY_SCRIPT)
+        except Exception:  # noqa: BLE001  a crashed or closed page has no memory to report
+            return {"heap_mb": None, "dom_nodes": None}
+        heap = m.get("heap")
+        return {"heap_mb": round(heap / 1048576, 1) if isinstance(heap, (int, float)) else None,
+                "dom_nodes": m.get("nodes")}
 
     def shot(self, path, element=""):
         if self.pg is None:

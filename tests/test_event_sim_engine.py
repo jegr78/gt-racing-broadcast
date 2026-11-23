@@ -788,6 +788,13 @@ class _FakePage:
     def title(self):
         return "Panel"
 
+    memory = {"heap": 52428800, "nodes": 1234}
+
+    def evaluate(self, script, arg=None):
+        if self.memory is None:
+            raise RuntimeError("Target page, context or browser has been closed")
+        return dict(self.memory)
+
     def locator(self, selector):
         return selector
 
@@ -841,6 +848,21 @@ def t_page_role_opens_shoots_and_reports_console_errors():
         assert "404" in str(exc) and "tok" not in str(exc), str(exc)
     findings = role.close()
     assert sorted(s for s, _ in findings) == ["hard", "soft"], "a script error is hard, a failed load soft"
+
+
+def t_page_role_reports_its_memory():
+    br = _FakeBrowser()
+    role = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br), "page:director")
+    role.open()
+    assert "heap_mb" not in role.page(), "a page that is not open reports no memory"
+    role.do("open", {"path": "/panel"})
+    state = role.page()
+    assert state["heap_mb"] == 50.0 and state["dom_nodes"] == 1234, state
+    br.page.memory = {"heap": None, "nodes": 10}
+    assert role.page()["heap_mb"] is None, "a browser without performance.memory reports no heap"
+    br.page.memory = None
+    state = role.page()
+    assert state["heap_mb"] is None and state["dom_nodes"] is None, "a crashed page reports no memory"
 
 
 def t_page_role_opens_in_the_window_size_it_is_given():
