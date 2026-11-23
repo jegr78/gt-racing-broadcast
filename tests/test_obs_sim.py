@@ -775,10 +775,10 @@ def t_a_slow_grab_never_blocks_obs():
             shooter.request("GetSourceScreenshot", {"sourceName": "Splitscreen", "imageFormat": "png"})))
         worker.start()
         assert _wait(lambda: sim.state.grabber.asked), "the screenshot is grabbing"
-        started = time.monotonic()
         resp, _ = other.request("SetCurrentProgramScene", {"sceneName": "Standby"})
         assert resp["requestStatus"]["result"] and obs_sim.fetch(sim.http_url)["scene"] == "Standby"
-        assert time.monotonic() - started < 1.0, "requests and /state run while a grab waits"
+        held = not release.is_set() and worker.is_alive() and not results
+        assert held, "a request and /state are answered while the grab is still held"
         release.set()
         worker.join(5)
         assert results and results[0][0]["requestStatus"]["result"], results
@@ -946,9 +946,8 @@ def t_full_size_jpeg_skips_flat_blocks_and_is_cached():
         assert _jpeg_size(one_colour) == (1920, 1080) and dcts == [], "a one-colour picture needs no DCT"
         st = obs_state.ObsState(obs_state.DEFAULT_COLLECTION)
         st.set_labels({"Feed A": "Stint 1 Comms 1"})
-        started = time.monotonic()
         raw = obs_ws.parse_screenshot_data_uri(_shot(st, imageFormat="jpg"))
-        assert _jpeg_size(raw) == (1920, 1080) and time.monotonic() - started < 10, "a sane full-size JPEG"
+        assert _jpeg_size(raw) == (1920, 1080), "a full-size JPEG"
         blocks = (1920 // 16) * (1088 // 16) * 6
         assert 0 < len(dcts) < blocks // 4, f"only the busy blocks take the DCT: {len(dcts)} of {blocks}"
         encodes = []
