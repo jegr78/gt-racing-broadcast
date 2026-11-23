@@ -164,7 +164,9 @@ director.
   gap, such as a sender outage, the counter decides. A car that has not crossed yet
   counts from the reference line's start, where reference laps begin; its first own
   crossing moves its distance once by the difference, which is zero on a line that
-  starts at the finish line.
+  starts at the finish line. The downloaded line of Spa 24h Layout (`d60ebc`) starts
+  past La Source and closes over it with a 193 m chord, so there the move is about
+  190 m; a reference line of that layout that starts at the finish line removes it.
 - **Driver change** (multi-lobby layer). The broadcast stint switch opens the
   change window. Inside it, a team changes when its old car stands in the box and
   the new driver's car then leaves the box. The old car's distance becomes an
@@ -208,7 +210,9 @@ director.
 
 - Order, gap to the leader and interval; a deficit of a full lap or more reads
   `+N L`. Status `Box` while a counting car stands in the box (a car that does not
-  count yet, as on a formation lap, shows `Waiting`), `No data` while its sender is
+  count yet, as on a formation lap, shows `Waiting`; a counting car that stands in
+  the pit lane before its box shows `Box` too, since telemetry cannot tell the two
+  stands apart), `No data` while its sender is
   missing. An entry without data keeps the position implied by the other positions.
 - Remaining time comes from the existing race timer, including its red flag
   adjustments.
