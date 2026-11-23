@@ -3408,7 +3408,8 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
         seen = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
-                 m._driver_invite_path, m._align_running_relay_mode)
+                 m._driver_invite_path, m._align_running_relay_mode, m.companion_start,
+                 m._event_launch)
         restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
         with tempfile.TemporaryDirectory() as tmp:
             m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")
@@ -3419,6 +3420,10 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
             m._sync_live_telemetry_record = lambda: None
             m._wait_for_obs_ready = lambda timeout=0, early=False: False
             m.relay_start = lambda _rest: None
+
+            def _past(*a, **kw):
+                raise AssertionError("event start went past the mode check without aligning it")
+            m.companion_start = m._event_launch = _past
 
             def _align(mode, **kw):
                 seen.append(mode)
@@ -3433,7 +3438,8 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
                 restore()
                 (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
-                 m._driver_invite_path, m._align_running_relay_mode) = saved
+                 m._driver_invite_path, m._align_running_relay_mode, m.companion_start,
+                 m._event_launch) = saved
 
     assert _drive(["--qualifying"]) == ["qualifying"]
     assert _drive([]) == ["race"]
