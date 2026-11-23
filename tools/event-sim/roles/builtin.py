@@ -174,6 +174,19 @@ RECENT = 30              # console lines and failed requests a failure snapshot 
 DIAG_MS = 2000           # how long a failure snapshot waits for the page to answer
 STATE_SCRIPT = ("() => ({visibility: document.visibilityState, focus: document.hasFocus(), "
                 "ready: document.readyState, title: document.title})")
+# Each page keeps its last long tasks (main thread busy 50 ms or more); LONG_TASKS reads
+# those that started within `arg` ms. Neither changes what the page does.
+LONG_TASK_OBSERVER = """(() => {
+  const keep = window.__simLongTasks = [];
+  try {
+    new PerformanceObserver(list => {
+      for (const e of list.getEntries()) { keep.push([e.startTime, e.duration]); if (keep.length > 200) keep.shift(); }
+    }).observe({type: 'longtask', buffered: true});
+  } catch (e) { /* a browser without long tasks */ }
+})()"""
+LONG_TASKS = """(ms) => ({tasks: (window.__simLongTasks || [])
+  .filter(t => performance.now() - t[0] <= ms)
+  .map(t => ({ago_s: Math.round(performance.now() - t[0]) / 1000, ms: Math.round(t[1])}))})"""
 DIAG_METRICS = ("JSHeapUsedSize", "JSHeapTotalSize", "Nodes", "JSEventListeners", "Documents", "Frames",
                 "LayoutCount", "RecalcStyleCount", "LayoutDuration", "RecalcStyleDuration",
                 "ScriptDuration", "TaskDuration")
@@ -271,6 +284,7 @@ class PageRole(Role):
                     raise StepError(f"open: viewport is [width, height], not {size!r}")
                 self.viewport = {"width": size[0], "height": size[1]}
             self.context = browser.new_context(viewport=dict(self.viewport))
+            self.context.add_init_script(LONG_TASK_OBSERVER)
             self._trace_start()
             self.pg = self.context.new_page()
             self.pg.on("console", self._console)
@@ -320,6 +334,12 @@ class PageRole(Role):
     def _response(self, response):
         if response.status >= 400:
             self.network.append({"t": self.clock(), "url": redact(response.url), "status": response.status})
+
+    def long_tasks(self, seconds):
+        """The page's long tasks that started within the last `seconds`: [{ago_s, ms}].
+        A page that does not answer within DIAG_MS raises."""
+        got = self.pg.wait_for_function(LONG_TASKS, arg=round(seconds * 1000), timeout=DIAG_MS).json_value()
+        return got["tasks"]
 
     def diagnose(self):
         """The page at a failure: URL, whether it answers within DIAG_MS (and how fast),

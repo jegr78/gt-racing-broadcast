@@ -56,6 +56,7 @@ class StepResult:
     host: dict = field(default_factory=dict)       # hoststate.delta over the step
     snapshots: list = field(default_factory=list)  # the state at a failure
     traces: list = field(default_factory=list)     # Playwright trace zips kept of this step
+    long_tasks: dict = field(default_factory=dict) # role -> its page's long tasks, for a slow or failed step
 
 
 class RunContext:
@@ -393,6 +394,18 @@ class Engine:
             except Exception as exc:  # noqa: BLE001  a trace never decides the run
                 self.findings.append(Finding(SOFT, f"trace of {name}: {exc}", step.id, name))
 
+    def _long_tasks(self, res, seconds):
+        """Each open page's long tasks during a step that failed, left a snapshot or was slow."""
+        if not (res.status == "failed" or res.snapshots or any(a.get("slow") for a in res.actions)):
+            return
+        for name, role in self._page_roles():
+            if role.pg is None:
+                continue
+            try:
+                res.long_tasks[name] = role.long_tasks(seconds)
+            except Exception as exc:  # noqa: BLE001  a page that does not answer
+                res.long_tasks[name] = [{"error": str(exc).splitlines()[0] if str(exc) else type(exc).__name__}]
+
     def _take_actions(self, res):
         for name, role in self._page_roles():
             res.actions.extend(dict(a, role=name) for a in role.take_actions())
@@ -453,6 +466,7 @@ class Engine:
             self._snapshot(step, res, step.role, res.error or "a check failed", f"fail-{step.id}.png")
         self._take_findings(step)
         self._flag_slow(step, res)
+        self._long_tasks(res, self.clock() - begin)
         res.host = hoststate.delta(self._step_sample, self._sample())
         self._trace_end(step, res)
         self.ctx.learn(force=True)      # a link this step created or renewed

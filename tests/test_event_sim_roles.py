@@ -239,6 +239,9 @@ class Context:
     def new_page(self):
         return self.page
 
+    def add_init_script(self, script):
+        self.page.init_scripts = [*getattr(self.page, "init_scripts", []), script]
+
     def close(self):
         self.closed = True
 

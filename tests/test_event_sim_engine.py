@@ -973,10 +973,14 @@ class _FakePage:
     hung = False
     state = {"visibility": "visible", "focus": True, "ready": "complete", "title": "Panel"}
 
-    def wait_for_function(self, script, timeout=None):
+    long_tasks = ()
+
+    def wait_for_function(self, script, arg=None, timeout=None):
         if self.hung:
             raise TimeoutError(f"Timeout {timeout}ms exceeded.")
         state = self.state
+        if script == builtin.LONG_TASKS:
+            state = {"tasks": [t for t in self.long_tasks if t["ago_s"] * 1000 <= arg]}
 
         class Handle:
             def json_value(self):
@@ -1010,6 +1014,7 @@ class _FakeBrowser:
     def __init__(self):
         self.page = _FakePage()
         self.tracing = _Tracing()
+        self.init_scripts = []
 
     def get(self):
         return self
@@ -1034,6 +1039,9 @@ class _FakeBrowser:
 
             def new_page(self):
                 return outer.page
+
+            def add_init_script(self, script):
+                outer.init_scripts.append(script)
 
             def new_cdp_session(self, page):
                 class Session:
@@ -1340,6 +1348,20 @@ def t_the_page_keeps_its_last_console_lines_and_failed_requests():
     assert len(d["network"]) == builtin.RECENT and d["network"][-1]["status"] == 503, d["network"]
     assert d["network"][0]["failure"] == "net::ERR_ABORTED", d["network"][0]
     assert "secret" not in json.dumps(d), d
+
+
+def t_a_slow_or_failed_step_names_the_long_tasks_of_each_page():
+    tasks = ({"ago_s": 1.0, "ms": 1900}, {"ago_s": 60.0, "ms": 300})
+    data, br, _ = _diag_run([{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
+                             {"id": "quick", "role": "rec", "do": "go", "at": "after:open"},
+                             {"id": "slow", "role": "paged", "do": "slow", "args": {"click": 3}, "at": "after:quick"}],
+                            page={"long_tasks": tasks})
+    assert br.init_scripts == [builtin.LONG_TASK_OBSERVER], "each page records its long tasks from the start"
+    s = _by_id(data)
+    assert s["quick"]["long_tasks"] == {}, "a quick step asks no page"
+    assert s["slow"]["long_tasks"] == {"page:rc": [{"ago_s": 1.0, "ms": 1900}]}, \
+        f"only the tasks inside the step: {s['slow']['long_tasks']}"
+    assert "1900" in report.render_html(data), "the report shows them under the step"
 
 
 def t_the_traces_own_blocked_script_in_a_sandboxed_frame_is_no_page_error():

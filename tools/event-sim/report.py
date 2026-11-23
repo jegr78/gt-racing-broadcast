@@ -58,6 +58,14 @@ def _actions(actions):
     return f"<ul class='acts'>{items}</ul>"
 
 
+def _long(tasks):
+    if not tasks:
+        return ""
+    return "".join(f"<div class='acts'>{_e(role)} long tasks: "
+                   + (", ".join(f"{t['ms']} ms {t['ago_s']:.1f}s before the end" if "ms" in t else _e(t.get("error"))
+                                for t in items) or "none") + "</div>" for role, items in tasks.items())
+
+
 def _host(h):
     if not h or h.get("cpu_s") is None:
         return ""
@@ -105,7 +113,7 @@ def render_html(data):
         rows.append(f"<tr><td>{started}</td><td>{_e(s['role'])}</td><td>{_e(s['do'])}"
                     f"<br><small>{_e(s['id'])}</small></td><td class='{_e(s['status'])}'>"
                     f"{_e(s['status'])}<br>{_e(s['error'])}</td><td>{s['duration']:.2f}s"
-                    f"{_actions(s.get('actions'))}{_host(s.get('host'))}</td>"
+                    f"{_actions(s.get('actions'))}{_host(s.get('host'))}{_long(s.get('long_tasks'))}</td>"
                     f"<td>{_checks(s['checks'])}</td><td>{_step_findings(by_step.get(s['id']))}</td>"
                     f"<td>{shot}</td></tr>")
 
