@@ -740,11 +740,14 @@ def t_real_ffmpeg_grabs_a_frame_from_a_feed_that_stays_open():
 class FakeGrabber:
     def __init__(self, live, block=None):
         self.live, self.block, self.asked = live, block, []
+        self.grabbing = threading.Event()
 
     def frames(self, urls):
         self.asked.append(sorted(urls))
         if self.block is not None:
-            self.block.wait(5)
+            self.grabbing.set()
+            self.block.wait(30)
+            self.grabbing.clear()
         return {u: (bytes((10, 200, 30)) * 16, 4, 4) if u in self.live else None for u in urls}
 
 
@@ -777,7 +780,7 @@ def t_a_slow_grab_never_blocks_obs():
         assert _wait(lambda: sim.state.grabber.asked), "the screenshot is grabbing"
         resp, _ = other.request("SetCurrentProgramScene", {"sceneName": "Standby"})
         assert resp["requestStatus"]["result"] and obs_sim.fetch(sim.http_url)["scene"] == "Standby"
-        held = not release.is_set() and worker.is_alive() and not results
+        held = sim.state.grabber.grabbing.is_set() and not results
         assert held, "a request and /state are answered while the grab is still held"
         release.set()
         worker.join(5)
