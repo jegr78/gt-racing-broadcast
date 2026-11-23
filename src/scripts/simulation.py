@@ -170,9 +170,10 @@ def _port_problem(value, environ=None, name=RELAY_PORT):
     return ""
 
 
-def control_port_problem(port, environ=None):
-    """Why an explicit relay --http-port must not be used in simulation, or ""."""
-    return _port_problem(str(port), environ, "--http-port") if active(environ) else ""
+def control_port_problem(port, environ=None, name="--http-port"):
+    """Why an explicit relay control port (`name` is the flag that gave it) must not be
+    used in simulation, or ""."""
+    return _port_problem(str(port), environ, name) if active(environ) else ""
 
 
 _RELAY_PORT_UNSET = f"{RELAY_PORT} is not set (a free port for the simulated relay, never 8088)"

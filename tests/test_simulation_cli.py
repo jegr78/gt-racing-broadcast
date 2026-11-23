@@ -840,6 +840,33 @@ def t_cookies_export_is_skipped_in_simulation():
     assert out.getvalue().count("cookies: skipped (simulation).") == 3, out.getvalue()
 
 
+def t_a_missing_relay_port_past_the_gate_exits_cleanly():
+    out = io.StringIO()
+    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="", RACECAST_SIM_FEED_PORTS=""), \
+            _patched((m, "_bootstrap", lambda argv: argv), (m.sv, "read_pid", lambda p: None)), \
+            contextlib.redirect_stdout(out):
+        try:
+            m.main(["relay", "status"])
+        except SystemExit as exc:
+            assert isinstance(exc.code, str) and "RACECAST_SIM_RELAY_PORT is not set" in exc.code, exc.code
+        else:
+            raise AssertionError(f"relay status ran without a simulated relay port: {out.getvalue()}")
+
+
+def t_a_simulated_takeover_never_names_the_live_relay_port():
+    with _env(**SIM_ENV):
+        assert m._takeover_port([]) == 41000, "the default is the simulated relay port"
+        assert m._takeover_port(["--port", "42000"]) == 42000
+        for port in ("8088", "53001"):
+            try:
+                m._takeover_port(["--port", port])
+            except SystemExit as exc:
+                assert "--port" in str(exc.code) and "live relay" in str(exc.code), exc.code
+            else:
+                raise AssertionError(f"a simulated takeover reached for the live relay on {port}")
+    assert m._takeover_port(["--port", "8088"]) == 8088, "outside simulation nothing changes"
+
+
 def t_kill_relay_text_names_the_actual_port():
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
         html = fh.read()

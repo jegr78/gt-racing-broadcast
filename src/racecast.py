@@ -7346,9 +7346,13 @@ def _takeover_port(args):
         if i + 1 >= len(args):
             sys.exit("racecast: --port requires an integer value")
         try:
-            return int(args[i + 1])
+            port = int(args[i + 1])
         except ValueError:
             sys.exit(f"racecast: --port must be an integer, got {args[i + 1]!r}")
+        problem = simulation.control_port_problem(port, name="--port")
+        if problem:
+            sys.exit(f"racecast: simulation mode: {problem}")
+        return port
     return _relay_port()
 
 
