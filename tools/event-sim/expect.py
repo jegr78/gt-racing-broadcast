@@ -2,7 +2,8 @@
 
 Allowed: literals, lists and tuples, `and`/`or`/`not`, comparisons (`==`, `!=`, `<`,
 `<=`, `>`, `>=`, `in`, `not in`), unary minus, attribute and index access, and calls of
-the methods a probe lists in `calls` (plus `len`). Never `eval`: anything else, a name
+the methods a probe lists in `calls` (plus `len` and the row helpers `pluck`, `row` and
+`drift`). Never `eval`: anything else, a name
 that is no probe, or an attribute starting with `_` is refused when the scenario loads.
 
 A value that cannot be read yet (a missing key, a probe whose service is down) raises
@@ -17,7 +18,44 @@ _CMP = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b,
 _NODES = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.USub,
           ast.Compare, ast.Name, ast.Load, ast.Constant, ast.Attribute, ast.Subscript,
           ast.Call, ast.List, ast.Tuple, *_CMP)
-BUILTINS = {"len": len}
+
+
+def _rows(rows):
+    return [r for r in raw(rows) if isinstance(r, dict)] if isinstance(raw(rows), list) else []
+
+
+def pluck(rows, key):
+    """The value of `key` in each row, in order."""
+    rows = _rows(rows)
+    if not rows or any(key not in r for r in rows):
+        raise Unresolved(f"not every row has {key!r}")
+    return [r[key] for r in rows]
+
+
+def row(rows, key, value):
+    """The first row whose `key` is `value`."""
+    for r in _rows(rows):
+        if r.get(key) == value:
+            return r
+    raise Unresolved(f"no row with {key} == {value!r}")
+
+
+def drift(before, after, key, by="entry"):
+    """The largest change of the number `key` between the rows of `before` and `after`
+    that share `by`; rows where either side has no number are left out."""
+    old = {r.get(by): r.get(key) for r in _rows(before)}
+    changes = [abs(r[key] - old[r.get(by)]) for r in _rows(after)
+               if _number(r.get(key)) and _number(old.get(r.get(by)))]
+    if not changes:
+        raise Unresolved(f"no row of both readings has a number {key!r}")
+    return max(changes)
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+BUILTINS = {"len": len, "pluck": pluck, "row": row, "drift": drift}
 ROOTS = ("obs", "relay", "sheet", "webhook", "race", "page", "result")
 MAX_LENGTH = 500
 
@@ -125,7 +163,7 @@ def compile_expr(text, roots=None):
             raise ExpectError(f"unknown name {node.id!r}" + (f" (known: {', '.join(roots)})" if roots else ""))
         if isinstance(node, ast.Call):
             if not isinstance(node.func, (ast.Name, ast.Attribute)):
-                raise ExpectError("only probe methods, page() and len() can be called")
+                raise ExpectError("only probe methods, page() and the built-in helpers can be called")
         if isinstance(node, ast.Constant) and not isinstance(node.value, (str, int, float, bool, type(None))):
             raise ExpectError(f"constant {node.value!r} is not allowed")
     return tree
@@ -222,7 +260,7 @@ def _eval(node, names):
             fn = _eval(node.func, names)
             if isinstance(fn, Func):
                 fn = fn.fn
-            elif fn is not len:
+            elif fn not in BUILTINS.values():
                 raise Unresolved(f"{node.func.id}() cannot be called")
         try:
             return wrap(fn(*args))

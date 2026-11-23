@@ -221,6 +221,25 @@ def t_expect_refuses_everything_else():
     _refused([{"role": "rec", "do": "go", "expect": ["relya.up"]}], "unknown name 'relya'")
 
 
+def t_expect_compares_rows_of_two_readings():
+    before = [{"entry": "A #1", "gap_s": 0.0}, {"entry": "B #2", "gap_s": 4.0}, {"entry": "C #3", "gap_s": None}]
+    after = [{"entry": "B #2", "gap_s": 4.7}, {"entry": "A #1", "gap_s": 0.0}, {"entry": "C #3", "gap_s": 9.0}]
+    names = {"box": Box(0, {"before": before, "after": after})}
+    assert expect.truth("pluck(box.data.after, 'entry') == ['B #2', 'A #1', 'C #3']", names)[0]
+    assert expect.truth("row(box.data.after, 'entry', 'B #2').gap_s == 4.7", names)[0]
+    assert expect.truth("drift(box.data.before, box.data.after, 'gap_s') < 0.71", names)[0], \
+        "the largest change of a key between rows of the same entry, None on either side left out"
+    assert not expect.truth("drift(box.data.before, box.data.after, 'gap_s') < 0.69", names)[0]
+    for text in ("row(box.data.after, 'entry', 'Z #9').gap_s == 1",
+                 "drift(box.data.before, [], 'gap_s') < 1", "pluck(box.data.after, 'nope') == []"):
+        try:
+            expect.truth(text, names)
+        except expect.Unresolved:
+            continue
+        raise AssertionError(f"{text!r} must stay unresolved: nothing to compare is not a pass")
+    expect.compile_expr("drift(result('a').entries, race.entries, 'gap_s') <= 1", ROOTS)
+
+
 def t_only_plain_values_leave_a_probe():
     names = {"box": Box(1, {"a": [1, 2]}), "page": expect.Func(lambda r: {"r": r})}
     for text in ("box.twice(box) == 1", "box.twice(page) == 1", "box.twice == 1", "len == 1", "box == 1",
