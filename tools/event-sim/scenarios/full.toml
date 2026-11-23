@@ -1,14 +1,15 @@
-# Full: the race-day event of the slide deck, in real time, over three stints in three
+# Full: the race day of the slide deck, in real time, over three stints in three
 # lobbies with one commentator each. 14 cars on a Suzuka-length lap (about 1:45).
 # Start event, then qualifying mode: every driver of the three stints registers and Race Control
 # approves them, the desk adds qualifying laps, the director switches to race mode and
 # goes live. A formation lap, the start, a pit stop; in stint 1 a car disconnects (confirmed
-# DC, rejoin mark), another one's sender stops (estimate behind the car ahead, rejoin
+# DC, rejoin mark), another one's sender stops (an estimate 3 s behind another car, rejoin
 # mark), a third retires. Comms 2 sends the stint 2 link late. At each stint change every
-# driver swaps in the new lobby; the DC team rejoins a lap down. A red flag in stint 2
-# ends in a keep-gaps restart. In stint 3 Race Control calls the final lap.
-# Screenshots carry the deck's image names (`<slide>-<n>`), so a deck update is one run
-# plus a copy of shots/.
+# running team's driver swaps in the new lobby; the DC team rejoins a lap down. A red flag
+# in stint 2 ends in a keep-gaps restart. In stint 3 Race Control calls the final lap.
+# Its 50 screenshots carry deck image names (`<slide>-<n>`): the race-day subset of the
+# deck, see tools/CLAUDE.md for the families it does not produce. It runs in the
+# workflow (about 36 min there); it exceeds the local 2 GiB E2E unit.
 description = "The deck's race day in real time: qualifying, approval, three stints, DC, estimate, DNF, red flag, finish."
 max_minutes = 75
 
@@ -255,8 +256,8 @@ id = "shot_formation_1"
 at = "after:formation+3s"
 role = "api"
 do = "get"
-args = { path = "/status" }
-expect = ["relay.up"]
+args = { path = "/drivers/race" }
+expect = ["race.state == 'waiting'", "race.settings.formation"]
 shot = { name = "formation-1", role = "page:overlay" }
 
 [[step]]
@@ -425,8 +426,9 @@ id = "dc_event"
 at = "after:shot_dc_suspected_1+5s"
 role = "api"
 do = "get"
-args = { path = "/status" }
-expect = ["relay.up"]
+args = { path = "/drivers/race/recording" }
+expect = ["row(relay.get('/drivers/race/recording').events, 'entry', 'Falcon Engineering #66').state == 'suspected'"]
+timeout = "20s"
 
 [[step]]
 id = "shot_dc_suspected_2"
@@ -478,8 +480,9 @@ at = "after:shot_dc_tower_2"
 role = "viewer"
 do = "read"
 args = { cars = 14 }
-expect = ["page('viewer').cars >= 14"]
-timeout = "20s"
+expect = ["page('viewer').cars >= 14",
+          "len(having(page('viewer').rows, 'Falcon', 'DC')) == 1"]
+timeout = "30s"
 shot = "dc-onair-3"
 
 [[step]]
@@ -524,7 +527,9 @@ at = "after:shot_est_onair_1"
 role = "race_control"
 do = "estimate"
 args = { entry = "Harbor Lights #88", ref = "Granite GP #77", seconds = 3 }
-expect = ["row(race.entries, 'entry', 'Harbor Lights #88').estimate != None"]
+expect = ["row(race.entries, 'entry', 'Harbor Lights #88').estimate.ref == 'Granite GP #77'",
+          "row(race.entries, 'entry', 'Harbor Lights #88').estimate.ahead == False",
+          "row(race.entries, 'entry', 'Harbor Lights #88').estimate.seconds == 3"]
 timeout = "15s"
 shot = { name = "est-desk-1", role = "race_control", element = ".area[data-area=\"corrections\"]" }
 
@@ -720,6 +725,7 @@ args = { path = "/status" }
 expect = ["relay.up"]
 shot = { name = "director-1", role = "director" }
 
+# Every team now races with its stint 2 driver; the retired car may keep its last one.
 [[step]]
 id = "dc_back"
 at = "after:shot_director_1"
@@ -728,7 +734,8 @@ do = "get"
 args = { path = "/drivers/race" }
 expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').status == 'racing'",
           "row(race.entries, 'entry', 'Falcon Engineering #66').driver == 'Driver 66-2'",
-          "row(race.entries, 'entry', 'Falcon Engineering #66').lapped >= 1"]
+          "row(race.entries, 'entry', 'Falcon Engineering #66').lapped >= 1",
+          "unchanged(result('lap6').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]"]
 timeout = "5m"
 
 [[step]]
@@ -805,6 +812,8 @@ expect = ["result('red_flag').status == 'RED FLAG: banner, cover and race held'"
 timeout = "20s"
 shot = { name = "restart-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
 
+# The race as it froze, up to 3 s after before_red: cars more than 0.2 s apart keep their
+# order, level ones may swap in between, so the exact order is soft.
 [[step]]
 id = "frozen"
 at = "after:red_flag+3s"
@@ -812,7 +821,9 @@ role = "api"
 do = "get"
 args = { path = "/drivers/race" }
 expect = ["result('frozen').red_flag",
-          "pluck(result('frozen').entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
+          "sorted(pluck(result('frozen').entries, 'entry')) == sorted(pluck(result('before_red').entries, 'entry'))",
+          "swaps(result('before_red').entries, result('frozen').entries, 'gap_s', 0.2) == []"]
+soft = ["pluck(result('frozen').entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
 
 [[step]]
 id = "shot_redflag_1"
@@ -863,13 +874,13 @@ at = "after:restart_released"
 role = "drivers"
 do = "release"
 args = { gaps = "${before_red.entries}" }
-expect = ["page('drivers').driving == 14",
-          "'comms2' in obs.program_channels"]
+expect = ["page('drivers').driving == 14"]
 timeout = "4m"
 
-# The release of 14 cars takes about a minute, and the simulated paces differ by up to
-# 3.5 %, so gaps move about 2 s by themselves; red-flag checks the restart within 1 s.
-# Cars closer than the drivers' 0.2 s tick may swap at the release: the exact order is soft.
+# The release of 14 cars takes 37-39 s and the simulated paces differ by up to about
+# 4.7 %, so gaps move about 2 s by themselves; red-flag checks the restart within 1 s.
+# The paces also change the order, not only cars closer than the drivers' 0.2 s tick:
+# the exact order is soft.
 [[step]]
 id = "kept"
 at = "after:leave_box+3s"
@@ -881,8 +892,17 @@ soft = ["pluck(race.entries, 'entry') == pluck(result('before_red').entries, 'en
 timeout = "5s"
 
 [[step]]
+id = "program_back"
+at = "after:kept"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["'comms2' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
 id = "shot_restart_3"
-at = "after:kept+3s"
+at = "after:program_back+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
@@ -952,7 +972,8 @@ at = "after:release3"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
-expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'"]
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'",
+          "unchanged(result('lap11').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]"]
 timeout = "60s"
 
 [[step]]
