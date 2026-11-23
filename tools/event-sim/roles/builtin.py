@@ -12,8 +12,6 @@ import scenario
 from roles import Role, ShotUnavailable, StepError, Unavailable, register, selectors
 
 PAGE_TIMEOUT_MS = 15000
-MEMORY_SCRIPT = ("() => ({heap: performance.memory ? performance.memory.usedJSHeapSize : null,"
-                 " nodes: document.getElementsByTagName('*').length})")
 LOAD_FAILED = "Failed to load resource"
 CONNECTION = "net::ERR_CONNECTION_"
 _QUERY = re.compile(r"\?[^\s)]*")
@@ -174,7 +172,7 @@ class PageRole(Role):
     viewport = {"width": 1440, "height": 900}
 
     def open(self):
-        self.context = self.pg = None
+        self.context = self.pg = self.cdp = None
         self.errors = []
 
     def act_open(self, args):
@@ -226,15 +224,18 @@ class PageRole(Role):
                 "console_errors": list(self.errors), **self._memory()}
 
     def _memory(self):
-        """The page's JS heap in MB (Chromium's performance.memory) and its DOM node
-        count; None for what the page cannot tell."""
+        """The page's exact JS heap in MB, DOM nodes and event listeners from Chromium's
+        Performance metrics; None for what the browser cannot tell."""
         try:
-            m = self.pg.evaluate(MEMORY_SCRIPT)
-        except Exception:  # noqa: BLE001  a crashed or closed page has no memory to report
-            return {"heap_mb": None, "dom_nodes": None}
-        heap = m.get("heap")
+            if self.cdp is None:
+                self.cdp = self.context.new_cdp_session(self.pg)
+                self.cdp.send("Performance.enable")
+            got = {m["name"]: m["value"] for m in self.cdp.send("Performance.getMetrics")["metrics"]}
+        except Exception:  # noqa: BLE001  a crashed page or another browser has no metrics
+            return {"heap_mb": None, "dom_nodes": None, "listeners": None}
+        heap = got.get("JSHeapUsedSize")
         return {"heap_mb": round(heap / 1048576, 1) if isinstance(heap, (int, float)) else None,
-                "dom_nodes": m.get("nodes")}
+                "dom_nodes": got.get("Nodes"), "listeners": got.get("JSEventListeners")}
 
     def shot(self, path, element=""):
         if self.pg is None:

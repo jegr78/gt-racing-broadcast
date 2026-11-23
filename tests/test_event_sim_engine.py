@@ -788,12 +788,7 @@ class _FakePage:
     def title(self):
         return "Panel"
 
-    memory = {"heap": 52428800, "nodes": 1234}
-
-    def evaluate(self, script, arg=None):
-        if self.memory is None:
-            raise RuntimeError("Target page, context or browser has been closed")
-        return dict(self.memory)
+    metrics = {"JSHeapUsedSize": 52428800, "Nodes": 1234, "JSEventListeners": 56}
 
     def locator(self, selector):
         return selector
@@ -819,6 +814,16 @@ class _FakeBrowser:
         class C:
             def new_page(self):
                 return outer.page
+
+            def new_cdp_session(self, page):
+                class Session:
+                    def send(self, method):
+                        if page.metrics is None:
+                            raise RuntimeError("Target page, context or browser has been closed")
+                        if method == "Performance.getMetrics":
+                            return {"metrics": [{"name": k, "value": v} for k, v in page.metrics.items()]}
+                        return {}
+                return Session()
 
             def close(self):
                 pass  # nothing to release
@@ -857,10 +862,10 @@ def t_page_role_reports_its_memory():
     assert "heap_mb" not in role.page(), "a page that is not open reports no memory"
     role.do("open", {"path": "/panel"})
     state = role.page()
-    assert state["heap_mb"] == 50.0 and state["dom_nodes"] == 1234, state
-    br.page.memory = {"heap": None, "nodes": 10}
-    assert role.page()["heap_mb"] is None, "a browser without performance.memory reports no heap"
-    br.page.memory = None
+    assert (state["heap_mb"], state["dom_nodes"], state["listeners"]) == (50.0, 1234, 56), state
+    br.page.metrics = {"Nodes": 10}
+    assert role.page()["heap_mb"] is None, "a metric the browser does not send stays None"
+    br.page.metrics = None
     state = role.page()
     assert state["heap_mb"] is None and state["dom_nodes"] is None, "a crashed page reports no memory"
 
