@@ -1667,6 +1667,19 @@ def _relay_already_running_for_active_profile():
     return relay_start_plan(**_relay_start_signals())[0] == "running"
 
 
+def _relay_running_after_boot():
+    """_relay_already_running_for_active_profile, after waiting for our own relay that
+    still reads the Google Sheet."""
+    signals = _relay_start_signals()
+    action = relay_start_plan(**signals)[0]
+    if action != "starting":
+        return action == "running"
+    pid = signals["pidfile_pid"]
+    print(f"relay is starting (pid {pid}) and still reading the Google Sheet. Waiting…")
+    _wait_relay_boot(pid)
+    return _relay_already_running_for_active_profile()
+
+
 def _is_continuation_start(rest):
     """True when this `event start` continues an in-progress broadcast rather than
     beginning a fresh one: any --stint/--part flag marks a mid-event bring-up (a local
@@ -7210,7 +7223,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # pointer before the relay starts, so its PartStore comes up on the right Part.
     part = _part_index(rest)
     fresh = _new_session and not _is_continuation_start(rest)
-    relay_was_running = _relay_already_running_for_active_profile() if _new_session else False
+    relay_was_running = _relay_running_after_boot() if _new_session else False
     continuing = _new_session and _unstopped_event_continues()
     fresh = fresh and not continuing
     mode = "qualifying" if _qualifying_args(rest) else "race"

@@ -3453,6 +3453,32 @@ def t_relay_already_running_for_active_profile_requires_both():
         assert got is want, f"{why}: got {got}"
 
 
+def t_event_start_waits_for_a_booting_relay_and_treats_it_as_running():
+    import inspect
+    restore = _stub_relay_signals((4242,), 4242, False, "demo", "demo")
+    m._relay_starting = lambda: True
+    saved = (m._wait_relay_boot, m._relay_already_running_for_active_profile)
+    waited = []
+    def boot(pid):
+        waited.append(pid)
+        m._relay_http_ok = lambda: True
+        m._relay_starting = lambda: False
+        return True
+    m._wait_relay_boot = boot
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            assert m._relay_running_after_boot() is True, "a relay that finished starting counts as running"
+        assert waited == [4242] and "starting" in out.getvalue(), (waited, out.getvalue())
+        m._relay_http_ok, m._relay_starting = (lambda: False), (lambda: False)
+        assert m._relay_running_after_boot() is False, "a relay that does not answer is not running"
+    finally:
+        m._wait_relay_boot, m._relay_already_running_for_active_profile = saved
+        restore()
+    src = inspect.getsource(m.event_start)
+    assert "relay_was_running = _relay_running_after_boot()" in src, \
+        "event start waits for a booting relay before it decides whether one runs"
+
+
 def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
 
     class _Reached(Exception):
