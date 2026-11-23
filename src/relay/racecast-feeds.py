@@ -12191,6 +12191,7 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
 # The largest request body the control server reads (a parsed POST, or one drained
 # after the /console gate answered it).
 MAX_POST_BODY = 65536
+INGEST_IDLE_S = 15.0   # a kept sender connection without a post for this long is closed
 DRIVE_REGISTER_PER_MIN = 30   # registrations per client and minute
 
 
@@ -12535,6 +12536,19 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _coach_controls_rl = console_auth.RateLimiter(limit=30, window_s=60)
 
     class H(BaseHTTPRequestHandler):
+        def parse_request(self):
+            if vars(self).pop("protocol_version", None):    # the last request kept an ingest connection
+                self.connection.settimeout(None)
+            return super().parse_request()
+
+        def _keep_ingest_open(self):
+            """Answer this ingest post in HTTP/1.1 and keep the connection for the sender's
+            next post, closed after INGEST_IDLE_S without one. Only after the body was read."""
+            if self.request_version == "HTTP/1.1" and self.headers.get("Connection", "").lower() != "close":
+                self.protocol_version = "HTTP/1.1"
+                self.close_connection = False
+                self.connection.settimeout(INGEST_IDLE_S)
+
         def _send(self, obj, code=200, no_store=False, compact=False):
             body = json.dumps(obj, ensure_ascii=False, indent=None if compact else 2).encode("utf-8")
             self.send_response(code)
@@ -14955,6 +14969,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._drive_refuse(413 if length > 0 else 400, "bad body length")
                 body = self.rfile.read(length)
                 self._body_consumed = True
+                self._keep_ingest_open()
                 try:
                     stats = json.loads(self.headers.get("X-Sender-Stats") or "null")
                 except ValueError:
@@ -15046,6 +15061,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return None
             body = self.rfile.read(length)
             self._body_consumed = True
+            self._keep_ingest_open()
             try:
                 stats = json.loads(self.headers.get("X-Sender-Stats") or "null")
             except ValueError:
