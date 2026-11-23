@@ -1005,36 +1005,41 @@ def t_race_area_tabs_are_the_desk_parts():
 
 def t_the_panel_desk_preselects_qualifying_on_a_switch_only():
     h = _html()
-    out = _run_js("""var shown = [], nav = [], stored = null;
+    out = _run_js("""var shown = [], nav = [], stored = null, typing = false;
 function showDeskSub(n){ shown.push(n); stored = n; }
 function recall(){ return stored; }
 function setNav(a, level, why){ nav.push([level, why]); }
 function deskDot(){}
+function deskEditing(){ return typing; }
 var DESK_SUB_KEY = "k", deskMode = null;
 """ + _func_src(h, "deskState") + """
 }
 const st = (mode, extra) => Object.assign({waiting: 0, events: 0, mode: mode, red: false, dashboard: false}, extra);
-deskState(st("race")); deskState(st("qualifying")); deskState(st("qualifying", {waiting: 2}));
-deskState(st("race")); stored = "drivers"; deskState(st("qualifying", {red: true})); stored = "corrections";
-deskState(st("race"));
+deskState(st("qualifying")); deskState(st("race")); deskState(st("qualifying"));
+deskState(st("qualifying", {waiting: 2})); typing = true; deskState(st("race")); typing = false;
+deskState(st("qualifying", {red: true})); stored = "corrections"; deskState(st("race"));
 console.log(JSON.stringify({shown, nav}));""")
     if out is None:
         return
     got = json.loads(out)
-    assert got["shown"] == ["qualifying", "race", "qualifying"], \
-        f"a switch preselects Qualifying, and back to Race only from Qualifying: {got['shown']}"
-    assert got["nav"][2] == ["warn", "2 waiting"] and got["nav"][4] == ["live", "red flag"], got["nav"]
+    assert got["shown"] == ["qualifying", "qualifying"], \
+        "the first poll keeps the stored tab, typing holds the switch, back to Race only from Qualifying: " \
+        f"{got['shown']}"
+    assert got["nav"][3] == ["warn", "2 waiting"] and got["nav"][5] == ["live", "red flag"], got["nav"]
+    assert 'a.matches("input, select, textarea")' in _func_src(h, "deskEditing") and \
+        'document.querySelector("dialog[open]")' in _func_src(h, "deskEditing")
 
 
 def t_the_program_tile_gives_way_to_the_live_keys():
     out = _run_js(_func_src(_html(), "liveShrink") + """
 }
 console.log(JSON.stringify([liveShrink(700, 650, 336), liveShrink(700, 700, 336), liveShrink(700, 745, 336),
-                            liveShrink(700, 1200, 336)]));""")
+                            liveShrink(700, 1200, 336), liveShrink(700, 1200, 336, 150)]));""")
     if out is None:
         return
-    assert json.loads(out) == [0, 0, 256, 134.4], \
-        f"no overflow keeps the full tile, an overflow takes its height off, down to 40 % of the width: {out}"
+    assert json.loads(out) == [0, 0, 256, 134.4, 150], \
+        "no overflow keeps the full tile, an overflow takes its height off, down to 40 % of the width " \
+        f"and never below a feed tile: {out}"
     h = _html()
     assert "new ResizeObserver(fitLiveSoon).observe($(\"#liveCol\"));" in h and \
         'document.querySelectorAll("#liveCol > *").forEach(el => new ResizeObserver(fitLiveSoon).observe(el));' in h, \

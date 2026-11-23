@@ -3764,16 +3764,19 @@ function applyNavCollapse(){
   t.setAttribute("aria-expanded", String(!collapsed));
   t.hidden = NAV_AUTO.matches;           // a narrow window always collapses the nav
 }
-// The program tile gives way, down to 40 % of the column, so every key row below it stays in view.
-function liveShrink(colH, scrollH, width){
+// The program tile gives way, down to 40 % of the column and never below a feed tile, so
+// every key row below it stays in view.
+function liveShrink(colH, scrollH, width, feedW){
   const over = scrollH - colH;
-  return over > 0 ? Math.max(width * 0.4, width - over * 16 / 9) : 0;
+  return over > 0 ? Math.max(width * 0.4, feedW || 0, width - over * 16 / 9) : 0;
 }
 function fitLive(){
   const col = $("#liveCol"), prog = $("#liveCol .pvprog");
   prog.style.width = "";
   if (PHONE_MQ.matches || $("#pvBody").hidden) return;
-  const w = liveShrink(col.clientHeight, col.scrollHeight, prog.getBoundingClientRect().width);
+  const tile = $("#liveCol .pvtile");
+  const w = liveShrink(col.clientHeight, col.scrollHeight, prog.getBoundingClientRect().width,
+                       tile ? tile.getBoundingClientRect().width : 0);
   if (w) prog.style.width = Math.floor(w) + "px";
 }
 var fitLiveFrame = 0;
@@ -4117,8 +4120,13 @@ function deskDot(sub, level){
   const b = document.querySelector(`#deskTabs button[data-sub="${sub}"] .ndot`);
   if (b) b.className = "ndot" + (level ? " " + level : "");
 }
-// Qualifying preselects its tab on the first poll and on each switch, never per poll.
+// A switch to qualifying opens its tab, never on the first poll and never while someone types
+// or a dialog is open; the tab's dot marks the session either way.
 var deskMode = null;
+function deskEditing(){
+  const a = document.activeElement;
+  return !!(a && a.matches && a.matches("input, select, textarea")) || !!document.querySelector("dialog[open]");
+}
 function deskState(st){
   deskDot("drivers", st.waiting ? "warn" : "");
   deskDot("race", st.events ? "live" : "");
@@ -4127,9 +4135,11 @@ function deskState(st){
   setNav("race", st.red ? "live" : st.waiting ? "warn" : "",
          st.red ? "red flag" : st.waiting ? `${st.waiting} waiting` : st.events ? `${st.events} disconnects open` : "");
   if (st.mode !== deskMode){
-    if (st.mode === "qualifying") showDeskSub("qualifying");
-    else if (deskMode === "qualifying" && recall(DESK_SUB_KEY) === "qualifying") showDeskSub("race");
+    const first = deskMode === null;
     deskMode = st.mode;
+    if (first || deskEditing()) return;
+    if (st.mode === "qualifying") showDeskSub("qualifying");
+    else if (recall(DESK_SUB_KEY) === "qualifying") showDeskSub("race");
   }
 }
 (function () {

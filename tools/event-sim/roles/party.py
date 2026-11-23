@@ -194,18 +194,49 @@ class Surface(builtin.PageRole):
 
 
 class LiveColumn:
-    """A page with a live column (its `live` selector): `fit` fails when any visible control
-    there needs scrolling, the layout promise of the panel and the desk (#1267)."""
+    """A page with a live column (its `live` selector): `fit` fails when a visible control
+    there needs scrolling, the layout promise of the panel and the desk (#1267). It waits
+    for the role's `live_required` controls plus `require` (labels) and fails without them.
+    `viewport` ([width, height]) measures in that window; `reachable` then only asks that
+    scrolling the column reaches every control, so nothing clips one."""
+    live_required = ()
+
+    def _labels_in(self, found, labels):
+        names = [c["label"] for c in found]
+        return [want for want in labels if not any(n == want or n.startswith(want) for n in names)]
 
     def act_fit(self, args):
-        found = self.unfit(self.sel("live"))
-        if found is None:
-            raise StepError(f"{self.kind}: the page has no live column ({self.sel('live')})")
-        cut, total = found
+        size = args.get("viewport")
+        if size is not None and (not isinstance(size, list) or len(size) != 2
+                                 or not all(type(v) is int and v > 0 for v in size)):
+            raise StepError(f"fit: viewport is [width, height], not {size!r}")
+        want = list(self.live_required) + [str(x) for x in args.get("require", [])]
+        key = "clip" if args.get("reachable") else "cut"
+        if size:
+            self.pg.set_viewport_size({"width": size[0], "height": size[1]})
+        try:
+            def measured():
+                found = self.fit_report(self.sel("live"))
+                return found if found and not self._labels_in(found, want) else None
+            try:
+                found = self.until(measured, f"{self.kind}: the live controls", slow=None)
+            except StepError:
+                found = self.fit_report(self.sel("live"))
+                if found is None:
+                    raise StepError(f"{self.kind}: the page has no live column ({self.sel('live')})") from None
+                if not found:
+                    raise StepError(f"{self.kind}: the live column shows no control") from None
+                raise StepError(f"{self.kind}: the live column lacks {', '.join(self._labels_in(found, want))}") \
+                    from None
+            cut = [(c["label"], c[key]) for c in found if c[key] > builtin.FIT_TOLERANCE_PX]
+        finally:
+            if size:
+                self.pg.set_viewport_size(dict(self.viewport))
         if cut:
-            raise StepError(f"{self.kind}: {len(cut)} of {total} live controls need scrolling: " +
+            how = "are clipped" if key == "clip" else "need scrolling"
+            raise StepError(f"{self.kind}: {len(cut)} of {len(found)} live controls {how}: " +
                             ", ".join(f"{label} {px}px" for label, px in cut[:8]))
-        return {"controls": total}
+        return {"controls": len(found)}
 
 
 @register
@@ -310,6 +341,7 @@ class DirectorRole(LiveColumn, Surface):
     kind = "director"
     path, ready = "/panel", selectors.READY["DIRECTOR"]
     sources = selectors.SOURCES["DIRECTOR"]
+    live_required = selectors.LIVE_REQUIRED["DIRECTOR"]
     selectors = selectors.DIRECTOR
     masked = ("links",)
 
@@ -500,6 +532,7 @@ class RaceControlRole(LiveColumn, Surface):
     path, ready, crew = "/console/race-control", selectors.READY["RACE_CONTROL"], "Sim Race Control"
     base = "/race-control"
     sources = selectors.SOURCES["RACE_CONTROL"]
+    live_required = selectors.LIVE_REQUIRED["RACE_CONTROL"]
     selectors = selectors.RACE_CONTROL
     masked = ("links",)
 

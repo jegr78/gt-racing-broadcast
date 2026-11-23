@@ -43,6 +43,8 @@
     ".dd .pill.amb{border-color:#ffb454;color:#ffb454}",
     ".dd .banner{border:1px solid #ff4d5e;color:#ff4d5e;border-radius:6px;padding:6px 9px}",
     ".dd .msg{min-height:1.2em;font-size:12px}.dd .msg.err{color:#ff4d5e}",
+    ".dd>.msg.part{position:sticky;top:0;z-index:1;min-height:0;padding:4px 0;background:var(--panel,#14171c)}",
+    ".dd>.msg.part:empty{display:none}",
     ".dd .stale{opacity:.45}",
     ".dd .req{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-bottom:1px solid var(--edge,#2a2f37)}",
     ".dd .req .row{gap:6px}.dd .req .muted{font-size:12px}.dd .reqs-ok summary{cursor:pointer;padding:4px 0}",
@@ -342,6 +344,10 @@
     });
     return out;
   }
+  // The last good answer of each poll; a failed poll (null) keeps it, so a relay hiccup never reads as the race mode.
+  function remember(seen, race, rec, reqs) {
+    return {race: race || seen.race, rec: rec || seen.rec, reqs: reqs || seen.reqs};
+  }
   // What the page's navigation marks: requests waiting, open disconnects, a stale relay.
   function deskState(race, rec, reqs, stale) {
     var r = race || {};
@@ -361,31 +367,40 @@
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
     }
     var state = {race: null, ready: null, invite: null};
-    var msg = el("div", {cls: "msg", role: "status"});
+    var seen = {race: null, rec: null, reqs: null};
+    // A status line per part: an action's answer shows in the part it was pressed in.
+    var msgs = {}, part = "live";
+    SLOTS.forEach(function (name) { msgs[name] = el("div", {cls: "msg" + (name === "live" ? "" : " part"), role: "status"}); });
     // Shown after STALE_POLLS failed polls: decisions must not rest on frozen gaps.
     var staleNote = el("div", {cls: "msg err", role: "alert"});
     staleNote.hidden = true;
     var STALE_POLLS = 3;
     var PIT_HINT = "Estimated: a stop counts when the car stands off the racing line, so a beached car " +
       "or a red flag stop beside the track counts too. Correct it with the pit correction.";
-    function say(text, err) { msg.textContent = text || ""; msg.className = "msg" + (err ? " err" : ""); }
+    function say(text, err, where) {
+      var to = msgs[where || part];
+      SLOTS.forEach(function (name) { if (msgs[name] !== to) { msgs[name].classList.remove("cur"); msgs[name].textContent = ""; } });
+      to.textContent = text || "";
+      to.className = "msg cur" + (to === msgs.live ? "" : " part") + (err ? " err" : "");
+    }
 
-    async function call(path, body, quiet) {
+    async function call(path, body, quiet, where) {
       try {
         var r = await fetch(base + path, {method: body === undefined ? "GET" : "POST",
           headers: body === undefined ? {} : {"Content-Type": "application/json"},
           body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store"});
         var d = await r.json().catch(function () { return {}; });
         if (!r.ok || d.ok === false) {
-          if (!quiet) say(d.error || ("request failed (" + r.status + ")"), true);
+          if (!quiet) say(d.error || ("request failed (" + r.status + ")"), true, where);
           return null;
         }
         return d;
-      } catch (e) { if (!quiet) say("relay not reachable", true); return null; }
+      } catch (e) { if (!quiet) say("relay not reachable", true, where); return null; }
     }
     async function act(path, body, done) {
-      var d = await call(path, body || {});
-      if (d) { say(done || ""); refresh(); }
+      var where = part;
+      var d = await call(path, body || {}, false, where);
+      if (d) { say(done || "", false, where); refresh(); }
       return d;
     }
     var armed = arming();
@@ -431,7 +446,7 @@
       if (!d.cover) miss.push("cover: " + (d.note || "not raised"));
       if (d.banner !== "ok") miss.push("banner: " + d.banner);
       say(miss.length ? "RED FLAG held the race; " + miss.join("; ") : "RED FLAG: banner, cover and race held",
-          miss.length > 0);
+          miss.length > 0, "live");
     });
     var restart = el("select", {"aria-label": "Restart after the red flag"},
                      [opt("keep", "Restart: keep gaps"), opt("neutralise", "Restart: neutralise")]);
@@ -902,7 +917,7 @@
         el("div", {cls: "row finish"}, [mode, laps, finalLap, finish]),
         classLapRow,
         el("div", {cls: "row red"}, [redFlag, restart, release]),
-        redBanner, msg, lastChange],
+        redBanner, msgs.live, lastChange],
       race: [raceNote, raceTable, evTitle,
         el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
         evTable],
@@ -939,9 +954,11 @@
     // Each part goes into its page's [data-desk] mount point; one without goes at the end of `root`.
     var slots = deskSlots(root);
     SLOTS.forEach(function (name) {
-      var box = el("div", {cls: "dd dd-" + name}, parts[name]);
+      var box = el("div", {cls: "dd dd-" + name}, name === "live" ? parts[name] : [msgs[name]].concat(parts[name]));
       if (slots[name]) slots[name].replaceChildren(box); else root.appendChild(box);
       box.addEventListener("click", function () { if (soundBox.checked && !audio) wakeAudio(); });
+      box.addEventListener("pointerdown", function () { part = name; }, true);
+      box.addEventListener("focusin", function () { part = name; }, true);
     });
 
     function keepSelect(sel, items) {
@@ -1168,7 +1185,8 @@
       if (rd) renderSenders(rd);
       var rq = await reqCall;
       if (rq) renderRequests(rq);
-      if (onState) onState(deskState(r, rec, rq, staleNote.hidden === false));
+      seen = remember(seen, r, rec, rq);
+      if (onState) onState(deskState(seen.race, seen.rec, seen.reqs, staleNote.hidden === false));
     }
     async function refreshInvite() {
       var d = await call("/drivers/invite", undefined, true);

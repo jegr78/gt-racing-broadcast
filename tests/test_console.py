@@ -864,20 +864,63 @@ def t_the_race_control_areas_match_the_nav_and_the_tab_bar():
         assert f'id="{cid}"' in _between(html, '<section id="liveCol"', "</section>"), f"#{cid} is live"
 
 
+def t_a_short_window_scrolls_the_live_column_and_hide_lasts_one_session():
+    html = _src("racecontrol", "race-control.html")
+    assert "#liveCol > * { flex-shrink: 0; }" in html, \
+        "a flex child with overflow:hidden shrinks below its content and clips Restart released"
+    assert "sessionStorage.getItem(PV_KEY)" in html and "localStorage.setItem(PV_KEY" not in html, \
+        "a hidden preview never survives into the next event's first load"
+
+
 def t_qualifying_preselects_its_area_on_a_switch_only():
     path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
     got = _js_fn(path, "followMode", """(function () {
-      ["race", "race", "qualifying", "qualifying", "race", "qualifying", "race"].forEach(function (m, i) {
+      var modes = ["qualifying", "qualifying", "race", "qualifying", "race", "qualifying", "race", "qualifying"];
+      modes.forEach(function (m, i) {
+        typing = i === 5;
         if (i === 6) deskArea = "note";
         followMode(m);
       });
       return {shown: shown, area: deskArea};
-    })()""", prelude="var lastMode = null, deskArea = 'race', shown = [];"
+    })()""", prelude="var lastMode = null, deskArea = 'race', shown = [], typing = false;"
+                     "function editing() { return typing; }"
                      "function showArea(n) { shown.push(n); deskArea = n; }\n")
     if got is None:
         return
-    assert got == {"shown": ["qualifying", "race", "qualifying"], "area": "note"}, \
-        f"only a switch of the mode moves the desk, back to Race only from Qualifying: {got}"
+    assert got == {"shown": ["qualifying", "race", "qualifying"], "area": "qualifying"}, \
+        "the first poll keeps the stored area, typing holds the switch, back to Race only from " \
+        f"Qualifying: {got}"
+    assert "a.matches('input, select, textarea')" in _src("racecontrol", "race-control.html") and \
+        "document.querySelector('dialog[open]')" in _src("racecontrol", "race-control.html")
+
+
+def t_a_failed_poll_keeps_the_last_known_mode():
+    got = _desk_fn("requestRows,remember,deskState", """(function () {
+      var seen = {race: null, rec: null, reqs: null}, modes = [];
+      [{mode: "qualifying"}, null, {mode: "qualifying"}].forEach(function (race) {
+        seen = remember(seen, race, null, race ? {requests: [{conn: "a", status: "pending", ts: 1}]} : null);
+        modes.push([deskState(seen.race, seen.rec, seen.reqs, !race).mode, deskState(seen.race, seen.rec, seen.reqs).waiting]);
+      });
+      return modes;
+    })()""")
+    if got is None:
+        return
+    assert got == [["qualifying", 1], ["qualifying", 1], ["qualifying", 1]], \
+        f"a 502 between two polls neither reads as race mode nor clears the waiting count: {got}"
+    js = _src("console", "driver-desk.js")
+    assert "seen = remember(seen, r, rec, rq);" in js and "deskState(seen.race, seen.rec, seen.reqs" in js
+
+
+def t_an_answer_shows_in_the_part_it_was_asked_from():
+    js = _src("console", "driver-desk.js")
+    assert 'msgs[name] = el("div", {cls: "msg" + (name === "live" ? "" : " part"), role: "status"});' in js, \
+        "every part has its own status line"
+    act = js[js.index("async function act("):js.index("var armed = arming();")]
+    assert "var where = part;" in act and "say(done || \"\", false, where)" in act, \
+        "the answer goes to the part pressed in, even when the person moved on meanwhile"
+    assert 'box.addEventListener("pointerdown", function () { part = name; }, true);' in js and \
+        'box.addEventListener("focusin", function () { part = name; }, true);' in js
+    assert ".dd>.msg.part{position:sticky;top:0" in js, "a long part keeps its line in view"
 
 
 if __name__ == "__main__":

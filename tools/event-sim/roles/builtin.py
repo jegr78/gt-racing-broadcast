@@ -123,8 +123,9 @@ class StreamRole(Role):
         self._stub().clear(str(args.get("name")))
 
 
-# Each visible control under a root: its label and how many px a viewport or a clipping
-# ancestor cuts off it, so 0 means it works without scrolling.
+# Each visible control under a root: its label, how many px the viewport or a clipping
+# ancestor cuts off it (`cut`: 0 means it works without scrolling) and how many px an
+# ancestor that cannot scroll cuts off it (`clip`: 0 means scrolling reaches it).
 FIT_SCRIPT = """(root) => {
   const box = document.querySelector(root);
   if (!box) return null;
@@ -132,15 +133,18 @@ FIT_SCRIPT = """(root) => {
   for (const el of box.querySelectorAll('button, select, input, textarea, a.btn')) {
     const r = el.getBoundingClientRect();
     if (el.offsetParent === null || !r.width || !r.height) continue;
-    let top = 0, bottom = window.innerHeight;
+    let top = 0, bottom = window.innerHeight, ctop = -Infinity, cbottom = Infinity;
     for (let p = el.parentElement; p; p = p.parentElement) {
-      if (getComputedStyle(p).overflowY === 'visible') continue;
+      const o = getComputedStyle(p).overflowY;
+      if (o === 'visible') continue;
       const b = p.getBoundingClientRect();
       top = Math.max(top, b.top); bottom = Math.min(bottom, b.bottom);
+      if (o === 'hidden' || o === 'clip') { ctop = Math.max(ctop, b.top); cbottom = Math.min(cbottom, b.bottom); }
     }
     const name = el.dataset.label || el.getAttribute('aria-label') || el.textContent || el.id || el.tagName;
     out.push({label: name.trim().replace(/\\s+/g, ' ').slice(0, 40),
-              cut: Math.max(0, Math.ceil(r.bottom - bottom), Math.ceil(top - r.top))});
+              cut: Math.max(0, Math.ceil(r.bottom - bottom), Math.ceil(top - r.top)),
+              clip: Math.max(0, Math.ceil(r.bottom - cbottom), Math.ceil(ctop - r.top))});
   }
   return out;
 }"""
@@ -210,13 +214,9 @@ class PageRole(Role):
         target = self.pg.locator(element).first if element else self.pg
         target.screenshot(path=path, mask=[self.pg.locator(s) for s in selectors.LINKS], timeout=PAGE_TIMEOUT_MS)
 
-    def unfit(self, root):
-        """([(label, px cut off)] of the visible controls under `root` that need scrolling,
-        how many visible controls it has); None when the page has no `root`."""
-        found = self.pg.evaluate(FIT_SCRIPT, root)
-        if found is None:
-            return None
-        return [(c["label"], c["cut"]) for c in found if c["cut"] > FIT_TOLERANCE_PX], len(found)
+    def fit_report(self, root):
+        """FIT_SCRIPT's measure of the visible controls under `root`; None without `root`."""
+        return self.pg.evaluate(FIT_SCRIPT, root)
 
     def close(self):
         # A failed image or fetch (an idle feed's preview answers 503) is the browser's

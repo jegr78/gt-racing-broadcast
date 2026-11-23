@@ -164,6 +164,7 @@ class Page:
         self.url = ""
         self.handlers = {}
         self.fit = {}            # live column selector -> what FIT_SCRIPT measured there
+        self.size = (1440, 900)
 
     def add(self, selector, **kw):
         self.els[selector] = El(**kw)
@@ -214,7 +215,11 @@ class Page:
 
     def evaluate(self, script, arg=None):
         assert script == roles.builtin.FIT_SCRIPT, "the only script a role runs measures the live column"
-        return self.fit.get(arg)
+        found = self.fit.get(arg)
+        return found(self.size) if callable(found) else found
+
+    def set_viewport_size(self, size):
+        self.size = (size["width"], size["height"])
 
     def expect_response(self, pred, timeout=None):
         return Expect(self, pred, timeout)
@@ -954,7 +959,7 @@ def desk_areas(page):
 
 def desk():
     role, page, ctx = make(party.RaceControlRole)
-    page.add('.dd .msg[role="status"]', text="", attrs={"class": "msg"})
+    page.add('.dd .msg.cur[role="status"]', text="", attrs={"class": "msg"})
     desk_areas(page)
     return role, page, ctx
 
@@ -970,7 +975,7 @@ def desk_button(page, label, route, says, cls="msg", armed=True):
             return
         el.text = label
         page.respond("/console/race-control" + route)
-        status = page.els['.dd .msg[role="status"]']
+        status = page.els['.dd .msg.cur[role="status"]']
         status.text, status.attrs["class"] = says, cls
     el.on_click = click
     return key
@@ -1000,7 +1005,7 @@ def t_an_error_on_the_desks_status_line_fails_the_step():
 
 def t_the_desks_line_of_the_action_before_is_not_this_actions_result():
     role, page, _ = desk()
-    status = page.els['.dd .msg[role="status"]']
+    status = page.els['.dd .msg.cur[role="status"]']
     status.text, status.attrs["class"] = "RED FLAG held the race; banner: missing", "msg err"
     key = '.dd button[data-label="Final lap"]'
     el = page.add(key, text="Final lap")
@@ -1482,14 +1487,64 @@ def t_the_stack_stops_a_relay_the_control_center_restarted():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _controls(labels, cut=0, clip=0):
+    return [{"label": label, "cut": cut, "clip": clip} for label in labels]
+
+
 def t_fit_fails_when_a_live_control_needs_scrolling():
     for cls in (party.RaceControlRole, party.DirectorRole):
         role, page, _ = make(cls)
+        need = list(cls.live_required)
         fails(lambda role=role: role.do("fit", {}), "has no live column (#liveCol)")
-        page.fit["#liveCol"] = [{"label": "RED FLAG", "cut": 0}, {"label": "Finish", "cut": 1}]
-        assert role.do("fit", {}) == {"controls": 2}, "a 1 px sub-pixel overhang still fits"
-        page.fit["#liveCol"].append({"label": "CUT", "cut": 37})
-        fails(lambda role=role: role.do("fit", {}), "1 of 3 live controls need scrolling: CUT 37px")
+        page.fit["#liveCol"] = []
+        fails(lambda role=role: role.do("fit", {}), "the live column shows no control")
+        page.fit["#liveCol"] = _controls(need[1:])
+        fails(lambda role=role, need=need: role.do("fit", {}), f"the live column lacks {need[0]}")
+        page.fit["#liveCol"] = _controls(need) + [{"label": "Extra", "cut": 1, "clip": 0}]
+        assert role.do("fit", {}) == {"controls": len(need) + 1}, "a 1 px sub-pixel overhang still fits"
+        fails(lambda role=role: role.do("fit", {"require": ["Restart released"]}), "lacks Restart released")
+        page.fit["#liveCol"].append({"label": "CUT 2", "cut": 37, "clip": 0})
+        fails(lambda role=role: role.do("fit", {}), f"1 of {len(need) + 2} live controls need scrolling: CUT 2 37px")
+
+
+def t_fit_in_a_short_window_asks_only_that_scrolling_reaches_every_control():
+    role, page, _ = make(party.RaceControlRole)
+    need = list(party.RaceControlRole.live_required)
+    page.fit["#liveCol"] = lambda size: _controls(need, cut=0 if size[1] >= 900 else 80,
+                                                  clip=0 if size != (1366, 650) else 0)
+    fails(lambda: role.do("fit", {"viewport": [1366, 650]}), "need scrolling")
+    assert role.do("fit", {"viewport": [1366, 650], "reachable": True}) == {"controls": len(need)}
+    assert page.size == (1440, 900), "the role's own window comes back after the measure"
+    page.fit["#liveCol"] = lambda size: _controls(need, cut=80, clip=40)
+    fails(lambda: role.do("fit", {"viewport": [1366, 650], "reachable": True}), "are clipped")
+    fails(lambda: role.do("fit", {"viewport": [1366]}), "viewport is [width, height]")
+
+
+def t_fit_script_measures_a_real_page():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; FIT_SCRIPT runs in the event simulation)")
+        return
+    page = """<body style="margin:0"><div id="col" style="height:300px;overflow-y:auto">
+      <div style="height:200px;overflow:hidden"><button style="margin-top:250px">Hidden</button></div>
+      <button data-label="Below" style="margin-top:100px">x</button></div><button>Outside</button></body>"""
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            try:
+                tab = browser.new_page(viewport={"width": 400, "height": 400})
+                tab.set_content(page)
+                got = {c["label"]: (c["cut"] > 0, c["clip"] > 0) for c in tab.evaluate(roles.builtin.FIT_SCRIPT, "#col")}
+                missing = tab.evaluate(roles.builtin.FIT_SCRIPT, "#none")
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+        print(f"  (no Chromium: {type(exc).__name__})")
+        return
+    assert got == {"Hidden": (True, True), "Below": (True, False)}, \
+        f"a box that cannot scroll clips, the scrolling column only hides: {got}"
+    assert missing is None
 
 
 def t_the_smoke_scenario_checks_both_live_columns():
@@ -1512,6 +1567,11 @@ def t_the_desk_fit_scenario_measures_the_tallest_states():
         during = {r for r, i in fits if order.index(state) < i < end}
         assert roles_wanted <= during, f"a fit runs while {state} holds: {fits}"
     assert loaded.event.get("classes"), "the class lap row shows only with classes"
+    laptop = {s.role for s in loaded.steps if s.do == "fit" and s.args.get("viewport") == [1366, 650]
+              and s.args.get("reachable")}
+    assert laptop == {"race_control", "director"}, f"a laptop window still reaches every live control: {laptop}"
+    timed = [s.id for s in loaded.steps if s.at.kind == "time" or s.at.seconds]
+    assert not timed, f"a fit waits for its state, not for a fixed time: {timed}"
     assert not any(s.role == "drivers" and s.do == "start" for s in loaded.steps), "no state waits on a lap"
 
 

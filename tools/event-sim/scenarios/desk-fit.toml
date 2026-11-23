@@ -2,6 +2,8 @@
 # row of the Director Panel works in a 1440x900 window without scrolling, in the tallest
 # states: driver requests waiting, a red flag with a class lap row, a graphic request
 # under a two-row panel header, and qualifying. Nobody drives, so no state waits on a lap.
+# Each fit waits for the controls its state shows; in a 1366x650 laptop window scrolling the
+# column must reach every live control.
 description = "Desk and panel live columns fit 1440x900 in their tallest states."
 max_minutes = 8
 
@@ -69,6 +71,7 @@ id = "desk_fit_waiting"
 at = "after:desk_waiting"
 role = "race_control"
 do = "fit"
+expect = ["result('desk_fit_waiting').controls >= 5"]
 
 [[step]]
 id = "approve_drivers"
@@ -87,10 +90,26 @@ timeout = "15s"
 
 [[step]]
 id = "desk_fit_red_flag"
-at = "after:red_flag+3s"
+at = "after:red_flag"
 role = "race_control"
 do = "fit"
+args = { require = ["Restart released", "Restart after the red flag", "Lap count of GT4"] }
+expect = ["result('desk_fit_red_flag').controls >= 8"]
 shot = "desk-red-flag"
+
+[[step]]
+id = "desk_reach_laptop"
+at = "after:desk_fit_red_flag"
+role = "race_control"
+do = "fit"
+args = { viewport = [1366, 650], reachable = true, require = ["Restart released"] }
+
+[[step]]
+id = "panel_reach_laptop"
+at = "after:desk_reach_laptop"
+role = "director"
+do = "fit"
+args = { viewport = [1366, 650], reachable = true }
 
 [[step]]
 id = "long_title"
@@ -115,9 +134,11 @@ args = { path = "/console/cockpit/graphic-takes/request", as = "Comms 1", json =
 
 [[step]]
 id = "panel_fit_request"
-at = "after:ask_graphic+6s"
+at = "after:ask_graphic"
 role = "director"
 do = "fit"
+args = { require = ["TAKE", "DECLINE"] }
+expect = ["result('panel_fit_request').controls >= 15"]
 shot = { name = "panel-request", role = "director" }
 
 [[step]]
@@ -130,10 +151,19 @@ expect = ["race.mode == 'qualifying'"]
 timeout = "20s"
 
 [[step]]
+id = "desk_qualifying"
+at = "after:qualifying"
+role = "race_control"
+do = "open"
+expect = ["'Qualifying' in page('race_control').lap_line"]
+timeout = "20s"
+
+[[step]]
 id = "desk_fit_qualifying"
-at = "after:qualifying+4s"
+at = "after:desk_qualifying"
 role = "race_control"
 do = "fit"
+expect = ["result('desk_fit_qualifying').controls >= 5"]
 shot = "desk-qualifying"
 
 [[step]]
@@ -141,6 +171,7 @@ id = "panel_fit_qualifying"
 at = "after:desk_fit_qualifying"
 role = "director"
 do = "fit"
+expect = ["result('panel_fit_qualifying').controls >= 15"]
 
 [[step]]
 id = "stop_event"

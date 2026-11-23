@@ -49,7 +49,7 @@ RACE_CONTROL = {
     "button": '.dd button[data-label="{label}"]',
     "select": '.dd select[aria-label="{label}"]',
     "input": '.dd input[aria-label="{label}"]',
-    "status": '.dd .msg[role="status"]',
+    "status": '.dd .msg.cur[role="status"]',
     "lap_line": ".dd .lapline", "links": ".dd .mono.grow",
     "note_target": "#rcTarget", "note_text": "#rcText", "note_send": "#rcSend", "note_message": "#rcMsg",
 }
@@ -94,6 +94,10 @@ DESK = {
     "side_ahead": "ahead of",
     "side_behind": "behind",
 }
+
+# The live-column controls `fit` waits for and fails without, by label (a label may run on).
+LIVE_REQUIRED = {"DIRECTOR": ("NEXT", "CUT", "FADE", "STINGER"),
+                 "RACE_CONTROL": (DESK["red_flag"], DESK["final_lap"], DESK["finish"])}
 
 # The link texts a screenshot of any page blacks out: the driver invite and the timing link.
 LINKS = ("#evt-invite-text", "#evt-timing-text", ".dd .mono.grow")

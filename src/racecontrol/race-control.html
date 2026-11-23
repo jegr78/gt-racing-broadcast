@@ -68,6 +68,7 @@
           text-overflow: ellipsis; }
   .nwhy:empty { display: none; }
   #liveCol { display: flex; flex-direction: column; gap: 10px; }
+  #liveCol > * { flex-shrink: 0; }   /* a short window scrolls the column, it never clips a card */
   #previewCard { order: -1; }
   .area { display: flex; flex-direction: column; gap: 12px; }
   @media (min-width: 821px) {
@@ -455,13 +456,20 @@ function deskDots(st) {
   setDot('trouble', st.stale ? 'alarm' : st.gaps ? 'warn' : 'ok',
          st.stale ? 'relay not answering' : st.gaps ? 'recording gaps' : 'no issues');
 }
-// Qualifying preselects its area on the first poll and on each switch, never per poll.
+// A switch to qualifying opens its area, never on the first poll and never while someone
+// types or a dialog is open; the Qualifying dot marks the session either way.
+function editing() {
+  const a = document.activeElement;
+  return !!(a && a.matches && a.matches('input, select, textarea')) || !!document.querySelector('dialog[open]');
+}
 let lastMode = null;
 function followMode(mode) {
   if (mode === lastMode) return;
-  if (mode === 'qualifying') showArea('qualifying');
-  else if (lastMode === 'qualifying' && deskArea === 'qualifying') showArea('race');
+  const first = lastMode === null;
   lastMode = mode;
+  if (first || editing()) return;
+  if (mode === 'qualifying') showArea('qualifying');
+  else if (deskArea === 'qualifying') showArea('race');
 }
 
 // Redacted schedule (no stream URLs) plus the on-air marker.
@@ -610,6 +618,7 @@ $('rcSend').addEventListener('click', sendRcNote);
 $('rcText').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendRcNote(); });
 
 // Program monitor: cache-busted JPEG stills from the cockpit endpoint; none while hidden.
+// Hide lasts for this tab only, so a reload never starts an event with the picture off.
 const PV_KEY = 'rc_preview';
 function previewShown() { return !$('pgmBody').hidden; }
 function setPreview(on) {
@@ -617,12 +626,12 @@ function setPreview(on) {
   $('pgmToggle').textContent = on ? 'Hide' : 'Show';
   $('pgmToggle').setAttribute('aria-expanded', on ? 'true' : 'false');
 }
-try { setPreview(localStorage.getItem(PV_KEY) !== '0'); } catch (e) { /* private mode */ }
+try { setPreview(sessionStorage.getItem(PV_KEY) !== '0'); } catch (e) { /* private mode */ }
 $('pgmToggle').addEventListener('click', () => {
   const on = !previewShown();
   setPreview(on);
   if (!on) { const au = $('pgmAudio'); if (!au.paused) $('pgmAudioBtn').click(); }
-  try { localStorage.setItem(PV_KEY, on ? '1' : '0'); } catch (e) { /* private mode */ }
+  try { sessionStorage.setItem(PV_KEY, on ? '1' : '0'); } catch (e) { /* private mode */ }
 });
 function pollProgram() {
   if (!previewShown()) { setTimeout(pollProgram, 1500); return; }
