@@ -192,7 +192,9 @@ never the real one.
   still passes, and every check prunes records without a live holder. Every
   read-modify-write runs under `_force_lock` (an `O_CREAT|O_EXCL` lock file, broken after
   `FORCE_LOCK_STALE_S`), `os.replace` retries a Windows sharing violation, and the gate
-  ignores prune failures but refuses the pass when the record cannot be read. The machine `.env` never supplies it. A subcommand's own `--force`
+  ignores prune failures but refuses the pass when the record cannot be read. A grant that
+  cannot take the lock is a gate refusal; `relay start` checks the record before it spawns
+  (`_force_pass_problem`) and a hold that still fails after the spawn is a warning. The machine `.env` never supplies it. A subcommand's own `--force`
   keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
 - Driver Radio and AI: `env_overrides` blanks `RACECAST_GCLOUD_TTS_KEY`/`STT_KEY` and

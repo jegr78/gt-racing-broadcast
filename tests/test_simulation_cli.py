@@ -639,6 +639,58 @@ def t_relay_start_registers_the_relay_as_a_holder():
     assert held == [4242], held
 
 
+def t_a_busy_force_lock_refuses_the_grant_without_a_traceback():
+    fdir = tempfile.mkdtemp()
+    open(os.path.join(fdir, ".lock"), "w").close()
+    env = _sim_ok_env()
+    with _patched((m, "FORCE_LOCK_WAIT_S", 0), (m.atexit, "register", lambda *a, **k: None)):
+        refused = m._simulation_gate(["event", "start"], env, "league", {}, force=True, force_dir=fdir)
+    assert refused and "force record" in refused, refused
+    assert sim.FORCE not in env, "a refused grant hands no pass to the children"
+
+
+def _forced_relay_start(fdir, hold=None):
+    """relay_start under a --force pass with the record dir `fdir`: (spawned argvs, output)."""
+    spawned, out = [], io.StringIO()
+    signals = dict(port_pids=[], feed_pids=[], pidfile_pid=None, pidfile_alive=False,
+                   running_profile="", active_profile="demo", http_ok=False)
+    noop = lambda *a, **k: None   # noqa: E731
+    seams = [(m, "_relay_start_signals", lambda: dict(signals)), (m.pt, "FEED_PORTS", ()),
+             (m, "_ensure_active_console_secret", noop), (m, "_resolve_producer_name", lambda: "P"),
+             (m, "_write_relay_profile_stamp", noop),
+             (m, "_spawn_relay_verified", lambda argv: spawned.append(argv) or 4242),
+             (m, "_append_tailscale_snapshot", noop), (m, "_refresh_obs_pages", noop),
+             (m, "_simulation_force_dir", lambda: fdir), (m, "FORCE_LOCK_WAIT_S", 0)]
+    if hold:
+        seams.append((m, "_hold_simulation_force", hold))
+    with _env(**SIM_ENV, RACECAST_SIM_FORCE="league:" + "b" * 32), _patched(*seams), \
+            contextlib.redirect_stdout(out):
+        m.relay_start([])
+    return spawned, out.getvalue()
+
+
+def t_relay_start_refuses_before_spawning_when_the_force_record_is_busy():
+    fdir = tempfile.mkdtemp()
+    open(os.path.join(fdir, ".lock"), "w").close()
+    try:
+        _forced_relay_start(fdir)
+    except SystemExit as exc:
+        assert "force record" in str(exc.code), exc.code
+    else:
+        raise AssertionError("relay start went on without being able to hold the --force pass")
+    os.remove(os.path.join(fdir, ".lock"))
+    spawned, _out = _forced_relay_start(fdir)
+    assert len(spawned) == 1, "a free record lets the relay start"
+
+
+def t_relay_start_reports_a_failed_hold_after_the_spawn():
+    def busy(pid, *a):
+        raise OSError("force record lock is held")
+    spawned, out = _forced_relay_start(tempfile.mkdtemp(), hold=busy)
+    assert len(spawned) == 1 and "relay started" in out, out
+    assert "racecast --simulation --force" in out, f"the operator learns how to stop it: {out}"
+
+
 def t_force_record_updates_are_serialized():
     fdir = tempfile.mkdtemp()
     env, path = _grant(fdir)

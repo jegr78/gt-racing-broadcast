@@ -3052,6 +3052,10 @@ def relay_start(rest):
     if busy:
         print(f"WARNING: feed port(s) {', '.join(map(str, busy))} already in use. "
               f"That feed may fail to bind. Free them first: racecast freeport")
+    forced = simulation.active() and bool(os.environ.get(simulation.FORCE))
+    problem = _force_pass_problem() if forced else ""
+    if problem:
+        sys.exit(f"racecast: {problem}")
     _ensure_active_console_secret()   # zero-config console: provision + inject the secret
     # Resolve + inject the producer name (#317) so the relay can tag its OBS-stream
     # events and /status; the child inherits it via the environment.
@@ -3061,9 +3065,13 @@ def relay_start(rest):
     newpid = _spawn_relay_verified(argv)
     if newpid is None:
         return None                   # honest failure already reported; never claim success
-    if simulation.active() and os.environ.get(simulation.FORCE):
-        _hold_simulation_force(newpid)
     print(f"relay started (pid {newpid}). Watch it: racecast relay logs -f")
+    if forced:
+        try:
+            _hold_simulation_force(newpid)
+        except OSError as exc:
+            print(f"  WARNING: the relay does not hold the --force pass ({exc}). Stop it with "
+                  "racecast --simulation --force relay stop.")
     _append_tailscale_snapshot()
     _refresh_obs_pages(wait=0)    # relay already confirmed up -> refresh OBS pages now
     # Post-start verification: exactly one process should now hold 8088. More than
@@ -10982,6 +10990,21 @@ def _hold_simulation_force(pid, environ=None, force_dir=None):
             _write_force_record(path, record)
 
 
+def _force_pass_problem(environ=None, force_dir=None):
+    """Why a relay started now could not hold this run's --force pass, or ""."""
+    environ = os.environ if environ is None else environ
+    force_dir = force_dir or _simulation_force_dir()
+    _name, path = _force_record_path(environ, force_dir)
+    if not path:
+        return ""
+    try:
+        with _force_lock(force_dir):
+            _read_force_record(path)
+    except OSError as exc:
+        return f"simulation mode: the force record is not usable ({exc}); the relay was not started."
+    return ""
+
+
 def _simulation_forced_profile(environ, force_dir):
     """The profile an inherited RACECAST_SIM_FORCE allows, or None. It counts only while
     a holder of its record (the forcing run or its relay) is alive. Raises OSError when
@@ -11011,7 +11034,10 @@ def _simulation_gate(argv, environ=None, profile=None, values=None, force=False,
     name = _active_profile_name() if profile is None else profile
     force_dir = force_dir or _simulation_force_dir()
     if name and force:
-        _grant_simulation_force(name, environ, force_dir)
+        try:
+            _grant_simulation_force(name, environ, force_dir)
+        except OSError as exc:
+            return f"simulation mode: the force record could not be written ({exc}); no pass granted."
         return None
     values = _simulation_profile_values(name) if values is None and name else (values or {})
     try:
