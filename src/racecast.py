@@ -1447,13 +1447,7 @@ def health_cmd(rest):
         if not args:
             sys.exit("usage: racecast health pull <tailscale-ip> [--port N] [--from TS]")
         host = args[0]
-        port = _relay_port()
-        if "--port" in args[1:]:
-            i = args.index("--port", 1)
-            try:
-                port = int(args[i + 1])
-            except (IndexError, ValueError):
-                sys.exit("racecast: --port must be an integer")
+        port = _remote_relay_port(host, args[1:])
         frm = 0
         if "--from" in args[1:]:
             i = args.index("--from", 1)
@@ -2236,16 +2230,7 @@ def chat_cmd(rest):
         if not args:
             sys.exit("usage: racecast chat pull <tailscale-ip> [--port N]")
         host = args[0]
-        port = _relay_port()
-        if "--port" in args[1:]:
-            port_idx = args.index("--port", 1)
-            if port_idx + 1 >= len(args):
-                sys.exit("racecast: --port requires an integer value")
-            port_str = args[port_idx + 1]
-            try:
-                port = int(port_str)
-            except ValueError:
-                sys.exit(f"racecast: --port must be an integer, got {port_str!r}")
+        port = _remote_relay_port(host, args[1:])
         url = f"http://{host}:{port}/chat/data"
         try:
             with http_util.open_url(url, timeout=5) as resp:
@@ -2452,7 +2437,7 @@ def _console_pull_versions(args):
     if not args or args[0].startswith("-"):
         sys.exit("usage: racecast console pull-versions <A-tailscale-ip> [--port N]")
     host = args[0]
-    port = _takeover_port(args[1:])
+    port = _remote_relay_port(host, args[1:])
     # The endpoint authenticates on the shared league secret (same league = same
     # secret, which travels with the profile). We send OUR secret; A validates it.
     _apply_active_profile_env()
@@ -7354,6 +7339,15 @@ def _takeover_port(args):
             sys.exit(f"racecast: simulation mode: {problem}")
         return port
     return _relay_port()
+
+
+def _remote_relay_port(host, args):
+    """The port of another producer's relay a pull reads from. In simulation the host
+    must be loopback and the port one a simulated relay may use."""
+    if simulation.active() and not simulation.is_loopback_host(host):
+        sys.exit(f"racecast: simulation mode: {host} is not a loopback host; "
+                 "a rehearsal pulls only from a simulated relay on this machine.")
+    return _takeover_port(args)
 
 
 def event_takeover(rest):

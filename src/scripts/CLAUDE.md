@@ -180,7 +180,9 @@ never the real one.
   the browser; the log viewer lists no OBS or Companion log. `_gui_spawn`
   refuses outright. `_obs_up` replaces the OBS process check with the simulated
   WebSocket, and `_event_sections` lists OBS/Discord/Tailscale/Companion as INFO. A
-  takeover in simulation accepts only a loopback host, never `--funnel`.
+  takeover in simulation accepts only a loopback host, never `--funnel`; it and `chat pull`,
+  `health pull` and `console pull-versions` (`_remote_relay_port`) refuse a `--port` that
+  `simulation.control_port_problem` names (8088, 53001-53003, service and endpoint ports).
 - `_simulation_gate` refuses a missing endpoint and a profile other than `demo` or one
   with `SIMULATION=1` in its `profile.env`. Only a `--force` before the command
   (`racecast --simulation --force <group> ...`, consumed by `_apply_simulation_flag`)

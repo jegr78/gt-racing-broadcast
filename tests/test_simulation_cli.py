@@ -867,6 +867,35 @@ def t_a_simulated_takeover_never_names_the_live_relay_port():
     assert m._takeover_port(["--port", "8088"]) == 8088, "outside simulation nothing changes"
 
 
+def t_simulated_pulls_reach_only_a_loopback_simulation_relay():
+    urls = []
+
+    def record(url, *a, **k):
+        urls.append(url)
+        raise OSError("no relay in this test")
+    pulls = (lambda *a: m.chat_cmd(["pull", *a]), lambda *a: m.health_cmd(["pull", *a]),
+             lambda *a: m.console_cmd(["pull-versions", *a]))
+    with _env(**SIM_ENV), _patched((m.http_util, "open_url", record), (m.http_util, "get_json", record)), \
+            contextlib.redirect_stdout(io.StringIO()):
+        for pull in pulls:
+            for args, needle in ((("127.0.0.1", "--port", "8088"), "live relay"),
+                                 (("127.0.0.1", "--port", "4455"), "OBS WebSocket"),
+                                 (("100.64.0.7",), "loopback")):
+                try:
+                    pull(*args)
+                except SystemExit as exc:
+                    assert needle in str(exc.code), (args, exc.code)
+                else:
+                    raise AssertionError(f"a simulated pull from {args} went ahead")
+            assert urls == [], f"a refused pull still asked a relay: {urls}"
+            try:
+                pull("127.0.0.1")
+            except SystemExit:
+                pass  # the stub refuses the fetch
+            assert urls and ":41000/" in urls[-1], f"the default is the simulated relay port: {urls}"
+            urls.clear()
+
+
 def t_kill_relay_text_names_the_actual_port():
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
         html = fh.read()
