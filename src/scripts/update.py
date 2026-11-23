@@ -242,7 +242,9 @@ class _HttpsOnlyRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-_SECURE_OPENER = urllib.request.build_opener(_HttpsOnlyRedirect())
+def _secure_opener():
+    """Built per download, so it sees the proxy settings of that moment (none in simulation)."""
+    return urllib.request.build_opener(_HttpsOnlyRedirect())
 
 
 def archive_sha256(path):
@@ -300,7 +302,7 @@ def download(url, dst, opener=None, sleep=time.sleep):
     rewrites `dst` from the start. The last error propagates."""
     if urllib.parse.urlsplit(url).scheme != "https":
         raise ValueError(f"update: refusing non-HTTPS download URL: {url!r}")
-    opener = _SECURE_OPENER.open if opener is None else opener
+    opener = _secure_opener().open if opener is None else opener
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         req = urllib.request.Request(url, headers={"User-Agent": "racecast-update"})
         try:

@@ -14,7 +14,8 @@ import install_apps  # noqa: E402
 import obs_ws  # noqa: E402
 import tailscale  # noqa: E402
 
-SIM_ENV = {"RACECAST_SIMULATION": "1"}
+SIM_PORTS = {"RACECAST_SIM_RELAY_PORT": "41000", "RACECAST_SIM_FEED_PORTS": "41001,41002,41003"}
+SIM_ENV = {"RACECAST_SIMULATION": "1", **SIM_PORTS}
 
 
 @contextlib.contextmanager
@@ -123,7 +124,7 @@ def t_event_stop_reaches_no_real_party():
     with tempfile.TemporaryDirectory() as tmp, _env(**SIM_ENV), _patched(
             *_external(calls),
             (m, "_stop_driver_invite", noop), (m, "_nudge_relay_timing_host", noop),
-            (m, "_relay_is_alive", lambda: True), (m, "_running_relay_mode", lambda: "simulation"),
+            (m, "_relay_is_alive", lambda: True), (m, "_running_relay_run_mode", lambda: "simulation"),
             (m, "_build_report_file", lambda: {"summary": "report", "path": "r.html"}),
             (m, "_send_report_core", lambda *a, **k: sent.append(a)),
             (m, "_streams_static_dir", lambda: tmp), (m, "_wait_timing_host_end", noop),
@@ -382,7 +383,7 @@ def t_simulated_stop_leaves_a_live_relay_alone():
     with _env(**SIM_ENV), _patched((m.sv, "read_pid", lambda p: 4242),
                                    (m.sv, "pid_alive", lambda pid: True),
                                    (m.sv, "stop_pid", lambda *a, **k: stopped.append(a)),
-                                   (m, "_running_relay_mode", lambda: "live"),
+                                   (m, "_running_relay_run_mode", lambda: "live"),
                                    (m, "_relay_is_alive", lambda: True),
                                    (m, "_stop_driver_invite", lambda: stopped.append("invite"))):
         for fn in (m.relay_stop, m.event_stop):
@@ -401,12 +402,12 @@ def t_relay_mode_stamp_round_trip():
             (m, "_runtime_base_dir", lambda: tmp), (m, "_active_profile_name", lambda: "demo")):
         with _env(**SIM_ENV):
             m._write_relay_profile_stamp()
-        assert m._running_relay_mode() == "simulation"
+        assert m._running_relay_run_mode() == "simulation"
         os.environ.pop("RACECAST_SIMULATION", None)
         m._write_relay_profile_stamp()
-        assert m._running_relay_mode() == "live"
+        assert m._running_relay_run_mode() == "live"
         m._clear_relay_profile_stamp()
-        assert m._running_relay_mode() == ""
+        assert m._running_relay_run_mode() == ""
 
 
 def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
@@ -416,7 +417,7 @@ def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
              (m, "_relay_identity", lambda pid: "relay" if is_relay else "other"),
              (m.pt, "pids_on_port", lambda port: [4242, 777]), (m.pt, "kill_pid", killed.append),
              (m.sv, "stop_pid", lambda pid, path=None, **k: stopped.append(pid) or True),
-             (m, "_running_relay_mode", lambda: mode), (m, "_release_obs_feeds", lambda: None))
+             (m, "_running_relay_run_mode", lambda: mode), (m, "_release_obs_feeds", lambda: None))
     code, out = 0, io.StringIO()
     with _env(**SIM_ENV), _patched(*seams):
         try:
@@ -482,7 +483,7 @@ def _stop_case(identity, holders):
              (m.sv, "stop_pid", lambda pid, path=None, is_target=None:
                  stopped.append((pid, is_target)) or (is_target is None or is_target(pid))),
              (m, "_clear_relay_profile_stamp", lambda: removed.append("stamps")),
-             (m, "_release_obs_feeds", lambda: None), (m, "_running_relay_mode", lambda: "live"))
+             (m, "_release_obs_feeds", lambda: None), (m, "_running_relay_run_mode", lambda: "live"))
     code = 0
     with tempfile.TemporaryDirectory() as tmp, _patched(*seams, (m, "_runtime_base_dir", lambda: tmp)):
         open(m._relay_pid_path(), "w").close()
@@ -513,7 +514,7 @@ def t_start_signals_treat_an_unknown_process_as_a_relay():
     for identity, expected in (("relay", True), ("unknown", True), ("other", False)):
         with _patched((m.pt, "pids_on_port", lambda port: []), (m.sv, "read_pid", lambda p: 4242),
                       (m.sv, "pid_alive", lambda pid: True), (m, "_relay_identity", lambda pid, _i=identity: _i),
-                      (m, "_running_relay_profile", lambda: "demo"), (m, "_running_relay_mode", lambda: "simulation")):
+                      (m, "_running_relay_profile", lambda: "demo"), (m, "_running_relay_run_mode", lambda: "simulation")):
             assert m._relay_start_signals()["pidfile_relay"] is expected, identity
 
 
@@ -638,6 +639,58 @@ def t_relay_start_registers_the_relay_as_a_holder():
     assert held == [4242], held
 
 
+def t_a_busy_force_lock_refuses_the_grant_without_a_traceback():
+    fdir = tempfile.mkdtemp()
+    open(os.path.join(fdir, ".lock"), "w").close()
+    env = _sim_ok_env()
+    with _patched((m, "FORCE_LOCK_WAIT_S", 0), (m.atexit, "register", lambda *a, **k: None)):
+        refused = m._simulation_gate(["event", "start"], env, "league", {}, force=True, force_dir=fdir)
+    assert refused and "force record" in refused, refused
+    assert sim.FORCE not in env, "a refused grant hands no pass to the children"
+
+
+def _forced_relay_start(fdir, hold=None):
+    """relay_start under a --force pass with the record dir `fdir`: (spawned argvs, output)."""
+    spawned, out = [], io.StringIO()
+    signals = dict(port_pids=[], feed_pids=[], pidfile_pid=None, pidfile_alive=False,
+                   running_profile="", active_profile="demo", http_ok=False)
+    noop = lambda *a, **k: None   # noqa: E731
+    seams = [(m, "_relay_start_signals", lambda: dict(signals)), (m.pt, "FEED_PORTS", ()),
+             (m, "_ensure_active_console_secret", noop), (m, "_resolve_producer_name", lambda: "P"),
+             (m, "_write_relay_profile_stamp", noop),
+             (m, "_spawn_relay_verified", lambda argv: spawned.append(argv) or 4242),
+             (m, "_append_tailscale_snapshot", noop), (m, "_refresh_obs_pages", noop),
+             (m, "_simulation_force_dir", lambda: fdir), (m, "FORCE_LOCK_WAIT_S", 0)]
+    if hold:
+        seams.append((m, "_hold_simulation_force", hold))
+    with _env(**SIM_ENV, RACECAST_SIM_FORCE="league:" + "b" * 32), _patched(*seams), \
+            contextlib.redirect_stdout(out):
+        m.relay_start([])
+    return spawned, out.getvalue()
+
+
+def t_relay_start_refuses_before_spawning_when_the_force_record_is_busy():
+    fdir = tempfile.mkdtemp()
+    open(os.path.join(fdir, ".lock"), "w").close()
+    try:
+        _forced_relay_start(fdir)
+    except SystemExit as exc:
+        assert "force record" in str(exc.code), exc.code
+    else:
+        raise AssertionError("relay start went on without being able to hold the --force pass")
+    os.remove(os.path.join(fdir, ".lock"))
+    spawned, _out = _forced_relay_start(fdir)
+    assert len(spawned) == 1, "a free record lets the relay start"
+
+
+def t_relay_start_reports_a_failed_hold_after_the_spawn():
+    def busy(pid, *a):
+        raise OSError("force record lock is held")
+    spawned, out = _forced_relay_start(tempfile.mkdtemp(), hold=busy)
+    assert len(spawned) == 1 and "relay started" in out, out
+    assert "racecast --simulation --force" in out, f"the operator learns how to stop it: {out}"
+
+
 def t_force_record_updates_are_serialized():
     fdir = tempfile.mkdtemp()
     env, path = _grant(fdir)
@@ -723,7 +776,8 @@ def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
     sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
     import ui_ops
     urls = []
-    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234"), \
+    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234",
+              RACECAST_SIM_FEED_PORTS="41001,41002,41003"), \
             _patched((m.http_util, "get_bytes", lambda url, **k: urls.append(url) or b"")):
         assert m._relay_port() == 41234
         m._fetch_relay_page("/hud")
@@ -735,9 +789,111 @@ def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
     assert urls == ["http://127.0.0.1:41234/hud"], urls
     assert m._relay_port() == 8088 and ui_ops.build_argv("kill-relay")[2] == "8088"
     assert preflight.relay_status_url() == "http://127.0.0.1:8088/status"
-    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003"):
+    with _env(**SIM_ENV):
         assert preflight.relay_ports()[:3] == (41001, 41002, 41003), "preflight checks the simulated feed ports"
     assert preflight.relay_ports()[:3] == (53001, 53002, 53003)
+
+
+def t_simulation_without_a_relay_port_never_reaches_8088():
+    assert "RACECAST_SIM_RELAY_PORT is not set" in m._simulation_gate(
+        ["event", "start"], dict(_sim_ok_env(), RACECAST_SIM_RELAY_PORT=""), "demo", {}), \
+        "the gate refuses a simulation without its own relay port"
+    urls = []
+
+    def record(url, *a, **k):
+        urls.append(url)
+        return {}
+    sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
+    import ui_ops
+    with tempfile.TemporaryDirectory() as tmp, \
+            _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="", RACECAST_SIM_FEED_PORTS=""), \
+            _patched((m.http_util, "get_bytes", record), (m.http_util, "get_json", record),
+                     (m.http_util, "post_json", record), (m.http_util, "open_url", record)):
+        for name, call in (
+                ("crew write", lambda: m.crew_write_data(1, "Ann", True, False)),
+                ("crew read", m.crew_entries_data),
+                ("event title", lambda: m.event_title_write_data(
+                    "Round 1", alive=lambda: True, sanitize=str, path=os.path.join(tmp, "event.json"))),
+                ("chat", lambda: m._post_chat_message("hello")),
+                ("Control Center relay row", lambda: m.relay_status_data(
+                    read_pid=lambda p: 4242, alive=lambda p: True)),
+                ("Kill relay", lambda: ui_ops.build_argv("kill-relay"))):
+            try:
+                result = call()
+            except ValueError as exc:
+                assert "RACECAST_SIM_RELAY_PORT" in str(exc), (name, exc)
+            else:
+                assert isinstance(result, dict) and result.get("ok") is False, \
+                    f"{name} answered as if it reached a relay: {result}"
+    assert urls == [], f"a simulation without its relay port reached a relay: {urls}"
+
+
+def t_cookies_export_is_skipped_in_simulation():
+    ran, paused, out = [], [], io.StringIO()
+    with _env(**SIM_ENV), _patched((m, "_run_script", lambda *a, **k: ran.append(a) or 0),
+                                   (m, "_init_pause", lambda *a: paused.append(a))), \
+            contextlib.redirect_stdout(out):
+        assert m._oneshot_code("cookies", ["firefox"]) == 0
+        assert m._oneshot_code("cookies", ["twitch", "firefox"]) == 0
+        assert m._init_cookies_run("firefox") == 0
+    assert ran == [] and paused == [], f"the machine-wide cookie jar is not the rehearsal's: {ran} {paused}"
+    assert out.getvalue().count("cookies: skipped (simulation).") == 3, out.getvalue()
+
+
+def t_a_missing_relay_port_past_the_gate_exits_cleanly():
+    out = io.StringIO()
+    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="", RACECAST_SIM_FEED_PORTS=""), \
+            _patched((m, "_bootstrap", lambda argv: argv), (m.sv, "read_pid", lambda p: None)), \
+            contextlib.redirect_stdout(out):
+        try:
+            m.main(["relay", "status"])
+        except SystemExit as exc:
+            assert isinstance(exc.code, str) and "RACECAST_SIM_RELAY_PORT is not set" in exc.code, exc.code
+        else:
+            raise AssertionError(f"relay status ran without a simulated relay port: {out.getvalue()}")
+
+
+def t_a_simulated_takeover_never_names_the_live_relay_port():
+    with _env(**SIM_ENV):
+        assert m._takeover_port([]) == 41000, "the default is the simulated relay port"
+        assert m._takeover_port(["--port", "42000"]) == 42000
+        for port in ("8088", "53001"):
+            try:
+                m._takeover_port(["--port", port])
+            except SystemExit as exc:
+                assert "--port" in str(exc.code) and "live relay" in str(exc.code), exc.code
+            else:
+                raise AssertionError(f"a simulated takeover reached for the live relay on {port}")
+    assert m._takeover_port(["--port", "8088"]) == 8088, "outside simulation nothing changes"
+
+
+def t_simulated_pulls_reach_only_a_loopback_simulation_relay():
+    urls = []
+
+    def record(url, *a, **k):
+        urls.append(url)
+        raise OSError("no relay in this test")
+    pulls = (lambda *a: m.chat_cmd(["pull", *a]), lambda *a: m.health_cmd(["pull", *a]),
+             lambda *a: m.console_cmd(["pull-versions", *a]))
+    with _env(**SIM_ENV), _patched((m.http_util, "open_url", record), (m.http_util, "get_json", record)), \
+            contextlib.redirect_stdout(io.StringIO()):
+        for pull in pulls:
+            for args, needle in ((("127.0.0.1", "--port", "8088"), "live relay"),
+                                 (("127.0.0.1", "--port", "4455"), "OBS WebSocket"),
+                                 (("100.64.0.7",), "loopback")):
+                try:
+                    pull(*args)
+                except SystemExit as exc:
+                    assert needle in str(exc.code), (args, exc.code)
+                else:
+                    raise AssertionError(f"a simulated pull from {args} went ahead")
+            assert urls == [], f"a refused pull still asked a relay: {urls}"
+            try:
+                pull("127.0.0.1")
+            except SystemExit:
+                pass  # the stub refuses the fetch
+            assert urls and ":41000/" in urls[-1], f"the default is the simulated relay port: {urls}"
+            urls.clear()
 
 
 def t_kill_relay_text_names_the_actual_port():

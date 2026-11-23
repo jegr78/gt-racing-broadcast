@@ -537,7 +537,7 @@ def t_status_obs_field_reports_probed_reachability():
     try:
         with tempfile.TemporaryDirectory() as td:
             r = _mk_relay(td, ["https://youtu.be/a", "https://youtu.be/b"])
-            assert r.status()["obs"] == {"reachable": None, "note": None}
+            assert r.status()["obs"] == {"reachable": None, "note": None, "stream_active": None}
             r.obs_reachable = False
             r.obs_note = "OBS WebSocket not reachable on 127.0.0.1:4455 (OBS not running?)"
             st = r.status()
@@ -545,7 +545,7 @@ def t_status_obs_field_reports_probed_reachability():
             assert "not reachable" in st["obs"]["note"]
             r.obs_reachable = True
             r.obs_note = None
-            assert r.status()["obs"] == {"reachable": True, "note": None}
+            assert r.status()["obs"] == {"reachable": True, "note": None, "stream_active": None}
     finally:
         m._obs_ws = orig
 

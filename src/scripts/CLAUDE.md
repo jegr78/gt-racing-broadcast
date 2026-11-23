@@ -146,20 +146,21 @@ never the real one.
   OAuth/voice and the timing host keys; `env_overrides` does the same for the env vars
   (`_apply_profile_env`, `_bootstrap`, the relay's `simulation_startup`), so a value from
   the shell or the machine `.env` cannot leak through.
-  `RACECAST_SIM_RELAY_PORT` (a port, unset = 8088) moves the relay control port:
+  `RACECAST_SIM_RELAY_PORT` (required, a port) moves the relay control port:
   `simulation.relay_port` feeds `racecast._relay_port()`, the only reader of
   `RELAY_PORT` (`tests/test_simulation_cli.py` counts the uses), the relay's
   `--http-port` default (`control_port`), preflight and the Control Center's Kill relay.
-  An invalid value is a `problems()` entry and `relay_port` raises, never 8088.
-  `RACECAST_SIM_FEED_PORTS` (three different ports `A,B,POV`; none of 8088, 53001-53003,
+  An unset or invalid value is a `problems()` entry and `relay_port` raises
+  `simulation.PortError` (a `ValueError`; `racecast.main` prints it), never 8088.
+  `RACECAST_SIM_FEED_PORTS` (required, three different ports `A,B,POV`; none of 8088, 53001-53003,
   the Control Center's port, the simulated control port, preflight's service ports 4455 and
   8000 or a port of another `RACECAST_SIM_*` endpoint) moves the feed ports. The relay reads
   it itself (`feed_ports` beside `control_port`) when `--ports`/`--pov-port` are not given,
   so every way of starting it agrees, and in simulation it refuses an explicit 53001-53003,
   8088, Control Center port or simulated control port. `--ports` takes exactly two numbers
-  (anything else is a start error), and an empty `--ports` means the defaults.
-  `RACECAST_SIM_RELAY_PORT` without it is a `problems()` entry: two relays would share the
-  product feed ports (on Windows `SO_REUSEADDR` lets both bind). `racecast._feed_ports()`
+  (anything else is a start error), and an empty `--ports` means the defaults. Unset,
+  `feed_ports` raises like `relay_port`: two relays would share the product feed ports (on
+  Windows `SO_REUSEADDR` lets both bind). `racecast._feed_ports()`
   feeds the busy-port warning, preflight's `relay_ports`, the stop-time
   `release_feed_inputs` and `freeport`'s default ports. A simulated start reports no
   `feed_pids`, since it cannot prove who holds a feed port: a heal kills the control
@@ -172,13 +173,16 @@ never the real one.
 - Skips print `<what>: skipped (simulation).` at the leaves, so CLI and Control Center
   jobs report alike: `_event_launch`, `app launch|quit`, `_tailscale_connect`,
   `tailscale down`, `_tailscale_ip`/`_tailscale_magicdns` (None), `companion_start/stop`,
-  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check, and the relay's
+  `funnel_cmd`, Discord join/leave and auto-join/leave, the update check, `racecast cookies`
+  (the machine-wide `runtime/yt-cookies.txt`), and the relay's
   host integrations: the A/V sync watcher on the OBS log, the keep-awake block
   (`systemd-inhibit`, `caffeinate`, `SetThreadExecutionState`) and the cookie refresh from
   the browser; the log viewer lists no OBS or Companion log. `_gui_spawn`
   refuses outright. `_obs_up` replaces the OBS process check with the simulated
   WebSocket, and `_event_sections` lists OBS/Discord/Tailscale/Companion as INFO. A
-  takeover in simulation accepts only a loopback host, never `--funnel`.
+  takeover in simulation accepts only a loopback host, never `--funnel`; it and `chat pull`,
+  `health pull` and `console pull-versions` (`_remote_relay_port`) refuse a `--port` that
+  `simulation.control_port_problem` names (8088, 53001-53003, service and endpoint ports).
 - `_simulation_gate` refuses a missing endpoint and a profile other than `demo` or one
   with `SIMULATION=1` in its `profile.env`. Only a `--force` before the command
   (`racecast --simulation --force <group> ...`, consumed by `_apply_simulation_flag`)
@@ -191,7 +195,9 @@ never the real one.
   still passes, and every check prunes records without a live holder. Every
   read-modify-write runs under `_force_lock` (an `O_CREAT|O_EXCL` lock file, broken after
   `FORCE_LOCK_STALE_S`), `os.replace` retries a Windows sharing violation, and the gate
-  ignores prune failures but refuses the pass when the record cannot be read. The machine `.env` never supplies it. A subcommand's own `--force`
+  ignores prune failures but refuses the pass when the record cannot be read. A grant that
+  cannot take the lock is a gate refusal; `relay start` checks the record before it spawns
+  (`_force_pass_problem`) and a hold that still fails after the spawn is a warning. The machine `.env` never supplies it. A subcommand's own `--force`
   keeps its old meaning. `profile`, `help`
   and `--version` are exempt.
 - Driver Radio and AI: `env_overrides` blanks `RACECAST_GCLOUD_TTS_KEY`/`STT_KEY` and
@@ -224,7 +230,11 @@ never the real one.
   PID file and never kill a port holder they cannot prove is theirs. `relay_status_data`
   carries `mode`.
 - `install_network_guard` patches `socket` in the process (connect, connect_ex, sendto,
-  getaddrinfo) to refuse anything that is not loopback (`OutboundRefused`, an `OSError`).
+  sendmsg, getaddrinfo, gethostbyname, gethostbyname_ex, gethostbyaddr) to refuse anything
+  that is not loopback (`OutboundRefused`, an `OSError`). It also makes urllib ignore
+  proxies (`getproxies` answers none, the global opener has an empty `ProxyHandler`), since a
+  loopback proxy would carry a request past the socket check; `update` builds its opener
+  per download for the same reason.
   It runs in `_bootstrap` and the relay's `main`, and `_script_invocation` starts every
   subprocess script through `guarded_argv` so the one-shots run behind it too. It covers
   Python only: ffmpeg and the stream stand-ins are outside it. The one documented local

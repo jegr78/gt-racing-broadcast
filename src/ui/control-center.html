@@ -1030,6 +1030,7 @@ let preflightRun = false, assetsLoaded = false,
 // instead of a misleading "pending".
 let wizardJobResults = {};
 let currentView = 'home', lastStatus = null;
+let seenScheduleMode = null;
 
 function showView(name) {
   currentView = name;
@@ -1712,6 +1713,7 @@ async function refresh() {
   if (s.cookies) setLevelBadge('cookies', s.cookies.level,
       s.cookies.level === 'PASS' ? 'FRESH'
         : (s.cookies.level === 'INFO' ? 'NOT NEEDED' : s.cookies.level), s.cookies.detail);
+  seenScheduleMode = followScheduleMode(s.relay, seenScheduleMode, $('event-qualifying'));
   updateHome(s);
   updateAppStatus(s);
   // Live relay stats are a separate localhost round-trip, so fetch them only while
@@ -1896,6 +1898,15 @@ async function op(name, confirmFirst, params, confirmation) {
   } catch (e) { alertModal('Control Center not reachable.'); return; }
   if (!r.ok) { alertModal(r.error); return; }
   watchJob(name, r.job_id);
+}
+
+// The Qualifying box takes the running relay's mode whenever that mode changes, so a
+// reload shows it; in between, and across a status gap, the operator's tick stands.
+function followScheduleMode(relay, seen, box) {
+  const mode = relay && relay.alive && relay.http_ok ? relay.schedule_mode || null : null;
+  if (!mode) return seen;
+  if (mode !== seen) box.checked = mode === 'qualifying';
+  return mode;
 }
 
 function opEventStart() {

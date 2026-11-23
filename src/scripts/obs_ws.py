@@ -38,7 +38,7 @@ import simulation
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"   # RFC 6455 magic
 DEFAULT_PORT = 4455
 SIM_OBS_OFF = f"OBS {simulation.SKIPPED}: no {simulation.OBS_WS} endpoint"
-RELAY_PORTS = (53001, 53002, 53003)
+RELAY_PORTS = simulation.LIVE_FEED_PORTS
 CLOSE_DRAIN_TIMEOUT_S = 1.0   # max seconds to wait for OBS's close echo before closing the socket
 
 STINT_SCENE = "Stint"                       # single-cam scene holding both feeds

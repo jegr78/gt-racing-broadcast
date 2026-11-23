@@ -615,7 +615,7 @@ COLORS = {PASS: "\033[32m", WARN: "\033[33m", FAIL: "\033[31m", INFO: "\033[36m"
 RESET = "\033[0m"
 
 # ports the relay binds (must be FREE) and services we probe (should be REACHABLE)
-FEED_PORTS = (53001, 53002, 53003)
+FEED_PORTS = simulation.LIVE_FEED_PORTS
 
 
 def relay_ports():

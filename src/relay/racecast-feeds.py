@@ -5493,15 +5493,15 @@ def apply_split_audio(relay, obs_ws):
     return payload, status
 
 
-_ITEM_SWITCH_LOCK = threading.Lock()
+_ITEM_SWITCH_LOCK = threading.Lock()   # one read-then-switch of a scene item or a mute at a time
 
 
 def switch_scene_item(obs_ws, scene, source, on=None, expect=None):
     """Show or hide one scene item. `on` None flips the state OBS reports and switches
     nothing when OBS cannot report it; with `expect`, the state the caller shows, it
     flips only while OBS still reports that state. Returns (ok, enabled, note, changed),
-    with enabled None for the refusal. The lock keeps two toggles from reading the same
-    state."""
+    with enabled None for the refusal. Runs under _ITEM_SWITCH_LOCK, so no other switch of
+    an item or a mute in this relay runs between the read and the switch."""
     with _ITEM_SWITCH_LOCK:
         if on is None:
             state, note = obs_ws.read_obs_state([(scene, source)], [])
@@ -5534,14 +5534,15 @@ def toggle_input_mute(obs_ws, name, expect=None):
 
 
 def note_cover(relay, enabled):
-    """Remember the Standby Cover state the relay last switched or read in OBS."""
+    """Remember the Standby Cover state the relay last switched or read in OBS, or the
+    red flag direction it decided while OBS could not report the cover."""
     if isinstance(enabled, bool):
         relay.cover_last = enabled
 
 
 def red_flag_on_record(relay, hud):
     """Whether a red flag is on by the relay's own record, for when OBS cannot report
-    the Standby Cover: the last cover state it saw, else the HUD banner or a cover the
+    the Standby Cover: the last cover state it saw or decided, else the HUD banner or a cover the
     Race Control desk raised."""
     last = getattr(relay, "cover_last", None)
     if last is not None:
@@ -11025,7 +11026,8 @@ class Relay:
                           "source": self.pov_source.health() if self.pov_source else None,
                           **sync_fields(self.pov_source, POV_SHEET_ROW),
                           **self._backlog_status("POV", self.pov)}
-        out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
+        out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note,
+                      "stream_active": (self.obs_stats or {}).get("stream_active")}
         # On-air feed/stint + league identity for producer takeover (#takeover):
         # the on-air feed is the lower-index one (live_feed); the stint is the
         # DISPLAY row (on_air_row_idx), not the feed's physical pull index; during
@@ -12170,15 +12172,14 @@ def simulation_startup(environ):
     return None
 
 
-DEFAULT_FEED_PORTS = (53001, 53002, 53003)
+DEFAULT_FEED_PORTS = simulation.LIVE_FEED_PORTS
 
 
 def feed_ports(ports, pov, environ):
     """([Feed A, Feed B], POV) from --ports and --pov-port. A value not given is the
-    product default 53001/53002/53003, or in simulation the matching port of
-    RACECAST_SIM_FEED_PORTS when that is set (the event simulation always sets it; unset,
-    a simulated relay keeps the product ports). In simulation an explicit port that is a
-    product feed port, 8088, the Control Center's port or the simulated control port raises."""
+    product default 53001/53002/53003, or in simulation the matching port of the required
+    RACECAST_SIM_FEED_PORTS. In simulation an explicit port that is a product feed port,
+    8088, the Control Center's port or the simulated control port raises."""
     try:
         chosen = [int(x) for x in ports.split(",")] if ports else None
     except ValueError:
@@ -12199,8 +12200,14 @@ def feed_ports(ports, pov, environ):
 
 
 def control_port(value, environ):
-    """--http-port, else the simulated relay port in simulation, else 8088."""
-    return value if value is not None else simulation.relay_port(environ)
+    """--http-port, else the simulated relay port in simulation, else 8088. In simulation
+    an explicit port of the live relay, a service or another simulated party raises."""
+    if value is None:
+        return simulation.relay_port(environ)
+    problem = simulation.control_port_problem(value, environ)
+    if problem:
+        raise ValueError(f"simulation mode: {problem}")
+    return value
 
 
 def _timing_host_env_file():
@@ -13769,6 +13776,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if timer_store:
                 base["timer"] = timer_store.summary()
             base["event_title"] = event_store.get() if event_store else ""
+            base["part_live"] = bool(part_store.get().get("live")) if part_store is not None else None
             feeds = base.get("feeds") or {}
             if feeds.get("A") and feeds.get("B") and base.get("mode") != "qualifying":
                 base["handover_next"] = handover_next(
@@ -15479,6 +15487,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 relay, getattr(setup_ctl, "hud", None) or hud_source)
                             payload["changed"] = shown in (None, raised)
                             payload["red_flag"] = not raised if payload["changed"] else raised
+                            note_cover(relay, payload["red_flag"])   # so the next press goes the other way
                     return self._send(payload, 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:
@@ -16355,8 +16364,8 @@ def main():
     _sim_error = simulation_startup(os.environ)
     if _sim_error:
         sys.exit(f"ERROR: {_sim_error}")
-    args.http_port = control_port(args.http_port, os.environ)
     try:
+        args.http_port = control_port(args.http_port, os.environ)
         ports, args.pov_port = feed_ports(args.ports, args.pov_port, os.environ)
     except ValueError as exc:
         sys.exit(f"ERROR: {exc}")

@@ -16,7 +16,7 @@ m._announce_takeover = lambda *a, **k: None
 _INVITE_DIR = tempfile.mkdtemp(prefix="racecast-invite-")
 m._driver_invite_path = lambda: os.path.join(_INVITE_DIR, "driver-invite.json")
 # Nor read the mode stamp of a relay that runs on this machine.
-m._running_relay_mode = lambda: ""
+m._running_relay_run_mode = lambda: ""
 
 
 def t_frozen_child_env_moves_the_extraction_dir_out_of_os_temp():
@@ -3217,8 +3217,8 @@ def t_sync_live_telemetry_record_never_raises():
 def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
     """Stub every signal relay_start_plan reads; returns a restore callable."""
     saved = (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
-             m._running_relay_profile, m._active_profile_name, m._running_relay_mode)
-    m._running_relay_mode = lambda: "live" if running else ""
+             m._running_relay_profile, m._active_profile_name, m._running_relay_run_mode)
+    m._running_relay_run_mode = lambda: "live" if running else ""
     m.pt.pids_on_port = lambda port: list(port_pids) if port == m.RELAY_PORT else []
     m.sv.read_pid = lambda path: pidfile_pid
     m.sv.pid_alive = lambda pid: pid is not None
@@ -3228,7 +3228,7 @@ def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
 
     def restore():
         (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
-         m._running_relay_profile, m._active_profile_name, m._running_relay_mode) = saved
+         m._running_relay_profile, m._active_profile_name, m._running_relay_run_mode) = saved
     return restore
 
 
@@ -3257,15 +3257,13 @@ def t_a_simulated_relay_start_never_kills_a_feed_port_holder():
     try:
         m.pt.pids_on_port = lambda port: [4242] if port == m._relay_port() else holders.get(port, [])
         assert m._relay_start_signals()["feed_pids"] == [777], "a live start heals its own feed ports"
-        os.environ["RACECAST_SIMULATION"] = "1"
-        for feeds in (None, "41001,41002,41003"):
-            if feeds:
-                os.environ["RACECAST_SIM_FEED_PORTS"] = feeds
-            signals = m._relay_start_signals()
-            assert signals["feed_pids"] == [], \
-                f"a simulated start cannot prove who holds a feed port, so it kills none of them ({feeds})"
-            action, kill, _ = m.relay_start_plan(**dict(signals, http_ok=False, running_mode="simulation"))
-            assert action == "heal" and kill == [4242], f"a hung simulation relay heals itself only: {action} {kill}"
+        os.environ.update(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41000",
+                          RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+        signals = m._relay_start_signals()
+        assert signals["feed_pids"] == [], \
+            "a simulated start cannot prove who holds a feed port, so it kills none of them"
+        action, kill, _ = m.relay_start_plan(**dict(signals, http_ok=False, running_mode="simulation"))
+        assert action == "heal" and kill == [4242], f"a hung simulation relay heals itself only: {action} {kill}"
     finally:
         env()
         m.pt.pids_on_port = saved
@@ -3276,7 +3274,8 @@ def t_simulated_feed_ports_reach_the_helpers_and_the_relay_reads_them_itself():
     env = _sim_env()
     try:
         assert m._feed_ports() == (53001, 53002, 53003)
-        os.environ.update(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+        os.environ.update(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003",
+                          RACECAST_SIM_RELAY_PORT="41000")
         assert m._feed_ports() == (41001, 41002, 41003)
         assert "--ports" not in m._relay_runtime_args(), \
             "the relay reads the variable itself, so every way of starting it agrees"
@@ -3285,7 +3284,8 @@ def t_simulated_feed_ports_reach_the_helpers_and_the_relay_reads_them_itself():
 
 
 def t_simulated_freeport_defaults_to_the_simulated_feed_ports():
-    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003",
+                   RACECAST_SIM_RELAY_PORT="41000")
     seen, saved = [], m._simulated_freeport
     m._simulated_freeport = lambda ports: seen.append(list(ports)) or 0
     try:
@@ -3377,26 +3377,67 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
         "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
 
 
-def t_align_running_relay_mode_switches_to_the_mode_start_event_asked_for():
+def _relay_status(mode, part_live=False, streaming=False):
+    return {"mode": mode, "part_live": part_live,
+            "obs": {"reachable": True, "stream_active": streaming}}
+
+
+def t_align_running_relay_mode_switches_an_idle_relay_to_the_mode_start_event_asked_for():
     switched = []
 
     def _switch(mode):
         switched.append(mode)
         return {"mode": mode}
-    note = m._align_running_relay_mode("qualifying", read_mode=lambda: "race", switch=_switch)
+    idle = {"read_stream": lambda: False}
+    note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race"),
+                                       switch=_switch, **idle)
     assert switched == ["qualifying"], switched
     assert "race" in note and "qualifying" in note, note
     switched.clear()
-    note = m._align_running_relay_mode("race", read_mode=lambda: "qualifying", switch=_switch)
+    note = m._align_running_relay_mode("race", read_status=lambda: _relay_status("qualifying"),
+                                       switch=_switch, **idle)
     assert switched == ["race"], "a start without Qualifying brings a qualifying relay back to race"
     assert "qualifying" in note and "race" in note, note
     switched.clear()
-    assert m._align_running_relay_mode("race", read_mode=lambda: "race", switch=_switch) is None
-    assert m._align_running_relay_mode("qualifying", read_mode=lambda: None, switch=_switch) is None
+    assert m._align_running_relay_mode("race", read_status=lambda: _relay_status("race"),
+                                       switch=_switch, **idle) is None
+    assert m._align_running_relay_mode("qualifying", read_status=lambda: None, switch=_switch,
+                                       **idle) is None
     assert switched == [], "a relay already in that mode, or unreachable, is left alone"
-    note = m._align_running_relay_mode("qualifying", read_mode=lambda: "race",
-                                       switch=lambda mode: {"error": "no Qualifying tab"})
+    note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race"),
+                                       switch=lambda mode: {"error": "no Qualifying tab"}, **idle)
     assert "no Qualifying tab" in note and "race" in note, note
+
+
+def t_align_running_relay_mode_never_switches_a_live_or_unknown_program():
+    switched = []
+    cases = ((_relay_status("race", streaming=True), "OBS is streaming", False),
+             (_relay_status("race", streaming=None), "OBS", False),
+             (dict(_relay_status("race"), obs={"reachable": False}), "OBS", False),
+             (dict(_relay_status("race"), obs={"reachable": False, "stream_active": False}), "OBS", False),
+             ({"mode": "race"}, "OBS", False),
+             (_relay_status("race"), "OBS is streaming", True),
+             (_relay_status("race"), "OBS", None),
+             (_relay_status("race", part_live=True), "the Part record says live", None))
+    for status, why, now in cases:
+        note = m._align_running_relay_mode("qualifying", read_status=lambda s=status: s,
+                                           switch=switched.append, read_stream=lambda n=now: n)
+        assert switched == [], f"Start event switched the mode under {status}, OBS now {now}"
+        assert note.startswith("WARNING") and why in note, (status, note)
+        assert "still in race mode" in note and "Director Panel" in note, note
+    assert note.isascii(), "the warning prints on a cp1252 console"
+
+
+def t_align_running_relay_mode_trusts_obs_over_a_stale_part_record():
+    switched = []
+
+    def _switch(mode):
+        switched.append(mode)
+        return {"mode": mode}
+    note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race", part_live=True),
+                                       switch=_switch, read_stream=lambda: False)
+    assert switched == ["qualifying"], "a Part ended by OBS Stop Streaming must not block the switch"
+    assert "Part record says live, OBS is not streaming" in note and "switched to qualifying" in note, note
 
 
 def t_event_start_aligns_a_running_relay_with_the_requested_mode():
@@ -3410,7 +3451,7 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
                  m._driver_invite_path, m._align_running_relay_mode, m.companion_start,
-                 m._event_launch)
+                 m._event_launch, m.http_util.post_json, m.http_util.get_json, m.http_util.get_bytes)
         restore = _stub_relay_signals((4242,), 4242, True, "demo", "demo")
         with tempfile.TemporaryDirectory() as tmp:
             m._driver_invite_path = lambda: os.path.join(tmp, "driver-invite.json")
@@ -3421,6 +3462,11 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
             m._sync_live_telemetry_record = lambda: None
             m._wait_for_obs_ready = lambda timeout=0, early=False: False
             m.relay_start = lambda _rest: None
+
+            def _no_relay(url, *a, **k):
+                urls.append(url)
+                raise OSError("no relay in this test")
+            m.http_util.post_json = m.http_util.get_json = m.http_util.get_bytes = _no_relay
 
             def _past(*a, **kw):
                 raise AssertionError("event start went past the mode check without aligning it")
@@ -3440,10 +3486,13 @@ def t_event_start_aligns_a_running_relay_with_the_requested_mode():
                 (m._event_gate_results, m._tailscale_connect, ev.app_running, m._runtime_dir,
                  m._sync_live_telemetry_record, m.relay_start, m._wait_for_obs_ready,
                  m._driver_invite_path, m._align_running_relay_mode, m.companion_start,
-                 m._event_launch) = saved
+                 m._event_launch, m.http_util.post_json, m.http_util.get_json,
+                 m.http_util.get_bytes) = saved
 
+    urls = []
     assert _drive(["--qualifying"]) == ["qualifying"]
     assert _drive([]) == ["race"]
+    assert all(u.endswith("/drivers/race/new-event") for u in urls), f"only the stubbed new-event call: {urls}"
 
 
 def t_event_start_and_stop_drive_the_invite():
@@ -6927,17 +6976,17 @@ def t_event_stop_noop_when_already_stopped():
 
 
 def t_qualifying_title_marks_when_qualifying():
-    orig = m._relay_mode
+    orig = m._relay_schedule_mode
     try:
-        m._relay_mode = lambda: "qualifying"
+        m._relay_schedule_mode = lambda: "qualifying"
         assert m._qualifying_title("Le Mans 24h") == "Le Mans 24h — Qualifying"
         assert m._qualifying_title("") == "Qualifying"
-        m._relay_mode = lambda: "race"
+        m._relay_schedule_mode = lambda: "race"
         assert m._qualifying_title("Le Mans 24h") == "Le Mans 24h"
-        m._relay_mode = lambda: None
+        m._relay_schedule_mode = lambda: None
         assert m._qualifying_title("Le Mans 24h") == "Le Mans 24h"
     finally:
-        m._relay_mode = orig
+        m._relay_schedule_mode = orig
 
 
 def t_report_log_is_fresh_window_gate():
@@ -7311,7 +7360,8 @@ def t_a_simulated_event_hands_out_the_loopback_links_the_relay_serves():
     old = m._tailscale_magicdns, m._tailscale_ip, dict(m._INVITE_HOSTS)
     m._tailscale_magicdns, m._tailscale_ip = (lambda: "box.tailnet.ts.net"), (lambda: "100.64.0.7")
     m._INVITE_HOSTS.update(at=None, magic="", ip=None)
-    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234")
+    env = _sim_env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234",
+                   RACECAST_SIM_FEED_PORTS="41001,41002,41003")
     try:
         assert m._invite_links("abc") == {"funnel": None,
                                           "tailnet": "http://127.0.0.1:41234/console/drive?i=abc"}, \

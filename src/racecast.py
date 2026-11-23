@@ -766,7 +766,7 @@ def _relay_run_mode():
     """The mode a relay started now runs in: "simulation" or "live"."""
     return "simulation" if simulation.active() else "live"
 
-def _running_relay_mode():
+def _running_relay_run_mode():
     """The running relay's mode from its stamp, "" for no stamp (no relay or an older one)."""
     try:
         with open(_relay_mode_path(), encoding="utf-8") as fh:
@@ -828,7 +828,7 @@ def _clear_relay_profile_stamp():
 
 def _refuse_live_relay_in_simulation():
     """A simulated stop never touches a relay that runs outside simulation mode."""
-    if simulation.active() and _running_relay_mode() != "simulation":
+    if simulation.active() and _running_relay_run_mode() != "simulation":
         sys.exit("racecast: the running relay is a live relay, not a simulation one. "
                  "Stop it without --simulation.")
 
@@ -1447,13 +1447,7 @@ def health_cmd(rest):
         if not args:
             sys.exit("usage: racecast health pull <tailscale-ip> [--port N] [--from TS]")
         host = args[0]
-        port = _relay_port()
-        if "--port" in args[1:]:
-            i = args.index("--port", 1)
-            try:
-                port = int(args[i + 1])
-            except (IndexError, ValueError):
-                sys.exit("racecast: --port must be an integer")
+        port = _remote_relay_port(host, args[1:])
         frm = 0
         if "--from" in args[1:]:
             i = args.index("--from", 1)
@@ -1815,7 +1809,7 @@ def _report_log_files(since=None):
     return pairs
 
 
-def _relay_mode():
+def _relay_schedule_mode():
     """The live relay's schedule mode ('race'/'qualifying') from /status, or None
     when the relay is unreachable. Best-effort. The report title marker degrades
     gracefully. Reuses the loopback JSON helper (no bare urllib)."""
@@ -1845,26 +1839,60 @@ def _switch_relay_mode(mode):
     return _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/mode/{mode}")
 
 
-def _align_running_relay_mode(requested, read_mode=None, switch=None):
+def _obs_stream_active():
+    """OBS's stream state read now: True, False, or None when OBS does not answer."""
+    import obs_ws
+    reachable, stats, _note = obs_ws.get_health_stats()
+    return stats.get("stream_active") if reachable else None
+
+
+def _program_busy(status, read_stream=None):
+    """Why the running relay's program may be on air: "" only when its /status reports
+    OBS reachable and not streaming and OBS read now agrees. Unknown counts as on air.
+    A live Part is a stream, so the Part record only explains a refusal."""
+    obs = status.get("obs") if isinstance(status.get("obs"), dict) else {}
+    stream = obs.get("stream_active") if obs.get("reachable") is True else None
+    if stream is True:
+        why = "OBS is streaming"
+    elif stream is not False:
+        why = "the relay could not read whether OBS is streaming"
+    else:
+        now = (read_stream or _obs_stream_active)()
+        if now is False:
+            return ""
+        why = "OBS is streaming" if now is True else "OBS did not answer whether it is streaming"
+    return why + (" (the Part record says live)" if status.get("part_live") is True else "")
+
+
+def _align_running_relay_mode(requested, read_status=None, switch=None, read_stream=None):
     """Switch an already running relay to the mode Start event asked for, as the Director
-    Panel's toggle does. Returns what happened for the operator, or None when the relay
-    is already in that mode or cannot be read."""
-    actual = (read_mode or _relay_mode)()
-    if actual is None or actual == requested:
+    Panel's toggle does, but only while nothing is on air: the switch re-points both feeds
+    to stint 1. Returns what happened for the operator, or None when the relay is already
+    in that mode or cannot be read."""
+    status = (read_status or _relay_status_probe)()
+    actual = status.get("mode") if isinstance(status, dict) else None
+    if actual not in ("race", "qualifying") or actual == requested:
         return None
+    busy = _program_busy(status, read_stream)
+    if busy:
+        return (f"WARNING: relay: still in {actual} mode, not switched to {requested} because "
+                f"{busy}. Switching re-points both feeds to stint 1. Switch it between sessions "
+                f"in the Director Panel (Schedule: switch -> {requested.upper()}).")
     try:
         res = (switch or _switch_relay_mode)(requested)
     except Exception as exc:  # noqa: BLE001  reported to the operator
         return f"relay: still in {actual} mode, the switch to {requested} failed ({exc})."
     if isinstance(res, dict) and res.get("error"):
         return f"relay: still in {actual} mode, the switch to {requested} failed: {res['error']}"
-    return f"relay: was running in {actual} mode, switched to {requested} mode."
+    stale = (" The Part record says live, OBS is not streaming."
+             if status.get("part_live") is True else "")
+    return f"relay: was running in {actual} mode, switched to {requested} mode.{stale}"
 
 
 def _qualifying_title(base):
     """Append ' — Qualifying' to a report/event title when the live relay is in
     qualifying mode; an empty base becomes just 'Qualifying'. Unchanged otherwise."""
-    if _relay_mode() == "qualifying":
+    if _relay_schedule_mode() == "qualifying":
         return f"{base} — Qualifying" if base else "Qualifying"
     return base
 
@@ -2199,16 +2227,7 @@ def chat_cmd(rest):
         if not args:
             sys.exit("usage: racecast chat pull <tailscale-ip> [--port N]")
         host = args[0]
-        port = _relay_port()
-        if "--port" in args[1:]:
-            port_idx = args.index("--port", 1)
-            if port_idx + 1 >= len(args):
-                sys.exit("racecast: --port requires an integer value")
-            port_str = args[port_idx + 1]
-            try:
-                port = int(port_str)
-            except ValueError:
-                sys.exit(f"racecast: --port must be an integer, got {port_str!r}")
+        port = _remote_relay_port(host, args[1:])
         url = f"http://{host}:{port}/chat/data"
         try:
             with http_util.open_url(url, timeout=5) as resp:
@@ -2415,7 +2434,7 @@ def _console_pull_versions(args):
     if not args or args[0].startswith("-"):
         sys.exit("usage: racecast console pull-versions <A-tailscale-ip> [--port N]")
     host = args[0]
-    port = _takeover_port(args[1:])
+    port = _remote_relay_port(host, args[1:])
     # The endpoint authenticates on the shared league secret (same league = same
     # secret, which travels with the profile). We send OUR secret; A validates it.
     _apply_active_profile_env()
@@ -2719,10 +2738,12 @@ def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
     is_alive = alive(pid)
     status = probe() if is_alive else None
     awake = status.get("keep_awake") if isinstance(status, dict) else None
+    schedule = status.get("mode") if isinstance(status, dict) else None
     return {"pid": pid, "alive": is_alive, "port": _relay_port(),
             "http_ok": status is not None,
             "keep_awake": awake if isinstance(awake, dict) else None,
-            "mode": ((mode or _running_relay_mode)() or "live") if is_alive else None}
+            "mode": ((mode or _running_relay_run_mode)() or "live") if is_alive else None,
+            "schedule_mode": schedule if schedule in ("race", "qualifying") else None}
 
 
 def _relay_status_probe():
@@ -2867,7 +2888,7 @@ def _relay_start_signals():
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
-            "running_mode": _running_relay_mode(),
+            "running_mode": _running_relay_run_mode(),
             "active_mode": _relay_run_mode(),
             "http_ok": _relay_responds(own) if port_pids else False}
 
@@ -3027,6 +3048,10 @@ def relay_start(rest):
     if busy:
         print(f"WARNING: feed port(s) {', '.join(map(str, busy))} already in use. "
               f"That feed may fail to bind. Free them first: racecast freeport")
+    forced = simulation.active() and bool(os.environ.get(simulation.FORCE))
+    problem = _force_pass_problem() if forced else ""
+    if problem:
+        sys.exit(f"racecast: {problem}")
     _ensure_active_console_secret()   # zero-config console: provision + inject the secret
     # Resolve + inject the producer name (#317) so the relay can tag its OBS-stream
     # events and /status; the child inherits it via the environment.
@@ -3036,9 +3061,13 @@ def relay_start(rest):
     newpid = _spawn_relay_verified(argv)
     if newpid is None:
         return None                   # honest failure already reported; never claim success
-    if simulation.active() and os.environ.get(simulation.FORCE):
-        _hold_simulation_force(newpid)
     print(f"relay started (pid {newpid}). Watch it: racecast relay logs -f")
+    if forced:
+        try:
+            _hold_simulation_force(newpid)
+        except OSError as exc:
+            print(f"  WARNING: the relay does not hold the --force pass ({exc}). Stop it with "
+                  "racecast --simulation --force relay stop.")
     _append_tailscale_snapshot()
     _refresh_obs_pages(wait=0)    # relay already confirmed up -> refresh OBS pages now
     # Post-start verification: exactly one process should now hold 8088. More than
@@ -7166,7 +7195,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         if note:
             print(note)
     elif _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
-        _mm = qualifying_mode_mismatch_note(True, _relay_mode())
+        _mm = qualifying_mode_mismatch_note(True, _relay_schedule_mode())
         if _mm:
             print("WARNING: " + _mm)
     # 4. OBS
@@ -7299,10 +7328,23 @@ def _takeover_port(args):
         if i + 1 >= len(args):
             sys.exit("racecast: --port requires an integer value")
         try:
-            return int(args[i + 1])
+            port = int(args[i + 1])
         except ValueError:
             sys.exit(f"racecast: --port must be an integer, got {args[i + 1]!r}")
+        problem = simulation.control_port_problem(port, name="--port")
+        if problem:
+            sys.exit(f"racecast: simulation mode: {problem}")
+        return port
     return _relay_port()
+
+
+def _remote_relay_port(host, args):
+    """The port of another producer's relay a pull reads from. In simulation the host
+    must be loopback and the port one a simulated relay may use."""
+    if simulation.active() and not simulation.is_loopback_host(host):
+        sys.exit(f"racecast: simulation mode: {host} is not a loopback host; "
+                 "a rehearsal pulls only from a simulated relay on this machine.")
+    return _takeover_port(args)
 
 
 def event_takeover(rest):
@@ -7510,7 +7552,7 @@ def _simulated_freeport(ports):
     (its PID file, stamped simulation, a relay process); it never kills a port holder it
     cannot prove is its own. Returns the exit code."""
     pid = sv.read_pid(_relay_pid_path())
-    if sv.pid_alive(pid) and _relay_identity(pid) == "relay" and _running_relay_mode() == "simulation":
+    if sv.pid_alive(pid) and _relay_identity(pid) == "relay" and _running_relay_run_mode() == "simulation":
         print(f"simulation: stopping this install's simulation relay (PID {pid}) to free "
               f"its ports instead of killing port holders.")
         relay_stop([])
@@ -7723,6 +7765,9 @@ def _oneshot_code(command, rest):
         for key, val in _read_env_file().items():
             os.environ.setdefault(key, val)
     if command == "cookies":
+        if simulation.active():   # the cookie jar is machine-wide, not the rehearsal's
+            print(simulation.skipped("cookies"))
+            return 0
         rest = _cookies_oneshot_args(rest)
     _od = _active_overlay_dir()
     extra = _oneshot_extra(command, rest, _runtime_dir(), _runtime_base_dir(),
@@ -10356,6 +10401,8 @@ def _init_cookies_run(browser):
     """Gate (YouTube login) + the cookies one-shot. The gate only fires when
     the cookies are actually missing/stale. Under --force a fresh cookie jar
     skips the pause but still re-exports."""
+    if simulation.active():
+        return _oneshot_code("cookies", [browser])
     _pf = _event_modules()[1]
     res = _pf.cookies_status(_cookies_path())
     if ins.cookies_done(res.level, res.detail) is None:
@@ -10957,6 +11004,21 @@ def _hold_simulation_force(pid, environ=None, force_dir=None):
             _write_force_record(path, record)
 
 
+def _force_pass_problem(environ=None, force_dir=None):
+    """Why a relay started now could not hold this run's --force pass, or ""."""
+    environ = os.environ if environ is None else environ
+    force_dir = force_dir or _simulation_force_dir()
+    _name, path = _force_record_path(environ, force_dir)
+    if not path:
+        return ""
+    try:
+        with _force_lock(force_dir):
+            _read_force_record(path)
+    except OSError as exc:
+        return f"simulation mode: the force record is not usable ({exc}); the relay was not started."
+    return ""
+
+
 def _simulation_forced_profile(environ, force_dir):
     """The profile an inherited RACECAST_SIM_FORCE allows, or None. It counts only while
     a holder of its record (the forcing run or its relay) is alive. Raises OSError when
@@ -10986,7 +11048,10 @@ def _simulation_gate(argv, environ=None, profile=None, values=None, force=False,
     name = _active_profile_name() if profile is None else profile
     force_dir = force_dir or _simulation_force_dir()
     if name and force:
-        _grant_simulation_force(name, environ, force_dir)
+        try:
+            _grant_simulation_force(name, environ, force_dir)
+        except OSError as exc:
+            return f"simulation mode: the force record could not be written ({exc}); no pass granted."
         return None
     values = _simulation_profile_values(name) if values is None and name else (values or {})
     try:
@@ -11861,6 +11926,13 @@ def main(argv=None):
         action = route(argv)
     except ValueError as e:
         sys.exit(f"racecast: {e}")
+    try:
+        return _run_action(action)
+    except simulation.PortError as e:
+        sys.exit(f"racecast: {e}")
+
+
+def _run_action(action):
     if action["kind"] == "help":
         print(usage_for(action.get("topic")))
         return None
@@ -11912,7 +11984,7 @@ def main(argv=None):
     if action["kind"] == "aggregate":
         aggregate_status()
         return None
-    sys.exit(f"racecast: {action['kind']} not implemented")
+    raise SystemExit(f"racecast: {action['kind']} not implemented")
 
 
 if __name__ == "__main__":

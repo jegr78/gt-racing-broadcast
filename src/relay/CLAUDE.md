@@ -32,8 +32,12 @@ starts with `Q`). Because `Q` is the only (= last) part, ending it fires the exi
 last-part auto-stop → report → teardown, so `racecast event start --qualifying` (or the
 Control Center **Qualifying** toggle at Start Event, `ui_ops` `_qualifying_flag`) runs a
 clean, separate qualifying session with its own OBS stream key. `set_mode` resets the
-part pointer to Part 1 on a live mode switch (unless a part is on air). The post-event
-**report title** gains a `— Qualifying` marker (`_relay_mode`/`_qualifying_title` in
+part pointer to Part 1 on a live mode switch (unless a part is on air). `event start` on a running relay
+switches its mode only when `/status` reports OBS reachable with `obs.stream_active` false
+and OBS read at that moment agrees (`_align_running_relay_mode`); anything else, unknown
+included, is a warning. `part_live` is the PartStore record, which stays true when a Part
+ends in OBS, so it only adds a note. The post-event
+**report title** gains a `— Qualifying` marker (`_relay_schedule_mode`/`_qualifying_title` in
 `racecast.py`, read from the live relay `/status`). The **Director Panel** shows the
 schedule editor matching the mode (race editor `#urlsBox` vs the qualifying row
 `#qualRow`; the mode toggle, submissions and Parts control stay visible in both). The
