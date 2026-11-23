@@ -699,6 +699,10 @@ times on a maintainer machine, start and teardown included:
   timing, race mode, approval of 12 drivers, a DC confirmed on the desk and rejoined late,
   final lap in the third lobby; asserts the ranking, `no_data` then `dc`, the swaps (driver
   and pit stop count) and the finish.
+- `full` (about 50 min, real time): the deck's race day with 14 cars on a Suzuka-length lap:
+  qualifying, approval of 42 drivers, formation, a pit stop, a DC, an estimate, a DNF, a
+  late stream link, a red flag with a keep restart, the final lap. Its screenshots carry
+  the deck's image names (`<slide>-<n>`, e.g. `dc-tower-1`).
 - `multiclass` (4 min): Hypercar and GT3 in one lobby; asserts the GT3 leader is
   P2 overall but P1 in its class with class gap 0, the public timing lists both, and a GT3
   lap count set on the desk.
