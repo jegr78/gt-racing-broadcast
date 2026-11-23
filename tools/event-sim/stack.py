@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -49,6 +50,7 @@ LOG_TAIL = 4000
 PART_KEY_REF = "sim-part-{}"     # a Script Property name; its value is made up per run
 RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended")    # the second is the RED FLAG banner
 EVENT_FILES = {"invite": "driver-invite.json", "timing": "timing-link.json"}
+KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)     # SIGTERM is TerminateProcess on Windows
 
 
 def _any_port():
@@ -234,6 +236,7 @@ class Child:
 
     def __init__(self, name, argv, env, cwd, log_path, seconds):
         self.name, self.log_path = name, log_path
+        self.expected_exit = False       # a scenario killed it on purpose
         self.log = open(log_path, "wb")  # noqa: SIM115  closed in stop()
         try:
             self.proc = subprocess.Popen([sys.executable, CHILD, str(seconds), "--long", "--", *argv],
@@ -254,7 +257,7 @@ class Child:
                 self.proc.stdin.close()
             try:
                 code = self.proc.wait(timeout=20)
-                if code not in (0, 124):
+                if code not in (0, 124) and not self.expected_exit:
                     problem = f"{self.name} supervisor exited {code}"
             except subprocess.TimeoutExpired:
                 self.proc.kill()
@@ -415,6 +418,25 @@ class Stack:
             except OSError:
                 out.append(("soft", f"{name} log unreadable"))
         return out
+
+    def kill_relay(self, pids=None, kill=os.kill):
+        """Kill the relay as a crash would: only the one process that holds this run's
+        control port and that the app home's `relay.pid` names. Returns its PID."""
+        path = os.path.join(self.home or "", "runtime", "relay.pid")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                pid = int(fh.read().strip())
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"no relay to kill: {path}: {exc}") from None
+        port = urlsplit(self.urls["relay"]).port
+        holders = list((pids or ports.pids_on_port)(port))
+        if holders != [pid]:
+            raise RuntimeError(f"relay.pid names {pid}, but port {port} is held by {holders}: nothing killed")
+        kill(pid, KILL_SIGNAL)
+        for child in self.children:
+            if child.name == "relay":
+                child.expected_exit = True
+        return pid
 
     def stop_relay(self, run=subprocess.run):
         """Stop the relay this app home's PID file names: a relay the Control Center

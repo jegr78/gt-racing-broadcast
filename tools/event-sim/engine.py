@@ -55,7 +55,7 @@ class RunContext:
     sink) to base URLs; `token(name)` mints a console token for a crew member."""
 
     def __init__(self, urls=None, token=None, stub=None, obs=None, browser=None, out_dir="",
-                 event=None, event_link=None, secrets=(), clock=time.monotonic):
+                 event=None, event_link=None, secrets=(), clock=time.monotonic, kill_relay=None):
         self.urls = dict(urls or {})
         self._token = token
         self.stub = stub
@@ -64,6 +64,7 @@ class RunContext:
         self.out_dir = out_dir
         self.event = dict(event or {})
         self._event_link = event_link
+        self._kill_relay = kill_relay
         self.secrets = set(secrets)      # every credential of the run, for `scrub`
         self._clock, self._learned_at = clock, None
         self.findings = []
@@ -110,6 +111,15 @@ class RunContext:
             raise roles.StepError(f"the event has no {kind} link yet (Start event creates it)")
         self.secrets.add(link)
         return link
+
+    def kill_relay(self):
+        """Kill the run's relay as a crash would; returns its PID."""
+        if self._kill_relay is None:
+            raise roles.StepError("this run cannot kill its relay")
+        try:
+            return self._kill_relay()
+        except (RuntimeError, OSError) as exc:
+            raise roles.StepError(str(exc)) from None
 
     def browser(self):
         """The shared headless browser (`browser.Browser`), or None without Playwright."""

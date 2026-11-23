@@ -59,7 +59,7 @@ def run(scn, out, keep_work=False, headed=False, no_skips=False):
             return 2
         ctx = engine.RunContext(urls=st.urls, token=st.token, stub=st.stub, obs=st.obs,
                                 browser=br, out_dir=out, event=scn.event, event_link=st.event_link,
-                                secrets=[st.secret])
+                                secrets=[st.secret], kill_relay=st.kill_relay)
         eng = engine.Engine(scn, ctx, st.probes(), registry=roles.default_registry(),
                             shots_dir=os.path.join(out, "shots"), final_checks=[st.log_checks],
                             no_skips=no_skips)

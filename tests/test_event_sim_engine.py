@@ -695,6 +695,46 @@ def t_api_role_adds_tokens_and_fails_on_http_errors():
         th.join()
 
 
+class _Proc:
+    def poll(self):
+        return None
+
+
+def t_a_relay_crash_kills_only_the_relay_its_pid_file_names():
+    scn = _scn([{"role": "rec", "do": "go"}])
+    with tempfile.TemporaryDirectory() as work:
+        st = stack.Stack(scn, work)
+        st.home, st.urls = work, {"relay": "http://127.0.0.1:41000"}
+        child = stack.Child.__new__(stack.Child)
+        child.name, child.proc, child.expected_exit = "relay", _Proc(), False
+        st.children = [child]
+        killed = []
+        try:
+            st.kill_relay(pids=lambda port: [4242], kill=lambda pid, sig: killed.append(pid))
+            raise AssertionError("no PID file is no relay to kill")
+        except RuntimeError as exc:
+            assert "relay.pid" in str(exc), exc
+        stack.stamp_relay(work, 4242)
+        try:
+            st.kill_relay(pids=lambda port: [4242, 4343], kill=lambda pid, sig: killed.append(pid))
+            raise AssertionError("a port held by another process too is not killed")
+        except RuntimeError as exc:
+            assert "41000" in str(exc) and "4343" in str(exc), exc
+        assert not killed, "nothing is killed on a mismatch"
+        seen = []
+        assert st.kill_relay(pids=lambda port: seen.append(port) or [4242],
+                             kill=lambda pid, sig: killed.append((pid, sig))) == 4242
+        assert seen == [41000] and killed == [(4242, stack.KILL_SIGNAL)]
+        assert child.expected_exit, "the stack's own relay child may now end without a problem"
+    ctx = engine.RunContext(kill_relay=lambda: 4242)
+    assert builtin.RelayRole(ctx, "relay").do("kill", {}) == {"pid": 4242}
+    try:
+        builtin.RelayRole(engine.RunContext(), "relay").do("kill", {})
+        raise AssertionError("a run that cannot kill its relay fails the step")
+    except roles.StepError:
+        pass  # expected
+
+
 def t_relay_probe_names_its_port():
     assert expect.truth("relay.port == 41234", {"relay": probes.RelayProbe("http://127.0.0.1:41234")})[0]
 

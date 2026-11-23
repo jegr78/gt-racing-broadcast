@@ -54,6 +54,16 @@ class ApiRole(Role):
 
 
 @register
+class RelayRole(Role):
+    """The producer's machine: `kill` ends the relay as a crash would, without `relay
+    stop`, so nothing is cleaned up and the event stays unstopped."""
+    kind = "relay"
+
+    def act_kill(self, args):
+        return {"pid": self.ctx.kill_relay()}
+
+
+@register
 class ObsRole(Role):
     """An operator acting in the simulated OBS. `request` sends any request
     (`type`, `data`); `scene` switches the program scene. Its screenshot is the program."""
