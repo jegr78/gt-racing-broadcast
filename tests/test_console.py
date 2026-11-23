@@ -935,6 +935,71 @@ def t_a_parts_status_line_stays_in_view_while_its_area_scrolls():
         f"the answer stays at the top of the scrolled area, not {got['line'] - got['top']} px away: {got}"
 
 
+def _panel_page():
+    page = _src("director", "director-panel.html")
+    for token, value in (("__RC_API_BASE__", ""), ("__RC_VERSION__", "dev"),
+                         ("<!--__EVENT_INFO__-->", _src("console", "event-info.html"))):
+        page = page.replace(token, value)
+    return page
+
+
+def t_disconnect_event_controls_fit_a_phone():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; the event rows are measured with visual acceptance)")
+        return
+    events = [{"id": f"e{i}", "entry": f"Kestrel Sim Racing #{i}", "driver": "Driver 12-1", "state": "suspected",
+               "last_packet": 1_800_000_000 + i} for i in range(3)]
+    race = {"state": "racing", "mode": "race", "entries": [], "classes": [], "red_flag": None}
+
+    def serve(route):
+        path = route.request.url.split("://", 1)[1].split("/", 1)[1].split("?", 1)[0]
+        if path in ("rc", "panel"):
+            return route.fulfill(body=_desk_page() if path == "rc" else _panel_page(), content_type="text/html")
+        if path == "driver-desk.js":
+            return route.fulfill(body=_src("console", "driver-desk.js"), content_type="application/javascript")
+        path = path.removeprefix("race-control/")
+        if path == "drivers/race/recording":
+            return route.fulfill(body=json.dumps({"running": True, "started_at": 1_800_000_000, "started_by": "x",
+                                                  "events": events}), content_type="application/json")
+        if path == "drivers/race":
+            return route.fulfill(body=json.dumps(race), content_type="application/json")
+        return route.fulfill(body="{}", content_type="application/json")
+    got = {}
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return
+        try:
+          for page, area in (("rc", '#crewTabs button[data-id="race"]'), ("panel", '.navbtn[data-area="race"]')):
+            tab = browser.new_page(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+            tab.route("http://desk.test/**", serve)
+            tab.goto("http://desk.test/" + page)
+            tab.click(area)
+            tab.locator('.dd button:has-text("Confirm DC")').first.wait_for()
+            got[page] = tab.evaluate("""() => [...document.querySelectorAll('.dd tbody button, .dd tbody select')]
+              .filter(e => e.offsetParent && e.closest('tr').querySelector('button'))
+              .filter(e => /Confirm DC|Dismiss|Show standings|before/.test(e.textContent))
+              .map(e => { const r = e.getBoundingClientRect(), c = e.closest('.tbl').getBoundingClientRect();
+                          return [e.textContent.slice(0, 14), Math.round(r.left), Math.round(r.right),
+                                  Math.round(r.height), Math.round(c.left), Math.round(c.right)]; })""")
+            tab.close()
+        finally:
+            browser.close()
+    for page, rows in got.items():
+        assert len(rows) == 12, f"{page}: each event shows Confirm DC, Dismiss, the offset and Show standings: {rows}"
+        clipped = [g for g in rows if g[1] < g[4] or g[2] > g[5] or g[2] > 390]
+        assert not clipped, f"{page}: no event control sticks out of its table on a 390 px phone: {clipped}"
+        narrow = [g for g in rows if g[0].startswith(("Confirm DC", "5 s before")) and g[1] - g[4] > 24
+                  or g[0].startswith("Show standings") and g[5] - g[2] > 24]
+        assert not narrow, f"{page}: an event's controls span the table's width on a phone: {narrow}"
+        small = [g for g in rows if g[3] < 44]
+        assert not small, f"{page}: every event control is a 44 px touch target on a phone: {small}"
+
+
 def t_qualifying_preselects_its_area_on_a_switch_only():
     path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
     got = _js_fn(path, "followMode", """(function () {
