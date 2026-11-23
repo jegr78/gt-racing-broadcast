@@ -1505,10 +1505,12 @@ def t_the_desk_fit_scenario_measures_the_tallest_states():
     loaded = scenario.load(os.path.join(SIM, "scenarios", "desk-fit.toml"), REG)
     order = [s.id for s in loaded.steps]
     fits = [(s.role, order.index(s.id)) for s in loaded.steps if s.do == "fit"]
-    for state, roles_wanted in (("red_flag", {"race_control"}), ("ask_graphic", {"director"}),
-                                ("qualifying", {"race_control", "director"})):
-        after = {r for r, i in fits if i > order.index(state)}
-        assert roles_wanted <= after, f"a fit runs after {state}: {fits}"
+    states = ["red_flag", "ask_graphic", "qualifying"]
+    for n, (state, roles_wanted) in enumerate(zip(states, ({"race_control"}, {"director"},
+                                                           {"race_control", "director"}), strict=True)):
+        end = order.index(states[n + 1]) if n + 1 < len(states) else len(order)
+        during = {r for r, i in fits if order.index(state) < i < end}
+        assert roles_wanted <= during, f"a fit runs while {state} holds: {fits}"
     assert loaded.event.get("classes"), "the class lap row shows only with classes"
     assert not any(s.role == "drivers" and s.do == "start" for s in loaded.steps), "no state waits on a lap"
 
