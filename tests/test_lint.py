@@ -145,6 +145,35 @@ def t_proc_return_repo_is_clean():
     assert lint.check_proc_return_value_uses(ROOT) == [], lint.check_proc_return_value_uses(ROOT)
 
 
+ASSERT_METHOD = "xs = []\nassert xs.pop() == 1\n"
+ASSERT_IN_LAMBDA = "assert run(cb=lambda: seen.append(1)) == 4\n"
+ASSERT_NAME = "assert print('x') is None\n"
+ASSERT_SUBPROCESS = "import subprocess\nassert subprocess.call(['true']) == 0\n"
+ASSERT_YIELD = "def g():\n    assert (yield) is None\n"
+ASSERT_COMPREHENSION = "assert all(x for x in xs)\n"
+ASSERT_PURE_CALL = "assert role.do('get') == {}\n"
+ASSERT_MESSAGE_ONLY = "assert ok, xs.pop()\n"
+
+
+def t_assert_side_effect_flags_codeqls_names():
+    assert lint.find_assert_side_effects(ASSERT_METHOD) == [2], "a .pop() inside an assert"
+    assert lint.find_assert_side_effects(ASSERT_IN_LAMBDA) == [1], "an .append in a lambda counts too"
+    assert lint.find_assert_side_effects(ASSERT_NAME) == [1], "a bare print() call"
+    assert lint.find_assert_side_effects(ASSERT_SUBPROCESS) == [2], "subprocess.call"
+    assert lint.find_assert_side_effects(ASSERT_YIELD) == [2], "an explicit yield"
+    assert lint.find_assert_side_effects(ASSERT_MESSAGE_ONLY) == [1], "the message is part of the assert"
+
+
+def t_assert_side_effect_leaves_other_calls_alone():
+    assert lint.find_assert_side_effects(ASSERT_PURE_CALL) == [], "a name CodeQL does not list"
+    assert lint.find_assert_side_effects(ASSERT_COMPREHENSION) == [], "a comprehension has no explicit yield"
+    assert lint.find_assert_side_effects("def (:\n") == [], "unparseable source is skipped"
+
+
+def t_assert_side_effect_repo_is_clean():
+    assert lint.check_assert_side_effects(ROOT) == [], lint.check_assert_side_effects(ROOT)
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):
