@@ -1357,15 +1357,17 @@ def t_the_traces_own_blocked_script_in_a_sandboxed_frame_is_no_page_error():
 def t_a_trace_chunk_per_step_is_kept_only_for_a_failed_step():
     steps = [{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
              {"id": "ok", "role": "rec", "do": "go", "at": "after:open"},
-             {"id": "bad", "role": "page:rc", "do": "open", "args": {"path": "x"}, "at": "after:ok"}]
+             {"id": "bad", "role": "page:rc", "do": "open", "args": {"path": "x"}, "at": "after:ok"},
+             {"id": "slow", "role": "paged", "do": "slow", "args": {"click": 3}, "at": "after:ok"}]
     data, br, tmp = _diag_run(steps, trace="fail")
     calls = br.tracing.calls
     assert calls[0] == ("start", True, True) and calls[-1] == ("stop",), calls
     stops = [c[1] for c in calls if c[0] == "stop_chunk"]
-    assert stops == [None, None, "bad-page_rc.zip"], f"a chunk per step, only the failed one kept: {stops}"
+    assert stops == [None, None, "bad-page_rc.zip", "slow-page_rc.zip"], \
+        f"a chunk per step, kept for a failed step and one with a slow action: {stops}"
     assert _by_id(data)["bad"]["traces"] == ["traces/bad-page_rc.zip"], _by_id(data)["bad"]
     assert os.path.isfile(os.path.join(tmp, "traces", "bad-page_rc.zip"))
-    data, br, _ = _diag_run(steps, trace="all")
+    data, br, _ = _diag_run(steps[:3], trace="all")
     assert [c[1] for c in br.tracing.calls if c[0] == "stop_chunk"] == ["open-page_rc.zip", "ok-page_rc.zip",
                                                                        "bad-page_rc.zip"], br.tracing.calls
     data, br, _ = _diag_run(steps, trace="off")

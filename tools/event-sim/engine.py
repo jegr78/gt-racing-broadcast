@@ -371,9 +371,11 @@ class Engine:
 
     def _trace_end(self, step, res):
         """End every page's chunk; kept as traces/<step>-<role>.zip for a step that
-        failed or left a snapshot, or for every step with trace "all"."""
+        failed, left a snapshot or had a slow action (a flake's tail), or for every step
+        with trace "all"."""
         keep = self.traces_dir is not None and (
-            self.ctx.trace == "all" or res.status == "failed" or bool(res.snapshots))
+            self.ctx.trace == "all" or res.status == "failed" or bool(res.snapshots)
+            or any(a.get("slow") for a in res.actions))
         for name, role in self._page_roles():
             file = f"{step.id}-{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}.zip"
             try:

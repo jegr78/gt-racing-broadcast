@@ -623,8 +623,11 @@ needed to explain a failure at the moment it happens:
   timeout says the page was alive.
 - Traces. `--trace fail` (default) records a Playwright trace of every page (DOM
   snapshots and screencast) in one chunk per step and keeps the chunks of a step that
-  failed or left a snapshot as `traces/<step>-<role>.zip`; `--trace all` keeps every
-  step's, `--trace off` records none. Open one with `playwright show-trace FILE`. A trace
+  failed, left a snapshot or had a slow action (the tail of a flake, seen far more often
+  than its failure) as `traces/<step>-<role>.zip`; `--trace all` keeps every step's,
+  `--trace off` records none. Its DOM snapshots make Chromium log "Blocked script
+  execution in 'about:blank'" for a sandboxed frame (the Control Center's report
+  preview); a tracing role drops that line. Open one with `playwright show-trace FILE`. A trace
   zip holds what the page sent and received, the run's console tokens included: they
   die with the run's secret, but treat the zip as the report's private part.
 - `--repeat N` (1-50) runs the scenario N times, one contained E2E unit run after the
