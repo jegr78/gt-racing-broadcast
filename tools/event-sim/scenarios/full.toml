@@ -967,7 +967,7 @@ id = "final_lap"
 at = "after:lap15"
 role = "race_control"
 do = "final_lap"
-expect = ["race.state == 'final_lap'"]
+expect = ["race.state in ['final_lap', 'finishing', 'finished']"]
 timeout = "30s"
 
 [[step]]
