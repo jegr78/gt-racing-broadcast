@@ -203,6 +203,15 @@ def t_a_commentator_step_names_a_commentator_of_the_scenario():
     _scn([dict(chat, role="commentator:Guest")], event=event, sheet={"tabs": {"Crew": crew}})
     _refused([dict(chat, role="commentator:Boss")], "'Boss' is no commentator", event=event,
              sheet={"tabs": {"Crew": crew}})
+    relay_rule = [["Person", "Commentator"], ["Yes Man", " yes "], ["Tick", "\u2713"], ["Ex", "x"]]
+    for name in ("Yes Man", "Tick", "Ex"):
+        _scn([dict(chat, role=f"commentator:{name}")], event=event, sheet={"tabs": {"Crew": relay_rule}})
+    schedule = [["URL", "Streamer", "Stint"], ["", "Comms 1", "Stint 1"], ["", "Late Guest", "Stint 2"]]
+    _scn([dict(chat, role="commentator:Late Guest")], event=event, sheet={"tabs": {"Schedule": schedule}})
+    assert _scn([dict(chat, role="commentator:comms 1")], event=event).steps, "names compare as asset keys"
+    dropped = {"Schedule": [["URL", "Streamer", "Stint"], ["", "Other", "Stint 1"]],
+               "Crew": [["Name", "Commentator"], ["Other", "TRUE"]]}
+    _refused([{"role": "rec", "do": "go"}], "event.commentators[0]", event=event, sheet={"tabs": dropped})
 
 
 def t_role_instances_share_the_kind():

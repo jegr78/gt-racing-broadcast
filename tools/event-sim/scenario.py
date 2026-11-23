@@ -4,10 +4,15 @@ A scenario has an optional `name`, `description`, `max_minutes` and `wait`, an `
 table, an optional `[sheet.tabs]` table of extra or replaced tabs, optional `[tolerances]`
 and a list of `[[step]]` tables. A step runs once its `at` trigger fires.
 See tools/CLAUDE.md (Event simulation engine) for the format."""
+import csv
+import functools
+import importlib.util
+import io
 import os
 import re
 import tomllib
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import expect
 import probes
@@ -225,16 +230,35 @@ def _checks(raw, where, key, roots):
     return list(raw)
 
 
-def _crew_commentators(tabs):
-    """The names a `[sheet.tabs] Crew` marks as commentators."""
-    rows = tabs.get("Crew") or []
-    if not rows:
-        return set()
-    head = [c.strip().lower() for c in rows[0]]
-    if "name" not in head or "commentator" not in head:
-        return set()
-    name, flag = head.index("name"), head.index("commentator")
-    return {r[name].strip() for r in rows[1:] if len(r) > max(name, flag) and r[flag].strip().upper() == "TRUE"}
+@functools.cache
+def _relay():
+    """The relay module for its Sheet parsers and role rule; loading it starts nothing."""
+    import stack  # puts src/scripts on sys.path, which the relay imports from
+    path = os.path.join(stack.ROOT, "src", "relay", "racecast-feeds.py")
+    spec = importlib.util.spec_from_file_location("racecast_feeds_rules", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _csv(rows):
+    out = io.StringIO()
+    csv.writer(out).writerows(rows)
+    return out.getvalue()
+
+
+def _final_commentators(event, comms, tabs):
+    """{asset key: name} of everyone the relay makes a commentator from the Sheet the run
+    serves (the event's tabs after `[sheet.tabs]`): a Schedule or Qualifying streamer or a
+    Crew row with a truthy Commentator flag."""
+    import stack
+    relay = _relay()
+    final = {k.lower(): v for k, v in stack.sheet_tabs(SimpleNamespace(event=event, commentators=comms,
+                                                                        tabs=tabs)).items()}
+    names = [n for tab in ("schedule", "qualifying")
+             for (_u, n, _s, _l) in relay.ScheduleSource._parse_rows(_csv(final.get(tab) or [])) or [] if n.strip()]
+    names += [m[0] for m in relay.CrewSource._parse_full(_csv(final.get("crew") or [])) if m[3]]
+    return {relay.asset_key(n): n.strip() for n in names}
 
 
 def _check_commentator(role, registry, commentators, where):
@@ -242,12 +266,12 @@ def _check_commentator(role, registry, commentators, where):
     cls = registry.get(role_kind(role))
     if cls is None or not getattr(cls, "by_commentator", False):
         return
-    name = role.split(":", 1)[1] if ":" in role else ""
+    name, commentators = (role.split(":", 1)[1] if ":" in role else ""), commentators or {}
     if not name:
         raise ScenarioError(f"{where}: {role!r} is `{role_kind(role)}:<crew name>`")
-    if name not in commentators:
-        raise ScenarioError(f"{where}: {name!r} is no commentator of [[event.commentators]] or the Crew tab "
-                            f"(known: {', '.join(sorted(commentators)) or 'none'})")
+    if _relay().asset_key(name) not in commentators:
+        raise ScenarioError(f"{where}: {name!r} is no commentator of the Schedule, Qualifying or Crew tab "
+                            f"(known: {', '.join(sorted(commentators.values())) or 'none'})")
 
 
 def _shot(raw, where):
@@ -264,7 +288,7 @@ def _shot(raw, where):
     return Shot(name, str(raw.get("role") or ""), str(raw.get("element") or ""))
 
 
-def _step(i, raw, registry, roots, default_wait=None, commentators=frozenset()):
+def _step(i, raw, registry, roots, default_wait=None, commentators=None):
     where = f"step {i + 1}"
     if not isinstance(raw, dict):
         raise ScenarioError(f"{where} must be a table")
@@ -330,7 +354,11 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ScenarioError("a scenario needs at least one [[step]]")
     comms, tabs = _commentators(event), _tabs(data.get("sheet"))
-    names = {c.name for c in comms} | _crew_commentators(tabs)
+    names = _final_commentators(event, comms, tabs)
+    for i, c in enumerate(comms):
+        if _relay().asset_key(c.name) not in names:
+            raise ScenarioError(f"event.commentators[{i}]: {c.name!r} is no commentator of the final "
+                                "Schedule, Qualifying or Crew tab ([sheet.tabs] replaced them)")
     steps, ids = [], {}
     for i, raw in enumerate(raw_steps):
         step = _step(i, raw, registry, roots, default_wait, names)
