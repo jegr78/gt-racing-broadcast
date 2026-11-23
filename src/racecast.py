@@ -766,7 +766,7 @@ def _relay_run_mode():
     """The mode a relay started now runs in: "simulation" or "live"."""
     return "simulation" if simulation.active() else "live"
 
-def _running_relay_mode():
+def _running_relay_run_mode():
     """The running relay's mode from its stamp, "" for no stamp (no relay or an older one)."""
     try:
         with open(_relay_mode_path(), encoding="utf-8") as fh:
@@ -828,7 +828,7 @@ def _clear_relay_profile_stamp():
 
 def _refuse_live_relay_in_simulation():
     """A simulated stop never touches a relay that runs outside simulation mode."""
-    if simulation.active() and _running_relay_mode() != "simulation":
+    if simulation.active() and _running_relay_run_mode() != "simulation":
         sys.exit("racecast: the running relay is a live relay, not a simulation one. "
                  "Stop it without --simulation.")
 
@@ -1815,7 +1815,7 @@ def _report_log_files(since=None):
     return pairs
 
 
-def _relay_mode():
+def _relay_schedule_mode():
     """The live relay's schedule mode ('race'/'qualifying') from /status, or None
     when the relay is unreachable. Best-effort. The report title marker degrades
     gracefully. Reuses the loopback JSON helper (no bare urllib)."""
@@ -1849,7 +1849,7 @@ def _align_running_relay_mode(requested, read_mode=None, switch=None):
     """Switch an already running relay to the mode Start event asked for, as the Director
     Panel's toggle does. Returns what happened for the operator, or None when the relay
     is already in that mode or cannot be read."""
-    actual = (read_mode or _relay_mode)()
+    actual = (read_mode or _relay_schedule_mode)()
     if actual is None or actual == requested:
         return None
     try:
@@ -1864,7 +1864,7 @@ def _align_running_relay_mode(requested, read_mode=None, switch=None):
 def _qualifying_title(base):
     """Append ' — Qualifying' to a report/event title when the live relay is in
     qualifying mode; an empty base becomes just 'Qualifying'. Unchanged otherwise."""
-    if _relay_mode() == "qualifying":
+    if _relay_schedule_mode() == "qualifying":
         return f"{base} — Qualifying" if base else "Qualifying"
     return base
 
@@ -2722,7 +2722,7 @@ def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
     return {"pid": pid, "alive": is_alive, "port": _relay_port(),
             "http_ok": status is not None,
             "keep_awake": awake if isinstance(awake, dict) else None,
-            "mode": ((mode or _running_relay_mode)() or "live") if is_alive else None}
+            "mode": ((mode or _running_relay_run_mode)() or "live") if is_alive else None}
 
 
 def _relay_status_probe():
@@ -2867,7 +2867,7 @@ def _relay_start_signals():
             "pidfile_pid": pid, "pidfile_alive": alive,
             "running_profile": _running_relay_profile(),
             "active_profile": _active_profile_name() or "",
-            "running_mode": _running_relay_mode(),
+            "running_mode": _running_relay_run_mode(),
             "active_mode": _relay_run_mode(),
             "http_ok": _relay_responds(own) if port_pids else False}
 
@@ -7166,7 +7166,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         if note:
             print(note)
     elif _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
-        _mm = qualifying_mode_mismatch_note(True, _relay_mode())
+        _mm = qualifying_mode_mismatch_note(True, _relay_schedule_mode())
         if _mm:
             print("WARNING: " + _mm)
     # 4. OBS
@@ -7510,7 +7510,7 @@ def _simulated_freeport(ports):
     (its PID file, stamped simulation, a relay process); it never kills a port holder it
     cannot prove is its own. Returns the exit code."""
     pid = sv.read_pid(_relay_pid_path())
-    if sv.pid_alive(pid) and _relay_identity(pid) == "relay" and _running_relay_mode() == "simulation":
+    if sv.pid_alive(pid) and _relay_identity(pid) == "relay" and _running_relay_run_mode() == "simulation":
         print(f"simulation: stopping this install's simulation relay (PID {pid}) to free "
               f"its ports instead of killing port holders.")
         relay_stop([])

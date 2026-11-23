@@ -123,7 +123,7 @@ def t_event_stop_reaches_no_real_party():
     with tempfile.TemporaryDirectory() as tmp, _env(**SIM_ENV), _patched(
             *_external(calls),
             (m, "_stop_driver_invite", noop), (m, "_nudge_relay_timing_host", noop),
-            (m, "_relay_is_alive", lambda: True), (m, "_running_relay_mode", lambda: "simulation"),
+            (m, "_relay_is_alive", lambda: True), (m, "_running_relay_run_mode", lambda: "simulation"),
             (m, "_build_report_file", lambda: {"summary": "report", "path": "r.html"}),
             (m, "_send_report_core", lambda *a, **k: sent.append(a)),
             (m, "_streams_static_dir", lambda: tmp), (m, "_wait_timing_host_end", noop),
@@ -382,7 +382,7 @@ def t_simulated_stop_leaves_a_live_relay_alone():
     with _env(**SIM_ENV), _patched((m.sv, "read_pid", lambda p: 4242),
                                    (m.sv, "pid_alive", lambda pid: True),
                                    (m.sv, "stop_pid", lambda *a, **k: stopped.append(a)),
-                                   (m, "_running_relay_mode", lambda: "live"),
+                                   (m, "_running_relay_run_mode", lambda: "live"),
                                    (m, "_relay_is_alive", lambda: True),
                                    (m, "_stop_driver_invite", lambda: stopped.append("invite"))):
         for fn in (m.relay_stop, m.event_stop):
@@ -401,12 +401,12 @@ def t_relay_mode_stamp_round_trip():
             (m, "_runtime_base_dir", lambda: tmp), (m, "_active_profile_name", lambda: "demo")):
         with _env(**SIM_ENV):
             m._write_relay_profile_stamp()
-        assert m._running_relay_mode() == "simulation"
+        assert m._running_relay_run_mode() == "simulation"
         os.environ.pop("RACECAST_SIMULATION", None)
         m._write_relay_profile_stamp()
-        assert m._running_relay_mode() == "live"
+        assert m._running_relay_run_mode() == "live"
         m._clear_relay_profile_stamp()
-        assert m._running_relay_mode() == ""
+        assert m._running_relay_run_mode() == ""
 
 
 def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
@@ -416,7 +416,7 @@ def _sim_freeport(mode, pid_alive, is_relay=True, args=("--force",)):
              (m, "_relay_identity", lambda pid: "relay" if is_relay else "other"),
              (m.pt, "pids_on_port", lambda port: [4242, 777]), (m.pt, "kill_pid", killed.append),
              (m.sv, "stop_pid", lambda pid, path=None, **k: stopped.append(pid) or True),
-             (m, "_running_relay_mode", lambda: mode), (m, "_release_obs_feeds", lambda: None))
+             (m, "_running_relay_run_mode", lambda: mode), (m, "_release_obs_feeds", lambda: None))
     code, out = 0, io.StringIO()
     with _env(**SIM_ENV), _patched(*seams):
         try:
@@ -482,7 +482,7 @@ def _stop_case(identity, holders):
              (m.sv, "stop_pid", lambda pid, path=None, is_target=None:
                  stopped.append((pid, is_target)) or (is_target is None or is_target(pid))),
              (m, "_clear_relay_profile_stamp", lambda: removed.append("stamps")),
-             (m, "_release_obs_feeds", lambda: None), (m, "_running_relay_mode", lambda: "live"))
+             (m, "_release_obs_feeds", lambda: None), (m, "_running_relay_run_mode", lambda: "live"))
     code = 0
     with tempfile.TemporaryDirectory() as tmp, _patched(*seams, (m, "_runtime_base_dir", lambda: tmp)):
         open(m._relay_pid_path(), "w").close()
@@ -513,7 +513,7 @@ def t_start_signals_treat_an_unknown_process_as_a_relay():
     for identity, expected in (("relay", True), ("unknown", True), ("other", False)):
         with _patched((m.pt, "pids_on_port", lambda port: []), (m.sv, "read_pid", lambda p: 4242),
                       (m.sv, "pid_alive", lambda pid: True), (m, "_relay_identity", lambda pid, _i=identity: _i),
-                      (m, "_running_relay_profile", lambda: "demo"), (m, "_running_relay_mode", lambda: "simulation")):
+                      (m, "_running_relay_profile", lambda: "demo"), (m, "_running_relay_run_mode", lambda: "simulation")):
             assert m._relay_start_signals()["pidfile_relay"] is expected, identity
 
 
