@@ -73,6 +73,14 @@ def memory_strain(state):
     return ', '.join(reasons)
 
 
+def unit_busy():
+    """True while another run holds the machine's E2E unit."""
+    try:
+        return subprocess.run(['systemctl','--user','is-active','--quiet',UNIT],stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode==0
+    except OSError:return False  # no systemctl: systemd-run reports it
+
+
 def wait_for_memory(proc=None,clock=time.monotonic,sleep=time.sleep,seconds=PRESSURE_WAIT_SECONDS):
     """Return once the host has memory for a run; after `seconds` of pressure raise
     RuntimeError('host under memory pressure: ...') with the values. Never starts silently."""
@@ -136,6 +144,8 @@ def enter(script,argv,seconds=None,long=False):
     if sys.platform!='linux':return None
     if os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted':return None
     if limited(current_group()):return None
+    # Another run's memory is no pressure to wait out: name the busy unit instead.
+    if unit_busy():raise RuntimeError(f'E2E unit {UNIT} is busy with another run; start this one after it')
     wait_for_memory()
     pid,start=owner_identity()
     command=['systemd-run','--user','--quiet','--wait','--collect','--pipe',

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Resource admission is fail-closed and inspection cannot become detached."""
+import atexit
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -22,8 +24,12 @@ def host(root,available_kb=8*1024**2,some=0.5,full=0.1,psi=True):
     return proc
 
 
-# Every admission below reads this calm host, never the machine running the test.
-safety.PROC=host(tempfile.mkdtemp(prefix='e2e-safety-proc-'))
+# Every admission below reads this calm host and a free unit, never the machine running the test.
+_PROC=tempfile.mkdtemp(prefix='e2e-safety-proc-')
+atexit.register(shutil.rmtree,_PROC,True)
+safety.PROC=host(_PROC)
+_UNIT_BUSY=safety.unit_busy
+safety.unit_busy=lambda:False
 
 
 def limits(root,**values):
@@ -319,6 +325,22 @@ def t_a_fresh_ci_runner_passes_the_memory_admission():
         assert safety.memory_strain(safety.host_memory(host(root,available_kb=14*1024**2,some=0.0,full=0.0)))==''
         # The smallest hosted Linux runner: 7 GB with a few GB available.
         assert safety.memory_strain(safety.host_memory(host(root,available_kb=4*1024**2,some=2.0,full=0.5)))==''
+
+
+def t_a_busy_unit_is_named_before_any_memory_wait():
+    waited=[]
+    with patch.object(safety.sys,'platform','linux'),patch.dict(safety.os.environ,{'GITHUB_ACTIONS':''}), \
+         patch.object(safety,'current_group',return_value=Path('/outside')), \
+         patch.object(safety,'unit_busy',return_value=True), \
+         patch.object(safety,'wait_for_memory',side_effect=lambda **kw:waited.append(1)):
+        try:safety.enter(__file__,[])
+        except RuntimeError as error:assert 'busy' in str(error) and safety.UNIT in str(error),error
+        else:raise AssertionError('a busy unit must be refused')
+    assert waited==[],'the memory of a host that runs another E2E is not this run\'s to wait for'
+    calls=[]
+    def run(argv,**kw):calls.append(argv);return SimpleNamespace(returncode=0)
+    with patch.object(safety.subprocess,'run',run):
+        assert _UNIT_BUSY() is True and calls[0][-1]==safety.UNIT and 'is-active' in calls[0],calls
 
 
 def t_admission_checks_the_host_before_it_starts_the_unit():

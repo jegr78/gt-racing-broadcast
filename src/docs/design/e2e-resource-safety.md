@@ -37,8 +37,11 @@ the unit's memory cap plus 512 MiB and memory PSI avg10 of at most 20 % (some) a
 (full). Under more pressure it waits up to 120 seconds, then refuses with "host under
 memory pressure:" and the values. It never starts a run silently under pressure, a
 kernel without PSI is judged by MemAvailable alone, and a hosted runner, which enters no
-unit, is not checked. The event simulation also classes a failure whose window the unit
-spent 20 % or more waiting on IO or memory as "host starved", which stays a hard failure.
+unit, is not checked. A unit busy with another run is named at once: that run's memory
+is no pressure to wait out. The event simulation also classes a failure whose window up
+to the failure the unit spent 20 % or more waiting on IO or memory. With the host's own
+stall over the same share it is "host starved"; with new memory.max or memory.high
+events of the unit it is "unit at its memory cap". Either stays a hard failure.
 
 `--keep` stays in the foreground for a finite inspection lease. Closing the
 harness closes its control pipes; independent child supervisors then stop their
