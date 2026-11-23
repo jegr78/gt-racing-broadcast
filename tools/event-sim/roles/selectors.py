@@ -1,7 +1,6 @@
-"""Every selector the page roles use, in one place: a page that moves a control (the Race
-Control desk and the panel's driver desk are due for it, #1267) changes this file only.
-`{name}` parts are filled in by the role. `tests/test_event_sim_roles.py` checks each id,
-class, label and button text against the shipped files in `SOURCES`."""
+"""Every selector the page roles use, in one place: a page that moves a control changes this
+file only. `{name}` parts are filled in by the role. `tests/test_event_sim_roles.py` checks
+each id, class, label and button text against the shipped files in `SOURCES`."""
 
 PRODUCER = {
     "track": "#evt-track", "track_option": '#evt-track option[value="{track}"]',
@@ -25,8 +24,8 @@ DIRECTOR = {
     "arm": "#armBtn", "next": "#nextBtn", "next_ready": "#nextBtn.ready", "next_sub": "#nextSub",
     "on_air": "#liveOnAir", "next_step": "#nextStepText",
     "scene": '#pgmBus button.k:has-text("{scene}")',
-    "red_flag": "#pgmBus button.redflag",
-    "desk_open": "#driverBox > summary", "links": "#driverBox .mono.grow",
+    "red_flag": "#pgmBus button.redflag", "live": "#liveCol",
+    "desk_tab": '#deskTabs button[data-sub="{sub}"]', "links": "#driverBox .mono.grow",
     "dashboard": '#driverBox button[data-label="Show dashboard"]',   # data-label keeps the first text
     "cue_target": "#cueTarget", "cue_level": "#cueLevel", "cue_text": "#cueText", "cue_send": "#cueSend",
     "chat_name": "#chatName", "chat_text": "#chatInput", "chat_send": "#chatSendBtn", "chat_log": "#chatLog",
@@ -41,16 +40,17 @@ DIRECTOR = {
 }
 
 RACE_CONTROL = {
-    "waiting": "#driverCard .req.waiting",
-    "waiting_name": "#driverCard .req.waiting strong",
-    "request": '#driverCard .req.waiting:has(strong[title="{name}"])',
-    "request_entry": '#driverCard .req.waiting select[aria-label="Entry of {name}"]',
-    "request_approve": '#driverCard .req.waiting:has(strong[title="{name}"]) button[data-label="Approve"]',
-    "button": '#driverCard button[data-label="{label}"]',
-    "select": '#driverCard select[aria-label="{label}"]',
-    "input": '#driverCard input[aria-label="{label}"]',
-    "status": '#driverCard .msg[role="status"]',
-    "lap_line": "#driverCard .lapline", "links": "#driverCard .mono.grow",
+    "area": '.navbtn[data-area="{area}"]', "live": "#liveCol",
+    "waiting": ".dd .req.waiting",
+    "waiting_name": ".dd .req.waiting strong",
+    "request": '.dd .req.waiting:has(strong[title="{name}"])',
+    "request_entry": '.dd .req.waiting select[aria-label="Entry of {name}"]',
+    "request_approve": '.dd .req.waiting:has(strong[title="{name}"]) button[data-label="Approve"]',
+    "button": '.dd button[data-label="{label}"]',
+    "select": '.dd select[aria-label="{label}"]',
+    "input": '.dd input[aria-label="{label}"]',
+    "status": '.dd .msg[role="status"]',
+    "lap_line": ".dd .lapline", "links": ".dd .mono.grow",
     "note_target": "#rcTarget", "note_text": "#rcText", "note_send": "#rcSend", "note_message": "#rcMsg",
 }
 
@@ -96,10 +96,10 @@ DESK = {
 }
 
 # The link texts a screenshot of any page blacks out: the driver invite and the timing link.
-LINKS = ("#evt-invite-text", "#evt-timing-text", "#driverCard .mono.grow", "#driverBox .mono.grow")
+LINKS = ("#evt-invite-text", "#evt-timing-text", ".dd .mono.grow")
 
 # Visible once the page works.
-READY = {"PRODUCER": "#evt-track", "DIRECTOR": "#nextBtn", "RACE_CONTROL": "#driverCard",
+READY = {"PRODUCER": "#evt-track", "DIRECTOR": "#nextBtn", "RACE_CONTROL": "#liveCol",
          "COMMENTATOR": "#tally", "VIEWER": "#timing"}
 
 SOURCES = {

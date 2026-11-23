@@ -1,11 +1,14 @@
 /* Driver telemetry controls shared by the Race Control desk and the Director Panel
-   (#1114, #1115). DriverDesk.mount(el, {base, fullRedFlag, dashboardToggle}) polls the
-   relay and renders: the invite link, the race with its finish and red flag controls,
-   the race recording with its disconnect events, corrections, estimates for quiet
-   cars, retirements (DNF), shown driver names, rejoin and change overrides, the dashboard's delay, fastest lap and
-   qualifying corrections (plus its on-air switch with dashboardToggle), and the
-   senders with readiness, reassign and disconnect, and the drivers' registrations to approve. `base` prefixes every route: "/race-control" on the desk (its fetch
-   shim adds /console), "" on the panel. Every text goes in through textContent. */
+   (#1114, #1115). DriverDesk.mount(root, {base, fullRedFlag, dashboardToggle, onState})
+   polls the relay and renders: the invite link, the race with its finish and red flag
+   controls, the race recording with its disconnect events, corrections, estimates for
+   quiet cars, retirements (DNF), shown driver names, rejoin and change overrides, the
+   dashboard's delay, fastest lap and qualifying corrections (plus its on-air switch with
+   dashboardToggle), and the senders with readiness, reassign and disconnect, and the
+   drivers' registrations to approve. Each part (SLOTS) goes into root's
+   [data-desk="<part>"] mount point (#1267); onState gets deskState() after every poll.
+   `base` prefixes every route: "/race-control" on the desk (its fetch shim adds
+   /console), "" on the panel. Every text goes in through textContent. */
 (function () {
   "use strict";
   var CSS = [
@@ -328,10 +331,31 @@
     return s.approval === "pending" ? ["pending", "amb"] : ["approved, no data", "amb"];
   }
 
+  // The desk's parts, each rendered into the page's [data-desk="<part>"] mount point.
+  var SLOTS = ["live", "race", "drivers", "corrections", "qualifying", "dashboard", "setup", "trouble"];
+  function deskSlots(root) {
+    var out = {};
+    SLOTS.forEach(function (name) {
+      var host = root.querySelector('[data-desk="' + name + '"]');
+      if (host) out[name] = host;
+    });
+    return out;
+  }
+  // What the page's navigation marks: requests waiting, open disconnects, a stale relay.
+  function deskState(race, rec, reqs, stale) {
+    var r = race || {};
+    return {waiting: requestRows(reqs && reqs.requests).filter(function (q) { return q.status === "pending"; }).length,
+            events: ((rec && rec.events) || []).filter(function (ev) {
+              return ev.state === "suspected" || ev.state === "dropout"; }).length,
+            mode: r.mode || "race", red: !!r.red_flag, dashboard: !!(r.settings && r.settings.visible),
+            gaps: !!(rec && ((rec.dropped || 0) + (rec.failed || 0))), stale: !!stale};
+  }
+
   function mount(root, opts) {
     var base = (opts && opts.base) || "";
     var fullRedFlag = !!(opts && opts.fullRedFlag);
     var dashboardToggle = !!(opts && opts.dashboardToggle);
+    var onState = (opts && opts.onState) || null;
     if (!document.getElementById("dd-style")) {
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
     }
@@ -500,8 +524,6 @@
       saveSound(soundBox.checked);
       if (soundBox.checked) wakeAudio();
     });
-    // A stored "on" survives a reload, but the audio waits for the first click on the desk.
-    root.addEventListener("click", function () { if (soundBox.checked && !audio) wakeAudio(); });
     function beep() {
       if (!soundBox.checked || !audio) return;
       try {
@@ -787,7 +809,7 @@
       el("span", {cls: "muted", text: "Requests keep coming? Renew the invite link."})]);
     var okSummary = el("summary", {cls: "muted", text: "Approved drivers"});
     var okList = el("div", {cls: "reqs"});
-    var okBox = el("details", {cls: "reqs-ok"}, [okSummary, okList]);   // closed: the race controls stay in reach
+    var okBox = el("details", {cls: "reqs-ok", open: ""}, [okSummary, okList]);
     var reqDraft = Object.create(null);   // conn -> unsaved name, entry and stint
     var reqOpen = Object.create(null);    // approved conns open for a correction
     var lastReq = null;
@@ -873,43 +895,53 @@
       okList.replaceChildren.apply(okList, ok);
     }
 
-    root.replaceChildren(el("div", {cls: "dd"}, [
-      staleNote,
-      el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
-      el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
-      lastChange,
-      reqTitle, reqBar, reqList, okBox,
-      el("div", {cls: "row"}, [mode, laps, finalLap, finish]),
-      classLapRow,
-      el("div", {cls: "row"}, [redFlag, restart, release]),
-      redBanner,
-      el("h3", {text: "Race"}),
-      el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
-      recWarn, raceNote, lapLine, raceTable, qualiTable,
-      el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry, estSide, estRef, estSec,
-                               estSet, estClear]),
-      estList,
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Retire"}), retEntry, retOn, retOff]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Driver name"}), nameEntry, nameDriver, nameText,
-                               nameSet, nameClear]),
-      nameList,
-      multiRow,
-      evTitle,
-      el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
-      evTable,
-      el("h3", {text: "Dashboard"}),
-      el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
-      el("div", {cls: "row"}, [flClass, flText, flClear]),
-      el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qLap, qDelete, qRestore]),
-      qList,
-      el("h3", {text: "Tyres"}),
-      el("div", {cls: "row"}, [showTyre.label, showFuel.label]),
-      tyreTable,
-      el("h3", {text: "Readiness"}), readyTable,
-      el("h3", {text: "Senders"}), sendTable,
-      msg]));
+    var connText = el("div", {cls: "muted", text: "Connecting to the relay…"});
+    var parts = {
+      live: [staleNote, lapLine,
+        el("div", {cls: "row finish"}, [mode, laps, finalLap, finish]),
+        classLapRow,
+        el("div", {cls: "row red"}, [redFlag, restart, release]),
+        redBanner, msg, lastChange],
+      race: [raceNote, raceTable, evTitle,
+        el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
+        evTable],
+      drivers: [reqTitle, reqBar, reqList, okBox, el("h3", {text: "Readiness"}), readyTable,
+        el("h3", {text: "Senders"}), sendTable],
+      corrections: [el("h3", {text: "Retirement"}),
+        el("div", {cls: "row"}, [retEntry, retOn, retOff]),
+        multiRow,
+        el("h3", {text: "Estimate"}),
+        el("div", {cls: "row"}, [estEntry, estSide, estRef, estSec, estSet, estClear]),
+        estList,
+        el("h3", {text: "Correction"}),
+        el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
+        el("h3", {text: "Driver name"}),
+        el("div", {cls: "row"}, [nameEntry, nameDriver, nameText, nameSet, nameClear]),
+        nameList,
+        el("h3", {text: "Fastest lap"}),
+        el("div", {cls: "row"}, [flClass, flText, flClear]),
+        el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet])],
+      qualifying: [el("div", {cls: "row"}, [qEntry, qTime, qSet, qLap, qDelete, qRestore]),
+        qList, qualiTable],
+      dashboard: [el("h3", {text: "Dashboard"}),
+        el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
+        el("h3", {text: "Tyres"}),
+        el("div", {cls: "row"}, [showTyre.label, showFuel.label]),
+        tyreTable],
+      setup: [el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
+        el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
+        el("h3", {text: "Recording"}),
+        el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
+        recWarn],
+      trouble: [connText]
+    };
+    // Each part goes into its page's [data-desk] mount point; one without goes at the end of `root`.
+    var slots = deskSlots(root);
+    SLOTS.forEach(function (name) {
+      var box = el("div", {cls: "dd dd-" + name}, parts[name]);
+      if (slots[name]) slots[name].replaceChildren(box); else root.appendChild(box);
+      box.addEventListener("click", function () { if (soundBox.checked && !audio) wakeAudio(); });
+    });
 
     function keepSelect(sel, items) {
       var cur = sel.value;
@@ -1014,7 +1046,7 @@
       var quali = r.mode === "qualifying";
       raceTable.hidden = quali;
       qualiTable.hidden = !quali;
-      if (quali) { raceNote.textContent = ""; renderQuali(r); }
+      if (quali) { raceNote.textContent = "Qualifying: the times are under Qualifying."; renderQuali(r); }
     }
     function renderQuali(r) {
       var rows = [];
@@ -1115,6 +1147,8 @@
       else { state.fails = (state.fails || 0) + 1; state.staleSince = state.staleSince || new Date(); }
       var stale = state.fails >= STALE_POLLS;
       staleNote.hidden = !stale;
+      connText.textContent = ok ? "Relay reachable, updated " + new Date().toLocaleTimeString() + "."
+        : "Relay not answering since " + state.staleSince.toLocaleTimeString() + ".";
       if (stale) staleNote.textContent = "Relay not reachable since " + state.staleSince.toLocaleTimeString() +
         ": the tables below are not current.";
       [raceTable, qualiTable, evTable, readyTable, sendTable, reqList].forEach(function (t) { t.classList.toggle("stale", stale); });
@@ -1127,11 +1161,13 @@
       var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
-      if (renderRecording(await recCall) && r) renderRace(r);
+      var rec = await recCall;
+      if (renderRecording(rec) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
       if (rd) renderSenders(rd);
       var rq = await reqCall;
       if (rq) renderRequests(rq);
+      if (onState) onState(deskState(r, rec, rq, staleNote.hidden === false));
     }
     async function refreshInvite() {
       var d = await call("/drivers/invite", undefined, true);

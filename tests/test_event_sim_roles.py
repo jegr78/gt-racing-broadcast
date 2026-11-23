@@ -163,6 +163,7 @@ class Page:
         self.responses, self.clicks, self.scrolled, self.shots, self.gotos, self.later = [], [], [], [], [], []
         self.url = ""
         self.handlers = {}
+        self.fit = {}            # live column selector -> what FIT_SCRIPT measured there
 
     def add(self, selector, **kw):
         self.els[selector] = El(**kw)
@@ -210,6 +211,10 @@ class Page:
 
     def locator(self, selector):
         return Locator(self, selector)
+
+    def evaluate(self, script, arg=None):
+        assert script == roles.builtin.FIT_SCRIPT, "the only script a role runs measures the live column"
+        return self.fit.get(arg)
 
     def expect_response(self, pred, timeout=None):
         return Expect(self, pred, timeout)
@@ -274,10 +279,10 @@ def t_the_registry_has_every_party_and_its_actions():
     want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
             "director": {"open", "approve_link", "arm_feed", "arm", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
-                         "end_part"},
+                         "end_part", "fit"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
-                             "note"},
+                             "note", "fit"},
             "commentator": {"open", "submit_link", "chat"},
             "viewer": {"open", "read"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"}}
@@ -723,7 +728,7 @@ def t_a_screenshot_blacks_out_the_event_links():
     assert fails_shot, "no page, no screenshot"
     role.do("open", {})
     role.shot("desk.png")
-    assert page.shots == [("desk.png", "", ["#driverCard .mono.grow"])], page.shots
+    assert page.shots == [("desk.png", "", [".dd .mono.grow"])], page.shots
     cc, page, _ = producer()
     cc.do("open", {})
     cc.shot("cc.png")
@@ -905,17 +910,18 @@ def t_arm_feed_and_scene_name_their_key():
 
 def t_show_dashboard_opens_the_desk_and_reads_the_button():
     role, page, _ = make(party.DirectorRole)
-    page.add('.navbtn[data-area="setup"]')
+    page.add('.navbtn[data-area="race"]')
     button = '#driverBox button[data-label="Show dashboard"]'
+    tab = '#deskTabs button[data-sub="dashboard"]'
     page.add(button, text="Show dashboard", visible=False)
-    page.add("#driverBox > summary", on_click=lambda: setattr(page.els[button], "visible", True))
+    page.add(tab, on_click=lambda: setattr(page.els[button], "visible", True))
 
     def toggle():
         page.respond("/drivers/race/settings")
         page.els[button].text = "Hide dashboard"
     page.els[button].on_click = toggle
     assert role.do("show_dashboard", {}) == {"on": True}
-    assert "#driverBox > summary" in page.clicks, "a closed desk is opened first"
+    assert page.clicks[:2] == ['.navbtn[data-area="race"]', tab], "the Race area and its Dashboard tab first"
     fails(lambda: role.do("show_dashboard", {}), "does not read 'Show dashboard'")
 
 
@@ -938,15 +944,24 @@ def t_cue_and_chat_send_what_was_typed():
 
 
 # -- race control ---------------------------------------------------------------------
+RC_AREAS = ("drivers", "corrections", "qualifying", "note")
+
+
+def desk_areas(page):
+    for area in RC_AREAS:
+        page.add(f'.navbtn[data-area="{area}"]')
+
+
 def desk():
     role, page, ctx = make(party.RaceControlRole)
-    page.add('#driverCard .msg[role="status"]', text="", attrs={"class": "msg"})
+    page.add('.dd .msg[role="status"]', text="", attrs={"class": "msg"})
+    desk_areas(page)
     return role, page, ctx
 
 
 def desk_button(page, label, route, says, cls="msg", armed=True):
     """A desk button; an armed one acts on its second click only."""
-    key = f'#driverCard button[data-label="{label}"]'
+    key = f'.dd button[data-label="{label}"]'
     el = page.add(key, text=label)
 
     def click():
@@ -955,7 +970,7 @@ def desk_button(page, label, route, says, cls="msg", armed=True):
             return
         el.text = label
         page.respond("/console/race-control" + route)
-        status = page.els['#driverCard .msg[role="status"]']
+        status = page.els['.dd .msg[role="status"]']
         status.text, status.attrs["class"] = says, cls
     el.on_click = click
     return key
@@ -985,9 +1000,9 @@ def t_an_error_on_the_desks_status_line_fails_the_step():
 
 def t_the_desks_line_of_the_action_before_is_not_this_actions_result():
     role, page, _ = desk()
-    status = page.els['#driverCard .msg[role="status"]']
+    status = page.els['.dd .msg[role="status"]']
     status.text, status.attrs["class"] = "RED FLAG held the race; banner: missing", "msg err"
-    key = '#driverCard button[data-label="Final lap"]'
+    key = '.dd button[data-label="Final lap"]'
     el = page.add(key, text="Final lap")
 
     def click():
@@ -1006,41 +1021,41 @@ def t_the_desks_line_of_the_action_before_is_not_this_actions_result():
 
 def t_desk_forms_pick_the_entry_before_the_button():
     role, page, _ = desk()
-    page.add('#driverCard select[aria-label="Entry to retire"]', options=["A #1", "B #2"])
+    page.add('.dd select[aria-label="Entry to retire"]', options=["A #1", "B #2"])
     desk_button(page, "Retire (DNF)", "/drivers/race/retire", "Retired: B #2")
     assert role.do("retire", {"entry": "B #2"}) == {"status": "Retired: B #2"}
-    assert page.els['#driverCard select[aria-label="Entry to retire"]'].value == "B #2"
+    assert page.els['.dd select[aria-label="Entry to retire"]'].value == "B #2"
     fails(lambda: role.do("retire", {"entry": "Z #9"}), "Entry to retire", "no option")
-    page.add('#driverCard select[aria-label="Team to rejoin"]', options=["A #1"])
+    page.add('.dd select[aria-label="Team to rejoin"]', options=["A #1"])
     desk_button(page, "Mark rejoin", "/drivers/race/rejoin", "Rejoin marked", armed=False)
     assert role.do("rejoin", {"entry": "A #1"}) == {"status": "Rejoin marked"}
     for label, opts in (("Quiet entry to estimate", ["A #1"]), ("Reference entry", ["B #2"]),
                         ("Behind or ahead of the reference", ["behind", "ahead of"])):
-        page.add(f'#driverCard select[aria-label="{label}"]', options=opts)
-    page.add('#driverCard input[aria-label="Seconds from the reference"]')
+        page.add(f'.dd select[aria-label="{label}"]', options=opts)
+    page.add('.dd input[aria-label="Seconds from the reference"]')
     desk_button(page, "Set estimate", "/drivers/race/estimate", "Estimate set", armed=False)
     role.do("estimate", {"entry": "A #1", "ref": "B #2", "seconds": 6, "ahead": True})
-    assert page.els['#driverCard select[aria-label="Behind or ahead of the reference"]'].value == "ahead of"
-    assert page.els['#driverCard input[aria-label="Seconds from the reference"]'].value == "6"
-    page.add('#driverCard select[aria-label="Qualifying entry"]', options=["A #1"])
-    page.add('#driverCard input[aria-label="Qualifying time"]')
+    assert page.els['.dd select[aria-label="Behind or ahead of the reference"]'].value == "ahead of"
+    assert page.els['.dd input[aria-label="Seconds from the reference"]'].value == "6"
+    page.add('.dd select[aria-label="Qualifying entry"]', options=["A #1"])
+    page.add('.dd input[aria-label="Qualifying time"]')
     desk_button(page, "Add lap", "/drivers/race/quali-lap", "Qualifying lap added", armed=False)
     assert role.do("add_lap", {"entry": "A #1", "time": "1:45.312"}) == {"status": "Qualifying lap added"}
 
 
 def t_corrections_times_and_notes_go_through_their_forms():
     role, page, _ = desk()
-    page.add('#driverCard select[aria-label="Entry to correct"]', options=["A #1"])
+    page.add('.dd select[aria-label="Entry to correct"]', options=["A #1"])
     for label in ("Distance correction in metres", "Pit stop correction", "Reason"):
-        page.add(f'#driverCard input[aria-label="{label}"]')
+        page.add(f'.dd input[aria-label="{label}"]')
     desk_button(page, "Apply correction", "/drivers/race/correct", "Correction applied", armed=False)
     assert role.do("correction", {"entry": "A #1", "pits": 1, "reason": "missed stop"}) == {"status": "Correction applied"}
-    assert page.els['#driverCard input[aria-label="Pit stop correction"]'].value == "1"
-    assert page.els['#driverCard input[aria-label="Distance correction in metres"]'].value == "", \
+    assert page.els['.dd input[aria-label="Pit stop correction"]'].value == "1"
+    assert page.els['.dd input[aria-label="Distance correction in metres"]'].value == "", \
         "a value nobody asked for is left alone"
-    assert page.els['#driverCard input[aria-label="Reason"]'].value == "missed stop"
-    page.add('#driverCard select[aria-label="Qualifying entry"]', options=["A #1"])
-    page.add('#driverCard input[aria-label="Qualifying time"]')
+    assert page.els['.dd input[aria-label="Reason"]'].value == "missed stop"
+    page.add('.dd select[aria-label="Qualifying entry"]', options=["A #1"])
+    page.add('.dd input[aria-label="Qualifying time"]')
     desk_button(page, "Set time", "/drivers/race/quali", "Qualifying time set", armed=False)
     assert role.do("set_time", {"entry": "A #1", "time": "1:45.312"}) == {"status": "Qualifying time set"}
     page.add("#rcTarget", options=["On air", "All commentators"])
@@ -1062,20 +1077,20 @@ def waiting_desk(names):
     page.entries = {}
 
     def render():
-        page.add("#driverCard .req.waiting", count=len(left))
-        page.add("#driverCard .req.waiting strong", text=left[0] if left else "", count=len(left))
+        page.add(".dd .req.waiting", count=len(left))
+        page.add(".dd .req.waiting strong", text=left[0] if left else "", count=len(left))
         for name in set(names):
             n = left.count(name)
-            row = f'#driverCard .req.waiting:has(strong[title="{name}"])'
+            row = f'.dd .req.waiting:has(strong[title="{name}"])'
             page.add(row, count=n)
 
             def approve(name=name):
                 page.respond("/console/race-control/drivers/requests/approve")
-                page.entries[name] = page.els[f'#driverCard .req.waiting select[aria-label="Entry of {name}"]'].value
+                page.entries[name] = page.els[f'.dd .req.waiting select[aria-label="Entry of {name}"]'].value
                 left.remove(name)
                 render()
             page.add(row + ' button[data-label="Approve"]', count=n, on_click=approve)
-            page.add(f'#driverCard .req.waiting select[aria-label="Entry of {name}"]', count=n,
+            page.add(f'.dd .req.waiting select[aria-label="Entry of {name}"]', count=n,
                      options=["A #1", "B #2"])
     render()
     return role, page, left
@@ -1452,6 +1467,25 @@ def t_the_stack_stops_a_relay_the_control_center_restarted():
         assert "port held" in st.stop_relay(bad)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def t_fit_fails_when_a_live_control_needs_scrolling():
+    for cls in (party.RaceControlRole, party.DirectorRole):
+        role, page, _ = make(cls)
+        fails(lambda role=role: role.do("fit", {}), "has no live column (#liveCol)")
+        page.fit["#liveCol"] = [{"label": "RED FLAG", "cut": 0}, {"label": "Finish", "cut": 1}]
+        assert role.do("fit", {}) == {"controls": 2}, "a 1 px sub-pixel overhang still fits"
+        page.fit["#liveCol"].append({"label": "CUT", "cut": 37})
+        fails(lambda role=role: role.do("fit", {}), "1 of 3 live controls need scrolling: CUT 37px")
+
+
+def t_the_smoke_scenario_checks_both_live_columns():
+    loaded = scenario.load(os.path.join(SIM, "scenarios", "smoke.toml"), REG)
+    fit = {(s.role, s.id) for s in loaded.steps if s.do == "fit"}
+    assert {r for r, _ in fit} == {"race_control", "director"}, f"each live column is measured: {fit}"
+    order = [s.id for s in loaded.steps]
+    waiting = [i for r, i in fit if r == "race_control" and order.index(i) < order.index("approve_drivers")]
+    assert waiting, "the desk is measured while driver requests wait"
 
 
 def t_the_smoke_scenario_uses_every_party_once():

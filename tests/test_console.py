@@ -415,14 +415,18 @@ def t_recording_routes_are_desk_routes():
     assert cp.decide({"director"}, ["drivers", "snapshot"], "POST") == cp.NOT_FOUND
 
 
-def _desk_fn(name, call):
-    """Runs one top-level function of driver-desk.js under node; None without node."""
+def _js_fn(path, name, call, prelude=""):
+    """Runs top-level functions of a page or script under node; None without node."""
     import sys
     sys.path.insert(0, HERE)
     import test_driver_tower as tower
-    desk = os.path.join(ROOT, "src", "console", "driver-desk.js")
-    src = "\n".join(tower._function(desk, n) for n in name.split(","))
-    return tower._run(src + "\n;console.log(JSON.stringify(" + call + "));")
+    src = "\n".join(tower._function(path, n) for n in name.split(","))
+    return tower._run(prelude + src + "\n;console.log(JSON.stringify(" + call + "));")
+
+
+def _desk_fn(name, call):
+    """Runs one top-level function of driver-desk.js under node; None without node."""
+    return _js_fn(os.path.join(ROOT, "src", "console", "driver-desk.js"), name, call)
 
 
 def t_the_desk_lists_waiting_requests_first_and_hides_rejected_ones():
@@ -786,6 +790,99 @@ def t_the_desk_class_interval_keeps_the_exact_time():
     if got is None:
         return
     assert got == [153.7, 9], f"grouped rows read the exact class interval, a lap down too: {got}"
+
+
+def _src(*rel):
+    with open(os.path.join(ROOT, "src", *rel), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _desk_slots():
+    import re
+    return json.loads(re.search(r"var SLOTS = (\[[^\]]*\]);", _src("console", "driver-desk.js")).group(1))
+
+
+def _between(text, start, end):
+    i = text.index(start)
+    return text[i:text.index(end, i)]
+
+
+def t_both_pages_give_every_desk_part_one_mount_point():
+    slots = _desk_slots()
+    assert slots[0] == "live" and len(set(slots)) == len(slots), slots
+    for page in (("racecontrol", "race-control.html"), ("director", "director-panel.html")):
+        html = _src(*page)
+        for name in slots:
+            assert html.count(f'data-desk="{name}"') == 1, f"{page[1]}: one mount point for the {name} part"
+    desk = _src("racecontrol", "race-control.html")
+    assert 'data-desk="live"' in _between(desk, '<section id="liveCol"', "</section>"), \
+        "the desk's race controls sit in its live column"
+    panel = _src("director", "director-panel.html")
+    race = _between(panel, '<div class="area" data-area="race">', '<div class="area" data-area="broadcast">')
+    assert race.index('data-desk="live"') < race.index('id="deskTabs"'), "the race controls sit above the parts"
+    fault = _between(panel, '<div class="area" data-area="fault">', '<div id="log">')
+    assert 'data-desk="trouble"' in fault, "the desk's connection line is under Troubleshoot"
+
+
+def t_the_desk_mounts_every_part_where_the_page_put_it():
+    got = _js_fn(os.path.join(ROOT, "src", "console", "driver-desk.js"), "deskSlots", """deskSlots(
+      {querySelector: function (q) { return q.indexOf('"trouble"') < 0 ? {q: q} : null; }})""",
+                 prelude='var SLOTS = ["live", "race", "trouble"];\n')
+    if got is None:
+        return
+    assert got == {"live": {"q": '[data-desk="live"]'}, "race": {"q": '[data-desk="race"]'}}, \
+        f"a part without a mount point is left to the end of the root: {got}"
+    js = _src("console", "driver-desk.js")
+    assert "if (slots[name]) slots[name].replaceChildren(box); else root.appendChild(box);" in js, \
+        "a missing mount point never clears the page"
+
+
+def t_the_desk_state_names_what_needs_attention():
+    reqs = {"requests": [{"conn": "a", "status": "pending", "ts": 1}, {"conn": "b", "status": "approved", "ts": 2},
+                         {"conn": "c", "status": "pending", "ts": 3}, {"conn": "d", "status": "rejected", "ts": 4}]}
+    rec = {"events": [{"state": "suspected"}, {"state": "dropout"}, {"state": "dismissed"}], "dropped": 2}
+    race = {"mode": "qualifying", "red_flag": {"mode": "keep"}, "settings": {"visible": True}}
+    got = _desk_fn("requestRows,deskState", "[deskState(" + ",".join(json.dumps(x) for x in (race, rec, reqs)) +
+                   ", false), deskState(null, null, null, true)]")
+    if got is None:
+        return
+    assert got[0] == {"waiting": 2, "events": 2, "mode": "qualifying", "red": True, "dashboard": True,
+                      "gaps": True, "stale": False}, got[0]
+    assert got[1] == {"waiting": 0, "events": 0, "mode": "race", "red": False, "dashboard": False,
+                      "gaps": False, "stale": True}, f"a dead relay marks only itself: {got[1]}"
+
+
+def t_the_race_control_areas_match_the_nav_and_the_tab_bar():
+    import re
+    html = _src("racecontrol", "race-control.html")
+    areas = json.loads(re.search(r"const DESK_AREAS = (\[[^\]]*\]);", html).group(1).replace("'", '"'))
+    assert areas == ["race", "drivers", "corrections", "qualifying", "dashboard", "graphics", "note", "setup",
+                     "trouble"], areas
+    assert re.findall(r'class="navbtn" data-area="([a-z]+)"', html) == areas, "one nav button per area, in order"
+    assert re.findall(r'<div class="area" data-area="([a-z]+)" data-tab="([a-z]+)">', html) == \
+        [(a, a) for a in areas], "each area is the tab of the same name below 820 px"
+    tabs = [t[0] for t in json.loads(re.search(r"data-tabs='([^']*)'", html).group(1))]
+    assert tabs == ["live"] + areas + ["chat"], f"the tab bar maps onto the areas: {tabs}"
+    used = set(re.findall(r'data-tab="([a-z]+)"', html))
+    assert used == set(tabs), f"every tab shows something and nothing hides behind an unknown tab: {used}"
+    for cid in ("tally", "program", "pgmToggle", "raceCard", "liveTimer"):
+        assert f'id="{cid}"' in _between(html, '<section id="liveCol"', "</section>"), f"#{cid} is live"
+
+
+def t_qualifying_preselects_its_area_on_a_switch_only():
+    path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
+    got = _js_fn(path, "followMode", """(function () {
+      ["race", "race", "qualifying", "qualifying", "race", "qualifying", "race"].forEach(function (m, i) {
+        if (i === 6) deskArea = "note";
+        followMode(m);
+      });
+      return {shown: shown, area: deskArea};
+    })()""", prelude="var lastMode = null, deskArea = 'race', shown = [];"
+                     "function showArea(n) { shown.push(n); deskArea = n; }\n")
+    if got is None:
+        return
+    assert got == {"shown": ["qualifying", "race", "qualifying"], "area": "note"}, \
+        f"only a switch of the mode moves the desk, back to Race only from Qualifying: {got}"
 
 
 if __name__ == "__main__":
