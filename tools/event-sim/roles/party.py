@@ -307,6 +307,23 @@ class ProducerRole(Surface):
     sources = selectors.SOURCES["PRODUCER"]
     selectors = selectors.PRODUCER
     masked = ("invite", "timing")
+    JOBS = "/api/jobs/"
+
+    def open(self):
+        super().open()
+        self.ended = set()       # paths of the job event streams the page saw end
+
+    def act_open(self, args):
+        fresh = self.pg is None
+        out = super().act_open(args)
+        if fresh:
+            self.pg.on("requestfinished", self._finished)
+        return out
+
+    def _finished(self, request):
+        path = urlsplit(request.url).path
+        if path.startswith(self.JOBS):
+            self.ended.add(path)
 
     def view(self, name):
         self.click(self.sel("view", view=name), f"view {name}")
@@ -353,13 +370,22 @@ class ProducerRole(Surface):
         return done
 
     def _job(self, button, op, what):
-        """Run the job behind `button` and wait for this job's result: the chip of an
-        earlier job stays up until the new one starts."""
+        """Run the job behind `button` and wait for this job's result: once the page's
+        event stream of this job (its id from the start answer) has ended, the chip shows
+        it. The page hides the chip only while a job runs, which a quick job ends between
+        two looks, so that is no sign of this job."""
         chip = self.sel("job")
         self.click(self.sel(button), what)
-        self.answered(lambda: self.click(self.sel("confirm"), f"{what}: confirm"), "/api/op/" + op, what)
-        self.until(lambda: not self.pg.locator(chip).first.is_visible(), f"{what}: the job starting")
-        self.until(lambda: self.shown(chip), f"{what}: the job's result", timeout=JOB_S, slow=None)
+        resp = self.answered(lambda: self.click(self.sel("confirm"), f"{what}: confirm"), "/api/op/" + op, what)
+        try:
+            job = resp.json().get("job_id")
+        except Exception:  # noqa: BLE001  an answer without a job is checked below
+            job = None
+        if not job:
+            raise StepError(f"{what}: the Control Center started no job")
+        stream = f"{self.JOBS}{job}/stream"
+        self.until(lambda: stream in self.ended, f"{what}: the job's end", timeout=JOB_S, slow=None)
+        self.until(lambda: self.shown(chip), f"{what}: the job's result")
         result = self.text(chip)
         if result != "done":
             tail = builtin.redact(self.text(self.sel("job_log")), self.ctx.secrets)[-600:]
