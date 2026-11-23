@@ -66,7 +66,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
   Stop: Ctrl+C
 """
 
-import argparse, collections, csv, datetime, hashlib, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
+import argparse, collections, csv, datetime, hashlib, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, select, shutil, signal, socket, ssl, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, quote, unquote, parse_qs, parse_qsl, urlencode, urljoin
 from urllib.request import Request, urlopen
@@ -6348,6 +6348,27 @@ def fanout_capped_read(ring, cursor, prebuffer_s, now=None,
     return ring.read(cursor, timeout_live)
 
 
+def consumer_hung_up(conn):
+    """True when the consumer closed its end; never blocks. Bytes it sends after the
+    request are read and dropped; a socket select() cannot watch counts as open."""
+    if conn.fileno() == -1:
+        return True
+    try:
+        readable, _, _ = select.select([conn], [], [], 0)
+    except ValueError:
+        return False                    # descriptor beyond select()'s range
+    except OSError:
+        return True
+    if not readable:
+        return False
+    try:
+        return conn.recv(4096) == b""
+    except BlockingIOError:
+        return False
+    except OSError:
+        return True
+
+
 class FeedFanoutServer:
     """Serve one FeedRing to many HTTP consumers (OBS + preview) on a loopback
     port. One accept loop + one handler thread per consumer. A slow/stuck socket
@@ -6477,6 +6498,8 @@ class FeedFanoutServer:
                         st = self._consumers.get(cid)
                         if st is not None:
                             st["cycle_ts"] = time.monotonic()  # send completed
+                elif consumer_hung_up(conn):                 # an idle feed never sends
+                    break
         except OSError:
             pass                                # consumer went away / slow send aborted
         finally:

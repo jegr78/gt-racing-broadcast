@@ -586,11 +586,12 @@ def ffmpeg_argv(ffmpeg, mode, height, code, stint, text, offset):
     for x, y, w, h, white in identity_boxes(width, height, code, stint):
         filters.append(f"drawbox=x={x}:y={y}:w={w}:h={h}:color={'white' if white else 'black'}:t=fill")
     source = "smptebars" if mode == "freeze" else "testsrc2"
-    return [*ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error",
+    # ffmpeg sizes its pools by core count; a run's task limit has to hold every pull.
+    return [*ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-filter_threads", "1",
             "-re", "-f", "lavfi", "-i", f"{source}=size={width}x{height}:rate={FPS}",
             "-re", "-f", "lavfi", "-i", f"sine=frequency={tone_hz(code)}:sample_rate=48000",
             "-map", "0:v", "-map", "1:a", "-vf", ",".join(filters),
-            "-c:v", "mpeg2video", "-q:v", "5", "-g", str(FPS), "-bf", "0", "-pix_fmt", "yuv420p",
+            "-c:v", "mpeg2video", "-threads", "1", "-q:v", "5", "-g", str(FPS), "-bf", "0", "-pix_fmt", "yuv420p",
             "-c:a", "mp2", "-b:a", "96k", "-output_ts_offset", f"{offset:.3f}", "-f", "mpegts", "pipe:1"]
 
 

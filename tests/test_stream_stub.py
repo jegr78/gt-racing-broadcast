@@ -378,6 +378,8 @@ def t_ffmpeg_argv_is_conservative():
                  "expansion=none", "-output_ts_offset 3.500", "sine=frequency="):
         assert part in joined, part
     assert argv[-1] == "pipe:1"
+    assert "-filter_threads 1" in joined and "-threads 1" in joined, \
+        "a pull uses one thread per stage, not one per core: a run's task limit holds every feed"
     frozen = " ".join(stream_stub.ffmpeg_argv(["ffmpeg"], "freeze", 360, 7, 2, text=False, offset=0))
     assert "smptebars" in frozen and "testsrc2" not in frozen and "drawtext" not in frozen
     assert "size=640x360" in frozen

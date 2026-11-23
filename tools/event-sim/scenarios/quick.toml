@@ -1,0 +1,319 @@
+# Quick: a short event of three stints in three lobbies, one commentator each, in well
+# under 20 minutes. Start event, then qualifying mode: Comms 1 is on air on the Qualifying row and
+# Race Control enters two laps with Add lap; the public timing ranks them. The director
+# switches to race mode, the drivers of all three stints register and Race Control
+# approves them. Stint 1: a car disconnects, Race Control confirms the DC and marks the
+# rejoin. Both stint changes swap every driver in a new lobby, the DC car rejoins late in
+# stint 2, and in the third lobby Race Control calls the final lap: the race finishes and
+# the producer stops the event.
+description = "Qualifying with Add lap, approval, three short stints with swaps and a DC, final lap, stop."
+max_minutes = 16
+
+[event]
+stints = 3
+track = "6e378b"
+track_length_m = 1200
+cars = 4
+seed = 7
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 3"
+channel = "comms3"
+scheduled = true
+
+[sheet.tabs]
+Qualifying = [["URL", "Streamer", "Stint"], ["sim://comms1", "Comms 1", "Qualifying"]]
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = false, finish_mode = "time" }
+expect = ["race.settings.finish_mode == 'time'"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'", "relay.up"]
+
+[[step]]
+id = "quali_mode"
+at = "after:start_event"
+role = "director"
+do = "mode"
+args = { mode = "qualifying" }
+expect = ["relay.status.mode == 'qualifying'"]
+timeout = "20s"
+
+[[step]]
+id = "arm_a"
+at = "after:quali_mode"
+role = "director"
+do = "arm_feed"
+args = { feed = "A" }
+
+[[step]]
+id = "stint1_on_air"
+at = "after:arm_a"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms1' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "quali_lap1"
+at = "after:stint1_on_air"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Blue Harbor Racing #22", time = "1:45.312" }
+
+[[step]]
+id = "quali_lap2"
+at = "after:quali_lap1"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Apex Works #11", time = "1:44.208" }
+
+[[step]]
+id = "quali_timing"
+at = "after:quali_lap2"
+role = "viewer"
+do = "read"
+args = { cars = 2 }
+expect = ["page('viewer').cars >= 2", "'Apex Works' in page('viewer').rows[0]",
+          "'Blue Harbor' in page('viewer').rows[1]"]
+timeout = "20s"
+shot = "quick-quali-timing"
+
+[[step]]
+id = "race_mode"
+at = "after:quali_timing"
+role = "director"
+do = "mode"
+args = { mode = "race" }
+expect = ["relay.status.mode == 'race'", "'comms1' in obs.program_channels"]
+timeout = "60s"
+
+[[step]]
+id = "cockpit2"
+at = "after:race_mode"
+role = "commentator:Comms 2"
+do = "open"
+expect = ["not page('commentator:Comms 2').on_air"]
+timeout = "15s"
+
+[[step]]
+id = "register"
+at = "after:cockpit2"
+role = "drivers"
+do = "register"
+args = { stints = 3 }
+expect = ["result('register').registered == 12"]
+
+[[step]]
+id = "approve_drivers"
+at = "after:register"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 12"]
+
+[[step]]
+id = "green"
+at = "after:approve_drivers"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'"]
+timeout = "60s"
+
+[[step]]
+id = "lap2"
+at = "after:green"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "3m"
+
+[[step]]
+id = "drop"
+at = "after:lap2"
+role = "drivers"
+do = "drop"
+args = { entry = "Cedar Motorsport #33" }
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'no_data'"]
+timeout = "20s"
+
+[[step]]
+id = "confirm_dc"
+at = "after:drop"
+role = "race_control"
+do = "confirm_dc"
+args = { entry = "Cedar Motorsport #33" }
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'dc'"]
+timeout = "15s"
+shot = "dc-confirmed-desk"
+
+[[step]]
+id = "mark_rejoin"
+at = "after:confirm_dc"
+role = "race_control"
+do = "rejoin"
+args = { entry = "Cedar Motorsport #33" }
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').rejoin"]
+timeout = "10s"
+
+[[step]]
+id = "box1"
+at = "after:mark_rejoin"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 3"]
+timeout = "90s"
+
+[[step]]
+id = "arm_b"
+at = "after:box1"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next2"
+at = "after:arm_b"
+role = "director"
+do = "next"
+expect = ["'comms2' in obs.program_channels", "'comms1' not in obs.program_channels",
+          "page('commentator:Comms 2').on_air"]
+timeout = "90s"
+
+[[step]]
+id = "lobby2"
+at = "after:next2"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "release2"
+at = "after:lobby2+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 3"]
+timeout = "60s"
+
+[[step]]
+id = "rejoin"
+at = "after:release2"
+role = "drivers"
+do = "rejoin"
+args = { entry = "Cedar Motorsport #33", seconds = 15 }
+
+[[step]]
+id = "rejoined"
+at = "after:rejoin"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["page('drivers').driving == 4",
+          "row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'racing'",
+          "row(race.entries, 'entry', 'Cedar Motorsport #33').driver == 'Driver 33-2'",
+          "row(race.entries, 'entry', 'Cedar Motorsport #33').gap_time_s >= 15",
+          "pluck(race.entries, 'entry')[3] == 'Cedar Motorsport #33'"]
+timeout = "60s"
+shot = { name = "dc-rejoined-desk", role = "race_control" }
+
+[[step]]
+id = "stint2_lap"
+at = "after:rejoined+15s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'",
+          "row(race.entries, 'entry', 'Apex Works #11').pit_stops == 1",
+          "len(result('stint2_lap').entries) == 4"]
+
+[[step]]
+id = "box2"
+at = "after:stint2_lap"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 4"]
+timeout = "90s"
+
+[[step]]
+id = "arm3"
+at = "after:box2"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next3"
+at = "after:arm3"
+role = "director"
+do = "next"
+expect = ["'comms3' in obs.program_channels", "'comms2' not in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "lobby3"
+at = "after:next3"
+role = "drivers"
+do = "lobby"
+args = { stint = 3 }
+
+[[step]]
+id = "release3"
+at = "after:lobby3+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 4"]
+timeout = "60s"
+
+[[step]]
+id = "final_lap"
+at = "after:release3+20s"
+role = "race_control"
+do = "final_lap"
+expect = ["race.state == 'finished'", "row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'"]
+timeout = "2m"
+shot = "quick-finished-desk"
+
+[[step]]
+id = "chequered"
+at = "after:final_lap"
+role = "drivers"
+do = "stop"
+
+[[step]]
+id = "stop_event"
+at = "after:chequered"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"

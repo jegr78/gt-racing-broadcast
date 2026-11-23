@@ -358,7 +358,7 @@ class DirectorRole(LiveColumn, Surface):
     `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
     Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
-    target, level), `chat` (text, name), `fit`."""
+    target, level), `chat` (text, name), `view` (area), `fit`."""
     kind = "director"
     path, ready = "/panel", selectors.READY["DIRECTOR"]
     sources = selectors.SOURCES["DIRECTOR"]
@@ -368,6 +368,11 @@ class DirectorRole(LiveColumn, Surface):
 
     def area(self, name):
         self.click(self.sel("area", area=name), f"area {name}")
+
+    def act_view(self, args):
+        """Open an area, so a screenshot shows it."""
+        self.area(str(args.get("area", "")))
+        return {"area": str(args.get("area", ""))}
 
     def _classes(self, selector):
         return self.attr(selector, "class").split()
@@ -546,7 +551,8 @@ class RaceControlRole(LiveColumn, Surface):
     """Race Control on its desk: `approve_driver` (name, entry), `approve_drivers`,
     `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
     `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
-    `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target), `fit`. An
+    `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target), `confirm_dc`
+    (entry), `class_laps` (class, laps), `view` (area), `fit`. An
     action first opens the desk area that holds its controls; the race controls stay in
     the live column."""
     kind = "race_control"
@@ -559,6 +565,11 @@ class RaceControlRole(LiveColumn, Surface):
 
     def area(self, name):
         self.click(self.sel("area", area=name), f"area {name}")
+
+    def act_view(self, args):
+        """Open an area, so a screenshot shows it."""
+        self.area(str(args.get("area", "")))
+        return {"area": str(args.get("area", ""))}
 
     def _line(self):
         status = self.sel("status")
@@ -637,6 +648,33 @@ class RaceControlRole(LiveColumn, Surface):
         self.area("corrections")
         self.choose(self.sel("select", label=DESK["rejoin_entry"]), "Team to rejoin", value=args.get("entry"))
         return self._press(DESK["rejoin"], "/drivers/race/rejoin", "Rejoin marked")
+
+    def act_confirm_dc(self, args):
+        """Confirm the open disconnect event of `entry` in the Race area's events list."""
+        entry = str(args.get("entry", ""))
+        self.area("race")
+        key = self.sel("dc_confirm", entry=entry)
+        try:
+            self.control(key, f"Confirm DC of {entry}")
+        except StepError:
+            raise StepError(f"no open event of {entry!r} to confirm") from None
+        before = self._line()
+        self.answered(lambda: self.click(key, f"Confirm DC of {entry}"), self.base + "/drivers/race/recording/event",
+                      f"Confirm DC of {entry}")
+        return {"status": self._status("Confirm DC", "DC confirmed", before)}
+
+    def act_class_laps(self, args):
+        """Set the lap count of a class after the first one (the live column's Class laps row)."""
+        cls = str(args.get("class", ""))
+        field = self.sel("input", label=DESK["class_laps"] + cls)
+        before = self._line()
+
+        def enter():
+            box = self.control(field, f"Lap count of {cls}")
+            box.fill(str(args.get("laps", "")), timeout=CONTROL_MS)
+            box.press("Tab", timeout=CONTROL_MS)
+        self.answered(enter, self.base + "/drivers/race/class-laps", f"Lap count of {cls}")
+        return {"status": self._status(f"Lap count of {cls}", f"{cls} lap count saved", before)}
 
     def act_estimate(self, args):
         self.area("corrections")

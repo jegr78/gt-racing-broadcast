@@ -288,10 +288,10 @@ def t_the_registry_has_every_party_and_its_actions():
     want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
             "director": {"open", "approve_link", "arm_feed", "arm", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
-                         "end_part", "fit"},
+                         "end_part", "fit", "view"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
-                             "note", "fit"},
+                             "note", "fit", "confirm_dc", "class_laps", "view"},
             "commentator": {"open", "submit_link", "chat"},
             "viewer": {"open", "read"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"}}
@@ -953,7 +953,7 @@ def t_cue_and_chat_send_what_was_typed():
 
 
 # -- race control ---------------------------------------------------------------------
-RC_AREAS = ("drivers", "corrections", "qualifying", "note")
+RC_AREAS = ("race", "drivers", "corrections", "qualifying", "note")
 
 
 def desk_areas(page):
@@ -1035,6 +1035,41 @@ def t_the_desks_line_of_the_action_before_is_not_this_actions_result():
     start = page.clock.t
     assert role.do("final_lap", {}) == {"status": "Final lap"}, "the same line twice is accepted once it stays"
     assert page.clock.t - start >= party.STALE_S
+
+
+def _desk_change(page, key, route, says, **kw):
+    """A desk select or input that sends `route` on its change and shows `says`."""
+    def change():
+        page.respond("/console/race-control" + route)
+        status = page.els['.dd .msg.cur[role="status"]']
+        status.text, status.attrs["class"] = says, "msg"
+    return page.add(key, on_change=change, **kw)
+
+
+def t_race_control_confirms_a_dc_and_sets_a_class_lap_count():
+    role, page, _ = desk()
+    key = '.dd tr:has(div:text-is("B #2")) button[data-label="Confirm DC"]:not([hidden])'
+    desk_button(page, "Confirm DC", "/drivers/race/recording/event", "DC confirmed", armed=False)
+    page.els[key] = page.els.pop('.dd button[data-label="Confirm DC"]')
+    assert role.do("confirm_dc", {"entry": "B #2"}) == {"status": "DC confirmed"}
+    assert page.clicks[-2:] == ['.navbtn[data-area="race"]', key], "the events list is in the Race area"
+    fails(lambda: role.do("confirm_dc", {"entry": "A #1"}), "no open event of 'A #1'")
+    laps = _desk_change(page, '.dd input[aria-label="Lap count of GT4"]', "/drivers/race/class-laps",
+                        "GT4 lap count saved")
+    assert role.do("class_laps", {"class": "GT4", "laps": 5}) == {"status": "GT4 lap count saved"}
+    assert laps.value == "5"
+    fails(lambda: role.do("class_laps", {"class": "GT3", "laps": 5}), "Lap count of GT3")
+
+
+def t_the_desk_and_the_panel_open_an_area_to_show_it():
+    role, page, _ = desk()
+    assert role.do("view", {"area": "corrections"}) == {"area": "corrections"}
+    assert page.clicks[-1] == '.navbtn[data-area="corrections"]'
+    fails(lambda: role.do("view", {"area": "nowhere"}), "area nowhere")
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="race"]')
+    assert role.do("view", {"area": "race"}) == {"area": "race"}
+    assert page.clicks[-1] == '.navbtn[data-area="race"]'
 
 
 def t_desk_forms_pick_the_entry_before_the_button():
@@ -1295,7 +1330,14 @@ def t_driver_actions_reach_the_field():
     assert role.page()["standing"] == 2, role.page()["cars"]
     role.do("lobby", {"stint": 2})
     role.do("rejoin", {"entry": 2, "seconds": 2})
-    role.do("release", {})
+    fails(lambda: role.do("release", {"gaps": [{"entry": drive.roster(3)[0], "gap_s": None}]}),
+          "no gap to release by")
+    fails(lambda: role.do("release", {"gaps": "race"}), "rows of a race reading")
+    teams = drive.roster(3)
+    role.do("release", {"gaps": [{"entry": teams[0], "gap_s": None}, {"entry": teams[2], "gap_s": 4.5}]})
+    assert role.field.car(teams[2]).pit["delay"] == 0.0, "a gap counts from the first car's"
+    assert role.field.car(teams[0]).pit["delay"] == drivers.UNGAPPED_STEP_S, \
+        "a lapped car without a gap leaves after the last, in the reading's order"
     runner.run(60.0)
     page = role.page()
     assert page["driving"] == 3 and {c["driver"] for c in page["cars"]} == \
@@ -1612,6 +1654,31 @@ def t_the_smoke_scenario_uses_every_party_once():
             if s["role"].split(":")[0] not in ("api", "obs", "stream") and not str(s.get("at", "")).startswith("after:")]
     assert free == [], f"without a browser these steps would not be skipped with their chain: {free}"
     assert loaded.steps[-1].do == "stop_event", "Stop event ends the relay, so it is the last step"
+
+
+EVENT_SCENARIOS = ("quick", "multiclass", "late-link", "dc-rejoin", "relay-crash", "red-flag")
+
+
+def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program():
+    for name in EVENT_SCENARIOS:
+        path = os.path.join(SIM, "scenarios", name + ".toml")
+        loaded = scenario.load(path, REG)
+        assert loaded.event.get("stints") == 3, f"{name}: three stints, each its own lobby"
+        stints = sorted(c.stint for c in loaded.commentators)
+        assert stints == [1, 2, 3], f"{name}: one commentator per stint, not {stints}"
+        lobbies = [s.args.get("stint") for s in loaded.steps if s.role == "drivers" and s.do == "lobby"]
+        assert {2, 3} <= set(lobbies), f"{name}: the drivers change into the lobbies of stints 2 and 3: {lobbies}"
+        checks = " ".join(e for s in loaded.steps for e in s.expect)
+        for c in loaded.commentators:
+            assert f"'{c.channel}' in obs.program_channels" in checks, \
+                f"{name}: no check that program shows {c.name}'s picture"
+        with open(path, "rb") as fh:
+            raw = tomllib.load(fh)
+        free = [s.get("id") for s in raw["step"] if s["role"].split(":")[0] not in ("api", "obs", "stream", "relay")
+                and not str(s.get("at", "")).startswith("after:")]
+        assert free == [], f"{name}: without a browser these steps would not be skipped with their chain: {free}"
+        assert loaded.steps[-1].do == "stop_event", f"{name}: Stop event ends the relay, so it is the last step"
+        assert all(s.expect for s in loaded.steps if s.role == "api"), f"{name}: every probe step asserts something"
 
 
 if __name__ == "__main__":

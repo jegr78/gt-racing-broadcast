@@ -569,6 +569,8 @@ def t_grabber_reads_only_the_relay_feeds():
         argv = grab.argv()
         assert argv[argv.index("-protocol_whitelist") + 1] == "pipe", argv
         assert argv.index("-f") < argv.index("-i") and argv[argv.index("-f") + 1] == "mpegts", argv
+        assert argv[argv.index("-threads") + 1] == "1" and argv[argv.index("-filter_threads") + 1] == "1", \
+            "a grab decodes on one thread, not one per core"
         many = _grabber(cmd, feeds, ports=range(9000, 9040), wait=0)
         many.frames([f"http://127.0.0.1:{p}" for p in range(9000, 9040)])
         assert len(many.feeds) <= obs_grab.MAX_FEEDS, "the feed cache is bounded"

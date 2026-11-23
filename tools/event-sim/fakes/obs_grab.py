@@ -55,8 +55,8 @@ class FeedGrabber:
         w, h = self.size
         # A live feed is endless: probe 1 s of it, not ffmpeg's default 5 s and 5 MB.
         return self.cmd + ["-hide_banner", "-loglevel", "error", "-protocol_whitelist", "pipe",
-                           "-probesize", "500000", "-analyzeduration", "1000000",
-                           "-f", "mpegts", "-i", "pipe:0", "-an", "-frames:v", "1",
+                           "-probesize", "500000", "-analyzeduration", "1000000", "-filter_threads", "1",
+                           "-threads", "1", "-f", "mpegts", "-i", "pipe:0", "-an", "-frames:v", "1",
                            "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
 
     @staticmethod

@@ -221,6 +221,37 @@ def t_expect_refuses_everything_else():
     _refused([{"role": "rec", "do": "go", "expect": ["relya.up"]}], "unknown name 'relya'")
 
 
+def t_expect_compares_rows_of_two_readings():
+    before = [{"entry": "A #1", "gap_s": 0.0}, {"entry": "B #2", "gap_s": 4.0}, {"entry": "C #3", "gap_s": None}]
+    after = [{"entry": "B #2", "gap_s": 4.7}, {"entry": "A #1", "gap_s": 0.0}, {"entry": "C #3", "gap_s": 9.0}]
+    names = {"box": Box(0, {"before": before, "after": after})}
+    assert expect.truth("pluck(box.data.after, 'entry') == ['B #2', 'A #1', 'C #3']", names)[0]
+    assert expect.truth("row(box.data.after, 'entry', 'B #2').gap_s == 4.7", names)[0]
+    assert expect.truth("drift(box.data.before, box.data.after, 'gap_s') < 0.71", names)[0], \
+        "the largest change of a key between rows of the same entry, None on either side left out"
+    assert not expect.truth("drift(box.data.before, box.data.after, 'gap_s') < 0.69", names)[0]
+    names = {"box": Box(0, {"before": before + [{"entry": "D #4", "gap_s": 10.0}],
+                            "after": after + [{"entry": "D #4", "gap_s": 8.5}]})}
+    assert expect.truth("drift(box.data.before, box.data.after, 'gap_s') == 1.5", names)[0], \
+        "a gap that shrank drifted as far as one that grew"
+    for text in ("row(box.data.after, 'entry', 'Z #9').gap_s == 1",
+                 "drift(box.data.before, [], 'gap_s') < 1", "pluck(box.data.after, 'nope') == []"):
+        try:
+            expect.truth(text, names)
+        except expect.Unresolved:
+            continue
+        raise AssertionError(f"{text!r} must stay unresolved: nothing to compare is not a pass")
+    lost = {"box": Box(0, {"before": before, "after": [{"entry": "A #1", "gap_s": 0.0},
+                                                       {"entry": "B #2", "gap_s": None}]})}
+    try:
+        expect.truth("drift(box.data.before, box.data.after, 'gap_s') <= 1", lost)
+    except expect.Unresolved:
+        pass  # the expected outcome
+    else:
+        raise AssertionError("a row that had a number before and none after is no drift of 0")
+    expect.compile_expr("drift(result('a').entries, race.entries, 'gap_s') <= 1", ROOTS)
+
+
 def t_only_plain_values_leave_a_probe():
     names = {"box": Box(1, {"a": [1, 2]}), "page": expect.Func(lambda r: {"r": r})}
     for text in ("box.twice(box) == 1", "box.twice(page) == 1", "box.twice == 1", "len == 1", "box == 1",
@@ -676,6 +707,53 @@ def t_api_role_adds_tokens_and_fails_on_http_errors():
         th.join()
 
 
+class _Proc:
+    def poll(self):
+        return None
+
+
+def t_a_relay_crash_kills_only_the_relay_its_pid_file_names():
+    scn = _scn([{"role": "rec", "do": "go"}])
+    with tempfile.TemporaryDirectory() as work:
+        st = stack.Stack(scn, work)
+        st.home, st.urls = work, {"relay": "http://127.0.0.1:41000"}
+        child = stack.Child.__new__(stack.Child)
+        child.name, child.proc, child.expected_exit = "relay", _Proc(), False
+        st.children = [child]
+        killed = []
+        st.home = None
+        try:
+            st.kill_relay(pids=lambda port: [4242], kill=lambda pid, sig: killed.append(pid))
+            raise AssertionError("a stack without its app home reads no relay.pid")
+        except RuntimeError as exc:
+            assert "app home" in str(exc), exc
+        st.home = work
+        try:
+            st.kill_relay(pids=lambda port: [4242], kill=lambda pid, sig: killed.append(pid))
+            raise AssertionError("no PID file is no relay to kill")
+        except RuntimeError as exc:
+            assert "relay.pid" in str(exc), exc
+        stack.stamp_relay(work, 4242)
+        try:
+            st.kill_relay(pids=lambda port: [4242, 4343], kill=lambda pid, sig: killed.append(pid))
+            raise AssertionError("a port held by another process too is not killed")
+        except RuntimeError as exc:
+            assert "41000" in str(exc) and "4343" in str(exc), exc
+        assert not killed, "nothing is killed on a mismatch"
+        seen = []
+        assert st.kill_relay(pids=lambda port: seen.append(port) or [4242],
+                             kill=lambda pid, sig: killed.append((pid, sig))) == 4242
+        assert seen == [41000] and killed == [(4242, stack.KILL_SIGNAL)]
+        assert child.expected_exit, "the stack's own relay child may now end without a problem"
+    ctx = engine.RunContext(kill_relay=lambda: 4242)
+    assert builtin.RelayRole(ctx, "relay").do("kill", {}) == {"pid": 4242}
+    try:
+        builtin.RelayRole(engine.RunContext(), "relay").do("kill", {})
+        raise AssertionError("a run that cannot kill its relay fails the step")
+    except roles.StepError:
+        pass  # expected
+
+
 def t_relay_probe_names_its_port():
     assert expect.truth("relay.port == 41234", {"relay": probes.RelayProbe("http://127.0.0.1:41234")})[0]
 
@@ -728,6 +806,7 @@ class _FakeBrowser:
 
     def new_context(self, viewport=None):
         outer = self
+        self.viewport = viewport
 
         class C:
             def new_page(self):
@@ -761,6 +840,22 @@ def t_page_role_opens_shoots_and_reports_console_errors():
         assert "404" in str(exc) and "tok" not in str(exc), str(exc)
     findings = role.close()
     assert sorted(s for s, _ in findings) == ["hard", "soft"], "a script error is hard, a failed load soft"
+
+
+def t_page_role_opens_in_the_window_size_it_is_given():
+    br = _FakeBrowser()
+    role = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br), "page:overlay")
+    role.open()
+    role.do("open", {"path": "/drivers", "viewport": [1920, 1080]})
+    assert br.viewport == {"width": 1920, "height": 1080}, "an OBS page is shot at the canvas size"
+    for bad in ([1920], [0, 1080], ["1920", 1080], "1920x1080"):
+        other = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br), "page:x")
+        other.open()
+        try:
+            other.do("open", {"path": "/drivers", "viewport": bad})
+            raise AssertionError(f"viewport {bad!r} must be refused")
+        except roles.StepError as exc:
+            assert "viewport" in str(exc), exc
 
 
 def t_page_role_keeps_tokens_out_of_what_it_reports():
