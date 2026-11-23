@@ -97,8 +97,8 @@
     .livestrip { order: -1; margin: -12px -12px 0; }
     .rail { overflow: visible; }
     .rail > .card { flex: none; }
-    #chat { flex: none; height: 300px; }
-    #bchat { flex: none; height: 280px; }
+    .rail #chat { flex: none; height: 300px; }   /* beats the later #chat rule */
+    .rail #bchat { flex: none; height: 280px; }
     .crewtabs-on .crewtabs { overflow-x: auto; }
     .crewtabs button { flex: 0 0 auto; min-width: 64px; padding: 0 10px; position: relative; }
     .crewtabs button.dot-warn::after, .crewtabs button.dot-alarm::after { content: ""; position: absolute;
