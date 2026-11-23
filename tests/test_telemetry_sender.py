@@ -510,6 +510,152 @@ def t_simulated_console_keeps_a_receiver_through_a_late_heartbeat_and_lapses_aft
     assert len(sent) == 3 and not console.receivers, "a lapsed receiver gets nothing and is forgotten"
 
 
+
+class _Relay:
+    """A loopback HTTP/1.1 server that counts connections and keeps the batches it
+    answered. `script` maps a 1-based request number to what goes wrong with it."""
+
+    def __init__(self, script=None, idle_close=False):
+        import socketserver
+        from http.server import BaseHTTPRequestHandler
+        outer = self
+        self.connections, self.requests, self.accepted = 0, 0, []
+        self.script, self.idle_close = dict(script or {}), idle_close
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def setup(self):
+                super().setup()
+                outer.connections += 1
+
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                outer.requests += 1
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                fault = outer.script.get(outer.requests)
+                if fault == "drop":
+                    self.close_connection = True
+                    return
+                if fault == "garble":
+                    self.wfile.write(b"no http here\r\n\r\n")
+                    self.close_connection = True
+                    return
+                if fault == "redirect":
+                    self.send_response(302)
+                    self.send_header("Location", outer.location)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                outer.accepted.append(tp.decode_batch(body))
+                reply = b'{"ok": true}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+                if outer.idle_close:
+                    self.close_connection = True   # closes without saying so, like an idle timeout
+
+        class S(socketserver.ThreadingMixIn, socketserver.TCPServer):
+            daemon_threads = True
+        self.srv = S(("127.0.0.1", 0), H)
+        self.url = "http://127.0.0.1:%d/console/probe/ingest" % self.srv.server_address[1]
+        self.location = self.url
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+def _uploader(relay):
+    return snd.Uploader(relay.url, "K", "L", say=lambda line: None)
+
+
+def t_posts_reuse_one_connection():
+    relay = _Relay()
+    try:
+        up = _uploader(relay)
+        for i in range(5):
+            up.put(b"p%d" % i)
+            up.post_once()
+    finally:
+        relay.close()
+    assert up.stats["posted"] == 5 and up.stats["post_failed"] == 0, up.stats
+    assert relay.connections == 1, f"five posts must share one connection, not {relay.connections}"
+
+
+def t_a_connection_the_relay_closed_is_opened_again_without_a_failure():
+    relay = _Relay(idle_close=True)
+    try:
+        up = _uploader(relay)
+        for i in range(3):
+            up.put(b"p%d" % i)
+            up.post_once()
+    finally:
+        relay.close()
+    assert up.stats["post_failed"] == 0, f"a closed idle connection is no upload failure: {up.stats}"
+    assert relay.accepted == [[b"p0"], [b"p1"], [b"p2"]], relay.accepted
+
+
+def t_a_dropped_post_is_sent_again_and_delivered_once():
+    relay = _Relay(script={2: "drop", 4: "drop", 5: "drop"})
+    try:
+        up = _uploader(relay)
+        up.put(b"p0")
+        up.post_once()                      # request 1 opens the connection
+        up.put(b"p1")
+        up.post_once()                      # request 2 drops on the reused connection, 3 retries
+        assert up.stats["post_failed"] == 0 and relay.connections == 2, (up.stats, relay.connections)
+        up.put(b"p2")
+        up.post_once()                      # 4 drops on the reused one, 5 drops on a fresh one
+        assert up.stats["post_failed"] == 1 and up.pending() == 1, \
+            f"a drop on a fresh connection is an upload failure and keeps the batch: {up.stats}"
+        up.post_once()                      # 6 delivers it
+    finally:
+        relay.close()
+    assert relay.accepted == [[b"p0"], [b"p1"], [b"p2"]], \
+        f"every batch arrives once, in order: {relay.accepted}"
+
+
+def t_a_garbled_reply_is_an_upload_failure():
+    relay = _Relay(script={1: "garble"})
+    try:
+        up = _uploader(relay)
+        up.put(b"p0")
+        up.post_once()
+        up.post_once()
+    finally:
+        relay.close()
+    assert up.stats["post_failed"] == 1 and relay.accepted == [[b"p0"]], (up.stats, relay.accepted)
+
+
+def t_a_redirect_is_never_followed():
+    relay, other = _Relay(script={1: "redirect"}), _Relay()
+    relay.location = other.url
+    try:
+        up = _uploader(relay)
+        up.put(b"p0")
+        up.post_once()
+    finally:
+        relay.close()
+        other.close()
+    assert other.connections == 0, "the sender posts to the relay's host only"
+    assert up.stats["post_failed"] == 1 and up.pending() == 1, up.stats
+
+
+def t_https_checks_the_certificate_and_the_host_name():
+    import http.client
+    import ssl
+    conn = snd.Connection()._new("https", "relay.example", None, 5)
+    assert isinstance(conn, http.client.HTTPSConnection) and conn.port == 443
+    assert conn._context.verify_mode == ssl.CERT_REQUIRED and conn._context.check_hostname, \
+        "the sender never posts telemetry over an unverified TLS connection"
+    assert isinstance(snd.Connection()._new("http", "127.0.0.1", 8, 5), http.client.HTTPConnection)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

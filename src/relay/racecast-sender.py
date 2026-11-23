@@ -23,9 +23,12 @@ Standard library only, Python 3.8 or newer.
 """
 import argparse
 import collections
+import http.client
+import io
 import json
 import re
 import socket
+import ssl
 import struct
 import sys
 import threading
@@ -96,6 +99,64 @@ def _reason(exc):
         return exc.reason or "refused"
 
 
+class Connection:
+    """One kept-open connection to the relay, called like urllib's urlopen for a POST.
+    Never follows a redirect: a reply of 300 or more raises HTTPError. After an error
+    the next call connects again. A post on a reused connection that the relay closed
+    in the meantime goes out once more on a new one."""
+
+    def __init__(self):
+        self._conn = None
+        self._target = None
+        self._tls = ssl.create_default_context()
+        self._lock = threading.Lock()
+
+    def _new(self, scheme, host, port, timeout):
+        if scheme == "https":
+            return http.client.HTTPSConnection(host, port, timeout=timeout, context=self._tls)
+        return http.client.HTTPConnection(host, port, timeout=timeout)
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __call__(self, req, timeout):
+        url = urllib.parse.urlsplit(req.full_url)
+        if url.scheme not in ("http", "https") or not url.hostname:
+            raise ValueError("the relay URL must start with http:// or https://")
+        target = (url.scheme, url.hostname, url.port)
+        path = url.path + ("?" + url.query if url.query else "")
+        with self._lock:
+            if target != self._target:
+                self.close()
+                self._target = target
+            again = self._conn is not None
+            while True:
+                if self._conn is None:
+                    self._conn = self._new(url.scheme, url.hostname, url.port, timeout)
+                try:
+                    self._conn.request("POST", path, body=req.data, headers=dict(req.header_items()))
+                    resp = self._conn.getresponse()
+                    body = resp.read()
+                except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError,
+                        ConnectionAbortedError):
+                    self.close()
+                    if again:
+                        again = False
+                        continue
+                    raise
+                except (OSError, http.client.HTTPException):
+                    self.close()
+                    raise
+                if resp.will_close:
+                    self.close()
+                if resp.status >= 300:
+                    raise urllib.error.HTTPError(req.full_url, resp.status, resp.reason,
+                                                 resp.headers, io.BytesIO(body))
+                return io.BytesIO(body)
+
+
 def _say(line):
     print(time.strftime("%H:%M:%S ") + line, flush=True)
 
@@ -111,7 +172,7 @@ class Uploader:
             self.url = url + ("&" if "?" in url else "?") + "sender=" + urllib.parse.quote(name)
             self._auth = {"X-Probe-Key": key}
         self.rate_hz = rate_hz
-        self._open = opener or urllib.request.urlopen
+        self._open = opener or Connection()
         self._say = say
         self._clock = clock
         self._lock = threading.Lock()
@@ -188,7 +249,7 @@ class Uploader:
                 return self._failed(f"the relay answered {exc.code} ({_reason(exc)}). "
                                     + REFUSED[exc.code], wait=REFUSED_WAIT_S, repeat=True)
             return self._failed(f"the relay answered {exc.code}")
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, http.client.HTTPException) as exc:
             return self._failed(f"cannot reach the relay ({exc})")
         self.latencies.append(time.perf_counter() - started)
         self._last_post = self._clock()
