@@ -831,6 +831,7 @@ class _FakePage:
         return "Panel"
 
     metrics = {"JSHeapUsedSize": 52428800, "Nodes": 1234, "JSEventListeners": 56}
+    enable_fails = 0
 
     def locator(self, selector):
         return selector
@@ -859,10 +860,19 @@ class _FakeBrowser:
 
             def new_cdp_session(self, page):
                 class Session:
+                    enabled = False
+
                     def send(self, method):
                         if page.metrics is None:
                             raise RuntimeError("Target page, context or browser has been closed")
+                        if method == "Performance.enable":
+                            if page.enable_fails:
+                                page.enable_fails -= 1
+                                raise RuntimeError("Performance.enable: not ready")
+                            self.enabled = True
                         if method == "Performance.getMetrics":
+                            if not self.enabled:
+                                raise RuntimeError("Performance.getMetrics before Performance.enable")
                             return {"metrics": [{"name": k, "value": v} for k, v in page.metrics.items()]}
                         return {}
                 return Session()
@@ -910,6 +920,50 @@ def t_page_role_reports_its_memory():
     br.page.metrics = None
     state = role.page()
     assert state["heap_mb"] is None and state["dom_nodes"] is None, "a crashed page reports no memory"
+
+
+def t_page_role_enables_the_metrics_again_after_a_failure():
+    br = _FakeBrowser()
+    role = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br), "page:director")
+    role.open()
+    role.do("open", {"path": "/panel"})
+    br.page.enable_fails = 1
+    assert role.page()["heap_mb"] is None, "no metrics while Performance.enable fails"
+    assert role.page()["heap_mb"] == 50.0, "a failed Performance.enable is tried again on the next read"
+
+
+def _page_run(steps):
+    br = _FakeBrowser()
+    ctx = engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br)
+    tmp = tempfile.mkdtemp(prefix="event-sim-test-")
+    atexit.register(shutil.rmtree, tmp, True)
+    clock = Clock()
+    data = engine.Engine(_scn(steps), ctx, {}, registry=_reg(), clock=clock, sleep=clock.sleep,
+                         shots_dir=os.path.join(tmp, "shots")).run()
+    return data, br, tmp
+
+
+def t_the_report_keeps_each_pages_last_memory():
+    data, _, _ = _page_run([{"id": "panel", "role": "page:director", "do": "open", "args": {"path": "/panel"}},
+                            {"id": "go", "role": "rec", "do": "go"}])
+    assert data["pages"] == {"page:director": {"heap_mb": 50.0, "dom_nodes": 1234, "listeners": 56}}, data["pages"]
+    page = report.render_html(data)
+    assert "page:director" in page and "50.0 MB" in page and "1234 DOM nodes" in page, page
+
+
+def t_a_failed_page_step_leaves_a_screenshot_named_after_it():
+    data, br, _ = _page_run([{"id": "panel", "role": "page:director", "do": "open", "args": {"path": "/panel"}},
+                             {"id": "gone", "role": "page:director", "do": "open", "args": {"path": "/x"},
+                              "at": "after:panel", "expect": ["box.value == 1"], "timeout": "1s"},
+                             {"id": "bad", "role": "page:director", "do": "open", "args": {"path": "x"}},
+                             {"id": "go", "role": "rec", "do": "go"}])
+    steps = {s["id"]: s for s in data["steps"]}
+    assert steps["gone"]["status"] == "failed" and steps["bad"]["status"] == "failed", data["steps"]
+    shots = [os.path.basename(p) for p in br.page.shots]
+    assert shots == ["fail-gone.png", "fail-bad.png"], f"a failed check and a failed action each leave one: {shots}"
+    assert steps["gone"]["fail_shot"] == "shots/fail-gone.png", steps["gone"]
+    assert steps["panel"]["fail_shot"] == "" and steps["go"]["fail_shot"] == "", "only a failed step leaves one"
+    assert "fail-gone.png" in report.render_html(data)
 
 
 def t_page_role_opens_in_the_window_size_it_is_given():

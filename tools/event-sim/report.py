@@ -44,13 +44,21 @@ def render_html(data):
     verdict = "PASS" if data["ok"] else "FAIL"
     rows = []
     for s in data["steps"]:
-        shot = (f"<a href='{_e(s['shot'])}'><img src='{_e(s['shot'])}' alt='{_e(s['shot'])}'></a>"
-                if s.get("shot") else "")
+        shot = "".join(f"<a href='{_e(p)}'><img src='{_e(p)}' alt='{_e(p)}'></a>"
+                       for p in (s.get("shot"), s.get("fail_shot")) if p)
         started = "" if s.get("started") is None else f"{s['started']:.1f}s"
         rows.append(f"<tr><td>{started}</td><td>{_e(s['role'])}</td><td>{_e(s['do'])}"
                     f"<br><small>{_e(s['id'])}</small></td><td class='{_e(s['status'])}'>"
                     f"{_e(s['status'])}<br>{_e(s['error'])}</td><td>{s['duration']:.2f}s</td>"
                     f"<td>{_checks(s['checks'])}</td><td>{shot}</td></tr>")
+
+    def memory(name, m):
+        heap, nodes, listeners = ("?" if m.get(k) is None else m[k] for k in ("heap_mb", "dom_nodes", "listeners"))
+        return (f"<li>{_e(name)}: {_e(heap)} MB JS heap, {_e(nodes)} DOM nodes, "
+                f"{_e(listeners)} event listeners</li>")
+    pages = data.get("pages") or {}
+    memory_list = ("<ul>" + "".join(memory(n, m) for n, m in sorted(pages.items())) + "</ul>"
+                   if pages else "<p>No page was open.</p>")
 
     def finding_list(items):
         if not items:
@@ -67,6 +75,7 @@ def render_html(data):
             f"<p>{_e(data.get('description'))} Duration {data['duration']:.1f}s.</p>"
             f"<h2>Hard failures</h2>{finding_list(hard)}"
             f"<h2>Soft findings</h2>{finding_list(soft)}"
+            f"<h2>Page memory at the end</h2>{memory_list}"
             f"<h2>Timeline</h2><table><tr><th>Time</th><th>Role</th><th>Action</th><th>Result</th>"
             f"<th>Duration</th><th>Checks</th><th>Shot</th></tr>{''.join(rows)}</table>"
             f"{LEGEND}</body></html>\n")

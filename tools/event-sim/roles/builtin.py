@@ -228,14 +228,18 @@ class PageRole(Role):
         Performance metrics; None for what the browser cannot tell."""
         try:
             if self.cdp is None:
-                self.cdp = self.context.new_cdp_session(self.pg)
-                self.cdp.send("Performance.enable")
+                cdp = self.context.new_cdp_session(self.pg)
+                cdp.send("Performance.enable")
+                self.cdp = cdp
             got = {m["name"]: m["value"] for m in self.cdp.send("Performance.getMetrics")["metrics"]}
         except Exception:  # noqa: BLE001  a crashed page or another browser has no metrics
             return {"heap_mb": None, "dom_nodes": None, "listeners": None}
         heap = got.get("JSHeapUsedSize")
         return {"heap_mb": round(heap / 1048576, 1) if isinstance(heap, (int, float)) else None,
                 "dom_nodes": got.get("Nodes"), "listeners": got.get("JSEventListeners")}
+
+    def memory(self):
+        return self._memory() if self.pg is not None else None
 
     def shot(self, path, element=""):
         if self.pg is None:

@@ -462,6 +462,10 @@ Runs a scenario against the fakes above plus the real relay and Control Center, 
 `docs/superpowers/specs/2026-11-21-event-simulation-design.md`). Exit 0: no hard finding;
 1: a hard finding; 2: the scenario or the stack did not start. Not in `tools/run-tests.py`;
 `tests/test_event_sim_engine.py` covers the engine with in-process fakes and a fake clock.
+A page role's step that fails hard leaves `shots/fail-<step>.png` of the whole page, and
+each page role's last JS heap, DOM node and event listener counts (Chromium's Performance
+metrics, also `page(role)`'s `heap_mb`, `dom_nodes`, `listeners`) go into the report's
+`pages` when it closes.
 
 ```bash
 python3 tools/event-sim/event_sim.py --scenario smoke --out DIR   # bundled name or a .toml path
