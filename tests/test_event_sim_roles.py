@@ -291,7 +291,7 @@ def t_the_registry_has_every_party_and_its_actions():
                          "end_part", "fit"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
-                             "note", "fit"},
+                             "note", "fit", "confirm_dc", "restart_mode", "class_laps"},
             "commentator": {"open", "submit_link", "chat"},
             "viewer": {"open", "read"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"}}
@@ -953,7 +953,7 @@ def t_cue_and_chat_send_what_was_typed():
 
 
 # -- race control ---------------------------------------------------------------------
-RC_AREAS = ("drivers", "corrections", "qualifying", "note")
+RC_AREAS = ("race", "drivers", "corrections", "qualifying", "note")
 
 
 def desk_areas(page):
@@ -1035,6 +1035,35 @@ def t_the_desks_line_of_the_action_before_is_not_this_actions_result():
     start = page.clock.t
     assert role.do("final_lap", {}) == {"status": "Final lap"}, "the same line twice is accepted once it stays"
     assert page.clock.t - start >= party.STALE_S
+
+
+def _desk_change(page, key, route, says, **kw):
+    """A desk select or input that sends `route` on its change and shows `says`."""
+    def change():
+        page.respond("/console/race-control" + route)
+        status = page.els['.dd .msg.cur[role="status"]']
+        status.text, status.attrs["class"] = says, "msg"
+    return page.add(key, on_change=change, **kw)
+
+
+def t_race_control_decides_a_dc_and_sets_the_restart_and_class_laps():
+    role, page, _ = desk()
+    key = '.dd tr:has(div:text-is("B #2")) button[data-label="Confirm DC"]:not([hidden])'
+    desk_button(page, "Confirm DC", "/drivers/race/recording/event", "DC confirmed", armed=False)
+    page.els[key] = page.els.pop('.dd button[data-label="Confirm DC"]')
+    assert role.do("confirm_dc", {"entry": "B #2"}) == {"status": "DC confirmed"}
+    assert page.clicks[-2:] == ['.navbtn[data-area="race"]', key], "the events list is in the Race area"
+    fails(lambda: role.do("confirm_dc", {"entry": "A #1"}), "no open event of 'A #1'")
+    select = _desk_change(page, '.dd select[aria-label="Restart after the red flag"]',
+                          "/drivers/race/restart-mode", "Restart mode set", options=["keep", "neutralise"])
+    assert role.do("restart_mode", {"mode": "neutralise"}) == {"status": "Restart mode set"}
+    assert select.value == "neutralise"
+    fails(lambda: role.do("restart_mode", {"mode": "fast"}), "keep or neutralise")
+    laps = _desk_change(page, '.dd input[aria-label="Lap count of GT4"]', "/drivers/race/class-laps",
+                        "GT4 lap count saved")
+    assert role.do("class_laps", {"class": "GT4", "laps": 5}) == {"status": "GT4 lap count saved"}
+    assert laps.value == "5"
+    fails(lambda: role.do("class_laps", {"class": "GT3", "laps": 5}), "Lap count of GT3")
 
 
 def t_desk_forms_pick_the_entry_before_the_button():
