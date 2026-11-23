@@ -509,6 +509,9 @@ block, not a separate one:
 
 The relay can also be brought up directly in qualifying mode with
 `racecast event start --qualifying` (or `racecast relay start --qualifying`).
+Start event on a relay that is already running switches it to the mode it asks
+for, as the switch above does: with Qualifying ticked to qualifying, without it
+back to race.
 Qualifying editing needs the profile's `SHEET_PUSH_URL`; serving and
 mode-switching work read-only. If the sheet has no **Qualifying** tab the switch
 is hidden and the qualifying controls are disabled. See
