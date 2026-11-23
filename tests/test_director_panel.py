@@ -746,7 +746,6 @@ const setupSet = (field, value) => setup.push(field + '=' + value);
 const fetch = async path => { fetched.push(path); };
 const obsStatePoll = () => {};
 const assetLabel = source => source;
-let deskRed = false;
 const redFlagItem = {scene: 'Stint', source: 'Standby Cover'};
 const key = cls => {
   const k = {cls: new Set(), textContent: 'Mute', lit: () => k.cls.has(cls),
@@ -838,22 +837,6 @@ def t_red_flag_follows_the_relays_answer():
             d["down"]
         assert d["up"]["lit"] is True and d["up"]["setup"] == ["racecontrol=Red Flag - Race Suspended"] \
             and d["up"]["fetched"] == ["/drivers/race/red-flag"], d["up"]
-
-
-def t_red_flag_never_holds_a_race_already_held():
-    out = _toggle_js(_html(), """
-  answers.push({ok: true, enabled: true, changed: true}, {ok: true, enabled: true, changed: true});
-  const step = async () => { await redFlagPress(); return {setup: setup.splice(0), fetched: fetched.splice(0)}; };
-  deskRed = true;
-  const held = await step();
-  redFlagBtn.classList.toggle('on', false); deskRed = false;
-  const free = await step();
-  console.log(JSON.stringify({held, free}));""")
-    if out is not None:
-        d = json.loads(out)
-        assert d["held"] == {"setup": ["racecontrol=Red Flag - Race Suspended"], "fetched": []}, \
-            f"over a race already held the press sets the banner but keeps Race Control's restart mode: {d['held']}"
-        assert d["free"]["fetched"] == ["/drivers/race/red-flag"], d["free"]
 
 
 def t_red_flag_without_the_cover_still_sets_banner_and_race():
@@ -1026,7 +1009,7 @@ def t_race_area_tabs_are_the_desk_parts():
 def _desk_tabs_js(h, body):
     subs = re.search(r"var DESK_SUBS = (\[[^\]]*\])", h).group(1)
     return _run_js("var DESK_SUBS = " + subs + r""", DESK_SUB_KEY = "k", deskSub = "race", deskMode = null,
-    deskSubStored = false, deskRed = false, typing = false, kept = {}, writes = [], nav = [];
+    deskSubStored = false, typing = false, kept = {}, writes = [], nav = [];
 function store(k, v){ writes.push(v); kept[k] = v; }
 function recall(k){ return k in kept ? kept[k] : null; }
 function setNav(a, level, why){ if (a === "race") nav.push([level, why]); }
@@ -1072,31 +1055,31 @@ console.log(JSON.stringify({fresh, seen, auto, clicked: writes, kept: kept.k,
 
 def t_the_panel_race_label_says_when_the_desk_data_is_stale():
     out = _desk_tabs_js(_html(), """
-const reds = [];
 [st("race", {waiting: 2}), st("race", {red: true}), st("race", {stale: true, red: true}),
  st("race", {gaps: true}), st("race", {gaps: true, waiting: 1}), st("race", {events: 2}), st("race")]
-  .forEach(s => { deskState(s); reds.push(deskRed); });
-console.log(JSON.stringify({nav, reds}));""")
+  .forEach(s => deskState(s));
+console.log(JSON.stringify({nav}));""")
     if out is None:
         return
     got = json.loads(out)
     assert got["nav"] == [["warn", "2 waiting"], ["live", "red flag"], ["live", "relay not answering"],
                           ["warn", "recording gaps"], ["warn", "1 waiting"], ["", "2 disconnects open"], ["", ""]], \
         f"the Race label shows a stale relay and recording gaps like the desk's trouble dot: {got['nav']}"
-    assert got["reds"] == [False, True, True, False, False, False, False], \
-        f"the RED FLAG key knows when the race is held: {got['reds']}"
 
 
 def t_the_panel_desk_tabs_follow_the_arrow_keys():
     out = _desk_tabs_js(_html(), """
 console.log(JSON.stringify([deskTabKey("race", "ArrowRight"), deskTabKey("setup", "ArrowRight"),
   deskTabKey("race", "ArrowLeft"), deskTabKey("drivers", "Home"), deskTabKey("race", "End"),
-  deskTabKey("race", "Enter")]));""")
+  deskTabKey("race", "Enter"), deskTabKey("race", "ArrowRight", true), deskTabKey("race", "End", true)]));""")
     if out is None:
         return
-    assert json.loads(out) == ["drivers", "race", "setup", "race", "setup", None], out
+    assert json.loads(out) == ["drivers", "race", "setup", "race", "setup", None, None, None], \
+        f"arrows, Home and End move the tab; with Alt, Ctrl or Meta they stay the browser's: {out}"
     h = _html()
     assert 'getElementById("deskTabs").addEventListener("keydown"' in h, "the tab list takes the arrow keys"
+    assert "deskTabKey(deskSub, e.key, e.altKey || e.ctrlKey || e.metaKey)" in h, \
+        "the handler hands the modifiers over, so Alt+Arrow stays the browser's"
 
 
 def t_the_program_tile_gives_way_to_the_live_keys():

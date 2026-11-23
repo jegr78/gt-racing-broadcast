@@ -187,22 +187,40 @@ def t_the_league_restart_default_and_its_override_per_restart():
 def t_a_red_flag_over_a_held_race_keeps_its_restart_mode():
     svc, clock, path, league = _ctl()
     dr.write_league(league, {"restart": "neutralise"})
-    first = svc.red_flag("rc:Anna")["red_flag"]
+    svc.red_flag("rc:Anna")
     svc.set_restart_mode("rc:Anna", "keep")
     clock[0] = 30.0
     again = svc.red_flag("director:Bo")["red_flag"]
-    assert again == dict(first, mode="keep"), \
-        f"a second hold keeps Race Control's restart mode and the time of the flag: {first} -> {again}"
-    assert svc._current()._red_flags == 1, "a second hold is no new red flag"
-    assert [r["action"] for r in _audit(path)] == ["red_flag", "restart_mode"], \
-        "a hold over a held race writes nothing to the audit"
+    assert again == {"at": 30.0, "mode": "keep"}, \
+        f"a second flag over a held race keeps Race Control's restart mode, not the league default: {again}"
+    assert svc._current()._red_flags == 2 and [r["action"] for r in _audit(path)][-1] == "red_flag"
     chosen = svc.red_flag("director:Bo", mode="neutralise")["red_flag"]
-    assert chosen == dict(first, mode="neutralise") and svc._current()._red_flags == 1, \
-        f"a mode named with the hold sets the restart mode only: {chosen}"
-    assert [r["action"] for r in _audit(path)][-1] == "restart_mode"
+    assert chosen["mode"] == "neutralise", f"a mode named with the flag wins: {chosen}"
     svc.release("rc:Anna")
-    assert svc.red_flag("rc:Anna")["red_flag"]["at"] == 30.0 and svc._current()._red_flags == 2, \
-        "after the release a red flag counts again"
+    assert svc.red_flag("rc:Anna")["red_flag"]["mode"] == "neutralise", "after the release the league default applies"
+
+
+def t_a_second_red_flag_before_the_release_freezes_cars_that_left_the_box():
+    from test_race_distance import Car, _drive, _new_lobby, _row
+    svc, clock, _path, _league = _ctl()
+    race = svc._current()
+    a, b = Car(race, "A", "a", L - 15), Car(race, "B", "b", L - 115)
+    t = _drive(race, [a, b], [50, 50], 0.0, 40)
+    clock[0] = t
+    svc.red_flag("rc:Anna")
+    for car in (a, b):
+        _new_lobby(car, L - 15)
+    t = _drive(race, [a, b], [None, None], t, 3)
+    a.box = b.box = False
+    t = _drive(race, [a, b], [40, 40], t, 10)            # restarted, no Restart released yet
+    assert _row(race, "A", t)["status"] == "racing", _row(race, "A", t)
+    clock[0] = t
+    svc.red_flag("rc:Anna")
+    held = _row(race, "A", t)["distance_m"]
+    t = _drive(race, [a, b], [40, 40], t, 10)
+    row = _row(race, "A", t)
+    assert row["status"] == "red_flag" and row["distance_m"] == held and race._red_flags == 2, \
+        f"a second incident before Restart released freezes the field again: {row}"
 
 
 def t_the_league_lap_time_seconds_default_to_five_and_are_checked():

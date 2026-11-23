@@ -1333,7 +1333,6 @@ function relayGated(item){
    to #pgmBus by every buildControls() call, so a solo rebuild never drops it;
    buildControls retargets redFlagItem from cfg.redFlag when that is present. */
 const redFlagItem = {scene:"Stint", source:"Standby Cover"};
-let deskRed = false;   // the driver race is held, from the desk's last poll
 async function redFlagPress(){
   await keyOnce(redFlagBtn, async ()=>{
     let d;
@@ -1357,7 +1356,7 @@ async function redFlagPress(){
     else log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
     setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
     // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
-    if (on && !deskRed) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
+    if (on) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
                                              body: "{}"}).catch(() => {});
     obsStatePoll();
   });
@@ -4126,14 +4125,15 @@ function showDeskSub(name, auto){
   document.querySelectorAll(".desksub").forEach(p => { p.hidden = p.dataset.sub !== name; });
   if (!auto) store(DESK_SUB_KEY, name);
 }
-function deskTabKey(cur, key){
+function deskTabKey(cur, key, mod){
+  if (mod) return null;
   const i = DESK_SUBS.indexOf(cur), n = DESK_SUBS.length;
   return {ArrowRight: DESK_SUBS[(i + 1) % n], ArrowLeft: DESK_SUBS[(i - 1 + n) % n],
           Home: DESK_SUBS[0], End: DESK_SUBS[n - 1]}[key] || null;
 }
 document.querySelectorAll("#deskTabs button").forEach(b => b.addEventListener("click", () => showDeskSub(b.dataset.sub)));
 document.getElementById("deskTabs").addEventListener("keydown", e => {
-  const sub = deskTabKey(deskSub, e.key);
+  const sub = deskTabKey(deskSub, e.key, e.altKey || e.ctrlKey || e.metaKey);
   if (!sub) return;
   e.preventDefault();
   showDeskSub(sub);
@@ -4153,7 +4153,6 @@ function deskEditing(){
   return !!(a && a.matches && a.matches("input, select, textarea")) || !!document.querySelector("dialog[open]");
 }
 function deskState(st){
-  deskRed = !!st.red;
   deskDot("drivers", st.waiting ? "warn" : "");
   deskDot("race", st.events ? "live" : "");
   deskDot("qualifying", st.mode === "qualifying" ? "ok" : "");

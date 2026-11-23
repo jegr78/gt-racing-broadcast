@@ -404,6 +404,10 @@ class Race:
     def red_flagged(self):
         return self._red is not None
 
+    @property
+    def restart_mode(self):
+        return self._restart_mode
+
     def set_restart_mode(self, mode):
         """Override the restart for entries still waiting to resume."""
         self._restart_mode = mode
