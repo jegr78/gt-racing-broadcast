@@ -2624,6 +2624,29 @@ def _relay_http_ok():
         return False
 
 
+def _starting_reply(exc):
+    """True when an HTTPError is the relay's boot reply: it bound the control port
+    and still reads the Google Sheet."""
+    if getattr(exc, "code", None) != 503:
+        return False
+    try:
+        body = json.loads(exc.read().decode("utf-8", "replace"))
+    except Exception:
+        return False
+    return isinstance(body, dict) and body.get("starting") is True
+
+
+def _relay_starting():
+    """True iff the relay control server answers with its boot reply."""
+    try:
+        http_util.get_bytes(f"http://127.0.0.1:{_relay_port()}/status", timeout=3)
+    except http_util.HTTPError as exc:
+        return _starting_reply(exc)
+    except Exception:
+        return False
+    return False
+
+
 def _relay_fetch_json(url, timeout=3):
     """GET a relay control-server endpoint and parse its JSON body."""
     return http_util.get_json(url, timeout=timeout)
@@ -2737,19 +2760,25 @@ def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
     pid = read_pid(_relay_pid_path())
     is_alive = alive(pid)
     status = probe() if is_alive else None
+    starting = status == "starting"
+    if starting:
+        status = None
     awake = status.get("keep_awake") if isinstance(status, dict) else None
     schedule = status.get("mode") if isinstance(status, dict) else None
     return {"pid": pid, "alive": is_alive, "port": _relay_port(),
-            "http_ok": status is not None,
+            "http_ok": status is not None, "starting": starting,
             "keep_awake": awake if isinstance(awake, dict) else None,
             "mode": ((mode or _running_relay_run_mode)() or "live") if is_alive else None,
             "schedule_mode": schedule if schedule in ("race", "qualifying") else None}
 
 
 def _relay_status_probe():
-    """The relay's /status as a dict, {} for a non-dict answer, None when it does not answer."""
+    """The relay's /status as a dict, {} for a non-dict answer, "starting" for its boot
+    reply, None when it does not answer."""
     try:
         status = _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/status")
+    except http_util.HTTPError as exc:
+        return "starting" if _starting_reply(exc) else None
     except Exception:
         return None
     return status if isinstance(status, dict) else {}
@@ -2768,6 +2797,7 @@ def keep_awake_text(awake):
 def _relay_extra_text(data, tailscale_ip):
     """The CLI's extra column for a live relay, from relay_status_data()."""
     parts = [f"control http://127.0.0.1:{data['port']}/status OK" if data["http_ok"]
+             else f"(port {data['port']} starting: reading the Google Sheet)" if data.get("starting")
              else f"(port {data['port']} not responding)"]
     awake = keep_awake_text(data.get("keep_awake"))
     if awake:
@@ -2814,12 +2844,13 @@ def _frozen_child_env():
 
 def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
                      running_profile, active_profile, http_ok, running_mode="",
-                     active_mode="live", pidfile_relay=True):
+                     active_mode="live", pidfile_relay=True, starting=False):
     """Pure: decide what `relay start` must do, from the gathered signals.
 
     Returns (action, kill_pids, reason):
       action  "start"   control port free -> just start
               "running" exactly one healthy active-profile relay we own -> no-op
+              "starting" that relay still reads the Google Sheet -> wait for it
               "heal"    a defect (orphan / split-brain / wrong-profile / dead-PID /
                         not-responding) -> kill kill_pids, then start fresh
       kill_pids  sorted union of the 8088 + feed-port holders (heal only, else [])
@@ -2852,8 +2883,11 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
                                   "racecast relay stop")
     single = len(port_set) == 1
     ours = single and pidfile_alive and (pidfile_pid in port_set)
-    if ours and http_ok and running_profile and running_profile == active_profile:
-        return ("running", [], "")
+    if ours and running_profile and running_profile == active_profile:
+        if http_ok:
+            return ("running", [], "")
+        if starting:
+            return ("starting", [], "")
     kill = sorted(port_set | set(feed_pids))
     holders = ", ".join(str(p) for p in sorted(port_set))
     if len(port_set) > 1:
@@ -2880,7 +2914,9 @@ def _relay_start_signals():
     pid = sv.read_pid(_relay_pid_path())
     alive = sv.pid_alive(pid)
     own = len(set(port_pids)) == 1 and alive and pid in port_pids
-    return {"port_pids": port_pids,
+    answered = bool(port_pids) and _relay_http_ok()
+    starting = bool(port_pids) and not answered and _relay_starting()
+    return {"port_pids": port_pids, "starting": starting,
             "pidfile_relay": bool(alive and _relay_identity(pid) != "other"),
             # A simulated start cannot prove who holds a feed port, so it kills none of them.
             "feed_pids": [] if simulation.active() else
@@ -2890,7 +2926,7 @@ def _relay_start_signals():
             "active_profile": _active_profile_name() or "",
             "running_mode": _running_relay_run_mode(),
             "active_mode": _relay_run_mode(),
-            "http_ok": _relay_responds(own) if port_pids else False}
+            "http_ok": answered or (bool(port_pids) and not starting and _relay_responds(own))}
 
 
 RELAY_PROBE_TRIES = 3     # our own relay may be busy (Sheet refresh, telemetry load)
@@ -2911,6 +2947,21 @@ def _relay_responds(own, probe=None, sleep=time.sleep):
 
 
 RELAY_START_VERIFY_S = 15   # seconds to confirm the freshly spawned relay bound its control port
+RELAY_BOOT_WAIT_S = 300     # a relay answering "starting" reads about ten Sheet tabs, each up to 15 s
+
+
+def _wait_relay_boot(pid, wait=RELAY_BOOT_WAIT_S):
+    """Wait while relay `pid` answers "starting"; True once it answers /status."""
+    ready = []
+
+    def _done():
+        if _relay_http_ok():
+            ready.append(True)
+            return True
+        return not sv.pid_alive(pid)
+
+    wait_for(_done, wait)
+    return bool(ready)
 
 
 def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
@@ -2926,9 +2977,9 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
         offset = _relay_boot_log_size()
         pid = sv.start_detached(argv, _relay_boot_log_path(), _relay_pid_path(),
                                 env=_frozen_child_env())
-        up = []
+        up, booting = [], []
 
-        def _settled(up=up, pid=pid):
+        def _settled(up=up, booting=booting, pid=pid):
             # Stop waiting once the relay answers OR its process is gone: a relay
             # that exits at startup never binds, so the full window is wasted.
             if _relay_http_ok():
@@ -2939,14 +2990,25 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
                     up.append(True)
                 return True
             sv._reap_zombie(pid)   # POSIX: an unreaped dead child still "exists"
-            return not sv.pid_alive(pid)
+            if not sv.pid_alive(pid):
+                return True
+            if not booting and _relay_starting():
+                booting.append(True)
+                return True
+            return False
 
         started = time.monotonic()
         wait_for(_settled, verify_s)
+        if booting and not up and sv.pid_alive(pid):
+            print(f"  relay is up and still reading the Google Sheet. Waiting up to "
+                  f"{RELAY_BOOT_WAIT_S} s…")
+            wait_for(_settled, RELAY_BOOT_WAIT_S)
         if up:
             _record_relay_start(pid)
             return pid
         reason = relay_boot_failure_line(_relay_boot_log_since(offset))
+        if booting and not reason and sv.pid_alive(pid):
+            reason = f"still starting after {RELAY_BOOT_WAIT_S} s"
         # A slow startup may still be fetching Sheet tabs. Reap this owned
         # attempt before another start overwrites its PID or binds its ports.
         # Keep the PID file if cleanup fails so stop/status can still find it.
@@ -3018,6 +3080,12 @@ def relay_start(rest):
     action, kill_pids, reason = relay_start_plan(**signals)
     if action == "refuse":
         sys.exit(f"racecast: {reason}")
+    if action == "starting":
+        print(f"relay is starting (pid {pid}) and still reading the Google Sheet. Waiting…")
+        if not _wait_relay_boot(pid):
+            print(f"  ERROR: relay (pid {pid}) did not finish starting. Check: racecast relay logs")
+            return None
+        action = "running"
     if action == "running":
         print(f"relay already running (pid {pid}).")
         if stint:

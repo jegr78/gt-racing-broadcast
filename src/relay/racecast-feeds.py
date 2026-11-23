@@ -12084,6 +12084,53 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+class BootHandler(BaseHTTPRequestHandler):
+    """The control server's handler while main() still reads the Google Sheet: every
+    request gets 503. Only /status carries a body, a fixed one that reveals nothing but
+    the start, so an open page's poll fails as if the relay were down."""
+    BODY = b'{"starting": true, "schedule": "loading"}'
+
+    def _starting(self):
+        body = self.BODY if self.path.split("?", 1)[0] == "/status" else b""
+        self.send_response(503)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", "2")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    do_GET = do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _starting
+
+    def log_message(self, *args):
+        pass
+
+
+def boot_control_servers(addrs, port):
+    """Bind the control port on each address with BootHandler. Returns (servers,
+    bound_addrs); an address that fails to bind is logged and left out."""
+    servers, bound = [], []
+    for addr in addrs:
+        try:
+            servers.append(QuietThreadingHTTPServer((addr, port), BootHandler))
+            bound.append(addr)
+        except OSError as e:
+            LOG.warning("could not bind %s:%s. %s", addr, port, e)
+    return servers, bound
+
+
+def serve_control_servers(servers):
+    for httpd in servers:
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+
+def go_live(servers, handler):
+    """Hand the bound control servers from BootHandler to the real handler."""
+    for httpd in servers:
+        httpd.RequestHandlerClass = handler
+
+
 # Human-facing /console PAGE routes (segment tuples, sans the leading "console").
 # A GET to one of these with a missing/invalid token, when OAuth is configured,
 # serves the launcher (Login with Discord) instead of a naked 401 JSON page.
@@ -16409,12 +16456,8 @@ def main():
              (args.league_name or "?"), args.bind, args.ports,
              ("qualifying" if args.qualifying else "race"), csv_url)
 
-    # Fail fast: the loopback control port is mandatory (OBS always reaches the relay
-    # on 127.0.0.1). If another relay already holds it, abort BEFORE the network
-    # refreshes below, otherwise the log reads like a successful start
-    # ("Schedule loaded …") right before the bind fails. The real bind later is the
-    # authoritative guard; this just turns a slow, misleading failure into a fast,
-    # clear one.
+    # Fail fast with a clear message when another relay holds the loopback control
+    # port; the bind below stays the authoritative guard.
     if not control_port_available("127.0.0.1", args.http_port):
         LOG.error("control port 127.0.0.1:%s already in use. Another relay is "
                   "probably running; aborting before any startup work.", args.http_port)
@@ -16422,6 +16465,25 @@ def main():
                  f"Another relay is probably already running. Stop it first "
                  f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
                  f"to see what holds the port.")
+
+    # Bind before the Sheet reads below, so `relay start` sees a slow first start
+    # as starting (503) instead of a dead one.
+    bind_addrs = resolve_bind_addresses(
+        args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
+    servers, bound_addrs = boot_control_servers(bind_addrs, args.http_port)
+    # The loopback bind is mandatory when requested: OBS always reaches the relay
+    # on 127.0.0.1. If it failed but (e.g.) the Tailscale IP bound, running on
+    # would be a silent split-brain; 127.0.0.1 stays served by the STALE relay
+    # that holds the port (issue #84). Abort loudly instead of half-starting.
+    if not servers or loopback_bind_failed(bind_addrs, bound_addrs):
+        for httpd in servers:
+            httpd.server_close()
+        sys.exit(f"Could not bind the control server on 127.0.0.1 port {args.http_port}. "
+                 f"Another relay is probably already running. Stop it first "
+                 f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
+                 f"to see what holds the port.")
+    serve_control_servers(servers)
+    LOG.info("control port %s bound; reading the Google Sheet", args.http_port)
 
     # POV source: own sheet tab (cell A2). Derivable only from sheet-id/tab,
     # so a custom --sheet-csv-url disables POV (no tab to point at).
@@ -17025,26 +17087,7 @@ def main():
         radio_native=radio_native,
         browser_hosts=(tailscale.detect_magicdns_name(),),
     )
-    bind_addrs = resolve_bind_addresses(
-        args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
-    servers, bound_addrs = [], []
-    for addr in bind_addrs:
-        try:
-            servers.append(QuietThreadingHTTPServer((addr, args.http_port), handler))
-            bound_addrs.append(addr)
-        except OSError as e:
-            LOG.warning("could not bind %s:%s. %s", addr, args.http_port, e)
-    # The loopback bind is mandatory when requested: OBS always reaches the relay
-    # on 127.0.0.1. If it failed but (e.g.) the Tailscale IP bound, running on
-    # would be a silent split-brain; 127.0.0.1 stays served by the STALE relay
-    # that holds the port (issue #84). Abort loudly instead of half-starting.
-    if not servers or loopback_bind_failed(bind_addrs, bound_addrs):
-        for httpd in servers:
-            httpd.server_close()
-        sys.exit(f"Could not bind the control server on 127.0.0.1 port {args.http_port}. "
-                 f"Another relay is probably already running. Stop it first "
-                 f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
-                 f"to see what holds the port.")
+    go_live(servers, handler)
 
     relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
     relay.keep_awake.start()
@@ -17181,9 +17224,8 @@ def main():
     if login_warning:
         LOG.warning("  %s", login_warning)
     LOG.info("  Sheet poll every %ss.  Ctrl+C to stop.", args.poll)
-    # Serve every bound address; keep the last on the main thread for signals.
-    for httpd in servers[:-1]:
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    # Move the last server's loop onto the main thread, which handles the signals.
+    servers[-1].shutdown()
     servers[-1].serve_forever()
 
 if __name__ == "__main__":

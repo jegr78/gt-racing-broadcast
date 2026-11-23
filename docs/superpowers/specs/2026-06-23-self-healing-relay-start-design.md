@@ -122,6 +122,12 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
 listens on 8088; otherwise print a warning line rather than silently assuming
 success.
 
+Update (#1266): the relay binds its control port before the first Sheet read and
+answers `/status` with 503 `{"starting": true, ...}` until it is ready. The plan has a
+fourth action, `starting` (our own active-profile relay answers the boot reply): wait
+for it, never heal it. A spawned relay that answers "starting" gets up to
+`RELAY_BOOT_WAIT_S` instead of the 15 s verify window.
+
 **4. The old refuse path goes away:** `relay_start_port_note` (the "port held by … —
 Free it first" message, #273) is replaced by the heal path — the foreign holder is
 now cleared instead of blocking the start.

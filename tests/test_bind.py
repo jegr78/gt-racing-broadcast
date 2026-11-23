@@ -216,6 +216,68 @@ def t_no_http_server_in_src_keeps_the_stdlib_backlog():
     assert bare == [], f"construct a subclass with request_queue_size set, not the stdlib default of 5: {bare}"
 
 
+def _status(port, method="GET", path="/status", body=None):
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.request(method, path, body=body)
+        resp = conn.getresponse()
+        return resp.status, resp.read()
+    finally:
+        conn.close()
+
+
+def t_control_port_answers_starting_while_the_sheet_loads():
+    import threading
+    from http.server import BaseHTTPRequestHandler
+
+    class Live(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.send_header("Content-Length", "2"); self.end_headers()
+            self.wfile.write(b"{}")
+        def log_message(self, *a):
+            pass
+
+    servers, bound = m.boot_control_servers(["127.0.0.1"], 0)
+    assert bound == ["127.0.0.1"] and len(servers) == 1
+    port = servers[0].server_address[1]
+    m.serve_control_servers(servers)
+    sheet = threading.Event()   # a slow first schedule read, released by the test
+    loaded = []
+    reader = threading.Thread(target=lambda: sheet.wait(10) and loaded.append(True), daemon=True)
+    reader.start()
+    try:
+        status, raw = _status(port, "GET", "/status?x=1")
+        assert status == 503 and json.loads(raw) == {"starting": True, "schedule": "loading"}, \
+            f"/status during the sheet read must answer the fixed starting body: {status} {raw!r}"
+        for method, path, body in (("POST", "/next", b"x" * 300), ("GET", "/hud/data", None),
+                                   ("GET", "/console/cockpit", None)):
+            status, raw = _status(port, method, path, body)
+            assert (status, raw) == (503, b""), \
+                f"{method} {path} during the sheet read must answer an empty 503: {status} {raw!r}"
+        sheet.set(); reader.join(5)
+        assert loaded, "the stubbed sheet read finished"
+        m.go_live(servers, Live)
+        status, raw = _status(port)
+        assert status == 200 and raw == b"{}", f"after go_live the real handler answers: {status} {raw!r}"
+    finally:
+        for srv in servers:
+            srv.shutdown(); srv.server_close()
+
+
+def t_main_binds_the_control_port_before_the_first_sheet_read():
+    import inspect
+    src = inspect.getsource(m.main)
+    boot = src.index("boot_control_servers(")
+    for read in ("pov_source.refresh()", "qual_source.refresh()", "crew_source.refresh()",
+                 "hud_source.refresh()", "source.load_initial("):
+        assert boot < src.index(read), f"the control port must answer before {read}"
+    assert src.index("serve_control_servers(servers)") < src.index("pov_source.refresh()"), \
+        "the boot handler must serve before the first sheet read"
+    assert src.index("handler = make_handler(") < src.index("go_live(servers, handler)"), \
+        "the real handler goes live only once it exists"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

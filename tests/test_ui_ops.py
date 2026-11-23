@@ -28,7 +28,7 @@ def t_relay_status_data_running():
     d = rc.relay_status_data(read_pid=lambda p: 4242,
                               alive=lambda pid: True,
                               probe=lambda: {"keep_awake": awake}, mode=lambda: "simulation")
-    assert d == {"pid": 4242, "alive": True, "port": 8088, "http_ok": True,
+    assert d == {"pid": 4242, "alive": True, "port": 8088, "http_ok": True, "starting": False,
                  "keep_awake": awake, "mode": "simulation", "schedule_mode": None}
 
 
@@ -92,7 +92,7 @@ def t_relay_status_data_stopped_skips_http_probe():
     d = rc.relay_status_data(read_pid=lambda p: None,
                               alive=lambda pid: False,
                               probe=lambda: probed.append(1) or {})
-    assert d == {"pid": None, "alive": False, "port": 8088, "http_ok": False,
+    assert d == {"pid": None, "alive": False, "port": 8088, "http_ok": False, "starting": False,
                  "keep_awake": None, "mode": None, "schedule_mode": None}
     assert probed == []   # never probe HTTP for a dead relay
 
