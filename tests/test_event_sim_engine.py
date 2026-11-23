@@ -230,6 +230,10 @@ def t_expect_compares_rows_of_two_readings():
     assert expect.truth("drift(box.data.before, box.data.after, 'gap_s') < 0.71", names)[0], \
         "the largest change of a key between rows of the same entry, None on either side left out"
     assert not expect.truth("drift(box.data.before, box.data.after, 'gap_s') < 0.69", names)[0]
+    names = {"box": Box(0, {"before": before + [{"entry": "D #4", "gap_s": 10.0}],
+                            "after": after + [{"entry": "D #4", "gap_s": 8.5}]})}
+    assert expect.truth("drift(box.data.before, box.data.after, 'gap_s') == 1.5", names)[0], \
+        "a gap that shrank drifted as far as one that grew"
     for text in ("row(box.data.after, 'entry', 'Z #9').gap_s == 1",
                  "drift(box.data.before, [], 'gap_s') < 1", "pluck(box.data.after, 'nope') == []"):
         try:
