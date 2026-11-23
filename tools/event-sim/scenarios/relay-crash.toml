@@ -226,8 +226,16 @@ expect = ["page('race_control').waiting == 0", "len(race.entries) == 4",
 timeout = "90s"
 
 [[step]]
-id = "box2"
+id = "no_requests"
 at = "after:codes_kept"
+role = "api"
+do = "get"
+args = { path = "/drivers/requests" }
+expect = ["'pending' not in pluck(result('no_requests').requests, 'status')"]
+
+[[step]]
+id = "box2"
+at = "after:no_requests"
 role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 4"]

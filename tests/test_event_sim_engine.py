@@ -241,6 +241,14 @@ def t_expect_compares_rows_of_two_readings():
         except expect.Unresolved:
             continue
         raise AssertionError(f"{text!r} must stay unresolved: nothing to compare is not a pass")
+    lost = {"box": Box(0, {"before": before, "after": [{"entry": "A #1", "gap_s": 0.0},
+                                                       {"entry": "B #2", "gap_s": None}]})}
+    try:
+        expect.truth("drift(box.data.before, box.data.after, 'gap_s') <= 1", lost)
+    except expect.Unresolved:
+        pass  # the expected outcome
+    else:
+        raise AssertionError("a row that had a number before and none after is no drift of 0")
     expect.compile_expr("drift(result('a').entries, race.entries, 'gap_s') <= 1", ROOTS)
 
 
@@ -713,6 +721,13 @@ def t_a_relay_crash_kills_only_the_relay_its_pid_file_names():
         child.name, child.proc, child.expected_exit = "relay", _Proc(), False
         st.children = [child]
         killed = []
+        st.home = None
+        try:
+            st.kill_relay(pids=lambda port: [4242], kill=lambda pid, sig: killed.append(pid))
+            raise AssertionError("a stack without its app home reads no relay.pid")
+        except RuntimeError as exc:
+            assert "app home" in str(exc), exc
+        st.home = work
         try:
             st.kill_relay(pids=lambda port: [4242], kill=lambda pid, sig: killed.append(pid))
             raise AssertionError("no PID file is no relay to kill")

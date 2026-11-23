@@ -422,7 +422,9 @@ class Stack:
     def kill_relay(self, pids=None, kill=os.kill):
         """Kill the relay as a crash would: only the one process that holds this run's
         control port and that the app home's `relay.pid` names. Returns its PID."""
-        path = os.path.join(self.home or "", "runtime", "relay.pid")
+        if not self.home:
+            raise RuntimeError("no relay to kill: the run has no app home yet")
+        path = os.path.join(self.home, "runtime", "relay.pid")
         try:
             with open(path, encoding="utf-8") as fh:
                 pid = int(fh.read().strip())

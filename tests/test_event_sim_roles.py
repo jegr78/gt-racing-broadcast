@@ -1680,6 +1680,7 @@ def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program
         assert loaded.steps[-1].do == "stop_event", f"{name}: Stop event ends the relay, so it is the last step"
         assert all(s.expect for s in loaded.steps if s.role == "api"), f"{name}: every probe step asserts something"
 
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

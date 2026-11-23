@@ -42,10 +42,16 @@ def row(rows, key, value):
 
 def drift(before, after, key, by="entry"):
     """The largest change of the number `key` between the rows of `before` and `after`
-    that share `by`; rows where either side has no number are left out."""
+    that share `by`; rows without a number before are left out, a row that lost its
+    number is unresolved."""
     old = {r.get(by): r.get(key) for r in _rows(before)}
-    changes = [abs(r[key] - old[r.get(by)]) for r in _rows(after)
-               if _number(r.get(key)) and _number(old.get(r.get(by)))]
+    changes = []
+    for r in _rows(after):
+        if not _number(old.get(r.get(by))):
+            continue
+        if not _number(r.get(key)):
+            raise Unresolved(f"{r.get(by)!r} had a number {key!r} before and has none now")
+        changes.append(abs(r[key] - old[r.get(by)]))
     if not changes:
         raise Unresolved(f"no row of both readings has a number {key!r}")
     return max(changes)
