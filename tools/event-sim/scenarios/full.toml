@@ -867,6 +867,8 @@ expect = ["page('drivers').driving == 14",
           "'comms2' in obs.program_channels"]
 timeout = "4m"
 
+# The release of 14 cars takes about a minute, and the simulated paces differ by up to
+# 3.5 %, so gaps move about 2 s by themselves; red-flag checks the restart within 1 s.
 # Cars closer than the drivers' 0.2 s tick may swap at the release: the exact order is soft.
 [[step]]
 id = "kept"
@@ -874,9 +876,9 @@ at = "after:leave_box+3s"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
-expect = ["drift(result('before_red').entries, race.entries, 'gap_s') <= 1"]
+expect = ["drift(result('before_red').entries, race.entries, 'gap_s') <= 3"]
 soft = ["pluck(race.entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
-timeout = "20s"
+timeout = "5s"
 
 [[step]]
 id = "shot_restart_3"
