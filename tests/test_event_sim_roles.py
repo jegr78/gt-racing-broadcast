@@ -113,6 +113,10 @@ class Locator:
         return self._el().box
 
     def scroll_into_view_if_needed(self, timeout=None):
+        el = self.page.els.get(self.selector)
+        if el is not None and getattr(el, "rerenders", 0):
+            el.rerenders -= 1
+            raise RuntimeError("Locator.scroll_into_view_if_needed: Element is not attached to the DOM")
         self.page.scrolled.append(self.selector)
 
     def click(self, timeout=None):
@@ -981,6 +985,15 @@ def desk_button(page, label, route, says, cls="msg", armed=True):
     return key
 
 
+def t_a_control_the_page_renders_anew_is_found_again():
+    role, page, _ = desk()
+    key = desk_button(page, "Final lap", "/drivers/race/final-lap", "Final lap")
+    page.els[key].rerenders = 2
+    assert role.do("final_lap", {}) == {"status": "Final lap"}, "the desk re-renders a row between find and click"
+    page.els[key].rerenders = 10 ** 6
+    fails(lambda: role.do("final_lap", {}), "not attached")
+
+
 def t_an_armed_desk_button_is_confirmed_with_a_second_click():
     role, page, _ = desk()
     key = desk_button(page, "Final lap", "/drivers/race/final-lap", "Final lap")
@@ -1542,19 +1555,19 @@ def t_fit_script_measures_a_real_page():
     page = """<body style="margin:0"><div id="col" style="height:300px;overflow-y:auto">
       <div style="height:200px;overflow:hidden"><button style="margin-top:250px">Hidden</button></div>
       <button data-label="Below" style="margin-top:100px">x</button></div><button>Outside</button></body>"""
-    try:
-        with sync_playwright() as pw:
+    with sync_playwright() as pw:
+        try:
             browser = pw.chromium.launch()
-            try:
-                tab = browser.new_page(viewport={"width": 400, "height": 400})
-                tab.set_content(page)
-                got = {c["label"]: (c["cut"] > 0, c["clip"] > 0) for c in tab.evaluate(roles.builtin.FIT_SCRIPT, "#col")}
-                missing = tab.evaluate(roles.builtin.FIT_SCRIPT, "#none")
-            finally:
-                browser.close()
-    except Exception as exc:  # noqa: BLE001  no browser binary on this machine
-        print(f"  (no Chromium: {type(exc).__name__})")
-        return
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return
+        try:
+            tab = browser.new_page(viewport={"width": 400, "height": 400})
+            tab.set_content(page)
+            got = {c["label"]: (c["cut"] > 0, c["clip"] > 0) for c in tab.evaluate(roles.builtin.FIT_SCRIPT, "#col")}
+            missing = tab.evaluate(roles.builtin.FIT_SCRIPT, "#none")
+        finally:
+            browser.close()
     assert got == {"Hidden": (True, True), "Below": (True, False)}, \
         f"a box that cannot scroll clips, the scrolling column only hides: {got}"
     assert missing is None

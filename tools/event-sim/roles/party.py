@@ -18,6 +18,7 @@ FEED_S = 120.0
 POLL_MS = 100
 DESK = selectors.DESK
 STALE_S = 1.0
+DETACHED = "not attached"   # Playwright's text for an element the page replaced
 HUD_FIELDS = ("stint", "streamer", "session", "flag", "racecontrol")
 URI_SAFE = "!'()*~"      # what the page's encodeURIComponent leaves as it is
 
@@ -72,8 +73,19 @@ class Surface(builtin.PageRole):
         if not loc.is_enabled():
             raise StepError(f"{what}: the control is disabled ({selector})")
         self._note_outside(loc, what)
-        loc.scroll_into_view_if_needed(timeout=CONTROL_MS)
-        return loc
+        # A desk re-renders its rows with every poll: a row replaced between finding and
+        # scrolling is found again, the locator resolves to the new one.
+        begin = self.clock()
+        while True:
+            try:
+                loc.scroll_into_view_if_needed(timeout=CONTROL_MS)
+                return loc
+            except Exception as exc:
+                if DETACHED not in str(exc):
+                    raise
+                if self.clock() - begin >= CONTROL_MS / 1000:
+                    raise StepError(f"{what}: the page keeps replacing the control, {DETACHED}") from None
+                self.pg.wait_for_timeout(POLL_MS)
 
     def _note_outside(self, loc, what):
         box, view = loc.bounding_box(), self.viewport
@@ -145,8 +157,9 @@ class Surface(builtin.PageRole):
             resp = info.value
         except StepError:
             raise
-        except Exception:
-            raise StepError(f"{what}: the page sent no request to {path}") from None
+        except Exception as exc:  # Playwright's text says what the click or the wait met
+            detail = builtin.redact(str(exc).splitlines()[0] if str(exc) else type(exc).__name__, self.ctx.secrets)
+            raise StepError(f"{what}: the page sent no request to {path} ({detail})") from None
         if resp.status >= 400:
             raise StepError(f"{what}: {path} answered HTTP {resp.status}")
         return resp
