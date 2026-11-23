@@ -1901,10 +1901,11 @@ async function op(name, confirmFirst, params, confirmation) {
 }
 
 // The Qualifying box takes the running relay's mode whenever that mode changes, so a
-// reload shows it; in between the operator's tick stands.
+// reload shows it; in between, and across a status gap, the operator's tick stands.
 function followScheduleMode(relay, seen, box) {
   const mode = relay && relay.alive && relay.http_ok ? relay.schedule_mode || null : null;
-  if (mode && mode !== seen) box.checked = mode === 'qualifying';
+  if (!mode) return seen;
+  if (mode !== seen) box.checked = mode === 'qualifying';
   return mode;
 }
 

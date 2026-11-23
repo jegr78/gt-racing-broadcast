@@ -1848,25 +1848,20 @@ def _obs_stream_active():
 
 def _program_busy(status, read_stream=None):
     """Why the running relay's program may be on air: "" only when its /status reports
-    no broadcast Part live and OBS reachable and not streaming, and OBS read now agrees.
-    Unknown counts as on air."""
+    OBS reachable and not streaming and OBS read now agrees. Unknown counts as on air.
+    A live Part is a stream, so the Part record only explains a refusal."""
     obs = status.get("obs") if isinstance(status.get("obs"), dict) else {}
-    part = status.get("part_live")
     stream = obs.get("stream_active") if obs.get("reachable") is True else None
-    if part is True:
-        return "a broadcast Part is live"
     if stream is True:
-        return "OBS is streaming"
-    if part is not False:
-        return "the relay did not report whether a broadcast Part is live"
-    if stream is not False:
-        return "the relay could not read whether OBS is streaming"
-    now = (read_stream or _obs_stream_active)()
-    if now is True:
-        return "OBS is streaming"
-    if now is not False:
-        return "OBS did not answer whether it is streaming"
-    return ""
+        why = "OBS is streaming"
+    elif stream is not False:
+        why = "the relay could not read whether OBS is streaming"
+    else:
+        now = (read_stream or _obs_stream_active)()
+        if now is False:
+            return ""
+        why = "OBS is streaming" if now is True else "OBS did not answer whether it is streaming"
+    return why + (" (the Part record says live)" if status.get("part_live") is True else "")
 
 
 def _align_running_relay_mode(requested, read_status=None, switch=None, read_stream=None):
@@ -1889,7 +1884,9 @@ def _align_running_relay_mode(requested, read_status=None, switch=None, read_str
         return f"relay: still in {actual} mode, the switch to {requested} failed ({exc})."
     if isinstance(res, dict) and res.get("error"):
         return f"relay: still in {actual} mode, the switch to {requested} failed: {res['error']}"
-    return f"relay: was running in {actual} mode, switched to {requested} mode."
+    stale = (" The Part record says live, OBS is not streaming."
+             if status.get("part_live") is True else "")
+    return f"relay: was running in {actual} mode, switched to {requested} mode.{stale}"
 
 
 def _qualifying_title(base):

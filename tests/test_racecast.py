@@ -3411,16 +3411,14 @@ def t_align_running_relay_mode_switches_an_idle_relay_to_the_mode_start_event_as
 
 def t_align_running_relay_mode_never_switches_a_live_or_unknown_program():
     switched = []
-    unknown = {"mode": "race"}
-    cases = ((_relay_status("race", part_live=True), "a broadcast Part is live"),
-             (_relay_status("race", streaming=True), "OBS is streaming"),
-             (_relay_status("race", streaming=None), "OBS"),
-             (dict(_relay_status("race"), obs={"reachable": False}), "OBS"),
-             (dict(_relay_status("race"), obs={"reachable": False, "stream_active": False}), "OBS"),
-             (dict(_relay_status("race"), part_live=None), "Part"),
-             (unknown, "Part"))
-    cases = [(status, why, False) for status, why in cases]
-    cases += [(_relay_status("race"), "OBS is streaming", True), (_relay_status("race"), "OBS", None)]
+    cases = ((_relay_status("race", streaming=True), "OBS is streaming", False),
+             (_relay_status("race", streaming=None), "OBS", False),
+             (dict(_relay_status("race"), obs={"reachable": False}), "OBS", False),
+             (dict(_relay_status("race"), obs={"reachable": False, "stream_active": False}), "OBS", False),
+             ({"mode": "race"}, "OBS", False),
+             (_relay_status("race"), "OBS is streaming", True),
+             (_relay_status("race"), "OBS", None),
+             (_relay_status("race", part_live=True), "the Part record says live", None))
     for status, why, now in cases:
         note = m._align_running_relay_mode("qualifying", read_status=lambda s=status: s,
                                            switch=switched.append, read_stream=lambda n=now: n)
@@ -3428,6 +3426,18 @@ def t_align_running_relay_mode_never_switches_a_live_or_unknown_program():
         assert note.startswith("WARNING") and why in note, (status, note)
         assert "still in race mode" in note and "Director Panel" in note, note
     assert note.isascii(), "the warning prints on a cp1252 console"
+
+
+def t_align_running_relay_mode_trusts_obs_over_a_stale_part_record():
+    switched = []
+
+    def _switch(mode):
+        switched.append(mode)
+        return {"mode": mode}
+    note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race", part_live=True),
+                                       switch=_switch, read_stream=lambda: False)
+    assert switched == ["qualifying"], "a Part ended by OBS Stop Streaming must not block the switch"
+    assert "Part record says live, OBS is not streaming" in note and "switched to qualifying" in note, note
 
 
 def t_event_start_aligns_a_running_relay_with_the_requested_mode():

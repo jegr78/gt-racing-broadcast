@@ -60,7 +60,8 @@ let mode = null;
 const relay = m => ({alive: true, http_ok: true, schedule_mode: m});
 for (const [r, tick] of [[relay('qualifying'), null], [relay('qualifying'), false],
                          [relay('qualifying'), null], [relay('race'), null],
-                         [{alive: false}, true], [relay('race'), null]]) {
+                         [{alive: false}, true], [relay('race'), null],
+                         [{alive: true, http_ok: false}, false], [relay('race'), null]]) {
   if (tick !== null) box.checked = tick;
   mode = followScheduleMode(r, mode, box);
   seen.push(box.checked);
@@ -70,8 +71,8 @@ console.log(JSON.stringify(seen));
     res = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
                          encoding="utf-8", errors="replace", timeout=30)
     assert res.returncode == 0, res.stderr
-    assert json.loads(res.stdout) == [True, False, False, False, True, False], \
-        f"the box follows each new relay mode and keeps the operator's tick in between: {res.stdout}"
+    assert json.loads(res.stdout) == [True, False, False, False, True, True, False, False], \
+        f"the box follows each new relay mode, keeps the operator's tick in between and across a status gap: {res.stdout}"
 
 
 def t_relay_status_data_older_relay_has_no_keep_awake():
