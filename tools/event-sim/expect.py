@@ -2,8 +2,8 @@
 
 Allowed: literals, lists and tuples, `and`/`or`/`not`, comparisons (`==`, `!=`, `<`,
 `<=`, `>`, `>=`, `in`, `not in`), unary minus, attribute and index access, and calls of
-the methods a probe lists in `calls` (plus `len` and the row helpers `pluck`, `row` and
-`drift`). Never `eval`: anything else, a name
+the methods a probe lists in `calls` (plus `len`, `sorted`, the row helpers `pluck`, `row`,
+`drift`, `swaps` and `unchanged`, and `having` for texts). Never `eval`: anything else, a name
 that is no probe, or an attribute starting with `_` is refused when the scenario loads.
 
 A value that cannot be read yet (a missing key, a probe whose service is down) raises
@@ -57,11 +57,41 @@ def drift(before, after, key, by="entry"):
     return max(changes)
 
 
+def swaps(before, after, key, margin, by="entry"):
+    """The pairs [ahead, behind] of `before` whose numbers `key` lie more than `margin`
+    apart and that `after` lists the other way round; rows missing from either side or
+    without a number are left out."""
+    place = {r.get(by): k for k, r in enumerate(_rows(after))}
+    rows = [r for r in _rows(before) if _number(r.get(key)) and r.get(by) in place]
+    if not rows:
+        raise Unresolved(f"no row of both readings has a number {key!r}")
+    return [[a.get(by), b.get(by)] for i, a in enumerate(rows) for b in rows[i + 1:]
+            if b[key] - a[key] > margin and place[b.get(by)] < place[a.get(by)]]
+
+
+def unchanged(before, after, key, by="entry"):
+    """The `by` of every row of `after` whose `key` is what `before` had, in `after`'s order."""
+    old = {r.get(by): r.get(key) for r in _rows(before)}
+    common = [r for r in _rows(after) if r.get(by) in old]
+    if not common:
+        raise Unresolved(f"the readings share no {by!r}")
+    return [r.get(by) for r in common if r.get(key) == old[r.get(by)]]
+
+
+def having(items, *texts):
+    """The strings of `items` that contain every one of `texts`."""
+    items = raw(items)
+    if not isinstance(items, list):
+        raise Unresolved(f"{short(items)} is no list of texts")
+    return [t for t in items if isinstance(t, str) and all(str(w) in t for w in texts)]
+
+
 def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-BUILTINS = {"len": len, "pluck": pluck, "row": row, "drift": drift}
+BUILTINS = {"len": len, "sorted": sorted, "pluck": pluck, "row": row, "drift": drift, "swaps": swaps,
+            "unchanged": unchanged, "having": having}
 ROOTS = ("obs", "relay", "sheet", "webhook", "race", "page", "result")
 MAX_LENGTH = 500
 

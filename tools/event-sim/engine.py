@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field
 import expect
 import redaction
 import roles
+from roles import builtin
 from scenario import TEMPLATE_RE as _TEMPLATE, template_refs
 
 HARD, SOFT = "hard", "soft"
@@ -47,6 +48,7 @@ class StepResult:
     error: str = ""
     checks: list = field(default_factory=list)
     shot: str = ""
+    fail_shot: str = ""              # the role's page when the step failed
     result: object = None
 
 
@@ -176,6 +178,7 @@ class Engine:
         self.final_checks = list(final_checks)
         self.no_skips = no_skips
         self.roles = {}
+        self.pages = {}                  # each page role's memory when it closed
         self.findings = []
         self.results = {}
         self.start = None
@@ -300,6 +303,19 @@ class Engine:
             self.findings.append(Finding(HARD if self.no_skips else SOFT, f"shot {shot.name}: {exc}",
                                          step.id, role_name))
 
+    def _evidence(self, step, res):
+        """A failed page step's whole page as `fail-<step>.png`; never decides the run."""
+        role = self.roles.get(step.role)
+        if self.shots_dir is None or not isinstance(role, builtin.PageRole) or role.pg is None:
+            return
+        os.makedirs(self.shots_dir, exist_ok=True)
+        name = f"fail-{step.id}.png"
+        try:
+            role.shot(os.path.join(self.shots_dir, name))
+            res.fail_shot = f"shots/{name}"
+        except Exception as exc:  # a page that broke with the step
+            self.findings.append(Finding(SOFT, f"no picture of the failure: {exc}", step.id, step.role))
+
     def _checks(self, step, res):
         slow = self.scenario.tolerances.get("state_s", 2.0)
         for soft, exprs in ((False, step.expect), (True, step.soft)):
@@ -341,6 +357,8 @@ class Engine:
                 res.status = "failed"
         if res.status != "skipped":
             self._shoot(step, res)
+        if res.status == "failed":
+            self._evidence(step, res)
         self._take_findings(step)
         self.ctx.learn(force=True)      # a link this step created or renewed
         res.duration = round(self.clock() - begin, 3)
@@ -368,6 +386,9 @@ class Engine:
                     self.sleep(self.poll)
         finally:
             for name, role in reversed(list(self.roles.items())):
+                memory = role.memory()          # catches the browser's errors itself
+                if memory is not None:
+                    self.pages[name] = memory
                 try:
                     for severity, message in role.close() or []:
                         self.findings.append(Finding(severity, message, role=name))
@@ -388,5 +409,5 @@ class Engine:
         return self.ctx.scrub({
             "scenario": self.scenario.name, "description": self.scenario.description,
             "ok": not hard and not failed, "duration": round(self.now(), 3),
-            "steps": [asdict(s) for s in steps],
+            "steps": [asdict(s) for s in steps], "pages": dict(self.pages),
             "findings": [asdict(f) for f in sorted(findings, key=lambda f: f.severity != HARD)]})

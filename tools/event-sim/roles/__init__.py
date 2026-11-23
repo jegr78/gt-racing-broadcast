@@ -50,6 +50,10 @@ class Role:
         """Write a PNG of the role's surface (or `element` of it) to `path`."""
         raise ShotUnavailable(f"role {self.name!r} takes no screenshots")
 
+    def memory(self):
+        """A page's {heap_mb, dom_nodes, listeners}, or None for a role without an open page."""
+        return None
+
     def close(self):
         """Release the role's pages and connections; returns a list of (severity, text)."""
         return []

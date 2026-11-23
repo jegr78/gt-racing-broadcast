@@ -1,0 +1,1096 @@
+# Full: the race day of the slide deck, in real time, over three stints in three
+# lobbies with one commentator each. 14 cars on a Suzuka-length lap (about 1:45).
+# Start event, then qualifying mode: every driver of the three stints registers and Race Control
+# approves them, the desk adds qualifying laps, the director switches to race mode and
+# goes live. A formation lap, the start, a pit stop; in stint 1 a car disconnects (confirmed
+# DC, rejoin mark), another one's sender stops (an estimate 3 s behind another car, rejoin
+# mark), a third retires. Comms 2 sends the stint 2 link late. At each stint change every
+# running team's driver swaps in the new lobby; the DC team rejoins a lap down. A red flag
+# in stint 2 ends in a keep-gaps restart. In stint 3 Race Control calls the final lap.
+# Its 50 screenshots carry deck image names (`<slide>-<n>`): the race-day subset of the
+# deck, see tools/CLAUDE.md for the families it does not produce. It runs in the
+# workflow (about 36 min there); it exceeds the local 2 GiB E2E unit.
+description = "The deck's race day in real time: qualifying, approval, three stints, DC, estimate, DNF, red flag, finish."
+max_minutes = 75
+
+[event]
+stints = 3
+track = "6e378b"
+track_length_m = 5800
+cars = 14
+seed = 7
+parts = 2
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+
+[[event.commentators]]
+name = "Comms 3"
+channel = "comms3"
+scheduled = true
+
+[sheet.tabs]
+Qualifying = [["URL", "Streamer", "Stint"], ["sim://comms1", "Comms 1", "Qualifying"]]
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = true, finish_mode = "time" }
+expect = ["race.settings.formation",
+          "race.settings.finish_mode == 'time'"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'",
+          "relay.up"]
+
+[[step]]
+id = "quali_mode"
+at = "after:start_event"
+role = "director"
+do = "mode"
+args = { mode = "qualifying" }
+expect = ["relay.status.mode == 'qualifying'"]
+timeout = "20s"
+
+[[step]]
+id = "arm_a"
+at = "after:quali_mode"
+role = "director"
+do = "arm_feed"
+args = { feed = "A" }
+
+[[step]]
+id = "quali_on_air"
+at = "after:arm_a"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms1' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "dashboard"
+at = "after:quali_on_air"
+role = "director"
+do = "show_dashboard"
+args = { on = true }
+expect = ["race.settings.visible"]
+timeout = "10s"
+
+[[step]]
+id = "overlay"
+at = "after:dashboard"
+role = "page:overlay"
+do = "open"
+args = { service = "relay", path = "/drivers", wait_for = "#drivers-tower", viewport = [1920, 1080] }
+
+[[step]]
+id = "cockpit1"
+at = "after:overlay"
+role = "commentator:Comms 1"
+do = "open"
+expect = ["page('commentator:Comms 1').on_air"]
+timeout = "20s"
+
+[[step]]
+id = "cockpit2"
+at = "after:cockpit1"
+role = "commentator:Comms 2"
+do = "open"
+expect = ["not page('commentator:Comms 2').on_air"]
+timeout = "20s"
+
+[[step]]
+id = "cockpit3"
+at = "after:cockpit2"
+role = "commentator:Comms 3"
+do = "open"
+expect = ["not page('commentator:Comms 3').on_air"]
+timeout = "20s"
+
+[[step]]
+id = "register"
+at = "after:cockpit3"
+role = "drivers"
+do = "register"
+args = { stints = 3 }
+expect = ["result('register').registered == 42"]
+
+[[step]]
+id = "desk_waiting"
+at = "after:register"
+role = "race_control"
+do = "open"
+expect = ["page('race_control').waiting == 42"]
+timeout = "20s"
+
+[[step]]
+id = "desk_requests"
+at = "after:desk_waiting"
+role = "race_control"
+do = "view"
+args = { area = "drivers" }
+shot = { name = "approval-requests-1", role = "race_control", element = ".area[data-area=\"drivers\"]" }
+
+[[step]]
+id = "approve_drivers"
+at = "after:desk_requests"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 42",
+          "page('race_control').waiting == 0"]
+timeout = "20s"
+shot = { name = "approval-approved-1", role = "race_control", element = ".area[data-area=\"drivers\"]" }
+
+[[step]]
+id = "quali_lap1"
+at = "after:approve_drivers"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Blue Harbor Racing #22", time = "1:45.312" }
+
+[[step]]
+id = "quali_lap2"
+at = "after:quali_lap1"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Apex Works #11", time = "1:44.208" }
+
+[[step]]
+id = "quali_lap3"
+at = "after:quali_lap2"
+role = "race_control"
+do = "add_lap"
+args = { entry = "Cedar Motorsport #33", time = "1:44.951" }
+
+[[step]]
+id = "quali_desk"
+at = "after:quali_lap3"
+role = "race_control"
+do = "view"
+args = { area = "qualifying" }
+shot = { name = "quali-desk-1", role = "race_control", element = ".area[data-area=\"qualifying\"]" }
+
+[[step]]
+id = "quali_timing"
+at = "after:quali_desk"
+role = "viewer"
+do = "read"
+args = { cars = 3 }
+expect = ["'Apex Works' in page('viewer').rows[0]",
+          "'Cedar Motorsport' in page('viewer').rows[1]",
+          "'Blue Harbor' in page('viewer').rows[2]"]
+timeout = "20s"
+shot = "quali-public-1"
+
+[[step]]
+id = "shot_quali_cockpit_1"
+at = "after:quali_timing+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "quali-cockpit-1", role = "commentator:Comms 1", element = "#timingCard" }
+
+[[step]]
+id = "shot_quali_tower_gap_1"
+at = "after:shot_quali_cockpit_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "quali-tower-gap-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "race_mode"
+at = "after:shot_quali_tower_gap_1"
+role = "director"
+do = "mode"
+args = { mode = "race" }
+expect = ["relay.status.mode == 'race'",
+          "'comms1' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "go_live"
+at = "after:race_mode+3s"
+role = "director"
+do = "start_part"
+expect = ["obs.streaming"]
+
+[[step]]
+id = "formation"
+at = "after:go_live"
+role = "drivers"
+do = "start"
+expect = ["page('drivers').driving == 14"]
+timeout = "60s"
+
+[[step]]
+id = "shot_formation_1"
+at = "after:formation+3s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'waiting'", "race.settings.formation"]
+shot = { name = "formation-1", role = "page:overlay" }
+
+[[step]]
+id = "shot_formation_2"
+at = "after:shot_formation_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "formation-2", role = "viewer" }
+
+[[step]]
+id = "racing"
+at = "after:shot_formation_2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'racing'"]
+timeout = "6m"
+
+[[step]]
+id = "shot_start_1"
+at = "after:racing+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "start-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "desk_race"
+at = "after:shot_start_1"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+
+[[step]]
+id = "shot_start_2"
+at = "after:desk_race+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "start-2", role = "page:overlay" }
+
+[[step]]
+id = "shot_new_cockpit_timing_1"
+at = "after:shot_start_2+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "new-cockpit-timing-1", role = "commentator:Comms 1", element = "#timingCard" }
+
+[[step]]
+id = "submit"
+at = "after:shot_new_cockpit_timing_1"
+role = "commentator:Comms 2"
+do = "submit_link"
+args = { url = "sim://comms2", stint = 2 }
+expect = ["webhook.count('submission') == 1",
+          "sheet.schedule[1].url == ''"]
+timeout = "15s"
+
+[[step]]
+id = "approve_link"
+at = "after:submit"
+role = "director"
+do = "approve_link"
+args = { stint = 2 }
+expect = ["sheet.schedule[1].url == 'sim://comms2'",
+          "webhook.count('stream link approved') == 1"]
+timeout = "40s"
+
+[[step]]
+id = "lap2"
+at = "after:approve_link"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "12m"
+
+[[step]]
+id = "pit"
+at = "after:lap2"
+role = "drivers"
+do = "pit"
+args = { entry = "Blue Harbor Racing #22", seconds = 20 }
+
+[[step]]
+id = "in_pits"
+at = "after:pit"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Blue Harbor Racing #22').status == 'box'"]
+timeout = "5m"
+
+[[step]]
+id = "shot_pits_1"
+at = "after:in_pits+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "pits-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "shot_pits_2"
+at = "after:shot_pits_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "pits-2", role = "page:overlay" }
+
+[[step]]
+id = "out_of_pits"
+at = "after:shot_pits_2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Blue Harbor Racing #22').status == 'racing'",
+          "row(race.entries, 'entry', 'Blue Harbor Racing #22').pit_stops == 1"]
+timeout = "2m"
+
+[[step]]
+id = "shot_tower_full_1"
+at = "after:out_of_pits+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "tower-full-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "lap3"
+at = "after:shot_tower_full_1"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 3"]
+timeout = "12m"
+
+[[step]]
+id = "dc_drop"
+at = "after:lap3"
+role = "drivers"
+do = "drop"
+args = { entry = "Falcon Engineering #66" }
+expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').status == 'no_data'"]
+timeout = "20s"
+
+[[step]]
+id = "shot_dc_suspected_1"
+at = "after:dc_drop+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-suspected-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "dc_event"
+at = "after:shot_dc_suspected_1+5s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race/recording" }
+expect = ["row(relay.get('/drivers/race/recording').events, 'entry', 'Falcon Engineering #66').state == 'suspected'"]
+timeout = "20s"
+
+[[step]]
+id = "shot_dc_suspected_2"
+at = "after:dc_event+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-suspected-2", role = "race_control", element = ".area[data-area=\"race\"] .tbl >> nth=1" }
+
+[[step]]
+id = "shot_dc_tower_1"
+at = "after:shot_dc_suspected_2+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-tower-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "dc_confirm"
+at = "after:shot_dc_tower_1"
+role = "race_control"
+do = "confirm_dc"
+args = { entry = "Falcon Engineering #66" }
+expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').status == 'dc'"]
+timeout = "15s"
+
+[[step]]
+id = "desk_events"
+at = "after:dc_confirm"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+shot = { name = "dc-decided-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl >> nth=1" }
+
+[[step]]
+id = "shot_dc_tower_2"
+at = "after:desk_events+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-tower-2", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "dc_public"
+at = "after:shot_dc_tower_2"
+role = "viewer"
+do = "read"
+args = { cars = 14 }
+expect = ["page('viewer').cars >= 14",
+          "len(having(page('viewer').rows, 'Falcon', 'DC')) == 1"]
+timeout = "30s"
+shot = "dc-onair-3"
+
+[[step]]
+id = "dc_mark"
+at = "after:dc_public"
+role = "race_control"
+do = "rejoin"
+args = { entry = "Falcon Engineering #66" }
+expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').rejoin"]
+timeout = "10s"
+
+[[step]]
+id = "lap4"
+at = "after:dc_mark"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 4"]
+timeout = "12m"
+
+[[step]]
+id = "est_drop"
+at = "after:lap4"
+role = "drivers"
+do = "drop"
+args = { entry = "Harbor Lights #88" }
+expect = ["row(race.entries, 'entry', 'Harbor Lights #88').status == 'no_data'"]
+timeout = "20s"
+
+[[step]]
+id = "shot_est_onair_1"
+at = "after:est_drop+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "est-onair-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "estimate"
+at = "after:shot_est_onair_1"
+role = "race_control"
+do = "estimate"
+args = { entry = "Harbor Lights #88", ref = "Granite GP #77", seconds = 3 }
+expect = ["row(race.entries, 'entry', 'Harbor Lights #88').estimate.ref == 'Granite GP #77'",
+          "row(race.entries, 'entry', 'Harbor Lights #88').estimate.ahead == False",
+          "row(race.entries, 'entry', 'Harbor Lights #88').estimate.seconds == 3"]
+timeout = "15s"
+shot = { name = "est-desk-1", role = "race_control", element = ".area[data-area=\"corrections\"]" }
+
+[[step]]
+id = "shot_est_onair_2"
+at = "after:estimate+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "est-onair-2", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "shot_est_onair_3"
+at = "after:shot_est_onair_2+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "est-onair-3", role = "viewer" }
+
+[[step]]
+id = "shot_est_onair_4"
+at = "after:shot_est_onair_3+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "est-onair-4", role = "page:overlay", element = "#drivers-map" }
+
+[[step]]
+id = "est_mark"
+at = "after:shot_est_onair_4"
+role = "race_control"
+do = "rejoin"
+args = { entry = "Harbor Lights #88" }
+expect = ["row(race.entries, 'entry', 'Harbor Lights #88').rejoin"]
+timeout = "10s"
+
+[[step]]
+id = "lap5"
+at = "after:est_mark"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 5"]
+timeout = "12m"
+
+[[step]]
+id = "retire"
+at = "after:lap5"
+role = "race_control"
+do = "retire"
+args = { entry = "Ion Racing #9" }
+expect = ["row(race.entries, 'entry', 'Ion Racing #9').status == 'retired'",
+          "pluck(race.entries, 'entry')[13] == 'Ion Racing #9'"]
+timeout = "15s"
+
+[[step]]
+id = "desk_dnf"
+at = "after:retire"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+shot = { name = "new-dnf-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "shot_new_dnf_6"
+at = "after:desk_dnf+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "new-dnf-6", role = "viewer" }
+
+[[step]]
+id = "shot_new_dnf_tower_1"
+at = "after:shot_new_dnf_6+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "new-dnf-tower-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "lap6"
+at = "after:shot_new_dnf_tower_1"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 6"]
+timeout = "12m"
+
+[[step]]
+id = "box2"
+at = "after:lap6"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 12"]
+timeout = "4m"
+
+[[step]]
+id = "shot_swaps_1"
+at = "after:box2+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "swaps-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "arm2"
+at = "after:shot_swaps_1"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next2"
+at = "after:arm2"
+role = "director"
+do = "next"
+expect = ["'comms2' in obs.program_channels",
+          "'comms1' not in obs.program_channels",
+          "page('commentator:Comms 2').on_air"]
+timeout = "90s"
+
+[[step]]
+id = "lobby2"
+at = "after:next2"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "release2"
+at = "after:lobby2+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 12"]
+timeout = "4m"
+
+[[step]]
+id = "shot_swaps_2"
+at = "after:release2+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "swaps-2", role = "page:overlay", element = "#drivers-map" }
+
+[[step]]
+id = "rejoin_dc"
+at = "after:shot_swaps_2"
+role = "drivers"
+do = "rejoin"
+args = { entry = "Falcon Engineering #66", seconds = 130 }
+
+[[step]]
+id = "rejoin_est"
+at = "after:rejoin_dc"
+role = "drivers"
+do = "rejoin"
+args = { entry = "Harbor Lights #88", seconds = 5 }
+
+[[step]]
+id = "swapped"
+at = "after:rejoin_est"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'",
+          "row(race.entries, 'entry', 'Apex Works #11').pit_stops == 1",
+          "row(race.entries, 'entry', 'Harbor Lights #88').status == 'racing'",
+          "row(race.entries, 'entry', 'Harbor Lights #88').estimate == None",
+          "row(race.entries, 'entry', 'Ion Racing #9').status == 'retired'"]
+timeout = "60s"
+
+[[step]]
+id = "shot_swaps_3"
+at = "after:swapped+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "swaps-3", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "shot_director_1"
+at = "after:shot_swaps_3+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "director-1", role = "director" }
+
+# Every team now races with its stint 2 driver; the retired car may keep its last one.
+[[step]]
+id = "dc_back"
+at = "after:shot_director_1"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').status == 'racing'",
+          "row(race.entries, 'entry', 'Falcon Engineering #66').driver == 'Driver 66-2'",
+          "row(race.entries, 'entry', 'Falcon Engineering #66').lapped >= 1",
+          "unchanged(result('lap6').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]"]
+timeout = "5m"
+
+[[step]]
+id = "shot_dc_rejoin_desk_1"
+at = "after:dc_back+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-rejoin-desk-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "shot_dc_rejoin_tower_1"
+at = "after:shot_dc_rejoin_desk_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-rejoin-tower-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "shot_dc_rejoin_public_1"
+at = "after:shot_dc_rejoin_tower_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-rejoin-public-1", role = "viewer" }
+
+[[step]]
+id = "shot_dc_states_3"
+at = "after:shot_dc_rejoin_public_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "dc-states-3", role = "race_control", element = ".area[data-area=\"race\"] .tbl >> nth=1" }
+
+[[step]]
+id = "shot_lapped_1"
+at = "after:shot_dc_states_3+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "lapped-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "lap9"
+at = "after:shot_lapped_1"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 9"]
+timeout = "12m"
+
+[[step]]
+id = "before_red"
+at = "after:lap9"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["pluck(result('before_red').entries, 'gap_s')[1] > 0"]
+
+[[step]]
+id = "red_flag"
+at = "after:before_red"
+role = "race_control"
+do = "red_flag"
+expect = ["result('red_flag').status == 'RED FLAG: banner, cover and race held'",
+          "race.red_flag.mode == 'keep'",
+          "relay.get('/setup/data').fields.racecontrol == 'Red Flag - Race Suspended'",
+          "'comms2' not in obs.program_channels"]
+timeout = "20s"
+shot = { name = "restart-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+# The race as it froze, up to 3 s after before_red: cars more than 0.2 s apart keep their
+# order, level ones may swap in between, so the exact order is soft.
+[[step]]
+id = "frozen"
+at = "after:red_flag+3s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["result('frozen').red_flag",
+          "sorted(pluck(result('frozen').entries, 'entry')) == sorted(pluck(result('before_red').entries, 'entry'))",
+          "swaps(result('before_red').entries, result('frozen').entries, 'gap_s', 0.2) == []"]
+soft = ["pluck(result('frozen').entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
+
+[[step]]
+id = "shot_redflag_1"
+at = "after:frozen+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "redflag-1", role = "page:overlay" }
+
+[[step]]
+id = "shot_redflag_2"
+at = "after:shot_redflag_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "redflag-2", role = "viewer" }
+
+[[step]]
+id = "to_box"
+at = "after:shot_redflag_2"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 14"]
+timeout = "4m"
+
+[[step]]
+id = "restart_lobby"
+at = "after:to_box"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "restart_released"
+at = "after:restart_lobby+5s"
+role = "race_control"
+do = "release"
+expect = ["not race.red_flag",
+          "relay.get('/setup/data').fields.racecontrol != 'Red Flag - Race Suspended'"]
+timeout = "15s"
+shot = { name = "restart-2", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "leave_box"
+at = "after:restart_released"
+role = "drivers"
+do = "release"
+args = { gaps = "${before_red.entries}" }
+expect = ["page('drivers').driving == 14"]
+timeout = "4m"
+
+# The release of 14 cars takes 37-39 s and the simulated paces differ by up to about
+# 4.7 %, so gaps move about 2 s by themselves; red-flag checks the restart within 1 s.
+# The paces also change the order, not only cars closer than the drivers' 0.2 s tick:
+# the exact order is soft.
+[[step]]
+id = "kept"
+at = "after:leave_box+3s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["drift(result('before_red').entries, race.entries, 'gap_s') <= 3"]
+soft = ["pluck(race.entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
+timeout = "5s"
+
+[[step]]
+id = "program_back"
+at = "after:kept"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["'comms2' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "shot_restart_3"
+at = "after:program_back+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "restart-3", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "shot_restart_tower_1"
+at = "after:shot_restart_3+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "restart-tower-1", role = "page:overlay", element = "#drivers-tower" }
+
+[[step]]
+id = "lap11"
+at = "after:shot_restart_tower_1"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 11"]
+timeout = "12m"
+
+[[step]]
+id = "box3"
+at = "after:lap11"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 14"]
+timeout = "4m"
+
+[[step]]
+id = "arm3"
+at = "after:box3"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next3"
+at = "after:arm3"
+role = "director"
+do = "next"
+expect = ["'comms3' in obs.program_channels",
+          "'comms2' not in obs.program_channels",
+          "page('commentator:Comms 3').on_air"]
+timeout = "90s"
+
+[[step]]
+id = "lobby3"
+at = "after:next3"
+role = "drivers"
+do = "lobby"
+args = { stint = 3 }
+
+[[step]]
+id = "release3"
+at = "after:lobby3+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 14"]
+timeout = "4m"
+
+[[step]]
+id = "stint3"
+at = "after:release3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'",
+          "unchanged(result('lap11').entries, race.entries, 'driver') in [[], ['Ion Racing #9']]"]
+timeout = "60s"
+
+[[step]]
+id = "lap15"
+at = "after:stint3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 15"]
+timeout = "12m"
+
+[[step]]
+id = "final_lap"
+at = "after:lap15"
+role = "race_control"
+do = "final_lap"
+expect = ["race.state in ['final_lap', 'finishing', 'finished']"]
+timeout = "30s"
+
+[[step]]
+id = "shot_finallap_2"
+at = "after:final_lap+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "finallap-2", role = "page:overlay" }
+
+[[step]]
+id = "desk_final"
+at = "after:shot_finallap_2"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+shot = { name = "finallap-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+
+[[step]]
+id = "flag"
+at = "after:desk_final"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'finishing' or race.state == 'finished'"]
+timeout = "5m"
+
+[[step]]
+id = "shot_chequered_1"
+at = "after:flag+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "chequered-1", role = "page:overlay" }
+
+[[step]]
+id = "shot_chequered_2"
+at = "after:shot_chequered_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "chequered-2", role = "viewer" }
+
+[[step]]
+id = "finished"
+at = "after:shot_chequered_2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'finished'",
+          "row(race.entries, 'entry', 'Ion Racing #9').status == 'retired'"]
+timeout = "5m"
+
+[[step]]
+id = "shot_finished_1"
+at = "after:finished+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "finished-1", role = "page:overlay" }
+
+[[step]]
+id = "shot_finished_2"
+at = "after:shot_finished_1+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "finished-2", role = "viewer" }
+
+[[step]]
+id = "shot_new_cockpit_finished"
+at = "after:shot_finished_2+3s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+shot = { name = "new-cockpit-finished", role = "commentator:Comms 3", element = "#timingCard" }
+
+[[step]]
+id = "chequered"
+at = "after:shot_new_cockpit_finished"
+role = "drivers"
+do = "stop"
+
+[[step]]
+id = "off_air"
+at = "after:chequered"
+role = "director"
+do = "end_part"
+expect = ["not obs.streaming"]
+
+[[step]]
+id = "stop_event"
+at = "after:off_air"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"

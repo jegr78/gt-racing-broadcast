@@ -462,6 +462,10 @@ Runs a scenario against the fakes above plus the real relay and Control Center, 
 `docs/superpowers/specs/2026-11-21-event-simulation-design.md`). Exit 0: no hard finding;
 1: a hard finding; 2: the scenario or the stack did not start. Not in `tools/run-tests.py`;
 `tests/test_event_sim_engine.py` covers the engine with in-process fakes and a fake clock.
+A page role's step that fails hard leaves `shots/fail-<step>.png` of the whole page, and
+each page role's last JS heap, DOM node and event listener counts (Chromium's Performance
+metrics, also `page(role)`'s `heap_mb`, `dom_nodes`, `listeners`) go into the report's
+`pages` when it closes.
 
 ```bash
 python3 tools/event-sim/event_sim.py --scenario smoke --out DIR   # bundled name or a .toml path
@@ -533,10 +537,14 @@ program feeds show), `sheet` (`tab(name)` or `sheet.<tab>`: records, index 0 is 
 under the header; `writes`, `write_count(action)`), `webhook` (`count(text)`, `messages`,
 `rejected`), `race` (the relay's `/drivers/race`), `page(role)` and `result(step_id)`. Keys
 match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, literals, attribute
-and index access, probe methods, `len` and three row helpers parse: `pluck(rows, key)` (the
-key of every row, in order), `row(rows, key, value)` (the first row with that value) and
+and index access, probe methods, `len`, `sorted` and these helpers parse: `pluck(rows, key)` (the
+key of every row, in order), `row(rows, key, value)` (the first row with that value),
 `drift(before, after, key)` (the largest change of a number between rows of the same `entry`,
-for gaps after a restart); anything else, a `_` name or an unknown root is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
+for gaps after a restart), `swaps(before, after, key, margin)` (the `[ahead, behind]` pairs
+more than `margin` apart in `before` that `after` lists the other way round),
+`unchanged(before, after, key)` (the entries whose value stayed, e.g. a driver after a
+stint change) and `having(texts, word, ...)` (the texts holding every word, e.g. a timing
+row); anything else, a `_` name or an unknown root is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
 A probe, a method or a function is never a value or an argument. Checks are polled, so they
 must have no side effects: `relay.get` reads `/status` or a `.../data` path, never a control
 such as `/next` or `/feed/A/activate`.
@@ -697,8 +705,25 @@ times on a maintainer machine, start and teardown included:
 
 - `quick` (4.5 min): Start event, qualifying mode, two Add lap times ranked on the public
   timing, race mode, approval of 12 drivers, a DC confirmed on the desk and rejoined late,
-  final lap in the third lobby; asserts the ranking, `no_data` then `dc`, the swaps (driver
-  and pit stop count) and the finish.
+  final lap in the third lobby; asserts the ranking, `no_data` then `dc` (the recording's
+  event suspected, then confirmed, and DC on the public timing), the swaps (driver and pit
+  stop count) and the finish.
+- `full` (about 36 min on GitHub's runner, real time): the deck's race day with 14 cars on a
+  Suzuka-length lap: qualifying, approval of 42 drivers, formation, a pit stop, a DC, an
+  estimate, a DNF, a late stream link, a red flag with a keep restart, the final lap. It
+  runs in the workflow; locally it exceeds the 2 GiB E2E unit. Its 50 screenshots carry
+  deck image names (`<slide>-<n>`, e.g. `dc-tower-1`), the race-day subset of the deck's
+  151. Not produced: multiclass (`mc-*`), qualifying details (`quali-addlap-*`,
+  `quali-flash-*`, `quali-director`, `quali-drivers`, `quali-tower-int`), no-sender and
+  takeover (`new-no-sender*`), name overrides and long names (`new-name-override`,
+  `new-long-name`), the tyre and fuel columns (`tyres`, `tower-notyre`, `tower-nofuel`),
+  the overlay builder (`style-*`), estimates ahead (`est-ahead-*`), lap flashes
+  (`new-lap-flash`), public columns (`public-columns`, `new-public-timing`), tower gap and
+  interval (`new-tower-gap`, `new-tower-int`), the recording browser (`browse`,
+  `new-snapshot`), approval variants (`approval-readiness`, `-correct`, `-dup`,
+  `-director`), `pits-after-swap`, `dc-rejoin-mark`, `dc-rejoin-gap`, `swaps-2-early`, and
+  further numbers of `dc-decided`, `dc-onair`, `dc-states`, `dc-tower`, `lapped`,
+  `new-cockpit-timing`, `new-dnf` and `tower-full`.
 - `multiclass` (4 min): Hypercar and GT3 in one lobby; asserts the GT3 leader is
   P2 overall but P1 in its class with class gap 0, the public timing lists both, and a GT3
   lap count set on the desk.
@@ -712,7 +737,7 @@ times on a maintainer machine, start and teardown included:
   count again with no new approval; stint 3 runs to the finish.
 - `red-flag` (5 min): the desk's RED FLAG in stint 2 (cover, banner, race held), a
   restart lobby and Restart released; the drivers leave the box by their gaps of before the
-  flag (the relay shows no gaps while it holds); asserts every gap within 1 s (the exact order is soft: cars closer than the 0.2 s driver tick may swap).
+  flag (the relay shows no gaps while it holds); asserts every gap within 1 s (the exact order is soft: the paces differ, and cars closer than the 0.2 s driver tick may swap).
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 

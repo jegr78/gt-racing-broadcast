@@ -405,8 +405,9 @@ class DirectorRole(LiveColumn, Surface):
         if self.attr(arm, "data-on") != "1":
             raise StepError(f"ARM: the button offers no arming, it reads {label!r}")
         self.answered(lambda: self.click(arm, "ARM"), f"/feed/{feed}/activate", "ARM")
-        self.until(lambda: {"starting", "ready"} & set(self._classes(arm)), "the feed starting")
-        return {"feed": feed, "label": label}
+        self.until(lambda: {"starting", "ready"} & set(self._classes(arm)) and self.text(arm) != label,
+                   f"the panel showing feed {feed} armed")
+        return {"feed": feed, "label": label, "shows": self.text(arm)}
 
     def act_next(self, args):
         try:

@@ -167,7 +167,8 @@ at = "after:lap2"
 role = "drivers"
 do = "drop"
 args = { entry = "Cedar Motorsport #33" }
-expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'no_data'"]
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'no_data'",
+          "row(relay.get('/drivers/race/recording').events, 'entry', 'Cedar Motorsport #33').state == 'suspected'"]
 timeout = "20s"
 
 [[step]]
@@ -176,7 +177,9 @@ at = "after:drop"
 role = "race_control"
 do = "confirm_dc"
 args = { entry = "Cedar Motorsport #33" }
-expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'dc'"]
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'dc'",
+          "row(relay.get('/drivers/race/recording').events, 'entry', 'Cedar Motorsport #33').state == 'confirmed'",
+          "len(having(page('viewer').rows, 'Cedar', 'DC')) == 1"]
 timeout = "15s"
 shot = "dc-confirmed-desk"
 

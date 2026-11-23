@@ -172,7 +172,7 @@ class PageRole(Role):
     viewport = {"width": 1440, "height": 900}
 
     def open(self):
-        self.context = self.pg = None
+        self.context = self.pg = self.cdp = None
         self.errors = []
 
     def act_open(self, args):
@@ -221,7 +221,25 @@ class PageRole(Role):
         if self.pg is None:
             return {"open": False, "console_errors": list(self.errors)}
         return {"open": True, "url": redact(self.pg.url), "title": self.pg.title(),
-                "console_errors": list(self.errors)}
+                "console_errors": list(self.errors), **self._memory()}
+
+    def _memory(self):
+        """The page's exact JS heap in MB, DOM nodes and event listeners from Chromium's
+        Performance metrics; None for what the browser cannot tell."""
+        try:
+            if self.cdp is None:
+                cdp = self.context.new_cdp_session(self.pg)
+                cdp.send("Performance.enable")
+                self.cdp = cdp
+            got = {m["name"]: m["value"] for m in self.cdp.send("Performance.getMetrics")["metrics"]}
+        except Exception:  # noqa: BLE001  a crashed page or another browser has no metrics
+            return {"heap_mb": None, "dom_nodes": None, "listeners": None}
+        heap = got.get("JSHeapUsedSize")
+        return {"heap_mb": round(heap / 1048576, 1) if isinstance(heap, (int, float)) else None,
+                "dom_nodes": got.get("Nodes"), "listeners": got.get("JSEventListeners")}
+
+    def memory(self):
+        return self._memory() if self.pg is not None else None
 
     def shot(self, path, element=""):
         if self.pg is None:

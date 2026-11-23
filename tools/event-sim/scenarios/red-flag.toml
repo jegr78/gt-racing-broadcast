@@ -189,7 +189,8 @@ expect = ["result('red_flag').status == 'RED FLAG: banner, cover and race held'"
           "'comms2' not in obs.program_channels"]
 timeout = "20s"
 
-# The race as it froze: the order of right before the flag, no gaps while held.
+# The race as it froze, no gaps while held: cars more than 0.2 s apart before the flag
+# keep their order, level ones may swap before the freeze, so the exact order is soft.
 [[step]]
 id = "frozen"
 at = "after:red_flag+3s"
@@ -197,7 +198,9 @@ role = "api"
 do = "get"
 args = { path = "/drivers/race" }
 expect = ["result('frozen').red_flag",
-          "pluck(result('frozen').entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
+          "sorted(pluck(result('frozen').entries, 'entry')) == sorted(pluck(result('before_red').entries, 'entry'))",
+          "swaps(result('before_red').entries, result('frozen').entries, 'gap_s', 0.2) == []"]
+soft = ["pluck(result('frozen').entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
 
 [[step]]
 id = "to_box"
@@ -232,11 +235,11 @@ at = "after:restart_released"
 role = "drivers"
 do = "release"
 args = { gaps = "${before_red.entries}" }
-expect = ["page('drivers').driving == 4", "'comms2' in obs.program_channels"]
+expect = ["page('drivers').driving == 4"]
 timeout = "90s"
 
-# Each car came out of the box its frozen gap after the leader, within 1 s. Cars closer
-# than the drivers' 0.2 s tick may swap at the release: the exact order is soft.
+# Each car came out of the box its frozen gap after the leader, within 1 s. The paces
+# differ, and cars closer than the drivers' 0.2 s tick may swap: the exact order is soft.
 [[step]]
 id = "kept"
 at = "after:leave_box+10s"
@@ -248,8 +251,17 @@ soft = ["pluck(race.entries, 'entry') == pluck(result('frozen').entries, 'entry'
 shot = { name = "restart-released", role = "race_control" }
 
 [[step]]
-id = "box2"
+id = "program_back"
 at = "after:kept"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["'comms2' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "box2"
+at = "after:program_back"
 role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 4"]
