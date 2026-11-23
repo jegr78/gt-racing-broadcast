@@ -1239,7 +1239,8 @@ def _diag_run(steps, trace="off", host=None, page=None):
     reg = dict(_reg(), paged=_Paged)
     eng = engine.Engine(scenario.from_dict({"step": steps}, reg), ctx, {}, registry=reg, clock=clock,
                         sleep=clock.sleep, shots_dir=os.path.join(tmp, "shots"),
-                        traces_dir=os.path.join(tmp, "traces"), host=host or (lambda: {"t": clock()}))
+                        traces_dir=os.path.join(tmp, "traces"), host=host or (lambda: {"t": clock()}),
+                        processes=lambda: [{"pid": 7, "name": "chrome-headless-shell gpu-process", "cpu_s": clock()}])
     _Paged.clock = clock
     return eng.run(), br, tmp
 
@@ -1288,6 +1289,9 @@ def t_a_failed_shot_on_another_page_leaves_a_snapshot_of_that_page():
     assert len(s["snapshots"]) == 1, f"the shot's page was diagnosed although the step's role has no page: {s}"
     snap = s["snapshots"][0]
     assert snap["role"] == "page:rc" and "restart-lobby" in snap["why"], snap
+    assert snap["processes"][0]["name"] == "chrome-headless-shell gpu-process", "which process of the unit ate the CPU"
+    assert data["unit_processes"][0]["cpu_s"] >= snap["processes"][0]["cpu_s"], "and once more at the end of the run"
+    assert "gpu-process" in report.render_html(data)
     page = snap["page"]
     assert page["alive"] and page["visibility"] == "visible" and page["metrics"]["Nodes"] == 1234, page
     assert page["processes"] == [{"type": "renderer", "id": 7, "cpu_s": 12.5}], page

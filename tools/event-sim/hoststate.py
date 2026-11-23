@@ -80,6 +80,40 @@ def _unit(proc, cgroup_root):
             "pressure": {r: _psi(os.path.join(base, f"{r}.pressure")) for r in RESOURCES}}
 
 
+def _label(cmdline):
+    """A short name for a process: its program, and Chromium's --type or a Python script."""
+    args = [a for a in cmdline.split("\0") if a]
+    if not args:
+        return None
+    name = os.path.basename(args[0])
+    extra = next((a[len("--type="):] if a.startswith("--type=") else os.path.basename(a)
+                  for a in args[1:] if a.startswith("--type=") or a.endswith(".py")), "")
+    return f"{name} {extra}".strip()
+
+
+def processes(proc=PROC, cgroup_root=CGROUP, ticks=None):
+    """The processes of this run's cgroup, most CPU first: [{pid, name, cpu_s}]
+    (user and system time so far). None outside Linux."""
+    unit = _unit(proc, cgroup_root)
+    pids = _read(os.path.join(cgroup_root, unit["path"].lstrip("/"), "cgroup.procs")) if unit else None
+    if pids is None:
+        return None
+    ticks = ticks or os.sysconf("SC_CLK_TCK")
+    out = []
+    for pid in pids.split():
+        stat = _read(os.path.join(proc, pid, "stat"))
+        if not stat or ")" not in stat:
+            continue        # it ended meanwhile
+        fields = stat.rsplit(")", 1)[1].split()
+        try:
+            cpu = (int(fields[11]) + int(fields[12])) / ticks
+        except (IndexError, ValueError):
+            continue
+        name = _label(_read(os.path.join(proc, pid, "cmdline")) or "") or stat.split("(", 1)[1].rsplit(")", 1)[0]
+        out.append({"pid": int(pid), "name": name, "cpu_s": round(cpu, 2)})
+    return sorted(out, key=lambda p: -p["cpu_s"])
+
+
 def sample(proc=PROC, cgroup_root=CGROUP, clock=time.monotonic):
     """{t, loadavg, pressure, unit}; a value the machine does not offer is None."""
     load = _read(os.path.join(proc, "loadavg"))

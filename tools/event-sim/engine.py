@@ -177,7 +177,7 @@ def resolve_args(value, results):
 class Engine:
     def __init__(self, scenario, ctx, probes, registry=None, clock=time.monotonic,
                  sleep=time.sleep, poll=POLL_S, shots_dir=None, final_checks=(), no_skips=False,
-                 traces_dir=None, host=hoststate.sample):
+                 traces_dir=None, host=hoststate.sample, processes=hoststate.processes):
         self.scenario = scenario
         self.ctx = ctx
         self.probes = dict(probes)
@@ -188,6 +188,8 @@ class Engine:
         self.no_skips = no_skips
         self.traces_dir = traces_dir
         self._host = host
+        self._processes = processes
+        self.unit_processes = None       # the run's processes and their CPU at the end
         self._step_sample = {}
         self.roles = {}
         self.pages = {}                  # each page role's memory when it closed
@@ -331,12 +333,19 @@ class Engine:
         except Exception:  # noqa: BLE001  a diagnostic never decides the run
             return {}
 
+    def _unit_processes(self):
+        try:
+            return self._processes()
+        except Exception:  # noqa: BLE001  a diagnostic never decides the run
+            return None
+
     def _snapshot(self, step, res, role_name, why, picture):
         """The state at a failure: the host and the unit, and for a page role its page
         (`PageRole.diagnose`) and a picture of the whole page as `picture`. Never decides the run."""
         host = self._sample()
         snap = {"role": role_name, "why": why, "at": round(self.now(), 3), "host": host,
-                "since_step": hoststate.delta(self._step_sample, host), "page": None,
+                "since_step": hoststate.delta(self._step_sample, host), "processes": self._unit_processes(),
+                "page": None,
                 "picture": "", "picture_s": None, "picture_error": ""}
         res.snapshots.append(snap)
         role = self.roles.get(role_name)
@@ -471,6 +480,7 @@ class Engine:
                 else:
                     self.sleep(self.poll)
         finally:
+            self.unit_processes = self._unit_processes()
             for name, role in reversed(list(self.roles.items())):
                 memory = role.memory()          # catches the browser's errors itself
                 if memory is not None:
@@ -496,4 +506,5 @@ class Engine:
             "scenario": self.scenario.name, "description": self.scenario.description,
             "ok": not hard and not failed, "duration": round(self.now(), 3),
             "steps": [asdict(s) for s in steps], "pages": dict(self.pages),
+            "unit_processes": self.unit_processes,
             "findings": [asdict(f) for f in sorted(findings, key=lambda f: f.severity != HARD)]})

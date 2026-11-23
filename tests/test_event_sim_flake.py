@@ -91,6 +91,28 @@ def t_a_delta_says_how_much_cpu_the_unit_got_and_how_long_it_stalled():
     assert d["oom"] == 1 and d["high"] == 3, d
 
 
+def _stat(pid, comm, utime, stime):
+    fields = ["S", "1"] + ["0"] * 9 + [str(utime), str(stime)] + ["0"] * 30
+    return f"{pid} ({comm}) {' '.join(fields)}\n"
+
+
+def t_the_units_processes_are_named_and_ranked_by_cpu():
+    proc, cg = _host(usage=0, throttled=0, unit_cpu=0, host_cpu=0)
+    _write(cg, "app.slice/racecast-e2e.service/cgroup.procs", "11\n12\n13\n14\n")
+    _write(proc, "11/stat", _stat(11, "chrome-headless", 300, 100))
+    _write(proc, "11/cmdline", "/x/chrome-headless-shell\0--type=gpu-process\0--no-sandbox\0")
+    _write(proc, "12/stat", _stat(12, "python", 50, 50))
+    _write(proc, "12/cmdline", "/venv/bin/python\0/app/src/racecast.py\0relay\0")
+    _write(proc, "13/stat", _stat(13, "ffm peg) x", 900, 0))
+    _write(proc, "13/cmdline", "ffmpeg\0-i\0pipe:0\0")
+    got = hoststate.processes(proc=proc, cgroup_root=cg, ticks=100)
+    assert [(p["name"], p["cpu_s"]) for p in got] == [("ffmpeg", 9.0), ("chrome-headless-shell gpu-process", 4.0),
+                                                       ("python racecast.py", 1.0)], \
+        f"by CPU seconds, a vanished pid left out: {got}"
+    empty = _tmp()
+    assert hoststate.processes(proc=os.path.join(empty, "p"), cgroup_root=os.path.join(empty, "c")) is None
+
+
 def t_the_load_is_cpu_with_a_bounded_worker_count():
     assert flake.parse_load("cpu:2") == ("cpu", 2)
     for bad in ("cpu", "cpu:0", f"cpu:{flake.MAX_LOAD + 1}", "io:1", "cpu:x", "cpu:-1"):

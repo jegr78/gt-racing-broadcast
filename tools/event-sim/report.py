@@ -75,7 +75,8 @@ def _snapshot(step, snap):
              "loadavg": host.get("loadavg"), "host pressure": host.get("pressure"),
              "unit": {k: unit.get(k) for k in ("cpu", "memory_current", "memory_peak", "memory_events",
                                                "pids_current", "pressure")} if unit else None,
-             "since the step began": snap.get("since_step")}
+             "since the step began": snap.get("since_step"),
+             "unit processes (CPU s so far)": snap.get("processes")}
     lines = [f"{c.get('age_s')}s ago [{c.get('type')}] {c.get('text')}" for c in page.get("console", [])[-SNAP_LINES:]]
     lines += [f"{n.get('age_s')}s ago {n.get('method', '')} {n.get('url')} {n.get('failure') or n.get('status')}"
               for n in page.get("network", [])[-SNAP_LINES:]]
@@ -117,6 +118,8 @@ def render_html(data):
                      key=lambda pair: -pair[0]["s"])[:SLOWEST]
     slow_list = "<ul>" + "".join(f"<li>{a['s']:.2f}s {_e(step)}: {_e(a['role'])} {_e(a['kind'])} {_e(a['what'])}</li>"
                                  for a, step in slowest) + "</ul>" if slowest else "<p>None.</p>"
+    procs = ("<ul>" + "".join(f"<li>{p['cpu_s']:.1f}s {_e(p['name'])}</li>" for p in data["unit_processes"][:15])
+             + "</ul>") if data.get("unit_processes") else "<p>Not measured (Linux only).</p>"
     pages = data.get("pages") or {}
     memory_list = ("<ul>" + "".join(memory(n, m) for n, m in sorted(pages.items())) + "</ul>"
                    if pages else "<p>No page was open.</p>")
@@ -139,6 +142,7 @@ def render_html(data):
             f"<h2>Failure snapshots</h2>{snaps or '<p>None.</p>'}"
             f"<h2>Slowest page actions</h2>{slow_list}"
             f"<h2>Page memory at the end</h2>{memory_list}"
+            f"<h2>CPU of the run's processes at the end</h2>{procs}"
             f"<h2>Timeline</h2><table><tr><th>Time</th><th>Role</th><th>Action</th><th>Result</th>"
             f"<th>Duration</th><th>Checks</th><th>Findings</th><th>Shot</th></tr>{''.join(rows)}</table>"
             f"{LEGEND}</body></html>\n")
