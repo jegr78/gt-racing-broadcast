@@ -169,7 +169,10 @@ def placeholder_png():
 def event_roster(event):
     """The team labels of `[event] cars` (none without it)."""
     cars = event.get("cars")
-    return drive.roster(cars) if cars is not None else []
+    try:
+        return drive.roster(cars) if cars is not None else []
+    except ValueError as exc:
+        raise ValueError(f"event.{exc}") from None
 
 
 def event_classes(event, teams):
@@ -193,12 +196,15 @@ def event_parts(event):
 
 def event_track(event):
     """(layout id, lap length in metres) of `[event] track`, or None."""
+    length = event.get("track_length_m", drive.DEFAULT_TRACK_M)
+    if not isinstance(length, (int, float)) or isinstance(length, bool) or length < drive.MIN_LENGTH_M:
+        raise ValueError(f"event.track_length_m is a lap of at least {drive.MIN_LENGTH_M:.0f} m, not {length!r}")
     track = event.get("track")
     if track is None:
         return None
     if not isinstance(track, str) or not re.fullmatch(r"[0-9a-f]{6}", track):
         raise ValueError(f"event.track is a GT7 layout id (six hex digits), not {track!r}")
-    return track, float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
+    return track, float(length)
 
 
 def child_env(base, extra):

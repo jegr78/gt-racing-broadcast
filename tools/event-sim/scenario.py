@@ -29,6 +29,9 @@ DEFAULT_MAX_MINUTES = 12
 MAX_MAX_MINUTES = 120              # the spec's CI timeout for the longest scenario, `full`
 STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wait", "shot"}
 TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step"}
+EVENT_KEYS = {"stints", "track", "track_length_m", "cars", "classes", "parts", "qualifying_part", "seed",
+              "commentators"}
+COMMENTATOR_KEYS = {"name", "channel", "stint", "scheduled"}
 
 
 class ScenarioError(ValueError):
@@ -149,12 +152,36 @@ def role_kind(role):
     return role.split(":", 1)[0]
 
 
+def _event(event):
+    """Refuse an `[event]` key or value that the stack would refuse or ignore at start."""
+    import stack  # its validators; importing it starts nothing
+    unknown = set(event) - EVENT_KEYS
+    if unknown:
+        raise ScenarioError(f"unknown event key(s) {', '.join(sorted(unknown))} "
+                            f"(known: {', '.join(sorted(EVENT_KEYS))})")
+    stints = event.get("stints", 1)
+    if type(stints) is not int or not 1 <= stints <= 255:
+        raise ScenarioError(f"event.stints is a whole number 1-255, not {stints!r}")
+    if type(event.get("seed", 7)) is not int:
+        raise ScenarioError(f"event.seed is a whole number, not {event['seed']!r}")
+    if not isinstance(event.get("qualifying_part", False), bool):
+        raise ScenarioError(f"event.qualifying_part is true or false, not {event['qualifying_part']!r}")
+    try:
+        stack.event_classes(event, stack.event_roster(event))
+        stack.event_parts(event)
+        stack.event_track(event)
+    except ValueError as exc:
+        raise ScenarioError(str(exc)) from None
+
+
 def _commentators(event):
     out, seen = [], set()
     for i, raw in enumerate(event.get("commentators") or []):
         where = f"event.commentators[{i}]"
         if not isinstance(raw, dict):
             raise ScenarioError(f"{where} must be a table")
+        if set(raw) - COMMENTATOR_KEYS:
+            raise ScenarioError(f"{where}: unknown key(s) {', '.join(sorted(set(raw) - COMMENTATOR_KEYS))}")
         name = raw.get("name")
         channel = raw.get("channel")
         stint = raw.get("stint", i + 1)
@@ -266,6 +293,7 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     event = data.get("event") or {}
     if not isinstance(event, dict):
         raise ScenarioError("event must be a table")
+    _event(event)
     max_minutes = data.get("max_minutes", DEFAULT_MAX_MINUTES)
     if type(max_minutes) is not int or not 1 <= max_minutes <= MAX_MAX_MINUTES:
         raise ScenarioError(f"max_minutes must be a whole number 1-{MAX_MAX_MINUTES}, not {max_minutes!r}")

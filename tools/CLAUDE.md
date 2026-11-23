@@ -508,8 +508,10 @@ so the report is written inside the lifetime.
 It shares the one E2E unit: run it after, not beside, `tools/e2e.py`.
 
 Scenario (`scenario.py`, TOML): `name`, `description`, `max_minutes`, `wait` (default
-trigger timeout), `[event]` with `stints` and `[[event.commentators]]` (`name`, `channel` for
-`sim://<channel>`, `stint`, `scheduled` = the Schedule row has the link from the start),
+trigger timeout), `[event]` with `stints`, `track` (a GT7 layout id), `track_length_m`, `cars`
+(1-15), `classes`, `parts` (0-9), `qualifying_part`, `seed` and `[[event.commentators]]`
+(`name`, `channel` for `sim://<channel>`, `stint`, `scheduled` = the Schedule row has the link
+from the start); an unknown key or a value the stack would refuse fails the load (`--check`),
 `[sheet.tabs]` (replaces tabs built from the event), `[tolerances] state_s` (default 2) and
 `[[step]]`: `id` (default `do`, unique, letters, digits, `_` and `-`, no dot), `at`, `role`
 (`kind` or `kind:instance`, the instance letters, digits, space, `.`, `_`, `-`), `do`, `args`,

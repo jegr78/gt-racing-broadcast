@@ -176,6 +176,21 @@ def t_scenario_checks_the_event_and_its_tabs():
     _refused([{"role": "rec", "do": "go", "expect": ["box.value == " + "1" * 500]}], "longer than")
 
 
+def t_scenario_checks_the_event_keys_and_values_at_load():
+    go = [{"role": "rec", "do": "go"}]
+    _refused(go, "qualifing_part", event={"qualifing_part": True})
+    _refused(go, "colour", event={"commentators": [{"name": "A", "channel": "c1", "colour": "red"}]})
+    for key, bad in (("parts", 10), ("parts", "2"), ("classes", []), ("classes", ["GT3", " "]),
+                     ("track", "Le Mans"), ("track", 123), ("cars", 0), ("cars", 16), ("cars", True),
+                     ("stints", 0), ("stints", "3"), ("seed", "7"), ("seed", 1.5),
+                     ("track_length_m", 10), ("track_length_m", "1200"), ("track_length_m", True),
+                     ("qualifying_part", "yes")):
+        _refused(go, f"event.{key}", event={key: bad})
+    scn = _scn(go, event={"stints": 3, "track": "6e378b", "track_length_m": 1200, "cars": 6,
+                          "classes": ["GT3", "GT4"], "parts": 2, "qualifying_part": True, "seed": 7})
+    assert scn.event["parts"] == 2
+
+
 def t_role_instances_share_the_kind():
     scn = _scn([{"role": "rec:Comms 2", "do": "go"}])
     assert scenario.role_kind(scn.steps[0].role) == "rec"
