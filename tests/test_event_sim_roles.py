@@ -1334,8 +1334,10 @@ def t_driver_actions_reach_the_field():
           "no gap to release by")
     fails(lambda: role.do("release", {"gaps": "race"}), "rows of a race reading")
     teams = drive.roster(3)
-    role.do("release", {"gaps": [{"entry": teams[0], "gap_s": 3.0}, {"entry": teams[2], "gap_s": 4.5}]})
-    assert role.field.car(teams[2]).pit["delay"] == 1.5, "a gap counts from the first car's"
+    role.do("release", {"gaps": [{"entry": teams[0], "gap_s": None}, {"entry": teams[2], "gap_s": 4.5}]})
+    assert role.field.car(teams[2]).pit["delay"] == 0.0, "a gap counts from the first car's"
+    assert role.field.car(teams[0]).pit["delay"] == drivers.UNGAPPED_STEP_S, \
+        "a lapped car without a gap leaves after the last, in the reading's order"
     runner.run(60.0)
     page = role.page()
     assert page["driving"] == 3 and {c["driver"] for c in page["cars"]} == \

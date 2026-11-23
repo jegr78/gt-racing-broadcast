@@ -10,6 +10,8 @@ import drive
 import probes
 from roles import Role, StepError, register
 
+UNGAPPED_STEP_S = 1.0    # cars without a gap (lapped) leave after the last, this far apart
+
 
 @register
 class DriversRole(Role):
@@ -131,19 +133,26 @@ class DriversRole(Role):
 
     def act_release(self, args):
         """The held cars leave the box; with `gaps` (the rows of a race reading, such as
-        the frozen race of a red flag) each leaves its gap after the first, a car
-        without a gap with the last."""
+        race right before a red flag) each leaves its gap after the first; a car without
+        a gap, such as a lapped one, leaves after the last in the reading's order."""
         delays = None
         if "gaps" in args:
             rows = args["gaps"]
             if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
-                raise StepError("release gaps are the rows of a race reading, e.g. ${frozen.entries}")
+                raise StepError("release gaps are the rows of a race reading, e.g. ${before_red.entries}")
+            known = {c.entry for c in self._field().cars}
+            rows = [r for r in rows if r.get("entry") in known]    # a roster entry may have no car
             gaps = {r.get("entry"): float(r["gap_s"]) for r in rows
                     if isinstance(r.get("gap_s"), (int, float)) and not isinstance(r.get("gap_s"), bool)}
             if not gaps:
                 raise StepError("the race reading has no gap to release by")
             first = min(gaps.values())
             delays = {entry: gap - first for entry, gap in gaps.items()}
+            last = max(delays.values())
+            for r in rows:
+                if r.get("entry") not in delays:
+                    last += UNGAPPED_STEP_S
+                    delays[r.get("entry")] = last
         self._do(lambda: self._field().release(delays), "release")
 
     def act_drop(self, args):
