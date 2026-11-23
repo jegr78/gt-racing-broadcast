@@ -791,6 +791,7 @@ class _FakeBrowser:
 
     def new_context(self, viewport=None):
         outer = self
+        self.viewport = viewport
 
         class C:
             def new_page(self):
@@ -824,6 +825,22 @@ def t_page_role_opens_shoots_and_reports_console_errors():
         assert "404" in str(exc) and "tok" not in str(exc), str(exc)
     findings = role.close()
     assert sorted(s for s, _ in findings) == ["hard", "soft"], "a script error is hard, a failed load soft"
+
+
+def t_page_role_opens_in_the_window_size_it_is_given():
+    br = _FakeBrowser()
+    role = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br), "page:overlay")
+    role.open()
+    role.do("open", {"path": "/drivers", "viewport": [1920, 1080]})
+    assert br.viewport == {"width": 1920, "height": 1080}, "an OBS page is shot at the canvas size"
+    for bad in ([1920], [0, 1080], ["1920", 1080], "1920x1080"):
+        other = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br), "page:x")
+        other.open()
+        try:
+            other.do("open", {"path": "/drivers", "viewport": bad})
+            raise AssertionError(f"viewport {bad!r} must be refused")
+        except roles.StepError as exc:
+            assert "viewport" in str(exc), exc
 
 
 def t_page_role_keeps_tokens_out_of_what_it_reports():

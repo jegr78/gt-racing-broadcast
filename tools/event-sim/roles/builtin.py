@@ -165,7 +165,7 @@ FIT_TOLERANCE_PX = 1
 @register
 class PageRole(Role):
     """A page in its own browser context: `open` (service, path, optional `as` for a
-    console token, `wait_for` a selector). A script error on the page is a hard finding
+    console token, `wait_for` a selector, `viewport` [width, height] on the first open). A script error on the page is a hard finding
     when the role closes, a failed resource load a soft one. Without Playwright, `open`
     is skipped. A screenshot blacks out the invite and timing links of any page."""
     kind = "page"
@@ -180,6 +180,11 @@ class PageRole(Role):
         if browser is None:
             raise Unavailable(f"a page needs a browser: {self.ctx.browser_problem()}")
         if self.context is None:
+            size = args.get("viewport")
+            if size is not None:
+                if not (isinstance(size, list) and len(size) == 2 and all(type(v) is int and v > 0 for v in size)):
+                    raise StepError(f"open: viewport is [width, height], not {size!r}")
+                self.viewport = {"width": size[0], "height": size[1]}
             self.context = browser.new_context(viewport=dict(self.viewport))
             self.pg = self.context.new_page()
             self.pg.on("console", self._console)

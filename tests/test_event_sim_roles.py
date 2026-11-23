@@ -288,10 +288,10 @@ def t_the_registry_has_every_party_and_its_actions():
     want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
             "director": {"open", "approve_link", "arm_feed", "arm", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
-                         "end_part", "fit"},
+                         "end_part", "fit", "view"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
-                             "note", "fit", "confirm_dc", "restart_mode", "class_laps"},
+                             "note", "fit", "confirm_dc", "class_laps", "view"},
             "commentator": {"open", "submit_link", "chat"},
             "viewer": {"open", "read"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"}}
@@ -1046,7 +1046,7 @@ def _desk_change(page, key, route, says, **kw):
     return page.add(key, on_change=change, **kw)
 
 
-def t_race_control_decides_a_dc_and_sets_the_restart_and_class_laps():
+def t_race_control_confirms_a_dc_and_sets_a_class_lap_count():
     role, page, _ = desk()
     key = '.dd tr:has(div:text-is("B #2")) button[data-label="Confirm DC"]:not([hidden])'
     desk_button(page, "Confirm DC", "/drivers/race/recording/event", "DC confirmed", armed=False)
@@ -1054,16 +1054,22 @@ def t_race_control_decides_a_dc_and_sets_the_restart_and_class_laps():
     assert role.do("confirm_dc", {"entry": "B #2"}) == {"status": "DC confirmed"}
     assert page.clicks[-2:] == ['.navbtn[data-area="race"]', key], "the events list is in the Race area"
     fails(lambda: role.do("confirm_dc", {"entry": "A #1"}), "no open event of 'A #1'")
-    select = _desk_change(page, '.dd select[aria-label="Restart after the red flag"]',
-                          "/drivers/race/restart-mode", "Restart mode set", options=["keep", "neutralise"])
-    assert role.do("restart_mode", {"mode": "neutralise"}) == {"status": "Restart mode set"}
-    assert select.value == "neutralise"
-    fails(lambda: role.do("restart_mode", {"mode": "fast"}), "keep or neutralise")
     laps = _desk_change(page, '.dd input[aria-label="Lap count of GT4"]', "/drivers/race/class-laps",
                         "GT4 lap count saved")
     assert role.do("class_laps", {"class": "GT4", "laps": 5}) == {"status": "GT4 lap count saved"}
     assert laps.value == "5"
     fails(lambda: role.do("class_laps", {"class": "GT3", "laps": 5}), "Lap count of GT3")
+
+
+def t_the_desk_and_the_panel_open_an_area_to_show_it():
+    role, page, _ = desk()
+    assert role.do("view", {"area": "corrections"}) == {"area": "corrections"}
+    assert page.clicks[-1] == '.navbtn[data-area="corrections"]'
+    fails(lambda: role.do("view", {"area": "nowhere"}), "area nowhere")
+    role, page, _ = make(party.DirectorRole)
+    page.add('.navbtn[data-area="race"]')
+    assert role.do("view", {"area": "race"}) == {"area": "race"}
+    assert page.clicks[-1] == '.navbtn[data-area="race"]'
 
 
 def t_desk_forms_pick_the_entry_before_the_button():

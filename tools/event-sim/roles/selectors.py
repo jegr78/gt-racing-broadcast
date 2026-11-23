@@ -74,7 +74,6 @@ DESK = {
     "retire": "Retire (DNF)",
     "rejoin_entry": "Team to rejoin",
     "rejoin": "Mark rejoin",
-    "restart_mode": "Restart after the red flag",
     "class_laps": "Lap count of ",
     "estimate_entry": "Quiet entry to estimate",
     "estimate_side": "Behind or ahead of the reference",

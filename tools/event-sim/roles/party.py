@@ -358,7 +358,7 @@ class DirectorRole(LiveColumn, Surface):
     `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
     Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
-    target, level), `chat` (text, name), `fit`."""
+    target, level), `chat` (text, name), `view` (area), `fit`."""
     kind = "director"
     path, ready = "/panel", selectors.READY["DIRECTOR"]
     sources = selectors.SOURCES["DIRECTOR"]
@@ -368,6 +368,11 @@ class DirectorRole(LiveColumn, Surface):
 
     def area(self, name):
         self.click(self.sel("area", area=name), f"area {name}")
+
+    def act_view(self, args):
+        """Open an area, so a screenshot shows it."""
+        self.area(str(args.get("area", "")))
+        return {"area": str(args.get("area", ""))}
 
     def _classes(self, selector):
         return self.attr(selector, "class").split()
@@ -547,7 +552,7 @@ class RaceControlRole(LiveColumn, Surface):
     `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
     `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
     `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target), `confirm_dc`
-    (entry), `restart_mode` (mode: keep or neutralise), `class_laps` (class, laps), `fit`. An
+    (entry), `class_laps` (class, laps), `view` (area), `fit`. An
     action first opens the desk area that holds its controls; the race controls stay in
     the live column."""
     kind = "race_control"
@@ -560,6 +565,11 @@ class RaceControlRole(LiveColumn, Surface):
 
     def area(self, name):
         self.click(self.sel("area", area=name), f"area {name}")
+
+    def act_view(self, args):
+        """Open an area, so a screenshot shows it."""
+        self.area(str(args.get("area", "")))
+        return {"area": str(args.get("area", ""))}
 
     def _line(self):
         status = self.sel("status")
@@ -652,15 +662,6 @@ class RaceControlRole(LiveColumn, Surface):
         self.answered(lambda: self.click(key, f"Confirm DC of {entry}"), self.base + "/drivers/race/recording/event",
                       f"Confirm DC of {entry}")
         return {"status": self._status("Confirm DC", "DC confirmed", before)}
-
-    def act_restart_mode(self, args):
-        mode = str(args.get("mode", ""))
-        if mode not in ("keep", "neutralise"):
-            raise StepError(f"restart_mode is keep or neutralise, not {mode!r}")
-        before = self._line()
-        self.answered(lambda: self.choose(self.sel("select", label=DESK["restart_mode"]), "Restart mode", value=mode),
-                      self.base + "/drivers/race/restart-mode", "Restart mode")
-        return {"status": self._status("Restart mode", "Restart mode set", before)}
 
     def act_class_laps(self, args):
         """Set the lap count of a class after the first one (the live column's Class laps row)."""
