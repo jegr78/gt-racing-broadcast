@@ -105,6 +105,21 @@ def _off_air(relay):
     relay._heartbeat_tick(2000)
 
 
+def t_status_names_the_program_state_start_event_checks():
+    with _event() as (relay, _obs, _posts, _teardown, parts, port):
+        def status():
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/status", timeout=5) as r:
+                return json.loads(r.read())
+        st = status()
+        assert (st["part_live"], st["obs"]["stream_active"]) == (True, True), \
+            f"a live Part and a streaming OBS are on /status: {st.get('part_live')}, {st.get('obs')}"
+        parts.end()
+        relay.obs_stats = {}
+        st = status()
+        assert (st["part_live"], st["obs"]["stream_active"]) == (False, None), \
+            f"an ended Part is off, an unread OBS stream state stays unknown: {st.get('part_live')}, {st.get('obs')}"
+
+
 def t_final_end_keeps_stop_marker_and_report_without_late_health_pings():
     with _event() as (relay, obs, posts, teardown, parts, port):
         def stop(on):

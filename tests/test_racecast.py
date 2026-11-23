@@ -3377,26 +3377,52 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
         "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
 
 
-def t_align_running_relay_mode_switches_to_the_mode_start_event_asked_for():
+def _relay_status(mode, part_live=False, streaming=False):
+    return {"mode": mode, "part_live": part_live,
+            "obs": {"reachable": True, "stream_active": streaming}}
+
+
+def t_align_running_relay_mode_switches_an_idle_relay_to_the_mode_start_event_asked_for():
     switched = []
 
     def _switch(mode):
         switched.append(mode)
         return {"mode": mode}
-    note = m._align_running_relay_mode("qualifying", read_mode=lambda: "race", switch=_switch)
+    note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race"),
+                                       switch=_switch)
     assert switched == ["qualifying"], switched
     assert "race" in note and "qualifying" in note, note
     switched.clear()
-    note = m._align_running_relay_mode("race", read_mode=lambda: "qualifying", switch=_switch)
+    note = m._align_running_relay_mode("race", read_status=lambda: _relay_status("qualifying"),
+                                       switch=_switch)
     assert switched == ["race"], "a start without Qualifying brings a qualifying relay back to race"
     assert "qualifying" in note and "race" in note, note
     switched.clear()
-    assert m._align_running_relay_mode("race", read_mode=lambda: "race", switch=_switch) is None
-    assert m._align_running_relay_mode("qualifying", read_mode=lambda: None, switch=_switch) is None
+    assert m._align_running_relay_mode("race", read_status=lambda: _relay_status("race"),
+                                       switch=_switch) is None
+    assert m._align_running_relay_mode("qualifying", read_status=lambda: None, switch=_switch) is None
     assert switched == [], "a relay already in that mode, or unreachable, is left alone"
-    note = m._align_running_relay_mode("qualifying", read_mode=lambda: "race",
+    note = m._align_running_relay_mode("qualifying", read_status=lambda: _relay_status("race"),
                                        switch=lambda mode: {"error": "no Qualifying tab"})
     assert "no Qualifying tab" in note and "race" in note, note
+
+
+def t_align_running_relay_mode_never_switches_a_live_or_unknown_program():
+    switched = []
+    unknown = {"mode": "race"}
+    cases = ((_relay_status("race", part_live=True), "a broadcast Part is live"),
+             (_relay_status("race", streaming=True), "OBS is streaming"),
+             (_relay_status("race", streaming=None), "OBS"),
+             (dict(_relay_status("race"), obs={"reachable": False}), "OBS"),
+             (dict(_relay_status("race"), part_live=None), "Part"),
+             (unknown, "Part"))
+    for status, why in cases:
+        note = m._align_running_relay_mode("qualifying", read_status=lambda s=status: s,
+                                           switch=switched.append)
+        assert switched == [], f"Start event switched the mode under {status}"
+        assert note.startswith("WARNING") and why in note, (status, note)
+        assert "still in race mode" in note and "Director Panel" in note, note
+    assert note.isascii(), "the warning prints on a cp1252 console"
 
 
 def t_event_start_aligns_a_running_relay_with_the_requested_mode():

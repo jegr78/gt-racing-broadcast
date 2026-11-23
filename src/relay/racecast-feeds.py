@@ -11025,7 +11025,8 @@ class Relay:
                           "source": self.pov_source.health() if self.pov_source else None,
                           **sync_fields(self.pov_source, POV_SHEET_ROW),
                           **self._backlog_status("POV", self.pov)}
-        out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
+        out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note,
+                      "stream_active": (self.obs_stats or {}).get("stream_active")}
         # On-air feed/stint + league identity for producer takeover (#takeover):
         # the on-air feed is the lower-index one (live_feed); the stint is the
         # DISPLAY row (on_air_row_idx), not the feed's physical pull index; during
@@ -13769,6 +13770,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if timer_store:
                 base["timer"] = timer_store.summary()
             base["event_title"] = event_store.get() if event_store else ""
+            base["part_live"] = bool(part_store.get().get("live")) if part_store is not None else None
             feeds = base.get("feeds") or {}
             if feeds.get("A") and feeds.get("B") and base.get("mode") != "qualifying":
                 base["handover_next"] = handover_next(

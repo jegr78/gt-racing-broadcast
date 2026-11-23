@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdlib checks for the Control Center's structured status providers in racecast.py.
 Run: python3 tests/test_ui_ops.py"""
-import os, sys, time
+import json, os, shutil, subprocess, sys, time
 from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +29,49 @@ def t_relay_status_data_running():
                               alive=lambda pid: True,
                               probe=lambda: {"keep_awake": awake}, mode=lambda: "simulation")
     assert d == {"pid": 4242, "alive": True, "port": 8088, "http_ok": True,
-                 "keep_awake": awake, "mode": "simulation"}
+                 "keep_awake": awake, "mode": "simulation", "schedule_mode": None}
+
+
+def t_relay_status_data_carries_the_running_relays_schedule_mode():
+    def data(status):
+        return rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
+                                    probe=lambda: status, mode=lambda: "live")
+    assert data({"mode": "qualifying"})["schedule_mode"] == "qualifying"
+    assert data({"mode": "race"})["schedule_mode"] == "race"
+    for status in ({"mode": "solo"}, {}, None):
+        assert data(status)["schedule_mode"] is None, f"no race/qualifying mode in {status}"
+
+
+def _control_center_function(name):
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    body = html[html.index(f"function {name}("):]
+    return body[:body.index("\n}") + 2]
+
+
+def t_control_center_qualifying_box_follows_the_relay_mode_and_stays_editable():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = _control_center_function("followScheduleMode") + """
+const box = {checked: false}, seen = [];
+let mode = null;
+const relay = m => ({alive: true, http_ok: true, schedule_mode: m});
+for (const [r, tick] of [[relay('qualifying'), null], [relay('qualifying'), false],
+                         [relay('qualifying'), null], [relay('race'), null],
+                         [{alive: false}, true], [relay('race'), null]]) {
+  if (tick !== null) box.checked = tick;
+  mode = followScheduleMode(r, mode, box);
+  seen.push(box.checked);
+}
+console.log(JSON.stringify(seen));
+"""
+    res = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=30)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == [True, False, False, False, True, False], \
+        f"the box follows each new relay mode and keeps the operator's tick in between: {res.stdout}"
 
 
 def t_relay_status_data_older_relay_has_no_keep_awake():
@@ -50,7 +92,7 @@ def t_relay_status_data_stopped_skips_http_probe():
                               alive=lambda pid: False,
                               probe=lambda: probed.append(1) or {})
     assert d == {"pid": None, "alive": False, "port": 8088, "http_ok": False,
-                 "keep_awake": None, "mode": None}
+                 "keep_awake": None, "mode": None, "schedule_mode": None}
     assert probed == []   # never probe HTTP for a dead relay
 
 

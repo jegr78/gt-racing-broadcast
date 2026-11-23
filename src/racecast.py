@@ -1845,13 +1845,36 @@ def _switch_relay_mode(mode):
     return _relay_fetch_json(f"http://127.0.0.1:{_relay_port()}/mode/{mode}")
 
 
-def _align_running_relay_mode(requested, read_mode=None, switch=None):
+def _program_busy(status):
+    """Why the running relay's program may be on air, from its /status: "" only when it
+    reports no broadcast Part live and OBS not streaming. Unknown counts as on air."""
+    obs = status.get("obs") if isinstance(status.get("obs"), dict) else {}
+    part, stream = status.get("part_live"), obs.get("stream_active")
+    if part is True:
+        return "a broadcast Part is live"
+    if stream is True:
+        return "OBS is streaming"
+    if part is not False:
+        return "the relay did not report whether a broadcast Part is live"
+    if stream is not False:
+        return "the relay could not read whether OBS is streaming"
+    return ""
+
+
+def _align_running_relay_mode(requested, read_status=None, switch=None):
     """Switch an already running relay to the mode Start event asked for, as the Director
-    Panel's toggle does. Returns what happened for the operator, or None when the relay
-    is already in that mode or cannot be read."""
-    actual = (read_mode or _relay_schedule_mode)()
-    if actual is None or actual == requested:
+    Panel's toggle does, but only while nothing is on air: the switch re-points both feeds
+    to stint 1. Returns what happened for the operator, or None when the relay is already
+    in that mode or cannot be read."""
+    status = (read_status or _relay_status_probe)()
+    actual = status.get("mode") if isinstance(status, dict) else None
+    if actual not in ("race", "qualifying") or actual == requested:
         return None
+    busy = _program_busy(status)
+    if busy:
+        return (f"WARNING: relay: still in {actual} mode, not switched to {requested} because "
+                f"{busy}. Switching re-points both feeds to stint 1. Switch it between sessions "
+                f"in the Director Panel (Schedule: switch -> {requested.upper()}).")
     try:
         res = (switch or _switch_relay_mode)(requested)
     except Exception as exc:  # noqa: BLE001  reported to the operator
@@ -2719,10 +2742,12 @@ def relay_status_data(read_pid=None, alive=None, probe=None, mode=None):
     is_alive = alive(pid)
     status = probe() if is_alive else None
     awake = status.get("keep_awake") if isinstance(status, dict) else None
+    schedule = status.get("mode") if isinstance(status, dict) else None
     return {"pid": pid, "alive": is_alive, "port": _relay_port(),
             "http_ok": status is not None,
             "keep_awake": awake if isinstance(awake, dict) else None,
-            "mode": ((mode or _running_relay_run_mode)() or "live") if is_alive else None}
+            "mode": ((mode or _running_relay_run_mode)() or "live") if is_alive else None,
+            "schedule_mode": schedule if schedule in ("race", "qualifying") else None}
 
 
 def _relay_status_probe():
