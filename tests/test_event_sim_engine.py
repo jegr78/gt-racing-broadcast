@@ -284,6 +284,24 @@ def t_repeat_runs_each_run_in_its_own_unit_one_after_the_other():
             pass  # argparse refuses it
 
 
+def t_a_run_owns_its_work_dir_and_names_it_in_its_out_dir():
+    out = tempfile.mkdtemp(prefix="event-sim-out-")
+    atexit.register(shutil.rmtree, out, True)
+    before = os.environ.get("TMPDIR")
+    with event_sim.owned_work(out) as work:
+        assert os.path.isdir(work) and os.path.basename(work).startswith("racecast-sim-"), work
+        with open(os.path.join(out, event_sim.WORK_NOTE), encoding="utf-8") as fh:
+            assert fh.read().strip() == work, "the out dir names the run's own work dir, for a cleanup by path"
+        assert os.environ["TMPDIR"].startswith(work), "the browser's temporary files live in the run's work dir"
+    assert not os.path.exists(work) and not os.path.exists(os.path.join(out, event_sim.WORK_NOTE)), \
+        "the run removes what it owns, and only that"
+    assert os.environ.get("TMPDIR") == before, "TMPDIR is restored"
+    with event_sim.owned_work(out, keep=True) as work:
+        pass
+    assert os.path.isdir(work), "--keep-work keeps it"
+    shutil.rmtree(work)
+
+
 # -- expect ----------------------------------------------------------------------
 def t_expect_reads_probes_views_and_calls():
     box = Box(3, {"Race Control": "GREEN", "rows": [{"URL": "sim://a"}]})

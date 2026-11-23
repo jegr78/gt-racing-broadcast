@@ -664,6 +664,12 @@ failure seen once is not reproduced until a test forces its cause; clean runs af
 fix prove nothing on their own. Do not edit `tools/event-sim/` while a set runs: each
 run imports it anew (hunt from a separate worktree).
 
+Each run owns one work dir (`/tmp/racecast-sim-*`, the app home and, through `TMPDIR`,
+the browser's temporary files) and removes it at the end. While it exists,
+`OUT/work-dir.txt` names it: after a killed run, remove that path. Never clean up
+`/tmp/racecast-sim-*` or `/tmp/playwright-artifacts-*` by pattern, another agent's run
+may be using its own.
+
 ### Role drivers (`roles/party.py`, `roles/drivers.py`, `drive.py`, #1233)
 
 One class per party. A page role opens its page in its own browser context on its first

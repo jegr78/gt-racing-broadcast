@@ -11,6 +11,7 @@ start. `--check` only loads and validates the scenario. `--repeat N` runs it N t
 contained run after the other, and writes DIR/summary.html and DIR/summary.json over
 DIR/run-NN/ (tools/CLAUDE.md, hunting a flake). Maintainer tool, not shipped."""
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -34,6 +35,7 @@ import stack  # noqa: E402
 
 SCENARIOS = os.path.join(HERE, "scenarios")
 MAX_REPEAT = 50
+WORK_NOTE = "work-dir.txt"   # names the run's own work dir while it exists
 TRACES = ("off", "fail", "all")
 
 
@@ -71,12 +73,44 @@ def build_parser():
     return ap
 
 
+@contextlib.contextmanager
+def owned_work(out, keep=False):
+    """The run's own work dir: named in OUT/work-dir.txt while it exists, so a run that
+    was killed is cleaned up by that path and never by a pattern (another run may be
+    using its own). TMPDIR points into it, so the browser's temporary files go with it.
+    Removed at the end unless `keep`."""
+    os.makedirs(out, exist_ok=True)
+    work = tempfile.mkdtemp(prefix="racecast-sim-")
+    note = os.path.join(out, WORK_NOTE)
+    with open(note, "w", encoding="utf-8") as fh:
+        fh.write(work + "\n")
+    tmp = os.path.join(work, "tmp")
+    os.makedirs(tmp)
+    before = os.environ.get("TMPDIR")
+    os.environ["TMPDIR"] = tmp
+    try:
+        yield work
+    finally:
+        if before is None:
+            os.environ.pop("TMPDIR", None)
+        else:
+            os.environ["TMPDIR"] = before
+        if keep:
+            print(f"event-sim: work dir kept at {work}")
+        else:
+            shutil.rmtree(work, ignore_errors=True)
+            os.remove(note)
+
+
 def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="off", load=None):
+    with owned_work(out, keep=keep_work) as work:
+        return _run(scn, out, work, no_skips=no_skips, headed=headed, trace=trace, load=load)
+
+
+def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None):
     import browser
     import engine
     import report
-    os.makedirs(out, exist_ok=True)
-    work = tempfile.mkdtemp(prefix="racecast-sim-")
     st = stack.Stack(scn, work)
     br = browser.Browser(headless=not headed)
     busy = flake.Load(flake.parse_load(load)[1]) if load else None
@@ -111,10 +145,6 @@ def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="off", lo
             for p in problems:
                 data["findings"].append({"severity": "soft", "role": "", "step": "", "message": ctx.scrub(p)})
             report.write(out, data)
-        if keep_work:
-            print(f"event-sim: work dir kept at {work}")
-        else:
-            shutil.rmtree(work, ignore_errors=True)
     hard = [f for f in data["findings"] if f["severity"] == "hard"]
     soft = [f for f in data["findings"] if f["severity"] == "soft"]
     for s in data["steps"]:
