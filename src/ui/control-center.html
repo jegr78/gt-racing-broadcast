@@ -1138,8 +1138,13 @@ function setBadgeEl(badgeId, detailId, on, onText, offText, detail) {
 
 // The detail of a running relay, shared by the Home and Services rows.
 function relayDetail(r) {
-  return r.http_ok ? 'control OK on port ' + r.port + keepAwakeText(r.keep_awake)
-                   : 'port ' + r.port + ' not responding';
+  if (r.http_ok) return 'control OK on port ' + r.port + keepAwakeText(r.keep_awake);
+  return 'port ' + r.port + (r.starting ? ' starting: reading the Google Sheet' : ' not responding');
+}
+
+// The Home tiles' text for a running relay whose control server is not ready.
+function relayControlText(r) {
+  return r.starting ? 'relay starting: reading the Google Sheet' : 'relay control not responding';
 }
 
 // The relay's idle-sleep block (#1105); empty for a relay that does not report it.
@@ -1202,8 +1207,8 @@ function updateHome(s) {
     const hb = $('h-health');
     hb.classList.remove('on', 'warn', 'fail');
     hb.lastElementChild.textContent = '—';
-    $('hd-health').textContent = relayUp ? 'relay control not responding' : 'relay stopped';
-    $('hd-timer').textContent = relayUp ? 'relay control not responding' : 'relay stopped';
+    $('hd-health').textContent = relayUp ? relayControlText(s.relay) : 'relay stopped';
+    $('hd-timer').textContent = relayUp ? relayControlText(s.relay) : 'relay stopped';
     $('hd-feeds').textContent = 'start the relay for live stats';
   }
 }

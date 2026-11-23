@@ -75,6 +75,28 @@ console.log(JSON.stringify(seen));
         f"the box follows each new relay mode, keeps the operator's tick in between and across a status gap: {res.stdout}"
 
 
+def t_control_center_names_a_starting_relay():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = (_control_center_function("keepAwakeText") + _control_center_function("relayDetail")
+              + _control_center_function("relayControlText") + """
+console.log(JSON.stringify([
+  relayDetail({http_ok: false, starting: true, port: 8088}),
+  relayDetail({http_ok: false, starting: false, port: 8088}),
+  relayDetail({http_ok: true, port: 8088, keep_awake: null}),
+  relayControlText({starting: true}), relayControlText({starting: false})]));
+""")
+    res = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=30)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == [
+        "port 8088 starting: reading the Google Sheet", "port 8088 not responding",
+        "control OK on port 8088", "relay starting: reading the Google Sheet",
+        "relay control not responding"], f"a starting relay is its own state: {res.stdout}"
+
+
 def t_relay_status_data_older_relay_has_no_keep_awake():
     d = rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
                               probe=lambda: {})
