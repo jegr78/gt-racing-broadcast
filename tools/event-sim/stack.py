@@ -61,7 +61,7 @@ def _any_port():
 
 def lifetime(scn):
     """Seconds the services and the containment unit may live: the run plus a margin."""
-    return e2e_safety.lifetime(int(scn.run_seconds) + TEARDOWN_MARGIN_S)
+    return e2e_safety.lifetime(int(scn.run_seconds) + TEARDOWN_MARGIN_S, long=True)
 
 
 def port_map(feeds, control):
