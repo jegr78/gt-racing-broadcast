@@ -170,6 +170,55 @@ def t_fanout_server_lets_a_consumer_of_an_idle_feed_go():
             time.sleep(0.05)
         assert not srv._consumers, "a consumer that hung up on an idle feed keeps no handler thread"
     finally:
+        s.close()
+        srv.stop()
+
+
+def _until(cond, limit=5.0):
+    deadline = time.monotonic() + limit
+    while not cond() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return cond()
+
+
+def t_fanout_server_keeps_a_quiet_consumer_of_an_idle_feed():
+    ring = m.FeedRing(4096)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t"))
+    srv.start()
+    s = socket.create_connection(("127.0.0.1", srv.port), timeout=5.0)
+    try:
+        s.sendall(b"GET / HTTP/1.0\r\n\r\n")
+        s.recv(4096)
+        assert _until(lambda: bool(srv._consumers)), "the consumer was registered"
+        first = next(iter(srv._consumers.values()))["cycle_ts"]
+        _until(lambda: not srv._consumers or any(c["cycle_ts"] != first for c in srv._consumers.values()))
+        ring.write(b"\x47" * 188)
+        got = b""
+        while len(got) < 188:
+            chunk = s.recv(4096)
+            assert chunk, "a consumer that only waited was cut off before the feed sent"
+            got += chunk
+        assert srv._consumers, "the quiet consumer is still served"
+    finally:
+        s.close()
+        srv.stop()
+
+
+def t_fanout_server_lets_a_consumer_go_whose_request_came_in_two_parts():
+    ring = m.FeedRing(4096)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t"))
+    srv.start()
+    s = socket.create_connection(("127.0.0.1", srv.port), timeout=5.0)
+    try:
+        s.sendall(b"GET / HTTP/1.0\r\n")
+        s.recv(4096)
+        s.sendall(b"Host: x\r\n\r\n")
+        assert _until(lambda: bool(srv._consumers)), "the consumer was registered"
+        s.close()
+        assert _until(lambda: not srv._consumers), \
+            "bytes left over from the request must not keep a gone consumer's handler"
+    finally:
+        s.close()
         srv.stop()
 
 

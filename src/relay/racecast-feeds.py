@@ -6349,11 +6349,23 @@ def fanout_capped_read(ring, cursor, prebuffer_s, now=None,
 
 
 def consumer_hung_up(conn):
-    """True when the consumer closed its end; never blocks."""
+    """True when the consumer closed its end; never blocks. Bytes it sends after the
+    request are read and dropped; a socket select() cannot watch counts as open."""
+    if conn.fileno() == -1:
+        return True
     try:
         readable, _, _ = select.select([conn], [], [], 0)
-        return bool(readable) and conn.recv(1, socket.MSG_PEEK) == b""
-    except (OSError, ValueError):
+    except ValueError:
+        return False                    # descriptor beyond select()'s range
+    except OSError:
+        return True
+    if not readable:
+        return False
+    try:
+        return conn.recv(4096) == b""
+    except BlockingIOError:
+        return False
+    except OSError:
         return True
 
 
