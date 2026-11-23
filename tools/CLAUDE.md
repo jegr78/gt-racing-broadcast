@@ -533,8 +533,10 @@ program feeds show), `sheet` (`tab(name)` or `sheet.<tab>`: records, index 0 is 
 under the header; `writes`, `write_count(action)`), `webhook` (`count(text)`, `messages`,
 `rejected`), `race` (the relay's `/drivers/race`), `page(role)` and `result(step_id)`. Keys
 match without case, spaces as `_`. Only comparisons, `and`/`or`/`not`, literals, attribute
-and index access, probe methods and `len` parse; anything else, a `_` name or an unknown root
-is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
+and index access, probe methods, `len` and three row helpers parse: `pluck(rows, key)` (the
+key of every row, in order), `row(rows, key, value)` (the first row with that value) and
+`drift(before, after, key)` (the largest change of a number between rows of the same `entry`,
+for gaps after a restart); anything else, a `_` name or an unknown root is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
 A probe, a method or a function is never a value or an argument. Checks are polled, so they
 must have no side effects: `relay.get` reads `/status` or a `.../data` path, never a control
 such as `/next` or `/feed/A/activate`.
@@ -551,6 +553,11 @@ Writing scenarios against the relay:
   `GET /feed/A/activate` (the director's arm), so arm it before checking the program picture.
 - The relay's feed cover hides a feed for about 25 s after it starts, so a program identity
   check needs a timeout of a minute or more.
+- A new lobby's driver takes a team over only after standing in the box for the relay's box
+  hold (1.5 s): release the cars a few seconds after `lobby`, never in the same moment.
+- Start event parks OBS on Standby unless it streams: a scenario that restarts mid-event goes
+  live with a Part first, as a real event does.
+- `.class` is a Python keyword: read a row's class as `row(...)['class']`.
 
 Roles (`roles/`): a class with `kind`, registered with `@roles.register`; a step's `role`
 is `kind` or `kind:instance`, one instance per string, opened on first use and closed at
@@ -564,8 +571,10 @@ returns late findings. `ctx` (`engine.RunContext`) has `url(service)` (`relay`, 
 None without Playwright). Built in
 (`roles/builtin.py`): `api` (`get`/`post` with `service`, `path`, `as`, `json`, `status`),
 `obs` (`scene`, `request`; its shot is the program), `stream` (`channel`, `cut`, `stall`,
-`freeze`, `clear`) and `page` (`open` with `service`, `path` starting with one `/` on that
-service, `as`, `wait_for`; tokens are redacted from what it reports; the base of the party
+`freeze`, `clear`), `relay` (`kill`: ends the process that holds the run's control port and
+that the app home's `relay.pid` names, as a crash would, nothing else) and `page` (`open`
+with `service`, `path` starting with one `/` on that service, `as`, `wait_for`, `viewport`
+[width, height] on the first open, e.g. an OBS page at 1920x1080; tokens are redacted from what it reports; the base of the party
 roles below). A page's repeated console error is one finding with its count, and its
 requests after its service stopped are one more.
 
@@ -577,11 +586,11 @@ action and acts on the controls a person uses; the drivers have no page.
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
-| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name) |
-| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target) |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `view` (area) |
+| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
-| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release`, `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
+| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 
 An action is a mechanism. Which one follows which is the scenario's business, never a
 role's: `box`, the director's `next`, `lobby` and `release` are four steps, not one "swap".
@@ -608,7 +617,9 @@ UI or API:
   Channel tab and a made-up stream key per Part, without which the panel hides the Part
   control and shows OFFLINE/GO LIVE instead. Ending the last Part stops the event.
 - `producer.start_event` on a stopped event starts a fresh relay. `relay_restart` and a
-  fresh start are detached relays. A restart comes back at stint 1 with the feeds stopped.
+  fresh start are detached relays. A restart, and a plain Start event after a crash, comes
+  back on the stint that was on air, on Feed A, with the feeds stopped (#1270): arm Feed A.
+- `view` opens a desk or panel area, so a screenshot of an element in it can be taken.
 - Not offered: switching the profile (the app home holds the demo profile only).
 - Drivers act through the API, as `racecast-sender.py` does for a real driver: the
   registration form adds nothing a sender does not do. Each driver registers as its own
@@ -676,6 +687,32 @@ submits a link in the cockpit, the director approves it, arms Feed A and cuts to
 Control field and starts Part 1 (`obs.streaming`), four drivers register, Race Control
 approves them, they race, a viewer reads the public timing, Race Control calls the final
 lap, the director ends Part 1 and the producer stops the event. Stop event ends the relay, so it is the last step.
+
+### Bundled event scenarios (`scenarios/*.toml`, #1234)
+
+Each plays three stints in three lobbies with one commentator per stint (Comms 1, 2, 3),
+checks each commentator's picture on program at their stint, swaps every driver in each new
+lobby and ends with Stop event. `tests/test_event_sim_roles.py` holds them to that. Run
+times on a maintainer machine, start and teardown included:
+
+- `quick` (4.5 min): Start event, qualifying mode, two Add lap times ranked on the public
+  timing, race mode, approval of 12 drivers, a DC confirmed on the desk and rejoined late,
+  final lap in the third lobby; asserts the ranking, `no_data` then `dc`, the swaps (driver
+  and pit stop count) and the finish.
+- `multiclass` (4 min): Hypercar and GT3 in one lobby; asserts the GT3 leader is
+  P2 overall but P1 in its class with class gap 0, the public timing lists both, and a GT3
+  lap count set on the desk.
+- `late-link` (4 min): Comms 2 submits the stream link during stint 1; asserts it stays
+  pending (empty Schedule row, no handover link), the approval writes the row and the
+  webhook, and at the change Comms 2 is on program and Comms 1 is not.
+- `dc-rejoin` (4.5 min): a sender stops in stint 1; asserts `no_data`, `dc` after Confirm
+  DC, the rejoin mark, and in stint 2 the team's new driver racing again behind the field.
+- `relay-crash` (5 min): the relay is killed in stint 2 while Part 1 streams; a plain
+  Start event brings stint 2 back with the program untouched, and the same driver codes
+  count again with no new approval; stint 3 runs to the finish.
+- `red-flag` (5 min): the desk's RED FLAG in stint 2 (cover, banner, race held), a
+  restart lobby and Restart released; the drivers leave the box by their gaps of before the
+  flag (the relay shows no gaps while it holds); asserts that order and every gap within 1 s.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 
