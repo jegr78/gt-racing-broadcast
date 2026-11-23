@@ -1356,8 +1356,7 @@ async function redFlagPress(){
     else if (d.changed === false) log("RED FLAG: the cover is already " + (on ? "up" : "down"), "warn");
     else log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
     setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
-    // The driver telemetry race holds every entry too (#1114), unless it is held already: a
-    // second hold would drop Race Control's restart mode. A release stays a separate step.
+    // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
     if (on && !deskRed) fetch("/drivers/race/red-flag", {method: "POST", headers: {"Content-Type": "application/json"},
                                              body: "{}"}).catch(() => {});
     obsStatePoll();

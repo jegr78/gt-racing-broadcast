@@ -1053,6 +1053,29 @@ def t_an_automatic_area_is_shown_but_never_stored():
         f"a first load in qualifying opens it and the race brings Race back, storing neither; a click stores: {got}"
 
 
+def t_the_phone_tab_bar_marks_the_running_qualifying():
+    path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
+    got = _js_fn(path, "setDot,deskDots", """(function () {
+      deskDots({waiting: 0, events: 0, mode: "qualifying", dashboard: false, stale: false, gaps: false});
+      var on = {};
+      Object.keys(tabs).forEach(function (k) { on[k] = Object.keys(tabs[k].cls).filter(function (c) { return tabs[k].cls[c]; }); });
+      return on;
+    })()""", prelude="""var tabs = {};
+function stub() { var cls = {}; return {cls: cls, textContent: "", firstChild: {textContent: "X"}, className: "",
+  setAttribute: function () {}, querySelector: function () { return this; },
+  classList: {toggle: function (c, v) { cls[c] = !!v; }}}; }
+var document = {querySelector: function (sel) {
+  var m = /data-(area|id)="([a-z]+)"/.exec(sel);
+  if (m[1] === "area") return stub();
+  return tabs[m[2]] || (tabs[m[2]] = stub());
+}};
+""")
+    if got is None:
+        return
+    assert got["qualifying"] == ["dot-ok"], f"the Quali tab carries the session's dot on a phone: {got}"
+    assert got["trouble"] == [] and got["drivers"] == [], f"no dot where nothing is going on: {got}"
+
+
 def t_a_failed_poll_keeps_the_last_known_mode():
     got = _desk_fn("requestRows,remember,deskState", """(function () {
       var seen = {race: null, rec: null, reqs: null}, modes = [];

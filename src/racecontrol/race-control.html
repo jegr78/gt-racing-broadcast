@@ -101,9 +101,11 @@
     .rail #bchat { flex: none; height: 280px; }
     .crewtabs-on .crewtabs { overflow-x: auto; }
     .crewtabs button { flex: 0 0 auto; min-width: 64px; padding: 0 10px; position: relative; }
-    .crewtabs button.dot-warn::after, .crewtabs button.dot-alarm::after { content: ""; position: absolute;
+    .crewtabs button.dot-warn::after, .crewtabs button.dot-alarm::after,
+    .crewtabs button.dot-ok::after { content: ""; position: absolute;
       top: 9px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
     .crewtabs button.dot-alarm::after { background: var(--alarm); }
+    .crewtabs button.dot-ok::after { background: var(--live); }
   }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: clip; }   /* clip, not hidden: a sticky status line needs the area as its scroll box */
   /* On-air banner, modelled on the cockpit tally. This is a global monitoring view
@@ -446,6 +448,7 @@ function setDot(area, level, why) {
   if (tab) {
     tab.classList.toggle('dot-warn', level === 'warn');
     tab.classList.toggle('dot-alarm', level === 'alarm');
+    tab.classList.toggle('dot-ok', level === 'ok' && area !== 'trouble');   // '!' is ok while nothing is wrong
   }
 }
 function deskDots(st) {

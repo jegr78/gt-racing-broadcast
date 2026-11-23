@@ -552,7 +552,8 @@ then say "quota nearly used: viewers stay on Funnel". Only the next UTC day lift
 - **Red flag** freezes every entry's distance. In the restart lobby each car
   continues from its anchor when it leaves the box; lap 1 there does not count. The
   league's rule (Control Center Home, **Red flag**, or `racecast event race
-  --restart`) says whether a restart keeps the gaps or neutralises them.
+  --restart`) says whether a restart keeps the gaps or neutralises them. A second red
+  flag while the race is held changes nothing: the restart mode Race Control picked stays.
   - **Keep** is a release staggered by the gaps: Race Control releases each car from
     the restart lobby's box its frozen gap after the leader. Every car starts from
     the leader's frozen distance (an estimated leader's too), a car laps down that many whole laps behind it, so
