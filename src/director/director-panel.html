@@ -539,7 +539,6 @@
   body.nav-collapsed .navcollapse{align-self:center}
 
   /* Live column: what acts on air within seconds. */
-  #liveCol{display:flex;flex-direction:column;gap:10px}
   #liveCol>.bus{margin-bottom:0}
   #liveCol .preview .pvbody{grid-template-columns:repeat(3,minmax(0,1fr))}
   #liveCol .pvprog{grid-column:1 / -1}
@@ -585,7 +584,6 @@
   #liveCol #txBar .txdur input{padding:6px}
   #liveCol #gfxReqList{max-height:92px;overflow-y:auto}
   #liveCol #txBar button.k{min-width:0;flex:1 1 0}
-  #handoverCtl{display:flex;flex-direction:column;gap:8px}
   #gfxReqSec{border-color:var(--amber)}
   #gfxReqSec[hidden]{display:none}
   #gfxReqList{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
@@ -695,11 +693,18 @@
     .rail{order:4;position:static;transform:none;width:auto;padding:0;border:0;display:flex;
       flex-direction:column;gap:10px}
     .rail .chatlog{height:240px;flex:0 0 auto}
+    #liveCol .pgm button.k,#overlaySec button.k,#liveCol #txBar button.k,#liveCol #gfxReqList button.k,
+    #liveCol #pvToggle,#liveCol #pgmAudioBtn,.desktabs button{min-height:44px}
     .railsplit{display:none}
     .drawerbtn{display:none}
     .hocards{grid-template-columns:1fr}
     #hoUpcoming .hrow{grid-template-columns:70px minmax(0,1fr) 110px}
     #hoUpcoming .hrow button{grid-column:1 / -1}
+  }
+  /* Phones: overlays and transitions get the full width each. */
+  @media(max-width:599px){
+    #liveCol>#overlaySec,#liveCol>#txBar{grid-column:1 / -1}
+    body:not(.solo) #liveCol #overlaySec .keys{grid-template-columns:repeat(3,minmax(0,1fr))}
   }
 #asset-preview{width:min(940px,94vw);max-height:94vh;padding:0;border:1px solid #334155;border-radius:12px;background:#111827;color:#e5e7eb}
 #asset-preview::backdrop{background:#000b}
