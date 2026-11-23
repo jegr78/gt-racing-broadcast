@@ -425,8 +425,8 @@ function applyArea(name) {
   });
   document.querySelectorAll('.area').forEach(a => a.classList.toggle('active', a.dataset.area === name));
 }
-function showArea(name) {
-  if (window.crewSelectTab) window.crewSelectTab(name); else applyArea(name);
+function showArea(name, auto) {
+  if (window.crewSelectTab) window.crewSelectTab(name, auto); else applyArea(name);
 }
 document.querySelectorAll('.navbtn').forEach(b => {
   b.addEventListener('click', () => showArea(b.dataset.area));
@@ -457,10 +457,17 @@ function deskDots(st) {
          st.stale ? 'relay not answering' : st.gaps ? 'recording gaps' : 'no issues');
 }
 // Qualifying opens its area on a switch, and on the first poll when the browser kept no area;
-// never while someone types or a dialog is open. The Qualifying dot marks the session either way.
+// never while someone types or a dialog is open, never off a phone's Live or Chat tab, and
+// never stored as the operator's choice. The Qualifying dot marks the session either way.
 function editing() {
   const a = document.activeElement;
   return !!(a && a.matches && a.matches('input, select, textarea')) || !!document.querySelector('dialog[open]');
+}
+// The tab a phone shows, null while the tab bar is hidden.
+function phoneTab() {
+  if (!document.body.classList.contains('crewtabs-on') || !window.matchMedia('(max-width: 820px)').matches) return null;
+  const b = document.querySelector('#crewTabs button[aria-selected="true"]');
+  return b ? b.getAttribute('data-id') : null;
 }
 let lastMode = null, storedArea = false;
 function followMode(mode) {
@@ -468,8 +475,9 @@ function followMode(mode) {
   const first = lastMode === null;
   lastMode = mode;
   if (editing() || (first && (storedArea || mode !== 'qualifying'))) return;
-  if (mode === 'qualifying') showArea('qualifying');
-  else if (deskArea === 'qualifying') showArea('race');
+  if (['live', 'chat'].includes(phoneTab())) return;
+  if (mode === 'qualifying') showArea('qualifying', true);
+  else if (deskArea === 'qualifying') showArea('race', true);
 }
 
 // Redacted schedule (no stream URLs) plus the on-air marker.
@@ -851,8 +859,8 @@ pgmAudioInit("/cockpit/program-audio");
 /* The tab bar's choice is the area's: a tab that names an area shows it on a desktop too. */
 (function () {
   var pick = window.crewSelectTab, saved = null;
-  if (pick) window.crewSelectTab = function (id) {
-    pick(id); applyArea(id);
+  if (pick) window.crewSelectTab = function (id, auto) {
+    pick(id, auto); applyArea(id);
     var tab = document.querySelector('#crewTabs button[data-id="' + id + '"]');
     if (tab && tab.offsetParent) tab.scrollIntoView({block: 'nearest', inline: 'nearest'});
   };

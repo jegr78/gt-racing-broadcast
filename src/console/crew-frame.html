@@ -36,14 +36,15 @@
     if (!nav) return;
     var tabs = JSON.parse(nav.getAttribute('data-tabs') || '[]');
     var key = 'crewTab:' + location.pathname;
-    window.crewSelectTab = function crewSelectTab(id) {
+    // Only a tap is stored; `auto` (a restore, a page's own choice) only shows the tab.
+    window.crewSelectTab = function crewSelectTab(id, auto) {
       document.querySelectorAll('[data-tab]').forEach(function (el) {
         el.classList.toggle('tab-on', el.getAttribute('data-tab').split(' ').indexOf(id) >= 0);
       });
       nav.querySelectorAll('button').forEach(function (b) {
         b.setAttribute('aria-selected', b.getAttribute('data-id') === id ? 'true' : 'false');
       });
-      try { localStorage.setItem(key, id); } catch (e) { /* private mode */ }
+      if (!auto) try { localStorage.setItem(key, id); } catch (e) { /* private mode */ }
     };
     tabs.forEach(function (t) {
       var b = document.createElement('button');
@@ -55,7 +56,7 @@
     var saved = null;
     try { saved = localStorage.getItem(key); } catch (e) { /* private mode */ }
     var ids = tabs.map(function (t) { return t[0]; });
-    window.crewSelectTab(ids.indexOf(saved) >= 0 ? saved : ids[0]);
+    window.crewSelectTab(ids.indexOf(saved) >= 0 ? saved : ids[0], true);
     document.body.classList.add('crewtabs-on');
     // Mirror the race timer into the live strip, since its card is desktop-only.
     var src = document.getElementById('timer'), dst = document.getElementById('liveTimer');

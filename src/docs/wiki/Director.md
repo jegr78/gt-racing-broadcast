@@ -311,7 +311,10 @@ top sit the race controls (finish mode, lap count, **Final lap**, **Finish**, th
 flag hold); below them tabs split the rest the way the desk's areas do: **Race**,
 **Drivers**, **Corrections**, **Qualifying**, **Dashboard** and **Links** (invite and
 timing links, race recording). A dot marks waiting requests, an open disconnect or the
-running qualifying, and qualifying opens its tab by itself once per switch. The
+running qualifying, and qualifying opens its tab by itself once per switch. That
+automatic choice is not remembered: a reload shows the tab you last picked. The
+**Race** entry in the area list also says `relay not answering` or `recording gaps` when the
+desk data is stale or the race recording lost samples. The
 connection line sits under **Troubleshoot**. In short:
 
 - the invite link with **Copy** (on the public Funnel address while Funnel serves the

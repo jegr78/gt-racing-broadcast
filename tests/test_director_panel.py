@@ -1012,42 +1012,91 @@ def t_race_area_tabs_are_the_desk_parts():
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         slots = json.loads(re.search(r"var SLOTS = (\[[^\]]*\]);", fh.read()).group(1))
     parts = [p for p in slots if p not in ("live", "trouble")]
-    tabs = re.findall(r'<button type="button" role="tab" data-sub="([a-z]+)">', h)
-    panes = re.findall(r'<div class="desksub" data-sub="([a-z]+)" role="tabpanel"><div data-desk="([a-z]+)">', h)
+    tabs = re.findall(r'<button type="button" role="tab" id="deskTab-([a-z]+)" aria-controls="deskPane-([a-z]+)" '
+                      r'data-sub="([a-z]+)">', h)
+    panes = re.findall(r'<div class="desksub" id="deskPane-([a-z]+)" data-sub="([a-z]+)" role="tabpanel" '
+                       r'aria-labelledby="deskTab-([a-z]+)"><div data-desk="([a-z]+)">', h)
     subs = json.loads(re.search(r"var DESK_SUBS = (\[[^\]]*\])", h).group(1))
-    assert tabs == subs == parts and panes == [(p, p) for p in parts], (tabs, panes, subs)
+    assert subs == parts and tabs == [(p, p, p) for p in parts] and panes == [(p, p, p, p) for p in parts], \
+        f"each tab names its panel and each panel its tab: {tabs} {panes} {subs}"
     assert "if (!DESK_SUBS.includes(name)) name = " in _func_src(h, "showDeskSub"), \
         "a stale stored tab never reaches a selector"
 
 
-def t_the_panel_desk_preselects_qualifying_on_a_switch_only():
-    h = _html()
-    out = _run_js("""var shown = [], nav = [], stored = null, typing = false;
-function showDeskSub(n){ shown.push(n); stored = n; }
-function recall(){ return stored; }
-function setNav(a, level, why){ nav.push([level, why]); }
+def _desk_tabs_js(h, body):
+    subs = re.search(r"var DESK_SUBS = (\[[^\]]*\])", h).group(1)
+    return _run_js("var DESK_SUBS = " + subs + r""", DESK_SUB_KEY = "k", deskSub = "race", deskMode = null,
+    deskSubStored = false, deskRed = false, typing = false, kept = {}, writes = [], nav = [];
+function store(k, v){ writes.push(v); kept[k] = v; }
+function recall(k){ return k in kept ? kept[k] : null; }
+function setNav(a, level, why){ if (a === "race") nav.push([level, why]); }
 function deskDot(){}
 function deskEditing(){ return typing; }
-var DESK_SUB_KEY = "k", deskMode = null, deskSubStored = true;
-""" + _func_src(h, "deskState") + """
-}
-const st = (mode, extra) => Object.assign({waiting: 0, events: 0, mode: mode, red: false, dashboard: false}, extra);
-deskSubStored = false; deskState(st("qualifying")); const fresh = shown.splice(0);
-deskMode = null; deskSubStored = true; stored = null;
-deskState(st("qualifying")); deskState(st("race")); deskState(st("qualifying"));
-deskState(st("qualifying", {waiting: 2})); typing = true; deskState(st("race")); typing = false;
-deskState(st("qualifying", {red: true})); stored = "corrections"; deskState(st("race"));
-console.log(JSON.stringify({shown, nav: nav.slice(1), fresh}));""")
+const tabs = DESK_SUBS.map(s => ({dataset: {sub: s}, attrs: {}, tabIndex: 0, setAttribute(k, v){ this.attrs[k] = v; }}));
+const panes = DESK_SUBS.map(s => ({dataset: {sub: s}, hidden: false}));
+const document = {querySelectorAll: sel => sel.includes("button") ? tabs : panes};
+const shownSub = () => panes.filter(p => !p.hidden).map(p => p.dataset.sub).join();
+const st = (mode, extra) => Object.assign({waiting: 0, events: 0, mode: mode, red: false, dashboard: false,
+                                           gaps: false, stale: false}, extra);
+""" + "".join(_func_src(h, n) + "\n}\n" for n in ("showDeskSub", "deskState", "deskTabKey")) + body)
+
+
+def t_the_panel_desk_preselects_qualifying_on_a_switch_only():
+    h = _html()
+    out = _desk_tabs_js(h, """
+const seen = [];
+deskState(st("qualifying")); seen.push(shownSub()); deskState(st("race")); seen.push(shownSub());
+const fresh = {seen: seen.splice(0), writes: writes.splice(0)};
+deskMode = null; deskSubStored = true; kept.k = "corrections"; showDeskSub("corrections", true);
+deskState(st("qualifying")); seen.push(shownSub()); deskState(st("race")); seen.push(shownSub());
+deskState(st("qualifying")); seen.push(shownSub());
+typing = true; deskState(st("race")); seen.push(shownSub()); typing = false;
+const auto = writes.splice(0);
+showDeskSub("drivers");
+console.log(JSON.stringify({fresh, seen, auto, clicked: writes, kept: kept.k,
+                            selected: tabs.filter(t => t.attrs["aria-selected"] === "true").map(t => t.dataset.sub),
+                            focusable: tabs.filter(t => t.tabIndex === 0).map(t => t.dataset.sub)}));""")
     if out is None:
         return
     got = json.loads(out)
-    assert got["fresh"] == ["qualifying"], f"a first load in qualifying without a kept tab opens Qualifying: {got}"
-    assert got["shown"] == ["qualifying", "qualifying"], \
-        "the first poll keeps the stored tab, typing holds the switch, back to Race only from Qualifying: " \
-        f"{got['shown']}"
-    assert got["nav"][3] == ["warn", "2 waiting"] and got["nav"][5] == ["live", "red flag"], got["nav"]
+    assert got["fresh"] == {"seen": ["qualifying", "race"], "writes": []}, \
+        f"a first load in qualifying without a kept tab opens Qualifying and goes back, storing neither: {got}"
+    assert got["seen"] == ["corrections", "corrections", "qualifying", "qualifying"], \
+        f"the first poll keeps the stored tab, typing holds the switch: {got['seen']}"
+    assert got["auto"] == [] and got["clicked"] == ["drivers"] and got["kept"] == "drivers", \
+        f"only the operator's own choice is stored: {got}"
+    assert got["selected"] == got["focusable"] == ["drivers"], got
     assert 'a.matches("input, select, textarea")' in _func_src(h, "deskEditing") and \
         'document.querySelector("dialog[open]")' in _func_src(h, "deskEditing")
+
+
+def t_the_panel_race_label_says_when_the_desk_data_is_stale():
+    out = _desk_tabs_js(_html(), """
+const reds = [];
+[st("race", {waiting: 2}), st("race", {red: true}), st("race", {stale: true, red: true}),
+ st("race", {gaps: true}), st("race", {gaps: true, waiting: 1}), st("race", {events: 2}), st("race")]
+  .forEach(s => { deskState(s); reds.push(deskRed); });
+console.log(JSON.stringify({nav, reds}));""")
+    if out is None:
+        return
+    got = json.loads(out)
+    assert got["nav"] == [["warn", "2 waiting"], ["live", "red flag"], ["live", "relay not answering"],
+                          ["warn", "recording gaps"], ["warn", "1 waiting"], ["", "2 disconnects open"], ["", ""]], \
+        f"the Race label shows a stale relay and recording gaps like the desk's trouble dot: {got['nav']}"
+    assert got["reds"] == [False, True, True, False, False, False, False], \
+        f"the RED FLAG key knows when the race is held: {got['reds']}"
+
+
+def t_the_panel_desk_tabs_follow_the_arrow_keys():
+    out = _desk_tabs_js(_html(), """
+console.log(JSON.stringify([deskTabKey("race", "ArrowRight"), deskTabKey("setup", "ArrowRight"),
+  deskTabKey("race", "ArrowLeft"), deskTabKey("drivers", "Home"), deskTabKey("race", "End"),
+  deskTabKey("race", "Enter")]));""")
+    if out is None:
+        return
+    assert json.loads(out) == ["drivers", "race", "setup", "race", "setup", None], out
+    h = _html()
+    assert 'getElementById("deskTabs").addEventListener("keydown"' in h, "the tab list takes the arrow keys"
 
 
 def t_the_program_tile_gives_way_to_the_live_keys():

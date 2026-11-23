@@ -946,12 +946,14 @@ def t_qualifying_preselects_its_area_on_a_switch_only():
       });
       return {shown: shown, area: deskArea};
     })()""", prelude="var lastMode = null, deskArea = 'race', shown = [], typing = false, storedArea = true;"
+                     "function phoneTab() { return null; }"
                      "function editing() { return typing; }"
                      "function showArea(n) { shown.push(n); deskArea = n; }\n")
     if got is None:
         return
     first = [_js_fn(path, "followMode", "(function () { followMode('qualifying'); return shown; })()",
                     prelude=f"var lastMode = null, deskArea = 'race', shown = [], storedArea = {stored};"
+                            "function phoneTab() { return null; }"
                             "function editing() { return false; }"
                             "function showArea(n) { shown.push(n); deskArea = n; }\n")
              for stored in ("false", "true")]
@@ -962,6 +964,93 @@ def t_qualifying_preselects_its_area_on_a_switch_only():
         f"Qualifying: {got}"
     assert "a.matches('input, select, textarea')" in _src("racecontrol", "race-control.html") and \
         "document.querySelector('dialog[open]')" in _src("racecontrol", "race-control.html")
+
+
+def _desk_tabs_run(phone, saved, body):
+    """Runs the crew frame's tab bar and the desk's area code under node with a stub DOM."""
+    frame = _src("console", "crew-frame.html")
+    frame_js = frame[frame.index("<script>") + 8:frame.index("</script>")]
+    path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
+    page = _src("racecontrol", "race-control.html")
+    tabs = re.search(r"data-tabs='([^']*)'", page).group(1)
+    wrap = page[page.index("<!--__CREW_FRAME__-->"):]
+    wrap = wrap[wrap.index("(function () {"):wrap.index("})();") + 5]
+    areas = re.search(r"const DESK_AREAS = (\[[^\]]*\]);", page).group(1).replace("'", '"')
+    dom = r"""
+var stored = %s, writes = [], buttons = [], areaEls = [], scrolled = 0;
+function el(extra) {
+  var e = {attrs: {}, cls: {}, handlers: {}, offsetParent: null, textContent: "",
+           setAttribute: function (k, v) { this.attrs[k] = String(v); },
+           getAttribute: function (k) { return k in this.attrs ? this.attrs[k] : null; },
+           addEventListener: function (t, f) { this.handlers[t] = f; },
+           scrollIntoView: function () {},
+           classList: {toggle: function (c, on) { e.cls[c] = !!on; }, add: function (c) { e.cls[c] = true; },
+                       contains: function (c) { return !!e.cls[c]; }}};
+  return Object.assign(e, extra || {});
+}
+var nav = el({appendChild: function (b) { buttons.push(b); },
+              querySelectorAll: function () { return buttons; }});
+nav.attrs["data-tabs"] = %s;
+DESK_AREAS_.forEach(function (a) { areaEls.push(el({dataset: {area: a}})); });
+var body = el();
+var document = {
+  body: body, activeElement: null,
+  getElementById: function (id) { return id === "crewTabs" ? nav : null; },
+  createElement: function () { return el(); },
+  querySelectorAll: function (sel) { return sel === ".area" ? areaEls : []; },
+  querySelector: function (sel) {
+    var m = /data-id="([a-z]+)"/.exec(sel);
+    if (m) return buttons.filter(function (b) { return b.attrs["data-id"] === m[1]; })[0] || null;
+    if (sel.indexOf('aria-selected="true"') >= 0)
+      return buttons.filter(function (b) { return b.attrs["aria-selected"] === "true"; })[0] || null;
+    return null;
+  }
+};
+var window = globalThis;
+window.matchMedia = function () { return {matches: %s}; };
+window.scrollTo = function () { scrolled++; };
+var location = {pathname: "/console/race-control"};
+var localStorage = {getItem: function (k) { return stored; },
+                    setItem: function (k, v) { writes.push(v); stored = v; }};
+function tap(id) { buttons.filter(function (b) { return b.attrs["data-id"] === id; })[0].handlers.click(); }
+function tab() { var b = document.querySelector('#crewTabs button[aria-selected="true"]'); return b && b.attrs["data-id"]; }
+function area() { return areaEls.filter(function (a) { return a.cls.active; }).map(function (a) { return a.dataset.area; }).join(); }
+""" % (json.dumps(saved), json.dumps(tabs), "true" if phone else "false")
+    funcs = "\n".join(tower._function(path, n) for n in ("applyArea", "showArea", "editing", "phoneTab", "followMode"))
+    return tower._run("var DESK_AREAS_ = " + areas + ";" + dom + frame_js + "\nconst DESK_AREAS = DESK_AREAS_;"
+                      "\nlet deskArea = 'race', lastMode = null, storedArea = false;\n" + funcs + "\n" + wrap
+                      + "\n;console.log(JSON.stringify((function () {" + body + "})()));")
+
+
+def t_a_phone_on_live_or_chat_never_leaves_it_by_itself():
+    step = "followMode(m); return [tab(), area(), writes.slice()];"
+    got = _desk_tabs_run(True, "live", """
+      var out = [[tab(), writes.slice()]];
+      ["qualifying", "race"].forEach(function (m) { out.push((function () { """ + step + """ })()); });
+      return out;""")
+    if got is None:
+        return
+    assert got == [["live", []], ["live", "race", []], ["live", "race", []]], \
+        f"a phone kept on Live stays there when qualifying starts and ends, and stores nothing: {got}"
+    back = _desk_tabs_run(True, None, """
+      followMode("race"); followMode("qualifying"); tap("qualifying"); tap("chat");
+      followMode("race");
+      return [tab(), writes];""")
+    assert back == ["chat", ["qualifying", "chat"]], \
+        f"after Quali the phone stays on Chat when the race resumes, only taps are stored: {back}"
+
+
+def t_an_automatic_area_is_shown_but_never_stored():
+    got = _desk_tabs_run(False, None, """
+      var out = [writes.slice()];
+      followMode("qualifying"); out.push([area(), writes.slice()]);
+      followMode("race"); out.push([area(), writes.slice()]);
+      showArea("drivers"); out.push([area(), writes.slice()]);
+      return out;""")
+    if got is None:
+        return
+    assert got == [[], ["qualifying", []], ["race", []], ["drivers", ["drivers"]]], \
+        f"a first load in qualifying opens it and the race brings Race back, storing neither; a click stores: {got}"
 
 
 def t_a_failed_poll_keeps_the_last_known_mode():
