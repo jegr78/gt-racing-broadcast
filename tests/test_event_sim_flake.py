@@ -113,6 +113,18 @@ def t_the_units_processes_are_named_and_ranked_by_cpu():
     assert hoststate.processes(proc=os.path.join(empty, "p"), cgroup_root=os.path.join(empty, "c")) is None
 
 
+def t_the_cpu_each_process_used_between_two_readings():
+    before = [{"pid": 1, "name": "gpu", "cpu_s": 10.0}, {"pid": 2, "name": "renderer", "cpu_s": 5.0},
+              {"pid": 3, "name": "gone", "cpu_s": 1.0}]
+    after = [{"pid": 1, "name": "gpu", "cpu_s": 10.5}, {"pid": 2, "name": "renderer", "cpu_s": 7.25},
+             {"pid": 4, "name": "new", "cpu_s": 0.75}]
+    assert hoststate.cpu_delta(before, after) == [{"pid": 2, "name": "renderer", "cpu_s": 2.25},
+                                                  {"pid": 4, "name": "new", "cpu_s": 0.75},
+                                                  {"pid": 1, "name": "gpu", "cpu_s": 0.5}], \
+        "most first; a process that started meanwhile counts from zero, one that ended is left out"
+    assert hoststate.cpu_delta(None, after) is None
+
+
 def t_the_load_is_cpu_with_a_bounded_worker_count():
     assert flake.parse_load("cpu:2") == ("cpu", 2)
     for bad in ("cpu", "cpu:0", f"cpu:{flake.MAX_LOAD + 1}", "io:1", "cpu:x", "cpu:-1"):

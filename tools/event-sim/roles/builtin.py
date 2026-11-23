@@ -174,19 +174,23 @@ RECENT = 30              # console lines and failed requests a failure snapshot 
 DIAG_MS = 2000           # how long a failure snapshot waits for the page to answer
 STATE_SCRIPT = ("() => ({visibility: document.visibilityState, focus: document.hasFocus(), "
                 "ready: document.readyState, title: document.title})")
-# Each page keeps its last long tasks (main thread busy 50 ms or more); LONG_TASKS reads
-# those that started within `arg` ms. Neither changes what the page does.
+# Each page keeps its last long tasks (main thread busy 50 ms or more) and long animation
+# frames (with the scripts that ran in them); LONG_TASKS reads those that started within
+# `arg` ms. Neither changes what the page does.
 LONG_TASK_OBSERVER = """(() => {
   const keep = window.__simLongTasks = [];
+  const add = (kind, e, scripts) => { keep.push([e.startTime, e.duration, kind, scripts]); if (keep.length > 300) keep.shift(); };
   try {
-    new PerformanceObserver(list => {
-      for (const e of list.getEntries()) { keep.push([e.startTime, e.duration]); if (keep.length > 200) keep.shift(); }
-    }).observe({type: 'longtask', buffered: true});
-  } catch (e) { /* a browser without long tasks */ }
+    new PerformanceObserver(l => l.getEntries().forEach(e => add('task', e, []))).observe({type: 'longtask', buffered: true});
+    new PerformanceObserver(l => l.getEntries().forEach(e => add('frame', e, (e.scripts || [])
+      .filter(s => s.duration >= 20).slice(0, 4)
+      .map(s => `${s.invoker || s.invokerType} ${s.sourceFunctionName || ''}@${(s.sourceURL || '').split('?')[0].split('/').pop()}:${s.sourceCharPosition} ${Math.round(s.duration)}ms`))))
+      .observe({type: 'long-animation-frame', buffered: true});
+  } catch (e) { /* a browser without them */ }
 })()"""
 LONG_TASKS = """(ms) => ({tasks: (window.__simLongTasks || [])
   .filter(t => performance.now() - t[0] <= ms)
-  .map(t => ({ago_s: Math.round(performance.now() - t[0]) / 1000, ms: Math.round(t[1])}))})"""
+  .map(t => ({ago_s: Math.round(performance.now() - t[0]) / 1000, ms: Math.round(t[1]), kind: t[2], scripts: t[3]}))})"""
 DIAG_METRICS = ("JSHeapUsedSize", "JSHeapTotalSize", "Nodes", "JSEventListeners", "Documents", "Frames",
                 "LayoutCount", "RecalcStyleCount", "LayoutDuration", "RecalcStyleDuration",
                 "ScriptDuration", "TaskDuration")

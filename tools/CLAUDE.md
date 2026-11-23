@@ -621,9 +621,11 @@ needed to explain a failure at the moment it happens:
   Each snapshot and the report's end also list the CPU seconds of every process in the
   run's cgroup (`hoststate.processes`: Chromium's GPU process and renderers, the
   Playwright driver, the relay, ffmpeg), so a starved run names who used the quota.
-  Each page records its long tasks (main thread busy 50 ms or more,
-  `LONG_TASK_OBSERVER`); a step that failed or was slow lists every page's long tasks
-  within the step in its `long_tasks`.
+  Each page records its long tasks (main thread busy 50 ms or more) and long animation
+  frames with the scripts that ran in them (`LONG_TASK_OBSERVER`); a step that failed or
+  was slow lists every page's within the step in its `long_tasks`, and each process's CPU
+  seconds over the step in its `cpu`. Every shot carries its own `host` and `cpu`: a long
+  task with about as much renderer CPU is page work, one with little is starvation.
   Then a picture of the whole page (`shots/fail-<step>.png`, `fail-<step>-shot.png` for a
   failed screenshot) with how long it took: a picture that takes 0.1 s right after an 8 s
   timeout says the page was alive.

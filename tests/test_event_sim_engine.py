@@ -1275,6 +1275,9 @@ def t_every_page_action_and_shot_is_timed_and_a_slow_one_is_soft():
         f"only the slow click, not the request around it: {slow}"
     assert slow[1][0] == "slowanswer" and "request 'NEXT' took 4.1s" in slow[1][1], slow
     assert data["ok"], "slowness is a finding, never a failure"
+    shot = s["fast"]["actions"][-1]
+    assert "host" in shot and shot["cpu"][0]["name"] == "chrome-headless-shell gpu-process", \
+        f"a shot has the host and each process's CPU over its own seconds: {shot}"
     assert [a.get("slow", False) for a in s["slowclick"]["actions"]][:2] == [False, True], s["slowclick"]
     page = report.render_html(data)
     assert "click NEXT" in page and "5.00s" in page, "the report lists each step's actions"
@@ -1359,6 +1362,7 @@ def t_a_slow_or_failed_step_names_the_long_tasks_of_each_page():
     assert br.init_scripts == [builtin.LONG_TASK_OBSERVER], "each page records its long tasks from the start"
     s = _by_id(data)
     assert s["quick"]["long_tasks"] == {}, "a quick step asks no page"
+    assert s["slow"]["cpu"] and s["quick"]["cpu"] is None, "a slow step names each process's CPU over the step"
     assert s["slow"]["long_tasks"] == {"page:rc": [{"ago_s": 1.0, "ms": 1900}]}, \
         f"only the tasks inside the step: {s['slow']['long_tasks']}"
     assert "1900" in report.render_html(data), "the report shows them under the step"

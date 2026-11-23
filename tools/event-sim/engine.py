@@ -57,6 +57,7 @@ class StepResult:
     snapshots: list = field(default_factory=list)  # the state at a failure
     traces: list = field(default_factory=list)     # Playwright trace zips kept of this step
     long_tasks: dict = field(default_factory=dict) # role -> its page's long tasks, for a slow or failed step
+    cpu: list = None                               # each process's CPU seconds over a slow or failed step
 
 
 class RunContext:
@@ -310,6 +311,7 @@ class Engine:
             return
         os.makedirs(self.shots_dir, exist_ok=True)
         path = os.path.join(self.shots_dir, shot.name + ".png")
+        host, procs = self._sample(), self._unit_processes()
         begin = self.clock()
         rec = {"role": role_name, "kind": "shot", "what": shot.name, "s": None, "ok": False, "depth": 0,
                "budget": roles.builtin.budget_for("shot"), "covered": False}
@@ -320,6 +322,7 @@ class Engine:
             rec["ok"] = True
         except Exception as exc:  # ShotUnavailable or a broken page: a screenshot never decides the run
             rec["s"] = round(self.clock() - begin, 3)
+            self._shot_load(rec, host, procs)
             why = f"shot {shot.name}: {exc}"
             # A run that must have its browser (--no-skips) must have its pictures too.
             self.findings.append(Finding(HARD if self.no_skips else SOFT, why, step.id, role_name))
@@ -327,6 +330,12 @@ class Engine:
                 self._snapshot(step, res, role_name, why, f"fail-{step.id}-shot.png")
         if rec["s"] is None:
             rec["s"] = round(self.clock() - begin, 3)
+            self._shot_load(rec, host, procs)
+
+    def _shot_load(self, rec, host, procs):
+        """What the unit got during the shot itself: a step's figures dilute it."""
+        rec["host"] = hoststate.delta(host, self._sample())
+        rec["cpu"] = hoststate.cpu_delta(procs, self._unit_processes(), top=8)
 
     def _sample(self):
         try:
@@ -383,9 +392,7 @@ class Engine:
         """End every page's chunk; kept as traces/<step>-<role>.zip for a step that
         failed, left a snapshot or had a slow action (a flake's tail), or for every step
         with trace "all"."""
-        keep = self.traces_dir is not None and (
-            self.ctx.trace == "all" or res.status == "failed" or bool(res.snapshots)
-            or any(a.get("slow") for a in res.actions))
+        keep = self.traces_dir is not None and (self.ctx.trace == "all" or self._noteworthy(res))
         for name, role in self._page_roles():
             file = f"{step.id}-{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}.zip"
             try:
@@ -394,9 +401,14 @@ class Engine:
             except Exception as exc:  # noqa: BLE001  a trace never decides the run
                 self.findings.append(Finding(SOFT, f"trace of {name}: {exc}", step.id, name))
 
+    @staticmethod
+    def _noteworthy(res):
+        """A step that failed, left a snapshot or had a slow action: its diagnostics are kept."""
+        return res.status == "failed" or bool(res.snapshots) or any(a.get("slow") for a in res.actions)
+
     def _long_tasks(self, res, seconds):
         """Each open page's long tasks during a step that failed, left a snapshot or was slow."""
-        if not (res.status == "failed" or res.snapshots or any(a.get("slow") for a in res.actions)):
+        if not self._noteworthy(res):
             return
         for name, role in self._page_roles():
             if role.pg is None:
@@ -440,6 +452,7 @@ class Engine:
         self.results[step.id] = res
         begin = self.clock()
         self._step_sample = self._sample()
+        step_procs = self._unit_processes()
         self._trace_begin(step)
         try:
             args = resolve_args(step.args, {k: r.result for k, r in self.results.items()
@@ -467,6 +480,8 @@ class Engine:
         self._take_findings(step)
         self._flag_slow(step, res)
         self._long_tasks(res, self.clock() - begin)
+        if self._noteworthy(res):
+            res.cpu = hoststate.cpu_delta(step_procs, self._unit_processes())
         res.host = hoststate.delta(self._step_sample, self._sample())
         self._trace_end(step, res)
         self.ctx.learn(force=True)      # a link this step created or renewed

@@ -116,6 +116,17 @@ def processes(proc=PROC, cgroup_root=CGROUP, ticks=None):
     return sorted(out, key=lambda p: -p["cpu_s"])
 
 
+def cpu_delta(before, after, top=10):
+    """Each process's CPU seconds between two `processes()` readings, most first. A
+    process that started meanwhile counts from zero; None without both readings."""
+    if before is None or after is None:
+        return None
+    was = {p["pid"]: p["cpu_s"] for p in before}
+    out = [{"pid": p["pid"], "name": p["name"], "cpu_s": round(p["cpu_s"] - was.get(p["pid"], 0.0), 2)}
+           for p in after]
+    return sorted(out, key=lambda p: -p["cpu_s"])[:top]
+
+
 def sample(proc=PROC, cgroup_root=CGROUP, clock=time.monotonic):
     """{t, loadavg, pressure, unit}; a value the machine does not offer is None."""
     load = _read(os.path.join(proc, "loadavg"))
