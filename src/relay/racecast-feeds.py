@@ -5493,15 +5493,15 @@ def apply_split_audio(relay, obs_ws):
     return payload, status
 
 
-_ITEM_SWITCH_LOCK = threading.Lock()
+_ITEM_SWITCH_LOCK = threading.Lock()   # one read-then-switch of a scene item or a mute at a time
 
 
 def switch_scene_item(obs_ws, scene, source, on=None, expect=None):
     """Show or hide one scene item. `on` None flips the state OBS reports and switches
     nothing when OBS cannot report it; with `expect`, the state the caller shows, it
     flips only while OBS still reports that state. Returns (ok, enabled, note, changed),
-    with enabled None for the refusal. The lock keeps two toggles from reading the same
-    state."""
+    with enabled None for the refusal. Runs under _ITEM_SWITCH_LOCK, so no other switch of
+    an item or a mute in this relay runs between the read and the switch."""
     with _ITEM_SWITCH_LOCK:
         if on is None:
             state, note = obs_ws.read_obs_state([(scene, source)], [])
@@ -5534,14 +5534,15 @@ def toggle_input_mute(obs_ws, name, expect=None):
 
 
 def note_cover(relay, enabled):
-    """Remember the Standby Cover state the relay last switched or read in OBS."""
+    """Remember the Standby Cover state the relay last switched or read in OBS, or the
+    red flag direction it decided while OBS could not report the cover."""
     if isinstance(enabled, bool):
         relay.cover_last = enabled
 
 
 def red_flag_on_record(relay, hud):
     """Whether a red flag is on by the relay's own record, for when OBS cannot report
-    the Standby Cover: the last cover state it saw, else the HUD banner or a cover the
+    the Standby Cover: the last cover state it saw or decided, else the HUD banner or a cover the
     Race Control desk raised."""
     last = getattr(relay, "cover_last", None)
     if last is not None:
@@ -15486,6 +15487,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 relay, getattr(setup_ctl, "hud", None) or hud_source)
                             payload["changed"] = shown in (None, raised)
                             payload["red_flag"] = not raised if payload["changed"] else raised
+                            note_cover(relay, payload["red_flag"])   # so the next press goes the other way
                     return self._send(payload, 503)
                 if p == ["obs", "audio"]:
                     if _obs_ws is None:

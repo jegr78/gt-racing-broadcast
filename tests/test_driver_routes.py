@@ -1756,7 +1756,9 @@ def t_red_flag_toggle_without_a_readable_cover_takes_the_relays_own_state():
             st, d = toggle("Standby Cover", **{"from": False})
             assert st == 503 and d["ok"] is False and d["error"] and (d["red_flag"], d["changed"]) == (True, True), \
                 f"no red flag on record: the press raises one, and says the cover was not switched: {d}"
-            assert srv.relay.cover_last is None, "a decision without OBS is no cover state the relay saw"
+            st, d = toggle("Standby Cover")
+            assert st == 503 and (d["red_flag"], d["changed"]) == (False, True), \
+                f"the next press without OBS lowers the red flag the last one raised: {d}"
             forget(banner=g.m.RED_FLAG_BANNER)
             d = toggle("Standby Cover", **{"from": False})[1]
             assert (d["red_flag"], d["changed"]) == (True, False), \
