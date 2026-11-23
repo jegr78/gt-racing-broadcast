@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the /console authorization policy (#216 phase 2).
 Run: python3 tests/test_console.py"""
-import importlib.util, json, os
+import importlib.util, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import test_driver_tower as tower  # noqa: E402
 
 
 def _load(name, rel):
@@ -417,9 +419,6 @@ def t_recording_routes_are_desk_routes():
 
 def _js_fn(path, name, call, prelude=""):
     """Runs top-level functions of a page or script under node; None without node."""
-    import sys
-    sys.path.insert(0, HERE)
-    import test_driver_tower as tower
     src = "\n".join(tower._function(path, n) for n in name.split(","))
     return tower._run(prelude + src + "\n;console.log(JSON.stringify(" + call + "));")
 
@@ -709,7 +708,6 @@ def t_the_desk_lap_line_shows_the_race_lap_and_the_lobby_lap():
 
 
 def t_the_desk_tables_keep_their_own_text_colour_in_the_panel():
-    import re
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         block = fh.read().split("var CSS = [", 1)[1].split("].join", 1)[0]
     css = "".join(re.findall(r'"([^"]*)"', block))
@@ -722,7 +720,6 @@ def t_the_desk_tables_keep_their_own_text_colour_in_the_panel():
 
 
 def t_the_senders_table_shrinks_its_move_choice_to_the_column():
-    import re
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         src = fh.read()
     css = "".join(re.findall(r'"([^"]*)"', src.split("var CSS = [", 1)[1].split("].join", 1)[0]))
@@ -798,7 +795,6 @@ def _src(*rel):
 
 
 def _desk_slots():
-    import re
     return json.loads(re.search(r"var SLOTS = (\[[^\]]*\]);", _src("console", "driver-desk.js")).group(1))
 
 
@@ -853,7 +849,6 @@ def t_the_desk_state_names_what_needs_attention():
 
 
 def t_the_race_control_areas_match_the_nav_and_the_tab_bar():
-    import re
     html = _src("racecontrol", "race-control.html")
     areas = json.loads(re.search(r"const DESK_AREAS = (\[[^\]]*\]);", html).group(1).replace("'", '"'))
     assert areas == ["race", "drivers", "corrections", "qualifying", "dashboard", "graphics", "note", "setup",

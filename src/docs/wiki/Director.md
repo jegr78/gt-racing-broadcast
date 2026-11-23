@@ -51,9 +51,10 @@ The page is a fixed frame of four columns, so nothing you need on air scrolls aw
 - **Live column**: the program preview with the feed tiles, what is on air, the handover
   keys **ARM** and **NEXT** side by side, the PGM scene keys, the overlays and the
   transition. Graphic requests from the crew appear here too, under what is on air (see
-  below). At 1440x900 every key row fits without scrolling: when the column runs short,
+  below). At 1440x900 the key rows fit without scrolling: when the column runs short,
   for example while the header pills take a second row, the program tile shrinks, down
-  to half its width.
+  to half its width. A pending graphic request with a two-row header can still push the
+  transition keys below; the column then scrolls.
 - **Workspace** (middle): the area you picked. Above it a "next step" line names the
   next handover step from the relay's state: a missing or submitted link for the next
   stint first, then ARM, then the cut. Only the next stint's missing link turns the
