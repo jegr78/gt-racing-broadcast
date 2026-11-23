@@ -32,7 +32,7 @@ def _write(base, rel, text):
 
 
 def _psi(some_total, full_total=0):
-    return (f"some avg10=1.50 avg60=0.75 avg300=0.10 total={some_total}\n"
+    return (f"some avg10=1.50 avg60=0.75 avg300=0.10 total={some_total}\n\n"     # a blank line is skipped
             f"full avg10=0.00 avg60=0.00 avg300=0.00 total={full_total}\n")
 
 
@@ -156,6 +156,13 @@ def t_the_load_runs_its_workers_supervised_and_stops_them():
     assert [c.name for c in made] == ["load-cpu-1", "load-cpu-2", "load-cpu-3"], made
     assert all(c.seconds == 600 and c.argv[-1] == flake.BUSY for c in made), "each worker spins until stopped"
     assert load.stop() == [] and all(c.stopped for c in made), "stop ends every worker"
+    made.clear()
+    load = flake.Load(3, child=Child)
+    load.start(work, seconds=600)
+    made[0].stop = lambda: (_ for _ in ()).throw(OSError("pipe gone"))
+    problems = load.stop()
+    assert made[1].stopped and made[2].stopped, "one worker that fails to stop never keeps the others running"
+    assert problems == ["load-cpu-1: OSError: pipe gone"], problems
 
 
 def _report(ok, steps, findings=()):

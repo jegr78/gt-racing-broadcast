@@ -11,7 +11,8 @@ PROC = "/proc"
 CGROUP = "/sys/fs/cgroup"
 RESOURCES = ("cpu", "memory", "io")
 DELTA_KEYS = ("seconds", "cpu_s", "throttled_s", "nr_throttled", "unit_cpu_stall_s",
-              "unit_memory_stall_s", "unit_io_stall_s", "host_cpu_stall_s", "cpu_stall_share",
+              "unit_memory_stall_s", "unit_io_stall_s", "host_cpu_stall_s", "host_memory_stall_s",
+              "host_io_stall_s", "cpu_stall_share",
               "oom", "oom_kill", "high", "max", "memory_peak_mb", "swap_in_pages", "swap_out_pages")
 
 
@@ -51,6 +52,8 @@ def _psi(path):
         return None
     out = {}
     for line in text.splitlines():
+        if not line.split():
+            continue
         kind, *fields = line.split()
         values = {}
         for f in fields:
@@ -175,6 +178,8 @@ def delta(before, after):
         "unit_memory_stall_s": _diff(before, after, "unit", "pressure", "memory", "some", "total", scale=1e6),
         "unit_io_stall_s": _diff(before, after, "unit", "pressure", "io", "some", "total", scale=1e6),
         "host_cpu_stall_s": _diff(before, after, "pressure", "cpu", "some", "total", scale=1e6),
+        "host_memory_stall_s": _diff(before, after, "pressure", "memory", "some", "total", scale=1e6),
+        "host_io_stall_s": _diff(before, after, "pressure", "io", "some", "total", scale=1e6),
         "oom": _diff(before, after, "unit", "memory_events", "oom"),
         "oom_kill": _diff(before, after, "unit", "memory_events", "oom_kill"),
         "high": _diff(before, after, "unit", "memory_events", "high"),

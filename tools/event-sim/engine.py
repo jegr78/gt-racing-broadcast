@@ -20,10 +20,13 @@ EVENT_LINKS = ("invite", "timing")
 LEARN_EVERY_S = 1.0
 scrub = redaction.scrub
 POLL_S = 0.25
-# A failure whose window the unit spent this share or more waiting on IO or memory is
-# classed "host starved": still a hard failure, the report says why.
+# A failure whose window the unit spent this share or more waiting on IO or memory gets
+# a class: still a hard failure, the report says why. "host starved" needs the host's own
+# stall over the same share; memory.max or memory.high events of the unit make it the
+# run's own memory instead.
 STARVED_SHARE = 0.2
 STARVED = "host starved"
+AT_CAP = "unit at its memory cap"
 
 
 @dataclass
@@ -35,17 +38,23 @@ class Finding:
     cause: str = ""          # STARVED when the host starved the unit in the failure's window
 
 
-def starved(h):
-    """The "host starved" explanation of a window's hoststate.delta, or ""."""
+def classify(h):
+    """(class, text) of a failure window's hoststate.delta: STARVED, AT_CAP or ("", "")."""
     seconds = (h or {}).get("seconds")
     if not seconds:
-        return ""
+        return "", ""
     io, mem = h.get("unit_io_stall_s") or 0.0, h.get("unit_memory_stall_s") or 0.0
     share = max(io, mem) / seconds
     if share < STARVED_SHARE:
-        return ""
-    return (f"{STARVED}: the unit waited {io:.1f}s on IO and {mem:.1f}s on memory in {seconds:.1f}s "
-            f"({share:.0%}); host swap-in {h.get('swap_in_pages')} pages, CPU throttled {h.get('throttled_s')}s")
+        return "", ""
+    waited = f"the unit waited {io:.1f}s on IO and {mem:.1f}s on memory in {seconds:.1f}s ({share:.0%})"
+    if (h.get("max") or 0) + (h.get("high") or 0) > 0:
+        return AT_CAP, f"{AT_CAP}: {waited}; memory.max {h.get('max')}, memory.high {h.get('high')} events"
+    host_io, host_mem = h.get("host_io_stall_s") or 0.0, h.get("host_memory_stall_s") or 0.0
+    if max(host_io, host_mem) / seconds < STARVED_SHARE:
+        return "", ""
+    return STARVED, (f"{STARVED}: {waited}; the host waited {host_io:.1f}s on IO and {host_mem:.1f}s on memory, "
+                     f"swap-in {h.get('swap_in_pages')} pages, CPU throttled {h.get('throttled_s')}s")
 
 
 @dataclass
@@ -342,10 +351,10 @@ class Engine:
             rec["s"] = round(self.clock() - begin, 3)
             self._shot_load(rec, host, procs)
             why = f"shot {shot.name}: {exc}"
-            cause = starved(rec["host"])
+            cause, text = classify(rec["host"])
             # A run that must have its browser (--no-skips) must have its pictures too.
-            self.findings.append(Finding(HARD if self.no_skips else SOFT, why + (f" [{cause}]" if cause else ""),
-                                         step.id, role_name, STARVED if cause else ""))
+            self.findings.append(Finding(HARD if self.no_skips else SOFT, why + (f" [{text}]" if cause else ""),
+                                         step.id, role_name, cause))
             if not isinstance(exc, roles.ShotUnavailable):
                 self._snapshot(step, res, role_name, why, f"fail-{step.id}-shot.png")
         if rec["s"] is None:
@@ -448,7 +457,7 @@ class Engine:
             if a["budget"] is not None and a["s"] is not None and a["s"] > a["budget"] and not a["covered"]:
                 a["slow"] = True
                 self.findings.append(Finding(SOFT, f"slow: {a['role']} {a['kind']} {a['what']!r} took "
-                                                   f"{a['s']:.1f}s (budget {a['budget']:g}s)", step.id, step.role))
+                                                   f"{a['s']:.1f}s (budget {a['budget']:g}s)", step.id, a["role"]))
 
     def _checks(self, step, res):
         slow = self.scenario.tolerances.get("state_s", 2.0)
@@ -474,6 +483,7 @@ class Engine:
         self._step_sample = self._sample()
         step_procs = self._unit_processes()
         self._trace_begin(step)
+        first = len(self.findings)
         try:
             args = resolve_args(step.args, {k: r.result for k, r in self.results.items()
                                             if r.result is not None})
@@ -492,6 +502,12 @@ class Engine:
             self._checks(step, res)
             if any(not c.ok and not c.soft for c in res.checks):
                 res.status = "failed"
+        if res.status == "failed":
+            # The window up to the failure: what the shot and the snapshot take after it is not its cause.
+            cause, text = classify(hoststate.delta(self._step_sample, self._sample()))
+            for f in self.findings[first:]:
+                if cause and f.severity == HARD and not f.cause:
+                    f.message, f.cause = f"{f.message} [{text}]", cause
         self._take_actions(res)
         if res.status != "skipped":
             self._shoot(step, res)
@@ -503,14 +519,9 @@ class Engine:
         if self._noteworthy(res):
             res.cpu = hoststate.cpu_delta(step_procs, self._unit_processes())
         res.host = hoststate.delta(self._step_sample, self._sample())
-        cause = starved(res.host) if res.status == "failed" else ""
-        if cause:
-            for f in self.findings:
-                if f.step == step.id and f.severity == HARD and not f.cause:
-                    f.message, f.cause = f"{f.message} [{cause}]", STARVED
         if res.host.get("oom_kill"):
             # A killed renderer or service surfaces later as a timeout; name the kill itself.
-            self.findings.append(Finding(HARD, f"the unit's memory cgroup OOM-killed {res.host['oom_kill']} "
+            self.findings.append(Finding(HARD, f"this run's memory cgroup OOM-killed {res.host['oom_kill']} "
                                                f"process(es) during this step (memory.max reached "
                                                f"{res.host.get('max')} times, peak {res.host.get('memory_peak_mb')} MB)",
                                          step.id, step.role))

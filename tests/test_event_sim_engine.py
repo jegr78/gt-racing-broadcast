@@ -284,6 +284,36 @@ def t_repeat_runs_each_run_in_its_own_unit_one_after_the_other():
             pass  # argparse refuses it
 
 
+def t_repeat_never_reads_an_old_report_and_needs_exit_0_for_a_pass():
+    scn = scenario.load(scenario.find("smoke", os.path.join(SIM, "scenarios")), REG)
+    out = tempfile.mkdtemp(prefix="event-sim-repeat-")
+    atexit.register(shutil.rmtree, out, True)
+    old = os.path.join(out, "run-02")
+    os.makedirs(old)
+    report.write(old, {"scenario": "smoke", "description": "", "ok": True, "duration": 1.0, "pages": {},
+                       "steps": [], "findings": []})
+    entered = []
+
+    def enter(script, argv, seconds=None, long=False):
+        entered.append(argv)
+        return 3
+    args = event_sim.build_parser().parse_args(["--scenario", "smoke", "--out", out, "--repeat", "2"])
+    assert event_sim.repeat(scn, out, args, enter=enter, wait=lambda: True) == 2 and entered == [], \
+        "an out dir that already holds run-02 is refused before any run: its report is not this set's"
+    shutil.rmtree(old)
+
+    def crashed_after_its_report(script, argv, seconds=None, long=False):
+        run_out = argv[argv.index("--out") + 1]
+        os.makedirs(run_out)
+        report.write(run_out, {"scenario": "smoke", "description": "", "ok": True, "duration": 1.0, "pages": {},
+                               "steps": [], "findings": []})
+        return 1
+    args = event_sim.build_parser().parse_args(["--scenario", "smoke", "--out", out, "--repeat", "1"])
+    assert event_sim.repeat(scn, out, args, enter=crashed_after_its_report, wait=lambda: True) == 1
+    with open(os.path.join(out, "summary.json"), encoding="utf-8") as fh:
+        assert json.load(fh)["counts"] == {"pass": 0, "fail": 1, "not-run": 0}, "an ok report with exit 1 is a fail"
+
+
 def t_a_run_owns_its_work_dir_and_names_it_in_its_out_dir():
     out = tempfile.mkdtemp(prefix="event-sim-out-")
     atexit.register(shutil.rmtree, out, True)
@@ -298,8 +328,18 @@ def t_a_run_owns_its_work_dir_and_names_it_in_its_out_dir():
     assert os.environ.get("TMPDIR") == before, "TMPDIR is restored"
     with event_sim.owned_work(out, keep=True) as work:
         pass
+    atexit.register(shutil.rmtree, work, True)
     assert os.path.isdir(work), "--keep-work keeps it"
+    try:
+        with event_sim.owned_work(out):
+            raise AssertionError("an out dir that names a work dir already is refused")
+    except RuntimeError as exc:
+        assert work in str(exc), f"the refusal names the old work dir: {exc}"
     shutil.rmtree(work)
+    os.remove(os.path.join(out, event_sim.WORK_NOTE))
+    with event_sim.owned_work(out) as work:
+        os.remove(os.path.join(out, event_sim.WORK_NOTE))
+    assert not os.path.exists(work), "a note someone removed meanwhile does not break the cleanup"
 
 
 # -- expect ----------------------------------------------------------------------
@@ -1395,22 +1435,52 @@ def t_an_oom_kill_in_the_unit_is_its_own_hard_finding():
                            host=lambda: next(samples))
     hard = [(f["step"], f["message"]) for f in data["findings"] if f["severity"] == "hard"]
     assert len(hard) == 1 and hard[0][0] == "b" and "OOM-killed 1 process" in hard[0][1], hard
+    assert "this run's memory cgroup" in hard[0][1] and "unit" not in hard[0][1], \
+        "a hosted runner has no E2E unit: the text names the run's cgroup"
     assert "2048 MB" in hard[0][1], "the finding names the unit's memory peak"
     assert not data["ok"], "a killed process is a failure of the run, whatever step it hits next"
 
 
-def _stalling(clock, io_share):
-    """A host sampler whose unit waits `io_share` of the time on IO."""
-    def sample():
-        t = clock()
-        return {"t": t, "loadavg": [1, 1, 1], "swap": {"in": int(t), "out": 0},
-                "unit": {"cpu": {"usage_usec": 0, "throttled_usec": 0},
-                         "pressure": {"io": {"some": {"total": int(t * io_share * 1e6)}},
-                                      "memory": {"some": {"total": 0}}, "cpu": {"some": {"total": 0}}}}}
-    return sample
+class _Host:
+    """A host sampler on the fake clock. `unit_io` and `host_io` are the stalled shares
+    while time passes; `stall(seconds)` adds stall at once; with `capped` every reading
+    counts one more memory.max event of the unit."""
+
+    def __init__(self, clock, unit_io=0.0, host_io=None, capped=False):
+        self.clock, self.unit_rate, self.host_rate = clock, unit_io, unit_io if host_io is None else host_io
+        self.unit, self.host, self.cap, self.last, self.capped = 0.0, 0.0, 0, clock(), capped
+
+    def _advance(self):
+        t = self.clock()
+        self.unit += (t - self.last) * self.unit_rate
+        self.host += (t - self.last) * self.host_rate
+        self.last = t
+
+    def stall(self, seconds):
+        self._advance()
+        self.unit += seconds
+        self.host += seconds
+
+    def __call__(self):
+        self._advance()
+        self.cap += self.capped
+        some = lambda v: {"some": {"total": int(v * 1e6)}}      # noqa: E731
+        return {"t": self.clock(), "loadavg": [1, 1, 1], "swap": {"in": 0, "out": 0},
+                "pressure": {"io": some(self.host), "memory": some(0), "cpu": some(0)},
+                "unit": {"cpu": {"usage_usec": 0, "throttled_usec": 0}, "memory_events": {"max": self.cap, "high": 0},
+                         "pressure": {"io": some(self.unit), "memory": some(0), "cpu": some(0)}}}
 
 
-def _starved_run(steps, io_share, page=None):
+class _Noisy(Recorder):
+    """A role whose page logs a script error while it acts."""
+    kind = "noisy"
+
+    def act_go(self, args):
+        self.ctx.finding("hard", "console error: TypeError: x is undefined")
+        return {}
+
+
+def _starved_run(steps, host_of, page=None):
     clock = Clock()
     br = _FakeBrowser()
     for k, v in (page or {}).items():
@@ -1418,50 +1488,94 @@ def _starved_run(steps, io_share, page=None):
     ctx = engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br, clock=clock)
     tmp = tempfile.mkdtemp(prefix="event-sim-test-")
     atexit.register(shutil.rmtree, tmp, True)
-    reg = dict(_reg(), paged=_Paged)
+    reg = dict(_reg(), paged=_Paged, noisy=_Noisy)
     _Paged.clock = clock
-    return engine.Engine(scenario.from_dict({"step": steps}, reg), ctx, {}, registry=reg, clock=clock,
-                         sleep=clock.sleep, shots_dir=os.path.join(tmp, "shots"), host=_stalling(clock, io_share),
+    host = host_of(clock)
+    data = engine.Engine(scenario.from_dict({"step": steps}, reg), ctx, {}, registry=reg, clock=clock,
+                         sleep=clock.sleep, shots_dir=os.path.join(tmp, "shots"), host=host,
                          processes=lambda: None, no_skips=True).run()
+    return data, host
+
+
+def _causes(data, step):
+    return [(f["message"].split(":")[0], f["cause"]) for f in data["findings"]
+            if f["severity"] == "hard" and f["step"] == step]
 
 
 def t_a_failure_while_the_host_starved_the_unit_says_so_and_stays_hard():
-    steps = [{"id": "check", "role": "rec", "do": "go", "expect": ["relay.up"], "timeout": "4s"}]
-    for share, starved in ((0.5, True), (engine.STARVED_SHARE / 2, False)):
-        data = _starved_run(steps, share)
-        hard = [f for f in data["findings"] if f["severity"] == "hard" and f["step"] == "check"]
-        assert hard and all(f["cause"] == ("host starved" if starved else "") for f in hard), (share, hard)
-        if starved:
-            assert "host starved: the unit waited" in hard[0]["message"] and "on IO" in hard[0]["message"], hard
-        assert not data["ok"], "a starved failure is still a failure"
-    shot = [{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
-            {"id": "to_box", "role": "paged", "do": "slow", "args": {"click": 0.1}, "at": "after:open",
-             "shot": {"name": "restart-lobby", "role": "page:rc"}}]
+    steps = [{"id": "early", "role": "rec", "do": "fail"},
+             {"id": "check", "role": "noisy", "do": "go", "expect": ["relay.up"], "timeout": "4s"}]
+    data, _ = _starved_run(steps, lambda c: _Host(c, unit_io=0.5))
+    assert _causes(data, "early") == [("button missing", "")], \
+        f"an earlier step's failure keeps its own class: {_causes(data, 'early')}"
+    assert _causes(data, "check") == [("expect 'relay.up' still false after 4s", engine.STARVED),
+                                      ("console error", "")], \
+        f"the failed check gets the class, the page's script error does not: {_causes(data, 'check')}"
+    msg = next(f["message"] for f in data["findings"] if f["cause"])
+    assert "host starved: the unit waited" in msg and "host" in msg.split("starved:")[1], msg
+    assert not data["ok"], "a starved failure is still a failure"
+    for host_of, why in ((lambda c: _Host(c, unit_io=engine.STARVED_SHARE / 2), "too little stall"),
+                         (lambda c: _Host(c, unit_io=0.5, host_io=0.0), "the host itself was calm")):
+        data, _ = _starved_run(steps, host_of)
+        assert all(cause == "" for _, cause in _causes(data, "check")), (why, _causes(data, "check"))
+
+
+def t_the_class_reads_the_window_up_to_the_failure_not_what_followed():
+    hosts = []
+
+    def calm_until_the_shot(clock):
+        hosts.append(_Host(clock))
+        return hosts[-1]
 
     class SlowFail:
         def __contains__(self, name):
-            _Paged.clock.t += 8.0           # the screenshot's timeout passes on the fake clock
+            hosts[-1].stall(7.0)             # the host starves the unit only during the shot
+            _Paged.clock.t += 8.0
             return name == "restart-lobby.png"
-    data = _starved_run(shot, 0.5, page={"fail_shots": SlowFail()})
-    hard = [f for f in data["findings"] if "shot restart-lobby" in f["message"]]
-    assert hard and hard[0]["severity"] == "hard" and hard[0]["cause"] == "host starved", hard
-    assert "swap-in" in hard[0]["message"], hard[0]
+    steps = [{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
+             {"id": "check", "role": "rec", "do": "go", "at": "after:open", "expect": ["relay.up"], "timeout": "4s",
+              "shot": {"name": "restart-lobby", "role": "page:rc"}}]
+    data, _ = _starved_run(steps, calm_until_the_shot, page={"fail_shots": SlowFail()})
+    causes = dict(_causes(data, "check"))
+    assert causes["expect 'relay.up' still false after 4s"] == "", \
+        f"the check failed in a calm window; the stall after it is not its cause: {causes}"
+    assert causes["shot restart-lobby"] == engine.STARVED, causes
+
+
+def t_a_unit_at_its_own_memory_cap_is_not_a_starved_host():
+    data, _ = _starved_run([{"id": "check", "role": "rec", "do": "go", "expect": ["relay.up"], "timeout": "4s"}],
+                           lambda c: _Host(c, unit_io=0.5, capped=True))
+    assert _causes(data, "check") == [("expect 'relay.up' still false after 4s", engine.AT_CAP)], \
+        f"memory.max events in the window: the run's own memory, not the host: {_causes(data, 'check')}"
+
+
+def t_a_slow_shot_is_named_under_the_role_that_took_it():
+    class SlowShots:
+        def __contains__(self, name):
+            _Paged.clock.t += 3.0
+            return False
+    data, _, _ = _diag_run([{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
+                            {"id": "box", "role": "rec", "do": "go", "at": "after:open",
+                             "shot": {"name": "lobby", "role": "page:rc"}}], page={"fail_shots": SlowShots()})
+    slow = [f for f in data["findings"] if f["message"].startswith("slow:")]
+    assert [(f["step"], f["role"]) for f in slow] == [("box", "page:rc")], slow
 
 
 def t_our_blocked_script_in_a_sandboxed_frame_is_no_page_error():
     class Msg:
         type, location = "error", {"url": "about:blank"}
         text = builtin.SANDBOX_BLOCKED + " and the 'allow-scripts' permission is not set."
-    for trace, want in (("fail", []), ("off", [])):
+    for trace, want in (("fail", ["soft"]), ("off", ["soft"])):
         br = _FakeBrowser()
         role = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br, trace=trace),
                                 "page:producer")
         role.open()
         role.do("open", {"path": "/"})
         br.page.handlers["console"](Msg())
+        br.page.handlers["console"](Msg())
         closed = role.close()
-        assert [sev for sev, _ in closed] == want, \
-            f"trace {trace}: the observer's or a snapshot's script in a sandboxed frame is ours, not the page's"
+        assert [sev for sev, _ in closed] == want and "2 " in closed[0][1], \
+            f"trace {trace}: our script in a sandboxed frame is no page error, but it is counted: {closed}"
 
 
 def t_a_trace_chunk_per_step_is_kept_only_for_a_failed_step():

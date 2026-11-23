@@ -78,17 +78,24 @@ def owned_work(out, keep=False):
     """The run's own work dir: named in OUT/work-dir.txt while it exists, so a run that
     was killed is cleaned up by that path and never by a pattern (another run may be
     using its own). TMPDIR points into it, so the browser's temporary files go with it.
-    Removed at the end unless `keep`."""
+    Removed at the end unless `keep`. An OUT that already names a work dir is refused:
+    that one belongs to an earlier run, which the caller removes by its path."""
     os.makedirs(out, exist_ok=True)
-    work = tempfile.mkdtemp(prefix="racecast-sim-")
     note = os.path.join(out, WORK_NOTE)
-    with open(note, "w", encoding="utf-8") as fh:
-        fh.write(work + "\n")
-    tmp = os.path.join(work, "tmp")
-    os.makedirs(tmp)
-    before = os.environ.get("TMPDIR")
-    os.environ["TMPDIR"] = tmp
     try:
+        with open(note, encoding="utf-8") as fh:
+            raise RuntimeError(f"{note} names {fh.read().strip()}, the work dir of an earlier run in this "
+                               "out dir: remove that path and the note, or use a fresh --out")
+    except FileNotFoundError:
+        pass  # no earlier run left its work dir here
+    before = os.environ.get("TMPDIR")
+    work = tempfile.mkdtemp(prefix="racecast-sim-")
+    try:
+        with open(note, "w", encoding="utf-8") as fh:
+            fh.write(work + "\n")
+        tmp = os.path.join(work, "tmp")
+        os.makedirs(tmp)
+        os.environ["TMPDIR"] = tmp
         yield work
     finally:
         if before is None:
@@ -99,7 +106,8 @@ def owned_work(out, keep=False):
             print(f"event-sim: work dir kept at {work}")
         else:
             shutil.rmtree(work, ignore_errors=True)
-            os.remove(note)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(note)
 
 
 def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="off", load=None):
@@ -138,7 +146,11 @@ def _run(scn, out, work, headed=False, no_skips=False, trace="off", load=None):
                                         "message": ctx.scrub("engine error: " + traceback.format_exc(limit=3))})
     finally:
         br.close()
-        problems = busy.stop() if busy else []
+        problems = []
+        try:
+            problems += busy.stop() if busy else []
+        except Exception as exc:  # noqa: BLE001  the stack still stops and the report is still written
+            problems.append(f"load workers: {type(exc).__name__}: {exc}")
         problems += st.stop(logs_to=os.path.join(out, "logs"))
         if data is not None:
             data["setup"] = {"load": load, "trace": trace}
@@ -176,7 +188,12 @@ def _sha():
 def repeat(scn, out, args, enter=e2e_safety.enter, wait=flake.wait_for_unit):
     """Run the scenario `args.repeat` times into out/run-NN, each in its own contained
     run after the one before, then write the summary. A run that wrote no report
-    counts as not run. 0 when every run passed."""
+    counts as not run. 0 when every run passed; 2 when OUT already holds a run-NN, whose
+    report would pass for this set's."""
+    taken = [d for d in (f"run-{i:02d}" for i in range(1, args.repeat + 1)) if os.path.exists(os.path.join(out, d))]
+    if taken:
+        print(f"event-sim: {out} already holds {', '.join(taken)}; use a fresh --out", file=sys.stderr)
+        return 2
     runs = []
     for i in range(1, args.repeat + 1):
         run_out = os.path.join(out, f"run-{i:02d}")
@@ -201,7 +218,7 @@ def repeat(scn, out, args, enter=e2e_safety.enter, wait=flake.wait_for_unit):
             data = None
         runs.append({"run": i, "code": code, "report": data})
         print(f"event-sim: run {i}/{args.repeat}: "
-              f"{'no report' if data is None else ('PASS' if data.get('ok') else 'FAIL')} (exit {code})")
+              f"{'no report' if data is None else ('PASS' if data.get('ok') and code == 0 else 'FAIL')} (exit {code})")
     summary = flake.summarize(runs)
     meta = {"scenario": scn.name, "runs": args.repeat, "load": args.load, "trace": args.trace,
             "no_skips": args.no_skips, "sha": _sha()}
@@ -238,8 +255,12 @@ def main(argv=None):
         return 2
     if contained is not None:
         return contained
-    return run(scn, out, keep_work=args.keep_work, headed=args.headed, no_skips=args.no_skips,
-               trace=args.trace, load=args.load)
+    try:
+        return run(scn, out, keep_work=args.keep_work, headed=args.headed, no_skips=args.no_skips,
+                   trace=args.trace, load=args.load)
+    except RuntimeError as exc:          # the out dir names an earlier run's work dir
+        print(f"event-sim: not started: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

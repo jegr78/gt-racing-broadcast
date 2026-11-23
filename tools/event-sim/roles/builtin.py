@@ -218,6 +218,7 @@ class PageRole(Role):
         self.recent = collections.deque(maxlen=RECENT)
         self.network = collections.deque(maxlen=RECENT)
         self.tracing = self.chunk = False
+        self.sandboxed = 0       # SANDBOX_BLOCKED lines: our scripts, not the page's
 
     # -- timing ---------------------------------------------------------------------
     @contextlib.contextmanager
@@ -324,7 +325,9 @@ class PageRole(Role):
         where = (msg.location or {}).get("url") or ""
         text = redact(f"{msg.text} ({where})" if where else msg.text)
         self.recent.append({"t": self.clock(), "type": msg.type, "text": text})
-        if msg.type == "error" and not msg.text.startswith(SANDBOX_BLOCKED):
+        if msg.type == "error" and msg.text.startswith(SANDBOX_BLOCKED):
+            self.sandboxed += 1
+        elif msg.type == "error":
             self.errors.append(text)
 
     def _pageerror(self, error):
@@ -433,6 +436,9 @@ class PageRole(Role):
                 f"console error: {e}" + (f" ({n}x)" if n > 1 else "")) for e, n in counts.items()]
         if gone:
             out.append(("soft", f"{gone} requests of the page found its service stopped"))
+        if self.sandboxed:
+            out.append(("soft", f"{self.sandboxed} lines \"{SANDBOX_BLOCKED}\": the run's own scripts "
+                                "(long task observer, trace snapshots) refused in a sandboxed frame"))
         if self.tracing:
             try:
                 self.context.tracing.stop()

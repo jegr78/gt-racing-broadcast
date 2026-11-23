@@ -44,8 +44,13 @@ class Load:
                                              os.path.join(work, name + ".log"), seconds))
 
     def stop(self):
-        """Stop every worker; returns the problems."""
-        problems = [c.stop() for c in self.children]
+        """Stop every worker, each on its own; returns the problems."""
+        problems = []
+        for child in self.children:
+            try:
+                problems.append(child.stop())
+            except Exception as exc:  # noqa: BLE001  the next worker is stopped all the same
+                problems.append(f"{child.name}: {type(exc).__name__}: {exc}")
         self.children = []
         return [p for p in problems if p]
 
@@ -80,15 +85,15 @@ def _dist(values):
 
 
 def summarize(runs):
-    """`runs`: [{run, code, report}] (report None when the run wrote none). Returns
-    {runs, counts, steps, actions}."""
+    """`runs`: [{run, code, report}] (report None when the run wrote none). A run passes
+    only with exit code 0 and an ok report. Returns {runs, counts, steps, actions}."""
     out, counts, durations, failed, actions = [], {"pass": 0, "fail": 0, "not-run": 0}, {}, {}, {}
     for r in runs:
         data = r.get("report")
         if data is None:
             status, bad, hard, duration = "not-run", [], [], None
         else:
-            status = "pass" if data.get("ok") else "fail"
+            status = "pass" if data.get("ok") and r.get("code") == 0 else "fail"   # an ok report of a run that crashed after it fails
             hard_findings = [f for f in data.get("findings", []) if f.get("severity") == "hard"]
             bad = sorted({s["id"] for s in data["steps"] if s["status"] == "failed"}
                          | {f["step"] for f in hard_findings if f.get("step")})
