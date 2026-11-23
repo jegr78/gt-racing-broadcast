@@ -1,26 +1,36 @@
 """Race distance, order, gaps, driver changes and finish from driver telemetry (#1112).
 
 Pure: the relay feeds every decoded sample of every driver connection with its
-receive time on one clock, and reads `standings`. GT7's lap counter reads 0 on the
-grid and steps at each crossing of the finish line. The finish line's station on the
-picked layout's line is learned per car from its own crossings; a car that has not
-crossed yet uses the agreeing medoid of the counting cars of at least LINE_QUORUM
-entries, so one sender cannot move it for everyone; once agreed it stays.
+receive time on one clock, and reads `standings`. In a race GT7's lap counter reads 1
+on the grid (0 where the grid lies behind the line) and steps once per lap, on track
+at the finish line, but on a layout whose line runs through the pit lane also in the
+pit lane or while the car stands in its box. The finish line's station on the picked
+layout's line is learned per car from its own crossing: a counter step onto lap 1 or
+later on track, on the line and moving. A car that has not crossed yet uses the
+agreeing medoid of the counting cars of at least LINE_QUORUM entries, so one sender
+cannot move it for everyone; once agreed it stays. Without either a car counts from
+the reference line's start, where reference laps begin; its first own crossing moves
+a distance counted from the line, and its history, once by the difference.
 A car's distance is `anchor + (lap - lap0) * L + frac - frac0`, with `frac` its
 position past the line:
-the counter gives whole laps, the projection the fraction. Only near the line, where
-the counter may flip a moment before or after the projection wraps, the candidate
-nearest the predicted distance decides.
+the counter gives whole laps, the projection the fraction. Between samples close
+enough that the car cannot have driven half a lap, the candidate nearest the predicted
+distance decides the lap, so a counter step away from the line moves nothing; GT7's
+counter may differ from that by one lap, never more. After a longer gap the counter
+decides, and only near the line the prediction may move a sample a lap.
 
 - Start: with a formation lap a car's distance starts when its counter reaches 2,
-  without one when it reaches 1; the crossing times form the starting gaps. A sender
-  that connects later starts from its counter, at most on the leader's lap.
+  without one when it reaches 1, on the grid; the crossing times form the starting
+  gaps. A car starting on the grid, or at a counter step in the pit lane, within
+  START_BEHIND_M before the line starts behind it. A sender that connects later starts
+  from its counter, at most on the leader's lap.
 - A counter that drops (a new GT7 session, such as practice before the race) restarts
   that entry in a single lobby; in endurance it holds the entry until Race Control
   rejoins it (#1113).
 - Box: a car standing (below BOX_SPEED_MPS) more than BOX_LATERAL_M off the line for
-  BOX_HOLD_S. Not confirmed by a recording yet (#1110 measures pit stops).
-- Pit stops: every box stop the active counting car drives out of, plus one per stint
+  BOX_HOLD_S. A car that does not count yet shows `waiting`, never `box`.
+- Pit stops: every box stop the active counting car drives out of (two within
+  PIT_ROW_M of race distance are one pit lane visit), plus one per stint
   switch for a team's takeover in the next lobby (a change, a driver staying on, a
   rejoin, or an override after a switch), at most one per team and switch.
 - Driver change (multi-lobby only): inside the change window the active car
@@ -109,6 +119,7 @@ MAX_COARSE = 86400          # 24 hours of coarse history per entry
 MAX_SPEED_MPS = 120.0
 STEP_SLACK_M = 20.0         # projection noise on top of MAX_SPEED_MPS over the sample's time
 SNAP_M = 40.0               # around the line the counter may be a sample early or late
+START_BEHIND_M = 500.0      # a grid or a pit lane step before the line lies at most this far behind it
 AREA_MARGIN_M = 300.0
 CAR_FORGET_S = 120.0        # a quiet connection that no entry follows is dropped
 LAP_TIME_TOLERANCE = (1.0, 0.03)   # GT7's lap time vs the relay's: 1 s or 3 %, the larger
@@ -134,6 +145,8 @@ class _Car:
         self.left_box = False      # this sample left the box
         self.counting = False
         self.line = None           # the line station this car counts from
+        self.provisional = False   # it counts from the reference line's start until its own crossing
+        self.from_line = True      # its distance counts from the line, not from an anchor where it started
         self.anchor = self.f0 = 0.0
         self.lap0 = 0
         self.line_s = None         # the finish line's station, from this car's own crossing
@@ -196,6 +209,7 @@ class _Entry:
         self.adjust = 0.0          # corrections in metres
         self.pit_adjust = 0
         self.pit_stops = 0
+        self.pit_at = None         # its distance at the box exit its last pit stop counted
         self.switch_pit = False    # a pit stop already counted since the latest stint switch
         self.finished_at = None
         self.last_lap_ms = None
@@ -211,7 +225,7 @@ class _Entry:
     def restart(self):
         self.distance, self.ts, self.ds = None, [], []
         self.cts, self.cds = array("d"), array("d")
-        self.pit_stops, self.finished_at, self.since = 0, None, None
+        self.pit_stops, self.finished_at, self.since, self.pit_at = 0, None, None, None
         self.resumed = self.road = None
 
 
@@ -540,7 +554,7 @@ class Race:
 
     def override_change(self, entry, conn, now):
         """Make `conn` the team's active connection now, from the current distance;
-        False (nothing changed) when it is no car of the team or no line is known for it."""
+        False (nothing changed) when it is no car of the team or has sent no position."""
         ent, car = self._entries.get(entry), self._cars.get(conn)
         if ent is None or car is None or car.entry != entry or car.s is None \
                 or ent.distance is None:
@@ -672,39 +686,70 @@ class Race:
     def _next_distance(self, ent, car, t, lap, s):
         """The counting car's distance at this sample."""
         raw = self._raw(car, lap, s)
+        if not ent.ts:
+            return raw
+        dt = max(0.0, t - ent.ts[-1])
+        predicted = ent.distance + car.speed * dt
+        if MAX_SPEED_MPS * dt + STEP_SLACK_M < self.length / 2:
+            # Between close samples its own way along the line decides the lap: GT7's
+            # counter may step away from the line, in the pit lane or standing in the box.
+            return raw + round((predicted - raw) / self.length) * self.length
         frac = self._frac(car, s)
-        if SNAP_M < frac < self.length - SNAP_M or not ent.ts:
+        if SNAP_M < frac < self.length - SNAP_M:
             return raw
         # Just before the line the counter may have flipped already, just after not yet.
         other = raw - self.length if frac > self.length / 2 else raw + self.length
-        predicted = ent.distance + car.speed * max(0.0, t - ent.ts[-1])
         return min((raw, other), key=lambda v: abs(v - predicted))
 
-    def _start(self, ent, car, t, anchor, lap0, s, from_line=True):
-        """Count from here; False while no line station is known. `from_line`: the
-        distance counts from the race start line (a fresh start or a late sender);
-        otherwise from `anchor` at this spot (a driver change)."""
+    def _start(self, ent, car, t, anchor, lap0, s, from_line=True, stepped=False):
+        """Count from here and return True. `from_line`: the distance counts from the race
+        start line (a fresh start or a late sender); otherwise from `anchor` at this spot
+        (a driver change). Without a known line station it counts from the reference
+        line's start until its own crossing. `stepped`: the counter stepped onto this lap
+        with this sample."""
         line = self._line_of(car)
-        if line is None:
-            return False
-        car.line = line
+        car.provisional, car.from_line = line is None, from_line
+        car.line = 0.0 if line is None else line
         frac = self._frac(car, s)
         car.counting, car.anchor, car.lap0 = True, anchor, lap0
         car.f0 = 0.0 if from_line else frac
         car.lap_ok, car.line_t, car.pending = False, None, None   # the running lap is partial
         ent.stint_laps, ent.road, ent.base_adjust = 0, None, ent.adjust
         ent.distance, ent.since = self._raw(car, car.lap, s), t
-        if from_line and frac > self.length - SNAP_M:
-            ent.distance -= self.length    # the counter flipped: a few metres short is past it
+        # The counter flipped a few metres short of the line, or stepped in the pit lane
+        # before it; a car standing on its start lap waits on the grid behind the line.
+        behind = frac > self.length - SNAP_M or (
+            car.lap == lap0 and frac > max(self.length / 2, self.length - START_BEHIND_M)
+            and (stepped or car.speed < BOX_LEAVE_MPS))
+        if from_line and behind:
+            ent.distance -= self.length
         self._agree()
         return True
+
+    def _rebase(self, ent, car, s):
+        """The car's first crossing on track replaces the reference line's start it counted
+        from. Counted from the line, its distance and history move once by the difference;
+        counted from an anchor, only the lap's start moves."""
+        half = self.length / 2
+        moved = ((s - car.line + half) % self.length) - half
+        car.line, car.provisional = s, False
+        if not car.from_line:
+            car.f0 = (car.f0 - moved) % self.length
+            return
+        ent.distance -= moved
+        ent.ds = [d - moved for d in ent.ds]
+        ent.cds = array("d", (d - moved for d in ent.cds))
+        if ent.pit_at is not None:
+            ent.pit_at -= moved
+        if ent.halted is not None:
+            ent.halted -= moved
 
     def _late_start_ok(self, ent, lap, lap0):
         """A sender may start past the start lap only up to the leader's lap. With no
         entry counting yet (a race rebuilt mid-race: relay restart, new pick, reset)
         the bound is the lap that min(LINE_QUORUM - 1, known) other entries report, one
         lap per entry, so no entry lifts it alone."""
-        ahead = [math.floor(e.distance / self.length) for e in self._entries.values()
+        ahead = [max(0, math.floor(e.distance / self.length)) for e in self._entries.values()
                  if e is not ent and e.distance is not None]
         if ahead:
             return lap - lap0 <= max(ahead)
@@ -762,14 +807,23 @@ class Race:
                 ent.held = ent.distance is not None
             else:
                 ent.restart()
+        stepped = prev_lap is not None and lap == prev_lap + 1
+        # Only a step on track marks the line: GT7 also steps it in the pit lane, in the box
+        # or when a session loads.
+        crossing = stepped and lap >= 1 and sample.get("on_track") is not False \
+            and lateral <= BOX_LATERAL_M and speed >= BOX_LEAVE_MPS
         distance = None
         if active and car.counting and ent.finished_at is None:
+            if crossing and car.provisional:
+                self._rebase(ent, car, s)
             distance = self._next_distance(ent, car, t, lap, s)
-            if ent.ts and abs(distance - ent.distance) > \
-                    MAX_SPEED_MPS * (t - ent.ts[-1]) + STEP_SLACK_M:
+            allowed = MAX_SPEED_MPS * (t - ent.ts[-1]) + STEP_SLACK_M if ent.ts else math.inf
+            # GT7's counter may be a lap off the car's own count, never more.
+            if abs(distance - ent.distance) > allowed \
+                    or abs(self._raw(car, lap, s) - distance) > self.length + allowed:
                 car.t = t                         # implausible: live, but nothing moves
                 return
-        if prev_lap is not None and lap == prev_lap + 1 and car.line_s is None:
+        if crossing and car.line_s is None:
             car.line_s = s                        # this car's own crossing marks the line
         car.t, car.lap, car.speed, car.lateral, car.s = t, lap, speed, lateral, s
         car.position = sample.get("race_position")
@@ -781,8 +835,10 @@ class Race:
         if type(last_ms) is int:
             car.last_ms = last_ms
         self._box(car, t)
-        if active and car.left_box and car.counting:
-            ent.pit_stops += 1
+        if active and car.left_box and car.counting and (
+                ent.pit_at is None or abs(ent.distance - ent.pit_at) > PIT_ROW_M):
+            ent.pit_stops += 1                    # standing twice in one pit lane visit is one stop
+            ent.pit_at = ent.distance
             if self._window_until is not None and t <= self._window_until:
                 ent.switch_pit = True
         if self._out(ent):
@@ -809,7 +865,7 @@ class Race:
             lap0 = 2 if self.formation else 1
             if lap < lap0 or (self.multi_lobby and ent.changed) \
                     or not self._late_start_ok(ent, lap, lap0) \
-                    or not self._start(ent, car, t, 0.0, lap0, s):
+                    or not self._start(ent, car, t, 0.0, lap0, s, stepped=stepped):
                 return
         elif distance is not None:
             ent.distance = distance
@@ -1477,8 +1533,8 @@ class Race:
                 "status": "retired" if retired else
                           ("est" if self._estimated(e) else
                            "no_sender" if e.active is None else "no_data") if quiet else
-                          "box" if car.in_box else
                           "waiting" if e.distance is None else
+                          "box" if car.in_box else
                           "red_flag" if e.waiting else "racing",
                 "finished": e.finished_at is not None and not retired,
                 "waiting": e.waiting,
