@@ -612,6 +612,10 @@ def t_report_writes_json_and_escaped_html():
     assert "FAIL" in text and "shots/s1.png" in text
     for rule in ("traceback", "ERROR line", "script error", "failed resource load"):
         assert rule in text, f"the legend explains {rule!r}"
+    data, _, _ = _run([{"id": "n", "role": "rec", "do": "note"}, {"id": "g", "role": "rec", "do": "go"}])
+    rows = {r.split("<small>")[1].split("<")[0]: r for r in report.render_html(data).split("<tr>") if "<small>" in r}
+    assert "no visible feedback" in rows["n"] and "no visible feedback" not in rows["g"], \
+        "a step's row lists its own findings"
 
 
 # -- stack helpers ---------------------------------------------------------------
