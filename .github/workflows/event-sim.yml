@@ -1,0 +1,60 @@
+name: Event simulation
+
+# Plays a bundled event-simulation scenario (tools/event-sim) end to end against the
+# simulated OBS, Sheet, Discord and streams, with every crew role in Chromium.
+# Dispatch-only and not a required check: a full run takes up to two hours.
+# The report and its screenshots are uploaded even when the scenario fails.
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Bundled scenario (tools/event-sim/scenarios)"
+        type: choice
+        default: quick
+        options:
+          - quick
+          - smoke
+          - desk-fit
+          - multiclass
+          - late-link
+          - dc-rejoin
+          - relay-crash
+          - red-flag
+      profile:
+        description: "Time budget: quick = 30 min, full = 120 min"
+        type: choice
+        default: quick
+        options:
+          - quick
+          - full
+
+permissions:
+  contents: read
+
+jobs:
+  event-sim:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.profile == 'full' && 120 || 30 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install ffmpeg, Playwright and Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium
+      - name: Run the scenario
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: python tools/event-sim/event_sim.py --scenario "$SCENARIO" --out event-sim-report --no-skips
+      - name: Upload the report and screenshots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: event-sim-${{ inputs.scenario }}
+          path: event-sim-report/
+          retention-days: 14
+          if-no-files-found: ignore
