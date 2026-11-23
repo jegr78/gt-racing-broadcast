@@ -225,6 +225,31 @@ def _checks(raw, where, key, roots):
     return list(raw)
 
 
+def _crew_commentators(tabs):
+    """The names a `[sheet.tabs] Crew` marks as commentators."""
+    rows = tabs.get("Crew") or []
+    if not rows:
+        return set()
+    head = [c.strip().lower() for c in rows[0]]
+    if "name" not in head or "commentator" not in head:
+        return set()
+    name, flag = head.index("name"), head.index("commentator")
+    return {r[name].strip() for r in rows[1:] if len(r) > max(name, flag) and r[flag].strip().upper() == "TRUE"}
+
+
+def _check_commentator(role, registry, commentators, where):
+    """Refuse a commentator role without a crew name or with one the scenario does not have."""
+    cls = registry.get(role_kind(role))
+    if cls is None or not getattr(cls, "by_commentator", False):
+        return
+    name = role.split(":", 1)[1] if ":" in role else ""
+    if not name:
+        raise ScenarioError(f"{where}: {role!r} is `{role_kind(role)}:<crew name>`")
+    if name not in commentators:
+        raise ScenarioError(f"{where}: {name!r} is no commentator of [[event.commentators]] or the Crew tab "
+                            f"(known: {', '.join(sorted(commentators)) or 'none'})")
+
+
 def _shot(raw, where):
     if raw is None:
         return None
@@ -239,7 +264,7 @@ def _shot(raw, where):
     return Shot(name, str(raw.get("role") or ""), str(raw.get("element") or ""))
 
 
-def _step(i, raw, registry, roots, default_wait=None):
+def _step(i, raw, registry, roots, default_wait=None, commentators=frozenset()):
     where = f"step {i + 1}"
     if not isinstance(raw, dict):
         raise ScenarioError(f"{where} must be a table")
@@ -260,6 +285,7 @@ def _step(i, raw, registry, roots, default_wait=None):
     cls = registry.get(role_kind(role))
     if cls is None:
         raise ScenarioError(f"{where}: unknown role {role!r} (known: {', '.join(sorted(registry))})")
+    _check_commentator(role, registry, commentators, where)
     if do not in cls.action_names():
         raise ScenarioError(f"{where}: role {role_kind(role)!r} has no action {do!r} "
                             f"(has: {', '.join(cls.action_names())})")
@@ -273,6 +299,8 @@ def _step(i, raw, registry, roots, default_wait=None):
         raise ScenarioError(f"{where}: shot role {shot.role!r} must be `kind` or `kind:instance`")
     if shot and shot.role and role_kind(shot.role) not in registry:
         raise ScenarioError(f"{where}: shot role {shot.role!r} is unknown")
+    if shot and shot.role:
+        _check_commentator(shot.role, registry, commentators, where)
     try:
         at = parse_at(raw.get("at"))
     except ScenarioError as exc:
@@ -301,9 +329,11 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     raw_steps = data.get("step") or []
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ScenarioError("a scenario needs at least one [[step]]")
+    comms, tabs = _commentators(event), _tabs(data.get("sheet"))
+    names = {c.name for c in comms} | _crew_commentators(tabs)
     steps, ids = [], {}
     for i, raw in enumerate(raw_steps):
-        step = _step(i, raw, registry, roots, default_wait)
+        step = _step(i, raw, registry, roots, default_wait, names)
         if step.id in ids:
             raise ScenarioError(f"{step.label}: id {step.id!r} is not unique "
                                 f"(also step {ids[step.id] + 1}); give one of them an id")
@@ -323,7 +353,7 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     if not isinstance(slow, (int, float)) or slow < 0:
         raise ScenarioError("tolerances.state_s must be a non-negative number")
     return Scenario(name, str(data.get("description") or ""), max_minutes, event,
-                    _commentators(event), _tabs(data.get("sheet")), {"state_s": float(slow)},
+                    comms, tabs, {"state_s": float(slow)},
                     steps, path)
 
 

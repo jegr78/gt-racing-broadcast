@@ -191,6 +191,20 @@ def t_scenario_checks_the_event_keys_and_values_at_load():
     assert scn.event["parts"] == 2
 
 
+def t_a_commentator_step_names_a_commentator_of_the_scenario():
+    event = {"commentators": [{"name": "Comms 1", "channel": "c1"}]}
+    chat = {"role": "commentator:Comms 1", "do": "chat"}
+    _scn([chat], event=event)
+    _refused([dict(chat, role="commentator")], "commentator:<crew name>", event=event)
+    _refused([dict(chat, role="commentator:Comms 9")], "'Comms 9' is no commentator", event=event)
+    _refused([{"role": "rec", "do": "go", "shot": {"name": "s", "role": "commentator:Comms 9"}}],
+             "'Comms 9' is no commentator", event=event)
+    crew = [["Name", "Commentator", "Director"], ["Guest", "TRUE", "FALSE"], ["Boss", "FALSE", "TRUE"]]
+    _scn([dict(chat, role="commentator:Guest")], event=event, sheet={"tabs": {"Crew": crew}})
+    _refused([dict(chat, role="commentator:Boss")], "'Boss' is no commentator", event=event,
+             sheet={"tabs": {"Crew": crew}})
+
+
 def t_role_instances_share_the_kind():
     scn = _scn([{"role": "rec:Comms 2", "do": "go"}])
     assert scenario.role_kind(scn.steps[0].role) == "rec"

@@ -735,6 +735,7 @@ class CommentatorRole(Surface):
     """A commentator in the cockpit (`commentator:<crew name>`): `submit_link` (url,
     stint), `chat` (text). `page(role)` reads the tally."""
     kind = "commentator"
+    by_commentator = True
     path, ready = "/cockpit", selectors.READY["COMMENTATOR"]
     sources = selectors.SOURCES["COMMENTATOR"]
     selectors = selectors.COMMENTATOR
