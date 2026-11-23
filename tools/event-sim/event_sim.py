@@ -185,7 +185,12 @@ def repeat(scn, out, args, enter=e2e_safety.enter, wait=flake.wait_for_unit):
             runs.append({"run": i, "code": None, "report": None})
             continue
         argv = _run_argv(scn, run_out, args)
-        code = enter(__file__, argv, seconds=stack.lifetime(scn), long=True)
+        try:
+            code = enter(__file__, argv, seconds=stack.lifetime(scn), long=True)
+        except RuntimeError as exc:      # the admission refused it, e.g. host memory pressure
+            print(f"event-sim: run {i}: not started: {exc}", file=sys.stderr)
+            runs.append({"run": i, "code": None, "report": None})
+            continue
         if code is None:
             code = run(scn, run_out, keep_work=args.keep_work, headed=args.headed, no_skips=args.no_skips,
                        trace=args.trace, load=args.load)
@@ -226,7 +231,11 @@ def main(argv=None):
     if args.repeat:
         return repeat(scn, out, args)
     # The contained run starts in tools/, so it gets absolute paths.
-    contained = e2e_safety.enter(__file__, _run_argv(scn, out, args), seconds=stack.lifetime(scn), long=True)
+    try:
+        contained = e2e_safety.enter(__file__, _run_argv(scn, out, args), seconds=stack.lifetime(scn), long=True)
+    except RuntimeError as exc:          # no containment, or the host under memory pressure
+        print(f"event-sim: not started: {exc}", file=sys.stderr)
+        return 2
     if contained is not None:
         return contained
     return run(scn, out, keep_work=args.keep_work, headed=args.headed, no_skips=args.no_skips,
