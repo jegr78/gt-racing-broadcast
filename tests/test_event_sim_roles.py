@@ -1656,7 +1656,7 @@ def t_the_smoke_scenario_uses_every_party_once():
     assert loaded.steps[-1].do == "stop_event", "Stop event ends the relay, so it is the last step"
 
 
-EVENT_SCENARIOS = ("quick", "multiclass", "late-link", "dc-rejoin", "relay-crash", "red-flag")
+EVENT_SCENARIOS = ("quick", "full", "multiclass", "late-link", "dc-rejoin", "relay-crash", "red-flag")
 
 
 def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program():
