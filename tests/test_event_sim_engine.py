@@ -1338,6 +1338,22 @@ def t_the_page_keeps_its_last_console_lines_and_failed_requests():
     assert "secret" not in json.dumps(d), d
 
 
+def t_the_traces_own_blocked_script_in_a_sandboxed_frame_is_no_page_error():
+    class Msg:
+        type, location = "error", {"url": "about:blank"}
+        text = builtin.TRACE_SANDBOX + " and the 'allow-scripts' permission is not set."
+    for trace, want in (("fail", []), ("off", ["hard"])):
+        br = _FakeBrowser()
+        role = builtin.PageRole(engine.RunContext(urls={"relay": "http://127.0.0.1:9"}, browser=br, trace=trace),
+                                "page:producer")
+        role.open()
+        role.do("open", {"path": "/"})
+        br.page.handlers["console"](Msg())
+        closed = role.close()
+        assert [sev for sev, _ in closed] == want, \
+            f"trace {trace}: a DOM snapshot's script in a sandboxed frame is the trace's, not the page's"
+
+
 def t_a_trace_chunk_per_step_is_kept_only_for_a_failed_step():
     steps = [{"id": "open", "role": "page:rc", "do": "open", "args": {"path": "/rc"}},
              {"id": "ok", "role": "rec", "do": "go", "at": "after:open"},
