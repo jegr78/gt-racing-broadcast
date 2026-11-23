@@ -152,6 +152,27 @@ def t_fanout_server_writer_unblocked_by_dead_consumer():
         srv.stop()
 
 
+def t_fanout_server_lets_a_consumer_of_an_idle_feed_go():
+    # A stopped feed writes nothing: a consumer that hangs up must still end its handler.
+    ring = m.FeedRing(4096)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t"))
+    srv.start()
+    try:
+        s = socket.create_connection(("127.0.0.1", srv.port), timeout=2.0)
+        s.sendall(b"GET / HTTP/1.0\r\n\r\n")
+        s.recv(4096)                           # the response header
+        deadline = time.monotonic() + 5.0
+        while not srv._consumers and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert srv._consumers, "the consumer was registered"
+        s.close()
+        while srv._consumers and time.monotonic() < deadline + 5.0:
+            time.sleep(0.05)
+        assert not srv._consumers, "a consumer that hung up on an idle feed keeps no handler thread"
+    finally:
+        srv.stop()
+
+
 def t_streamlink_fanout_cmd_youtube_has_stdout_ua_cookies():
     cmd = m.streamlink_fanout_cmd("https://hls.example/x.m3u8", "youtube",
                                   cookies="/tmp/yt.txt", user_agent="UA/9")
