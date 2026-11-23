@@ -8,7 +8,6 @@ every runtime file stay out of the checkout. Each child runs under
 or dies. Every port is a free loopback port; 8088, 8089 and 53001-53003 are never used."""
 import http.client
 import json
-import math
 import os
 import re
 import secrets
@@ -199,8 +198,8 @@ def event_parts(event):
 def event_track(event):
     """(layout id, lap length in metres) of `[event] track`, or None."""
     length = event.get("track_length_m", drive.DEFAULT_TRACK_M)
-    if not isinstance(length, (int, float)) or isinstance(length, bool) or not math.isfinite(length) \
-            or not drive.MIN_LENGTH_M <= length <= MAX_TRACK_M:
+    # The range test also refuses nan and inf.
+    if not isinstance(length, (int, float)) or isinstance(length, bool) or not drive.MIN_LENGTH_M <= length <= MAX_TRACK_M:
         raise ValueError(f"event.track_length_m is a lap of {drive.MIN_LENGTH_M:.0f}-{MAX_TRACK_M} m, not {length!r}")
     track = event.get("track")
     if track is None:
