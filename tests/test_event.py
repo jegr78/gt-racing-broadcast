@@ -157,6 +157,11 @@ def t_classify_tailscale():
     assert "Tailscale not connected" in miss.detail   # no 'tailnet' jargon
 
 
+def t_classify_relay_names_a_starting_relay():
+    r = m.classify_relay(True, False, 8088, starting=True)
+    assert r.level == m.WARN and "starting" in r.detail and "not responding" not in r.detail, r
+
+
 def t_classify_relay():
     assert m.classify_relay(True, True).level == "PASS"
     r = m.classify_relay(True, False)

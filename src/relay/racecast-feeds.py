@@ -1634,14 +1634,21 @@ def _no_window_kwargs(os_name=None):
     return {}
 
 
-def detect_tailscale_ip():
-    """This machine's connected Tailscale IPv4 via the CLI, or None if the
-    Tailscale backend is unavailable, stopped, or logged out.
+TAILSCALE_IP_WAIT_S = 10   # a backend that just connected may report its IPv4 seconds later
 
-    Deliberate divergence from scripts/tailscale.py's tailscale_backend():
-    this detection-only copy keeps trying further binaries until one reports
-    a Running IP, while the state-aware version stops at the first binary
-    that answers at all (its callers need Stopped/NeedsLogin, not just the IP)."""
+
+def tailscale_backend_running(output):
+    """True when `tailscale status --json` reports BackendState Running."""
+    try:
+        data = json.loads(output)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and data.get("BackendState") == "Running"
+
+
+def _tailscale_status():
+    """(connected IPv4 or None, whether any backend runs), over every known binary."""
+    running = False
     for binary in _TAILSCALE_BINS:
         try:
             out = subprocess.run([binary, "status", "--json"], capture_output=True,
@@ -1651,8 +1658,27 @@ def detect_tailscale_ip():
             continue
         ip = parse_tailscale_status(out.stdout)
         if ip:
+            return ip, True
+        running = running or tailscale_backend_running(out.stdout)
+    return None, running
+
+
+def detect_tailscale_ip(wait=0, clock=time.monotonic, sleep=time.sleep, status=None):
+    """This machine's connected Tailscale IPv4 via the CLI, or None if the
+    Tailscale backend is unavailable, stopped, or logged out. A running backend
+    without an IPv4 yet is asked again for up to `wait` seconds.
+
+    Deliberate divergence from scripts/tailscale.py's tailscale_backend():
+    this detection-only copy keeps trying further binaries until one reports
+    a Running IP, while the state-aware version stops at the first binary
+    that answers at all (its callers need Stopped/NeedsLogin, not just the IP)."""
+    status = status or _tailscale_status
+    deadline = clock() + wait
+    while True:
+        ip, running = status()
+        if ip or not running or clock() >= deadline:
             return ip
-    return None
+        sleep(0.5)
 
 
 def resolve_bind_addresses(bind_arg, tailscale_ip):
@@ -12091,6 +12117,12 @@ class BootHandler(BaseHTTPRequestHandler):
     BODY = b'{"starting": true, "schedule": "loading"}'
 
     def _starting(self):
+        try:
+            length = min(int(self.headers.get("Content-Length") or 0), MAX_POST_BODY)
+        except ValueError:
+            length = 0
+        if length > 0:
+            self.rfile.read(length)   # an unread body resets the connection on Windows
         body = self.BODY if self.path.split("?", 1)[0] == "/status" else b""
         self.send_response(503)
         self.send_header("Content-Type", "application/json")
@@ -12129,6 +12161,14 @@ def go_live(servers, handler):
     """Hand the bound control servers from BootHandler to the real handler."""
     for httpd in servers:
         httpd.RequestHandlerClass = handler
+
+
+def serve_live(servers, handler):
+    """Go live and run the last server's loop on the calling thread (main() calls it
+    from the main thread, which handles the signals). Blocks."""
+    go_live(servers, handler)
+    servers[-1].shutdown()
+    servers[-1].serve_forever()
 
 
 # Human-facing /console PAGE routes (segment tuples, sans the leading "console").
@@ -16469,7 +16509,7 @@ def main():
     # Bind before the Sheet reads below, so `relay start` sees a slow first start
     # as starting (503) instead of a dead one.
     bind_addrs = resolve_bind_addresses(
-        args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
+        args.bind, detect_tailscale_ip(wait=TAILSCALE_IP_WAIT_S) if args.bind == "auto" else None)
     servers, bound_addrs = boot_control_servers(bind_addrs, args.http_port)
     # The loopback bind is mandatory when requested: OBS always reaches the relay
     # on 127.0.0.1. If it failed but (e.g.) the Tailscale IP bound, running on
@@ -17087,8 +17127,6 @@ def main():
         radio_native=radio_native,
         browser_hosts=(tailscale.detect_magicdns_name(),),
     )
-    go_live(servers, handler)
-
     relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
     relay.keep_awake.start()
     race_svc.open_recording()   # the port is ours, so the recording file is too
@@ -17224,9 +17262,7 @@ def main():
     if login_warning:
         LOG.warning("  %s", login_warning)
     LOG.info("  Sheet poll every %ss.  Ctrl+C to stop.", args.poll)
-    # Move the last server's loop onto the main thread, which handles the signals.
-    servers[-1].shutdown()
-    servers[-1].serve_forever()
+    serve_live(servers, handler)
 
 if __name__ == "__main__":
     main()

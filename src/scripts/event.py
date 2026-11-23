@@ -332,9 +332,12 @@ def classify_tailscale(ip):
                   "tablet remotely. Sign in to Tailscale")
 
 
-def classify_relay(alive, http_ok, port=8088):
+def classify_relay(alive, http_ok, port=8088, starting=False):
     if alive and http_ok:
         return Result(PASS, "Relay", f"running, control http://127.0.0.1:{port}/status OK")
+    if alive and starting:
+        return Result(WARN, "Relay", f"starting on port {port}: reading the Google Sheet. "
+                                     "Follow it with `racecast relay logs`")
     if alive:
         return Result(FAIL, "Relay",
                       f"process alive but port {port} not responding. Check `racecast relay logs`")

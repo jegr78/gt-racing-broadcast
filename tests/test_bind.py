@@ -274,8 +274,63 @@ def t_main_binds_the_control_port_before_the_first_sheet_read():
         assert boot < src.index(read), f"the control port must answer before {read}"
     assert src.index("serve_control_servers(servers)") < src.index("pov_source.refresh()"), \
         "the boot handler must serve before the first sheet read"
-    assert src.index("handler = make_handler(") < src.index("go_live(servers, handler)"), \
-        "the real handler goes live only once it exists"
+    assert src.index('signal.signal(signal.SIGTERM, shutdown)') < src.index("serve_live(servers, handler)"), \
+        "the real handler goes live only once SIGTERM stops the relay cleanly"
+
+
+def t_the_main_thread_takes_over_the_serve_loop_with_the_real_handler():
+    import threading
+    from http.server import BaseHTTPRequestHandler
+
+    class Live(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.send_header("Content-Length", "2"); self.end_headers()
+            self.wfile.write(b"{}")
+        def log_message(self, *a):
+            pass
+
+    servers, _bound = m.boot_control_servers(["127.0.0.1"], 0)
+    port = servers[0].server_address[1]
+    m.serve_control_servers(servers)
+    main = threading.Thread(target=m.serve_live, args=(servers, Live), daemon=True)
+    main.start()
+    try:
+        deadline = __import__("time").monotonic() + 5
+        status = None
+        while __import__("time").monotonic() < deadline:
+            status, _raw = _status(port)
+            if status == 200:
+                break
+        assert status == 200, f"serve_live answers with the real handler: {status}"
+        assert main.is_alive(), "serve_live keeps serving on the calling thread"
+    finally:
+        servers[0].shutdown()
+        main.join(5)
+        servers[0].server_close()
+    assert not main.is_alive(), "the calling thread runs the server's loop, so shutdown ends it"
+
+
+def t_tailscale_ip_waits_only_for_a_running_backend_without_ipv4():
+    clock = [0.0]
+    def sleep(s): clock[0] += s
+    answers = iter([(None, True), (None, True), ("100.64.1.2", True)])
+    assert m.detect_tailscale_ip(wait=10, clock=lambda: clock[0], sleep=sleep,
+                                 status=lambda: next(answers)) == "100.64.1.2", \
+        "a connected backend gets time to report its IPv4"
+    clock[0] = 0.0
+    assert m.detect_tailscale_ip(wait=10, clock=lambda: clock[0], sleep=sleep,
+                                 status=lambda: (None, False)) is None and clock[0] == 0.0, \
+        "a stopped backend is not waited for"
+    assert m.detect_tailscale_ip(wait=10, clock=lambda: clock[0], sleep=sleep,
+                                 status=lambda: (None, True)) is None and 10 <= clock[0] <= 11, \
+        f"the wait is bounded: {clock[0]}"
+    assert m.TAILSCALE_IP_WAIT_S > 0
+
+
+def t_tailscale_status_reports_a_running_backend_without_ipv4():
+    assert m.tailscale_backend_running(_status_json("Running", [])) is True
+    assert m.tailscale_backend_running(_status_json("Stopped", ["100.64.10.20"])) is False
+    assert m.tailscale_backend_running("not json") is False
 
 
 if __name__ == "__main__":

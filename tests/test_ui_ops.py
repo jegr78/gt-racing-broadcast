@@ -35,7 +35,7 @@ def t_relay_status_data_running():
 def t_relay_status_data_carries_the_running_relays_schedule_mode():
     def data(status):
         return rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
-                                    probe=lambda: status, mode=lambda: "live")
+                                    probe=lambda: status, mode=lambda: "live", starting=lambda: False)
     assert data({"mode": "qualifying"})["schedule_mode"] == "qualifying"
     assert data({"mode": "race"})["schedule_mode"] == "race"
     for status in ({"mode": "solo"}, {}, None):
@@ -105,7 +105,7 @@ def t_relay_status_data_older_relay_has_no_keep_awake():
 
 def t_relay_status_data_unanswered_probe_is_not_ok():
     d = rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
-                              probe=lambda: None)
+                              probe=lambda: None, starting=lambda: False)
     assert d["http_ok"] is False and d["keep_awake"] is None, d
 
 
