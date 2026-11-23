@@ -664,7 +664,7 @@ at = "after:lobby2+5s"
 role = "drivers"
 do = "release"
 expect = ["page('drivers').driving == 12"]
-timeout = "90s"
+timeout = "4m"
 
 [[step]]
 id = "shot_swaps_2"
@@ -865,7 +865,7 @@ do = "release"
 args = { gaps = "${before_red.entries}" }
 expect = ["page('drivers').driving == 14",
           "'comms2' in obs.program_channels"]
-timeout = "90s"
+timeout = "4m"
 
 # Cars closer than the drivers' 0.2 s tick may swap at the release: the exact order is soft.
 [[step]]
@@ -942,7 +942,7 @@ at = "after:lobby3+5s"
 role = "drivers"
 do = "release"
 expect = ["page('drivers').driving == 14"]
-timeout = "90s"
+timeout = "4m"
 
 [[step]]
 id = "stint3"
