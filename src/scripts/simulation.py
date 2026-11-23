@@ -131,7 +131,8 @@ def obs_target(environ=None):
     return (u.hostname, u.port) if u.port else None
 
 
-LIVE_PORTS = (DEFAULT_RELAY_PORT, 53001, 53002, 53003)   # the live relay's control and feed ports
+LIVE_FEED_PORTS = (53001, 53002, 53003)   # the product's Feed A, Feed B and POV; every module reads this
+LIVE_PORTS = (DEFAULT_RELAY_PORT,) + LIVE_FEED_PORTS
 DEFAULT_UI_PORT = 8089
 
 
@@ -174,7 +175,6 @@ def control_port_problem(port, environ=None):
     return _port_problem(str(port), environ, "--http-port") if active(environ) else ""
 
 
-LIVE_FEED_PORTS = LIVE_PORTS[1:]
 _RELAY_PORT_UNSET = f"{RELAY_PORT} is not set (a free port for the simulated relay, never 8088)"
 _FEED_PORTS_UNSET = (f"{FEED_PORTS} is not set (three free ports for Feed A, Feed B and POV, "
                      "never 53001-53003)")

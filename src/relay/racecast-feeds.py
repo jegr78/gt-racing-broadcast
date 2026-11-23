@@ -12172,7 +12172,7 @@ def simulation_startup(environ):
     return None
 
 
-DEFAULT_FEED_PORTS = (53001, 53002, 53003)
+DEFAULT_FEED_PORTS = simulation.LIVE_FEED_PORTS
 
 
 def feed_ports(ports, pov, environ):

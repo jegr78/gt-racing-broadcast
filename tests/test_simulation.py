@@ -425,6 +425,25 @@ def t_the_relay_takes_its_feed_ports_from_the_simulation_and_refuses_the_product
         raise AssertionError("--ports must be two port numbers")
 
 
+def t_the_product_feed_ports_have_one_source():
+    import re
+    import obs_ws
+    import ports
+    import preflight
+    copies = {"relay": _relay().DEFAULT_FEED_PORTS, "obs_ws": obs_ws.RELAY_PORTS,
+              "ports": ports.FEED_PORTS, "preflight": preflight.FEED_PORTS}
+    for name, value in copies.items():
+        assert value == sim.LIVE_FEED_PORTS == (53001, 53002, 53003), f"{name} disagrees: {value}"
+    hits = []
+    for base, _dirs, files in os.walk(os.path.join(ROOT, "src")):
+        for f in files:
+            if f.endswith(".py") and f != "simulation.py":
+                with open(os.path.join(base, f), encoding="utf-8") as fh:
+                    if re.search(r"53001,\s*53002,\s*53003", fh.read()):
+                        hits.append(f)
+    assert not hits, f"the feed port triple is spelled out again, take simulation.LIVE_FEED_PORTS: {hits}"
+
+
 def t_relay_port_moves_only_in_simulation():
     assert sim.RELAY_PORT == "RACECAST_SIM_RELAY_PORT" and sim.DEFAULT_RELAY_PORT == 8088
     assert sim.relay_port({}) == 8088

@@ -12,8 +12,10 @@ processes. Pure parsers + injectable command seams keep it unit-testable without
 real sockets/processes (mirrors stop-streams' `looks_like_feed` style)."""
 import os, re, shutil, signal, subprocess, time
 
+import simulation
 
-FEED_PORTS = (53001, 53002, 53003)   # Feed A / Feed B / POV, the freeport default
+
+FEED_PORTS = simulation.LIVE_FEED_PORTS   # Feed A / Feed B / POV, the freeport default
 
 
 def parse_lsof_pids(out):
