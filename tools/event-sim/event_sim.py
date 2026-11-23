@@ -62,8 +62,8 @@ def build_parser():
     ap.add_argument("--headed", action="store_true", help="show the browser (local only)")
     ap.add_argument("--no-skips", action="store_true",
                     help="a skipped step is a hard failure (a run that must have its browser)")
-    ap.add_argument("--trace", choices=TRACES, default="fail",
-                    help="Playwright traces: keep the failed steps' (default), every step's, or none")
+    ap.add_argument("--trace", choices=TRACES, default="off",
+                    help="Playwright traces: none (default), the failed and slow steps', or every step's")
     ap.add_argument("--repeat", type=_repeat_count, metavar="N",
                     help="run the scenario N times, one contained run after the other, and summarize")
     ap.add_argument("--load", type=_load, metavar="cpu:K",
@@ -71,7 +71,7 @@ def build_parser():
     return ap
 
 
-def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="fail", load=None):
+def run(scn, out, keep_work=False, headed=False, no_skips=False, trace="off", load=None):
     import browser
     import engine
     import report

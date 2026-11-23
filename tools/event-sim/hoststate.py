@@ -12,7 +12,7 @@ CGROUP = "/sys/fs/cgroup"
 RESOURCES = ("cpu", "memory", "io")
 DELTA_KEYS = ("seconds", "cpu_s", "throttled_s", "nr_throttled", "unit_cpu_stall_s",
               "unit_memory_stall_s", "unit_io_stall_s", "host_cpu_stall_s", "cpu_stall_share",
-              "oom", "high")
+              "oom", "high", "max", "memory_peak_mb")
 
 
 def _read(path):
@@ -156,7 +156,8 @@ def _diff(before, after, *path, scale=1):
 
 def delta(before, after):
     """What happened between two samples: the unit's CPU time, throttling and stall
-    seconds, the host's CPU stall seconds and new OOM and memory.high events."""
+    seconds, the host's CPU stall seconds, new OOM, memory.high and memory.max events
+    (the unit at its memory cap reclaims and stalls) and its memory peak so far."""
     stall = _diff(before, after, "unit", "pressure", "cpu", "some", "total", scale=1e6)
     linux = all(s.get("unit") is not None or s.get("loadavg") is not None for s in (before, after))
     seconds = round(after["t"] - before["t"], 3) if linux else None
@@ -172,6 +173,9 @@ def delta(before, after):
         "host_cpu_stall_s": _diff(before, after, "pressure", "cpu", "some", "total", scale=1e6),
         "oom": _diff(before, after, "unit", "memory_events", "oom"),
         "high": _diff(before, after, "unit", "memory_events", "high"),
+        "max": _diff(before, after, "unit", "memory_events", "max"),
+        "memory_peak_mb": None if _get(after, "unit", "memory_peak") is None
+        else round(after["unit"]["memory_peak"] / 1048576),
     })
     if stall is not None and seconds:
         out["cpu_stall_share"] = round(stall / seconds, 3)

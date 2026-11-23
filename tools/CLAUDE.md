@@ -629,15 +629,19 @@ needed to explain a failure at the moment it happens:
   Then a picture of the whole page (`shots/fail-<step>.png`, `fail-<step>-shot.png` for a
   failed screenshot) with how long it took: a picture that takes 0.1 s right after an 8 s
   timeout says the page was alive.
-- Traces. `--trace fail` (default) records a Playwright trace of every page (DOM
+- Traces. Off by default. `--trace fail` records a Playwright trace of every page (DOM
   snapshots and screencast) in one chunk per step and keeps the chunks of a step that
   failed, left a snapshot or had a slow action (the tail of a flake, seen far more often
-  than its failure) as `traces/<step>-<role>.zip`; `--trace all` keeps every step's,
-  `--trace off` records none. Its DOM snapshots make Chromium log "Blocked script
-  execution in 'about:blank'" for a sandboxed frame (the Control Center's report
-  preview); a tracing role drops that line. Open one with `playwright show-trace FILE`. A trace
-  zip holds what the page sent and received, the run's console tokens included: they
-  die with the run's secret, but treat the zip as the report's private part.
+  than its failure) as `traces/<step>-<role>.zip`; `--trace all` keeps every step's.
+  Tracing is not free: Playwright keeps the whole session's screencast and resources in
+  its temporary files on `/tmp` (tmpfs, charged to the unit's memory), and a traced
+  red-flag reached the unit's 2 GiB cap (memory.max events, reclaim stalls) and was
+  once OOM-killed. Trace a short scenario, or a run outside the unit. Its DOM snapshots
+  make Chromium log "Blocked script execution in 'about:blank'" for a sandboxed frame
+  (the Control Center's report preview); a tracing role drops that line. Open a trace
+  with `playwright show-trace FILE`. A zip holds what the page sent and received, the
+  run's console tokens included: they die with the run's secret, but treat the zip as
+  the report's private part.
 - `--repeat N` (1-50) runs the scenario N times, one contained E2E unit run after the
   other (it waits up to 30 min while another run holds the unit), into `DIR/run-NN/`, and
   writes `DIR/summary.html` and `summary.json`: pass, fail or not run per run (a run without

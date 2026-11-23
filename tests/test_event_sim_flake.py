@@ -50,7 +50,7 @@ def _host(usage, throttled, unit_cpu, host_cpu, oom=0, high=0):
     _write(cg, f"{unit}/memory.current", "1048576\n")
     _write(cg, f"{unit}/memory.peak", "2097152\n")
     _write(cg, f"{unit}/memory.max", "2147483648\n")
-    _write(cg, f"{unit}/memory.events", f"low 0\nhigh {high}\nmax 0\noom {oom}\noom_kill {oom}\n")
+    _write(cg, f"{unit}/memory.events", f"low 0\nhigh {high}\nmax {oom * 5}\noom {oom}\noom_kill {oom}\n")
     _write(cg, f"{unit}/pids.current", "42\n")
     for res in ("cpu", "memory", "io"):
         _write(cg, f"{unit}/{res}.pressure", _psi(unit_cpu if res == "cpu" else 0))
@@ -88,7 +88,8 @@ def t_a_delta_says_how_much_cpu_the_unit_got_and_how_long_it_stalled():
     assert d["nr_throttled"] == 750, d
     assert d["unit_cpu_stall_s"] == 2.0 and d["host_cpu_stall_s"] == 4.0, d
     assert d["cpu_stall_share"] == 0.5, "the unit's tasks waited for a CPU half of the time"
-    assert d["oom"] == 1 and d["high"] == 3, d
+    assert d["oom"] == 1 and d["high"] == 3 and d["max"] == 5, "the unit reached its memory cap"
+    assert d["memory_peak_mb"] == 2, d
 
 
 def _stat(pid, comm, utime, stime):
