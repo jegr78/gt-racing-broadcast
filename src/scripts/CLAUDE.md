@@ -208,7 +208,9 @@ never the real one.
   `driver_radio_voice_process.Owned` start Python workers through `guard_python_argv`; the
   frozen `_radio-*` entrypoints install the guard before they dispatch.
 - `runtime/relay.mode` (`simulation`|`live`) sits next to `relay.profile`; both modes share
-  `relay.pid` and the stamps. `relay_start_plan` answers `refuse` (no kill, no reuse) while
+  `relay.pid` and the stamps. `relay_start_plan` answers `starting` (wait, never heal) for
+  our own active-profile relay that still answers the boot reply (#1266, `src/relay/CLAUDE.md`
+  "Start order"), and `refuse` (no kill, no reuse) while
   the PID file names a live relay process of the other mode, on any control port (a
   simulation relay may run on `RACECAST_SIM_RELAY_PORT`), so neither start overwrites the
   other's PID file and stamps. `runtime/relay.started` holds the relay's

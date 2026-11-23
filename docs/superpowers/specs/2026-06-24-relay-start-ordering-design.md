@@ -27,6 +27,7 @@ Fail fast and clearly when the mandatory loopback control port is already taken 
 - No change to the real bind at line ~5736 (it stays as the final, authoritative guard, including the loopback-mandatory abort of issue #84).
 - No change to the tailnet/`0.0.0.0` bind behavior, retry logic, or the `freeport` tooling.
 - No restructuring of `main()` to bind the real control sockets early (the more invasive option was considered and rejected: the request handler depends on the `Relay` object constructed much later).
+  Superseded by #1266: `main()` now binds right after this probe and serves a 503 boot handler until the real handler exists (`src/relay/CLAUDE.md`, "Start order").
 
 ## Decisions (resolved during brainstorming)
 

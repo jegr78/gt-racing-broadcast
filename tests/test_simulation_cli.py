@@ -100,6 +100,51 @@ def t_event_start_reaches_no_real_party_and_reports_each_skip():
         assert sim.skipped(what) in text, f"no skip line for {what}:\n{text}"
 
 
+def _booting_relay_seams(tmp, ready, aligned):
+    starting = dict(port_pids=[4242], feed_pids=[], pidfile_pid=4242, pidfile_alive=True,
+                    running_profile="demo", active_profile="demo", http_ok=False,
+                    running_mode="simulation", active_mode="simulation", starting=True)
+    return (*_start_seams(tmp), (m, "_relay_start_signals", lambda: dict(starting)),
+            (m, "_wait_relay_boot", lambda pid: ready),
+            (m.sv, "pid_alive", lambda pid: True),
+            (m, "_relay_already_running_for_active_profile", lambda: ready),
+            (m, "_align_running_relay_mode", lambda mode, **k: aligned.append(mode)))
+
+
+def t_event_start_treats_a_relay_that_finished_starting_as_running():
+    calls, aligned = [], []
+    with tempfile.TemporaryDirectory() as tmp, _env(**SIM_ENV), \
+            _patched(*_external(calls), *_booting_relay_seams(tmp, True, aligned)), \
+            contextlib.redirect_stdout(io.StringIO()) as out:
+        m.event_start([])
+    assert aligned == ["race"], f"the running relay is aligned to the requested mode: {aligned}"
+    assert "still reading the Google Sheet" in out.getvalue()
+
+
+def t_event_start_stops_with_a_clear_message_when_the_boot_wait_runs_out():
+    calls, aligned = [], []
+    with tempfile.TemporaryDirectory() as tmp, _env(**SIM_ENV), \
+            _patched(*_external(calls), *_booting_relay_seams(tmp, False, aligned)), \
+            contextlib.redirect_stdout(io.StringIO()):
+        try:
+            m.event_start([])
+            raise AssertionError("event start went on after the boot wait ran out")
+        except SystemExit as exc:
+            assert "racecast relay stop" in str(exc.code), exc.code
+    assert aligned == []
+
+
+def t_event_takeover_does_not_wait_for_a_starting_relay():
+    calls, aligned, waited = [], [], []
+    with tempfile.TemporaryDirectory() as tmp, _env(**SIM_ENV), \
+            _patched(*_external(calls), *_booting_relay_seams(tmp, True, aligned),
+                     (m, "_wait_relay_boot", waited.append)), \
+            contextlib.redirect_stdout(io.StringIO()):
+        m.event_start(["--stint", "3"])
+    assert waited == [] and aligned == [], \
+        f"--stint restarts a starting relay through relay start, it does not wait for it: {waited} {aligned}"
+
+
 def t_event_start_without_simulation_still_launches():
     calls, out = [], io.StringIO()
     with tempfile.TemporaryDirectory() as tmp, _patched(

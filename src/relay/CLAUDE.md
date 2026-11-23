@@ -13,6 +13,26 @@ commentator stream, so OBS media sources never change URL. A 3rd **POV** feed
 (53003) is an optional driver picture-in-picture, paused at start. The schedule is a
 Google-Sheet tab read as CSV (no API key); a running feed is never torn off
 mid-stint: sheet edits apply on the next `/next` (handover) or `/reload`.
+
+**Start order (#1266).** `main()` binds the control port before its first Sheet read
+(`boot_control_servers`); under `--bind auto` it first gives a running Tailscale backend
+without an IPv4 up to `TAILSCALE_IP_WAIT_S` to report one. Until the real handler exists,
+`BootHandler` answers every path and method with 503 (it reads a request body up to
+`MAX_POST_BODY` first): `/status` with the fixed body `{"starting": true, "schedule":
+"loading"}`, every other path with an empty body, so an open page's poll fails as if the
+relay were down. `serve_live` swaps in the real handler on the same sockets after the
+signal handlers are installed and moves the last server's loop onto the main thread.
+Every "answers means ready" caller (`_relay_http_ok`, e2e `_wait_ready`, event-sim,
+preflight) sees the 503 as not ready. `relay start` reads the boot reply
+(`_relay_starting`): it waits up to `RELAY_BOOT_WAIT_S` for its own starting relay and
+never respawns one that answered it; when the PID file stops naming it, `relay start`
+leaves it alone. A second `relay start` and `event start` get the plan action `starting`
+and wait, then take the "already running" path; with `--stint` (a takeover) they restart
+the starting relay at that stint. `event status` shows it as WARN "starting", the Control
+Center Home view as "starting: reading the Google Sheet". Side effects that need the
+port to be ours (recording, timing publisher, keep-awake, telemetry) still start after
+the bind. Tests: `tests/test_bind.py`, `tests/test_racecast.py`, `tests/test_simulation_cli.py`.
+
 **Qualifying mode** (issue #124): a second `ScheduleSource` reads a separate
 `Qualifying` tab (same URL/Streamer/Stint structure); `Relay.mode` ∈
 {race, qualifying} and `self.source` is a property returning the active one, so

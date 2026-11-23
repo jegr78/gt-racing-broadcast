@@ -28,14 +28,14 @@ def t_relay_status_data_running():
     d = rc.relay_status_data(read_pid=lambda p: 4242,
                               alive=lambda pid: True,
                               probe=lambda: {"keep_awake": awake}, mode=lambda: "simulation")
-    assert d == {"pid": 4242, "alive": True, "port": 8088, "http_ok": True,
+    assert d == {"pid": 4242, "alive": True, "port": 8088, "http_ok": True, "starting": False,
                  "keep_awake": awake, "mode": "simulation", "schedule_mode": None}
 
 
 def t_relay_status_data_carries_the_running_relays_schedule_mode():
     def data(status):
         return rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
-                                    probe=lambda: status, mode=lambda: "live")
+                                    probe=lambda: status, mode=lambda: "live", starting=lambda: False)
     assert data({"mode": "qualifying"})["schedule_mode"] == "qualifying"
     assert data({"mode": "race"})["schedule_mode"] == "race"
     for status in ({"mode": "solo"}, {}, None):
@@ -75,6 +75,28 @@ console.log(JSON.stringify(seen));
         f"the box follows each new relay mode, keeps the operator's tick in between and across a status gap: {res.stdout}"
 
 
+def t_control_center_names_a_starting_relay():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = (_control_center_function("keepAwakeText") + _control_center_function("relayDetail")
+              + _control_center_function("relayControlText") + """
+console.log(JSON.stringify([
+  relayDetail({http_ok: false, starting: true, port: 8088}),
+  relayDetail({http_ok: false, starting: false, port: 8088}),
+  relayDetail({http_ok: true, port: 8088, keep_awake: null}),
+  relayControlText({starting: true}), relayControlText({starting: false})]));
+""")
+    res = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=30)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == [
+        "port 8088 starting: reading the Google Sheet", "port 8088 not responding",
+        "control OK on port 8088", "relay starting: reading the Google Sheet",
+        "relay control not responding"], f"a starting relay is its own state: {res.stdout}"
+
+
 def t_relay_status_data_older_relay_has_no_keep_awake():
     d = rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
                               probe=lambda: {})
@@ -83,7 +105,7 @@ def t_relay_status_data_older_relay_has_no_keep_awake():
 
 def t_relay_status_data_unanswered_probe_is_not_ok():
     d = rc.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
-                              probe=lambda: None)
+                              probe=lambda: None, starting=lambda: False)
     assert d["http_ok"] is False and d["keep_awake"] is None, d
 
 
@@ -92,7 +114,7 @@ def t_relay_status_data_stopped_skips_http_probe():
     d = rc.relay_status_data(read_pid=lambda p: None,
                               alive=lambda pid: False,
                               probe=lambda: probed.append(1) or {})
-    assert d == {"pid": None, "alive": False, "port": 8088, "http_ok": False,
+    assert d == {"pid": None, "alive": False, "port": 8088, "http_ok": False, "starting": False,
                  "keep_awake": None, "mode": None, "schedule_mode": None}
     assert probed == []   # never probe HTTP for a dead relay
 

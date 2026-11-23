@@ -2590,6 +2590,8 @@ def t_relay_start_warns_when_running_and_stint_ignored():
     m._relay_http_ok = lambda: True
     m._running_relay_profile = lambda: "testing"
     m._active_profile_name = lambda: "testing"
+    old_starting = m._relay_starting
+    m._relay_starting = lambda: False
     try:
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -2604,24 +2606,26 @@ def t_relay_start_warns_when_running_and_stint_ignored():
         m._relay_http_ok = old_http_ok
         m._running_relay_profile = old_running
         m._active_profile_name = old_active
+        m._relay_starting = old_starting
 
 
-def _relay_spawn_stubs(http_ok_seq):
+def _relay_spawn_stubs(http_ok_seq, starting=False):
     """Patch relay_start's whole effectful surface for a plain (port-free) start so
     only the spawn/verify/retry orchestration is exercised. http_ok_seq: the booleans
     _relay_http_ok returns on successive VERIFY calls. Returns (restore_fn, calls) where
     calls['spawn'] counts start_detached invocations. wait_for is reduced to a single
     probe() so a down verify doesn't burn the real 15 s window."""
     seq = iter(http_ok_seq)
-    calls = {"spawn": 0}
+    calls = {"spawn": 0, "waits": []}
     saves = [
         ("pt", "pids_on_port", lambda port: []),                 # port free -> plain start
-        ("sv", "read_pid", lambda path: None),
+        ("sv", "read_pid", lambda path: 4242 if calls["spawn"] else None),   # the spawn writes it
         ("sv", "pid_alive", bool),
         ("sv", "stop_pid", lambda *args, **kwargs: True),
         ("sv", "start_detached", lambda *a, **k: (
             calls.__setitem__("spawn", calls["spawn"] + 1), 4242)[1]),
         (None, "_relay_http_ok", lambda: next(seq)),
+        (None, "_relay_starting", lambda: starting),
         (None, "_running_relay_profile", lambda: ""),
         (None, "_active_profile_name", lambda: "testing"),
         (None, "_ensure_active_console_secret", lambda: None),
@@ -2629,7 +2633,7 @@ def _relay_spawn_stubs(http_ok_seq):
         (None, "_write_relay_profile_stamp", lambda: None),
         (None, "_append_tailscale_snapshot", lambda: None),
         (None, "_refresh_obs_pages", lambda *a, **k: None),
-        (None, "wait_for", lambda probe, wait, **k: probe()),
+        (None, "wait_for", lambda probe, wait, **k: calls["waits"].append(wait) or probe()),
     ]
     originals = []
     for obj_name, attr, val in saves:
@@ -2668,6 +2672,206 @@ def t_relay_start_retries_when_first_spawn_not_up():
         assert "relay started" in out
         assert "retrying" in out
     finally:
+        restore()
+
+
+def t_relay_start_waits_for_a_relay_that_answers_starting():
+    # A slow first Sheet read: the relay bound its port and answers "starting".
+    restore, calls = _relay_spawn_stubs([False, True], starting=True)
+    stops = []
+    m.sv.stop_pid = lambda *a, **k: stops.append(a) or True
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            m.relay_start([])
+        out = buf.getvalue()
+        assert calls["spawn"] == 1 and stops == [], \
+            f"a starting relay is neither stopped nor respawned: spawns={calls['spawn']} stops={stops}"
+        assert calls["waits"] == [m.RELAY_START_VERIFY_S, m.RELAY_BOOT_WAIT_S], \
+            f"the verify window, then the boot wait: {calls['waits']}"
+        assert "still reading the Google Sheet" in out and "relay started" in out, out
+    finally:
+        restore()
+
+
+def t_relay_start_reports_a_starting_relay_that_exits():
+    restore, calls = _relay_spawn_stubs([False, False], starting=True)
+    alive = iter([True, False])
+    m.sv.pid_alive = lambda pid: next(alive, False)
+    boot_log = m._relay_boot_log_since
+    m._relay_boot_log_since = lambda offset: "ERROR: no schedule available. Sheet error: x\n"
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            m.relay_start([])
+        out = buf.getvalue()
+        assert calls["spawn"] == 1, f"a relay that bound its port and died is not respawned: {calls}"
+        assert "no schedule available" in out and "relay started" not in out, out
+    finally:
+        m._relay_boot_log_since = boot_log
+        restore()
+
+
+def t_relay_start_gives_up_on_a_relay_starting_past_the_boot_wait():
+    restore, calls = _relay_spawn_stubs([False, False], starting=True)
+    stops = []
+    m.sv.stop_pid = lambda pid, **k: stops.append(pid) or True
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            m.relay_start([])
+        out = buf.getvalue()
+        assert calls["spawn"] == 1 and stops == [4242], \
+            f"a relay still starting after the boot wait is stopped once, not respawned: {calls} {stops}"
+        assert "still starting" in out and "ERROR" in out and "relay started" not in out, out
+    finally:
+        restore()
+
+
+def t_relay_start_never_respawns_a_relay_that_was_starting():
+    # Stopped during its boot with an empty boot log: no reason, still no respawn.
+    restore, calls = _relay_spawn_stubs([False, False, False], starting=True)
+    seen = []
+    m._relay_starting = lambda: seen.append(True) or True
+    m.sv.pid_alive = lambda pid: bool(pid) and not seen   # dies right after its boot reply
+    boot_log = m._relay_boot_log_since
+    m._relay_boot_log_since = lambda offset: ""
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            m.relay_start([])
+        assert calls["spawn"] == 1, f"a relay that bound its port is never respawned: {calls}"
+        assert "relay started" not in out.getvalue(), out.getvalue()
+    finally:
+        m._relay_boot_log_since = boot_log
+        restore()
+
+
+def t_relay_start_leaves_a_relay_whose_pid_file_moved_on():
+    # `relay stop` (or another start) took the PID file while this one was starting.
+    restore, calls = _relay_spawn_stubs([False, False], starting=True)
+    stops, removed = [], []
+    m.sv.stop_pid = lambda pid, **k: stops.append(pid) or True
+    m.sv.read_pid = lambda path: None
+    real_remove = m.os.remove
+    m.os.remove = removed.append
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            m.relay_start([])
+        assert calls["spawn"] == 1 and stops == [] and removed == [], \
+            f"no respawn, no stop, no PID file removal for a relay someone else took over: {calls} {stops} {removed}"
+        assert "racecast relay" in out.getvalue(), out.getvalue()
+    finally:
+        m.os.remove = real_remove
+        restore()
+
+
+def t_a_second_start_names_relay_stop_when_the_boot_wait_runs_out():
+    restore = _stub_relay_signals([100], 100, False, "testing", "testing")
+    m._relay_starting = lambda: True
+    saved = (m.wait_for, m.sv.start_detached)
+    waits = []
+    m.wait_for = lambda probe, wait, **k: waits.append(wait) or probe()
+    m.sv.start_detached = lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned"))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            m.relay_start([])
+        assert waits == [m.RELAY_BOOT_WAIT_S], waits
+        assert "racecast relay stop" in out.getvalue(), out.getvalue()
+    finally:
+        m.wait_for, m.sv.start_detached = saved
+        restore()
+
+
+def t_relay_start_with_stint_restarts_a_starting_relay():
+    restore = _stub_relay_signals([100], 100, False, "testing", "testing")
+    m._relay_starting = lambda: True
+    saved = (m.pt.kill_pid, m._spawn_relay_verified, m._wait_relay_boot)
+    killed, spawned = [], []
+    m.pt.kill_pid = killed.append
+    m._spawn_relay_verified = lambda argv: spawned.append(argv) or None
+    m._wait_relay_boot = lambda pid: (_ for _ in ()).throw(AssertionError("waited"))
+    stubs = [(n, getattr(m, n)) for n in ("_ensure_active_console_secret", "_resolve_producer_name",
+                                          "_write_relay_profile_stamp", "_clear_relay_profile_stamp")]
+    for n, _f in stubs:
+        setattr(m, n, lambda *a: "P")
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            m.relay_start(["--stint", "5"])
+        assert killed == [100] and len(spawned) == 1 and "--stint" in spawned[0], \
+            f"--stint on a starting relay restarts it at that stint: {killed} {spawned}"
+        assert "5" in out.getvalue(), out.getvalue()
+    finally:
+        m.pt.kill_pid, m._spawn_relay_verified, m._wait_relay_boot = saved
+        for n, f in stubs:
+            setattr(m, n, f)
+        restore()
+
+
+def t_restart_resume_ignores_a_non_dict_status():
+    calls, _out = _restart_calls([], True, "starting")
+    assert calls[-1] == ("start", []), f"a status that is not a dict resumes nothing: {calls}"
+
+
+def t_relay_starting_reads_only_the_boot_reply():
+    import email.message
+    def reply(code, body):
+        def get(url, **k):
+            raise m.http_util.HTTPError(url, code, "x", email.message.Message(), io.BytesIO(body))
+        return get
+    old = m.http_util.get_bytes
+    try:
+        for code, body, want in ((503, b'{"starting": true, "schedule": "loading"}', True),
+                                 (503, b'{"error": "busy"}', False), (503, b"<html>", False),
+                                 (500, b'{"starting": true}', False)):
+            m.http_util.get_bytes = reply(code, body)
+            assert m._relay_starting() is want, f"{code} {body!r} -> {want}"
+            assert m._relay_status_probe() is None, f"the status probe answers only a ready relay: {code}"
+        def refused(url, **k):
+            raise OSError("refused")
+        m.http_util.get_bytes = refused
+        assert m._relay_starting() is False
+    finally:
+        m.http_util.get_bytes = old
+
+
+def t_relay_status_data_names_a_starting_relay():
+    d = m.relay_status_data(read_pid=lambda p: 4242, alive=lambda pid: True,
+                            probe=lambda: None, mode=lambda: "live", starting=lambda: True)
+    assert d["http_ok"] is False and d["starting"] is True, d
+    assert "starting" in m._relay_extra_text(d, None), m._relay_extra_text(d, None)
+
+
+def t_relay_start_plan_waits_for_its_own_starting_relay():
+    action, kill, reason = m.relay_start_plan(
+        port_pids=[100], feed_pids=[200], pidfile_pid=100, pidfile_alive=True,
+        running_profile="testing", active_profile="testing", http_ok=False, starting=True)
+    assert (action, kill) == ("starting", []), "a second start never kills a relay that is still starting"
+    action, kill, _ = m.relay_start_plan(
+        port_pids=[100], feed_pids=[], pidfile_pid=None, pidfile_alive=False,
+        running_profile="", active_profile="testing", http_ok=False, starting=True)
+    assert action == "heal" and kill == [100], "a foreign starting holder still heals"
+
+
+def t_relay_start_joins_a_relay_that_is_starting():
+    restore = _stub_relay_signals([100], 100, False, "testing", "testing")
+    m._relay_starting = lambda: True
+    answers = iter([False, True])
+    m._relay_http_ok = lambda: next(answers)
+    saved = (m.wait_for, m.sv.start_detached, m.pt.kill_pid, m.relay_status)
+    spawned, killed = [], []
+    m.relay_status = lambda rest: None
+    m.wait_for = lambda probe, wait, **k: probe() or probe()
+    m.sv.start_detached = lambda *a, **k: spawned.append(a) or 1
+    m.pt.kill_pid = killed.append
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            m.relay_start([])
+        out = buf.getvalue()
+        assert spawned == [] and killed == [], f"no second relay and no kill: {spawned} {killed}"
+        assert "starting" in out and "already running" in out, out
+    finally:
+        m.wait_for, m.sv.start_detached, m.pt.kill_pid, m.relay_status = saved
         restore()
 
 
@@ -3217,7 +3421,9 @@ def t_sync_live_telemetry_record_never_raises():
 def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
     """Stub every signal relay_start_plan reads; returns a restore callable."""
     saved = (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
-             m._running_relay_profile, m._active_profile_name, m._running_relay_run_mode)
+             m._running_relay_profile, m._active_profile_name, m._running_relay_run_mode,
+             m._relay_starting)
+    m._relay_starting = lambda: False
     m._running_relay_run_mode = lambda: "live" if running else ""
     m.pt.pids_on_port = lambda port: list(port_pids) if port == m.RELAY_PORT else []
     m.sv.read_pid = lambda path: pidfile_pid
@@ -3228,7 +3434,8 @@ def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
 
     def restore():
         (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
-         m._running_relay_profile, m._active_profile_name, m._running_relay_run_mode) = saved
+         m._running_relay_profile, m._active_profile_name, m._running_relay_run_mode,
+         m._relay_starting) = saved
     return restore
 
 
@@ -3333,6 +3540,28 @@ def t_relay_already_running_for_active_profile_requires_both():
         finally:
             restore()
         assert got is want, f"{why}: got {got}"
+
+
+def t_event_start_waits_for_a_booting_relay_and_treats_it_as_running():
+    restore = _stub_relay_signals((4242,), 4242, False, "demo", "demo")
+    m._relay_starting = lambda: True
+    saved = (m._wait_relay_boot, m._relay_already_running_for_active_profile)
+    waited = []
+    def boot(pid):
+        waited.append(pid)
+        m._relay_http_ok = lambda: True
+        m._relay_starting = lambda: False
+        return True
+    m._wait_relay_boot = boot
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            assert m._relay_running_after_boot() is True, "a relay that finished starting counts as running"
+        assert waited == [4242] and "starting" in out.getvalue(), (waited, out.getvalue())
+        m._relay_http_ok, m._relay_starting = (lambda: False), (lambda: False)
+        assert m._relay_running_after_boot() is False, "a relay that does not answer is not running"
+    finally:
+        m._wait_relay_boot, m._relay_already_running_for_active_profile = saved
+        restore()
 
 
 def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
