@@ -400,6 +400,14 @@ class Race:
             car.restart_ready, car.retired_exit = False, None
             car.lap_ok, car.pending = False, None
 
+    @property
+    def red_flagged(self):
+        return self._red is not None
+
+    @property
+    def restart_mode(self):
+        return self._restart_mode
+
     def set_restart_mode(self, mode):
         """Override the restart for entries still waiting to resume."""
         self._restart_mode = mode

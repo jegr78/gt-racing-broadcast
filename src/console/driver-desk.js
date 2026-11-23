@@ -64,7 +64,13 @@
     ".dd tr.cls .lap{margin-left:8px;color:var(--muted,#9aa0a6);font-weight:400;font-family:var(--mono,ui-monospace,monospace)}",
     ".dd td.fl{color:#c49bff;font-weight:600}.dd td.pb{color:#4fdc74;font-weight:600}",
     ".dd .lapline{margin:4px 0;font-weight:600;font-family:var(--mono,ui-monospace,monospace)}.dd .lapline:empty{display:none}",
-    ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}"
+    ".dd h3{margin:4px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#9aa0a6)}",
+    // A phone stacks each disconnect event: entry and state, then its controls across the width.
+    "@media (max-width:600px){.dd table.ev,.dd table.ev tbody{display:block}.dd table.ev thead{display:none}",
+    ".dd table.ev tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);",
+    "border-bottom:1px solid var(--edge,#2a2f37)}.dd table.ev td{border-bottom:0}",
+    ".dd table.ev td.act,.dd table.ev td[colspan]{grid-column:1 / -1}",
+    ".dd table.ev td.act .row>*{flex:1 1 0;min-height:44px}}"
   ].join("");
 
   function el(tag, attrs, kids) {
@@ -527,7 +533,7 @@
     var recWarn = el("div", {cls: "msg err", role: "alert", hidden: ""});
     var evTitle = el("h3", {text: "Events (0)"});
     var evBody = el("tbody");
-    var evTable = el("div", {cls: "tbl"}, [el("table", {}, [el("thead", {}, [el("tr", {}, [
+    var evTable = el("div", {cls: "tbl"}, [el("table", {cls: "ev"}, [el("thead", {}, [el("tr", {}, [
       "Entry", "State", ""].map(function (h) { return el("th", {text: h}); }))]),
       evBody])]);
     var soundBox = el("input", {type: "checkbox", "aria-label": "Sound on suspicion"});
@@ -577,7 +583,7 @@
         var at = r.ev.last_packet - parseInt(offset.value, 10);
         window.open(href("/drivers/snapshot?time=" + encodeURIComponent(at.toFixed(1))), "_blank", "noopener");
       });
-      var tr = el("tr", {}, [who, what, el("td", {}, [el("div", {cls: "row"}, [confirm, dismiss]),
+      var tr = el("tr", {}, [who, what, el("td", {cls: "act"}, [el("div", {cls: "row"}, [confirm, dismiss]),
         el("div", {cls: "row", style: "margin-top:4px"}, [offset, showBtn])])]);
       return evRows[id] = {tr: tr, who: who, what: what, confirm: confirm, dismiss: dismiss, ev: ev};
     }

@@ -79,7 +79,10 @@ so the race controls never scroll away:
   schedule), **Note** (note to commentator), **Setup** (track layout, invite and timing
   links, race recording, race timer) and **Troubleshoot** (the relay connection). A dot
   marks an area that needs attention, e.g. `3 waiting` on Drivers or an open disconnect
-  on Race. In qualifying the desk opens **Qualifying** by itself, once per switch.
+  on Race. In qualifying the desk opens **Qualifying** by itself, once per switch, and
+  from there back to **Race** when qualifying ends. On a phone it never leaves the **Live** or
+  **Chat** tab by itself; the dot on **Quali** marks the session. A reload shows the area
+  you last picked, never one the desk opened by itself.
 - **Live column**: a small program preview with **Hide** (hidden, the race controls move
   up), what is on air, and the race controls: the finish mode and lap count, **Final
   lap**, **Finish**, **RED FLAG**, and while the red flag is out the restart mode and

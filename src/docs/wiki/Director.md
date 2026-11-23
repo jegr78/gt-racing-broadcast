@@ -311,7 +311,10 @@ top sit the race controls (finish mode, lap count, **Final lap**, **Finish**, th
 flag hold); below them tabs split the rest the way the desk's areas do: **Race**,
 **Drivers**, **Corrections**, **Qualifying**, **Dashboard** and **Links** (invite and
 timing links, race recording). A dot marks waiting requests, an open disconnect or the
-running qualifying, and qualifying opens its tab by itself once per switch. The
+running qualifying, and qualifying opens its tab by itself once per switch. That
+automatic choice is not remembered: a reload shows the tab you last picked. The
+**Race** entry in the area list also says `relay not answering` or `recording gaps` when the
+desk data is stale or the race recording lost samples. The
 connection line sits under **Troubleshoot**. In short:
 
 - the invite link with **Copy** (on the public Funnel address while Funnel serves the
@@ -324,7 +327,8 @@ connection line sits under **Troubleshoot**. In short:
   [approving drivers](Driver-Telemetry#approving-drivers).
 - the finish mode and lap count, **Final lap** and **Finish**
 - **Hold race (red flag)**, the restart mode and **Restart released**. The panel's own
-  `RED FLAG` button holds the race as well when it raises the cover.
+  `RED FLAG` button holds the race as well when it raises the cover. Over a race already
+  held it keeps the restart mode Race Control chose.
 - the race order with gaps, status, pit stops and corrections; a correction needs a
   reason
 - in endurance, rejoin marks and a change override per team

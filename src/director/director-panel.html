@@ -539,7 +539,6 @@
   body.nav-collapsed .navcollapse{align-self:center}
 
   /* Live column: what acts on air within seconds. */
-  #liveCol{display:flex;flex-direction:column;gap:10px}
   #liveCol>.bus{margin-bottom:0}
   #liveCol .preview .pvbody{grid-template-columns:repeat(3,minmax(0,1fr))}
   #liveCol .pvprog{grid-column:1 / -1}
@@ -585,7 +584,6 @@
   #liveCol #txBar .txdur input{padding:6px}
   #liveCol #gfxReqList{max-height:92px;overflow-y:auto}
   #liveCol #txBar button.k{min-width:0;flex:1 1 0}
-  #handoverCtl{display:flex;flex-direction:column;gap:8px}
   #gfxReqSec{border-color:var(--amber)}
   #gfxReqSec[hidden]{display:none}
   #gfxReqList{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
@@ -695,11 +693,18 @@
     .rail{order:4;position:static;transform:none;width:auto;padding:0;border:0;display:flex;
       flex-direction:column;gap:10px}
     .rail .chatlog{height:240px;flex:0 0 auto}
+    #liveCol .pgm button.k,#overlaySec button.k,#liveCol #txBar button.k,#liveCol #gfxReqList button.k,
+    #liveCol #pvToggle,#liveCol #pgmAudioBtn,.desktabs button{min-height:44px}
     .railsplit{display:none}
     .drawerbtn{display:none}
     .hocards{grid-template-columns:1fr}
     #hoUpcoming .hrow{grid-template-columns:70px minmax(0,1fr) 110px}
     #hoUpcoming .hrow button{grid-column:1 / -1}
+  }
+  /* Phones: overlays and transitions get the full width each. */
+  @media(max-width:599px){
+    #liveCol>#overlaySec,#liveCol>#txBar{grid-column:1 / -1}
+    body:not(.solo) #liveCol #overlaySec .keys{grid-template-columns:repeat(3,minmax(0,1fr))}
   }
 #asset-preview{width:min(940px,94vw);max-height:94vh;padding:0;border:1px solid #334155;border-radius:12px;background:#111827;color:#e5e7eb}
 #asset-preview::backdrop{background:#000b}
@@ -919,19 +924,19 @@
         <section class="bus" id="driverBox"><div class="cap">Race desk</div>
           <div data-desk="live"></div>
           <div class="desktabs" id="deskTabs" role="tablist" aria-label="Race desk">
-            <button type="button" role="tab" data-sub="race">Race<span class="ndot"></span></button>
-            <button type="button" role="tab" data-sub="drivers">Drivers<span class="ndot"></span></button>
-            <button type="button" role="tab" data-sub="corrections">Corrections<span class="ndot"></span></button>
-            <button type="button" role="tab" data-sub="qualifying">Qualifying<span class="ndot"></span></button>
-            <button type="button" role="tab" data-sub="dashboard">Dashboard<span class="ndot"></span></button>
-            <button type="button" role="tab" data-sub="setup">Links<span class="ndot"></span></button>
+            <button type="button" role="tab" id="deskTab-race" aria-controls="deskPane-race" data-sub="race">Race<span class="ndot"></span></button>
+            <button type="button" role="tab" id="deskTab-drivers" aria-controls="deskPane-drivers" data-sub="drivers">Drivers<span class="ndot"></span></button>
+            <button type="button" role="tab" id="deskTab-corrections" aria-controls="deskPane-corrections" data-sub="corrections">Corrections<span class="ndot"></span></button>
+            <button type="button" role="tab" id="deskTab-qualifying" aria-controls="deskPane-qualifying" data-sub="qualifying">Qualifying<span class="ndot"></span></button>
+            <button type="button" role="tab" id="deskTab-dashboard" aria-controls="deskPane-dashboard" data-sub="dashboard">Dashboard<span class="ndot"></span></button>
+            <button type="button" role="tab" id="deskTab-setup" aria-controls="deskPane-setup" data-sub="setup">Links<span class="ndot"></span></button>
           </div>
-          <div class="desksub" data-sub="race" role="tabpanel"><div data-desk="race"></div></div>
-          <div class="desksub" data-sub="drivers" role="tabpanel"><div data-desk="drivers"></div></div>
-          <div class="desksub" data-sub="corrections" role="tabpanel"><div data-desk="corrections"></div></div>
-          <div class="desksub" data-sub="qualifying" role="tabpanel"><div data-desk="qualifying"></div></div>
-          <div class="desksub" data-sub="dashboard" role="tabpanel"><div data-desk="dashboard"></div></div>
-          <div class="desksub" data-sub="setup" role="tabpanel"><div data-desk="setup"></div></div>
+          <div class="desksub" id="deskPane-race" data-sub="race" role="tabpanel" aria-labelledby="deskTab-race"><div data-desk="race"></div></div>
+          <div class="desksub" id="deskPane-drivers" data-sub="drivers" role="tabpanel" aria-labelledby="deskTab-drivers"><div data-desk="drivers"></div></div>
+          <div class="desksub" id="deskPane-corrections" data-sub="corrections" role="tabpanel" aria-labelledby="deskTab-corrections"><div data-desk="corrections"></div></div>
+          <div class="desksub" id="deskPane-qualifying" data-sub="qualifying" role="tabpanel" aria-labelledby="deskTab-qualifying"><div data-desk="qualifying"></div></div>
+          <div class="desksub" id="deskPane-dashboard" data-sub="dashboard" role="tabpanel" aria-labelledby="deskTab-dashboard"><div data-desk="dashboard"></div></div>
+          <div class="desksub" id="deskPane-setup" data-sub="setup" role="tabpanel" aria-labelledby="deskTab-setup"><div data-desk="setup"></div></div>
         </section>
       </div>
       <div class="area" data-area="broadcast">
@@ -1341,14 +1346,13 @@ async function redFlagPress(){
       return;
     }
     redFlagBtn.classList.toggle("on", on);
-    // The cover was already there (auto-cover, Companion, another panel): banner and
-    // race hold below are idempotent and still follow the press.
-    if (d.changed === false) log("RED FLAG: the cover is already " + (on ? "up" : "down"), "warn");
-    else if (!d.ok){
+    if (!d.ok){
       const note = "RED FLAG " + (on ? "raised" : "over") + ", but the Standby Cover was not switched in OBS ("
                    + (d.error || "no answer") + ")";
       log(note, "err"); toast(note);
     }
+    // The cover was already there (auto-cover, Companion, another panel): the banner still follows the press.
+    else if (d.changed === false) log("RED FLAG: the cover is already " + (on ? "up" : "down"), "warn");
     else log("RED FLAG " + (on ? "— cover up" : "over — cover down"));
     setupSet("racecontrol", on ? "Red Flag - Race Suspended" : "");
     // The driver telemetry race holds every entry too (#1114); a release stays a separate step.
@@ -4108,15 +4112,35 @@ pollCueBacks(); setInterval(pollCueBacks, 2000);
 /* Driver telemetry controls (#1114), shared with the Race Control desk: the Race area holds
    its parts behind the same subdivision as the desk's areas (#1267). */
 var DESK_SUBS = ["race", "drivers", "corrections", "qualifying", "dashboard", "setup"], DESK_SUB_KEY = "rc_desk_sub";
-function showDeskSub(name){
+var deskSub = "race";
+// Only the operator's own choice is stored; an automatic one (`auto`) only shows the tab.
+function showDeskSub(name, auto){
   if (!DESK_SUBS.includes(name)) name = "race";
-  document.querySelectorAll("#deskTabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.sub === name)));
+  deskSub = name;
+  document.querySelectorAll("#deskTabs button").forEach(b => {
+    const on = b.dataset.sub === name;
+    b.setAttribute("aria-selected", String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
   document.querySelectorAll(".desksub").forEach(p => { p.hidden = p.dataset.sub !== name; });
-  store(DESK_SUB_KEY, name);
+  if (!auto) store(DESK_SUB_KEY, name);
+}
+function deskTabKey(cur, key, mod){
+  if (mod) return null;
+  const i = DESK_SUBS.indexOf(cur), n = DESK_SUBS.length;
+  return {ArrowRight: DESK_SUBS[(i + 1) % n], ArrowLeft: DESK_SUBS[(i - 1 + n) % n],
+          Home: DESK_SUBS[0], End: DESK_SUBS[n - 1]}[key] || null;
 }
 document.querySelectorAll("#deskTabs button").forEach(b => b.addEventListener("click", () => showDeskSub(b.dataset.sub)));
+document.getElementById("deskTabs").addEventListener("keydown", e => {
+  const sub = deskTabKey(deskSub, e.key, e.altKey || e.ctrlKey || e.metaKey);
+  if (!sub) return;
+  e.preventDefault();
+  showDeskSub(sub);
+  document.getElementById("deskTab-" + sub).focus();
+});
 var deskSubStored = DESK_SUBS.includes(recall(DESK_SUB_KEY));
-showDeskSub(recall(DESK_SUB_KEY));
+showDeskSub(recall(DESK_SUB_KEY), true);
 function deskDot(sub, level){
   const b = document.querySelector(`#deskTabs button[data-sub="${sub}"] .ndot`);
   if (b) b.className = "ndot" + (level ? " " + level : "");
@@ -4133,14 +4157,15 @@ function deskState(st){
   deskDot("race", st.events ? "live" : "");
   deskDot("qualifying", st.mode === "qualifying" ? "ok" : "");
   deskDot("dashboard", st.dashboard ? "ok" : "");
-  setNav("race", st.red ? "live" : st.waiting ? "warn" : "",
-         st.red ? "red flag" : st.waiting ? `${st.waiting} waiting` : st.events ? `${st.events} disconnects open` : "");
+  setNav("race", st.stale || st.red ? "live" : st.waiting || st.gaps ? "warn" : "",
+         st.stale ? "relay not answering" : st.red ? "red flag" : st.waiting ? `${st.waiting} waiting`
+         : st.gaps ? "recording gaps" : st.events ? `${st.events} disconnects open` : "");
   if (st.mode !== deskMode){
     const first = deskMode === null;
     deskMode = st.mode;
     if (deskEditing() || (first && (deskSubStored || st.mode !== "qualifying"))) return;
-    if (st.mode === "qualifying") showDeskSub("qualifying");
-    else if (recall(DESK_SUB_KEY) === "qualifying") showDeskSub("race");
+    if (st.mode === "qualifying") showDeskSub("qualifying", true);
+    else if (deskSub === "qualifying") showDeskSub("race", true);
   }
 }
 (function () {

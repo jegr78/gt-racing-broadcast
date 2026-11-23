@@ -1173,9 +1173,14 @@ class Service:
         return out
 
     def red_flag(self, who, mode=None):
-        mode = _mode(mode) if mode is not None else read_league(self._league)["restart"]
+        """Hold the race. Without `mode` a race already held keeps its restart mode;
+        otherwise the league default applies."""
+        mode = _mode(mode) if mode is not None else None
+        league = read_league(self._league)["restart"]
         with self._lock:
-            self._current().red_flag(self._clock(), mode)
+            race = self._current()
+            mode = mode or (race.restart_mode if race.red_flagged else league)
+            race.red_flag(self._clock(), mode)
             self._log(who, "red_flag", mode=mode)
         return self.standings()
 

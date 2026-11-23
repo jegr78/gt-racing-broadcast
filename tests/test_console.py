@@ -935,6 +935,71 @@ def t_a_parts_status_line_stays_in_view_while_its_area_scrolls():
         f"the answer stays at the top of the scrolled area, not {got['line'] - got['top']} px away: {got}"
 
 
+def _panel_page():
+    page = _src("director", "director-panel.html")
+    for token, value in (("__RC_API_BASE__", ""), ("__RC_VERSION__", "dev"),
+                         ("<!--__EVENT_INFO__-->", _src("console", "event-info.html"))):
+        page = page.replace(token, value)
+    return page
+
+
+def t_disconnect_event_controls_fit_a_phone():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; the event rows are measured with visual acceptance)")
+        return
+    events = [{"id": f"e{i}", "entry": f"Kestrel Sim Racing #{i}", "driver": "Driver 12-1", "state": "suspected",
+               "last_packet": 1_800_000_000 + i} for i in range(3)]
+    race = {"state": "racing", "mode": "race", "entries": [], "classes": [], "red_flag": None}
+
+    def serve(route):
+        path = route.request.url.split("://", 1)[1].split("/", 1)[1].split("?", 1)[0]
+        if path in ("rc", "panel"):
+            return route.fulfill(body=_desk_page() if path == "rc" else _panel_page(), content_type="text/html")
+        if path == "driver-desk.js":
+            return route.fulfill(body=_src("console", "driver-desk.js"), content_type="application/javascript")
+        path = path.removeprefix("race-control/")
+        if path == "drivers/race/recording":
+            return route.fulfill(body=json.dumps({"running": True, "started_at": 1_800_000_000, "started_by": "x",
+                                                  "events": events}), content_type="application/json")
+        if path == "drivers/race":
+            return route.fulfill(body=json.dumps(race), content_type="application/json")
+        return route.fulfill(body="{}", content_type="application/json")
+    got = {}
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return
+        try:
+          for page, area in (("rc", '#crewTabs button[data-id="race"]'), ("panel", '.navbtn[data-area="race"]')):
+            tab = browser.new_page(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+            tab.route("http://desk.test/**", serve)
+            tab.goto("http://desk.test/" + page)
+            tab.click(area)
+            tab.locator('.dd button:has-text("Confirm DC")').first.wait_for()
+            got[page] = tab.evaluate("""() => [...document.querySelectorAll('.dd tbody button, .dd tbody select')]
+              .filter(e => e.offsetParent && e.closest('tr').querySelector('button'))
+              .filter(e => /Confirm DC|Dismiss|Show standings|before/.test(e.textContent))
+              .map(e => { const r = e.getBoundingClientRect(), c = e.closest('.tbl').getBoundingClientRect();
+                          return [e.textContent.slice(0, 14), Math.round(r.left), Math.round(r.right),
+                                  Math.round(r.height), Math.round(c.left), Math.round(c.right)]; })""")
+            tab.close()
+        finally:
+            browser.close()
+    for page, rows in got.items():
+        assert len(rows) == 12, f"{page}: each event shows Confirm DC, Dismiss, the offset and Show standings: {rows}"
+        clipped = [g for g in rows if g[1] < g[4] or g[2] > g[5] or g[2] > 390]
+        assert not clipped, f"{page}: no event control sticks out of its table on a 390 px phone: {clipped}"
+        narrow = [g for g in rows if g[0].startswith(("Confirm DC", "5 s before")) and g[1] - g[4] > 24
+                  or g[0].startswith("Show standings") and g[5] - g[2] > 24]
+        assert not narrow, f"{page}: an event's controls span the table's width on a phone: {narrow}"
+        small = [g for g in rows if g[3] < 44]
+        assert not small, f"{page}: every event control is a 44 px touch target on a phone: {small}"
+
+
 def t_qualifying_preselects_its_area_on_a_switch_only():
     path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
     got = _js_fn(path, "followMode", """(function () {
@@ -946,12 +1011,14 @@ def t_qualifying_preselects_its_area_on_a_switch_only():
       });
       return {shown: shown, area: deskArea};
     })()""", prelude="var lastMode = null, deskArea = 'race', shown = [], typing = false, storedArea = true;"
+                     "function phoneTab() { return null; }"
                      "function editing() { return typing; }"
                      "function showArea(n) { shown.push(n); deskArea = n; }\n")
     if got is None:
         return
     first = [_js_fn(path, "followMode", "(function () { followMode('qualifying'); return shown; })()",
                     prelude=f"var lastMode = null, deskArea = 'race', shown = [], storedArea = {stored};"
+                            "function phoneTab() { return null; }"
                             "function editing() { return false; }"
                             "function showArea(n) { shown.push(n); deskArea = n; }\n")
              for stored in ("false", "true")]
@@ -962,6 +1029,116 @@ def t_qualifying_preselects_its_area_on_a_switch_only():
         f"Qualifying: {got}"
     assert "a.matches('input, select, textarea')" in _src("racecontrol", "race-control.html") and \
         "document.querySelector('dialog[open]')" in _src("racecontrol", "race-control.html")
+
+
+def _desk_tabs_run(phone, saved, body):
+    """Runs the crew frame's tab bar and the desk's area code under node with a stub DOM."""
+    frame = _src("console", "crew-frame.html")
+    frame_js = frame[frame.index("<script>") + 8:frame.index("</script>")]
+    path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
+    page = _src("racecontrol", "race-control.html")
+    tabs = re.search(r"data-tabs='([^']*)'", page).group(1)
+    wrap = page[page.index("<!--__CREW_FRAME__-->"):]
+    wrap = wrap[wrap.index("(function () {"):wrap.index("})();") + 5]
+    areas = re.search(r"const DESK_AREAS = (\[[^\]]*\]);", page).group(1).replace("'", '"')
+    dom = r"""
+var stored = %s, writes = [], buttons = [], areaEls = [], scrolled = 0;
+function el(extra) {
+  var e = {attrs: {}, cls: {}, handlers: {}, offsetParent: null, textContent: "",
+           setAttribute: function (k, v) { this.attrs[k] = String(v); },
+           getAttribute: function (k) { return k in this.attrs ? this.attrs[k] : null; },
+           addEventListener: function (t, f) { this.handlers[t] = f; },
+           scrollIntoView: function () {},
+           classList: {toggle: function (c, on) { e.cls[c] = !!on; }, add: function (c) { e.cls[c] = true; },
+                       contains: function (c) { return !!e.cls[c]; }}};
+  return Object.assign(e, extra || {});
+}
+var nav = el({appendChild: function (b) { buttons.push(b); },
+              querySelectorAll: function () { return buttons; }});
+nav.attrs["data-tabs"] = %s;
+DESK_AREAS_.forEach(function (a) { areaEls.push(el({dataset: {area: a}})); });
+var body = el();
+var document = {
+  body: body, activeElement: null,
+  getElementById: function (id) { return id === "crewTabs" ? nav : null; },
+  createElement: function () { return el(); },
+  querySelectorAll: function (sel) { return sel === ".area" ? areaEls : []; },
+  querySelector: function (sel) {
+    var m = /data-id="([a-z]+)"/.exec(sel);
+    if (m) return buttons.filter(function (b) { return b.attrs["data-id"] === m[1]; })[0] || null;
+    if (sel.indexOf('aria-selected="true"') >= 0)
+      return buttons.filter(function (b) { return b.attrs["aria-selected"] === "true"; })[0] || null;
+    return null;
+  }
+};
+var window = globalThis;
+window.matchMedia = function () { return {matches: %s}; };
+window.scrollTo = function () { scrolled++; };
+var location = {pathname: "/console/race-control"};
+var localStorage = {getItem: function (k) { return stored; },
+                    setItem: function (k, v) { writes.push(v); stored = v; }};
+function tap(id) { buttons.filter(function (b) { return b.attrs["data-id"] === id; })[0].handlers.click(); }
+function tab() { var b = document.querySelector('#crewTabs button[aria-selected="true"]'); return b && b.attrs["data-id"]; }
+function area() { return areaEls.filter(function (a) { return a.cls.active; }).map(function (a) { return a.dataset.area; }).join(); }
+""" % (json.dumps(saved), json.dumps(tabs), "true" if phone else "false")
+    funcs = "\n".join(tower._function(path, n) for n in ("applyArea", "showArea", "editing", "phoneTab", "followMode"))
+    return tower._run("var DESK_AREAS_ = " + areas + ";" + dom + frame_js + "\nconst DESK_AREAS = DESK_AREAS_;"
+                      "\nlet deskArea = 'race', lastMode = null, storedArea = false;\n" + funcs + "\n" + wrap
+                      + "\n;console.log(JSON.stringify((function () {" + body + "})()));")
+
+
+def t_a_phone_on_live_or_chat_never_leaves_it_by_itself():
+    step = "followMode(m); return [tab(), area(), writes.slice()];"
+    got = _desk_tabs_run(True, "live", """
+      var out = [[tab(), writes.slice()]];
+      ["qualifying", "race"].forEach(function (m) { out.push((function () { """ + step + """ })()); });
+      return out;""")
+    if got is None:
+        return
+    assert got == [["live", []], ["live", "race", []], ["live", "race", []]], \
+        f"a phone kept on Live stays there when qualifying starts and ends, and stores nothing: {got}"
+    back = _desk_tabs_run(True, None, """
+      followMode("race"); followMode("qualifying"); tap("qualifying"); tap("chat");
+      followMode("race");
+      return [tab(), writes];""")
+    assert back == ["chat", ["qualifying", "chat"]], \
+        f"after Quali the phone stays on Chat when the race resumes, only taps are stored: {back}"
+
+
+def t_an_automatic_area_is_shown_but_never_stored():
+    got = _desk_tabs_run(False, None, """
+      var out = [writes.slice()];
+      followMode("qualifying"); out.push([area(), writes.slice()]);
+      followMode("race"); out.push([area(), writes.slice()]);
+      showArea("drivers"); out.push([area(), writes.slice()]);
+      return out;""")
+    if got is None:
+        return
+    assert got == [[], ["qualifying", []], ["race", []], ["drivers", ["drivers"]]], \
+        f"a first load in qualifying opens it and the race brings Race back, storing neither; a click stores: {got}"
+
+
+def t_the_phone_tab_bar_marks_the_running_qualifying():
+    path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
+    got = _js_fn(path, "setDot,deskDots", """(function () {
+      deskDots({waiting: 0, events: 0, mode: "qualifying", dashboard: false, stale: false, gaps: false});
+      var on = {};
+      Object.keys(tabs).forEach(function (k) { on[k] = Object.keys(tabs[k].cls).filter(function (c) { return tabs[k].cls[c]; }); });
+      return on;
+    })()""", prelude="""var tabs = {};
+function stub() { var cls = {}; return {cls: cls, textContent: "", firstChild: {textContent: "X"}, className: "",
+  setAttribute: function () {}, querySelector: function () { return this; },
+  classList: {toggle: function (c, v) { cls[c] = !!v; }}}; }
+var document = {querySelector: function (sel) {
+  var m = /data-(area|id)="([a-z]+)"/.exec(sel);
+  if (m[1] === "area") return stub();
+  return tabs[m[2]] || (tabs[m[2]] = stub());
+}};
+""")
+    if got is None:
+        return
+    assert got["qualifying"] == ["dot-ok"], f"the Quali tab carries the session's dot on a phone: {got}"
+    assert got["trouble"] == [] and got["drivers"] == [], f"no dot where nothing is going on: {got}"
 
 
 def t_a_failed_poll_keeps_the_last_known_mode():
