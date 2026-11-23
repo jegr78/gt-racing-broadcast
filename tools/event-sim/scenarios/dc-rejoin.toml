@@ -1,0 +1,277 @@
+# Disconnect and rejoin: three stints in three lobbies, one commentator each. In stint 1
+# Cedar Motorsport #33's sender stops on track: the desk shows it quiet ("no_data"), Race
+# Control confirms the DC on its events list ("dc" on every screen) and marks the team for
+# a rejoin. The others change drivers at the stint change; #33's stint 2 driver joins the
+# new lobby late, leaves the box 15 s after the field and counts again from the leader's
+# distance, with the late start as its deficit.
+description = "A driver disconnects in stint 1; Race Control confirms the DC and marks the rejoin for stint 2."
+max_minutes = 14
+
+[event]
+stints = 3
+track = "6e378b"
+track_length_m = 1200
+cars = 4
+seed = 7
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 3"
+channel = "comms3"
+scheduled = true
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = false, finish_mode = "laps", laps = 2 }
+expect = ["race.settings.lap_count == 2"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'", "relay.up"]
+
+[[step]]
+id = "arm_a"
+at = "after:start_event"
+role = "director"
+do = "arm_feed"
+args = { feed = "A" }
+
+[[step]]
+id = "stint1_on_air"
+at = "after:arm_a"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms1' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "cockpit2"
+at = "after:stint1_on_air"
+role = "commentator:Comms 2"
+do = "open"
+expect = ["not page('commentator:Comms 2').on_air"]
+timeout = "15s"
+
+[[step]]
+id = "register"
+at = "after:cockpit2"
+role = "drivers"
+do = "register"
+expect = ["result('register').registered == 12"]
+
+[[step]]
+id = "approve_drivers"
+at = "after:register"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 12"]
+
+[[step]]
+id = "green"
+at = "after:approve_drivers"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'"]
+timeout = "60s"
+
+[[step]]
+id = "lap2"
+at = "after:green"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "3m"
+
+[[step]]
+id = "drop"
+at = "after:lap2"
+role = "drivers"
+do = "drop"
+args = { entry = "Cedar Motorsport #33" }
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'no_data'"]
+timeout = "20s"
+
+[[step]]
+id = "viewer_open"
+at = "after:drop"
+role = "viewer"
+do = "read"
+args = { cars = 4 }
+
+[[step]]
+id = "confirm_dc"
+at = "after:viewer_open"
+role = "race_control"
+do = "confirm_dc"
+args = { entry = "Cedar Motorsport #33" }
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'dc'"]
+timeout = "15s"
+shot = "dc-confirmed-desk"
+
+[[step]]
+id = "mark_rejoin"
+at = "after:confirm_dc"
+role = "race_control"
+do = "rejoin"
+args = { entry = "Cedar Motorsport #33" }
+expect = ["row(race.entries, 'entry', 'Cedar Motorsport #33').rejoin"]
+timeout = "10s"
+
+[[step]]
+id = "box1"
+at = "after:mark_rejoin"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 3"]
+timeout = "90s"
+
+[[step]]
+id = "arm_b"
+at = "after:box1"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next2"
+at = "after:arm_b"
+role = "director"
+do = "next"
+expect = ["'comms2' in obs.program_channels", "'comms1' not in obs.program_channels",
+          "page('commentator:Comms 2').on_air"]
+timeout = "90s"
+
+[[step]]
+id = "lobby2"
+at = "after:next2"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "release2"
+at = "after:lobby2+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 3"]
+timeout = "60s"
+
+[[step]]
+id = "rejoin"
+at = "after:release2"
+role = "drivers"
+do = "rejoin"
+args = { entry = "Cedar Motorsport #33", seconds = 15 }
+
+[[step]]
+id = "rejoined"
+at = "after:rejoin"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["page('drivers').driving == 4",
+          "row(race.entries, 'entry', 'Cedar Motorsport #33').status == 'racing'",
+          "row(race.entries, 'entry', 'Cedar Motorsport #33').driver == 'Driver 33-2'",
+          "row(race.entries, 'entry', 'Cedar Motorsport #33').gap_time_s >= 15",
+          "pluck(race.entries, 'entry')[3] == 'Cedar Motorsport #33'"]
+timeout = "60s"
+shot = { name = "dc-rejoined-desk", role = "race_control" }
+
+[[step]]
+id = "stint2_lap"
+at = "after:rejoined+15s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'",
+          "row(race.entries, 'entry', 'Apex Works #11').pit_stops == 1",
+          "len(result('stint2_lap').entries) == 4"]
+
+[[step]]
+id = "box2"
+at = "after:stint2_lap"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 4"]
+timeout = "90s"
+
+[[step]]
+id = "arm3"
+at = "after:box2"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next3"
+at = "after:arm3"
+role = "director"
+do = "next"
+expect = ["'comms3' in obs.program_channels", "'comms2' not in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "lobby3"
+at = "after:next3"
+role = "drivers"
+do = "lobby"
+args = { stint = 3 }
+
+[[step]]
+id = "release3"
+at = "after:lobby3+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 4"]
+timeout = "60s"
+
+[[step]]
+id = "finished"
+at = "after:release3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'finished'", "row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'"]
+timeout = "3m"
+
+[[step]]
+id = "chequered"
+at = "after:finished"
+role = "drivers"
+do = "stop"
+
+[[step]]
+id = "stop_event"
+at = "after:chequered"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"

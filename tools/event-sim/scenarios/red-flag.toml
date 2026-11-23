@@ -1,0 +1,307 @@
+# Red flag: three stints in three lobbies, one commentator each. In stint 2 Race Control
+# raises the full RED FLAG on its desk: the Standby Cover hides the feed, the HUD banner
+# reads the red flag and the race freezes. The cars meet in a restart lobby in the box,
+# Race Control releases the restart (keep gaps) and the cars leave in the frozen order,
+# each about its frozen gap behind the leader. Stint 3 then runs to the finish.
+description = "Red flag in stint 2, restart lobby, keep-gaps release: order and gaps kept."
+max_minutes = 14
+
+[event]
+stints = 3
+track = "6e378b"
+track_length_m = 1200
+cars = 4
+seed = 7
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 3"
+channel = "comms3"
+scheduled = true
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = false, finish_mode = "laps", laps = 2 }
+expect = ["race.settings.lap_count == 2"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'", "relay.up"]
+
+[[step]]
+id = "arm_a"
+at = "after:start_event"
+role = "director"
+do = "arm_feed"
+args = { feed = "A" }
+
+[[step]]
+id = "stint1_on_air"
+at = "after:arm_a"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms1' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "cockpit2"
+at = "after:stint1_on_air"
+role = "commentator:Comms 2"
+do = "open"
+expect = ["not page('commentator:Comms 2').on_air"]
+timeout = "15s"
+
+[[step]]
+id = "register"
+at = "after:cockpit2"
+role = "drivers"
+do = "register"
+expect = ["result('register').registered == 12"]
+
+[[step]]
+id = "approve_drivers"
+at = "after:register"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 12"]
+
+[[step]]
+id = "green"
+at = "after:approve_drivers"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'"]
+timeout = "60s"
+
+[[step]]
+id = "lap2"
+at = "after:green"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "3m"
+
+[[step]]
+id = "box1"
+at = "after:lap2"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 4"]
+timeout = "90s"
+
+[[step]]
+id = "arm_b"
+at = "after:box1"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next2"
+at = "after:arm_b"
+role = "director"
+do = "next"
+expect = ["'comms2' in obs.program_channels", "'comms1' not in obs.program_channels",
+          "page('commentator:Comms 2').on_air"]
+timeout = "90s"
+
+[[step]]
+id = "lobby2"
+at = "after:next2"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "release2"
+at = "after:lobby2+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 4"]
+timeout = "60s"
+
+[[step]]
+id = "stint2_lap"
+at = "after:release2+30s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'",
+          "row(race.entries, 'entry', 'Apex Works #11').pit_stops == 1",
+          "len(result('stint2_lap').entries) == 4"]
+
+# Mid-stint, once every car of the new lobby has a gap.
+[[step]]
+id = "stint2_gaps"
+at = "after:stint2_lap"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 5", "pluck(race.entries, 'gap_s')[3] > 0"]
+timeout = "3m"
+
+# The race right before the flag: its order and gaps are what the keep restart keeps.
+[[step]]
+id = "before_red"
+at = "after:stint2_gaps"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["pluck(result('before_red').entries, 'gap_s')[3] > 0"]
+
+[[step]]
+id = "red_flag"
+at = "after:before_red"
+role = "race_control"
+do = "red_flag"
+expect = ["result('red_flag').status == 'RED FLAG: banner, cover and race held'",
+          "race.red_flag.mode == 'keep'",
+          "relay.get('/setup/data').fields.racecontrol == 'Red Flag - Race Suspended'",
+          "'comms2' not in obs.program_channels"]
+timeout = "20s"
+
+# The race as it froze: the order of right before the flag, no gaps while held.
+[[step]]
+id = "frozen"
+at = "after:red_flag+3s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["result('frozen').red_flag",
+          "pluck(result('frozen').entries, 'entry') == pluck(result('before_red').entries, 'entry')"]
+
+[[step]]
+id = "to_box"
+at = "after:frozen"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 4"]
+timeout = "90s"
+shot = { name = "restart-lobby", role = "race_control" }
+
+[[step]]
+id = "restart_lobby"
+at = "after:to_box"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "restart_released"
+at = "after:restart_lobby+3s"
+role = "race_control"
+do = "release"
+expect = ["not race.red_flag", "race.state == 'racing'",
+          "relay.get('/setup/data').fields.racecontrol != 'Red Flag - Race Suspended'"]
+timeout = "15s"
+
+# Each car leaves the restart box its gap of before the flag after the leader, as a keep
+# restart asks of the drivers.
+[[step]]
+id = "leave_box"
+at = "after:restart_released"
+role = "drivers"
+do = "release"
+args = { gaps = "${before_red.entries}" }
+expect = ["page('drivers').driving == 4", "'comms2' in obs.program_channels"]
+timeout = "90s"
+
+# Each car came out of the box its frozen gap after the leader: same order, gaps within 1 s.
+[[step]]
+id = "kept"
+at = "after:leave_box+10s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["pluck(race.entries, 'entry') == pluck(result('frozen').entries, 'entry')",
+          "drift(result('before_red').entries, race.entries, 'gap_s') <= 1"]
+shot = { name = "restart-released", role = "race_control" }
+
+[[step]]
+id = "box2"
+at = "after:kept"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 4"]
+timeout = "90s"
+
+[[step]]
+id = "arm3"
+at = "after:box2"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next3"
+at = "after:arm3"
+role = "director"
+do = "next"
+expect = ["'comms3' in obs.program_channels", "'comms2' not in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "lobby3"
+at = "after:next3"
+role = "drivers"
+do = "lobby"
+args = { stint = 3 }
+
+[[step]]
+id = "release3"
+at = "after:lobby3+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 4"]
+timeout = "60s"
+
+[[step]]
+id = "finished"
+at = "after:release3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'finished'", "row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'"]
+timeout = "3m"
+
+[[step]]
+id = "chequered"
+at = "after:finished"
+role = "drivers"
+do = "stop"
+
+[[step]]
+id = "stop_event"
+at = "after:chequered"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"

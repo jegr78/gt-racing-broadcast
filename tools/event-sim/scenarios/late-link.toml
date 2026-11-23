@@ -1,0 +1,257 @@
+# Late stream link: three stints in three lobbies, one commentator each. Comms 2 has no
+# link in the Schedule when the event starts. During stint 1 Comms 2 submits it in the
+# cockpit: it waits as pending, the Schedule row stays empty and the director's next
+# handover reads no link. The director approves it, the row gets the link, Feed B arms
+# with it, and at the stint change the program shows Comms 2's picture, not Comms 1's.
+description = "Comms 2 submits the stream link during stint 1; approval puts it on Feed B at the change."
+max_minutes = 14
+
+[event]
+stints = 3
+track = "6e378b"
+track_length_m = 1200
+cars = 4
+seed = 7
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+
+[[event.commentators]]
+name = "Comms 3"
+channel = "comms3"
+scheduled = true
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = false, finish_mode = "laps", laps = 2 }
+expect = ["race.settings.lap_count == 2"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'", "relay.up"]
+
+[[step]]
+id = "arm_a"
+at = "after:start_event"
+role = "director"
+do = "arm_feed"
+args = { feed = "A" }
+
+[[step]]
+id = "stint1_on_air"
+at = "after:arm_a"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms1' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "cockpit2"
+at = "after:stint1_on_air"
+role = "commentator:Comms 2"
+do = "open"
+expect = ["not page('commentator:Comms 2').on_air"]
+timeout = "15s"
+
+[[step]]
+id = "register"
+at = "after:cockpit2"
+role = "drivers"
+do = "register"
+expect = ["result('register').registered == 12"]
+
+[[step]]
+id = "approve_drivers"
+at = "after:register"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 12"]
+
+[[step]]
+id = "green"
+at = "after:approve_drivers"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'"]
+timeout = "60s"
+
+[[step]]
+id = "lap2"
+at = "after:green"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "3m"
+
+[[step]]
+id = "no_link_yet"
+at = "after:lap2"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["sheet.schedule[1].url == ''", "not result('no_link_yet').handover_next.link"]
+
+[[step]]
+id = "submit"
+at = "after:no_link_yet"
+role = "commentator:Comms 2"
+do = "submit_link"
+args = { url = "sim://comms2", stint = 2 }
+expect = ["webhook.count('submission') == 1", "page('commentator:Comms 2').pending != ''"]
+timeout = "15s"
+
+# Pending is not published: the row and the handover still have no link.
+[[step]]
+id = "pending"
+at = "after:submit+5s"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["sheet.schedule[1].url == ''", "sheet.write_count('schedule') == 0",
+          "not result('pending').handover_next.link"]
+
+[[step]]
+id = "approve"
+at = "after:pending"
+role = "director"
+do = "approve_link"
+args = { stint = 2 }
+expect = ["sheet.write_count('schedule') == 1", "sheet.schedule[1].url == 'sim://comms2'",
+          "webhook.count('stream link approved') == 1", "relay.status.handover_next.link",
+          "page('commentator:Comms 2').pending == ''"]
+timeout = "40s"
+
+[[step]]
+id = "box1"
+at = "after:approve"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 4"]
+timeout = "90s"
+
+[[step]]
+id = "arm_b"
+at = "after:box1"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next2"
+at = "after:arm_b"
+role = "director"
+do = "next"
+expect = ["'comms2' in obs.program_channels", "'comms1' not in obs.program_channels",
+          "page('commentator:Comms 2').on_air"]
+timeout = "90s"
+
+[[step]]
+id = "lobby2"
+at = "after:next2"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "release2"
+at = "after:lobby2+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 4"]
+timeout = "60s"
+
+[[step]]
+id = "stint2_lap"
+at = "after:release2+30s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'",
+          "row(race.entries, 'entry', 'Apex Works #11').pit_stops == 1",
+          "len(result('stint2_lap').entries) == 4"]
+
+[[step]]
+id = "box2"
+at = "after:stint2_lap"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 4"]
+timeout = "90s"
+
+[[step]]
+id = "arm3"
+at = "after:box2"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next3"
+at = "after:arm3"
+role = "director"
+do = "next"
+expect = ["'comms3' in obs.program_channels", "'comms2' not in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "lobby3"
+at = "after:next3"
+role = "drivers"
+do = "lobby"
+args = { stint = 3 }
+
+[[step]]
+id = "release3"
+at = "after:lobby3+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 4"]
+timeout = "60s"
+
+[[step]]
+id = "finished"
+at = "after:release3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'finished'", "row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'"]
+timeout = "3m"
+
+[[step]]
+id = "chequered"
+at = "after:finished"
+role = "drivers"
+do = "stop"
+
+[[step]]
+id = "stop_event"
+at = "after:chequered"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"

@@ -1,0 +1,260 @@
+# Multiclass: three stints in three lobbies, one commentator each, six cars in two classes
+# (Hypercar and GT3, in turn down the grid). The race keeps one overall order; position,
+# gap and lap count also count per class. The GT3 leader runs P2 overall but P1 in its
+# class with no class gap; the public timing lists both classes. In the final lobby Race
+# Control sets the GT3 lap count on its desk, and the race finishes on the overall count.
+description = "Hypercar and GT3 in one lobby: class positions, class gaps and a GT3 lap count."
+max_minutes = 15
+
+[event]
+stints = 3
+track = "6e378b"
+track_length_m = 1200
+cars = 6
+classes = ["Hypercar", "GT3"]
+seed = 7
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 3"
+channel = "comms3"
+scheduled = true
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = false, finish_mode = "laps", laps = 2 }
+expect = ["race.settings.lap_count == 2"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'", "relay.up"]
+
+[[step]]
+id = "arm_a"
+at = "after:start_event"
+role = "director"
+do = "arm_feed"
+args = { feed = "A" }
+
+[[step]]
+id = "stint1_on_air"
+at = "after:arm_a"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms1' in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "cockpit2"
+at = "after:stint1_on_air"
+role = "commentator:Comms 2"
+do = "open"
+expect = ["not page('commentator:Comms 2').on_air"]
+timeout = "15s"
+
+[[step]]
+id = "register"
+at = "after:cockpit2"
+role = "drivers"
+do = "register"
+expect = ["result('register').registered == 18"]
+
+[[step]]
+id = "approve_drivers"
+at = "after:register"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 18"]
+
+[[step]]
+id = "green"
+at = "after:approve_drivers"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'"]
+timeout = "60s"
+
+[[step]]
+id = "lap2"
+at = "after:green"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "3m"
+
+# The GT3 leader: second on the road, first in its class.
+[[step]]
+id = "classes"
+at = "after:lap2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.classes == ['Hypercar', 'GT3']",
+          "row(race.entries, 'entry', 'Apex Works #11').class_pos == 1",
+          "pluck(race.entries, 'entry')[1] == 'Blue Harbor Racing #22'",
+          "row(race.entries, 'entry', 'Blue Harbor Racing #22')['class'] == 'GT3'",
+          "row(race.entries, 'entry', 'Blue Harbor Racing #22').class_pos == 1",
+          "row(race.entries, 'entry', 'Blue Harbor Racing #22').class_gap_s == 0",
+          "row(race.entries, 'entry', 'Blue Harbor Racing #22').gap_s > 0",
+          "row(race.entries, 'entry', 'Delta Sim Team #44').class_pos == 2",
+          "row(race.entries, 'entry', 'Delta Sim Team #44').class_gap_s > 0"]
+
+[[step]]
+id = "timing"
+at = "after:classes"
+role = "viewer"
+do = "read"
+args = { cars = 6 }
+expect = ["page('viewer').cars >= 6"]
+timeout = "20s"
+shot = "classes-public-timing"
+
+[[step]]
+id = "box1"
+at = "after:timing"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 6"]
+timeout = "90s"
+
+[[step]]
+id = "arm_b"
+at = "after:box1"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next2"
+at = "after:arm_b"
+role = "director"
+do = "next"
+expect = ["'comms2' in obs.program_channels", "'comms1' not in obs.program_channels",
+          "page('commentator:Comms 2').on_air"]
+timeout = "90s"
+
+[[step]]
+id = "lobby2"
+at = "after:next2"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "release2"
+at = "after:lobby2+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 6"]
+timeout = "60s"
+
+[[step]]
+id = "stint2_lap"
+at = "after:release2+30s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'",
+          "row(race.entries, 'entry', 'Apex Works #11').pit_stops == 1",
+          "len(result('stint2_lap').entries) == 6"]
+
+[[step]]
+id = "box2"
+at = "after:stint2_lap"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 6"]
+timeout = "90s"
+
+[[step]]
+id = "arm3"
+at = "after:box2"
+role = "director"
+do = "arm"
+
+[[step]]
+id = "next3"
+at = "after:arm3"
+role = "director"
+do = "next"
+expect = ["'comms3' in obs.program_channels", "'comms2' not in obs.program_channels"]
+timeout = "90s"
+
+[[step]]
+id = "lobby3"
+at = "after:next3"
+role = "drivers"
+do = "lobby"
+args = { stint = 3 }
+
+[[step]]
+id = "release3"
+at = "after:lobby3+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 6"]
+timeout = "60s"
+
+[[step]]
+id = "gt3_laps"
+at = "after:release3"
+role = "race_control"
+do = "class_laps"
+args = { class = "GT3", laps = 1 }
+expect = ["race.class_laps.gt3 == 1"]
+timeout = "10s"
+shot = "classes-desk"
+
+[[step]]
+id = "finished"
+at = "after:gt3_laps"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'finished'", "row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'",
+          "row(race.entries, 'entry', 'Blue Harbor Racing #22').class_pos == 1",
+          "row(race.entries, 'entry', 'Apex Works #11').class_pos == 1"]
+timeout = "3m"
+
+[[step]]
+id = "chequered"
+at = "after:finished"
+role = "drivers"
+do = "stop"
+
+[[step]]
+id = "stop_event"
+at = "after:chequered"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"

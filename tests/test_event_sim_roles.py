@@ -1654,6 +1654,30 @@ def t_the_smoke_scenario_uses_every_party_once():
     assert loaded.steps[-1].do == "stop_event", "Stop event ends the relay, so it is the last step"
 
 
+EVENT_SCENARIOS = ("quick", "multiclass", "late-link", "dc-rejoin", "relay-crash", "red-flag")
+
+
+def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program():
+    for name in EVENT_SCENARIOS:
+        path = os.path.join(SIM, "scenarios", name + ".toml")
+        loaded = scenario.load(path, REG)
+        assert loaded.event.get("stints") == 3, f"{name}: three stints, each its own lobby"
+        stints = sorted(c.stint for c in loaded.commentators)
+        assert stints == [1, 2, 3], f"{name}: one commentator per stint, not {stints}"
+        lobbies = [s.args.get("stint") for s in loaded.steps if s.role == "drivers" and s.do == "lobby"]
+        assert {2, 3} <= set(lobbies), f"{name}: the drivers change into the lobbies of stints 2 and 3: {lobbies}"
+        checks = " ".join(e for s in loaded.steps for e in s.expect)
+        for c in loaded.commentators:
+            assert f"'{c.channel}' in obs.program_channels" in checks, \
+                f"{name}: no check that program shows {c.name}'s picture"
+        with open(path, "rb") as fh:
+            raw = tomllib.load(fh)
+        free = [s.get("id") for s in raw["step"] if s["role"].split(":")[0] not in ("api", "obs", "stream", "relay")
+                and not str(s.get("at", "")).startswith("after:")]
+        assert free == [], f"{name}: without a browser these steps would not be skipped with their chain: {free}"
+        assert loaded.steps[-1].do == "stop_event", f"{name}: Stop event ends the relay, so it is the last step"
+        assert all(s.expect for s in loaded.steps if s.role == "api"), f"{name}: every probe step asserts something"
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
