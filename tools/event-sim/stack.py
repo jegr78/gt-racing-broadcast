@@ -50,6 +50,7 @@ LOG_TAIL = 4000
 PART_KEY_REF = "sim-part-{}"     # a Script Property name; its value is made up per run
 RACE_CONTROL = ("GREEN", "Red Flag - Race Suspended")    # the second is the RED FLAG banner
 EVENT_FILES = {"invite": "driver-invite.json", "timing": "timing-link.json"}
+MAX_TRACK_M = 30000             # above the longest real circuit (about 25 km)
 KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)     # SIGTERM is TerminateProcess on Windows
 
 
@@ -61,7 +62,7 @@ def _any_port():
 
 def lifetime(scn):
     """Seconds the services and the containment unit may live: the run plus a margin."""
-    return e2e_safety.lifetime(int(scn.run_seconds) + TEARDOWN_MARGIN_S)
+    return e2e_safety.lifetime(int(scn.run_seconds) + TEARDOWN_MARGIN_S, long=True)
 
 
 def port_map(feeds, control):
@@ -169,7 +170,10 @@ def placeholder_png():
 def event_roster(event):
     """The team labels of `[event] cars` (none without it)."""
     cars = event.get("cars")
-    return drive.roster(cars) if cars is not None else []
+    try:
+        return drive.roster(cars) if cars is not None else []
+    except ValueError as exc:
+        raise ValueError(f"event.{exc}") from None
 
 
 def event_classes(event, teams):
@@ -193,12 +197,16 @@ def event_parts(event):
 
 def event_track(event):
     """(layout id, lap length in metres) of `[event] track`, or None."""
+    length = event.get("track_length_m", drive.DEFAULT_TRACK_M)
+    # The range test also refuses nan and inf.
+    if not isinstance(length, (int, float)) or isinstance(length, bool) or not drive.MIN_LENGTH_M <= length <= MAX_TRACK_M:
+        raise ValueError(f"event.track_length_m is a lap of {drive.MIN_LENGTH_M:.0f}-{MAX_TRACK_M} m, not {length!r}")
     track = event.get("track")
     if track is None:
         return None
     if not isinstance(track, str) or not re.fullmatch(r"[0-9a-f]{6}", track):
         raise ValueError(f"event.track is a GT7 layout id (six hex digits), not {track!r}")
-    return track, float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
+    return track, float(length)
 
 
 def child_env(base, extra):

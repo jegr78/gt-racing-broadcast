@@ -176,6 +176,46 @@ def t_scenario_checks_the_event_and_its_tabs():
     _refused([{"role": "rec", "do": "go", "expect": ["box.value == " + "1" * 500]}], "longer than")
 
 
+def t_scenario_checks_the_event_keys_and_values_at_load():
+    go = [{"role": "rec", "do": "go"}]
+    _refused(go, "qualifing_part", event={"qualifing_part": True})
+    _refused(go, "colour", event={"commentators": [{"name": "A", "channel": "c1", "colour": "red"}]})
+    for key, bad in (("parts", 10), ("parts", "2"), ("classes", []), ("classes", ["GT3", " "]),
+                     ("track", "Le Mans"), ("track", 123), ("cars", 0), ("cars", 16), ("cars", True),
+                     ("stints", 0), ("stints", "3"), ("seed", "7"), ("seed", 1.5),
+                     ("track_length_m", 10), ("track_length_m", "1200"), ("track_length_m", True),
+                     ("track_length_m", float("nan")), ("track_length_m", float("inf")), ("track_length_m", 1e9),
+                     ("track_length_m", 30001),
+                     ("qualifying_part", "yes")):
+        _refused(go, f"event.{key}", event={key: bad})
+    scn = _scn(go, event={"stints": 3, "track": "6e378b", "track_length_m": 1200, "cars": 6,
+                          "classes": ["GT3", "GT4"], "parts": 2, "qualifying_part": True, "seed": 7})
+    assert scn.event["parts"] == 2
+
+
+def t_a_commentator_step_names_a_commentator_of_the_scenario():
+    event = {"commentators": [{"name": "Comms 1", "channel": "c1"}]}
+    chat = {"role": "commentator:Comms 1", "do": "chat"}
+    _scn([chat], event=event)
+    _refused([dict(chat, role="commentator")], "commentator:<crew name>", event=event)
+    _refused([dict(chat, role="commentator:Comms 9")], "'Comms 9' is no commentator", event=event)
+    _refused([{"role": "rec", "do": "go", "shot": {"name": "s", "role": "commentator:Comms 9"}}],
+             "'Comms 9' is no commentator", event=event)
+    crew = [["Name", "Commentator", "Director"], ["Guest", "TRUE", "FALSE"], ["Boss", "FALSE", "TRUE"]]
+    _scn([dict(chat, role="commentator:Guest")], event=event, sheet={"tabs": {"Crew": crew}})
+    _refused([dict(chat, role="commentator:Boss")], "'Boss' is no commentator", event=event,
+             sheet={"tabs": {"Crew": crew}})
+    relay_rule = [["Person", "Commentator"], ["Yes Man", " yes "], ["Tick", "\u2713"], ["Ex", "x"]]
+    for name in ("Yes Man", "Tick", "Ex"):
+        _scn([dict(chat, role=f"commentator:{name}")], event=event, sheet={"tabs": {"Crew": relay_rule}})
+    schedule = [["URL", "Streamer", "Stint"], ["", "Comms 1", "Stint 1"], ["", "Late Guest", "Stint 2"]]
+    _scn([dict(chat, role="commentator:Late Guest")], event=event, sheet={"tabs": {"Schedule": schedule}})
+    assert _scn([dict(chat, role="commentator:comms 1")], event=event).steps, "names compare as asset keys"
+    dropped = {"Schedule": [["URL", "Streamer", "Stint"], ["", "Other", "Stint 1"]],
+               "Crew": [["Name", "Commentator"], ["Other", "TRUE"]]}
+    _refused([{"role": "rec", "do": "go"}], "event.commentators[0]", event=event, sheet={"tabs": dropped})
+
+
 def t_role_instances_share_the_kind():
     scn = _scn([{"role": "rec:Comms 2", "do": "go"}])
     assert scenario.role_kind(scn.steps[0].role) == "rec"
@@ -583,6 +623,10 @@ def t_report_writes_json_and_escaped_html():
     assert "FAIL" in text and "shots/s1.png" in text
     for rule in ("traceback", "ERROR line", "script error", "failed resource load"):
         assert rule in text, f"the legend explains {rule!r}"
+    data, _, _ = _run([{"id": "n", "role": "rec", "do": "note"}, {"id": "g", "role": "rec", "do": "go"}])
+    rows = {r.split("<small>")[1].split("<")[0]: r for r in report.render_html(data).split("<tr>") if "<small>" in r}
+    assert "no visible feedback" in rows["n"] and "no visible feedback" not in rows["g"], \
+        "a step's row lists its own findings"
 
 
 # -- stack helpers ---------------------------------------------------------------
@@ -799,6 +843,43 @@ def t_a_relay_crash_kills_only_the_relay_its_pid_file_names():
 
 def t_relay_probe_names_its_port():
     assert expect.truth("relay.port == 41234", {"relay": probes.RelayProbe("http://127.0.0.1:41234")})[0]
+
+
+CONTROLS = ("/next", "/feed/A/activate", "/setup/set/stint/data", "/status?x=/data", "/hud/data/../next",
+            "/timer/start", "status", "")
+
+
+def t_relay_get_never_sends_a_control():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Api)
+    th = threading.Thread(target=srv.serve_forever)
+    th.start()
+    try:
+        _Api.seen = []
+        probe = probes.RelayProbe(f"http://127.0.0.1:{srv.server_address[1]}")
+        for path in CONTROLS:
+            try:
+                probe.get(path)
+                raise AssertionError(f"relay.get({path!r}) must be refused")
+            except expect.Unresolved:
+                pass  # expected
+        assert _Api.seen == [], f"a refused path reached the relay: {_Api.seen}"
+        for path in ("/status", "/setup/data", "/drivers/race/recording"):
+            assert probe.get(path)["ok"] is True
+        assert [p for _, p, _ in _Api.seen] == ["/status", "/setup/data", "/drivers/race/recording"]
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        th.join()
+
+
+def t_scenario_refuses_a_relay_get_of_a_control():
+    go = {"role": "rec", "do": "go"}
+    for path in CONTROLS:
+        _refused([dict(go, expect=[f"relay.get({path!r}).ok"])], "relay.get")
+    _refused([dict(go, soft=["relay.get('/next')"])], "relay.get")
+    _refused([dict(go, expect=["relay.get(result('go').path)"])], "relay.get")
+    _refused([dict(go, expect=["relay.get()"])], "relay.get")
+    _scn([dict(go, expect=["relay.get('/setup/data').stint == 'Stint 1'", "relay.get('/drivers/race').state"])])
 
 
 def t_http_json_refuses_non_loopback_hosts():

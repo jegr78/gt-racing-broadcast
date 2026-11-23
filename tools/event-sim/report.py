@@ -38,10 +38,20 @@ def _checks(checks):
     return "<ul>" + "".join(items) + "</ul>"
 
 
+def _step_findings(items):
+    if not items:
+        return ""
+    return "<ul>" + "".join(f"<li class='{_e(f['severity'])}'>{_e(f['message'])}</li>" for f in items) + "</ul>"
+
+
 def render_html(data):
     hard = [f for f in data["findings"] if f["severity"] == "hard"]
     soft = sorted((f for f in data["findings"] if f["severity"] == "soft"), key=lambda f: f.get("role") or "")
     verdict = "PASS" if data["ok"] else "FAIL"
+    by_step = {}
+    for f in data["findings"]:
+        if f.get("step"):
+            by_step.setdefault(f["step"], []).append(f)
     rows = []
     for s in data["steps"]:
         shot = "".join(f"<a href='{_e(p)}'><img src='{_e(p)}' alt='{_e(p)}'></a>"
@@ -50,7 +60,8 @@ def render_html(data):
         rows.append(f"<tr><td>{started}</td><td>{_e(s['role'])}</td><td>{_e(s['do'])}"
                     f"<br><small>{_e(s['id'])}</small></td><td class='{_e(s['status'])}'>"
                     f"{_e(s['status'])}<br>{_e(s['error'])}</td><td>{s['duration']:.2f}s</td>"
-                    f"<td>{_checks(s['checks'])}</td><td>{shot}</td></tr>")
+                    f"<td>{_checks(s['checks'])}</td><td>{_step_findings(by_step.get(s['id']))}</td>"
+                    f"<td>{shot}</td></tr>")
 
     def memory(name, m):
         heap, nodes, listeners = ("?" if m.get(k) is None else m[k] for k in ("heap_mb", "dom_nodes", "listeners"))
@@ -77,7 +88,7 @@ def render_html(data):
             f"<h2>Soft findings</h2>{finding_list(soft)}"
             f"<h2>Page memory at the end</h2>{memory_list}"
             f"<h2>Timeline</h2><table><tr><th>Time</th><th>Role</th><th>Action</th><th>Result</th>"
-            f"<th>Duration</th><th>Checks</th><th>Shot</th></tr>{''.join(rows)}</table>"
+            f"<th>Duration</th><th>Checks</th><th>Findings</th><th>Shot</th></tr>{''.join(rows)}</table>"
             f"{LEGEND}</body></html>\n")
 
 

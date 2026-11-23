@@ -4,12 +4,18 @@ A scenario has an optional `name`, `description`, `max_minutes` and `wait`, an `
 table, an optional `[sheet.tabs]` table of extra or replaced tabs, optional `[tolerances]`
 and a list of `[[step]]` tables. A step runs once its `at` trigger fires.
 See tools/CLAUDE.md (Event simulation engine) for the format."""
+import csv
+import functools
+import importlib.util
+import io
 import os
 import re
 import tomllib
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import expect
+import probes
 
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")      # names that become file names
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")          # no dot: `${id.key}` splits at the first
@@ -28,6 +34,9 @@ DEFAULT_MAX_MINUTES = 12
 MAX_MAX_MINUTES = 120              # the spec's CI timeout for the longest scenario, `full`
 STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wait", "shot"}
 TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step"}
+EVENT_KEYS = {"stints", "track", "track_length_m", "cars", "classes", "parts", "qualifying_part", "seed",
+              "commentators"}
+COMMENTATOR_KEYS = {"name", "channel", "stint", "scheduled"}
 
 
 class ScenarioError(ValueError):
@@ -148,12 +157,36 @@ def role_kind(role):
     return role.split(":", 1)[0]
 
 
+def _event(event):
+    """Refuse an `[event]` key or value that the stack would refuse or ignore at start."""
+    import stack  # its validators; importing it starts nothing
+    unknown = set(event) - EVENT_KEYS
+    if unknown:
+        raise ScenarioError(f"unknown event key(s) {', '.join(sorted(unknown))} "
+                            f"(known: {', '.join(sorted(EVENT_KEYS))})")
+    stints = event.get("stints", 1)
+    if type(stints) is not int or not 1 <= stints <= 255:
+        raise ScenarioError(f"event.stints is a whole number 1-255, not {stints!r}")
+    if type(event.get("seed", 7)) is not int:
+        raise ScenarioError(f"event.seed is a whole number, not {event['seed']!r}")
+    if not isinstance(event.get("qualifying_part", False), bool):
+        raise ScenarioError(f"event.qualifying_part is true or false, not {event['qualifying_part']!r}")
+    try:
+        stack.event_classes(event, stack.event_roster(event))
+        stack.event_parts(event)
+        stack.event_track(event)
+    except ValueError as exc:
+        raise ScenarioError(str(exc)) from None
+
+
 def _commentators(event):
     out, seen = [], set()
     for i, raw in enumerate(event.get("commentators") or []):
         where = f"event.commentators[{i}]"
         if not isinstance(raw, dict):
             raise ScenarioError(f"{where} must be a table")
+        if set(raw) - COMMENTATOR_KEYS:
+            raise ScenarioError(f"{where}: unknown key(s) {', '.join(sorted(set(raw) - COMMENTATOR_KEYS))}")
         name = raw.get("name")
         channel = raw.get("channel")
         stint = raw.get("stint", i + 1)
@@ -191,10 +224,54 @@ def _checks(raw, where, key, roots):
         raise ScenarioError(f"{where}: {key} must be a list of expressions")
     for text in raw:
         try:
-            expect.compile_expr(text, roots)
-        except expect.ExpectError as exc:
+            probes.check_relay_reads(expect.compile_expr(text, roots))
+        except (expect.ExpectError, ValueError) as exc:
             raise ScenarioError(f"{where}: {key} {text!r}: {exc}") from None
     return list(raw)
+
+
+@functools.cache
+def _relay():
+    """The relay module for its Sheet parsers and role rule; loading it starts nothing."""
+    import stack  # puts src/scripts on sys.path, which the relay imports from
+    path = os.path.join(stack.ROOT, "src", "relay", "racecast-feeds.py")
+    spec = importlib.util.spec_from_file_location("racecast_feeds_rules", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _csv(rows):
+    out = io.StringIO()
+    csv.writer(out).writerows(rows)
+    return out.getvalue()
+
+
+def _final_commentators(event, comms, tabs):
+    """{asset key: name} of everyone the relay makes a commentator from the Sheet the run
+    serves (the event's tabs after `[sheet.tabs]`): a Schedule or Qualifying streamer or a
+    Crew row with a truthy Commentator flag."""
+    import stack
+    relay = _relay()
+    final = {k.lower(): v for k, v in stack.sheet_tabs(SimpleNamespace(event=event, commentators=comms,
+                                                                        tabs=tabs)).items()}
+    names = [n for tab in ("schedule", "qualifying")
+             for (_u, n, _s, _l) in relay.ScheduleSource._parse_rows(_csv(final.get(tab) or [])) or [] if n.strip()]
+    names += [m[0] for m in relay.CrewSource._parse_full(_csv(final.get("crew") or [])) if m[3]]
+    return {relay.asset_key(n): n.strip() for n in names}
+
+
+def _check_commentator(role, registry, commentators, where):
+    """Refuse a commentator role without a crew name or with one the scenario does not have."""
+    cls = registry.get(role_kind(role))
+    if cls is None or not getattr(cls, "by_commentator", False):
+        return
+    name, commentators = (role.split(":", 1)[1] if ":" in role else ""), commentators or {}
+    if not name:
+        raise ScenarioError(f"{where}: {role!r} is `{role_kind(role)}:<crew name>`")
+    if _relay().asset_key(name) not in commentators:
+        raise ScenarioError(f"{where}: {name!r} is no commentator of the Schedule, Qualifying or Crew tab "
+                            f"(known: {', '.join(sorted(commentators.values())) or 'none'})")
 
 
 def _shot(raw, where):
@@ -211,7 +288,7 @@ def _shot(raw, where):
     return Shot(name, str(raw.get("role") or ""), str(raw.get("element") or ""))
 
 
-def _step(i, raw, registry, roots, default_wait=None):
+def _step(i, raw, registry, roots, default_wait=None, commentators=None):
     where = f"step {i + 1}"
     if not isinstance(raw, dict):
         raise ScenarioError(f"{where} must be a table")
@@ -232,6 +309,7 @@ def _step(i, raw, registry, roots, default_wait=None):
     cls = registry.get(role_kind(role))
     if cls is None:
         raise ScenarioError(f"{where}: unknown role {role!r} (known: {', '.join(sorted(registry))})")
+    _check_commentator(role, registry, commentators, where)
     if do not in cls.action_names():
         raise ScenarioError(f"{where}: role {role_kind(role)!r} has no action {do!r} "
                             f"(has: {', '.join(cls.action_names())})")
@@ -245,6 +323,8 @@ def _step(i, raw, registry, roots, default_wait=None):
         raise ScenarioError(f"{where}: shot role {shot.role!r} must be `kind` or `kind:instance`")
     if shot and shot.role and role_kind(shot.role) not in registry:
         raise ScenarioError(f"{where}: shot role {shot.role!r} is unknown")
+    if shot and shot.role:
+        _check_commentator(shot.role, registry, commentators, where)
     try:
         at = parse_at(raw.get("at"))
     except ScenarioError as exc:
@@ -265,6 +345,7 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     event = data.get("event") or {}
     if not isinstance(event, dict):
         raise ScenarioError("event must be a table")
+    _event(event)
     max_minutes = data.get("max_minutes", DEFAULT_MAX_MINUTES)
     if type(max_minutes) is not int or not 1 <= max_minutes <= MAX_MAX_MINUTES:
         raise ScenarioError(f"max_minutes must be a whole number 1-{MAX_MAX_MINUTES}, not {max_minutes!r}")
@@ -272,9 +353,15 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     raw_steps = data.get("step") or []
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ScenarioError("a scenario needs at least one [[step]]")
+    comms, tabs = _commentators(event), _tabs(data.get("sheet"))
+    names = _final_commentators(event, comms, tabs)
+    for i, c in enumerate(comms):
+        if _relay().asset_key(c.name) not in names:
+            raise ScenarioError(f"event.commentators[{i}]: {c.name!r} is no commentator of the final "
+                                "Schedule, Qualifying or Crew tab ([sheet.tabs] replaced them)")
     steps, ids = [], {}
     for i, raw in enumerate(raw_steps):
-        step = _step(i, raw, registry, roots, default_wait)
+        step = _step(i, raw, registry, roots, default_wait, names)
         if step.id in ids:
             raise ScenarioError(f"{step.label}: id {step.id!r} is not unique "
                                 f"(also step {ids[step.id] + 1}); give one of them an id")
@@ -294,7 +381,7 @@ def from_dict(data, registry, name="scenario", path="", roots=expect.ROOTS):
     if not isinstance(slow, (int, float)) or slow < 0:
         raise ScenarioError("tolerances.state_s must be a non-negative number")
     return Scenario(name, str(data.get("description") or ""), max_minutes, event,
-                    _commentators(event), _tabs(data.get("sheet")), {"state_s": float(slow)},
+                    comms, tabs, {"state_s": float(slow)},
                     steps, path)
 
 

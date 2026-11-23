@@ -237,6 +237,35 @@ def t_every_e2e_script_enters_containment():
     assert not missing,f'e2e scripts that start services outside e2e_safety containment: {missing}'
 
 
+def t_only_a_caller_that_opts_in_gets_more_than_900_seconds():
+    for bad in (901,safety.LONG_MAX_SECONDS):
+        try:safety.lifetime(bad)
+        except ValueError:continue
+        raise AssertionError(f'lifetime({bad}) admitted without long=True')
+    assert safety.lifetime(900)==900 and safety.lifetime(safety.LONG_MAX_SECONDS,long=True)==safety.LONG_MAX_SECONDS
+
+
+def t_the_internal_entrypoints_keep_a_long_lifetime():
+    long=str(safety.LONG_MAX_SECONDS)
+    with patch.object(safety,'watch_owner') as watch:
+        safety.main(['e2e_safety.py','--watch-owner','101','202',long])
+    assert watch.call_args.args==(101,202,safety.LONG_MAX_SECONDS),'the owner watcher keeps the unit lifetime'
+    stdin=SimpleNamespace(buffer=SimpleNamespace(readline=lambda n:json.dumps({'A':'b'}).encode()+b'\n'))
+    with patch.object(safety,'owner_watchdog') as watchdog,patch.object(safety.os,'execve') as execve, \
+         patch.object(safety.sys,'stdin',stdin):
+        safety.main(['e2e_safety.py','--exec','12345','42',long,'script.py','--x'])
+    assert watchdog.call_args.args==(12345,'42',safety.LONG_MAX_SECONDS),'the contained run keeps its lifetime'
+    assert execve.call_args.args[1][1:]==['script.py','--x'] and execve.call_args.args[2]=={'A':'b'}
+    with patch.object(safety.os,'pidfd_open',return_value=101,create=True),patch.object(safety.os,'close'), \
+         patch.object(safety.os,'getuid',return_value=0,create=True), \
+         patch.object(safety.Path,'stat',return_value=SimpleNamespace(st_uid=0)), \
+         patch.object(safety.Path,'read_text',return_value='1 (x) '+' '.join(['S']+['0']*18+['42'])), \
+         patch.object(safety,'current_group',return_value=Path('/g')),patch.object(safety,'limited',return_value=True), \
+         patch.object(safety.os,'open',return_value=202),patch.object(safety.subprocess,'Popen') as launch:
+        safety.owner_watchdog(12345,'42',safety.LONG_MAX_SECONDS)
+    assert launch.call_args.args[0][-1]==long,'the watcher process gets the long lifetime'
+
+
 if __name__=='__main__':
     for name,fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)

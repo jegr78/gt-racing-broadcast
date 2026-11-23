@@ -503,13 +503,17 @@ whole run inside `e2e_safety` containment, both for `max_minutes` plus 10 minute
 teardown and report. Only the event simulation opts into more than 900 s
 (`e2e_safety.enter(..., long=True)`, `e2e_child.py SECONDS --long -- ...`), capped at
 `e2e_safety.LONG_MAX_SECONDS` = 7800; everyone else keeps 900 s or the `MAX_SECONDS` they set.
+The unit's 2 GiB memory cap still applies: `full` does not fit into it and runs in the
+`event-sim.yml` workflow, where the hosted runner is the boundary and no unit is used.
 A check's timeout is cut at the end of the run, and a step that has not run by then fails,
 so the report is written inside the lifetime.
 It shares the one E2E unit: run it after, not beside, `tools/e2e.py`.
 
 Scenario (`scenario.py`, TOML): `name`, `description`, `max_minutes`, `wait` (default
-trigger timeout), `[event]` with `stints` and `[[event.commentators]]` (`name`, `channel` for
-`sim://<channel>`, `stint`, `scheduled` = the Schedule row has the link from the start),
+trigger timeout), `[event]` with `stints`, `track` (a GT7 layout id), `track_length_m`, `cars`
+(1-15), `classes`, `parts` (0-9), `qualifying_part`, `seed` and `[[event.commentators]]`
+(`name`, `channel` for `sim://<channel>`, `stint`, `scheduled` = the Schedule row has the link
+from the start); an unknown key or a value the stack would refuse fails the load (`--check`),
 `[sheet.tabs]` (replaces tabs built from the event), `[tolerances] state_s` (default 2) and
 `[[step]]`: `id` (default `do`, unique, letters, digits, `_` and `-`, no dot), `at`, `role`
 (`kind` or `kind:instance`, the instance letters, digits, space, `.`, `_`, `-`), `do`, `args`,
@@ -546,8 +550,10 @@ more than `margin` apart in `before` that `after` lists the other way round),
 stint change) and `having(texts, word, ...)` (the texts holding every word, e.g. a timing
 row); anything else, a `_` name or an unknown root is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
 A probe, a method or a function is never a value or an argument. Checks are polled, so they
-must have no side effects: `relay.get` reads `/status` or a `.../data` path, never a control
-such as `/next` or `/feed/A/activate`.
+must have no side effects: `relay.get` takes one literal path from `probes.RELAY_READS`
+(`/status`, `/drivers/race`, `/drivers/race/recording` and the read-only `.../data` routes
+such as `/setup/data`). Any other path, a control such as `/next` or `/setup/set/...`, is
+refused at load and again before a request is sent.
 
 Findings (the report's legend says the same): hard is an action error, an `expect` still
 false at its timeout, a trigger that never fires, a script error on a page, a traceback in a
@@ -596,7 +602,7 @@ action and acts on the controls a person uses; the drivers have no page.
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
 | `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `view` (area) |
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
-| `commentator:<crew name>` | `/cockpit` with that person's token | `open`, `submit_link` (url, stint), `chat` (text) |
+| `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
 | `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 

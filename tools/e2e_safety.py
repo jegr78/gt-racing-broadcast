@@ -41,7 +41,7 @@ def owner_identity():
     return os.getpid(),Path('/proc/self/stat').read_text(encoding='utf8',errors='replace').rsplit(')',1)[1].split()[19]
 
 
-def lifetime(seconds,long=True):
+def lifetime(seconds,long=False):
     """`seconds` as a whole lifetime; above 900 s only for a caller that opts in (`long`)."""
     cap=LONG_MAX_SECONDS if long else 900
     if not math.isfinite(seconds) or not 0<seconds<=cap:
@@ -70,7 +70,7 @@ def owner_watchdog(pid,start,seconds=None):
         group=current_group()
         if not limited(group):raise RuntimeError('E2E owner watchdog requires verified containment')
         kill_fd=os.open(group/'cgroup.kill',os.O_WRONLY)
-        subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--watch-owner',str(fd),str(kill_fd),str(lifetime(MAX_SECONDS if seconds is None else seconds))],
+        subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--watch-owner',str(fd),str(kill_fd),str(lifetime(MAX_SECONDS if seconds is None else seconds,long=True))],
                          pass_fds=(fd,kill_fd),stdin=subprocess.DEVNULL)
     finally:
         os.close(fd)
@@ -115,13 +115,18 @@ def inspect_for(seconds):
     while time.monotonic()<deadline:time.sleep(min(.2,max(0,deadline-time.monotonic())))
 
 
-if __name__=='__main__':
-    if len(sys.argv)==5 and sys.argv[1]=='--watch-owner':
-        watch_owner(int(sys.argv[2]),int(sys.argv[3]),lifetime(int(sys.argv[4])));raise SystemExit(0)
-    if len(sys.argv)<6 or sys.argv[1]!='--exec':raise SystemExit('Internal bounded E2E entrypoint')
+def main(argv):
+    """The internal entrypoints; `enter` already capped their lifetime, which may be long."""
+    if len(argv)==5 and argv[1]=='--watch-owner':
+        watch_owner(int(argv[2]),int(argv[3]),lifetime(int(argv[4]),long=True));return
+    if len(argv)<6 or argv[1]!='--exec':raise SystemExit('Internal bounded E2E entrypoint')
     raw=sys.stdin.buffer.readline(256*1024)
     environment=json.loads(raw)
     if not isinstance(environment,dict) or not all(isinstance(k,str) and isinstance(v,str) for k,v in environment.items()):
         raise SystemExit('Invalid bounded E2E environment')
-    owner_watchdog(int(sys.argv[2]),sys.argv[3],lifetime(int(sys.argv[4])))
-    os.execve(sys.executable,[sys.executable,*sys.argv[5:]],environment)
+    owner_watchdog(int(argv[2]),argv[3],lifetime(int(argv[4]),long=True))
+    os.execve(sys.executable,[sys.executable,*argv[5:]],environment)
+
+
+if __name__=='__main__':
+    main(sys.argv)

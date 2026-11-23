@@ -102,15 +102,19 @@ hidden or disabled is a hard failure.
 ## Scenario format
 
 TOML, read with `tomllib` (Python 3.11+, no new dependency). A scenario sets the event (track,
-mode, stints, laps, classes, roster, crew, commentators) and lists steps on a timeline:
+lap length, stints, cars, classes, broadcast Parts, commentators) and lists steps on a timeline:
 
 ```toml
 [event]
 track = "6e378b"
-mode = "endurance"
 stints = 3                    # three stints, each its own GT7 lobby
-laps_per_stint = 3            # quick profile; full uses real values
+cars = 4
 seed = 7
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+stint = 2
 
 [[step]]
 at = "0s"
@@ -122,7 +126,7 @@ expect = ["obs.scene == 'Standby'", "relay.up"]
 at = "after:start_event+20s"
 role = "commentator:Comms 2"
 do = "submit_link"
-args = { channel = "sim://comms2" }
+args = { url = "sim://comms2", stint = 2 }
 
 [[step]]
 at = "after:submit_link+10s"
@@ -137,6 +141,8 @@ role = "race_control"
 do = "final_lap"
 ```
 
+- The `[event] mode` and `laps_per_stint` keys of the first draft were not implemented. The
+  loader refuses an unknown `[event]` key, so a typo fails `--check` instead of being ignored.
 - `at` is a duration since start, an offset after another step, or a race condition
   (`lap:leader=N`, `state:finishing`).
 - `expect` lists hard checks in a small expression language over named probes: `obs`,
@@ -164,10 +170,14 @@ do = "final_lap"
 - **Hard (exit code 1):** an HTTP error on a step, an `expect` that stays false past its
   timeout, a missing or disabled control, a console error on any page, a webhook message
   missing or duplicated, a relay error in its log, a feed that shows the wrong
-  commentator.
+  commentator, a live-column control of the Director Panel or the Race Control desk that
+  needs scrolling (the `fit` action).
 - **Soft (report only):** a page needing longer than 2 s to show a new state, an action
-  without visible feedback, a control outside the viewport at the role's screen size, the
-  layout rules of `tools/e2e.py --visual`, timing deviations within tolerance.
+  without visible feedback, a control outside the viewport at the role's screen size,
+  timing deviations within tolerance.
+- The soft layout rules of `tools/e2e.py --visual` are not part of the simulation. The
+  `fit` action and the `desk-fit` scenario replace them with a hard layout check of the
+  live columns at 1440x900.
 - **Tolerances:** gaps within 1 s, positions exact, order exact at the finish, state
   changes within 5 s. A deviation caused by machine load is soft as long as the order is
   right.
@@ -175,7 +185,8 @@ do = "final_lap"
 ## Report
 
 `report.html` shows one row per step: time, role, action, result, duration, screenshot
-thumbnail, findings. A summary lists hard failures first, then soft findings by role.
+thumbnail, checks, findings. A summary lists hard failures first, then soft findings by role;
+a finding without a step (a service log, a page closing) appears only there.
 `report.json` holds the same data for tooling. `shots/` keeps every named screenshot at full
 size. The `full` scenario names its screenshots after the slide deck's image set, so the race-day
 images of a deck update are one run of `full` followed by a copy of `shots/`; the other
@@ -187,6 +198,10 @@ families (multiclass, tyres, approval corrections and more) still come from thei
 `quick`) and `profile` (`quick` or `full`). Ubuntu runner, Playwright Chromium and ffmpeg
 installed, timeout 30 minutes for `quick` and 120 for `full`. The report and the shots are
 uploaded as an artifact kept 14 days. It is not a required check.
+
+In CI the runner is the boundary and no containment unit is used. Locally every scenario runs
+inside the E2E containment unit with its 2 GiB memory cap (`tools/e2e_safety.py`), and `full`
+does not fit there, so `full` runs in this workflow.
 
 ## Security
 

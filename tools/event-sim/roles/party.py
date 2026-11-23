@@ -213,8 +213,17 @@ class LiveColumn:
     `viewport` ([width, height]) measures in that window; `reachable` then only asks that
     scrolling the column reaches every control, so nothing clips one. The page may still
     settle its layout (the panel's program tile shrinks a frame later), so it measures
-    again until the controls fit or the time is up."""
+    again until the controls fit or the time is up. `view` (area) opens one of its
+    areas, so a screenshot shows it."""
     live_required = ()
+
+    def area(self, name):
+        self.click(self.sel("area", area=name), f"area {name}")
+
+    def act_view(self, args):
+        """Open an area, so a screenshot shows it."""
+        self.area(str(args.get("area", "")))
+        return {"area": str(args.get("area", ""))}
 
     def _labels_in(self, found, labels):
         names = [c["label"] for c in found]
@@ -258,6 +267,21 @@ class LiveColumn:
             raise StepError(f"{self.kind}: {len(cut)} of {len(found)} live controls {how}: " +
                             ", ".join(f"{label} {px}px" for label, px in cut[:8]))
         return {"controls": len(found)}
+
+
+class CrewChat:
+    """`chat` (text, and `name` on a page with a name field, default `chat_as`): the
+    message is sent once the crew chat shows it."""
+    chat_as = ""
+
+    def act_chat(self, args):
+        text = str(args.get("text", ""))
+        if "chat_name" in self.selectors:
+            self.fill(self.sel("chat_name"), args.get("name", self.chat_as), "chat name")
+        self.fill(self.sel("chat_text"), text, "chat message")
+        self.click(self.sel("chat_send"), "chat send")
+        self.until(lambda: text in self.text(self.sel("chat_log")), "the message in the crew chat")
+        return {"text": text}
 
 
 @register
@@ -353,7 +377,7 @@ class ProducerRole(Surface):
 
 
 @register
-class DirectorRole(LiveColumn, Surface):
+class DirectorRole(LiveColumn, CrewChat, Surface):
     """The director on the Director Panel: `approve_link` (stint), `arm_feed` (feed),
     `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
     Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
@@ -365,14 +389,7 @@ class DirectorRole(LiveColumn, Surface):
     live_required = selectors.LIVE_REQUIRED["DIRECTOR"]
     selectors = selectors.DIRECTOR
     masked = ("links",)
-
-    def area(self, name):
-        self.click(self.sel("area", area=name), f"area {name}")
-
-    def act_view(self, args):
-        """Open an area, so a screenshot shows it."""
-        self.area(str(args.get("area", "")))
-        return {"area": str(args.get("area", ""))}
+    chat_as = "Director"
 
     def _classes(self, selector):
         return self.attr(selector, "class").split()
@@ -531,14 +548,6 @@ class DirectorRole(LiveColumn, Surface):
         self.answered(lambda: self.click(self.sel("cue_send"), "SEND CUE"), "/cues/send", "SEND CUE")
         return {"text": text}
 
-    def act_chat(self, args):
-        text = str(args.get("text", ""))
-        self.fill(self.sel("chat_name"), args.get("name", "Director"), "chat name")
-        self.fill(self.sel("chat_text"), text, "chat message")
-        self.click(self.sel("chat_send"), "SEND")
-        self.until(lambda: text in self.text(self.sel("chat_log")), "the message in the crew chat")
-        return {"text": text}
-
     def facts(self):
         return {"on_air": self.text(self.sel("on_air")),
                 "arm": self.text(self.sel("arm")), "next": self.text(self.sel("next_sub")),
@@ -563,14 +572,6 @@ class RaceControlRole(LiveColumn, Surface):
     live_required = selectors.LIVE_REQUIRED["RACE_CONTROL"]
     selectors = selectors.RACE_CONTROL
     masked = ("links",)
-
-    def area(self, name):
-        self.click(self.sel("area", area=name), f"area {name}")
-
-    def act_view(self, args):
-        """Open an area, so a screenshot shows it."""
-        self.area(str(args.get("area", "")))
-        return {"area": str(args.get("area", ""))}
 
     def _line(self):
         status = self.sel("status")
@@ -731,10 +732,11 @@ class RaceControlRole(LiveColumn, Surface):
 
 
 @register
-class CommentatorRole(Surface):
+class CommentatorRole(CrewChat, Surface):
     """A commentator in the cockpit (`commentator:<crew name>`): `submit_link` (url,
     stint), `chat` (text). `page(role)` reads the tally."""
     kind = "commentator"
+    by_commentator = True
     path, ready = "/cockpit", selectors.READY["COMMENTATOR"]
     sources = selectors.SOURCES["COMMENTATOR"]
     selectors = selectors.COMMENTATOR
@@ -756,13 +758,6 @@ class CommentatorRole(Surface):
         except Exception:
             data = {}
         return {"id": data.get("id") if isinstance(data, dict) else None, "stint": stint}
-
-    def act_chat(self, args):
-        text = str(args.get("text", ""))
-        self.fill(self.sel("chat_text"), text, "chat message")
-        self.click(self.sel("chat_send"), "Send")
-        self.until(lambda: text in self.text(self.sel("chat_log")), "the message in the crew chat")
-        return {"text": text}
 
     def facts(self):
         tally = self.sel("tally")
