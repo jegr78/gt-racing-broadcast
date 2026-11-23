@@ -435,14 +435,15 @@
   /* the grid display above beats the UA [hidden] rule: without this HIDE leaves the tiles on screen */
   .preview .pvbody[hidden]{display:none}
   .pvfeeds{display:contents}
-  #pgmAudioBar{grid-column:1 / -1}
+  #pgmAudioBar{margin-left:auto;text-transform:none;letter-spacing:normal;font-family:var(--mono);font-weight:500}
+  #previewSec:has(#pvBody[hidden]) #pgmAudioBar{display:none !important}
   .pvframe{position:relative;width:100%;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;
     background:#0c0f14;border:1px solid #1e2630;border-radius:6px;overflow:hidden}
   .pvframe img{width:100%;height:100%;object-fit:cover;display:none;border-radius:6px}   /* shown only once a frame loads */
   .pvframe.loaded img{display:block}
   .pvframe.loaded .pvph{display:none}
   .pvph{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px;
-    color:#5d6b7c;font-size:10px;letter-spacing:.02em;text-align:center}
+    color:var(--muted);font-size:10px;letter-spacing:.02em;text-align:center}
   .pvph svg{width:22px;height:22px;opacity:.6}
   .pvph.err{color:#c98a8a}
   .pvlabel{font-size:10px;opacity:.85;margin-top:3px;display:flex;justify-content:space-between;align-items:center;gap:6px}
@@ -547,7 +548,42 @@
   .liveair b{display:block;color:var(--ink);font:700 19px var(--head);letter-spacing:.04em;text-transform:none}
   #liveCol .pgm .keys,#overlaySec .keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
   #liveCol .pgm button.k,#overlaySec button.k{min-width:0}
-  #liveCol #txBar .keys{flex-wrap:nowrap}
+  /* Condensed so preview, ARM/NEXT, scenes, overlays and transitions fit 1440x900 (#1267). */
+  #liveCol{gap:8px}
+  #liveCol>.bus{padding:7px 10px;gap:6px}
+  #liveCol .bus .cap{padding-bottom:4px;font-size:12px}
+  #liveCol #pvToggle,#liveCol #pgmAudioBtn{min-width:0;min-height:0;padding:4px 10px;font-size:11px}
+  #liveCol .preview .pvbody{margin-top:0;gap:6px}
+  #liveCol .pvprog{position:relative;justify-self:center;width:100%}
+  #liveCol .pvprog>.pvlabel{position:absolute;left:6px;bottom:6px;max-width:calc(100% - 12px);margin:0;
+    padding:2px 6px;border-radius:4px;background:rgba(10,12,15,.75)}
+  #liveCol .pvprog>.pvlabel>span{overflow:hidden;text-overflow:ellipsis}
+  #liveCol .pvbar{margin-top:2px}
+  #liveCol .liveair{display:flex;align-items:baseline;gap:10px;padding:6px 12px;min-width:0}
+  #liveCol .liveair b{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #liveCol #handoverCtl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  #liveCol #armBtn{min-height:58px;font-size:11px;line-height:1.3}
+  #liveCol #nextBtn{grid-column:span 2;min-height:58px;gap:2px}
+  #liveCol #armBtn[hidden]+#nextBtn{grid-column:1 / -1}
+  #liveCol #txBar .keys{flex-wrap:wrap}
+  #liveCol #txBar .txdur{margin-left:0}
+  body:not(.solo) #liveCol #txBar .txdur{flex:1 1 100%}
+  /* Endurance: overlays beside the transition, one row for both; solo stacks its overlay keys. */
+  #liveCol{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);align-content:start}
+  #liveCol>*{grid-column:1 / -1}
+  #liveCol>#overlaySec{grid-column:1}
+  #liveCol>#txBar{grid-column:2}
+  body.solo #liveCol>#overlaySec,body.solo #liveCol>#txBar{grid-column:1 / -1}
+  body:not(.solo) #liveCol #overlaySec .keys{grid-template-columns:minmax(0,1fr)}
+  #liveCol #gfxReqList button.k{min-height:0;padding:5px 8px;font-size:11px}
+  #liveCol>.bus:not(.preview)>.cap{font-size:10px;letter-spacing:.18em;padding:0;border:0;color:var(--muted)}
+  #liveCol>.bus:not(.preview)>.cap::before{height:10px}
+  #liveCol #nextBtn .nmain{font-size:23px}
+  #liveCol .pgm .keys,#liveCol #overlaySec .keys,#liveCol #txBar .keys{gap:6px}
+  #liveCol .pgm button.k,#overlaySec button.k,#liveCol #txBar button.k{min-height:36px;padding:3px 6px}
+  #liveCol button.k .tag{margin-bottom:2px}
+  #liveCol #txBar .txdur input{padding:6px}
+  #liveCol #gfxReqList{max-height:92px;overflow-y:auto}
   #liveCol #txBar button.k{min-width:0;flex:1 1 0}
   #handoverCtl{display:flex;flex-direction:column;gap:8px}
   #gfxReqSec{border-color:var(--amber)}
@@ -570,6 +606,17 @@
   #nextBtn .nsub{font-size:11px;letter-spacing:.04em}
   #nextBtn.ready{border-color:var(--live);background:linear-gradient(180deg,#17351f,#0f2717);
     box-shadow:0 0 0 1px var(--live),0 0 18px var(--live-glow);color:#baf5d0}
+
+  /* Race area: the shared driver desk, one part at a time below its race controls. */
+  .desktabs{display:flex;flex-wrap:wrap;gap:6px;padding-bottom:8px;border-bottom:1px solid #222a33}
+  .desktabs button{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:5px 12px;border-radius:8px;
+    border:1px solid var(--edge);background:#0c0f13;color:var(--muted);font:600 12px var(--mono);cursor:pointer}
+  .desktabs button:hover{color:var(--ink)}
+  .desktabs button[aria-selected="true"]{color:var(--ink);border-color:var(--blue);background:#16212e}
+  .desktabs button:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+  .desktabs .ndot{width:8px;height:8px}
+  .desktabs .ndot:not(.ok):not(.warn):not(.live){display:none}
+  .desksub[hidden]{display:none}
 
   /* Workspace: one area at a time; the cards inside never move between areas. */
   #workspace{display:flex;flex-direction:column;gap:10px}
@@ -723,6 +770,7 @@
         <button type="button" class="navbtn" data-area="audio" data-short="A"><span class="ndot"></span><span class="nlbl">Audio<small class="nwhy"></small></span></button>
       </div>
       <div class="navgrp"><span class="navhead">Operations</span>
+        <button type="button" class="navbtn" data-area="race" data-short="R"><span class="ndot"></span><span class="nlbl">Race<small class="nwhy"></small></span></button>
         <button type="button" class="navbtn" data-area="broadcast" data-short="B"><span class="ndot"></span><span class="nlbl">Broadcast<small class="nwhy"></small></span></button>
         <button type="button" class="navbtn" data-area="schedule" data-short="S"><span class="ndot"></span><span class="nlbl">Schedule<small class="nwhy"></small></span></button>
         <button type="button" class="navbtn" data-area="setup" data-short="T"><span class="ndot"></span><span class="nlbl">Setup<small class="nwhy"></small></span></button>
@@ -732,7 +780,13 @@
     <section id="liveCol" aria-label="Live">
       <section class="bus preview" id="previewSec">
         <div class="cap">Program
-          <button class="k" id="pvToggle">SHOW</button></div>
+          <button class="k" id="pvToggle">SHOW</button>
+          <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px;">
+            <button class="k" id="pgmAudioBtn" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
+            <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
+                   aria-label="Program audio volume" style="width:80px;">
+            <audio id="pgmAudio" preload="none" style="display:none;"></audio>
+          </div></div>
         <div class="pvbody" id="pvBody" hidden>
           <div class="pvprog">
             <div class="pvframe" id="pvProgramFrame">
@@ -757,12 +811,6 @@
                 <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
               <div class="pvbar"><span class="pvbarfill"></span></div>
               <div class="pvlabel"><span>POV</span><button class="k pvtoggle" data-feed="POV">PAUSE</button></div></div>
-          </div>
-          <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px; margin-top:2px;">
-            <button class="k" id="pgmAudioBtn" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
-            <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
-                   aria-label="Program audio volume" style="width:110px;">
-            <audio id="pgmAudio" preload="none" style="display:none;"></audio>
           </div>
         </div>
       </section>
@@ -867,6 +915,25 @@
       <div class="area" data-area="audio">
         <section class="bus"><div class="cap">Audio</div><div class="body" id="audio"></div></section>
       </div>
+      <div class="area" data-area="race">
+        <section class="bus" id="driverBox"><div class="cap">Race desk</div>
+          <div data-desk="live"></div>
+          <div class="desktabs" id="deskTabs" role="tablist" aria-label="Race desk">
+            <button type="button" role="tab" data-sub="race">Race<span class="ndot"></span></button>
+            <button type="button" role="tab" data-sub="drivers">Drivers<span class="ndot"></span></button>
+            <button type="button" role="tab" data-sub="corrections">Corrections<span class="ndot"></span></button>
+            <button type="button" role="tab" data-sub="qualifying">Qualifying<span class="ndot"></span></button>
+            <button type="button" role="tab" data-sub="dashboard">Dashboard<span class="ndot"></span></button>
+            <button type="button" role="tab" data-sub="setup">Links<span class="ndot"></span></button>
+          </div>
+          <div class="desksub" data-sub="race" role="tabpanel"><div data-desk="race"></div></div>
+          <div class="desksub" data-sub="drivers" role="tabpanel"><div data-desk="drivers"></div></div>
+          <div class="desksub" data-sub="corrections" role="tabpanel"><div data-desk="corrections"></div></div>
+          <div class="desksub" data-sub="qualifying" role="tabpanel"><div data-desk="qualifying"></div></div>
+          <div class="desksub" data-sub="dashboard" role="tabpanel"><div data-desk="dashboard"></div></div>
+          <div class="desksub" data-sub="setup" role="tabpanel"><div data-desk="setup"></div></div>
+        </section>
+      </div>
       <div class="area" data-area="broadcast">
         <section class="bus" id="streamSec"><div class="cap">Stream</div>
           <div class="keys">
@@ -966,10 +1033,6 @@
             <div class="hint">Names the track, draws the map and shows corner names from the first metre. Recognition checks the pick after the first complete lap.</div>
           </div>
         </section>
-        <details class="bus urls" id="driverBox">
-          <summary>Driver telemetry</summary>
-          <div class="body" id="driverDesk"></div>
-        </details>
         <details class="bus chat" id="gfxBrowseBox" open>
           <summary>Graphics library<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
           <div class="body">
@@ -1027,6 +1090,9 @@
             <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
             <div class="hint">Raw scene switch: audio stays as it is. The scene macros in the live column set the audio too.</div>
           </section>
+        <section class="bus" id="deskTroubleSec"><div class="cap">Driver telemetry</div>
+          <div data-desk="trouble"></div>
+        </section>
         <section class="bus" id="obsToolsSec"><div class="cap">OBS</div>
           <div class="keys"><button class="k" id="obsRefreshBtn">↻ REFRESH</button></div>
           <div class="hint">Reloads the relay-served OBS browser sources.</div>
@@ -3670,7 +3736,7 @@ var PHONE_MQ = matchMedia("(max-width:899px)");
 function store(k, v){ try{ localStorage.setItem(k, v); }catch(e){ /* private mode */ } }
 function recall(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 
-var AREAS = ["handover", "graphics", "hud", "intermission", "cues", "audio", "broadcast", "schedule", "setup", "fault"];
+var AREAS = ["handover", "graphics", "hud", "intermission", "cues", "audio", "race", "broadcast", "schedule", "setup", "fault"];
 function areaAvailable(name){
   if (!AREAS.includes(name)) return false;   // a stale stored value never reaches the selector
   const b = document.querySelector(`.navbtn[data-area="${name}"]`);
@@ -3698,6 +3764,25 @@ function applyNavCollapse(){
   t.setAttribute("aria-expanded", String(!collapsed));
   t.hidden = NAV_AUTO.matches;           // a narrow window always collapses the nav
 }
+// The program tile gives way, down to 40 % of the column and never below a feed tile, so
+// every key row below it stays in view.
+function liveShrink(colH, scrollH, width, feedW){
+  const over = scrollH - colH;
+  return over > 0 ? Math.max(width * 0.4, feedW || 0, width - over * 16 / 9) : 0;
+}
+function fitLive(){
+  const col = $("#liveCol"), prog = $("#liveCol .pvprog");
+  prog.style.width = "";
+  if (PHONE_MQ.matches || $("#pvBody").hidden) return;
+  const tile = $("#liveCol .pvtile");
+  const w = liveShrink(col.clientHeight, col.scrollHeight, prog.getBoundingClientRect().width,
+                       tile ? tile.getBoundingClientRect().width : 0);
+  if (w) prog.style.width = Math.floor(w) + "px";
+}
+var fitLiveFrame = 0;
+const fitLiveSoon = () => { cancelAnimationFrame(fitLiveFrame); fitLiveFrame = requestAnimationFrame(fitLive); };
+new ResizeObserver(fitLiveSoon).observe($("#liveCol"));
+document.querySelectorAll("#liveCol > *").forEach(el => new ResizeObserver(fitLiveSoon).observe(el));
 $("#navCollapse").addEventListener("click", () => {
   store(NAV_KEY, recall(NAV_KEY) === "1" ? "0" : "1");
   applyNavCollapse();
@@ -4020,11 +4105,49 @@ pollCueBacks(); setInterval(pollCueBacks, 2000);
   </div>
 </dialog>
 <script>
-/* Driver telemetry controls (#1114), shared with the Race Control desk. */
+/* Driver telemetry controls (#1114), shared with the Race Control desk: the Race area holds
+   its parts behind the same subdivision as the desk's areas (#1267). */
+var DESK_SUBS = ["race", "drivers", "corrections", "qualifying", "dashboard", "setup"], DESK_SUB_KEY = "rc_desk_sub";
+function showDeskSub(name){
+  if (!DESK_SUBS.includes(name)) name = "race";
+  document.querySelectorAll("#deskTabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.sub === name)));
+  document.querySelectorAll(".desksub").forEach(p => { p.hidden = p.dataset.sub !== name; });
+  store(DESK_SUB_KEY, name);
+}
+document.querySelectorAll("#deskTabs button").forEach(b => b.addEventListener("click", () => showDeskSub(b.dataset.sub)));
+var deskSubStored = DESK_SUBS.includes(recall(DESK_SUB_KEY));
+showDeskSub(recall(DESK_SUB_KEY));
+function deskDot(sub, level){
+  const b = document.querySelector(`#deskTabs button[data-sub="${sub}"] .ndot`);
+  if (b) b.className = "ndot" + (level ? " " + level : "");
+}
+// Qualifying opens its tab on a switch, and on the first poll when the browser kept no tab; never
+// while someone types or a dialog is open. The tab's dot marks the session either way.
+var deskMode = null;
+function deskEditing(){
+  const a = document.activeElement;
+  return !!(a && a.matches && a.matches("input, select, textarea")) || !!document.querySelector("dialog[open]");
+}
+function deskState(st){
+  deskDot("drivers", st.waiting ? "warn" : "");
+  deskDot("race", st.events ? "live" : "");
+  deskDot("qualifying", st.mode === "qualifying" ? "ok" : "");
+  deskDot("dashboard", st.dashboard ? "ok" : "");
+  setNav("race", st.red ? "live" : st.waiting ? "warn" : "",
+         st.red ? "red flag" : st.waiting ? `${st.waiting} waiting` : st.events ? `${st.events} disconnects open` : "");
+  if (st.mode !== deskMode){
+    const first = deskMode === null;
+    deskMode = st.mode;
+    if (deskEditing() || (first && (deskSubStored || st.mode !== "qualifying"))) return;
+    if (st.mode === "qualifying") showDeskSub("qualifying");
+    else if (recall(DESK_SUB_KEY) === "qualifying") showDeskSub("race");
+  }
+}
 (function () {
   const s = document.createElement("script");
   s.src = RC_API("/driver-desk.js");
-  s.onload = () => window.DriverDesk.mount(document.getElementById("driverDesk"), {base: "", dashboardToggle: true});
+  s.onload = () => window.DriverDesk.mount(document.querySelector(".frame"),
+                                          {base: "", dashboardToggle: true, onState: deskState});
   document.body.appendChild(s);
 })();
 </script>

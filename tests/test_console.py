@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the /console authorization policy (#216 phase 2).
 Run: python3 tests/test_console.py"""
-import importlib.util, json, os
+import importlib.util, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import test_driver_tower as tower  # noqa: E402
 
 
 def _load(name, rel):
@@ -415,14 +417,15 @@ def t_recording_routes_are_desk_routes():
     assert cp.decide({"director"}, ["drivers", "snapshot"], "POST") == cp.NOT_FOUND
 
 
+def _js_fn(path, name, call, prelude=""):
+    """Runs top-level functions of a page or script under node; None without node."""
+    src = "\n".join(tower._function(path, n) for n in name.split(","))
+    return tower._run(prelude + src + "\n;console.log(JSON.stringify(" + call + "));")
+
+
 def _desk_fn(name, call):
     """Runs one top-level function of driver-desk.js under node; None without node."""
-    import sys
-    sys.path.insert(0, HERE)
-    import test_driver_tower as tower
-    desk = os.path.join(ROOT, "src", "console", "driver-desk.js")
-    src = "\n".join(tower._function(desk, n) for n in name.split(","))
-    return tower._run(src + "\n;console.log(JSON.stringify(" + call + "));")
+    return _js_fn(os.path.join(ROOT, "src", "console", "driver-desk.js"), name, call)
 
 
 def t_the_desk_lists_waiting_requests_first_and_hides_rejected_ones():
@@ -705,7 +708,6 @@ def t_the_desk_lap_line_shows_the_race_lap_and_the_lobby_lap():
 
 
 def t_the_desk_tables_keep_their_own_text_colour_in_the_panel():
-    import re
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         block = fh.read().split("var CSS = [", 1)[1].split("].join", 1)[0]
     css = "".join(re.findall(r'"([^"]*)"', block))
@@ -718,7 +720,6 @@ def t_the_desk_tables_keep_their_own_text_colour_in_the_panel():
 
 
 def t_the_senders_table_shrinks_its_move_choice_to_the_column():
-    import re
     with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
         src = fh.read()
     css = "".join(re.findall(r'"([^"]*)"', src.split("var CSS = [", 1)[1].split("].join", 1)[0]))
@@ -786,6 +787,227 @@ def t_the_desk_class_interval_keeps_the_exact_time():
     if got is None:
         return
     assert got == [153.7, 9], f"grouped rows read the exact class interval, a lap down too: {got}"
+
+
+def _src(*rel):
+    with open(os.path.join(ROOT, "src", *rel), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _desk_slots():
+    return json.loads(re.search(r"var SLOTS = (\[[^\]]*\]);", _src("console", "driver-desk.js")).group(1))
+
+
+def _between(text, start, end):
+    i = text.index(start)
+    return text[i:text.index(end, i)]
+
+
+def t_both_pages_give_every_desk_part_one_mount_point():
+    slots = _desk_slots()
+    assert slots[0] == "live" and len(set(slots)) == len(slots), slots
+    for page in (("racecontrol", "race-control.html"), ("director", "director-panel.html")):
+        html = _src(*page)
+        for name in slots:
+            assert html.count(f'data-desk="{name}"') == 1, f"{page[1]}: one mount point for the {name} part"
+    desk = _src("racecontrol", "race-control.html")
+    assert 'data-desk="live"' in _between(desk, '<section id="liveCol"', "</section>"), \
+        "the desk's race controls sit in its live column"
+    panel = _src("director", "director-panel.html")
+    race = _between(panel, '<div class="area" data-area="race">', '<div class="area" data-area="broadcast">')
+    assert race.index('data-desk="live"') < race.index('id="deskTabs"'), "the race controls sit above the parts"
+    fault = _between(panel, '<div class="area" data-area="fault">', '<div id="log">')
+    assert 'data-desk="trouble"' in fault, "the desk's connection line is under Troubleshoot"
+
+
+def t_the_desk_mounts_every_part_where_the_page_put_it():
+    got = _js_fn(os.path.join(ROOT, "src", "console", "driver-desk.js"), "deskSlots", """deskSlots(
+      {querySelector: function (q) { return q.indexOf('"trouble"') < 0 ? {q: q} : null; }})""",
+                 prelude='var SLOTS = ["live", "race", "trouble"];\n')
+    if got is None:
+        return
+    assert got == {"live": {"q": '[data-desk="live"]'}, "race": {"q": '[data-desk="race"]'}}, \
+        f"a part without a mount point is left to the end of the root: {got}"
+    js = _src("console", "driver-desk.js")
+    assert "if (slots[name]) slots[name].replaceChildren(box); else root.appendChild(box);" in js, \
+        "a missing mount point never clears the page"
+
+
+def t_the_desk_state_names_what_needs_attention():
+    reqs = {"requests": [{"conn": "a", "status": "pending", "ts": 1}, {"conn": "b", "status": "approved", "ts": 2},
+                         {"conn": "c", "status": "pending", "ts": 3}, {"conn": "d", "status": "rejected", "ts": 4}]}
+    rec = {"events": [{"state": "suspected"}, {"state": "dropout"}, {"state": "dismissed"}], "dropped": 2}
+    race = {"mode": "qualifying", "red_flag": {"mode": "keep"}, "settings": {"visible": True}}
+    got = _desk_fn("requestRows,deskState", "[deskState(" + ",".join(json.dumps(x) for x in (race, rec, reqs)) +
+                   ", false), deskState(null, null, null, true)]")
+    if got is None:
+        return
+    assert got[0] == {"waiting": 2, "events": 2, "mode": "qualifying", "red": True, "dashboard": True,
+                      "gaps": True, "stale": False}, got[0]
+    assert got[1] == {"waiting": 0, "events": 0, "mode": "race", "red": False, "dashboard": False,
+                      "gaps": False, "stale": True}, f"a dead relay marks only itself: {got[1]}"
+
+
+def t_the_race_control_areas_match_the_nav_and_the_tab_bar():
+    html = _src("racecontrol", "race-control.html")
+    areas = json.loads(re.search(r"const DESK_AREAS = (\[[^\]]*\]);", html).group(1).replace("'", '"'))
+    assert areas == ["race", "drivers", "corrections", "qualifying", "dashboard", "graphics", "note", "setup",
+                     "trouble"], areas
+    assert re.findall(r'class="navbtn" data-area="([a-z]+)"', html) == areas, "one nav button per area, in order"
+    assert re.findall(r'<div class="area" data-area="([a-z]+)" data-tab="([a-z]+)">', html) == \
+        [(a, a) for a in areas], "each area is the tab of the same name below 820 px"
+    tabs = [t[0] for t in json.loads(re.search(r"data-tabs='([^']*)'", html).group(1))]
+    assert tabs == ["live"] + areas + ["chat"], f"the tab bar maps onto the areas: {tabs}"
+    used = set(re.findall(r'data-tab="([a-z]+)"', html))
+    assert used == set(tabs), f"every tab shows something and nothing hides behind an unknown tab: {used}"
+    for cid in ("tally", "program", "pgmToggle", "raceCard", "liveTimer"):
+        assert f'id="{cid}"' in _between(html, '<section id="liveCol"', "</section>"), f"#{cid} is live"
+
+
+def t_a_short_window_scrolls_the_live_column_and_hide_lasts_one_session():
+    html = _src("racecontrol", "race-control.html")
+    assert "#liveCol > * { flex-shrink: 0; }" in html, \
+        "a flex child with overflow:hidden shrinks below its content and clips Restart released"
+    assert "sessionStorage.getItem(PV_KEY)" in html and "localStorage.setItem(PV_KEY" not in html, \
+        "a hidden preview never survives into the next event's first load"
+
+
+def _desk_page():
+    """race-control.html as the relay serves it at the tailnet root."""
+    page = _src("racecontrol", "race-control.html")
+    for token, value in (("__RC_API_BASE__", ""), ("__RC_VERSION__", "dev"),
+                         ("<!--__CREW_FRAME__-->", _src("console", "crew-frame.html")),
+                         ("<!--__EVENT_INFO__-->", _src("console", "event-info.html"))):
+        page = page.replace(token, value)
+    return page
+
+
+def t_a_parts_status_line_stays_in_view_while_its_area_scrolls():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; the desk's status line is measured with visual acceptance)")
+        return
+    requests = {"requests": [{"conn": f"c{i}", "status": "pending", "ts": i, "name": f"Driver {i}",
+                              "entry": "Team A", "segment": "Stint 1"} for i in range(14)]}
+
+    def serve(route):
+        path = route.request.url.split("://", 1)[1].split("/", 1)[1].split("?", 1)[0]
+        if path == "rc":
+            return route.fulfill(body=_desk_page(), content_type="text/html")
+        if path == "driver-desk.js":
+            return route.fulfill(body=_src("console", "driver-desk.js"), content_type="application/javascript")
+        if path == "race-control/drivers/requests":
+            return route.fulfill(body=json.dumps(requests), content_type="application/json")
+        if path == "race-control/drivers/readiness":
+            return route.fulfill(body='{"rows": []}', content_type="application/json")
+        if route.request.method == "POST":
+            return route.fulfill(status=400, body=json.dumps({"error": "refused by the test"}),
+                                 content_type="application/json")
+        return route.fulfill(body="{}", content_type="application/json")
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return
+        try:
+            tab = browser.new_page(viewport={"width": 1440, "height": 900})
+            tab.route("http://desk.test/**", serve)
+            tab.goto("http://desk.test/rc")
+            tab.click('.navbtn[data-area="drivers"]')
+            reject = tab.locator('.dd-drivers button[data-label="Reject all waiting"]')
+            reject.click()
+            reject.click()
+            line = tab.locator('.dd-drivers .msg.cur[role="status"]')
+            line.wait_for()
+            tab.evaluate("document.getElementById('workspace').scrollTop = 600")
+            tab.wait_for_timeout(200)
+            got = tab.evaluate("""() => {
+              const w = document.getElementById('workspace'), m = document.querySelector('.dd-drivers .msg.cur');
+              return {scrolled: w.scrollTop, line: m.getBoundingClientRect().top, top: w.getBoundingClientRect().top,
+                      text: m.textContent};
+            }""")
+        finally:
+            browser.close()
+    assert got["scrolled"] > 300 and got["text"] == "refused by the test", got
+    assert got["top"] <= got["line"] <= got["top"] + 80, \
+        f"the answer stays at the top of the scrolled area, not {got['line'] - got['top']} px away: {got}"
+
+
+def t_qualifying_preselects_its_area_on_a_switch_only():
+    path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
+    got = _js_fn(path, "followMode", """(function () {
+      var modes = ["qualifying", "qualifying", "race", "qualifying", "race", "qualifying", "race", "qualifying"];
+      modes.forEach(function (m, i) {
+        typing = i === 5;
+        if (i === 6) deskArea = "note";
+        followMode(m);
+      });
+      return {shown: shown, area: deskArea};
+    })()""", prelude="var lastMode = null, deskArea = 'race', shown = [], typing = false, storedArea = true;"
+                     "function editing() { return typing; }"
+                     "function showArea(n) { shown.push(n); deskArea = n; }\n")
+    if got is None:
+        return
+    first = [_js_fn(path, "followMode", "(function () { followMode('qualifying'); return shown; })()",
+                    prelude=f"var lastMode = null, deskArea = 'race', shown = [], storedArea = {stored};"
+                            "function editing() { return false; }"
+                            "function showArea(n) { shown.push(n); deskArea = n; }\n")
+             for stored in ("false", "true")]
+    assert first == [["qualifying"], []], \
+        f"a first load in qualifying opens Qualifying unless the browser kept an area: {first}"
+    assert got == {"shown": ["qualifying", "race", "qualifying"], "area": "qualifying"}, \
+        "the first poll keeps the stored area, typing holds the switch, back to Race only from " \
+        f"Qualifying: {got}"
+    assert "a.matches('input, select, textarea')" in _src("racecontrol", "race-control.html") and \
+        "document.querySelector('dialog[open]')" in _src("racecontrol", "race-control.html")
+
+
+def t_a_failed_poll_keeps_the_last_known_mode():
+    got = _desk_fn("requestRows,remember,deskState", """(function () {
+      var seen = {race: null, rec: null, reqs: null}, modes = [];
+      [{mode: "qualifying"}, null, {mode: "qualifying"}].forEach(function (race) {
+        seen = remember(seen, race, null, race ? {requests: [{conn: "a", status: "pending", ts: 1}]} : null);
+        modes.push([deskState(seen.race, seen.rec, seen.reqs, !race).mode, deskState(seen.race, seen.rec, seen.reqs).waiting]);
+      });
+      return modes;
+    })()""")
+    if got is None:
+        return
+    assert got == [["qualifying", 1], ["qualifying", 1], ["qualifying", 1]], \
+        f"a 502 between two polls neither reads as race mode nor clears the waiting count: {got}"
+    js = _src("console", "driver-desk.js")
+    assert "seen = remember(seen, r, rec, rq);" in js and "deskState(seen.race, seen.rec, seen.reqs" in js
+
+
+def t_the_page_hears_of_the_desk_only_after_a_good_answer():
+    got = _desk_fn("requestRows,remember,deskState,deskReport", """(function () {
+      var seen = {race: null, rec: null, reqs: null}, out = [];
+      [null, {mode: "qualifying"}].forEach(function (race) {
+        seen = remember(seen, race, null, null);
+        var st = deskReport(seen, !race);
+        out.push(st && st.mode);
+      });
+      return out;
+    })()""")
+    if got is None:
+        return
+    assert got == [None, "qualifying"], \
+        f"a failed first poll reports nothing, so the first good one counts as the first: {got}"
+    assert "var report = deskReport(seen, staleNote.hidden === false);" in _src("console", "driver-desk.js")
+
+
+def t_an_answer_shows_in_the_part_it_was_asked_from():
+    js = _src("console", "driver-desk.js")
+    assert 'msgs[name] = el("div", {cls: "msg" + (name === "live" ? "" : " part"), role: "status"});' in js, \
+        "every part has its own status line"
+    act = js[js.index("async function act("):js.index("var armed = arming();")]
+    assert "var where = part;" in act and "say(done || \"\", false, where)" in act, \
+        "the answer goes to the part pressed in, even when the person moved on meanwhile"
+    assert 'box.addEventListener("pointerdown", function () { part = name; }, true);' in js and \
+        'box.addEventListener("focusin", function () { part = name; }, true);' in js
+    assert ".dd>.msg.part{position:sticky;top:0" in js, "a long part keeps its line in view"
 
 
 if __name__ == "__main__":

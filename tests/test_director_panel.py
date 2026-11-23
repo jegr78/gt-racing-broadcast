@@ -38,7 +38,8 @@ def _order(html, *needles):
 def t_tabs_removed():
     # The PROGRAM/SETUP tab shell is gone; there is one content area.
     h = _html()
-    assert 'role="tablist"' not in h
+    assert h.count('role="tablist"') == 1 and 'id="deskTabs" role="tablist"' in h, \
+        "only the Race area's desk parts are tabs"
     assert 'id="tabProgram"' not in h and 'id="tabSetup"' not in h
     assert 'id="tabBtnProgram"' not in h and 'id="tabBtnSetup"' not in h
     assert "function setTab(" not in h, "tab-switch JS must be gone"
@@ -616,7 +617,7 @@ def t_graphic_requests_sit_in_the_live_column():
 
 
 AREAS = ("handover", "graphics", "hud", "intermission", "cues", "audio",
-         "broadcast", "schedule", "setup", "fault")
+         "race", "broadcast", "schedule", "setup", "fault")
 
 # Every id of the page before the frame (#728). Only the three layout wrappers the
 # frame replaced may go; a missing id here is a control the reshuffle dropped.
@@ -966,8 +967,10 @@ def t_cards_sit_in_their_area():
         "audio": ("audio",),
         "broadcast": ("streamSec", "obsStreamBtn", "partControl", "subSec"),
         "schedule": ("urlsBox", "subsBox"),
-        "setup": ("gfxBrowseBox",),
-        "fault": ("feedsSec", "feedsBus", "feedQuality", "emergencySec", "emergencyBus", "scnVisSec", "obsToolsSec", "obsRefreshBtn"),
+        "race": ("driverBox", "deskTabs"),
+        "setup": ("trackSec", "gfxBrowseBox"),
+        "fault": ("feedsSec", "feedsBus", "feedQuality", "emergencySec", "emergencyBus", "scnVisSec", "deskTroubleSec",
+                  "obsToolsSec", "obsRefreshBtn"),
     }
     for area, ids in homes.items():
         seg = _area(h, area)
@@ -985,6 +988,65 @@ def t_live_column_holds_what_acts_on_air():
     assert 'data-tx="cut"' in live and 'id="txDur"' in live
     assert '<div class="liveair" id="liveOnAir">' in live and "  .onair{" not in h, \
         "the on-air card must not reuse .onair, which styles the on-air preview tile"
+
+
+def t_race_area_tabs_are_the_desk_parts():
+    h = _html()
+    with open(os.path.join(ROOT, "src", "console", "driver-desk.js"), encoding="utf-8") as fh:
+        slots = json.loads(re.search(r"var SLOTS = (\[[^\]]*\]);", fh.read()).group(1))
+    parts = [p for p in slots if p not in ("live", "trouble")]
+    tabs = re.findall(r'<button type="button" role="tab" data-sub="([a-z]+)">', h)
+    panes = re.findall(r'<div class="desksub" data-sub="([a-z]+)" role="tabpanel"><div data-desk="([a-z]+)">', h)
+    subs = json.loads(re.search(r"var DESK_SUBS = (\[[^\]]*\])", h).group(1))
+    assert tabs == subs == parts and panes == [(p, p) for p in parts], (tabs, panes, subs)
+    assert "if (!DESK_SUBS.includes(name)) name = " in _func_src(h, "showDeskSub"), \
+        "a stale stored tab never reaches a selector"
+
+
+def t_the_panel_desk_preselects_qualifying_on_a_switch_only():
+    h = _html()
+    out = _run_js("""var shown = [], nav = [], stored = null, typing = false;
+function showDeskSub(n){ shown.push(n); stored = n; }
+function recall(){ return stored; }
+function setNav(a, level, why){ nav.push([level, why]); }
+function deskDot(){}
+function deskEditing(){ return typing; }
+var DESK_SUB_KEY = "k", deskMode = null, deskSubStored = true;
+""" + _func_src(h, "deskState") + """
+}
+const st = (mode, extra) => Object.assign({waiting: 0, events: 0, mode: mode, red: false, dashboard: false}, extra);
+deskSubStored = false; deskState(st("qualifying")); const fresh = shown.splice(0);
+deskMode = null; deskSubStored = true; stored = null;
+deskState(st("qualifying")); deskState(st("race")); deskState(st("qualifying"));
+deskState(st("qualifying", {waiting: 2})); typing = true; deskState(st("race")); typing = false;
+deskState(st("qualifying", {red: true})); stored = "corrections"; deskState(st("race"));
+console.log(JSON.stringify({shown, nav: nav.slice(1), fresh}));""")
+    if out is None:
+        return
+    got = json.loads(out)
+    assert got["fresh"] == ["qualifying"], f"a first load in qualifying without a kept tab opens Qualifying: {got}"
+    assert got["shown"] == ["qualifying", "qualifying"], \
+        "the first poll keeps the stored tab, typing holds the switch, back to Race only from Qualifying: " \
+        f"{got['shown']}"
+    assert got["nav"][3] == ["warn", "2 waiting"] and got["nav"][5] == ["live", "red flag"], got["nav"]
+    assert 'a.matches("input, select, textarea")' in _func_src(h, "deskEditing") and \
+        'document.querySelector("dialog[open]")' in _func_src(h, "deskEditing")
+
+
+def t_the_program_tile_gives_way_to_the_live_keys():
+    out = _run_js(_func_src(_html(), "liveShrink") + """
+}
+console.log(JSON.stringify([liveShrink(700, 650, 336), liveShrink(700, 700, 336), liveShrink(700, 745, 336),
+                            liveShrink(700, 1200, 336), liveShrink(700, 1200, 336, 150)]));""")
+    if out is None:
+        return
+    assert json.loads(out) == [0, 0, 256, 134.4, 150], \
+        "no overflow keeps the full tile, an overflow takes its height off, down to 40 % of the width " \
+        f"and never below a feed tile: {out}"
+    h = _html()
+    assert "new ResizeObserver(fitLiveSoon).observe($(\"#liveCol\"));" in h and \
+        'document.querySelectorAll("#liveCol > *").forEach(el => new ResizeObserver(fitLiveSoon).observe(el));' in h, \
+        "a header row, ARM or a graphic request refits the column"
 
 
 def t_chat_rail_holds_both_chats_as_sections():

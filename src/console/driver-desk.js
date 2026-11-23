@@ -1,11 +1,14 @@
 /* Driver telemetry controls shared by the Race Control desk and the Director Panel
-   (#1114, #1115). DriverDesk.mount(el, {base, fullRedFlag, dashboardToggle}) polls the
-   relay and renders: the invite link, the race with its finish and red flag controls,
-   the race recording with its disconnect events, corrections, estimates for quiet
-   cars, retirements (DNF), shown driver names, rejoin and change overrides, the dashboard's delay, fastest lap and
-   qualifying corrections (plus its on-air switch with dashboardToggle), and the
-   senders with readiness, reassign and disconnect, and the drivers' registrations to approve. `base` prefixes every route: "/race-control" on the desk (its fetch
-   shim adds /console), "" on the panel. Every text goes in through textContent. */
+   (#1114, #1115). DriverDesk.mount(root, {base, fullRedFlag, dashboardToggle, onState})
+   polls the relay and renders: the invite link, the race with its finish and red flag
+   controls, the race recording with its disconnect events, corrections, estimates for
+   quiet cars, retirements (DNF), shown driver names, rejoin and change overrides, the
+   dashboard's delay, fastest lap and qualifying corrections (plus its on-air switch with
+   dashboardToggle), and the senders with readiness, reassign and disconnect, and the
+   drivers' registrations to approve. Each part (SLOTS) goes into root's
+   [data-desk="<part>"] mount point (#1267); onState gets deskState() after every poll.
+   `base` prefixes every route: "/race-control" on the desk (its fetch shim adds
+   /console), "" on the panel. Every text goes in through textContent. */
 (function () {
   "use strict";
   var CSS = [
@@ -40,9 +43,12 @@
     ".dd .pill.amb{border-color:#ffb454;color:#ffb454}",
     ".dd .banner{border:1px solid #ff4d5e;color:#ff4d5e;border-radius:6px;padding:6px 9px}",
     ".dd .msg{min-height:1.2em;font-size:12px}.dd .msg.err{color:#ff4d5e}",
+    ".dd>.msg.part{position:sticky;top:0;z-index:1;min-height:0;padding:4px 0;background:var(--panel,#14171c)}",
+    ".dd>.msg.part:empty{display:none}",
     ".dd .stale{opacity:.45}",
     ".dd .req{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-bottom:1px solid var(--edge,#2a2f37)}",
     ".dd .req .row{gap:6px}.dd .req .muted{font-size:12px}.dd .reqs-ok summary{cursor:pointer;padding:4px 0}",
+    ".dd .req>.row>.grow{flex:1 1 0}",
     ".dd .req.waiting{border-left:3px solid #ffb454;padding-left:8px}",
     ".dd button.go{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd [hidden]{display:none!important}",
@@ -328,39 +334,79 @@
     return s.approval === "pending" ? ["pending", "amb"] : ["approved, no data", "amb"];
   }
 
+  // The desk's parts, each rendered into the page's [data-desk="<part>"] mount point.
+  var SLOTS = ["live", "race", "drivers", "corrections", "qualifying", "dashboard", "setup", "trouble"];
+  function deskSlots(root) {
+    var out = {};
+    SLOTS.forEach(function (name) {
+      var host = root.querySelector('[data-desk="' + name + '"]');
+      if (host) out[name] = host;
+    });
+    return out;
+  }
+  // The last good answer of each poll; a failed poll (null) keeps it, so a relay hiccup never reads as the race mode.
+  function remember(seen, race, rec, reqs) {
+    return {race: race || seen.race, rec: rec || seen.rec, reqs: reqs || seen.reqs};
+  }
+  // What the page's navigation marks: requests waiting, open disconnects, a stale relay.
+  function deskState(race, rec, reqs, stale) {
+    var r = race || {};
+    return {waiting: requestRows(reqs && reqs.requests).filter(function (q) { return q.status === "pending"; }).length,
+            events: ((rec && rec.events) || []).filter(function (ev) {
+              return ev.state === "suspected" || ev.state === "dropout"; }).length,
+            mode: r.mode || "race", red: !!r.red_flag, dashboard: !!(r.settings && r.settings.visible),
+            gaps: !!(rec && ((rec.dropped || 0) + (rec.failed || 0))), stale: !!stale};
+  }
+
+  // What onState gets: nothing until the race answered once, so a failed first poll never
+  // reads as race mode.
+  function deskReport(seen, stale) {
+    return seen.race ? deskState(seen.race, seen.rec, seen.reqs, stale) : null;
+  }
+
   function mount(root, opts) {
     var base = (opts && opts.base) || "";
     var fullRedFlag = !!(opts && opts.fullRedFlag);
     var dashboardToggle = !!(opts && opts.dashboardToggle);
+    var onState = (opts && opts.onState) || null;
     if (!document.getElementById("dd-style")) {
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
     }
     var state = {race: null, ready: null, invite: null};
-    var msg = el("div", {cls: "msg", role: "status"});
+    var seen = {race: null, rec: null, reqs: null};
+    // A status line per part: an action's answer shows in the part it was pressed in.
+    var msgs = {}, part = "live";
+    SLOTS.forEach(function (name) { msgs[name] = el("div", {cls: "msg" + (name === "live" ? "" : " part"), role: "status"}); });
     // Shown after STALE_POLLS failed polls: decisions must not rest on frozen gaps.
     var staleNote = el("div", {cls: "msg err", role: "alert"});
     staleNote.hidden = true;
     var STALE_POLLS = 3;
     var PIT_HINT = "Estimated: a stop counts when the car stands off the racing line, so a beached car " +
       "or a red flag stop beside the track counts too. Correct it with the pit correction.";
-    function say(text, err) { msg.textContent = text || ""; msg.className = "msg" + (err ? " err" : ""); }
+    function say(text, err, where) {
+      var to = msgs[where || part];
+      SLOTS.forEach(function (name) { if (msgs[name] !== to) { msgs[name].classList.remove("cur"); msgs[name].textContent = ""; } });
+      to.textContent = text || "";
+      to.className = "msg cur" + (to === msgs.live ? "" : " part") + (err ? " err" : "");
+    }
 
-    async function call(path, body, quiet) {
+    async function call(path, body, quiet, where) {
       try {
         var r = await fetch(base + path, {method: body === undefined ? "GET" : "POST",
           headers: body === undefined ? {} : {"Content-Type": "application/json"},
           body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store"});
         var d = await r.json().catch(function () { return {}; });
         if (!r.ok || d.ok === false) {
-          if (!quiet) say(d.error || ("request failed (" + r.status + ")"), true);
+          if (!quiet) say(d.error || ("request failed (" + r.status + ")"), true, where);
           return null;
         }
         return d;
-      } catch (e) { if (!quiet) say("relay not reachable", true); return null; }
+      } catch (e) { if (!quiet) say("relay not reachable", true, where); return null; }
     }
     async function act(path, body, done) {
-      var d = await call(path, body || {});
-      if (d) { say(done || ""); refresh(); }
+      var where = part;
+      var d = await call(path, body || {}, false, where);
+      if (d) { say(done || "", false, where); refresh(); }
       return d;
     }
     var armed = arming();
@@ -406,7 +452,7 @@
       if (!d.cover) miss.push("cover: " + (d.note || "not raised"));
       if (d.banner !== "ok") miss.push("banner: " + d.banner);
       say(miss.length ? "RED FLAG held the race; " + miss.join("; ") : "RED FLAG: banner, cover and race held",
-          miss.length > 0);
+          miss.length > 0, "live");
     });
     var restart = el("select", {"aria-label": "Restart after the red flag"},
                      [opt("keep", "Restart: keep gaps"), opt("neutralise", "Restart: neutralise")]);
@@ -500,8 +546,6 @@
       saveSound(soundBox.checked);
       if (soundBox.checked) wakeAudio();
     });
-    // A stored "on" survives a reload, but the audio waits for the first click on the desk.
-    root.addEventListener("click", function () { if (soundBox.checked && !audio) wakeAudio(); });
     function beep() {
       if (!soundBox.checked || !audio) return;
       try {
@@ -787,7 +831,7 @@
       el("span", {cls: "muted", text: "Requests keep coming? Renew the invite link."})]);
     var okSummary = el("summary", {cls: "muted", text: "Approved drivers"});
     var okList = el("div", {cls: "reqs"});
-    var okBox = el("details", {cls: "reqs-ok"}, [okSummary, okList]);   // closed: the race controls stay in reach
+    var okBox = el("details", {cls: "reqs-ok", open: ""}, [okSummary, okList]);
     var reqDraft = Object.create(null);   // conn -> unsaved name, entry and stint
     var reqOpen = Object.create(null);    // approved conns open for a correction
     var lastReq = null;
@@ -873,43 +917,55 @@
       okList.replaceChildren.apply(okList, ok);
     }
 
-    root.replaceChildren(el("div", {cls: "dd"}, [
-      staleNote,
-      el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
-      el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
-      lastChange,
-      reqTitle, reqBar, reqList, okBox,
-      el("div", {cls: "row"}, [mode, laps, finalLap, finish]),
-      classLapRow,
-      el("div", {cls: "row"}, [redFlag, restart, release]),
-      redBanner,
-      el("h3", {text: "Race"}),
-      el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
-      recWarn, raceNote, lapLine, raceTable, qualiTable,
-      el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Estimate"}), estEntry, estSide, estRef, estSec,
-                               estSet, estClear]),
-      estList,
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Retire"}), retEntry, retOn, retOff]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Driver name"}), nameEntry, nameDriver, nameText,
-                               nameSet, nameClear]),
-      nameList,
-      multiRow,
-      evTitle,
-      el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
-      evTable,
-      el("h3", {text: "Dashboard"}),
-      el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
-      el("div", {cls: "row"}, [flClass, flText, flClear]),
-      el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet]),
-      el("div", {cls: "row"}, [el("span", {cls: "muted", text: "Qualifying"}), qEntry, qTime, qSet, qLap, qDelete, qRestore]),
-      qList,
-      el("h3", {text: "Tyres"}),
-      el("div", {cls: "row"}, [showTyre.label, showFuel.label]),
-      tyreTable,
-      el("h3", {text: "Readiness"}), readyTable,
-      el("h3", {text: "Senders"}), sendTable,
-      msg]));
+    var connText = el("div", {cls: "muted", text: "Connecting to the relay…"});
+    var parts = {
+      live: [staleNote, lapLine,
+        el("div", {cls: "row finish"}, [mode, laps, finalLap, finish]),
+        classLapRow,
+        el("div", {cls: "row red"}, [redFlag, restart, release]),
+        redBanner, msgs.live, lastChange],
+      race: [raceNote, raceTable, evTitle,
+        el("div", {cls: "row"}, [el("label", {cls: "check"}, [soundBox, el("span", {cls: "muted", text: "Sound on suspicion"})])]),
+        evTable],
+      drivers: [reqTitle, reqBar, reqList, okBox, el("h3", {text: "Readiness"}), readyTable,
+        el("h3", {text: "Senders"}), sendTable],
+      corrections: [el("h3", {text: "Retirement"}),
+        el("div", {cls: "row"}, [retEntry, retOn, retOff]),
+        multiRow,
+        el("h3", {text: "Estimate"}),
+        el("div", {cls: "row"}, [estEntry, estSide, estRef, estSec, estSet, estClear]),
+        estList,
+        el("h3", {text: "Correction"}),
+        el("div", {cls: "row"}, [corrEntry, corrM, corrPit, corrWhy, corrBtn]),
+        el("h3", {text: "Driver name"}),
+        el("div", {cls: "row"}, [nameEntry, nameDriver, nameText, nameSet, nameClear]),
+        nameList,
+        el("h3", {text: "Fastest lap"}),
+        el("div", {cls: "row"}, [flClass, flText, flClear]),
+        el("div", {cls: "row"}, [flEntry, flDriver, flTime, flSet])],
+      qualifying: [el("div", {cls: "row"}, [qEntry, qTime, qSet, qLap, qDelete, qRestore]),
+        qList, qualiTable],
+      dashboard: [el("h3", {text: "Dashboard"}),
+        el("div", {cls: "row"}, [onAir, el("label", {cls: "muted", text: "Delay (s)"}), delay]),
+        el("h3", {text: "Tyres"}),
+        el("div", {cls: "row"}, [showTyre.label, showFuel.label]),
+        tyreTable],
+      setup: [el("div", {cls: "row"}, [el("strong", {text: "Invite"}), inviteText, copyBtn]),
+        el("div", {cls: "row"}, [el("strong", {text: "Timing"}), timingText, timingCopy]),
+        el("h3", {text: "Recording"}),
+        el("div", {cls: "row"}, [recDot, recText, recStart, recStop, recCsv, recBrowse]),
+        recWarn],
+      trouble: [connText]
+    };
+    // Each part goes into its page's [data-desk] mount point; one without goes at the end of `root`.
+    var slots = deskSlots(root);
+    SLOTS.forEach(function (name) {
+      var box = el("div", {cls: "dd dd-" + name}, name === "live" ? parts[name] : [msgs[name]].concat(parts[name]));
+      if (slots[name]) slots[name].replaceChildren(box); else root.appendChild(box);
+      box.addEventListener("click", function () { if (soundBox.checked && !audio) wakeAudio(); });
+      box.addEventListener("pointerdown", function () { part = name; }, true);
+      box.addEventListener("focusin", function () { part = name; }, true);
+    });
 
     function keepSelect(sel, items) {
       var cur = sel.value;
@@ -1014,7 +1070,7 @@
       var quali = r.mode === "qualifying";
       raceTable.hidden = quali;
       qualiTable.hidden = !quali;
-      if (quali) { raceNote.textContent = ""; renderQuali(r); }
+      if (quali) { raceNote.textContent = "Qualifying: the times are under Qualifying."; renderQuali(r); }
     }
     function renderQuali(r) {
       var rows = [];
@@ -1115,6 +1171,8 @@
       else { state.fails = (state.fails || 0) + 1; state.staleSince = state.staleSince || new Date(); }
       var stale = state.fails >= STALE_POLLS;
       staleNote.hidden = !stale;
+      connText.textContent = ok ? "Relay reachable, updated " + new Date().toLocaleTimeString() + "."
+        : "Relay not answering since " + state.staleSince.toLocaleTimeString() + ".";
       if (stale) staleNote.textContent = "Relay not reachable since " + state.staleSince.toLocaleTimeString() +
         ": the tables below are not current.";
       [raceTable, qualiTable, evTable, readyTable, sendTable, reqList].forEach(function (t) { t.classList.toggle("stale", stale); });
@@ -1127,11 +1185,15 @@
       var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
-      if (renderRecording(await recCall) && r) renderRace(r);
+      var rec = await recCall;
+      if (renderRecording(rec) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);
       if (rd) renderSenders(rd);
       var rq = await reqCall;
       if (rq) renderRequests(rq);
+      seen = remember(seen, r, rec, rq);
+      var report = deskReport(seen, staleNote.hidden === false);
+      if (onState && report) onState(report);
     }
     async function refreshInvite() {
       var d = await call("/drivers/invite", undefined, true);

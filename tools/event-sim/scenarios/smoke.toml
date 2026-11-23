@@ -160,9 +160,24 @@ do = "register"
 args = { stints = 1 }
 expect = ["result('register').registered == 4"]
 
+# The race controls stay in reach at 1440x900 however many requests wait (#1267).
+[[step]]
+id = "desk_waiting"
+at = "after:register"
+role = "race_control"
+do = "open"
+expect = ["page('race_control').waiting == 4"]
+timeout = "15s"
+
+[[step]]
+id = "desk_fit_waiting"
+at = "after:desk_waiting"
+role = "race_control"
+do = "fit"
+
 [[step]]
 id = "approve_drivers"
-at = "after:register"
+at = "after:desk_fit_waiting"
 role = "race_control"
 do = "approve_drivers"
 expect = ["result('approve_drivers').approved == 4", "page('race_control').waiting == 0"]
@@ -186,8 +201,20 @@ expect = ["race.lap.leader >= 2"]
 timeout = "3m"
 
 [[step]]
-id = "timing"
+id = "desk_fit_racing"
 at = "after:lap2"
+role = "race_control"
+do = "fit"
+
+[[step]]
+id = "panel_fit_racing"
+at = "after:desk_fit_racing"
+role = "director"
+do = "fit"
+
+[[step]]
+id = "timing"
+at = "after:panel_fit_racing"
 role = "viewer"
 do = "read"
 args = { cars = 4 }

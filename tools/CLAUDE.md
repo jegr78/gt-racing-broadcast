@@ -467,7 +467,13 @@ Runs a scenario against the fakes above plus the real relay and Control Center, 
 python3 tools/event-sim/event_sim.py --scenario smoke --out DIR   # bundled name or a .toml path
 python3 tools/event-sim/event_sim.py --scenario smoke --check     # validate only, starts nothing
 python3 tools/event-sim/event_sim.py --scenario smoke --out DIR --no-skips   # a skipped step fails the run
+python3 tools/event-sim/event_sim.py --scenario desk-fit --out DIR --no-skips   # layout check, #1267
 ```
+
+`desk-fit` runs the `fit` action of the Race Control desk and the Director Panel (no live-column
+control may need scrolling at 1440x900) with requests waiting, a red flag with a class lap row
+(`[event] classes` gives the roster a Class column), a graphic request under a two-row panel
+header, and in qualifying. Nobody drives, so no step waits on a lap.
 
 `--no-skips` is for a run that must have its browser (the workflow): every skipped step
 and every missing screenshot becomes a hard finding. The generic `page` role is skipped

@@ -24,9 +24,11 @@
 <!-- Inline "R" favicon drawn as a path so it renders without a font. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0c0f'/%3E%3Cpath d='M11 24V8h6.2a4.4 4.4 0 0 1 0 8.8H11m6 0 4.6 7.2' fill='none' stroke='%232bd66a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; --bg: #0b0d10; --panel: #14171c; --panel-2: #1b1f25; --line: #232830;
+          --edge: #2a2f37; --ink: #e8eaed; --muted: #9aa0a6; --blue: #3b82f6; --live: #2bd66a;
+          --amber: #ffb454; --alarm: #ff4d5e; --mono: ui-monospace, SFMono-Regular, Menlo, monospace; }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: #0b0d10; color: #e8eaed; }
+  body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
   header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 14px; background: #14171c; }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
   a.back { display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
@@ -42,33 +44,98 @@
     padding: 6px 10px; font-size: 12px; font-weight: 600; }
   .appmeta a:hover { border-color: #3da9fc; }
   .appmeta .ver { color: #ffb454; font-variant-numeric: tabular-nums; }
-  .wrap { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; padding: 12px; }
-  .schedgfx { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-  @media (max-width: 640px) { .schedgfx { grid-template-columns: 1fr; } }
-  /* Grid items default to min-width:auto, so one unbreakable chat token would blow
-     the 1fr column past its track and squeeze the 2fr preview column. min-width:0
-     lets the columns honour their fr ratio. */
-  .wrap > div { min-width: 0; }
-  @media (max-width: 820px) {
-    .wrap { grid-template-columns: 1fr; }
-    .wrap > div, .schedgfx { display: contents; }
+  /* Frame (#1267): areas | live column | selected area | chats. Each column scrolls on its
+     own, so the race controls in the live column never scroll away. */
+  html, body { height: 100%; }
+  .app { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; }
+  .frame { display: grid; grid-template-columns: 158px 340px minmax(0, 1fr) 330px; gap: 12px;
+           padding: 12px; min-height: 0; }
+  .frame > * { min-height: 0; min-width: 0; overflow-y: auto; }
+  #areaNav { display: flex; flex-direction: column; gap: 4px; padding: 8px 6px; background: var(--panel);
+             border: 1px solid var(--line); border-radius: 10px; }
+  .navbtn { display: flex; align-items: center; gap: 9px; min-height: 46px; padding: 6px 9px;
+            border-radius: 8px; border: 1px solid transparent; background: none; color: var(--ink);
+            font: 600 13px/1.2 system-ui, sans-serif; text-align: left; cursor: pointer; }
+  .navbtn:hover { border-color: var(--edge); }
+  .navbtn.active { border-color: var(--blue); background: #16212e; }
+  .navbtn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .ndot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: #3a434d; }
+  .ndot.ok { background: var(--live); }
+  .ndot.warn { background: var(--amber); }
+  .ndot.alarm { background: var(--alarm); }
+  .nlbl { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .nwhy { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden;
+          text-overflow: ellipsis; }
+  .nwhy:empty { display: none; }
+  #liveCol { display: flex; flex-direction: column; gap: 10px; }
+  #liveCol > * { flex-shrink: 0; }   /* a short window scrolls the column, it never clips a card */
+  #previewCard { order: -1; }
+  .area { display: flex; flex-direction: column; gap: 12px; }
+  @media (min-width: 821px) {
+    .area:not(.active) { display: none; }
   }
-  .card { background: #14171c; border: 1px solid #232830; border-radius: 10px; overflow: hidden; }
+  .rail { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+  .rail > .card { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+  /* 821 to 1279 px: the nav shows letters and the chats sit under the area. */
+  @media (min-width: 821px) and (max-width: 1279px) {
+    .frame { grid-template-columns: 64px 320px minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+    #areaNav, #liveCol { grid-row: 1 / 3; }
+    #workspace { grid-column: 3; grid-row: 1; }
+    .rail { grid-column: 3; grid-row: 2; flex-direction: row; }
+    .navbtn { flex-direction: column; justify-content: center; gap: 3px; padding: 6px 0; }
+    .navbtn .nlbl { display: none; }
+    .navbtn::after { content: attr(data-short); font: 700 13px var(--mono); }
+  }
+  @media (max-width: 820px) {
+    html, body { height: auto; }
+    .app { display: block; height: auto; }
+    .frame { display: flex; flex-direction: column; }
+    .frame > * { overflow: visible; }
+    #areaNav { display: none; }
+    #liveCol { display: contents; }
+    #previewCard { order: 0; }
+    .livestrip { order: -1; margin: -12px -12px 0; }
+    .rail { overflow: visible; }
+    .rail > .card { flex: none; }
+    #chat { flex: none; height: 300px; }
+    #bchat { flex: none; height: 280px; }
+    .crewtabs-on .crewtabs { overflow-x: auto; }
+    .crewtabs button { flex: 0 0 auto; min-width: 64px; padding: 0 10px; position: relative; }
+    .crewtabs button.dot-warn::after, .crewtabs button.dot-alarm::after { content: ""; position: absolute;
+      top: 9px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+    .crewtabs button.dot-alarm::after { background: var(--alarm); }
+  }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: clip; }   /* clip, not hidden: a sticky status line needs the area as its scroll box */
   /* On-air banner, modelled on the cockpit tally. This is a global monitoring view
      rather than an identity-scoped one, so it always names who is on air. */
-  .tally { margin: 12px; padding: 18px; text-align: center; font-weight: 800; font-size: 26px;
+  .tally { margin: 0; padding: 10px 12px; text-align: center; font-weight: 800; font-size: 20px;
            letter-spacing: .02em; border-radius: 10px; transition: background .2s; }
   .tally.onair { background: #c1121f; color: #fff; box-shadow: 0 0 0 3px #ff4d5e inset; }
-  .tally.idle  { background: #1b1f25; color: #9aa0a6; font-size: 18px; }
-  .tally .pill { font-size: 13px; font-weight: 900; letter-spacing: .12em; vertical-align: middle;
+  .tally.idle  { background: var(--panel-2); color: var(--muted); font-size: 16px; }
+  .tally .pill { font-size: 12px; font-weight: 900; letter-spacing: .12em; vertical-align: middle;
                  background: rgba(0,0,0,.25); border-radius: 999px; padding: 3px 10px; margin-right: 10px; }
-  .tally .sub  { font-size: 14px; font-weight: 600; opacity: .9; margin-top: 6px; }
-  #program { width: 100%; display: block; background: #000; aspect-ratio: 16/9; object-fit: contain; }
-  .progwrap { position: relative; }
-  .progwrap .badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.6);
-                     padding: 2px 8px; border-radius: 6px; font-size: 12px; }
+  .tally .sub  { font-size: 13px; font-weight: 600; opacity: .9; margin-top: 2px; }
+  /* Program preview: small, with Hide; hidden, the race controls move up. */
+  .pvhead { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--line); }
+  .pvhead span { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .pvhead button, #pgmAudioBtn { font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer;
+    background: var(--panel-2); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; }
+  .pvhead button:hover, #pgmAudioBtn:hover { border-color: var(--blue); }
+  #program { width: 100%; max-height: 170px; display: block; background: #000; aspect-ratio: 16/9; object-fit: contain; }
+  #pgmAudioBar { padding: 6px 8px; }
+  #pgmAudioVol { accent-color: var(--blue); }
   #timer { padding: 14px; text-align: center; }
   #timer .t { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* The desk's live part: one row per decision, RED FLAG across the column. */
+  #liveCol .dd { gap: 8px; }
+  #liveCol .dd .row.finish select { flex: 1 1 100%; }
+  #liveCol .dd .row.finish input { flex: 0 0 5.5em; width: 5.5em; }
+  #liveCol .dd .row.finish button { flex: 1 1 0; }
+  #liveCol .dd button, #liveCol .dd select, #liveCol .dd input { min-height: 38px; }
+  #liveCol .dd .row.red button.alarm { flex: 1 1 100%; min-height: 46px; font-size: 16px; letter-spacing: .06em; }
+  #liveCol .dd .row.red select, #liveCol .dd .row.red button:not(.alarm) { flex: 1 1 0; min-width: 0; }
+  #liveCol .dd .lapline { margin: 0; font-size: 14px; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .7;
        margin: 0; padding: 10px 12px; border-bottom: 1px solid #232830; }
   /* Schedule table */
@@ -84,14 +151,14 @@
   #schedEmpty:not(:empty) + table { display: none; }
   #schedEmpty:empty { display: none; }
   /* Chat */
-  #chat { display: flex; flex-direction: column; height: 300px; }
+  #chat { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
   #chatlog { flex: 1; overflow-y: auto; padding: 8px 10px; }
   #chatlog .msg { margin-bottom: 6px; overflow-wrap: anywhere; }
   #chatlog .u { font-weight: 600; color: #8ab4f8; }
   #chatlog .ts, #bchatlog .ts { color: #8b939e; font-size: 10px; margin-right: 5px;
                                 font-variant-numeric: tabular-nums; }
   /* Broadcast chat (#294): read-only mirror of the public stream chat. */
-  #bchat { display: flex; flex-direction: column; height: 280px; }
+  #bchat { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
   #bchatlog { flex: 1; overflow-y: auto; padding: 8px 10px; }
   #bchatlog .msg { margin-bottom: 6px; overflow-wrap: anywhere; }
   #bchatlog .u { font-weight: 600; color: #f0a868; }
@@ -146,6 +213,7 @@
 </style>
 </head>
 <body>
+<div class="app">
 <header>
   <a class="back" id="backConsole" href="#" hidden aria-label="Back to Console">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -172,25 +240,68 @@
   })();
 </script>
 
-<div class="livestrip">
-  <div id="tally" class="tally idle">…</div>
-  <div id="liveTimer" class="livetimer"></div>
-</div>
-
-<div class="wrap">
-  <div>
-    <div class="card progwrap" data-tab="program">
-      <span class="badge">PROGRAM</span>
-      <img id="program" alt="program monitor">
-      <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px; margin-top:6px;">
-        <button id="pgmAudioBtn" class="bcompose" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
-        <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
-               aria-label="Program audio volume" style="width:110px;">
-        <audio id="pgmAudio" preload="none" style="display:none;"></audio>
+<div class="frame wrap" id="rcFrame">
+  <nav id="areaNav" aria-label="Desk areas">
+    <button type="button" class="navbtn" data-area="race" data-short="R"><span class="ndot"></span><span class="nlbl">Race<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="drivers" data-short="D"><span class="ndot"></span><span class="nlbl">Drivers<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="corrections" data-short="K"><span class="ndot"></span><span class="nlbl">Corrections<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="qualifying" data-short="Q"><span class="ndot"></span><span class="nlbl">Qualifying<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="dashboard" data-short="S"><span class="ndot"></span><span class="nlbl">Dashboard<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="graphics" data-short="G"><span class="ndot"></span><span class="nlbl">Graphics<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="note" data-short="N"><span class="ndot"></span><span class="nlbl">Note<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="setup" data-short="T"><span class="ndot"></span><span class="nlbl">Setup<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="trouble" data-short="!"><span class="ndot"></span><span class="nlbl">Troubleshoot<small class="nwhy"></small></span></button>
+  </nav>
+  <section id="liveCol" aria-label="Live">
+    <div class="livestrip">
+      <div id="tally" class="tally idle">…</div>
+      <div id="liveTimer" class="livetimer"></div>
+    </div>
+    <div class="card" id="previewCard" data-tab="live">
+      <div class="pvhead"><span>Program</span><button type="button" id="pgmToggle" aria-expanded="true" aria-controls="pgmBody">Hide</button></div>
+      <div id="pgmBody">
+        <img id="program" alt="program monitor">
+        <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px;">
+          <button id="pgmAudioBtn" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
+          <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
+                 aria-label="Program audio volume" style="width:110px;">
+          <audio id="pgmAudio" preload="none" style="display:none;"></audio>
+        </div>
       </div>
     </div>
-    <div class="schedgfx">
-      <div class="card" data-tab="schedule">
+    <div class="card" id="raceCard" data-tab="live">
+      <h2>Race</h2>
+      <div data-desk="live"></div>
+    </div>
+  </section>
+  <main id="workspace">
+    <div class="area" data-area="race" data-tab="race">
+      <div class="card"><h2>Race order and events</h2><div data-desk="race"></div></div>
+    </div>
+    <div class="area" data-area="drivers" data-tab="drivers">
+      <div class="card" id="driverCard"><h2>Drivers</h2><div data-desk="drivers"></div></div>
+    </div>
+    <div class="area" data-area="corrections" data-tab="corrections">
+      <div class="card"><h2>Corrections</h2><div data-desk="corrections"></div></div>
+    </div>
+    <div class="area" data-area="qualifying" data-tab="qualifying">
+      <div class="card"><h2>Qualifying</h2><div data-desk="qualifying"></div></div>
+    </div>
+    <div class="area" data-area="dashboard" data-tab="dashboard">
+      <div class="card"><h2>Dashboard and tyres</h2><div data-desk="dashboard"></div></div>
+    </div>
+    <div class="area" data-area="graphics" data-tab="graphics">
+      <div class="card" id="flagCard" hidden>
+        <h2>Flag graphic</h2>
+        <div id="flagList" class="flaglist"></div>
+      </div>
+      <div class="card">
+        <h2 id="gfxHead">Graphics
+          <button id="gfxRefresh" type="button" title="Reload the graphics list">Refresh</button>
+        </h2>
+        <div id="gfxList"><div class="empty">Loading…</div></div>
+      </div>
+      <div class="card">
         <h2>Schedule</h2>
         <div id="schedEmpty">Loading…</div>
         <table>
@@ -198,46 +309,40 @@
           <tbody id="schedRows"></tbody>
         </table>
       </div>
-      <div class="card" data-tab="graphics">
-        <h2 id="gfxHead">Graphics
-          <button id="gfxRefresh" type="button" title="Reload the graphics list">Refresh</button>
-        </h2>
-        <div id="gfxList"><div class="empty">Loading…</div></div>
-      </div>
     </div>
-  </div>
-  <div>
-    <div class="card" id="rcSendCard" data-tab="act">
-      <h2>Note to commentator</h2>
-      <div class="rcsend">
-        <select id="rcTarget" aria-label="Send to"></select>
-        <div id="rcPresets" class="rcpresets"></div>
-        <div class="rcrow">
-          <input id="rcText" placeholder="Short note, e.g. jump to car 5…" maxlength="200">
-          <button id="rcSend">Send</button>
+    <div class="area" data-area="note" data-tab="note">
+      <div class="card" id="rcSendCard">
+        <h2>Note to commentator</h2>
+        <div class="rcsend">
+          <select id="rcTarget" aria-label="Send to"></select>
+          <div id="rcPresets" class="rcpresets"></div>
+          <div class="rcrow">
+            <input id="rcText" placeholder="Short note, e.g. jump to car 5…" maxlength="200">
+            <button id="rcSend">Send</button>
+          </div>
+          <div id="rcMsg" class="rcmsg" role="status"></div>
         </div>
-        <div id="rcMsg" class="rcmsg" role="status"></div>
       </div>
     </div>
-    <div class="card" id="flagCard" data-tab="act" style="margin-top:12px;" hidden>
-      <h2>Flag graphic</h2>
-      <div id="flagList" class="flaglist"></div>
-    </div>
-    <div class="card" id="trackCard" data-tab="act" style="margin-top:12px;" hidden>
-      <h2>Track layout</h2>
-      <div class="rcsend">
-        <select id="trackPick" aria-label="GT7 layout of the event">
-          <option value="">None: recognise after the first lap</option>
-        </select>
-        <div id="trackNote" class="rcmsg warn" role="status"></div>
+    <div class="area" data-area="setup" data-tab="setup">
+      <div class="card" id="trackCard" hidden>
+        <h2>Track layout</h2>
+        <div class="rcsend">
+          <select id="trackPick" aria-label="GT7 layout of the event">
+            <option value="">None: recognise after the first lap</option>
+          </select>
+          <div id="trackNote" class="rcmsg warn" role="status"></div>
+        </div>
       </div>
+      <div class="card"><h2>Driver links and recording</h2><div data-desk="setup"></div></div>
+      <div class="card desk-only"><h2>Race timer</h2><div id="timer"><div class="t">—</div></div></div>
     </div>
-    <div class="card" id="driverCard" data-tab="act" style="margin-top:12px;">
-      <h2>Driver telemetry</h2>
-      <div id="driverDesk"></div>
+    <div class="area" data-area="trouble" data-tab="trouble">
+      <div class="card"><h2>Troubleshoot</h2><div data-desk="trouble"></div></div>
     </div>
-    <div class="card desk-only" style="margin-top:12px;"><h2>Race timer</h2><div id="timer"><div class="t">—</div></div></div>
-    <div class="card" data-tab="chat" style="margin-top:12px;">
+  </main>
+  <aside class="rail" data-tab="chat" aria-label="Chats">
+    <div class="card" id="chatCard">
       <h2>Crew chat</h2>
       <div id="chat">
         <div id="chatlog"></div>
@@ -247,13 +352,14 @@
         </div>
       </div>
     </div>
-    <div class="card" id="bchatCard" data-tab="chat" style="margin-top:12px;">
+    <div class="card" id="bchatCard">
       <h2>Broadcast chat <span class="ro">read-only</span><button id="bchatCompose" class="bcompose" hidden></button><button id="bchatRefresh" class="bcompose" title="Reconnect the chat reader and refresh">⟳ Refresh</button></h2>
       <div id="bchat">
         <div id="bchatlog"><div class="empty">Waiting for the broadcast stream…</div></div>
       </div>
     </div>
-  </div>
+  </aside>
+</div>
 </div>
 
 <script>
@@ -306,9 +412,70 @@ function renderOnAir(o) {
   }
 }
 
+// Areas (#1267): the nav on a desktop, the tab bar below 820 px; one choice for both.
+const DESK_AREAS = ['race', 'drivers', 'corrections', 'qualifying', 'dashboard', 'graphics', 'note', 'setup', 'trouble'];
+let deskArea = 'race';
+function applyArea(name) {
+  if (!DESK_AREAS.includes(name)) return;
+  deskArea = name;
+  document.querySelectorAll('.navbtn').forEach(b => {
+    const on = b.dataset.area === name;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-current', on ? 'page' : 'false');
+  });
+  document.querySelectorAll('.area').forEach(a => a.classList.toggle('active', a.dataset.area === name));
+}
+function showArea(name) {
+  if (window.crewSelectTab) window.crewSelectTab(name); else applyArea(name);
+}
+document.querySelectorAll('.navbtn').forEach(b => {
+  b.addEventListener('click', () => showArea(b.dataset.area));
+  b.title = b.querySelector('.nlbl').firstChild.textContent.trim();
+  b.setAttribute('aria-label', b.title);
+});
+// A dot marks an area that needs attention; the tab bar mirrors warn and alarm.
+function setDot(area, level, why) {
+  const b = document.querySelector(`.navbtn[data-area="${area}"]`);
+  if (!b) return;
+  b.querySelector('.ndot').className = 'ndot' + (level ? ' ' + level : '');
+  b.querySelector('.nwhy').textContent = why || '';
+  const name = b.querySelector('.nlbl').firstChild.textContent.trim();
+  b.title = why ? name + ' · ' + why : name;
+  b.setAttribute('aria-label', b.title);
+  const tab = document.querySelector(`#crewTabs button[data-id="${area}"]`);
+  if (tab) {
+    tab.classList.toggle('dot-warn', level === 'warn');
+    tab.classList.toggle('dot-alarm', level === 'alarm');
+  }
+}
+function deskDots(st) {
+  setDot('drivers', st.waiting ? 'warn' : '', st.waiting ? st.waiting + ' waiting' : '');
+  setDot('race', st.events ? 'alarm' : '', st.events ? st.events + ' disconnect' + (st.events > 1 ? 's' : '') + ' open' : '');
+  setDot('qualifying', st.mode === 'qualifying' ? 'ok' : '', st.mode === 'qualifying' ? 'session running' : '');
+  setDot('dashboard', st.dashboard ? 'ok' : '', st.dashboard ? 'on air' : '');
+  setDot('trouble', st.stale ? 'alarm' : st.gaps ? 'warn' : 'ok',
+         st.stale ? 'relay not answering' : st.gaps ? 'recording gaps' : 'no issues');
+}
+// Qualifying opens its area on a switch, and on the first poll when the browser kept no area;
+// never while someone types or a dialog is open. The Qualifying dot marks the session either way.
+function editing() {
+  const a = document.activeElement;
+  return !!(a && a.matches && a.matches('input, select, textarea')) || !!document.querySelector('dialog[open]');
+}
+let lastMode = null, storedArea = false;
+function followMode(mode) {
+  if (mode === lastMode) return;
+  const first = lastMode === null;
+  lastMode = mode;
+  if (editing() || (first && (storedArea || mode !== 'qualifying'))) return;
+  if (mode === 'qualifying') showArea('qualifying');
+  else if (deskArea === 'qualifying') showArea('race');
+}
+
 // Redacted schedule (no stream URLs) plus the on-air marker.
 function renderSchedule(d) {
   renderOnAir(d.on_air);
+  followMode(d.mode === 'qualifying' ? 'qualifying' : 'race');
   const title = (d.event_title || '').trim();
   $('eventTitle').textContent = title;
   document.title = title ? (title + ' · Race Control') : 'Race Control';
@@ -450,8 +617,24 @@ async function sendRcNote() {
 $('rcSend').addEventListener('click', sendRcNote);
 $('rcText').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendRcNote(); });
 
-// Program monitor: cache-busted JPEG stills from the cockpit endpoint.
+// Program monitor: cache-busted JPEG stills from the cockpit endpoint; none while hidden.
+// Hide lasts for this tab only, so a reload never starts an event with the picture off.
+const PV_KEY = 'rc_preview';
+function previewShown() { return !$('pgmBody').hidden; }
+function setPreview(on) {
+  $('pgmBody').hidden = !on;
+  $('pgmToggle').textContent = on ? 'Hide' : 'Show';
+  $('pgmToggle').setAttribute('aria-expanded', on ? 'true' : 'false');
+}
+try { setPreview(sessionStorage.getItem(PV_KEY) !== '0'); } catch (e) { /* private mode */ }
+$('pgmToggle').addEventListener('click', () => {
+  const on = !previewShown();
+  setPreview(on);
+  if (!on) { const au = $('pgmAudio'); if (!au.paused) $('pgmAudioBtn').click(); }
+  try { sessionStorage.setItem(PV_KEY, on ? '1' : '0'); } catch (e) { /* private mode */ }
+});
 function pollProgram() {
+  if (!previewShown()) { setTimeout(pollProgram, 1500); return; }
   const img = $('program');
   const next = new Image();
   next.onload = () => { img.src = next.src; setTimeout(pollProgram, 1500); };
@@ -662,16 +845,29 @@ pgmAudioInit("/cockpit/program-audio");
 </script>
 <!--__EVENT_INFO__-->
 <nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
-     data-tabs='[["act","Act"],["graphics","Graphics"],["chat","Chat"],["program","Program"],["schedule","Schedule"]]'></nav>
+     data-tabs='[["live","Live"],["race","Race"],["drivers","Drivers"],["corrections","Fix"],["qualifying","Quali"],["dashboard","Tyres"],["graphics","Gfx"],["note","Note"],["setup","Setup"],["trouble","!"],["chat","Chat"]]'></nav>
 <!--__CREW_FRAME__-->
 <script>
+/* The tab bar's choice is the area's: a tab that names an area shows it on a desktop too. */
+(function () {
+  var pick = window.crewSelectTab, saved = null;
+  if (pick) window.crewSelectTab = function (id) {
+    pick(id); applyArea(id);
+    var tab = document.querySelector('#crewTabs button[data-id="' + id + '"]');
+    if (tab && tab.offsetParent) tab.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  };
+  try { saved = localStorage.getItem('crewTab:' + location.pathname); } catch (e) { /* private mode */ }
+  storedArea = DESK_AREAS.includes(saved);
+  applyArea(storedArea ? saved : deskArea);
+})();
 /* Driver telemetry controls (#1114), shared with the Director Panel; RED FLAG here is
    the full one: banner, Standby Cover and the race's red flag mode. */
 (function () {
   var s = document.createElement("script");
   s.src = RC_API("/driver-desk.js");
   s.onload = function () {
-    window.DriverDesk.mount(document.getElementById("driverDesk"), {base: "/race-control", fullRedFlag: true});
+    window.DriverDesk.mount(document.getElementById("rcFrame"),
+                            {base: "/race-control", fullRedFlag: true, onState: deskDots});
   };
   document.body.appendChild(s);
 })();

@@ -18,6 +18,7 @@ FEED_S = 120.0
 POLL_MS = 100
 DESK = selectors.DESK
 STALE_S = 1.0
+DETACHED = "not attached"   # Playwright's text for an element the page replaced
 HUD_FIELDS = ("stint", "streamer", "session", "flag", "racecontrol")
 URI_SAFE = "!'()*~"      # what the page's encodeURIComponent leaves as it is
 
@@ -72,8 +73,19 @@ class Surface(builtin.PageRole):
         if not loc.is_enabled():
             raise StepError(f"{what}: the control is disabled ({selector})")
         self._note_outside(loc, what)
-        loc.scroll_into_view_if_needed(timeout=CONTROL_MS)
-        return loc
+        # A desk re-renders its rows with every poll: a row replaced between finding and
+        # scrolling is found again, the locator resolves to the new one.
+        begin = self.clock()
+        while True:
+            try:
+                loc.scroll_into_view_if_needed(timeout=CONTROL_MS)
+                return loc
+            except Exception as exc:
+                if DETACHED not in str(exc):
+                    raise
+                if self.clock() - begin >= CONTROL_MS / 1000:
+                    raise StepError(f"{what}: the page keeps replacing the control, {DETACHED}") from None
+                self.pg.wait_for_timeout(POLL_MS)
 
     def _note_outside(self, loc, what):
         box, view = loc.bounding_box(), self.viewport
@@ -145,8 +157,9 @@ class Surface(builtin.PageRole):
             resp = info.value
         except StepError:
             raise
-        except Exception:
-            raise StepError(f"{what}: the page sent no request to {path}") from None
+        except Exception as exc:  # Playwright's text says what the click or the wait met
+            detail = builtin.redact(str(exc).splitlines()[0] if str(exc) else type(exc).__name__, self.ctx.secrets)
+            raise StepError(f"{what}: the page sent no request to {path} ({detail})") from None
         if resp.status >= 400:
             raise StepError(f"{what}: {path} answered HTTP {resp.status}")
         return resp
@@ -191,6 +204,60 @@ class Surface(builtin.PageRole):
         target = self.pg.locator(element).first if element else self.pg
         target.screenshot(path=path, mask=[self.pg.locator(self.sel(k)) for k in self.masked],
                           timeout=CONTROL_MS)
+
+
+class LiveColumn:
+    """A page with a live column (its `live` selector): `fit` fails when a visible control
+    there needs scrolling, the layout promise of the panel and the desk (#1267). It waits
+    for the role's `live_required` controls plus `require` (labels) and fails without them.
+    `viewport` ([width, height]) measures in that window; `reachable` then only asks that
+    scrolling the column reaches every control, so nothing clips one. The page may still
+    settle its layout (the panel's program tile shrinks a frame later), so it measures
+    again until the controls fit or the time is up."""
+    live_required = ()
+
+    def _labels_in(self, found, labels):
+        names = [c["label"] for c in found]
+        return [want for want in labels if not any(n == want or n.startswith(want) for n in names)]
+
+    def act_fit(self, args):
+        size = args.get("viewport")
+        if size is not None and (not isinstance(size, list) or len(size) != 2
+                                 or not all(type(v) is int and v > 0 for v in size)):
+            raise StepError(f"fit: viewport is [width, height], not {size!r}")
+        want = list(self.live_required) + [str(x) for x in args.get("require", [])]
+        key = "clip" if args.get("reachable") else "cut"
+        if size:
+            self.pg.set_viewport_size({"width": size[0], "height": size[1]})
+        last = {}
+
+        def settled():
+            found = last["found"] = self.fit_report(self.sel("live"))
+            if not found or self._labels_in(found, want):
+                return None
+            last["cut"] = [(c["label"], c[key]) for c in found if c[key] > builtin.FIT_TOLERANCE_PX]
+            return not last["cut"]
+        try:
+            try:
+                self.until(settled, f"{self.kind}: the live controls", slow=None)
+            except StepError:
+                found = last.get("found")
+                if found is None:
+                    raise StepError(f"{self.kind}: the page has no live column ({self.sel('live')})") from None
+                if not found:
+                    raise StepError(f"{self.kind}: the live column shows no control") from None
+                if self._labels_in(found, want):
+                    raise StepError(f"{self.kind}: the live column lacks {', '.join(self._labels_in(found, want))}") \
+                        from None
+        finally:
+            if size:
+                self.pg.set_viewport_size(dict(self.viewport))
+        found, cut = last["found"], last.get("cut", [])
+        if cut:
+            how = "are clipped" if key == "clip" else "need scrolling"
+            raise StepError(f"{self.kind}: {len(cut)} of {len(found)} live controls {how}: " +
+                            ", ".join(f"{label} {px}px" for label, px in cut[:8]))
+        return {"controls": len(found)}
 
 
 @register
@@ -286,15 +353,16 @@ class ProducerRole(Surface):
 
 
 @register
-class DirectorRole(Surface):
+class DirectorRole(LiveColumn, Surface):
     """The director on the Director Panel: `approve_link` (stint), `arm_feed` (feed),
     `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby,
     Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode`
     (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text,
-    target, level), `chat` (text, name)."""
+    target, level), `chat` (text, name), `fit`."""
     kind = "director"
     path, ready = "/panel", selectors.READY["DIRECTOR"]
     sources = selectors.SOURCES["DIRECTOR"]
+    live_required = selectors.LIVE_REQUIRED["DIRECTOR"]
     selectors = selectors.DIRECTOR
     masked = ("links",)
 
@@ -433,9 +501,9 @@ class DirectorRole(Surface):
 
     def act_show_dashboard(self, args):
         on = bool(args.get("on", True))
-        self.area("setup")
+        self.area("race")
         if not self.pg.locator(self.sel("dashboard")).first.is_visible():
-            self.click(self.sel("desk_open"), "Driver telemetry")
+            self.click(self.sel("desk_tab", sub="dashboard"), "Race desk: Dashboard")
         show, hide = DESK["dashboard_show"], DESK["dashboard_hide"]
         want, shown = (hide, show) if on else (show, hide)
         button = self.sel("dashboard")
@@ -474,17 +542,23 @@ class DirectorRole(Surface):
 
 
 @register
-class RaceControlRole(Surface):
+class RaceControlRole(LiveColumn, Surface):
     """Race Control on its desk: `approve_driver` (name, entry), `approve_drivers`,
     `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry),
     `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason),
-    `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target)."""
+    `set_time` and `add_lap` (entry, time; qualifying), `note` (text, target), `fit`. An
+    action first opens the desk area that holds its controls; the race controls stay in
+    the live column."""
     kind = "race_control"
     path, ready, crew = "/console/race-control", selectors.READY["RACE_CONTROL"], "Sim Race Control"
     base = "/race-control"
     sources = selectors.SOURCES["RACE_CONTROL"]
+    live_required = selectors.LIVE_REQUIRED["RACE_CONTROL"]
     selectors = selectors.RACE_CONTROL
     masked = ("links",)
+
+    def area(self, name):
+        self.click(self.sel("area", area=name), f"area {name}")
 
     def _line(self):
         status = self.sel("status")
@@ -518,6 +592,7 @@ class RaceControlRole(Surface):
 
     def act_approve_driver(self, args):
         name = str(args.get("name", ""))
+        self.area("drivers")
         row = self.sel("request", name=name)
         try:
             before = self.until(lambda: self.count(row), "the request")
@@ -532,6 +607,7 @@ class RaceControlRole(Surface):
 
     def act_approve_drivers(self, args):
         """Approve every waiting request, top to bottom; none waiting is a failure."""
+        self.area("drivers")
         self.until(lambda: self.count(self.sel("waiting")), "a waiting driver request")
         names = []
         while self.count(self.sel("waiting")):
@@ -553,14 +629,17 @@ class RaceControlRole(Surface):
         return self._press(DESK["release"], "/drivers/race/release", "Restart released", armed=True)
 
     def act_retire(self, args):
+        self.area("corrections")
         self.choose(self.sel("select", label=DESK["retire_entry"]), "Entry to retire", value=args.get("entry"))
         return self._press(DESK["retire"], "/drivers/race/retire", "Retired", armed=True)
 
     def act_rejoin(self, args):
+        self.area("corrections")
         self.choose(self.sel("select", label=DESK["rejoin_entry"]), "Team to rejoin", value=args.get("entry"))
         return self._press(DESK["rejoin"], "/drivers/race/rejoin", "Rejoin marked")
 
     def act_estimate(self, args):
+        self.area("corrections")
         self.choose(self.sel("select", label=DESK["estimate_entry"]), "Quiet entry", value=args.get("entry"))
         self.choose(self.sel("select", label=DESK["estimate_side"]), "Behind or ahead",
                     label=DESK["side_ahead"] if args.get("ahead") else DESK["side_behind"])
@@ -570,6 +649,7 @@ class RaceControlRole(Surface):
 
     def act_correction(self, args):
         """Correct an entry's distance (`metres`) or pit stop count (`pits`), with a reason."""
+        self.area("corrections")
         self.choose(self.sel("select", label=DESK["correct_entry"]), "Entry to correct", value=args.get("entry"))
         if "metres" in args:
             self.fill(self.sel("input", label=DESK["correct_metres"]), args["metres"], "metres")
@@ -580,12 +660,14 @@ class RaceControlRole(Surface):
 
     def act_set_time(self, args):
         """Set an entry's qualifying time (`time` as m:ss.mmm)."""
+        self.area("qualifying")
         self.choose(self.sel("select", label=DESK["quali_entry"]), "Qualifying entry", value=args.get("entry"))
         self.fill(self.sel("input", label=DESK["quali_time"]), args.get("time", ""), "Qualifying time")
         return self._press(DESK["set_time"], "/drivers/race/quali", "Qualifying time set")
 
     def act_note(self, args):
         """Send a note to the commentators (`target`: the Send to label, default as shown)."""
+        self.area("note")
         text = str(args.get("text", ""))
         if args.get("target"):
             self.choose(self.sel("note_target"), "Send to", label=args["target"])
@@ -598,6 +680,7 @@ class RaceControlRole(Surface):
         return {"text": text}
 
     def act_add_lap(self, args):
+        self.area("qualifying")
         self.choose(self.sel("select", label=DESK["quali_entry"]), "Qualifying entry", value=args.get("entry"))
         self.fill(self.sel("input", label=DESK["quali_time"]), args.get("time", ""), "Qualifying time")
         return self._press(DESK["add_lap"], "/drivers/race/quali-lap", "Qualifying lap added")
