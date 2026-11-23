@@ -483,6 +483,12 @@ class Engine:
         if self._noteworthy(res):
             res.cpu = hoststate.cpu_delta(step_procs, self._unit_processes())
         res.host = hoststate.delta(self._step_sample, self._sample())
+        if res.host.get("oom_kill"):
+            # A killed renderer or service surfaces later as a timeout; name the kill itself.
+            self.findings.append(Finding(HARD, f"the unit's memory cgroup OOM-killed {res.host['oom_kill']} "
+                                               f"process(es) during this step (memory.max reached "
+                                               f"{res.host.get('max')} times, peak {res.host.get('memory_peak_mb')} MB)",
+                                         step.id, step.role))
         self._trace_end(step, res)
         self.ctx.learn(force=True)      # a link this step created or renewed
         res.duration = round(self.clock() - begin, 3)

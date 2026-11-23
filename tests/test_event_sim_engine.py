@@ -1368,6 +1368,19 @@ def t_a_slow_or_failed_step_names_the_long_tasks_of_each_page():
     assert "1900" in report.render_html(data), "the report shows them under the step"
 
 
+def t_an_oom_kill_in_the_unit_is_its_own_hard_finding():
+    def host(kills):
+        return {"t": 0.0, "loadavg": [1, 1, 1], "unit": {"memory_peak": 2 * 1024 ** 3,
+                                                         "memory_events": {"oom_kill": kills, "max": kills * 9}}}
+    samples = iter([host(0), host(0), host(0), host(1)])
+    data, _, _ = _diag_run([{"id": "a", "role": "rec", "do": "go"}, {"id": "b", "role": "rec", "do": "go"}],
+                           host=lambda: next(samples))
+    hard = [(f["step"], f["message"]) for f in data["findings"] if f["severity"] == "hard"]
+    assert len(hard) == 1 and hard[0][0] == "b" and "OOM-killed 1 process" in hard[0][1], hard
+    assert "2048 MB" in hard[0][1], "the finding names the unit's memory peak"
+    assert not data["ok"], "a killed process is a failure of the run, whatever step it hits next"
+
+
 def t_the_traces_own_blocked_script_in_a_sandboxed_frame_is_no_page_error():
     class Msg:
         type, location = "error", {"url": "about:blank"}

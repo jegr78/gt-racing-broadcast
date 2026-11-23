@@ -12,7 +12,7 @@ CGROUP = "/sys/fs/cgroup"
 RESOURCES = ("cpu", "memory", "io")
 DELTA_KEYS = ("seconds", "cpu_s", "throttled_s", "nr_throttled", "unit_cpu_stall_s",
               "unit_memory_stall_s", "unit_io_stall_s", "host_cpu_stall_s", "cpu_stall_share",
-              "oom", "high", "max", "memory_peak_mb")
+              "oom", "oom_kill", "high", "max", "memory_peak_mb")
 
 
 def _read(path):
@@ -172,6 +172,7 @@ def delta(before, after):
         "unit_io_stall_s": _diff(before, after, "unit", "pressure", "io", "some", "total", scale=1e6),
         "host_cpu_stall_s": _diff(before, after, "pressure", "cpu", "some", "total", scale=1e6),
         "oom": _diff(before, after, "unit", "memory_events", "oom"),
+        "oom_kill": _diff(before, after, "unit", "memory_events", "oom_kill"),
         "high": _diff(before, after, "unit", "memory_events", "high"),
         "max": _diff(before, after, "unit", "memory_events", "max"),
         "memory_peak_mb": None if _get(after, "unit", "memory_peak") is None

@@ -607,7 +607,10 @@ needed to explain a failure at the moment it happens:
   `cpu_s` of the unit, `unit_cpu_stall_s` and `cpu_stall_share` (its tasks waiting for a
   CPU, from the unit's `cpu.pressure`), `throttled_s` (the 200 % quota), the host's
   `host_cpu_stall_s` and new `oom`/`high` memory events (`hoststate.py`, Linux only, None
-  elsewhere). The E2E unit runs at `CPUWeight=10`: other work on the machine starves it
+  elsewhere). A step during which the unit's memory cgroup OOM-killed a process
+  (`memory.events` `oom_kill`) is a hard finding of its own that names the kill, the
+  `memory.max` events and the peak: a killed renderer otherwise surfaces later as a
+  timeout. The E2E unit runs at `CPUWeight=10`: other work on the machine starves it
   without any throttling, which `unit_cpu_stall_s` shows and `throttled_s` does not. The
   report lists the slowest actions of the run.
 - Failure snapshot. A step that fails, and a screenshot that fails (also one a step
