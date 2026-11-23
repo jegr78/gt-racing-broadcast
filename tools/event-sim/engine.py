@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 import expect
 import redaction
 import roles
-from roles import builtin
+import roles.builtin
 from scenario import TEMPLATE_RE as _TEMPLATE, template_refs
 
 HARD, SOFT = "hard", "soft"
@@ -306,7 +306,7 @@ class Engine:
     def _evidence(self, step, res):
         """A failed page step's whole page as `fail-<step>.png`; never decides the run."""
         role = self.roles.get(step.role)
-        if self.shots_dir is None or not isinstance(role, builtin.PageRole) or role.pg is None:
+        if self.shots_dir is None or not isinstance(role, roles.builtin.PageRole) or role.pg is None:
             return
         os.makedirs(self.shots_dir, exist_ok=True)
         name = f"fail-{step.id}.png"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the ruff linter over the repo (config: ruff.toml at the repo root), plus three
+"""Run the ruff linter over the repo (config: ruff.toml at the repo root), plus four
 in-house guards that mirror CodeQL classes ruff has no rule for.
 
     python3 tools/lint.py          # check only (what CI runs)
@@ -28,7 +28,8 @@ and method cases stay CodeQL's job.
 
 The assert guard (find_assert_side_effects) reproduces py/side-effect-in-assert with
 CodeQL's own name list, so a test that calls `.append`/`.close`/... inside an assert
-fails here instead of on main after the merge.
+fails here instead of on main after the merge. The import guard
+(find_import_both_ways) does the same for py/import-and-import-from.
 """
 import ast, io, os, shutil, subprocess, sys, tokenize
 
@@ -210,6 +211,26 @@ def find_assert_side_effects(source):
                   and any(_probable_side_effect(c) for c in ast.walk(n)))
 
 
+def find_import_both_ways(source, local):
+    """(lineno, name) for each of the repo's own modules (top-level name in `local`)
+    that a file imports with both `import M` and `from M import x`, CodeQL's
+    py/import-and-import-from; CodeQL leaves the standard library out because it has
+    no source for it. Returns [] for unparseable source."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    plain = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                plain.setdefault(a.name, n.lineno)
+    froms = {n.module for n in ast.walk(tree)
+             if isinstance(n, ast.ImportFrom) and n.level == 0 and n.module}
+    return sorted((line, name) for name, line in plain.items()
+                  if name in froms and name.split(".")[0] in local)
+
+
 def _python_files(root):
     """Tracked .py files (git, so dist/runtime/incoming stay excluded); a plain
     walk is the fallback when git is unavailable."""
@@ -269,6 +290,23 @@ def check_assert_side_effects(root):
     return sorted(bad)
 
 
+def check_import_both_ways(root):
+    """(relpath, lineno, name) for every module imported both ways in the repo
+    (CodeQL py/import-and-import-from)."""
+    files = _python_files(root)
+    local = {os.path.basename(os.path.dirname(p)) if os.path.basename(p) == "__init__.py"
+             else os.path.splitext(os.path.basename(p))[0] for p in files}
+    bad = []
+    for path in files:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+        except OSError:
+            continue
+        bad += [(os.path.relpath(path, root), ln, name) for ln, name in find_import_both_ways(src, local)]
+    return sorted(bad)
+
+
 def main():
     if not shutil.which("ruff"):
         sys.exit("lint: ruff not found on PATH.\n"
@@ -296,6 +334,13 @@ def main():
               "the whole assert, so call first and assert on the result:")
         for relpath, lineno in assert_bad:
             print(f"  {relpath}:{lineno}: assert contains a call that may have side effects")
+        rc = rc or 1
+    both = check_import_both_ways(ROOT)
+    if both:
+        print("\nimport-and-import-from (CodeQL py/import-and-import-from): import each "
+              "module one way only:")
+        for relpath, lineno, name in both:
+            print(f"  {relpath}:{lineno}: '{name}' is imported with both import and from-import")
         rc = rc or 1
     return rc
 
