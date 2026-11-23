@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Stdlib checks for the cross-platform port helpers (racecast freeport). Run:
 python3 tests/test_ports.py"""
-import importlib.util, os, signal
+import importlib.util, os, signal, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))   # ports reads its feed ports from simulation
 
 
 def _load(name, rel):
