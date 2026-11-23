@@ -29,6 +29,13 @@ def _isolated_args(tmp, port=None):
             "--gt7-ps-ip", "127.0.0.1"]
 
 
+def _ports_env(args):
+    """The RACECAST_SIM_* port variables that match the ports in `args`."""
+    value = lambda flag: args[args.index(flag) + 1]
+    return {"RACECAST_SIM_RELAY_PORT": value("--http-port"),
+            "RACECAST_SIM_FEED_PORTS": value("--ports") + "," + value("--pov-port")}
+
+
 def _sheet():
     """A loopback Sheet that records which tab every request asked for."""
     tabs = []
@@ -71,7 +78,9 @@ def t_simulated_relay_reads_only_the_loopback_sheet():
     env.update(RACECAST_SIMULATION="1", RACECAST_FEED_FANOUT="0", RACECAST_MANUAL_FEED_ARM="1",
                RACECAST_SIM_SHEET_URL=f"http://127.0.0.1:{srv.server_address[1]}/sim",
                RACECAST_SIM_STREAM_BIN=_stream_bin(tmp), RACECAST_UPDATE_CHECK="0")
-    argv = [sys.executable, RELAY, "--sheet-id", "SIMSHEET"] + _isolated_args(tmp, port)
+    args = _isolated_args(tmp, port)
+    env.update(_ports_env(args))
+    argv = [sys.executable, RELAY, "--sheet-id", "SIMSHEET"] + args
     log = open(os.path.join(tmp, "relay.out"), "wb")  # noqa: SIM115  closed below
     proc = subprocess.Popen(argv, env=env, stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -102,6 +111,19 @@ def t_simulated_relay_reads_only_the_loopback_sheet():
         log.close()
         srv.shutdown(); srv.server_close()
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def t_simulated_relay_refuses_the_live_control_port_cleanly():
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RACECAST_SIM")}
+    with tempfile.TemporaryDirectory(prefix="racecast-sim-relay-") as tmp:
+        args = _isolated_args(tmp)
+        env.update(_ports_env(args), RACECAST_SIMULATION="1",
+                   RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin(tmp))
+        args[args.index("--http-port") + 1] = "8088"
+        out = subprocess.run([sys.executable, RELAY] + args + ["--sheet-id", "X"],
+                             env=env, capture_output=True, text=True, errors="replace", timeout=60)
+    assert out.returncode != 0, "a simulated relay started on the live control port"
+    assert "--http-port" in out.stderr and "Traceback" not in out.stderr, out.stderr[-2000:]
 
 
 def t_simulated_relay_refuses_to_start_without_its_endpoints():

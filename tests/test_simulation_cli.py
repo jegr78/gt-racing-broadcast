@@ -14,7 +14,8 @@ import install_apps  # noqa: E402
 import obs_ws  # noqa: E402
 import tailscale  # noqa: E402
 
-SIM_ENV = {"RACECAST_SIMULATION": "1"}
+SIM_PORTS = {"RACECAST_SIM_RELAY_PORT": "41000", "RACECAST_SIM_FEED_PORTS": "41001,41002,41003"}
+SIM_ENV = {"RACECAST_SIMULATION": "1", **SIM_PORTS}
 
 
 @contextlib.contextmanager
@@ -723,7 +724,8 @@ def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
     sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
     import ui_ops
     urls = []
-    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234"), \
+    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="41234",
+              RACECAST_SIM_FEED_PORTS="41001,41002,41003"), \
             _patched((m.http_util, "get_bytes", lambda url, **k: urls.append(url) or b"")):
         assert m._relay_port() == 41234
         m._fetch_relay_page("/hud")
@@ -735,9 +737,43 @@ def t_simulated_cli_and_control_center_use_the_simulated_relay_port():
     assert urls == ["http://127.0.0.1:41234/hud"], urls
     assert m._relay_port() == 8088 and ui_ops.build_argv("kill-relay")[2] == "8088"
     assert preflight.relay_status_url() == "http://127.0.0.1:8088/status"
-    with _env(RACECAST_SIMULATION="1", RACECAST_SIM_FEED_PORTS="41001,41002,41003"):
+    with _env(**SIM_ENV):
         assert preflight.relay_ports()[:3] == (41001, 41002, 41003), "preflight checks the simulated feed ports"
     assert preflight.relay_ports()[:3] == (53001, 53002, 53003)
+
+
+def t_simulation_without_a_relay_port_never_reaches_8088():
+    assert "RACECAST_SIM_RELAY_PORT is not set" in m._simulation_gate(
+        ["event", "start"], dict(_sim_ok_env(), RACECAST_SIM_RELAY_PORT=""), "demo", {}), \
+        "the gate refuses a simulation without its own relay port"
+    urls = []
+
+    def record(url, *a, **k):
+        urls.append(url)
+        return {}
+    sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
+    import ui_ops
+    with tempfile.TemporaryDirectory() as tmp, \
+            _env(RACECAST_SIMULATION="1", RACECAST_SIM_RELAY_PORT="", RACECAST_SIM_FEED_PORTS=""), \
+            _patched((m.http_util, "get_bytes", record), (m.http_util, "get_json", record),
+                     (m.http_util, "post_json", record), (m.http_util, "open_url", record)):
+        for name, call in (
+                ("crew write", lambda: m.crew_write_data(1, "Ann", True, False)),
+                ("crew read", m.crew_entries_data),
+                ("event title", lambda: m.event_title_write_data(
+                    "Round 1", alive=lambda: True, sanitize=str, path=os.path.join(tmp, "event.json"))),
+                ("chat", lambda: m._post_chat_message("hello")),
+                ("Control Center relay row", lambda: m.relay_status_data(
+                    read_pid=lambda p: 4242, alive=lambda p: True)),
+                ("Kill relay", lambda: ui_ops.build_argv("kill-relay"))):
+            try:
+                result = call()
+            except ValueError as exc:
+                assert "RACECAST_SIM_RELAY_PORT" in str(exc), (name, exc)
+            else:
+                assert isinstance(result, dict) and result.get("ok") is False, \
+                    f"{name} answered as if it reached a relay: {result}"
+    assert urls == [], f"a simulation without its relay port reached a relay: {urls}"
 
 
 def t_kill_relay_text_names_the_actual_port():

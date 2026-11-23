@@ -12176,10 +12176,9 @@ DEFAULT_FEED_PORTS = (53001, 53002, 53003)
 
 def feed_ports(ports, pov, environ):
     """([Feed A, Feed B], POV) from --ports and --pov-port. A value not given is the
-    product default 53001/53002/53003, or in simulation the matching port of
-    RACECAST_SIM_FEED_PORTS when that is set (the event simulation always sets it; unset,
-    a simulated relay keeps the product ports). In simulation an explicit port that is a
-    product feed port, 8088, the Control Center's port or the simulated control port raises."""
+    product default 53001/53002/53003, or in simulation the matching port of the required
+    RACECAST_SIM_FEED_PORTS. In simulation an explicit port that is a product feed port,
+    8088, the Control Center's port or the simulated control port raises."""
     try:
         chosen = [int(x) for x in ports.split(",")] if ports else None
     except ValueError:
@@ -12200,8 +12199,14 @@ def feed_ports(ports, pov, environ):
 
 
 def control_port(value, environ):
-    """--http-port, else the simulated relay port in simulation, else 8088."""
-    return value if value is not None else simulation.relay_port(environ)
+    """--http-port, else the simulated relay port in simulation, else 8088. In simulation
+    an explicit port of the live relay, a service or another simulated party raises."""
+    if value is None:
+        return simulation.relay_port(environ)
+    problem = simulation.control_port_problem(value, environ)
+    if problem:
+        raise ValueError(f"simulation mode: {problem}")
+    return value
 
 
 def _timing_host_env_file():
@@ -16357,8 +16362,8 @@ def main():
     _sim_error = simulation_startup(os.environ)
     if _sim_error:
         sys.exit(f"ERROR: {_sim_error}")
-    args.http_port = control_port(args.http_port, os.environ)
     try:
+        args.http_port = control_port(args.http_port, os.environ)
         ports, args.pov_port = feed_ports(args.ports, args.pov_port, os.environ)
     except ValueError as exc:
         sys.exit(f"ERROR: {exc}")

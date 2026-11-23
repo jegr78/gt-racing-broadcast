@@ -167,7 +167,7 @@ RACECAST_PROFILE=
 - **`RACECAST_SIMULATION`** *(optional, default off)*: `1` turns on
   [simulation mode](Run-an-event#rehearse-in-simulation-mode), a rehearsal against
   simulated parties, configured with the `RACECAST_SIM_*` variables listed there
-  (`RACECAST_SIM_RELAY_PORT` moves the relay off 8088 for a rehearsal). On is
+  (`RACECAST_SIM_RELAY_PORT` keeps the rehearsal's relay off 8088). On is
   `1`, `true`, `yes` or `on`, off is empty, `0`, `false`, `no` or `off`; any other value
   stops racecast with an error instead of running for real.
 - **`RACECAST_UI_PASSWORD`** *(reserved)*: for the future Control-Center-over-Tailscale

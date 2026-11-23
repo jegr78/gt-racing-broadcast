@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import simulation as sim  # noqa: E402
 
 ON = {"RACECAST_SIMULATION": "1"}
+PORTS = {"RACECAST_SIM_RELAY_PORT": "41000", "RACECAST_SIM_FEED_PORTS": "41001,41002,41003"}
 
 
 def t_env_names_are_the_documented_contract():
@@ -87,9 +88,9 @@ def _stream_bin():
 
 def t_problems_name_every_missing_or_bad_endpoint():
     probs = sim.problems(dict(ON))
-    assert any(sim.SHEET_URL in p for p in probs), probs
-    assert any(sim.STREAM_BIN in p for p in probs), probs
-    env = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s",
+    for var in (sim.SHEET_URL, sim.STREAM_BIN, sim.RELAY_PORT, sim.FEED_PORTS):
+        assert any(var in p for p in probs), (var, probs)
+    env = dict(ON, **PORTS, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s",
                RACECAST_SIM_STREAM_BIN=_stream_bin())
     assert sim.problems(env) == [], sim.problems(env)
     env["RACECAST_SIM_OBS_WS"] = "ws://203.0.113.5:4455"
@@ -287,9 +288,15 @@ def t_feed_ports_move_only_in_simulation_and_never_onto_a_live_port():
     assert sim.FEED_PORTS == "RACECAST_SIM_FEED_PORTS"
     assert sim.feed_ports({}) == live
     assert sim.feed_ports({"RACECAST_SIM_FEED_PORTS": "41001,41002,41003"}) == live, "outside simulation nothing changes"
-    assert sim.feed_ports(dict(ON)) == live, "unset keeps the product ports"
+    try:
+        sim.feed_ports(dict(ON))
+    except ValueError as exc:
+        assert sim.FEED_PORTS in str(exc), exc
+    else:
+        raise AssertionError("an unset RACECAST_SIM_FEED_PORTS must never mean the product ports")
     assert sim.feed_ports(dict(ON, RACECAST_SIM_FEED_PORTS=" 41001, 41002 ,41003 ")) == (41001, 41002, 41003)
-    base = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin())
+    base = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin(),
+                RACECAST_SIM_RELAY_PORT="41000")
     assert sim.problems(dict(base, RACECAST_SIM_FEED_PORTS="41001,41002,41003")) == []
     bad = {"41001,41002": "three", "41001,41002,41003,41004": "three", "41001,41001,41003": "differ",
            "41001,53002,41003": "53001-53003", "8088,41002,41003": "8088", "41001,41002,8089": "Control Center",
@@ -322,7 +329,7 @@ def t_feed_ports_move_only_in_simulation_and_never_onto_a_live_port():
 
 def t_the_relay_takes_its_feed_ports_from_the_simulation_and_refuses_the_product_ones():
     m = _relay()
-    sim_env = dict(ON, RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+    sim_env = dict(ON, RACECAST_SIM_FEED_PORTS="41001,41002,41003", RACECAST_SIM_RELAY_PORT="41000")
     assert m.feed_ports(None, None, {}) == ([53001, 53002], 53003)
     assert m.feed_ports(None, None, sim_env) == ([41001, 41002], 41003), \
         "a relay started directly in simulation never binds the product ports"
@@ -361,7 +368,12 @@ def t_relay_port_moves_only_in_simulation():
     assert sim.RELAY_PORT == "RACECAST_SIM_RELAY_PORT" and sim.DEFAULT_RELAY_PORT == 8088
     assert sim.relay_port({}) == 8088
     assert sim.relay_port({"RACECAST_SIM_RELAY_PORT": "41234"}) == 8088, "outside simulation nothing changes"
-    assert sim.relay_port(dict(ON)) == 8088, "unset keeps 8088"
+    try:
+        sim.relay_port(dict(ON))
+    except ValueError as exc:
+        assert sim.RELAY_PORT in str(exc), exc
+    else:
+        raise AssertionError("an unset RACECAST_SIM_RELAY_PORT must never mean 8088")
     assert sim.relay_port(dict(ON, RACECAST_SIM_RELAY_PORT=" 41234 ")) == 41234
     bare = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin())
     alone = sim.problems(dict(bare, RACECAST_SIM_RELAY_PORT="41234"))
@@ -390,6 +402,36 @@ def t_relay_control_port_default_follows_simulation():
     assert m.control_port(None, {}) == 8088
     assert m.control_port(None, dict(ON, RACECAST_SIM_RELAY_PORT="41234")) == 41234
     assert m.control_port(5000, dict(ON, RACECAST_SIM_RELAY_PORT="41234")) == 5000, "--http-port still wins"
+    assert m.control_port(8088, {}) == 8088, "a live relay may name its own port"
+    env = dict(ON, **PORTS, RACECAST_SIM_OBS_WS="ws://127.0.0.1:41005")
+    for port, needle in ((8088, "8088"), (53002, "53001-53003"), (8089, "Control Center"),
+                         (4455, "OBS WebSocket"), (8000, "Companion"), (41002, sim.FEED_PORTS),
+                         (41005, sim.OBS_WS)):
+        try:
+            m.control_port(port, env)
+        except ValueError as exc:
+            assert "--http-port" in str(exc) and needle in str(exc), (port, exc)
+            continue
+        raise AssertionError(f"--http-port {port} must be refused in simulation")
+
+
+def t_simulated_relay_port_avoids_every_service_and_endpoint_port():
+    base = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s", RACECAST_SIM_STREAM_BIN=_stream_bin(),
+                RACECAST_SIM_FEED_PORTS="41001,41002,41003")
+    for port, needle in (("4455", "OBS WebSocket"), ("8000", "Companion")):
+        found = [p for p in sim.problems(dict(base, RACECAST_SIM_RELAY_PORT=port)) if sim.RELAY_PORT in p]
+        assert found and needle in found[0], (port, found)
+    for var, url in (("RACECAST_SIM_OBS_WS", "ws://127.0.0.1:41000"), ("RACECAST_SIM_SHEET_URL", "http://127.0.0.1:41000/s"),
+                     ("RACECAST_SIM_SHEET_PUSH_URL", "http://localhost:41000/exec"),
+                     ("RACECAST_SIM_DISCORD_WEBHOOK_URL", "http://127.0.0.1:41000/hook")):
+        found = [p for p in sim.problems(dict(base, RACECAST_SIM_RELAY_PORT="41000", **{var: url}))
+                 if sim.RELAY_PORT in p]
+        assert found and var in found[0], (var, found)
+        try:
+            sim.relay_port(dict(base, RACECAST_SIM_RELAY_PORT="41000", **{var: url}))
+        except ValueError:
+            continue
+        raise AssertionError(f"a relay port shared with {var} must raise")
 
 
 class _Log:
@@ -481,7 +523,7 @@ def t_relay_simulation_startup_refuses_a_missing_endpoint():
     err = m.simulation_startup(dict(ON))
     assert err and "RACECAST_SIM_SHEET_URL" in err and "RACECAST_SIM_STREAM_BIN" in err, err
     d = _stream_bin()
-    env = dict(ON, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s",
+    env = dict(ON, **PORTS, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s",
                RACECAST_SIM_STREAM_BIN=d, PATH="/usr/bin")
     assert m.simulation_startup(env) is None
     assert env["PATH"].split(os.pathsep)[0] == d, "the relay must pull through the stream stand-ins"
@@ -538,7 +580,7 @@ def t_env_overrides_replace_real_values_from_any_layer():
 
 def t_relay_startup_drops_real_endpoints_from_its_environment():
     m = _relay()
-    env = dict(ON, **REAL_ENV, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s",
+    env = dict(ON, **REAL_ENV, **PORTS, RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s",
                RACECAST_SIM_STREAM_BIN=_stream_bin(), PATH="/usr/bin")
     assert m.simulation_startup(env) is None
     leaked = {k: env[k] for k in REAL_ENV if env[k]}

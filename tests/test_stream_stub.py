@@ -952,7 +952,8 @@ def t_stand_in_runs_from_an_interpreter_path_with_spaces():
 
 def t_installed_directory_passes_the_simulation_check():
     stub = _stub()
-    env = dict(os.environ, **stub.env(), RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s")
+    env = dict(os.environ, **stub.env(), RACECAST_SIM_SHEET_URL="http://127.0.0.1:1/s",
+               RACECAST_SIM_RELAY_PORT="41000", RACECAST_SIM_FEED_PORTS="41001,41002,41003")
     assert simulation.problems(env) == [], simulation.problems(env)
 
 

@@ -11886,6 +11886,13 @@ def main(argv=None):
         action = route(argv)
     except ValueError as e:
         sys.exit(f"racecast: {e}")
+    try:
+        return _run_action(action)
+    except simulation.PortError as e:
+        sys.exit(f"racecast: {e}")
+
+
+def _run_action(action):
     if action["kind"] == "help":
         print(usage_for(action.get("topic")))
         return None

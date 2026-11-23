@@ -146,20 +146,21 @@ never the real one.
   OAuth/voice and the timing host keys; `env_overrides` does the same for the env vars
   (`_apply_profile_env`, `_bootstrap`, the relay's `simulation_startup`), so a value from
   the shell or the machine `.env` cannot leak through.
-  `RACECAST_SIM_RELAY_PORT` (a port, unset = 8088) moves the relay control port:
+  `RACECAST_SIM_RELAY_PORT` (required, a port) moves the relay control port:
   `simulation.relay_port` feeds `racecast._relay_port()`, the only reader of
   `RELAY_PORT` (`tests/test_simulation_cli.py` counts the uses), the relay's
   `--http-port` default (`control_port`), preflight and the Control Center's Kill relay.
-  An invalid value is a `problems()` entry and `relay_port` raises, never 8088.
-  `RACECAST_SIM_FEED_PORTS` (three different ports `A,B,POV`; none of 8088, 53001-53003,
+  An unset or invalid value is a `problems()` entry and `relay_port` raises
+  `simulation.PortError` (a `ValueError`; `racecast.main` prints it), never 8088.
+  `RACECAST_SIM_FEED_PORTS` (required, three different ports `A,B,POV`; none of 8088, 53001-53003,
   the Control Center's port, the simulated control port, preflight's service ports 4455 and
   8000 or a port of another `RACECAST_SIM_*` endpoint) moves the feed ports. The relay reads
   it itself (`feed_ports` beside `control_port`) when `--ports`/`--pov-port` are not given,
   so every way of starting it agrees, and in simulation it refuses an explicit 53001-53003,
   8088, Control Center port or simulated control port. `--ports` takes exactly two numbers
-  (anything else is a start error), and an empty `--ports` means the defaults.
-  `RACECAST_SIM_RELAY_PORT` without it is a `problems()` entry: two relays would share the
-  product feed ports (on Windows `SO_REUSEADDR` lets both bind). `racecast._feed_ports()`
+  (anything else is a start error), and an empty `--ports` means the defaults. Unset,
+  `feed_ports` raises like `relay_port`: two relays would share the product feed ports (on
+  Windows `SO_REUSEADDR` lets both bind). `racecast._feed_ports()`
   feeds the busy-port warning, preflight's `relay_ports`, the stop-time
   `release_feed_inputs` and `freeport`'s default ports. A simulated start reports no
   `feed_pids`, since it cannot prove who holds a feed port: a heal kills the control

@@ -2,10 +2,11 @@
 """Simulation mode: `RACECAST_SIMULATION=1` or `racecast --simulation`.
 
 A rehearsal of the product against simulated parties. Event start, stop and takeover
-skip OBS, Discord, Companion, Tailscale and the Funnel; OBS WebSocket, the Sheet, the
-Sheet push webhook, Discord webhooks and stream pulls come from the `RACECAST_SIM_*`
-loopback endpoints below. An unset or non-loopback endpoint is off, never the real
-one, and `install_network_guard` refuses every other outbound connection. Code that
+launch no OBS app and skip Discord, Companion, Tailscale and the Funnel; OBS itself is
+simulated: its WebSocket, the Sheet, the Sheet push webhook, Discord webhooks and stream
+pulls come from the `RACECAST_SIM_*` loopback endpoints below. An unset or non-loopback
+endpoint is off, never the real one, and `install_network_guard` refuses every other
+outbound connection. Code that
 calls the C-level `_socket.socket` directly bypasses that guard and is out of scope.
 
 Stdlib only: the relay and the standalone asset scripts import it too."""
@@ -25,8 +26,8 @@ SHEET_PUSH_URL = "RACECAST_SIM_SHEET_PUSH_URL"      # stands in for the league S
 DISCORD_WEBHOOK_URL = "RACECAST_SIM_DISCORD_WEBHOOK_URL"
 STREAM_BIN = "RACECAST_SIM_STREAM_BIN"              # directory with yt-dlp and streamlink stand-ins
 FORCE = "RACECAST_SIM_FORCE"                        # the one profile a --force run allowed
-RELAY_PORT = "RACECAST_SIM_RELAY_PORT"              # the relay control port, on 127.0.0.1
-FEED_PORTS = "RACECAST_SIM_FEED_PORTS"              # Feed A, Feed B, POV: three ports, comma-separated
+RELAY_PORT = "RACECAST_SIM_RELAY_PORT"              # the relay control port, on 127.0.0.1 (required)
+FEED_PORTS = "RACECAST_SIM_FEED_PORTS"              # Feed A, Feed B, POV: three ports, comma-separated (required)
 DEFAULT_RELAY_PORT = 8088
 
 SCHEMES = {OBS_WS: ("ws",), SHEET_URL: ("http",), SHEET_PUSH_URL: ("http",),
@@ -44,6 +45,10 @@ _FALSE = ("", "0", "false", "no", "off")
 
 class OutboundRefused(ConnectionRefusedError):
     """A non-loopback connection attempted in simulation mode."""
+
+
+class PortError(ValueError):
+    """A simulated relay port that is unset or unusable; never replaced by a live port."""
 
 
 def active(environ=None):
@@ -130,19 +135,49 @@ LIVE_PORTS = (DEFAULT_RELAY_PORT, 53001, 53002, 53003)   # the live relay's cont
 DEFAULT_UI_PORT = 8089
 
 
-def _port_problem(value, environ=None):
-    environ = os.environ if environ is None else environ
-    if not (value.isascii() and value.isdigit()) or not 1 <= int(value) <= 65535:
-        return f"{RELAY_PORT} must be a port number 1-65535, not {value!r}"
-    port = int(value)
-    if port in LIVE_PORTS:
-        return f"{RELAY_PORT}={port} is a port of the live relay (8088, 53001-53003); pick a free one"
-    if port == ui_port(environ):
-        return f"{RELAY_PORT}={port} is the Control Center's port; pick another one"
+def _endpoint_port_owner(port, environ):
+    """The RACECAST_SIM_* endpoint variable whose URL uses `port`, or ""."""
+    for var in SCHEMES:
+        try:
+            if urlparse((environ.get(var) or "").strip()).port == port:
+                return var
+        except ValueError:
+            continue
     return ""
 
 
+def _port_problem(value, environ=None, name=RELAY_PORT):
+    """Why `value` cannot be the simulated relay's control port, or "". `name` is what
+    set it: the variable, or the relay's --http-port."""
+    environ = os.environ if environ is None else environ
+    if not (value.isascii() and value.isdigit()) or not 1 <= int(value) <= 65535:
+        return f"{name} must be a port number 1-65535, not {value!r}"
+    port = int(value)
+    if port in LIVE_PORTS:
+        return f"{name}={port} is a port of the live relay (8088, 53001-53003); pick a free one"
+    if port == ui_port(environ):
+        return f"{name}={port} is the Control Center's port; pick another one"
+    if port in SERVICE_PORTS:
+        return f"{name}={port} is the {SERVICE_PORTS[port]} port; pick another one"
+    owner = _endpoint_port_owner(port, environ)
+    if owner:
+        return f"{name}={port} is the port of {owner}; pick another one"
+    feeds = (environ.get(FEED_PORTS) or "").strip()
+    if name != RELAY_PORT and feeds and not _feed_ports_problem(feeds, environ) \
+            and port in {int(p) for p in feeds.split(",")}:
+        return f"{name}={port} is one of {FEED_PORTS}; pick another one"
+    return ""
+
+
+def control_port_problem(port, environ=None):
+    """Why an explicit relay --http-port must not be used in simulation, or ""."""
+    return _port_problem(str(port), environ, "--http-port") if active(environ) else ""
+
+
 LIVE_FEED_PORTS = LIVE_PORTS[1:]
+_RELAY_PORT_UNSET = f"{RELAY_PORT} is not set (a free port for the simulated relay, never 8088)"
+_FEED_PORTS_UNSET = (f"{FEED_PORTS} is not set (three free ports for Feed A, Feed B and POV, "
+                     "never 53001-53003)")
 SERVICE_PORTS = {4455: "OBS WebSocket", 8000: "Companion"}   # what preflight probes on this machine
 
 
@@ -173,13 +208,10 @@ def _feed_ports_problem(value, environ=None):
     for port in ports:
         if port in SERVICE_PORTS:
             return f"{FEED_PORTS}: {port} is the {SERVICE_PORTS[port]} port; pick another one"
-    for var in SCHEMES:
-        try:
-            taken = urlparse((environ.get(var) or "").strip()).port
-        except ValueError:
-            taken = None
-        if taken in ports:
-            return f"{FEED_PORTS}: {taken} is the port of {var}; pick another one"
+    for port in ports:
+        owner = _endpoint_port_owner(port, environ)
+        if owner:
+            return f"{FEED_PORTS}: {port} is the port of {owner}; pick another one"
     return ""
 
 
@@ -187,25 +219,25 @@ def feed_ports(environ=None, default=LIVE_FEED_PORTS):
     """The relay's feed ports (Feed A, Feed B, POV): RACECAST_SIM_FEED_PORTS in simulation,
     else `default`. An invalid value raises instead of falling back to the live ports."""
     environ = os.environ if environ is None else environ
-    value = (environ.get(FEED_PORTS) or "").strip()
-    if not (active(environ) and value):
+    if not active(environ):
         return tuple(default)
-    problem = _feed_ports_problem(value, environ)
+    value = (environ.get(FEED_PORTS) or "").strip()
+    problem = _feed_ports_problem(value, environ) if value else _FEED_PORTS_UNSET
     if problem:
-        raise ValueError(problem)
+        raise PortError(f"simulation mode: {problem}")
     return tuple(int(p) for p in value.split(","))
 
 
 def relay_port(environ=None, default=DEFAULT_RELAY_PORT):
     """The relay control port: RACECAST_SIM_RELAY_PORT in simulation, else `default`.
-    An invalid value raises instead of falling back to a live relay's port."""
+    An unset or invalid value raises PortError instead of falling back to a live relay's port."""
     environ = os.environ if environ is None else environ
-    value = (environ.get(RELAY_PORT) or "").strip()
-    if not (active(environ) and value):
+    if not active(environ):
         return default
-    problem = _port_problem(value, environ)
+    value = (environ.get(RELAY_PORT) or "").strip()
+    problem = _port_problem(value, environ) if value else _RELAY_PORT_UNSET
     if problem:
-        raise ValueError(problem)
+        raise PortError(f"simulation mode: {problem}")
     return int(value)
 
 
@@ -258,14 +290,13 @@ def problems(environ=None):
     if stream:
         out.append(stream)
     port = (environ.get(RELAY_PORT) or "").strip()
-    if port and _port_problem(port, environ):
-        out.append(_port_problem(port, environ))
+    problem = _port_problem(port, environ) if port else _RELAY_PORT_UNSET
+    if problem:
+        out.append(problem)
     feeds = (environ.get(FEED_PORTS) or "").strip()
-    if feeds and _feed_ports_problem(feeds, environ):
-        out.append(_feed_ports_problem(feeds, environ))
-    if port and not feeds:
-        out.append(f"{RELAY_PORT} is set without {FEED_PORTS}: this relay would share the feed "
-                   "ports 53001-53003 with a live relay; set three free ports")
+    problem = _feed_ports_problem(feeds, environ) if feeds else _FEED_PORTS_UNSET
+    if problem:
+        out.append(problem)
     return out
 
 
@@ -475,3 +506,4 @@ def install_network_guard(environ=None):
         setattr(owner, name, replacements[name])
     socket._racecast_sim_guard = True
     return True
+
