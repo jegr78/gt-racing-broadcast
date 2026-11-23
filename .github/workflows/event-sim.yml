@@ -22,7 +22,7 @@ on:
           - relay-crash
           - red-flag
       profile:
-        description: "Time budget: quick = 30 min, full = 120 min"
+        description: "Time budget: quick = 30 min, full = 120 min (the full scenario always gets 120)"
         type: choice
         default: quick
         options:
@@ -35,7 +35,7 @@ permissions:
 jobs:
   event-sim:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.profile == 'full' && 120 || 30 }}
+    timeout-minutes: ${{ (inputs.profile == 'full' || inputs.scenario == 'full') && 120 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0

@@ -45,9 +45,9 @@ def t_it_runs_only_when_dispatched():
     assert triggers == ["workflow_dispatch"], "triggers %s" % triggers
 
 
-def t_the_timeout_follows_the_profile():
-    assert "timeout-minutes: ${{ inputs.profile == 'full' && 120 || 30 }}" in _text(), \
-        "timeout must be 120 min for full and 30 for quick"
+def t_the_timeout_follows_the_profile_or_the_full_scenario():
+    want = "timeout-minutes: ${{ (inputs.profile == 'full' || inputs.scenario == 'full') && 120 || 30 }}"
+    assert want in _text(), "120 min for the full profile or the full scenario, else 30"
 
 
 def t_the_report_is_kept_fourteen_days_even_after_a_failure():
