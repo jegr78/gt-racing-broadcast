@@ -1,5 +1,6 @@
 """The named roots of `expect` checks: relay, obs, sheet, webhook, race (`page(role)` is
 the engine's). Each read is fresh; a service that does not answer is `Unresolved`."""
+import ast
 import http.client
 import json
 from urllib.parse import urlsplit
@@ -9,6 +10,29 @@ import expect
 Probe, Unresolved, View = expect.Probe, expect.Unresolved, expect.View
 
 TIMEOUT_S = 3.0
+# The relay GETs that only read; many other relay GETs are controls (`/next`, `/setup/set/...`).
+RELAY_READS = frozenset({
+    "/status", "/drivers/race", "/drivers/race/recording", "/drivers/data", "/setup/data", "/hud/data",
+    "/splitscreen/data", "/intermission/data", "/timer/data", "/chat/data", "/cues/data",
+    "/schedule/data", "/crew/data", "/qualifying/data", "/event-notes/data"})
+
+
+def relay_read(path):
+    """`path` when it is one of RELAY_READS, else ValueError."""
+    if not isinstance(path, str) or path not in RELAY_READS:
+        raise ValueError(f"relay.get reads only {', '.join(sorted(RELAY_READS))}, not {path!r}")
+    return path
+
+
+def check_relay_reads(tree):
+    """ValueError unless every `relay.get(...)` in a compiled check names one of RELAY_READS
+    as a literal."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" \
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "relay":
+            if len(node.args) != 1 or not isinstance(node.args[0], ast.Constant):
+                raise ValueError("relay.get takes one path written as a string")
+            relay_read(node.args[0].value)
 
 
 def http_json(base, path, method="GET", body=None, timeout=TIMEOUT_S, headers=None):
@@ -45,8 +69,8 @@ def _get(base, path):
 
 class RelayProbe(Probe):
     """`relay.status` (GET /status), `relay.up`, `relay.port`, `relay.get('/path')`. A check
-    may poll many times: `get` only read-only paths (`/status`, `.../data`), never a
-    control such as `/next` or `/feed/A/activate`."""
+    may poll many times, so `get` reads only RELAY_READS and refuses any other path
+    before it sends a request."""
     fields = ("status", "up", "port")
     calls = ("get",)
 
@@ -70,9 +94,10 @@ class RelayProbe(Probe):
             return False
 
     def get(self, path):
-        if not isinstance(path, str) or not path.startswith("/"):
-            raise Unresolved(f"relay.get needs a path starting with '/', not {path!r}")
-        return _get(self.base, path)
+        try:
+            return _get(self.base, relay_read(path))
+        except ValueError as exc:
+            raise Unresolved(str(exc)) from None
 
 
 class RaceProbe(Probe):

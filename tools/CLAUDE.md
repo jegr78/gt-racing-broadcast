@@ -546,8 +546,10 @@ more than `margin` apart in `before` that `after` lists the other way round),
 stint change) and `having(texts, word, ...)` (the texts holding every word, e.g. a timing
 row); anything else, a `_` name or an unknown root is refused at load. A value that cannot be read yet keeps the check pending until its timeout.
 A probe, a method or a function is never a value or an argument. Checks are polled, so they
-must have no side effects: `relay.get` reads `/status` or a `.../data` path, never a control
-such as `/next` or `/feed/A/activate`.
+must have no side effects: `relay.get` takes one literal path from `probes.RELAY_READS`
+(`/status`, `/drivers/race`, `/drivers/race/recording` and the read-only `.../data` routes
+such as `/setup/data`). Any other path, a control such as `/next` or `/setup/set/...`, is
+refused at load and again before a request is sent.
 
 Findings (the report's legend says the same): hard is an action error, an `expect` still
 false at its timeout, a trigger that never fires, a script error on a page, a traceback in a

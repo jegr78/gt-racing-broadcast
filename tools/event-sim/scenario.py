@@ -10,6 +10,7 @@ import tomllib
 from dataclasses import dataclass, field
 
 import expect
+import probes
 
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")      # names that become file names
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")          # no dot: `${id.key}` splits at the first
@@ -191,8 +192,8 @@ def _checks(raw, where, key, roots):
         raise ScenarioError(f"{where}: {key} must be a list of expressions")
     for text in raw:
         try:
-            expect.compile_expr(text, roots)
-        except expect.ExpectError as exc:
+            probes.check_relay_reads(expect.compile_expr(text, roots))
+        except (expect.ExpectError, ValueError) as exc:
             raise ScenarioError(f"{where}: {key} {text!r}: {exc}") from None
     return list(raw)
 

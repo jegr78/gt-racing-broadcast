@@ -801,6 +801,43 @@ def t_relay_probe_names_its_port():
     assert expect.truth("relay.port == 41234", {"relay": probes.RelayProbe("http://127.0.0.1:41234")})[0]
 
 
+CONTROLS = ("/next", "/feed/A/activate", "/setup/set/stint/data", "/status?x=/data", "/hud/data/../next",
+            "/timer/start", "status", "")
+
+
+def t_relay_get_never_sends_a_control():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Api)
+    th = threading.Thread(target=srv.serve_forever)
+    th.start()
+    try:
+        _Api.seen = []
+        probe = probes.RelayProbe(f"http://127.0.0.1:{srv.server_address[1]}")
+        for path in CONTROLS:
+            try:
+                probe.get(path)
+                raise AssertionError(f"relay.get({path!r}) must be refused")
+            except expect.Unresolved:
+                pass  # expected
+        assert _Api.seen == [], f"a refused path reached the relay: {_Api.seen}"
+        for path in ("/status", "/setup/data", "/drivers/race/recording"):
+            assert probe.get(path)["ok"] is True
+        assert [p for _, p, _ in _Api.seen] == ["/status", "/setup/data", "/drivers/race/recording"]
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        th.join()
+
+
+def t_scenario_refuses_a_relay_get_of_a_control():
+    go = {"role": "rec", "do": "go"}
+    for path in CONTROLS:
+        _refused([dict(go, expect=[f"relay.get({path!r}).ok"])], "relay.get")
+    _refused([dict(go, soft=["relay.get('/next')"])], "relay.get")
+    _refused([dict(go, expect=["relay.get(result('go').path)"])], "relay.get")
+    _refused([dict(go, expect=["relay.get()"])], "relay.get")
+    _scn([dict(go, expect=["relay.get('/setup/data').stint == 'Stint 1'", "relay.get('/drivers/race').state"])])
+
+
 def t_http_json_refuses_non_loopback_hosts():
     for base in ("http://example.org:80", "https://127.0.0.1:1", "http://127.0.0.1.example.org:80"):
         try:
