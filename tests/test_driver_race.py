@@ -184,6 +184,27 @@ def t_the_league_restart_default_and_its_override_per_restart():
     assert _audit(path)[1]["who"] == "director:Bo" and _audit(path)[1]["mode"] == "keep"
 
 
+def t_a_red_flag_over_a_held_race_keeps_its_restart_mode():
+    svc, clock, path, league = _ctl()
+    dr.write_league(league, {"restart": "neutralise"})
+    first = svc.red_flag("rc:Anna")["red_flag"]
+    svc.set_restart_mode("rc:Anna", "keep")
+    clock[0] = 30.0
+    again = svc.red_flag("director:Bo")["red_flag"]
+    assert again == dict(first, mode="keep"), \
+        f"a second hold keeps Race Control's restart mode and the time of the flag: {first} -> {again}"
+    assert svc._current()._red_flags == 1, "a second hold is no new red flag"
+    assert [r["action"] for r in _audit(path)] == ["red_flag", "restart_mode"], \
+        "a hold over a held race writes nothing to the audit"
+    chosen = svc.red_flag("director:Bo", mode="neutralise")["red_flag"]
+    assert chosen == dict(first, mode="neutralise") and svc._current()._red_flags == 1, \
+        f"a mode named with the hold sets the restart mode only: {chosen}"
+    assert [r["action"] for r in _audit(path)][-1] == "restart_mode"
+    svc.release("rc:Anna")
+    assert svc.red_flag("rc:Anna")["red_flag"]["at"] == 30.0 and svc._current()._red_flags == 2, \
+        "after the release a red flag counts again"
+
+
 def t_the_league_lap_time_seconds_default_to_five_and_are_checked():
     _path, league = _paths()
     assert dr.read_league(league) == {"restart": "keep", "last_lap_s": 5}

@@ -746,6 +746,7 @@ const setupSet = (field, value) => setup.push(field + '=' + value);
 const fetch = async path => { fetched.push(path); };
 const obsStatePoll = () => {};
 const assetLabel = source => source;
+let deskRed = false;
 const redFlagItem = {scene: 'Stint', source: 'Standby Cover'};
 const key = cls => {
   const k = {cls: new Set(), textContent: 'Mute', lit: () => k.cls.has(cls),
@@ -839,6 +840,22 @@ def t_red_flag_follows_the_relays_answer():
             and d["up"]["fetched"] == ["/drivers/race/red-flag"], d["up"]
 
 
+def t_red_flag_never_holds_a_race_already_held():
+    out = _toggle_js(_html(), """
+  answers.push({ok: true, enabled: true, changed: true}, {ok: true, enabled: true, changed: true});
+  const step = async () => { await redFlagPress(); return {setup: setup.splice(0), fetched: fetched.splice(0)}; };
+  deskRed = true;
+  const held = await step();
+  redFlagBtn.classList.toggle('on', false); deskRed = false;
+  const free = await step();
+  console.log(JSON.stringify({held, free}));""")
+    if out is not None:
+        d = json.loads(out)
+        assert d["held"] == {"setup": ["racecontrol=Red Flag - Race Suspended"], "fetched": []}, \
+            f"over a race already held the press sets the banner but keeps Race Control's restart mode: {d['held']}"
+        assert d["free"]["fetched"] == ["/drivers/race/red-flag"], d["free"]
+
+
 def t_red_flag_without_the_cover_still_sets_banner_and_race():
     out = _toggle_js(_html(), """
   answers.push({ok: false, error: 'obs unreachable', red_flag: true, changed: true},
@@ -860,7 +877,7 @@ def t_red_flag_without_the_cover_still_sets_banner_and_race():
                                   fetched=["/drivers/race/red-flag"]), \
             f"a second panel takes the raised state over and repeats banner and hold: {d['other']}"
         assert d["down"]["setup"] == ["racecontrol="] and d["down"]["fetched"] == [], d["down"]
-        for part in (d["up"], d["down"]):
+        for part in (d["up"], d["other"], d["down"]):
             assert any(line.startswith("toast: ") and "Standby Cover was not switched" in line
                        and "obs unreachable" in line for line in part["logs"]), part["logs"]
         assert d["lost"]["setup"] == [] and d["lost"]["fetched"] == [] \
