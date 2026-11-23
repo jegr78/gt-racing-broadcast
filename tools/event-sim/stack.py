@@ -127,12 +127,13 @@ def sheet_tabs(scn):
         url = f"sim://{c.channel}" if c and c.scheduled else ""
         schedule.append([url, c.name if c else "", f"Stint {n}"])
     vocab_rows = max(stints, len(names), len(teams), len(RACE_CONTROL))
-    config = [["Teams", "Stints", "Streamers", "Session", "Race Control", "Flag"]]
+    classes = event_classes(scn.event, teams)
+    config = [["Teams", "Stints", "Streamers", "Session", "Race Control", "Flag"] + (["Class"] if classes else [])]
     for i in range(vocab_rows):
         config.append([teams[i] if i < len(teams) else "",
                        f"Stint {i + 1}" if i < stints else "", names[i] if i < len(names) else "",
                        "Race" if i == 0 else "", RACE_CONTROL[i] if i < len(RACE_CONTROL) else "",
-                       "Green Flag" if i == 0 else ""])
+                       "Green Flag" if i == 0 else ""] + ([classes[i] if i < len(teams) else ""] if classes else []))
     first = comms[0].name if comms else ""
     tabs = {
         "Schedule": schedule,
@@ -167,6 +168,16 @@ def event_roster(event):
     """The team labels of `[event] cars` (none without it)."""
     cars = event.get("cars")
     return drive.roster(cars) if cars is not None else []
+
+
+def event_classes(event, teams):
+    """`[event] classes`: the car class of each team, the classes in turn. None without it."""
+    names = event.get("classes")
+    if names is None:
+        return None
+    if not isinstance(names, list) or not names or not all(isinstance(n, str) and n.strip() for n in names):
+        raise ValueError(f"event.classes is a list of class names, not {names!r}")
+    return [names[i % len(names)] for i in range(len(teams))]
 
 
 def event_parts(event):

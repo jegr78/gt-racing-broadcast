@@ -46,6 +46,7 @@
     ".dd .stale{opacity:.45}",
     ".dd .req{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-bottom:1px solid var(--edge,#2a2f37)}",
     ".dd .req .row{gap:6px}.dd .req .muted{font-size:12px}.dd .reqs-ok summary{cursor:pointer;padding:4px 0}",
+    ".dd .req>.row>.grow{flex:1 1 0}",
     ".dd .req.waiting{border-left:3px solid #ffb454;padding-left:8px}",
     ".dd button.go{border-color:#3ecf6e;color:#3ecf6e}",
     ".dd [hidden]{display:none!important}",

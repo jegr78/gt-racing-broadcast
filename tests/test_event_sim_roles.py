@@ -1369,6 +1369,19 @@ def t_the_sheet_carries_the_roster_and_the_red_flag_banner():
         raise AssertionError("more cars than the grid holds must be refused")
 
 
+def t_event_classes_give_each_team_a_class_in_turn():
+    config = stack.sheet_tabs(scn({"stints": 3, "cars": 4, "classes": ["GT3", "GT4"]}))["Configuration"]
+    col = config[0].index("Class")
+    assert [row[col] for row in config[1:5]] == ["GT3", "GT4", "GT3", "GT4"], config
+    assert "Class" not in stack.sheet_tabs(scn({"cars": 4}))["Configuration"][0], "no classes, no Class column"
+    for bad in ([], "GT3", [""], [3]):
+        try:
+            stack.event_classes({"classes": bad}, ["A"])
+        except ValueError:
+            continue
+        raise AssertionError(f"classes {bad!r} must be refused")
+
+
 def t_parts_seed_the_producer_and_channel_tabs():
     assert "Producer" not in stack.sheet_tabs(scn({})), "no parts, no Part control on the panel"
     tabs = stack.sheet_tabs(scn({"parts": 2, "qualifying_part": True}))
@@ -1486,6 +1499,18 @@ def t_the_smoke_scenario_checks_both_live_columns():
     order = [s.id for s in loaded.steps]
     waiting = [i for r, i in fit if r == "race_control" and order.index(i) < order.index("approve_drivers")]
     assert waiting, "the desk is measured while driver requests wait"
+
+
+def t_the_desk_fit_scenario_measures_the_tallest_states():
+    loaded = scenario.load(os.path.join(SIM, "scenarios", "desk-fit.toml"), REG)
+    order = [s.id for s in loaded.steps]
+    fits = [(s.role, order.index(s.id)) for s in loaded.steps if s.do == "fit"]
+    for state, roles_wanted in (("red_flag", {"race_control"}), ("ask_graphic", {"director"}),
+                                ("qualifying", {"race_control", "director"})):
+        after = {r for r, i in fits if i > order.index(state)}
+        assert roles_wanted <= after, f"a fit runs after {state}: {fits}"
+    assert loaded.event.get("classes"), "the class lap row shows only with classes"
+    assert not any(s.role == "drivers" and s.do == "start" for s in loaded.steps), "no state waits on a lap"
 
 
 def t_the_smoke_scenario_uses_every_party_once():

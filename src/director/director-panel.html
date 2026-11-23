@@ -565,7 +565,17 @@
   #liveCol #armBtn{min-height:58px;font-size:11px;line-height:1.3}
   #liveCol #nextBtn{grid-column:span 2;min-height:58px;gap:2px}
   #liveCol #armBtn[hidden]+#nextBtn{grid-column:1 / -1}
-  #liveCol #txBar .keys{flex-wrap:nowrap}
+  #liveCol #txBar .keys{flex-wrap:wrap}
+  #liveCol #txBar .txdur{margin-left:0}
+  body:not(.solo) #liveCol #txBar .txdur{flex:1 1 100%}
+  /* Endurance: overlays beside the transition, one row for both; solo stacks its overlay keys. */
+  #liveCol{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);align-content:start}
+  #liveCol>*{grid-column:1 / -1}
+  #liveCol>#overlaySec{grid-column:1}
+  #liveCol>#txBar{grid-column:2}
+  body.solo #liveCol>#overlaySec,body.solo #liveCol>#txBar{grid-column:1 / -1}
+  body:not(.solo) #liveCol #overlaySec .keys{grid-template-columns:minmax(0,1fr)}
+  #liveCol #gfxReqList button.k{min-height:0;padding:5px 8px;font-size:11px}
   #liveCol>.bus:not(.preview)>.cap{font-size:10px;letter-spacing:.18em;padding:0;border:0;color:var(--muted)}
   #liveCol>.bus:not(.preview)>.cap::before{height:10px}
   #liveCol #nextBtn .nmain{font-size:23px}
@@ -3754,10 +3764,10 @@ function applyNavCollapse(){
   t.setAttribute("aria-expanded", String(!collapsed));
   t.hidden = NAV_AUTO.matches;           // a narrow window always collapses the nav
 }
-// The program tile gives way, down to half the column, so every key row below it stays in view.
+// The program tile gives way, down to 40 % of the column, so every key row below it stays in view.
 function liveShrink(colH, scrollH, width){
   const over = scrollH - colH;
-  return over > 0 ? Math.max(width / 2, width - over * 16 / 9) : 0;
+  return over > 0 ? Math.max(width * 0.4, width - over * 16 / 9) : 0;
 }
 function fitLive(){
   const col = $("#liveCol"), prog = $("#liveCol .pvprog");

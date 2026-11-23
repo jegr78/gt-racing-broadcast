@@ -1033,8 +1033,8 @@ console.log(JSON.stringify([liveShrink(700, 650, 336), liveShrink(700, 700, 336)
                             liveShrink(700, 1200, 336)]));""")
     if out is None:
         return
-    assert json.loads(out) == [0, 0, 256, 168], \
-        f"no overflow keeps the full tile, an overflow takes its height off, down to half the width: {out}"
+    assert json.loads(out) == [0, 0, 256, 134.4], \
+        f"no overflow keeps the full tile, an overflow takes its height off, down to 40 % of the width: {out}"
     h = _html()
     assert "new ResizeObserver(fitLiveSoon).observe($(\"#liveCol\"));" in h and \
         'document.querySelectorAll("#liveCol > *").forEach(el => new ResizeObserver(fitLiveSoon).observe(el));' in h, \

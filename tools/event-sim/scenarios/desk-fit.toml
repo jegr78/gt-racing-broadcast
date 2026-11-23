@@ -1,0 +1,151 @@
+# Layout check (#1267): every live-column control of the Race Control desk and every key
+# row of the Director Panel works in a 1440x900 window without scrolling, in the tallest
+# states: driver requests waiting, a red flag with a class lap row, a graphic request
+# under a two-row panel header, and qualifying. Nobody drives, so no state waits on a lap.
+description = "Desk and panel live columns fit 1440x900 in their tallest states."
+max_minutes = 8
+
+[event]
+stints = 3
+track = "6e378b"
+cars = 6
+classes = ["GT3", "GT4"]
+seed = 7
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[[event.commentators]]
+name = "Comms 2"
+channel = "comms2"
+scheduled = true
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "start_event"
+at = "after:track"
+role = "producer"
+do = "start_event"
+expect = ["relay.up"]
+
+[[step]]
+id = "panel_open"
+at = "after:start_event"
+role = "director"
+do = "open"
+
+[[step]]
+id = "register"
+at = "after:panel_open"
+role = "drivers"
+do = "register"
+args = { stints = 1 }
+expect = ["result('register').registered == 6"]
+
+[[step]]
+id = "desk_waiting"
+at = "after:register"
+role = "race_control"
+do = "open"
+expect = ["page('race_control').waiting == 6"]
+timeout = "15s"
+
+[[step]]
+id = "desk_fit_waiting"
+at = "after:desk_waiting"
+role = "race_control"
+do = "fit"
+
+[[step]]
+id = "approve_drivers"
+at = "after:desk_fit_waiting"
+role = "race_control"
+do = "approve_drivers"
+expect = ["page('race_control').waiting == 0"]
+
+[[step]]
+id = "red_flag"
+at = "after:approve_drivers"
+role = "race_control"
+do = "red_flag"
+expect = ["race.red_flag"]
+timeout = "15s"
+
+[[step]]
+id = "desk_fit_red_flag"
+at = "after:red_flag+3s"
+role = "race_control"
+do = "fit"
+shot = "desk-red-flag"
+
+[[step]]
+id = "long_title"
+at = "after:desk_fit_red_flag"
+role = "api"
+do = "post"
+args = { path = "/event/title", json = { title = "GT Endurance Championship 2026 - Round 4 - Nordschleife 24 Hours" } }
+
+[[step]]
+id = "take_mode"
+at = "after:long_title"
+role = "api"
+do = "post"
+args = { path = "/obs/graphics/mode", json = { role = "commentator", mode = "request" } }
+
+[[step]]
+id = "ask_graphic"
+at = "after:take_mode"
+role = "api"
+do = "post"
+args = { path = "/console/cockpit/graphic-takes/request", as = "Comms 1", json = { source = "Standings" } }
+
+[[step]]
+id = "panel_fit_request"
+at = "after:ask_graphic+6s"
+role = "director"
+do = "fit"
+shot = { name = "panel-request", role = "director" }
+
+[[step]]
+id = "qualifying"
+at = "after:panel_fit_request"
+role = "api"
+do = "get"
+args = { path = "/mode/qualifying" }
+expect = ["race.mode == 'qualifying'"]
+timeout = "20s"
+
+[[step]]
+id = "desk_fit_qualifying"
+at = "after:qualifying+4s"
+role = "race_control"
+do = "fit"
+shot = "desk-qualifying"
+
+[[step]]
+id = "panel_fit_qualifying"
+at = "after:desk_fit_qualifying"
+role = "director"
+do = "fit"
+
+[[step]]
+id = "stop_event"
+at = "after:panel_fit_qualifying"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"
