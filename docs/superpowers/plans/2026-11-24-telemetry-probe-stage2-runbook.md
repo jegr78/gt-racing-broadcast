@@ -47,9 +47,12 @@ once, a second person can type them with `probe-stage2.py mark` on the producer 
 
 ### 3.1 League coordination (maintainer, a week before)
 
-1. Send the driver poll (section 8) and collect the answers for the report.
-2. Pick the test group from the answers: two or three drivers, at least one Android
-   sender device, one driver who can host lobbies.
+1. Ask the volunteers which telemetry app or dashboard they run during races and on
+   which device, and map each answer to a line of the guide's "Which setup" section
+   (section 8 lists the apps it covers).
+2. Pick the test group: two or three drivers, at least one Android sender device, one
+   driver who can host lobbies, and if possible one driver who keeps an app on the
+   same device through `--forward` or `--listen`.
 3. Agree with the league on: a date and about three hours (block A starts 45 minutes before the first lobby, block G ends two hours after it), the lobby settings of blocks B, D and
    F (track, car class, laps or time, qualifying on for block F), who hosts, who joins
    the broadcast PS5 as spectator, and which entries and stints the test drivers register
@@ -349,9 +352,8 @@ questions and the spec.
 
 Lobby test with <n> drivers (<platforms>), league <name>. Results folder attached.
 
-### Driver poll
-<n> answers. Receivers today: ... Second devices: ... Drivers the dashboard reaches
-without new hardware: ...
+### Driver setups
+Per driver: app and device next to the sender, the guide line used, whether it worked.
 
 ### Q1 0x84 in an online lobby (block B)
 <"0x84 per sender" and "0x84 against the relay's order" rows of block B>
@@ -429,34 +431,23 @@ stage 1 tools (`tools/gt7-sim-ps5.py REC --loop` with a sender) for a by-hand ch
 the sender on a real packet stream; the committed scenario uses synthetic data so it
 runs on any machine.
 
-## 8. Driver poll (ready to send)
+## 8. Telemetry apps the guide covers
 
-```
-Driver telemetry: two quick questions
+A poll of one test group says little about the next league, so the guide covers the
+apps drivers commonly run instead (research of 2026-11-24, sources in the PR that added
+this section). GT7 sends to every device that sends a heartbeat, so a sender on a
+second device works next to any of them. On the same device the sender needs an app
+that forwards packets or receives forwarded ones:
 
-We are testing a way to show live race data from your GT7 telemetry on the broadcast.
-A small program (the sender) runs on a device on your home network and sends your car's
-telemetry to the broadcast. Before we test it in a lobby, we would like to know what
-you use today. Answers are voluntary and only used to plan the test.
+| App | Same device as the sender |
+|---|---|
+| SimHub (Windows) | yes: forwards ("Forward UDP packets to") and receives forwarded packets |
+| Coach Dave Delta (Windows, macOS) | yes: receives forwarded packets ("Enable Custom Port") |
+| GT Race Engineer | yes: receives forwarded packets ("Telemetrie Forwarding") |
+| EzioDash (iOS, iPadOS) | listening port documented as experimental, untested with the sender |
+| Sim-to-Motec | yes: any port other than 33740 makes it a passive receiver |
+| gt7dashboard, AI Race Engineer, Sim Dashboard, Telemetry Racing, Victory Dash, D-BOX, GT7Proxy for SimTools | no forward in or out documented for GT7: second device |
 
-1. Telemetry today: do you use a telemetry app or dashboard with GT7?
-   - SimHub (on which device?)
-   - GT Race Engineer (on which device?)
-   - A dashboard app on a phone or tablet (which app, which device?)
-   - Something else (what?)
-   - None
-   If you use one: can it forward the telemetry to another IP address and port?
-   (yes / no / don't know)
-
-2. A second device: which device on the same network as your PlayStation could run the
-   sender during a race? It runs next to the PlayStation for the whole race.
-   - Windows PC or laptop
-   - Mac
-   - Linux PC or Raspberry Pi
-   - Android phone or tablet
-   - iPhone or iPad
-   - None
-
-A dashboard app on your phone and the sender cannot share that phone, so if your phone
-runs a dashboard during races, please name another device for question 2.
-```
+Packet types: heartbeat `C` (368 bytes, 2026) has the key of `B` and appends 24 bytes to
+`~`. The sender and the relay decode it as type `B` and read every field, so a sender
+behind a SimHub that requests `C` works unchanged.

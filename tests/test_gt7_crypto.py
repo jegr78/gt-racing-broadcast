@@ -120,6 +120,17 @@ def t_encrypt_round_trips_each_type_like_the_console():
         "a shorter recording pads the extended fields with zeros"
 
 
+def t_a_c_packet_decodes_whole_under_the_b_key():
+    plain = _plain(0x170)
+    iv = 0x0BADF00D
+    nonce = struct.pack("<II", iv ^ gt7.IV_XOR["B"], iv)
+    packet = bytearray(gt7.salsa20_xor(gt7.KEY, nonce, plain))
+    struct.pack_into("<I", packet, 0x40, iv)
+    kind, got = gt7.decrypt_typed(bytes(packet))
+    assert kind == "B", f"heartbeat C (368 bytes) shares the B key, got {kind!r}"
+    assert len(got) == 0x170 and got[0x44:] == plain[0x44:], "all 368 bytes, the '~' fields included, must decode"
+
+
 def t_decrypt_typed_rejects_garbage():
     assert gt7.decrypt_typed(bytes(0x158)) == (None, None)
     assert gt7.decrypt_typed(b"short") == (None, None)

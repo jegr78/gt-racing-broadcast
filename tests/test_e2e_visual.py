@@ -289,6 +289,7 @@ def t_the_public_timing_surface_shows_the_league_block_on_frozen_data():
     (s,) = [s for s in v.SURFACES if s.name == "public-timing"]
     assert "window.fetch" in s.prep and "league" in s.prep, "the prep stops the polls, then renders a fixture with the block"
     assert "getElementById('league').hidden" in s.ready, s.ready
+    assert "render = () => shown(fixture)" in s.prep, "a poll already in flight must not replace the fixture"
 
 
 def t_telemetry_surface_uses_the_solo_pov_control_center():
