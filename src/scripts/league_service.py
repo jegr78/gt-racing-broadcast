@@ -30,6 +30,8 @@ V = 1
 FILENAME = "league-event.json"
 MAX_BODY = 256 * 1024
 SOCKET_TIMEOUT_S = 5.0
+READ_DEADLINE_S = 10.0          # one whole request, so a dripping answer cannot hold a call
+READ_CHUNK = 16384
 TICK_S = 2.0
 BACKOFF_MIN_S = 2.0
 BACKOFF_MAX_S = 30.0
@@ -51,7 +53,14 @@ FORMS = ("score", "table")
 STATUSES = ("stored", "pending")
 MODES = ("race", "qualifying")
 
-Settings = collections.namedtuple("Settings", "url key")
+class Settings(collections.namedtuple("Settings", "url key")):
+    """The service's base URL and its bearer key; the repr never shows the key."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return f"Settings(url={self.url!r}, key=<hidden>)"
+
+    __str__ = __repr__
 
 LOG = logging.getLogger("racecast.league_service")
 
@@ -74,7 +83,7 @@ def url_problem(url, environ=None):
         return "LEAGUE_SERVICE_URL must be an https:// URL"
     if not u.hostname:
         return "LEAGUE_SERVICE_URL has no host"
-    if "@" in u.netloc or u.query or u.fragment:
+    if "@" in u.netloc or "?" in url or "#" in url:
         return "LEAGUE_SERVICE_URL must not carry user info, a query or a fragment"
     return ""
 
@@ -95,13 +104,29 @@ def settings(url, key, environ=None):
     return Settings(url.rstrip("/"), key), ""
 
 
-def _text(v, limit, required=True):
-    """A string within `limit` characters, "" for an optional absent one, else None."""
-    if v is None and not required:
-        return ""
-    if not isinstance(v, str) or len(v) > limit or (required and not v):
+def _has_control(s):
+    """Whether `s` holds a C0 or C1 control character or DEL."""
+    return any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in s)
+
+
+def _text(v, limit, allow_empty=False):
+    """`v` when it is a string within `limit` characters without control characters,
+    else None."""
+    if not isinstance(v, str) or len(v) > limit or (not allow_empty and not v) or _has_control(v):
         return None
     return v
+
+
+_ABSENT = object()
+
+
+def _optional(doc, key, limit):
+    """An optional text field: "" when absent, the text when valid, _ABSENT when present
+    but invalid, so the caller drops the whole element."""
+    if key not in doc:
+        return ""
+    value = _text(doc[key], limit, allow_empty=True)
+    return _ABSENT if value is None else value
 
 
 def _int(v, minimum=None):
@@ -111,35 +136,44 @@ def _int(v, minimum=None):
 
 
 def parse_widget_value(doc, form=None):
-    """A WidgetValue cut to its limits, or None when it is not an object. `form` keeps
-    only that form's fields."""
+    """A WidgetValue within its limits, or None when it is not an object or a field it
+    carries is invalid. A list item with an invalid field is dropped, a list keeps its
+    first allowed items. `form` keeps only that form's fields."""
     if not isinstance(doc, dict):
         return None
     out = {}
-    if isinstance(doc.get("provisional"), bool):
+    if "provisional" in doc:
+        if not isinstance(doc["provisional"], bool):
+            return None
         out["provisional"] = doc["provisional"]
-    if form in (None, "score") and isinstance(doc.get("values"), list):
+    if form in (None, "score") and "values" in doc:
+        if not isinstance(doc["values"], list):
+            return None
         values = []
         for item in doc["values"]:
             if not isinstance(item, dict):
                 continue
-            label, value = _text(item.get("label"), MAX_LABEL), _text(item.get("value"), MAX_VALUE, False)
-            if label is not None and value is not None and "value" in item:
+            label, value = _text(item.get("label"), MAX_LABEL), _text(item.get("value"), MAX_VALUE, True)
+            if label is not None and value is not None:
                 values.append({"label": label, "value": value})
         out["values"] = values[:MAX_VALUES]
     if form in (None, "table"):
-        if isinstance(doc.get("rows"), list):
+        if "rows" in doc:
+            if not isinstance(doc["rows"], list):
+                return None
             rows = []
             for item in doc["rows"]:
                 if not isinstance(item, dict):
                     continue
                 rank, name = _int(item.get("rank"), 1), _text(item.get("name"), MAX_LABEL)
-                value = _text(item.get("value"), MAX_VALUE, False)
-                if rank is not None and name is not None and value is not None and "value" in item:
+                value = _text(item.get("value"), MAX_VALUE, True)
+                if rank is not None and name is not None and value is not None:
                     rows.append({"rank": rank, "name": name, "value": value})
             out["rows"] = rows[:MAX_ROWS]
-        title = _text(doc.get("value_title"), MAX_VALUE)
-        if title is not None:
+        if "value_title" in doc:
+            title = _text(doc["value_title"], MAX_VALUE)
+            if title is None:
+                return None
             out["value_title"] = title
     return out
 
@@ -151,8 +185,10 @@ def _widget(doc):
     if not (isinstance(wid, str) and WIDGET_ID_RE.fullmatch(wid)) or title is None or form not in FORMS:
         return None
     out = {"id": wid, "title": title, "form": form}
-    sample = parse_widget_value(doc.get("sample"), form)
-    if sample is not None:
+    if "sample" in doc:
+        sample = parse_widget_value(doc["sample"], form)
+        if sample is None:
+            return None
         out["sample"] = sample
     return out
 
@@ -170,12 +206,11 @@ def parse_event(doc):
     for item in doc["races"]:
         if not isinstance(item, dict):
             continue
-        race = item.get("race")
-        if not (isinstance(race, str) and RACE_RE.fullmatch(race)) or race in seen:
+        race, title = item.get("race"), _optional(item, "title", MAX_TITLE)
+        if not (isinstance(race, str) and RACE_RE.fullmatch(race)) or race in seen or title is _ABSENT:
             continue
-        title = _text(item.get("title"), MAX_TITLE, False)
         seen.add(race)
-        races.append({"race": race, "title": title if title is not None else ""})
+        races.append({"race": race, "title": title})
     races = races[:MAX_RACES]
     if not races:
         return None
@@ -185,8 +220,10 @@ def parse_event(doc):
         if w is not None and w["id"] not in ids:
             ids.add(w["id"])
             widgets.append(w)
-    title = _text(doc.get("title"), MAX_EVENT_TITLE, False)
-    return {"v": V, "title": title if title is not None else "", "races": races,
+    title = _optional(doc, "title", MAX_EVENT_TITLE)
+    if title is _ABSENT:
+        return None
+    return {"v": V, "title": title, "races": races,
             "widgets": widgets[:MAX_WIDGETS]}
 
 
@@ -226,8 +263,10 @@ def parse_result_status(doc, service_url):
     kept only on the service's own host."""
     if not _version_ok(doc) or doc.get("status") not in STATUSES:
         return None
-    message = _text(doc.get("message"), MAX_MESSAGE, False)
-    return {"status": doc["status"], "message": message or "",
+    message = _optional(doc, "message", MAX_MESSAGE)
+    if message is _ABSENT:
+        return None
+    return {"status": doc["status"], "message": message,
             "link": _https_link(doc.get("link")),
             "graphic_url": _https_link(doc.get("graphic_url"), urlsplit(service_url).hostname)}
 
@@ -238,7 +277,7 @@ def ref_problem(ref):
         return "the reference is empty"
     if len(ref) > MAX_REF:
         return f"the reference is longer than {MAX_REF} characters"
-    if any(ord(c) < 32 or ord(c) == 127 for c in ref):
+    if _has_control(ref):
         return "the reference holds control characters"
     return ""
 
@@ -253,7 +292,21 @@ def _explain_http(code):
     return f"the league service answered HTTP {code}"
 
 
-def call(cfg, method, path, query=None, body=None, opener=None, timeout=SOCKET_TIMEOUT_S):
+def _read_bounded(r, deadline):
+    """At most MAX_BODY + 1 bytes of `r`, read in chunks until `deadline` (monotonic)."""
+    raw = bytearray()
+    while len(raw) <= MAX_BODY:
+        if time.monotonic() > deadline:
+            raise ServiceError("the league service's answer took too long")
+        chunk = r.read1(READ_CHUNK) if hasattr(r, "read1") else r.read(READ_CHUNK)
+        if not chunk:
+            break
+        raw += chunk
+    return bytes(raw)
+
+
+def call(cfg, method, path, query=None, body=None, opener=None, timeout=SOCKET_TIMEOUT_S,
+         deadline_s=READ_DEADLINE_S):
     """One bounded request; the decoded JSON answer. Raises ServiceError."""
     opener = opener or http_util.open_url
     url = cfg.url + path + ("?" + urlencode(query) if query else "")
@@ -262,10 +315,11 @@ def call(cfg, method, path, query=None, body=None, opener=None, timeout=SOCKET_T
     if body is not None:
         data = json.dumps(body, separators=(",", ":")).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    deadline = time.monotonic() + deadline_s
     try:
-        with opener(url, data=data, headers=headers, method=method, timeout=timeout,
+        with opener(url, data=data, headers=headers, method=method, timeout=min(timeout, deadline_s),
                     allow_redirects=False) as r:
-            raw = r.read(MAX_BODY + 1)
+            raw = _read_bounded(r, deadline)
     except http_util.HTTPError as e:
         e.close()
         raise ServiceError(_explain_http(e.code)) from None
@@ -354,7 +408,7 @@ class Client:
     """The live-state sender. settings_fn() -> Settings | None; body_fn() -> LiveState
     or None while there is nothing to send; forms_fn() -> {widget id: form}."""
 
-    def __init__(self, settings_fn, body_fn, forms_fn=dict, post=post_live,
+    def __init__(self, settings_fn, body_fn, forms_fn, post=post_live,
                  clock=time.monotonic, log=LOG):
         self._settings_fn, self._body_fn, self._forms_fn = settings_fn, body_fn, forms_fn
         self._post, self._clock, self._log = post, clock, log

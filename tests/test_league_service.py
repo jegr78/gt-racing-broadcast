@@ -66,10 +66,51 @@ def t_parse_event_drops_what_is_beyond_a_limit():
     widgets[0] = {"id": "w0", "title": "x" * 61, "form": "table"}
     widgets[1] = {"id": "W1", "title": "T", "form": "table"}
     widgets[2] = {"id": "w2", "title": "T", "form": "html"}
-    e = ls.parse_event(_event(races=races, widgets=widgets, title="t" * 81))
+    e = ls.parse_event(_event(races=races, widgets=widgets))
     assert [r["race"] for r in e["races"]] == [f"r{i}" for i in range(16)], "16 races at most, bad ids dropped"
     assert [w["id"] for w in e["widgets"]] == [f"w{i}" for i in range(3, 10)][:8], e["widgets"]
-    assert e["title"] == "", "an over-long event title is dropped"
+
+
+def t_control_characters_drop_their_element():
+    for bad in ("Leg\x1b[31m1", "Leg\x00", "Leg\x9b1", "Leg\x7f"):
+        e = ls.parse_event(_event(races=[{"race": "leg-1", "title": bad}, {"race": "leg-2"}],
+                                  widgets=[{"id": "w", "title": bad, "form": "score"}]))
+        assert [r["race"] for r in e["races"]] == ["leg-2"] and e["widgets"] == [], (bad, e)
+        v = ls.parse_widget_value({"values": [{"label": bad, "value": "1"}, {"label": "B", "value": "2"}]}, "score")
+        assert v["values"] == [{"label": "B", "value": "2"}], (bad, v)
+
+
+def t_an_element_is_dropped_whole_never_shortened():
+    e = ls.parse_event(_event(races=[{"race": "leg-1", "title": "t" * 61}, {"race": "leg-2", "title": 5},
+                                     {"race": "leg-3", "title": None}, {"race": "leg-4"}]))
+    assert [r["race"] for r in e["races"]] == ["leg-4"], "a race with a bad title is dropped, not kept untitled"
+    assert ls.parse_event(_event(title="t" * 81)) is None, "an event with a bad title does not parse"
+    assert ls.parse_event(_event(title=None)) is None
+    assert ls.parse_event(_event(title="")) is not None
+    v = ls.parse_widget_value({"rows": [{"rank": 1, "name": "A", "value": None}, {"rank": 2, "name": "B", "value": ""},
+                                        {"rank": 3, "name": "C"}]}, "table")
+    assert v["rows"] == [{"rank": 2, "name": "B", "value": ""}], v
+    v = ls.parse_widget_value({"values": [{"label": "A", "value": None}, {"label": "B", "value": "1"}]}, "score")
+    assert v["values"] == [{"label": "B", "value": "1"}], v
+    for bad in ({"provisional": "yes"}, {"values": {}}, {"rows": "x"}, {"value_title": "v" * 17},
+                {"value_title": None}):
+        assert ls.parse_widget_value(bad) is None, bad
+    widgets = [{"id": "a", "title": "A", "form": "score", "sample": "x"},
+               {"id": "b", "title": "B", "form": "score", "sample": {"provisional": 1}},
+               {"id": "c", "title": "C", "form": "score"}]
+    assert [w["id"] for w in ls.parse_event(_event(widgets=widgets))["widgets"]] == ["c"], \
+        "a widget with a bad sample is dropped"
+
+
+def t_a_query_or_fragment_mark_is_refused_even_empty():
+    for bad in ("https://league.example/r?", "https://league.example/r#", "https://league.example/r?a=1"):
+        assert ls.url_problem(bad, {}) != "", bad
+
+
+def t_settings_never_show_the_key():
+    cfg = ls.Settings("https://league.example/r", KEY)
+    assert KEY not in repr(cfg) and KEY not in str(cfg) and "league.example" in repr(cfg)
+    assert KEY not in repr([cfg]) and cfg.key == KEY
 
 
 def t_parse_event_refuses_a_body_off_the_contract():
@@ -107,8 +148,10 @@ def t_result_status_keeps_the_graphic_only_on_the_service_host():
     assert s == {"status": "stored", "message": "ok", "link": "https://league.example/r/1",
                  "graphic_url": "https://league.example/r/1.png"}
     s = ls.parse_result_status({"v": 1, "status": "pending", "link": "http://league.example/r",
-                                "graphic_url": "https://evil.example/x.png", "message": "m" * 201}, url)
+                                "graphic_url": "https://evil.example/x.png"}, url)
     assert s == {"status": "pending", "message": "", "link": None, "graphic_url": None}, s
+    assert ls.parse_result_status({"v": 1, "status": "stored", "message": "m" * 201}, url) is None, \
+        "a status with an over-long message does not parse"
     assert ls.parse_result_status({"v": 1, "status": "done"}, url) is None
 
 
@@ -217,6 +260,40 @@ def t_a_broken_http_answer_raises_a_service_error():
             srv.close()
 
 
+def t_a_dripping_answer_is_cut_off_at_the_deadline():
+    import socket
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    stop = threading.Event()
+
+    def serve():
+        conn, _ = srv.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
+        try:
+            while not stop.wait(0.2):
+                conn.sendall(b" ")
+        except OSError:
+            pass  # the client hung up
+        conn.close()
+    t = threading.Thread(target=serve, daemon=True)
+    t.start()
+    cfg = ls.Settings(f"http://127.0.0.1:{srv.getsockname()[1]}/racecast", KEY)
+    started = time.monotonic()
+    try:
+        ls.fetch_event(cfg, "REF", deadline_s=1.0)
+        raise AssertionError("a dripping answer must not be waited for")
+    except ls.ServiceError as e:
+        took = time.monotonic() - started
+        assert took < 3.0 and "s" in str(e), (took, str(e))
+    finally:
+        stop.set()
+        t.join(2)
+        srv.close()
+    assert ls.READ_DEADLINE_S == 10.0
+
+
 def t_an_unreachable_service_raises():
     sim = _sim()
     cfg = _cfg(sim)
@@ -319,7 +396,7 @@ def t_client_backs_off_and_recovers():
         if isinstance(result, Exception):
             raise result
         return result
-    c = ls.Client(lambda: cfg, lambda: {"v": 1}, post=post, clock=clock, log=log)
+    c = ls.Client(lambda: cfg, lambda: {"v": 1}, dict, post=post, clock=clock, log=log)
     outcomes[:] = [ls.ServiceError("boom")] * 6 + [{"w": {"values": []}}]
     waits = []
     for _ in range(7):
@@ -336,7 +413,7 @@ def t_client_backs_off_and_recovers():
 def t_client_holds_a_value_30_seconds_then_hides_it():
     clock = _Clock()
     answers = [{"w": {"values": [{"label": "A", "value": "1"}]}}]
-    c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1},
+    c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1}, dict,
                   post=lambda *a: answers[0], clock=clock, log=_Log())
     c.step()
     answers[0] = {}
@@ -347,12 +424,20 @@ def t_client_holds_a_value_30_seconds_then_hides_it():
     assert c.values() == {}, "the value hides 30 s after its last good answer"
 
 
+def t_client_needs_the_event_forms():
+    try:
+        ls.Client(lambda: None, lambda: None)
+        raise AssertionError("forms_fn must be required")
+    except TypeError:
+        pass
+
+
 def t_client_without_a_service_sends_nothing():
     calls = []
-    c = ls.Client(lambda: None, lambda: {"v": 1}, post=lambda *a: calls.append(a), log=_Log())
+    c = ls.Client(lambda: None, lambda: {"v": 1}, dict, post=lambda *a: calls.append(a), log=_Log())
     assert c.step() == ls.TICK_S and calls == []
     assert c.status()["configured"] is False
-    c2 = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: None,
+    c2 = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: None, dict,
                    post=lambda *a: calls.append(a), log=_Log())
     c2.step()
     assert calls == [], "no body (no event loaded) sends nothing"
@@ -411,7 +496,7 @@ def t_client_logs_carry_no_key():
     ls.LOG.addHandler(h)
     try:
         with _sim() as sim:
-            c = ls.Client(lambda: _cfg(sim, key="leaky-key-123"), lambda: {"v": 1}, clock=_Clock())
+            c = ls.Client(lambda: _cfg(sim, key="leaky-key-123"), lambda: {"v": 1}, dict, clock=_Clock())
             c.step()
     finally:
         ls.LOG.removeHandler(h)

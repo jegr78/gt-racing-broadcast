@@ -117,6 +117,30 @@ def t_profile_save_refuses_a_league_url_that_is_not_https():
         assert (rc.league_service_url, rc.league_service_key) == ("https://league.example/r", KEY)
 
 
+def t_profile_save_reads_a_quoted_url_like_the_env_parser():
+    for value, ok in (('"http://league.example/r"', False), ("'https://league.example/r'", True),
+                      ('"https://league.example/r"', True)):
+        problem = m._league_url_problem([{"key": "LEAGUE_SERVICE_URL", "value": value}])
+        assert (problem == "") is ok, (value, problem)
+
+
+def t_event_stop_names_each_file_it_could_not_remove():
+    import driver_invite
+    with tempfile.TemporaryDirectory() as d:
+        path = ls.path_in(d)
+        ls.store(path, "REF", ls.parse_event({"v": 1, "races": [{"race": "r1"}], "widgets": []}))
+        saved = driver_invite.clear
+        driver_invite.clear = lambda p: (_ for _ in ()).throw(PermissionError("locked"))
+        try:
+            m._stop_driver_invite(os.path.join(d, "driver-invite.json"))
+            raise AssertionError("a file that could not be removed must be reported")
+        except OSError as exc:
+            assert "driver invite" in str(exc) and "locked" in str(exc), str(exc)
+        finally:
+            driver_invite.clear = saved
+        assert not os.path.exists(path), "the other files go even when one could not be removed"
+
+
 def t_the_key_is_never_handed_to_child_processes():
     pairs = dict(m._profile_env_pairs(_rc("https://league.example/r")))
     assert KEY not in pairs.values(), "the league key stays in profile.env"

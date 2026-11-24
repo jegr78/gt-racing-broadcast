@@ -6537,10 +6537,17 @@ def _stop_driver_invite(path=None):
     import timing_link
     path = path or _driver_invite_path()
     folder = os.path.dirname(os.path.abspath(path))
-    driver_invite.clear(path)
-    driver_requests.clear(driver_requests.path_in(folder))
-    timing_link.clear(timing_link.path_in(folder))
-    league_service.clear(league_service.path_in(folder))
+    failed = []
+    for what, clear in (("driver invite", lambda: driver_invite.clear(path)),
+                        ("driver requests", lambda: driver_requests.clear(driver_requests.path_in(folder))),
+                        ("public timing link", lambda: timing_link.clear(timing_link.path_in(folder))),
+                        ("league event", lambda: league_service.clear(league_service.path_in(folder)))):
+        try:
+            clear()
+        except OSError as exc:
+            failed.append(f"{what}: {exc}")
+    if failed:
+        raise OSError("; ".join(failed))
 
 
 def _timing_links(link_id, magic=None, host=None):
@@ -7469,7 +7476,7 @@ def event_stop(rest):
     try:
         _stop_driver_invite()          # the invite link dies with the event
     except OSError as exc:
-        print(f"driver invite: not removed ({exc}).")
+        print(f"event files: not all removed ({exc}).")
     _nudge_relay_timing_host()         # the timing host's room ends with it
     if not _relay_is_alive():
         print("Event already stopped: nothing to do "
@@ -8773,7 +8780,7 @@ def _league_url_problem(entries):
     import league_service
     for e in entries or []:
         if str(e.get("key", "")).strip() == "LEAGUE_SERVICE_URL":
-            value = str(e.get("value", "")).strip()
+            value = parse_env_text("LEAGUE_SERVICE_URL=" + str(e.get("value", ""))).get("LEAGUE_SERVICE_URL", "")
             return league_service.url_problem(value, {}) if value else ""
     return ""
 

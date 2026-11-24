@@ -110,9 +110,11 @@ service sends no HTML, no CSS and no image for a widget.
 Limits the relay enforces: eight widgets, 64 rows per table, bounded string lengths.
 Anything beyond a limit is dropped, and an answer that does not parse leaves the last
 good value in place. Dropped means the whole element, never a cut string: a race, widget,
-value or row with a field over its limit or of the wrong type is left out, and a list
-keeps its first allowed items. An answer over 256 KiB, one that is not JSON, or one
-without `v: 1` does not parse.
+value or row with a field over its limit, of the wrong type, null, or holding a control
+character is left out, and that holds for an optional field that is present too. A list
+keeps its first allowed items. An answer over 256 KiB, one that takes longer than 10 s,
+one that is not JSON, one without `v: 1`, or an event or status whose own title or
+message is invalid does not parse.
 
 Until the builder slots exist (step 3), the widget list lives with the loaded event in
 `league-event.json`.
