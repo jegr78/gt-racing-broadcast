@@ -146,12 +146,14 @@ def t_the_lap_counter_reads_0_on_the_grid_and_steps_at_the_line():
     assert wire.last("c0s0")["last_ms"] == -1, "no lap time before a complete lap"
     assert run(f, wire, 60.0, lambda: wire.last("c0s0")["lap"] == 2), "the second crossing starts lap 2"
     first_ms = wire.last("c0s0")["last_ms"]
-    assert first_ms > 0 and wire.last("c0s0")["best_ms"] == first_ms, "the first lap is the best lap so far"
+    assert first_ms > 0 and wire.last("c0s0")["best_ms"] == -1, "GT7 marks lap 1 red: no best lap"
     assert run(f, wire, 60.0, lambda: wire.last("c0s0")["lap"] == 3), "the third crossing starts lap 3"
     lap_ms = wire.last("c0s0")["last_ms"]
     pace = f.car(TEAMS[0]).base
     assert abs(lap_ms / 1000 - f.line.length / pace) < 1.0, f"a flying lap took {lap_ms} ms at {pace:.1f} m/s"
-    assert wire.last("c0s0")["best_ms"] == min(first_ms, lap_ms), "the best lap is the quicker one"
+    assert wire.last("c0s0")["best_ms"] == lap_ms, "the first valid lap is the best lap"
+    assert run(f, wire, 60.0, lambda: wire.last("c0s0")["lap"] == 4), "the fourth crossing starts lap 4"
+    assert wire.last("c0s0")["best_ms"] == min(lap_ms, wire.last("c0s0")["last_ms"]), "the best lap is the quicker one"
     pids = [s["pid"] for s in wire.samples["c0s0"]]
     assert pids == sorted(set(pids)), "packet ids rise, one per packet"
 

@@ -179,9 +179,12 @@ class Sender:
         self.pid = 0
         self.last_ms = self.best_ms = -1
         self.line_t = None
+        self.timed = 0             # laps timed in this session
 
     def new_session(self):
         self.line_t = None
+        self.timed = 0
+        self.last_ms = self.best_ms = -1          # GT7 clears both in a new session
 
 
 class Car:
@@ -374,7 +377,9 @@ class Field:
         s = car.sender
         if s.line_t is not None:
             s.last_ms = round((now - s.line_t) * 1000)
-            s.best_ms = s.last_ms if s.best_ms < 0 else min(s.best_ms, s.last_ms)
+            s.timed += 1
+            if s.timed > 1:                       # GT7 marks a session's lap 1 red
+                s.best_ms = s.last_ms if s.best_ms < 0 else min(s.best_ms, s.last_ms)
         s.line_t = now
         car.lap += 1
         car.pace = car.base + self.rnd.uniform(-0.45, 0.45)

@@ -246,8 +246,16 @@ expect = ["race.state == 'finished'", "row(race.entries, 'entry', 'Apex Works #1
 timeout = "3m"
 
 [[step]]
-id = "chequered"
+id = "class_fastest_public"
 at = "after:finished"
+role = "viewer"
+do = "read"
+expect = ["'Hypercar' in page('viewer').fastest", "'GT3' in page('viewer').fastest"]
+timeout = "20s"
+
+[[step]]
+id = "chequered"
+at = "after:class_fastest_public"
 role = "drivers"
 do = "stop"
 

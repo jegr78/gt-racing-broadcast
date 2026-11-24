@@ -86,8 +86,10 @@ prediction may move a sample a lap.
   of GT7's counter. A lap counts only when the car counted for all of it (not the
   formation lap, not lap 1 of a follow-up lobby, not a lap with a start, red flag,
   change or move in it), and GT7's `last_ms` for it is taken only when it agrees with
-  the relay's own timing within LAP_TIME_TOLERANCE. The fastest of those is the race's
-  fastest lap.
+  the relay's own timing within LAP_TIME_TOLERANCE. GT7 marks no lap invalid in
+  `last_ms`; its `best_ms` takes only valid laps, so a lap counts for the fastest lap
+  only when `best_ms` equals its time within LAP_TIME_WAIT_S of the line. The fastest
+  of those is the race's fastest lap.
 - Corrections add metres and pit stops per entry; `override_change` makes a team's
   connection active at once, continuing from the current distance.
 - Estimate: Race Control puts a quiet car S seconds behind or ahead of a reference car.
@@ -161,7 +163,7 @@ class _Car:
         self.fuel = self.x = self.z = None
         self.line_t = None         # relay time of the last counter step while counting
         self.lap_ok = False        # the running lap has been counted from its line
-        self.pending = None        # (relay lap time, line time) waiting for GT7's last_ms
+        self.pending = None        # [relay lap time, line time, GT7's lap time once it agrees] waiting for GT7
         self.last_ms = None        # the last last_ms seen
 
 
@@ -218,6 +220,7 @@ class _Entry:
         self.switch_pit = False    # a pit stop already counted since the latest stint switch
         self.finished_at = None
         self.last_lap_ms = None
+        self.counted = []          # its laps that counted for the fastest lap, kept for a void
         self.stint_laps = 0        # race laps since the active car began counting
         self.parked = None         # (conn, counting state) of the car moved away from it
         self.resume = False        # an undone retirement: count on from `distance`
@@ -889,7 +892,7 @@ class Race:
         ent.ds.append(ent.distance)
         self._trim(ent, t)
         self._lap_timing(ent, car, t, prev_lap is not None and lap > prev_lap,
-                         last_ms if new_lap_time else None)
+                         last_ms if new_lap_time else None, sample.get("best_ms"))
         # A single lobby counts laps in race distance: after a red flag restart from the
         # box the restart lobby's line no longer sits on a whole lap of it.
         if self.multi_lobby:
@@ -915,31 +918,63 @@ class Race:
         """The shortest believable lap: the line at MAX_SPEED_MPS."""
         return self.length / MAX_SPEED_MPS if self.length else math.inf
 
-    def _lap_timing(self, ent, car, t, line, last_ms):
-        """Time the active counting car's laps and take GT7's time when it agrees."""
+    def _lap_timing(self, ent, car, t, line, last_ms, best_ms):
+        """Time the active counting car's laps, show GT7's time when it agrees and count
+        it for the fastest lap once GT7 takes it as the car's best lap."""
         if line:
             if car.lap_ok:
                 ent.stint_laps += 1               # a lap counted from its own line
             if car.lap_ok and car.line_t is not None:
-                car.pending = (t - car.line_t, t)
+                car.pending = [t - car.line_t, t, None]
             car.line_t, car.lap_ok = t, True
         if car.pending is not None and t - car.pending[1] > LAP_TIME_WAIT_S:
             car.pending = None
-        if last_ms is None or car.pending is None:
+        if car.pending is None:
             return
-        measured = car.pending[0]
-        car.pending = None
-        if measured < self.min_lap_s():
-            return                                # faster than any car can drive the line
-        if abs(last_ms / 1000 - measured) > max(LAP_TIME_TOLERANCE[0], LAP_TIME_TOLERANCE[1] * measured):
+        if car.pending[2] is None:
+            if last_ms is None:
+                return
+            measured = car.pending[0]
+            if measured < self.min_lap_s() or abs(last_ms / 1000 - measured) > \
+                    max(LAP_TIME_TOLERANCE[0], LAP_TIME_TOLERANCE[1] * measured):
+                car.pending = None                # faster than the line allows, or not this lap's time
+                return
+            ent.last_lap_ms = car.pending[2] = last_ms
+        # GT7 keeps only a valid lap as best lap, so an invalid one never matches.
+        if best_ms != car.pending[2]:
             return
-        ent.last_lap_ms = last_ms
+        last_ms, car.pending = car.pending[2], None
         lap = {"entry": ent.entry, "driver": car.name, "ms": last_ms}
+        ent.counted.append(dict(lap))
         if self.fastest is None or last_ms < self.fastest["ms"]:
             self.fastest = dict(lap)
         cls = self._classes.get(ent.entry, "")
         if cls not in self.fastest_by_class or last_ms < self.fastest_by_class[cls]["ms"]:
             self.fastest_by_class[cls] = lap
+
+    def void_fastest(self, cls=None):
+        """Race Control voids the fastest lap, or with `cls` that class's: the fastest of
+        the other counted laps takes its place, in every class that held the voided lap."""
+        lap = self.fastest if cls is None else self.fastest_by_class.get(cls)
+        if lap is None:
+            return
+        ents = list(self._entries.values()) + list(self._parked.values())
+        for e in ents:
+            e.counted = [c for c in e.counted if c != lap]
+
+        def best(name=None):
+            laps = [c for e in ents for c in e.counted
+                    if name is None or self._classes.get(e.entry, "") == name]
+            return min(laps, key=lambda c: c["ms"], default=None)
+        names = [cls] if cls is not None else [n for n, f in self.fastest_by_class.items() if f == lap]
+        if cls is None:
+            self.fastest = best()
+        for name in names:
+            found = best(name)
+            if found is None:
+                self.fastest_by_class.pop(name, None)
+            else:
+                self.fastest_by_class[name] = dict(found)
 
     def _box(self, car, t):
         car.left_box = False

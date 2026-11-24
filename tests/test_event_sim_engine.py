@@ -356,7 +356,8 @@ def t_expect_reads_probes_views_and_calls():
 def t_expect_refuses_everything_else():
     for text in ("__import__('os')", "box.__class__", "box._secret", "[x for x in box.data]",
                  "lambda: 1", "box.value + 1 == 4", "open('f')", "box.twice(n=2)", "b'x' == b'x'",
-                 "x if box else y", "f'{box}'"):
+                 "x if box else y", "f'{box}'", "page('viewer').fastest.startswith('Fastest')",
+                 "box.data.rows.count(1) == 1"):
         try:
             expect.compile_expr(text, ROOTS)
         except expect.ExpectError:

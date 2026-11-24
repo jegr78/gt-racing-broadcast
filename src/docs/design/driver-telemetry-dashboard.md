@@ -229,6 +229,29 @@ director.
   Laps outside the race do not count: the formation lap, lap 1 of a follow-up
 lobby and the lap containing a change or red flag wait. GT7 decides whether a lap
 is valid; Race Control and the director correct the time.
+  - GT7 sends no validity flag. Its lap time (`last_ms`) carries every lap, red ones
+    too. Its best lap (`best_ms`) takes only a valid lap that beats the console's best
+    so far; a lap that ties it was not measured. The probe (#1110) saw GT7 mark lap 1 of all three races
+    red, in one Spa 24h Layout race every lap touching the pit lane, and in Time Trial
+    cut laps; a race lap with a cut and a time penalty stayed valid.
+  - So a lap counts for the fastest lap, overall and per class, only when GT7 takes
+    it as the car's best lap: `best_ms` equals the lap's time in a sample within
+    6 s of the line, the same window the relay waits for `last_ms`. Every lap time
+    still shows as the entry's last lap.
+  - A valid lap slower than the console's own best never shows in `best_ms` and never
+    counts. It can only be the race's fastest when that best was a lap the race left
+    out: a lap with a red flag in it, a lap the relay missed in a sender gap or a
+    relay restart, or a lap before a race reset in the same GT7 session. Race Control
+    and the director correct it then.
+  - A void by Race Control or the director brings back the fastest of the other laps
+    that counted, overall and in each class that held the voided lap.
+  - Each console keeps its own best. In single-player sessions GT7 cleared it at each
+    new session. Whether a lobby carries the qualifying best into the race, or the
+    race best into a restart lobby, was not measured; Race Control corrects the fastest lap then.
+  - Qualifying ranks by `best_ms` directly and needs no such check.
+  - Known limit: when two consecutive laps have exactly the same time to the
+    millisecond, the second does not show as a new last lap. The fastest lap is not
+    affected.
 - Qualifying shows the ranking of the running segment by GT7 best lap with gaps
   between best laps. Elimination and grid stay with the league and the Sheet.
 - A readiness list shows per entry whether a sender is connected before the start;
