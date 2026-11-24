@@ -198,7 +198,9 @@ def compile_expr(text, roots=None):
                 roots is not None and node.id not in roots and node.id not in BUILTINS)):
             raise ExpectError(f"unknown name {node.id!r}" + (f" (known: {', '.join(roots)})" if roots else ""))
         if isinstance(node, ast.Call):
-            if not isinstance(node.func, (ast.Name, ast.Attribute)):
+            if not isinstance(node.func, (ast.Name, ast.Attribute)) or isinstance(node.func, ast.Attribute) \
+                    and not isinstance(node.func.value, ast.Name):
+                # A probe's method hangs on its root name; data read from a page or a probe has none.
                 raise ExpectError("only probe methods, page() and the built-in helpers can be called")
         if isinstance(node, ast.Constant) and not isinstance(node.value, (str, int, float, bool, type(None))):
             raise ExpectError(f"constant {node.value!r} is not allowed")

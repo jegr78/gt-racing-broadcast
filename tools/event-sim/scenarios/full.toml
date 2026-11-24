@@ -1070,7 +1070,7 @@ id = "fastest_public"
 at = "after:shot_finished_2"
 role = "viewer"
 do = "read"
-expect = ["page('viewer').fastest.startswith('Fastest lap')"]
+expect = ["'Fastest lap' in page('viewer').fastest"]
 timeout = "20s"
 
 [[step]]
