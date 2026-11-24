@@ -245,7 +245,7 @@ is valid; Race Control and the director correct the time.
     session. Race Control and the director correct it then.
   - Each console keeps its own best. In single-player sessions GT7 cleared it at each
     new session. Whether a lobby carries the qualifying best into the race, or the
-    race best into a restart lobby, was not measured.
+    race best into a restart lobby, was not measured; Race Control corrects the fastest lap then.
   - Qualifying ranks by `best_ms` directly and needs no such check.
 - Qualifying shows the ranking of the running segment by GT7 best lap with gaps
   between best laps. Elimination and grid stay with the league and the Sheet.
