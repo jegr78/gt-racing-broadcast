@@ -153,7 +153,25 @@ director.
 
 - **Start.** With the event setting "formation lap" (default on) a car's distance
   starts when it crosses the line into lap 2. The crossing times form the starting
-  gaps. Without it, distance starts at lap 1.
+  gaps. Without it, distance starts at lap 1. In a race GT7 reads lap 1 on the grid
+  and keeps it over the start, so without a formation lap a car counts from the line
+  on lap 1; a car seen first up to 500 m before the line may stand on the grid or roll
+  to it, so it counts once it passes the line.
+- **Laps and the line** (#1263). A car's own counter step on track, on the line,
+  moving and right after its previous sample, marks the finish line's station. On the
+  line means within 12 m: on Grand Valley Highway 1 the counter stepped 0 to 9 m off
+  the line on track and 19 m off it in the pit lane at 80 km/h. Where the finish line runs through the pit
+  lane, GT7 also steps the counter in the pit lane or while the car stands in its box;
+  such steps mark nothing. Between samples close enough that a car cannot have driven
+  half a lap, its own movement along the line decides its laps, so a counter step away
+  from the line moves no distance and the lap count never steps back; after a longer
+  gap, such as a sender outage, the counter decides, kept by the lap it differed at
+  the car's last sample. A car that has not crossed yet counts from the reference
+  line's start, where reference laps begin; its first own crossing moves its distance
+  once to the lap GT7's counter gives there, by the difference to the start, which is
+  zero on a line that starts at the finish line. The downloaded line of Spa 24h Layout (`d60ebc`) starts
+  past La Source and closes over it with a 193 m chord, so there the move is about
+  190 m; a reference line of that layout that starts at the finish line removes it.
 - **Driver change** (multi-lobby layer). The broadcast stint switch opens the
   change window. Inside it, a team changes when its old car stands in the box and
   the new driver's car then leaves the box. The old car's distance becomes an
@@ -196,7 +214,10 @@ director.
 ## Display
 
 - Order, gap to the leader and interval; a deficit of a full lap or more reads
-  `+N L`. Status `Box` while a car stands in the box, `No data` while its sender is
+  `+N L`. Status `Box` while a counting car stands in the box (a car that does not
+  count yet, as on a formation lap, shows `Waiting`; a counting car that stands in
+  the pit lane before its box shows `Box` too, since telemetry cannot tell the two
+  stands apart), `No data` while its sender is
   missing. An entry without data keeps the position implied by the other positions.
 - Remaining time comes from the existing race timer, including its red flag
   adjustments.
@@ -221,7 +242,7 @@ is valid; Race Control and the director correct the time.
   current stint lobby. Race laps exclude the formation lap and lap 1 of a
   follow-up lobby.
 - Each entry row shows the number of pit stops: box stops that are not part of a
-  driver change, the lap-1 wait of a follow-up lobby or a red flag restart. Race
+  driver change (standing twice within 400 m of one pit lane visit is one stop), the lap-1 wait of a follow-up lobby or a red flag restart. Race
   Control and the director correct the count.
 - GT7 telemetry carries no tyre compound. Race Control and the director set it per
   entry from a dropdown, reading it from the broadcast spectator's view in the

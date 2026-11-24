@@ -1499,7 +1499,7 @@ def t_a_change_override_switches_the_team_now():
     assert row["pit_stops"] == 0, f"an override without a stint switch is no pit stop: {row}"
 
 
-def t_a_change_override_without_a_known_line_changes_nothing():
+def t_a_change_override_without_a_known_line_continues_from_the_distance():
     race = rd.Race(TRACE, formation=False, multi_lobby=True)
     old = Car(race, "A", "a1", L - 15, "Max")
     t = _drive(race, [old], [50], 0.0, 20)
@@ -1507,11 +1507,11 @@ def t_a_change_override_without_a_known_line_changes_nothing():
     new.along = -L / 2                                    # mid-lap, no crossing of its own yet
     t = _drive(race, [old, new], [50, 40], t, 2)
     before = _row(race, "A", t)["distance_m"]
-    assert not race.override_change("A", "a2", t), "no line station for the new car: refused"
+    assert race.override_change("A", "a2", t), "the reference line's start stands in for its line"
     t = _drive(race, [old, new], [50, 40], t, 2)
     row = _row(race, "A", t)
-    assert row["driver"] == "Max" and abs(row["distance_m"] - (before + 100)) < 10, \
-        f"the old car keeps counting after a refused override: {row} {before}"
+    assert row["driver"] == "Lea" and abs(row["distance_m"] - (before + 80)) < 10, \
+        f"the new car counts on from the team's distance: {row} {before}"
 
 
 def t_a_release_in_the_same_lobby_drives_on_from_where_the_cars_are():
@@ -2603,8 +2603,9 @@ def t_real_data_ends_the_estimate_of_a_never_seen_car():
     x.along = b.along - 300
     t = _drive(race, [a, b, x], [40, 40, 40], t, 3)
     rx = _row(race, "X", t)
-    assert rx["status"] == "waiting" and rx["estimate"] is None and rx["quiet_s"] == 0.0, \
+    assert rx["status"] == "racing" and rx["estimate"] is None and rx["quiet_s"] == 0.0, \
         f"its own sender ends the estimate: {rx}"
+    assert abs(rx["distance_m"] - x.along) < 5, f"it counts from where it drives on lap 1: {rx}"
     assert race.take_ended_estimates() == ["X"]
 
 
@@ -3509,6 +3510,389 @@ def t_an_estimated_leader_ahead_of_a_lapped_reference_still_sets_every_gap():
     assert abs(rb["gap_s"] - 0.97) < 0.1 and abs(rc["gap_s"] - 1.97) < 0.1, \
         f"the gaps count from the estimated leader, not from B: {rb['gap_s']} {rc['gap_s']}"
     assert abs(rb["gap_time_s"] - 0.97) < 0.1, rb
+
+# -- a pit-lane finish (#1263) -------------------------------------------------------
+HAIRPIN_M = 200.0
+# The reference line starts past a hairpin behind the finish line and closes over it with a chord.
+STEP_TRACE = [{"d": p["d"] - HAIRPIN_M, "x": p["x"], "z": p["z"]} for p in TRACE if p["d"] >= HAIRPIN_M]
+CHORD_M = math.dist((STEP_TRACE[-1]["x"], STEP_TRACE[-1]["z"]), (STEP_TRACE[0]["x"], STEP_TRACE[0]["z"]))
+
+
+def _spa_pos(station, pit):
+    """The real path: past the line a hairpin bulges up to 150 m outside the reference
+    line's chord; the pit lane runs 25 m outside the line and cuts across the hairpin."""
+    a = 2 * math.pi * (station % L) / L
+    into = station % L
+    r = R + (25.0 if pit else 150.0 * math.sin(math.pi * into / HAIRPIN_M) if into < HAIRPIN_M else 0.0)
+    return r * math.cos(a), r * math.sin(a)
+
+
+class PitCar(Car):
+    """GT7 in a race: the counter reads 1 on the grid, steps when the car crosses the line
+    on track, and in the pit lane where `_go` says (the line runs through the boxes)."""
+
+    def __init__(self, race, entry, conn, grid_s):
+        super().__init__(race, entry, conn, grid_s)
+        self.counter = 1
+
+    def send(self, t, position=None):
+        x, z = _spa_pos(self.along, self.box)
+        self.race.update(self.entry, self.conn, self.name, {
+            "t": t, "lap": self.counter, "x": x, "z": z, "speed_kmh": self.speed * 3.6,
+            "race_position": position, "on_track": True, "paused": False, "loading": False,
+            "last_ms": -1, "fuel_l": 50.0})
+
+
+def _go(race, car, t, seconds, v, pit=False, step_after=None, seen=None):
+    """`car` for `seconds` at v m/s (0 stands), in the pit lane when `pit`. GT7's counter
+    steps at a line crossing on track, or in the pit lane after `step_after` seconds."""
+    car.box = pit
+    for i in range(int(round(seconds * HZ))):
+        t += 1.0 / HZ
+        before = car.along
+        car.speed = v
+        car.along += v / HZ
+        if not pit and (before >= 0 or car.counter == 0) and math.floor(car.along / L) > math.floor(before / L):
+            car.counter += 1
+        if step_after is not None and i == int(step_after * HZ):
+            car.counter += 1
+        car.send(t)
+        if seen is not None:
+            seen.append((t, v, car.counter, _row(race, car.entry, t)))
+    return t
+
+
+def _spa_race(multi_lobby):
+    """Four laps alone, formation lap off, with two pit visits: the first stops short in
+    the pit lane where the counter steps, then in the box; the second's counter steps while
+    the car stands in the box."""
+    race = rd.Race(STEP_TRACE, formation=False, multi_lobby=multi_lobby)
+    car, seen = PitCar(race, "A", "a", L - 20), []
+    t = _go(race, car, 0.0, 2, 0, seen=seen)                                   # on the grid
+    t = _go(race, car, t, (L - 300 + 20) / 50, 50, seen=seen)                  # lap 1
+    t = _go(race, car, t, 150 / 15, 15, pit=True, seen=seen)                   # into the pit lane
+    t = _go(race, car, t, 7, 0, pit=True, step_after=3, seen=seen)            # stands where the line runs
+    t = _go(race, car, t, 50 / 15, 15, pit=True, seen=seen)
+    t = _go(race, car, t, 30, 0, pit=True, seen=seen)                          # the box
+    t = _go(race, car, t, 350 / 15, 15, pit=True, seen=seen)                   # out past the line
+    t = _go(race, car, t, (2 * L - 300 - car.along) / 50, 50, seen=seen)       # lap 2, then lap 3 to the pit
+    t = _go(race, car, t, L / 50, 50, seen=seen)
+    t = _go(race, car, t, 200 / 15, 15, pit=True, seen=seen)
+    t = _go(race, car, t, 60, 0, pit=True, step_after=30, seen=seen)          # the counter steps in the box
+    t = _go(race, car, t, 350 / 15, 15, pit=True, seen=seen)
+    t = _go(race, car, t, (4 * L + 100 - car.along) / 50, 50, seen=seen)       # lap 4 over the line
+    return race, car, t, seen
+
+
+def t_a_pit_lane_finish_counts_every_lap_once_without_a_jump():
+    for multi in (False, True):
+        race, car, t, seen = _spa_race(multi)
+        assert car.counter == 5, f"the drive completes GT7's four laps: {car.counter}"
+        first = next((t_ for t_, _v, _c, r in seen if r["distance_m"] is not None), None)
+        assert first is not None and first <= 2 + (20 + HAIRPIN_M) / 50 + 0.2, \
+            f"lap 1 counts once the car passes the reference line's start ({multi}): {first}"
+        laps = [r["laps"] for *_x, r in seen]
+        assert all(b >= a for a, b in zip(laps, laps[1:], strict=False)), \
+            f"the lap count never steps back ({multi}): {[l for i, l in enumerate(laps) if not i or l != laps[i - 1]]}"
+        assert laps[-1] == 4, f"four laps driven, four counted ({multi}): {laps[-1]}"
+        jumps = []
+        for (t0, _v0, _c0, r0), (t1, v1, c1, r1) in zip(seen, seen[1:], strict=False):
+            if r0["distance_m"] is None:
+                continue
+            step = r1["distance_m"] - r0["distance_m"]
+            if not -1.0 <= step <= v1 * (t1 - t0) + 5.0:
+                jumps.append((round(t1, 1), round(step), c1))
+        assert len(jumps) == 1 and abs(jumps[0][1] - CHORD_M) < 10 and jumps[0][2] == 3, \
+            f"only the first crossing on track moves the count onto its own line, by the chord ({multi}): {jumps}"
+        assert seen[-1][3]["pit_stops"] == 2, f"two pit visits ({multi}): {seen[-1][3]['pit_stops']}"
+
+
+def t_every_car_on_a_grid_that_reads_lap_one_counts_from_the_line():
+    race = rd.Race(TRACE, formation=False)
+    cars = [PitCar(race, e, e.lower(), L - g) for e, g in (("A", 10), ("B", 30), ("C", 50))]
+    t = _drive(race, cars, [0, 0, 0], 0.0, 1)
+    assert all(_row(race, e, t)["status"] == "waiting" for e in "ABC"), \
+        "on the grid before the reference line's start a car may stand or roll: it waits"
+    t = _drive(race, cars, [40, 40, 40], t, 5)
+    assert all(abs(_row(race, c.entry, t)["distance_m"] - c.along) < 5 for c in cars), \
+        [(_row(race, c.entry, t)["distance_m"], c.along) for c in cars]
+    assert _order(race, t) == ["A", "B", "C"] and abs(_row(race, "C", t)["gap_s"] - 1.0) < 0.1, \
+        (_order(race, t), _row(race, "C", t)["gap_s"])
+
+
+def t_a_red_flag_on_lap_one_restarts_cars_that_never_crossed_the_line():
+    race = rd.Race(STEP_TRACE, formation=False)
+    old = [PitCar(race, e, e.lower() + "1", L - g) for e, g in (("A", 10), ("B", 30))]
+    t = _drive(race, old, [40, 40], 0.0, 20)
+    lead = _row(race, "A", t)["distance_m"]
+    race.red_flag(t, "keep")
+    new = [PitCar(race, e, e.lower() + "2", L - 300 - 20 * i) for i, e in enumerate("AB")]
+    for car in new:
+        car.box = True
+    t = _drive(race, new, [None, None], t, 3)
+    for car in new:
+        car.box = False
+    t = _drive(race, new, [40, 40], t, 3)
+    rows = {e: _row(race, e, t) for e in "AB"}
+    assert all(r["status"] == "racing" and r["distance_m"] is not None
+               and abs(r["distance_m"] - lead - 120) < 15 for r in rows.values()), \
+        f"each car resumes from the keep anchor without a line of its own: {lead} {rows}"
+    race.release(t)
+    seen = []
+    _go(race, new[0], t, (L + 200 - new[0].along) / 40, 40, seen=seen)
+    steps = [b[3]["distance_m"] - a[3]["distance_m"] for a, b in zip(seen, seen[1:], strict=False)]
+    assert new[0].counter == 2 and all(0 <= d <= 4 + 5 for d in steps), \
+        f"its first crossing moves the line, not a distance counted from the anchor: {min(steps)} {max(steps)}"
+
+
+def t_a_counter_step_while_standing_in_the_box_moves_nothing():
+    race = rd.Race(TRACE, formation=False)
+    car = PitCar(race, "A", "a", L - 20)
+    car.counter = 0                                                 # counts from its own crossing
+    t = _go(race, car, 0.0, (2 * L - 120) / 50, 50)
+    t = _go(race, car, t, 40 / 15, 15, pit=True)
+    seen = []
+    t = _go(race, car, t, 90, 0, pit=True, step_after=10, seen=seen)
+    dist = {r["distance_m"] for *_x, r in seen}
+    assert len(dist) == 1 and {r["laps"] for *_x, r in seen} == {1}, \
+        f"standing in the box the distance and the laps stay: {sorted(dist)[:2]}..{sorted(dist)[-1:]}"
+    t = _go(race, car, t, 300 / 15, 15, pit=True, seen=seen)
+    _go(race, car, t, 40, 50, seen=seen)
+    laps = [r["laps"] for *_x, r in seen]
+    assert all(b >= a for a, b in zip(laps, laps[1:], strict=False)) and laps[-1] == 2, \
+        f"out of the box past the line the count goes on, never back: {sorted(set(laps))}"
+
+
+def t_only_a_crossing_on_track_marks_the_line():
+    race = rd.Race(TRACE, formation=True)
+    car = PitCar(race, "A", "a", L - 20)
+    car.counter = 0
+    t = _go(race, car, 0.0, 1, 0)
+    t = _go(race, car, t, 2, 0, step_after=1)                       # the race loads: 0 -> 1 standing
+    assert race._cars["a"].line_s is None, "a step while standing is no crossing"
+    t = _go(race, car, t, (L - 200 + 20) / 50, 50)
+    t = _go(race, car, t, 100 / 15, 15, pit=True, step_after=2)     # 1 -> 2 in the pit lane
+    assert race._cars["a"].line_s is None, "a step in the pit lane is no crossing"
+    t = _go(race, car, t, 150 / 15, 15, pit=True)
+    _go(race, car, t, L / 50, 50)                               # 2 -> 3 on the line
+    s = race._cars["a"].line_s
+    assert s is not None and race._circ(s, 0.0) < 10, f"the crossing on track marks the line: {s}"
+    off = rd.Race(TRACE, formation=True)
+    x, z = _pos(L / 2)
+    for i, (lap, on) in enumerate(((-1, True), (0, True), (1, False))):
+        off.update("B", "b", "Driver", {"t": 0.1 * (i + 1), "lap": lap, "x": x + 0.5 * i, "z": z,
+                                        "speed_kmh": 150.0, "on_track": on})
+    assert off._cars["b"].line_s is None, "a replay or a step onto lap 0 marks no line"
+
+
+def t_a_car_that_does_not_count_yet_shows_waiting_not_box():
+    race = rd.Race(TRACE, formation=True)
+    car = PitCar(race, "A", "a", L - 20)
+    t = _go(race, car, 0.0, (L - 200 + 20) / 50, 50)                # the formation lap
+    t = _go(race, car, t, 50 / 15, 15, pit=True)
+    t = _go(race, car, t, 6, 0, pit=True)
+    row = _row(race, "A", t)
+    assert row["distance_m"] is None and row["status"] == "waiting", row
+
+
+# -- review findings (#1263) ---------------------------------------------------------
+def _rotated(start_m):
+    """TRACE starting `start_m` past the finish line."""
+    n = 720
+    return [{"d": L * i / n, "x": R * math.cos(2 * math.pi * (start_m + L * i / n) / L),
+             "z": R * math.sin(2 * math.pi * (start_m + L * i / n) / L)} for i in range(n + 1)]
+
+
+class GridCar:
+    """GT7 in a race from a grid behind the line: the counter reads 1 there and stays 1
+    over the start, then steps at each crossing of the line."""
+
+    def __init__(self, race, entry, behind):
+        self.race, self.entry, self.along, self.counter = race, entry, -behind, 1
+
+    def tick(self, t, v, send=True, pit=False):
+        before = self.along
+        self.along += v / HZ
+        if not pit and self.along >= L and math.floor(self.along / L) > math.floor(before / L):
+            self.counter += 1
+        if send:
+            x, z = _pos(self.along, pit)
+            self.race.update(self.entry, self.entry.lower(), "Driver", {
+                "t": t, "lap": self.counter, "x": x, "z": z, "speed_kmh": v * 3.6,
+                "on_track": True, "race_position": None, "last_ms": -1})
+
+
+def _finish_points(race, cars, t, v, until, hold=()):
+    """Drive until the first car passes `until`; where each car was when it finished."""
+    done = {}
+    while cars[0].along < until:
+        t += 1.0 / HZ
+        for c in cars:
+            c.tick(t, 0 if c.entry in hold and c.along < -hold[c.entry] else v)
+        for r in race.standings(t)["entries"]:
+            if r["finished"] and r["entry"] not in done:
+                done[r["entry"]] = next(c.along for c in cars if c.entry == r["entry"])
+    return done, t
+
+
+def t_a_flying_start_counts_lap_one_once():
+    race = rd.Race(TRACE, formation=False, lap_count=3)
+    cars = [GridCar(race, e, g) for e, g in (("A", 200), ("B", 230), ("C", 260))]
+    t = 0.0
+    while cars[0].along < L / 2:
+        t += 1.0 / HZ
+        for c in cars:
+            c.tick(t, 50)
+        d = _row(race, "A", t)["distance_m"]
+        assert d is None or d < cars[0].along + 10, f"on lap 1 no lap ahead: {d} at {cars[0].along:.0f}"
+    done, _t = _finish_points(race, cars, t, 50, 3.5 * L)
+    assert all(abs(a - 3 * L) < 10 for a in done.values()) and len(done) == 3, \
+        f"first seen moving before the line on lap 1, each finishes after three laps at {3 * L:.0f}: {done}"
+
+
+def t_a_car_moving_before_the_line_among_a_standing_grid_leads_nobody():
+    race = rd.Race(TRACE, formation=False, lap_count=3)
+    cars = [GridCar(race, e, g) for e, g in (("A", 20), ("B", 40), ("C", 60), ("Z", 400))]
+    t = 0.0
+    for _ in range(20):
+        t += 1.0 / HZ
+        for c in cars[:3]:
+            c.tick(t, 0)
+    for _ in range(50):
+        t += 1.0 / HZ
+        for c in cars:
+            c.tick(t, 50)
+    assert _order(race, t)[0] == "A", f"Z rolling in from behind leads nobody on lap 1: {_order(race, t)}"
+    done, t = _finish_points(race, cars, t, 50, 3.5 * L)
+    assert _order(race, t)[0] == "A" and abs(done["Z"] - 3 * L) < 10, \
+        f"Z, rolling in from 400 m behind, is no lap up: {_order(race, t)} {done}"
+
+
+def t_a_reference_line_starting_far_past_the_finish_adds_no_lap():
+    for start in (1000.0, 1400.0):
+        race = rd.Race(_rotated(start), formation=False, lap_count=3)
+        cars = [GridCar(race, e, g) for e, g in (("A", 20), ("B", 40), ("C", 60))]
+        t = 0.0
+        for _ in range(20):
+            t += 1.0 / HZ
+            for c in cars:
+                c.tick(t, 0)
+        done, _t = _finish_points(race, cars, t, 50, 3.5 * L)
+        assert len(done) == 3 and all(abs(a - 3 * L) < 10 for a in done.values()), \
+            f"the first crossing moves the count onto the line, never a lap on ({start}): {done}"
+
+
+def t_a_counter_step_in_the_box_survives_a_sender_gap():
+    race = rd.Race(TRACE, formation=True)
+    car = GridCar(race, "A", 20)
+    t = 0.0
+    while car.along < 2 * L - 150:
+        t += 1.0 / HZ
+        car.tick(t, 50, pit=car.along > 2 * L - 300)
+    for _ in range(30):
+        t += 1.0 / HZ
+        car.tick(t, 0, pit=True)
+    car.counter += 1                                  # the line runs through the boxes
+    for silent in (False,) + (True,) * 300 + (False,) * 30:
+        t += 1.0 / HZ
+        car.tick(t, 0, send=not silent, pit=True)
+    while car.along < 3.5 * L:
+        t += 1.0 / HZ
+        car.tick(t, 50 if car.along > 2 * L + 200 else 15, pit=car.along <= 2 * L + 200)
+    car_d = _row(race, "A", t)["distance_m"]
+    assert abs(car_d - (car.along - L)) < 10, \
+        f"after 30 s without data in the box the car counts its own laps: {car_d} vs {car.along - L:.0f}"
+
+
+def t_the_first_sample_after_a_gap_is_no_crossing():
+    race = rd.Race(_rotated(1000.0), formation=False)
+    cars = [GridCar(race, e, g) for e, g in (("A", 20), ("Z", 80))]
+    t = 0.0
+    while t < 90:
+        t += 1.0 / HZ
+        cars[0].tick(t, 50)
+        cars[1].tick(t, 50, send=t < 1.0 or t > 89.5)
+    line_s = race._cars["z"].line_s
+    assert line_s is None or race._circ(line_s, L - 1000.0) < 10, \
+        f"a counter that stepped during the gap marks no line where the car reappears: {line_s}"
+
+
+def t_two_stops_400_m_apart_are_two_pit_stops():
+    for apart, stops in ((300.0, 1), (500.0, 2)):
+        race = rd.Race(TRACE, formation=False)
+        car = PitCar(race, "A", "a", L - 20)
+        car.counter = 0
+        t = _go(race, car, 0.0, (L + 1000) / 50, 50)
+        for leg in (0.0, apart):
+            t = _go(race, car, t, leg / 15, 15, pit=True)
+            t = _go(race, car, t, 5, 0, pit=True)
+        t = _go(race, car, t, 100 / 15, 15, pit=True)
+        t = _go(race, car, t, 5, 50)
+        assert _row(race, "A", t)["pit_stops"] == stops, \
+            f"stands {apart:.0f} m apart: {stops} pit stop(s), got {_row(race, 'A', t)['pit_stops']}"
+
+
+def t_moving_a_car_away_and_back_restores_how_it_counts():
+    race = rd.Race(STEP_TRACE, formation=False)
+    car = PitCar(race, "A", "a", L - 20)
+    t = _go(race, car, 0.0, 2, 0)
+    t = _go(race, car, t, (L / 2 + 20) / 50, 50)                   # A counts from the reference start
+    car.entry = "X"                                                 # moved by mistake
+    t = _go(race, car, t, (L / 2 + 100) / 50, 50)                   # X's own crossing rebases it
+    moved = race._cars["a"]
+    assert not moved.provisional and moved.line_s is not None, "on X the car crossed and moved its line"
+    car.entry = "A"
+    _go(race, car, t, 1, 50)
+    back = race._cars["a"]
+    assert (back.provisional, back.from_line, back.line, back.lap_off) == (True, True, 0.0, 0), \
+        f"back on A it counts as A did: {(back.provisional, back.from_line, back.line, back.lap_off)}"
+
+
+def t_a_rebase_after_a_red_flag_moves_every_kept_distance():
+    race = rd.Race(STEP_TRACE, formation=False)
+    car = PitCar(race, "A", "a", L - 20)
+    t = _go(race, car, 0.0, 2, 0)
+    t = _go(race, car, t, (L - 400 + 20) / 50, 50)
+    race.red_flag(t, "keep")
+    t_red, ent = t, race._entries["A"]
+    t = _go(race, car, t, 600 / 50, 50)                             # crosses the line, not counting
+    race.release(t)
+    t = _go(race, car, t, (2 * L - 400 - car.along) / 50, 50)
+    assert race._cars["a"].provisional, "the next crossing on track rebases it"
+    held = rd.Race._distance_at(ent, t_red)
+    ent.stint_end = ent.change_anchor = ent.halted = held
+    ent.crossed, ent.resumed = (t_red, t_red, held), (1, t_red, held)
+    frozen = ent.frozen
+    _go(race, car, t, 600 / 50, 50)
+    assert not race._cars["a"].provisional, "rebased after the release"
+    now = rd.Race._distance_at(ent, t_red)
+    assert abs((now - held) - CHORD_M) < 10, f"the history moved by the chord: {now - held}"
+    kept = {"frozen": ent.frozen - frozen + held, "stint_end": ent.stint_end, "change_anchor": ent.change_anchor,
+            "halted": ent.halted, "resumed": ent.resumed[2]}     # the crossing itself rewrites `crossed`
+    assert all(abs(v - now) < 0.01 for v in kept.values()), f"every kept distance moved with the history to {now}: {kept}"
+
+
+def t_a_gap_that_starts_on_the_line_carries_no_lap():
+    race = rd.Race(TRACE, formation=False)
+    car = GridCar(race, "A", 20)
+    t = 0.0
+    while car.along < 2 * L - 10:
+        t += 1.0 / HZ
+        car.tick(t, 50)
+    car.along, t = 2 * L + 8, t + 1.0 / HZ         # just past the line, the counter a sample late
+    x, z = _pos(car.along)
+    race.update("A", "a", "Driver", {"t": t, "lap": car.counter, "x": x, "z": z, "speed_kmh": 180.0,
+                                     "on_track": True, "last_ms": -1})
+    car.counter += 1
+    for _ in range(60 * HZ):                      # the sender is silent from that sample on
+        t += 1.0 / HZ
+        car.tick(t, 50, send=False)
+    for _ in range(3 * HZ):
+        t += 1.0 / HZ
+        car.tick(t, 50)
+    d = _row(race, "A", t)["distance_m"]
+    assert abs(d - car.along) < 10, f"a lap offset read on the line survives no gap: {d} vs {car.along:.0f}"
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
