@@ -97,6 +97,17 @@ TELEMETRY_RECORD=
   air directly in `request` mode too. The director keeps full control either way and can
   change the mode per role live from the panel until the relay restarts. See
   [Console → Graphics](Console#graphics).
+- **`LEAGUE_SERVICE_URL` / `LEAGUE_SERVICE_KEY`** *(optional)*: the league's own
+  management service (for example CTC Manager or CLR) and the key it issued. The URL must
+  be `https://`; the Control Center refuses anything else. Treat the key like a password:
+  racecast never shows it in a status or a log, and it travels with `profile export`.
+  In the Control Center's **Profile** view, **League service** takes the reference the
+  service shows on its match or event page and **Load** fetches the event's races and
+  widgets (`racecast event league REF` does the same). `racecast event stop` clears the
+  loaded event. Without these keys nothing changes.
+
+  ![Control Center. Profile view: the League service section with a loaded event, its races and widgets](images/cc-profile-league-service.png)
+
 - **`TELEMETRY_RECORD`** *(optional, solo POV)*: `1` records the GT7 telemetry trace from
   relay start. The Director Panel `REC` key and `racecast telemetry record` toggle it live.
   See [Relay mode](Relay-Mode).

@@ -90,7 +90,9 @@ Ctrl+C ends inspection; never use broad `pkill` commands to stop test services.
   stubs** for `yt-dlp`/`streamlink`/`ffmpeg`/`deno` into the temp dir and prepends them
   to the relay's PATH (the fake schedule URLs are never pulled). The dedicated **`e2e`
   CI job** (`.github/workflows/ci.yml`, ubuntu) runs exactly this; the matrix `test` job
-  already runs `tests/test_e2e.py` via `run-tests.py`.
+  already runs `tests/test_e2e.py` via `run-tests.py`. After the checks it loads the league
+  event in a `--simulation` app home of its own (`profiles/demo`) against the simulated
+  league service: `racecast event league`, the Control Center routes and `event stop`.
 - **Solo coaching** (`--coach-only`, **CI-runnable on Linux, Windows and macOS**):
   copies the committed `solo-pov` profile into an owned temporary app home, clears inherited
   `RACECAST_*` configuration and uses a loopback OBS stand-in and synthetic replay.
@@ -405,6 +407,41 @@ own readers and writers (`post_webhook`, `SetupControl`, `HudSource`, `CrewSourc
 `parse_timer_tab`, `apply_stream_service_for_ref` on the Channel tab, get-graphics on the
 Assets tab, the Discord payload builders, the relay's own `Relay._discord_post`,
 `http_util.post_multipart`).
+
+## Simulated league service (`tools/event-sim/fakes/league_sim.py`, #1253)
+
+`league_sim.py` answers every call of `src/docs/design/league-service.openapi.yaml` under
+`/racecast`: `GET /v1/event?ref=` (one two-leg event, ref `SIM-MATCH-1`, a `score` and a
+`table` widget), `POST /v1/live` (a stand-in league computation from the posted rows),
+`POST /v1/result` (stores the draft, a resend replaces it) and `GET /v1/result?ref=&race=`.
+A wrong or missing bearer key gets 401 and counts in `unauthorized`; a body off the
+contract gets 400 with the reason and counts in `rejected`. Accepted calls land in
+`calls(since, call)` with the User-Agent and the body, never the key. `answer(call,
+status, body | raw, location)` (or `POST /_sim/answer`) makes a call answer exactly that,
+for redirects, oversized and broken answers; fault targets are `call:<event|live|result|
+result-status>` and `service`. `.env()` gives `RACECAST_SIMULATION=1` and
+`RACECAST_SIM_LEAGUE_SERVICE_URL`/`_KEY`, which `config_overrides` puts in place of the
+profile's service. The event simulation's stack starts one with a random key. Tests:
+`tests/test_league_sim.py`, `tests/test_league_service.py`.
+
+```bash
+python3 tools/event-sim/fakes/league_sim.py --port 0 --ready-file league.json [--result-status stored]
+```
+
+## League replay (`tools/league-replay.py`, #1253)
+
+Plays a race recording (`race-recording-*.sqlite`, opened read-only) against a league
+service as live state, one call per 2 s of race time (`--speed` faster), through
+`league_service.post_live`, and prints the widget values it answers. A league builds its
+endpoints against real race histories with it. The key comes from `LEAGUE_SERVICE_KEY`
+or `--key-file`, never argv. A recording keeps no team, number or lap time; its time
+gaps go out as `gap_s`/`interval_s` (`gap_s` null for a lapped car). `--dry-run` prints
+the first body. `tests/test_league_replay.py` plays a synthetic recording against the
+simulated service.
+
+```bash
+LEAGUE_SERVICE_KEY=... python3 tools/league-replay.py REC.sqlite --url https://league.example/racecast --ref M-12 --race leg-1 --speed 10
+```
 
 ## Stream stub (`tools/event-sim/fakes/stream_stub.py`, #1231)
 

@@ -238,11 +238,18 @@ Security boundaries that apply everywhere:
   Every other program control stays director-gated, including putting the driver
   dashboard on air. Race data the desks maintain (corrections, tyre compound, the
   dashboard's compound and fuel columns) is not a program change.
-- The optional league timing host (#1161) is the relay's one outbound fan-out: it sends
+- The optional league timing host (#1161) is an outbound fan-out: it sends
   only the delayed public timing body (`driver_race.public_view`) and the roster's brand
   logos to the league's own
   Cloudflare Worker over an authenticated WebSocket. Nothing new is funnelled, and the
   host never reaches back into the relay.
+- The optional league service (#1252, `src/scripts/league_service.py`) is the second
+  outbound path and the first that carries the undelayed standings off the machine: the
+  live-state allowlist (`league_service.live_state`, no fuel, compound, stream URL or
+  telemetry channel), the event load and the result go only to the league's own service
+  at `LEAGUE_SERVICE_URL`. HTTPS only, a bearer `LEAGUE_SERVICE_KEY` that is never logged
+  or in a status response, no redirect followed, and every answer bounded and typed
+  against the contract. The service never calls the relay, and nothing new is funnelled.
 - No destructive HTTP endpoint for chat or cues: clear/import/pull stay producer-only CLI
   actions. A commentator's stream-link submission is own-rows-only and lands as pending,
   never auto-published.

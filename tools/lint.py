@@ -41,10 +41,10 @@ import ast, io, os, shutil, subprocess, sys, tokenize
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Caught types for which a silent `pass` is an accepted idiom CodeQL does not flag:
-# optional imports and interpreter/iterator-control signals. KeyboardInterrupt is
-# deliberately NOT here; see the module docstring. (#217)
+# optional imports and iterator-control signals. KeyboardInterrupt and SystemExit are
+# deliberately NOT here: CodeQL flags a silent swallow of either. (#217)
 _BENIGN_EXC = frozenset({"ImportError", "ModuleNotFoundError",
-                         "SystemExit", "StopIteration", "GeneratorExit"})
+                         "StopIteration", "GeneratorExit"})
 
 
 def _comment_lines(source):

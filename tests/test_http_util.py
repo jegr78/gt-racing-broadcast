@@ -144,6 +144,7 @@ _COVERED = [
     ("src", "scripts", "funnel_setup.py"),
     ("src", "scripts", "obs_browser_linux.py"),
     ("src", "scripts", "preflight.py"),
+    ("src", "scripts", "league_service.py"),
 ]
 
 

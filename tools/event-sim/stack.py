@@ -36,6 +36,7 @@ import obs_sim  # noqa: E402
 import ports  # noqa: E402
 import probes  # noqa: E402
 import simulation  # noqa: E402
+import league_sim  # noqa: E402
 import sheet_sim  # noqa: E402
 import stream_stub  # noqa: E402
 import webhook_sink  # noqa: E402
@@ -326,7 +327,7 @@ class Stack:
         self.python = python
         self.ready_timeout = ready_timeout
         self.secret = secrets.token_hex(24)
-        self.sheet = self.sink = self.stub = self.obs = None
+        self.sheet = self.sink = self.stub = self.obs = self.league = None
         self.children = []
         self.urls = {}
         self.racecast = self.env = self.home = None
@@ -346,6 +347,7 @@ class Stack:
         keys = {PART_KEY_REF.format(label): secrets.token_hex(8) for label in event_parts(self.scn.event)}
         self.sheet = sheet_sim.SheetSim(tabs=sheet_tabs(self.scn), stream_keys=keys).start()
         self.sink = webhook_sink.WebhookSink().start()
+        self.league = league_sim.LeagueSim(key=secrets.token_hex(16)).start()
         self.stub = stream_stub.StreamStub(os.path.join(self.work, "streams")).install()
         for c in self.scn.commentators:
             self.stub.channel(c.channel, stint=c.stint, commentator=c.name)
@@ -355,7 +357,7 @@ class Stack:
         self.obs = obs_sim.ObsSim(collection=collection, grabber=grabber).start()
 
         fakes = {}
-        for fake in (self.sheet, self.sink, self.stub, self.obs):
+        for fake in (self.sheet, self.sink, self.stub, self.obs, self.league):
             fakes.update(fake.env())
         env = child_env(os.environ, {**fakes, **port_env((feed_a, feed_b, pov), http_port, ui_port),
                                      "RACECAST_PROFILE": PROFILE,
@@ -370,7 +372,8 @@ class Stack:
                                       "--gt7-bind", "127.0.0.1", "--gt7-port", "0",
                                       "--gt7-ps-ip", "127.0.0.1"], env, home)
         self.urls = {"relay": f"http://127.0.0.1:{http_port}", "ui": f"http://127.0.0.1:{ui_port}",
-                     "obs": self.obs.http_url, "sheet": self.sheet.http_url, "sink": self.sink.http_url}
+                     "obs": self.obs.http_url, "sheet": self.sheet.http_url, "sink": self.sink.http_url,
+                     "league": self.league.http_url}
         wait_http(self.urls["relay"], "/status", relay, self.ready_timeout)
         holders = ports.pids_on_port(http_port)
         if len(holders) != 1:
@@ -471,7 +474,7 @@ class Stack:
             problem = child.stop()
             if problem:
                 problems.append(problem)
-        for fake in (self.obs, self.sink, self.sheet):
+        for fake in (self.obs, self.sink, self.sheet, self.league):
             if fake is not None:
                 try:
                     fake.stop()

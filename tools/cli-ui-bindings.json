@@ -202,5 +202,9 @@
   "ui": {
     "handler": "showView",
     "surface": "ui/control-center.html"
+  },
+  "event league": {
+    "handler": "loadLeagueEventRef",
+    "surface": "ui/control-center.html"
   }
 }

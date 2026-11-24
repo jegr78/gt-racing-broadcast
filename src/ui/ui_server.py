@@ -736,6 +736,8 @@ def make_handler(ctx):
                                       code=500)
             if path == "/api/timing-host":
                 return self._json(ctx["timing_host_status"]())
+            if path == "/api/league-event":
+                return self._json(ctx["league_event"]())
             if path == "/api/gt7-data":
                 try:
                     return self._json(ctx["gt7_data_status"]())
@@ -1197,6 +1199,22 @@ def make_handler(ctx):
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not write streams config: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/league-event/load":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error}, code=400)
+                if (body.get("expectedProfile") or None) != (ctx.get("active_profile", lambda: None)() or None):
+                    return self._json({"ok": False, "error": "Active league changed. Reload and try again"},
+                                      code=409)
+                ref = body.get("ref")
+                if not isinstance(ref, str):
+                    return self._json({"ok": False, "error": "ref must be a string"}, code=400)
+                try:
+                    result = ctx["league_event_load"](ref)
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not load the league event: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/profile/use":
