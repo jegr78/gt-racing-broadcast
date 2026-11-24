@@ -241,7 +241,7 @@ class ProbeRole(Role):
         self._tool("report", self.out)
         with io.open(os.path.join(self.out, "analysis.json"), encoding="utf-8") as fh:
             facts = json.load(fh)["facts"]
-        return dict(facts, csv=os.path.isfile(os.path.join(self.out, "race-recording.csv")))
+        return dict(facts, csv=os.path.isfile(os.path.join(self.out, "private", "race-recording.csv")))
 
     def close(self):
         out = []

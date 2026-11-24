@@ -7,6 +7,7 @@ Maintainer tool; the runbook is docs/superpowers/plans/2026-11-24-telemetry-prob
     python3 tools/probe-stage2.py mark --out RESULTS "block 3 change"
     python3 tools/probe-stage2.py race-reset --out RESULTS   # start the race over between blocks
     python3 tools/probe-stage2.py collect --out RESULTS [--runtime runtime/<profile>]
+    python3 tools/probe-stage2.py save-check --out RESULTS LABEL FILE   # a driver's --check output
     python3 tools/probe-stage2.py report RESULTS         # RESULTS/report.md and analysis.json
 
 The relay is read on its tailnet routes (default http://127.0.0.1:8088). Run it on the
@@ -17,6 +18,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -72,7 +74,7 @@ def poster(relay, timeout=10.0):
 def cmd_kit(args, fetch):
     invite = fetch("/drivers/invite") or {}
     if not invite.get("active") or not invite.get("id"):
-        print("No event invite: start the event, then `racecast event invite --new`.")
+        print("No event invite: `racecast event start` creates it.")
         return 1
     base = (args.base or invite.get("base") or "").rstrip("/")
     if not base:
@@ -123,15 +125,16 @@ def cmd_collect(args, fetch, get_bytes):
     probe = fetch("/telemetry/probe")
     if isinstance(probe, dict) and probe.get("senders") is not None:
         ps.Monitor(args.out, fetch).snapshot_probe(probe, "final")
+    private = os.path.join(args.out, ps.PRIVATE_DIR)
     try:
         body = get_bytes("/drivers/race/recording/csv")
-        with open(os.path.join(args.out, "race-recording.csv"), "wb") as fh:
+        os.makedirs(private, exist_ok=True)
+        with open(os.path.join(private, "race-recording.csv"), "wb") as fh:
             fh.write(body)
-        print("race-recording.csv saved.")
+        print("private/race-recording.csv saved: it names the drivers.")
     except (OSError, urllib.error.HTTPError) as exc:
         print(f"race-recording.csv: {exc}")
     if args.runtime:
-        private = os.path.join(args.out, "private")
         files = [os.path.join(args.runtime, "driver-race-audit.jsonl")]
         recordings = sorted(glob.glob(os.path.join(args.runtime, "race-recording-*.sqlite")),
                             key=os.path.getmtime)
@@ -147,6 +150,24 @@ def cmd_collect(args, fetch, get_bytes):
     return 0
 
 
+LAN_ADDRESS = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+DRIVER_CODE = re.compile(r"D1:\S+")
+
+
+def cmd_save_check(args, fetch):
+    """A driver's check output into checks/<label>.txt without addresses or a code."""
+    with open(args.file, encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    text = DRIVER_CODE.sub("<code>", LAN_ADDRESS.sub("<LAN address>", text))
+    folder = os.path.join(args.out, "checks")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, args.label + ".txt")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    print(f"saved {path}")
+    return 0
+
+
 def cmd_report(args, fetch):
     polls, marks = ps.load(args.dir)
     if not polls:
@@ -159,6 +180,12 @@ def cmd_report(args, fetch):
         fh.write(ps.report_md(a))
     print(f"Wrote {os.path.join(args.dir, 'report.md')} and analysis.json: {json.dumps(ps.facts(a))}")
     return 0
+
+
+def _label(value):
+    if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,40}", value):
+        raise argparse.ArgumentTypeError("letters, digits, spaces, _ . - only")
+    return value
 
 
 def main(argv=None, fetch=None, post=None, get_bytes=None):
@@ -181,6 +208,10 @@ def main(argv=None, fetch=None, post=None, get_bytes=None):
     c = sub.add_parser("collect", help="save the race recording, the audit log and a probe snapshot")
     c.add_argument("--out", required=True)
     c.add_argument("--runtime", help="the profile's runtime folder, e.g. runtime/<profile>")
+    v = sub.add_parser("save-check", help="save a driver's --check output without addresses or the code")
+    v.add_argument("--out", required=True)
+    v.add_argument("label", type=_label, help="a name for the file, e.g. the platform")
+    v.add_argument("file", help="the pasted output")
     r = sub.add_parser("report", help="turn a results folder into report.md and analysis.json")
     r.add_argument("dir")
     args = ap.parse_args(argv)
@@ -189,7 +220,8 @@ def main(argv=None, fetch=None, post=None, get_bytes=None):
         return cmd_race_reset(args, fetch, post or poster(args.relay))
     if args.cmd == "collect":
         return cmd_collect(args, fetch, get_bytes or (lambda path: _get_bytes(args.relay, path)))
-    return {"kit": cmd_kit, "watch": cmd_watch, "mark": cmd_mark, "report": cmd_report}[args.cmd](args, fetch)
+    return {"kit": cmd_kit, "watch": cmd_watch, "mark": cmd_mark, "report": cmd_report,
+            "save-check": cmd_save_check}[args.cmd](args, fetch)
 
 
 if __name__ == "__main__":

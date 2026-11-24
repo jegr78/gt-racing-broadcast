@@ -111,6 +111,16 @@ def t_the_change_timeline_finds_the_change_and_the_carried_anchor():
     assert change["anchor_carried"] is True and change["block"] == "block 3 change", change
 
 
+def t_a_race_reset_starts_the_change_timeline_over():
+    polls = _polls()
+    reset = [{"t": polls[8]["t"] - 1.0, "text": "race reset"}]
+    assert [e["kind"] for e in ps.changes(polls, reset) if e["kind"] == "change"] == [], \
+        "after a reset the first connection of an entry is no change"
+    marks = [{"t": 990.0, "text": "block B"}] + reset
+    events = ps.changes(polls, marks)
+    assert all(e["block"] == "block B" for e in events), f"an observation names no block: {events}"
+
+
 def t_a_change_that_closes_the_window_counts_inside_it():
     polls = _polls()
     for i, rec in enumerate(polls):
@@ -140,13 +150,24 @@ def t_hz_per_minute_shows_the_device_rate_and_the_low_minute():
     assert "Cid (Team B), 2 low minutes" in text, text
 
 
-def t_positions_compare_0x84_with_the_relay_order():
+def t_positions_compare_the_order_of_0x84_with_the_relay_order():
     polls = _polls()
-    polls[3]["race"]["entries"][0]["gt7_position"] = 2          # GT7 disagrees once
+    for rec in polls:
+        rec["race"]["entries"][0]["gt7_position"] = 3         # cars without a sender sit between
+        rec["race"]["entries"][1]["gt7_position"] = 7
+    rows = {r["entry"]: r for r in ps.positions(polls)}
+    assert rows["Team A"]["agree"] == rows["Team A"]["with_0x84"], \
+        f"GT7's 3 and 7 are the relay's first and second among the senders: {rows['Team A']}"
+    polls[3]["race"]["entries"][0]["gt7_position"] = 9         # GT7 puts A behind B once
     rows = {r["entry"]: r for r in ps.positions(polls)}
     a, b = rows["Team A"], rows["Team B"]
-    assert a["with_0x84"] == a["polls"] and a["agree"] == a["polls"] - 1, a
-    assert a["values"] == [1, 2], a
+    assert a["agree"] == a["with_0x84"] - 1 and b["agree"] == b["with_0x84"] - 1, (a, b)
+    assert a["values"] == [3, 9], a
+    assert "flagged" not in a and "relay_mismatch" in a, a
+
+
+def t_an_entry_without_0x84_has_no_agreement():
+    b = {r["entry"]: r for r in ps.positions(_polls())}["Team B"]
     assert b["with_0x84"] == 0 and b["agree_pct"] is None, f"no 0x84 is no agreement: {b}"
     counts = ps.car_counts(_polls())
     assert counts[ps.tag("ca")]["car_counts"] == [2] and counts[ps.tag("cc")]["with_position"] == 0
@@ -182,6 +203,27 @@ def t_a_sender_that_stopped_is_measured_over_the_time_it_sent():
         f"the relay lists a stopped connection for minutes; its rate covers the sending time: {ann}"
     rows = ps.hz_by_minute(_polls())[ps.tag("ca")]["rows"]
     assert all(r["device_hz"] == 60.0 for r in rows), f"no low minute after the sender stopped: {rows}"
+
+
+def _idle_polls():
+    """Ann's device: 50 s idle before it sends, then 60 Hz with a 30 s gap in the middle."""
+    polls, rx = [], 0
+    for i in range(141):
+        if 50 <= i < 80 or i >= 110:
+            rx += 60
+        polls.append(ps.compact(1000.0 + i, {"connections": [_conn("ca", "Ann", "Team A", rx, rx)]}, None, None))
+    return polls
+
+
+def t_idle_time_never_dilutes_the_rate():
+    ann = ps.sender_summary(_idle_polls())[0]
+    assert ann["device_hz"] == 60.0 and ann["relay_hz"] == 60.0, f"only the seconds it sent count: {ann}"
+    assert ann["idle_s"] == 79.0, f"140 s listed, 61 s of them sending: {ann}"
+    rows = ps.hz_by_minute(_idle_polls())[ps.tag("ca")]["rows"]
+    assert all(r["device_hz"] == 60.0 for r in rows if r["device_hz"] is not None), rows
+    assert [r["idle_s"] > 0 for r in rows] == [True, True, False], f"idle minutes are marked: {rows}"
+    text = ps.report_md(ps.analyse(_idle_polls()))
+    assert "idle" in text and "0 low minutes, minutes without a gap: 1" in text, text
 
 
 def t_a_restarted_sender_counts_from_zero_again():
@@ -252,6 +294,28 @@ def t_the_monitor_writes_a_record_per_poll_and_a_probe_snapshot():
     assert any(line.startswith("Ann") for line in said), said
 
 
+def t_the_monitor_writes_pseudonyms_and_keeps_the_names_private():
+    answers = {"/drivers/data": {"connections": [_conn("ca", "Ann Real", "Team A", 60, 60)]},
+               "/drivers/race": dict(_race([_row("Team A", "ca", "Ann Real", 10.0, 0)]),
+                                     fastest={"entry": "Team A", "driver": "Ann Real", "ms": 90000})}
+    said = []
+    with tempfile.TemporaryDirectory() as d:
+        mon = ps.Monitor(d, answers.get, clock=lambda: 1000.0, say=said.append)
+        mon.poll()
+        with open(os.path.join(d, ps.POLL_FILE), encoding="utf-8") as fh:
+            blob = fh.read()
+        with open(os.path.join(d, "private", "names.json"), encoding="utf-8") as fh:
+            names = json.load(fh)
+        again = ps.Monitor(d, answers.get, clock=lambda: 1001.0, say=said.append)
+        again.poll()
+        polls, _m = ps.load(d)
+    assert "Ann Real" not in blob, blob
+    assert names == {"Driver 1": "Ann Real"}, names
+    assert polls[1]["conns"][0]["name"] == polls[1]["race"]["entries"][0]["driver"] == "Driver 1", \
+        "a restarted watch keeps the pseudonyms"
+    assert any(line.startswith("Ann Real") for line in said), "the producer's screen shows the names"
+
+
 def t_live_lines_show_the_rate_since_the_last_poll():
     prev = ps.compact(10.0, {"connections": [_conn("ca", "Ann", "Team A", 0, 0)]}, None, None)
     cur = ps.compact(12.0, {"connections": [_conn("ca", "Ann", "Team A", 120, 118,
@@ -302,7 +366,7 @@ def t_the_cli_writes_the_kit_marks_and_the_report():
     assert sheets == sorted(p + ".md" for p in ps.PLATFORMS), sheets
     assert "## Driver changes" in report and "block 1 start" in report, report
     assert analysis["facts"]["changes"] == 1, analysis["facts"]
-    assert "invite link" in out.getvalue() and "No event invite" in out.getvalue(), out.getvalue()
+    assert "invite link" in out.getvalue() and "event start` creates it" in out.getvalue(), out.getvalue()
 
 
 def _cli():
@@ -351,6 +415,41 @@ def t_collect_keeps_the_audit_log_and_the_recording_apart_as_private():
     assert private == ["driver-race-audit.jsonl", "race-recording-1.sqlite", "race-recording-1.sqlite-wal"], private
     assert top == ["private"], f"nothing private lands beside the shareable files: {top}"
     assert "relay stopped" in sink.getvalue() and "private" in sink.getvalue(), sink.getvalue()
+
+
+def t_collect_keeps_the_race_recording_with_its_names_private():
+    cli = _cli()
+    with tempfile.TemporaryDirectory() as d:
+        sink = io.StringIO()
+        old, sys.stdout = sys.stdout, sink
+        try:
+            assert cli.main(["collect", "--out", d], fetch=lambda p: None,
+                            get_bytes=lambda path: b"time_utc,entry,driver\n") == 0
+        finally:
+            sys.stdout = old
+        assert os.listdir(d) == ["private"] and os.listdir(os.path.join(d, "private")) == ["race-recording.csv"]
+
+
+def t_a_saved_check_hides_addresses_and_codes():
+    cli = _cli()
+    with tempfile.TemporaryDirectory() as d:
+        raw = os.path.join(d, "raw.txt")
+        with open(raw, "w", encoding="utf-8") as fh:
+            fh.write("python3 racecast-sender.py --url https://h/console/drive/ingest --code D1:abc.def --check\n"
+                     "12:00:00 check 1/3 heartbeat: OK 2 sent to 192.168.178.58\n"
+                     "12:00:00 check 2/3 receive: OK 716 packets from 10.0.0.7, 59.7/s, 296 bytes\n"
+                     "12:00:00 RESULT: OK, ready for the session\n")
+        sink = io.StringIO()
+        old, sys.stdout = sys.stdout, sink
+        try:
+            assert cli.main(["save-check", "--out", d, "Ann Android", raw], fetch=lambda p: None) == 0
+        finally:
+            sys.stdout = old
+        with open(os.path.join(d, "checks", "Ann Android.txt"), encoding="utf-8") as fh:
+            text = fh.read()
+    for secret in ("192.168.178.58", "10.0.0.7", "D1:abc.def"):
+        assert secret not in text, f"{secret} must not reach the results: {text}"
+    assert "sent to <LAN address>" in text and "RESULT: OK" in text, text
 
 
 if __name__ == "__main__":

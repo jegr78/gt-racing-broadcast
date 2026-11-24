@@ -9,7 +9,8 @@ Maintainer only, stdlib only. Three parts:
 - `analyse` and `report_md`: the report tables from a results folder.
 
 A record never carries a driver code, the probe key or the invite id; a connection
-id is replaced by a short hash (`tag`), so the folder can be attached to an issue.
+id is replaced by a short hash (`tag`) and a driver name by a pseudonym (`Pseudonyms`),
+so the folder outside `private/` can be attached to an issue.
 """
 import hashlib
 import json
@@ -23,6 +24,8 @@ PRINT_EVERY_S = 5.0
 POLL_FILE = "poll.jsonl"
 MARK_FILE = "marks.jsonl"
 PROBE_DIR = "probe"
+PRIVATE_DIR = "private"
+NAMES_FILE = "names.json"
 PASS_HZ = 59.0            # stage 1's pass mark for 60 Hz, a proposal
 JUMP_M = 300.0            # a distance step larger than a car drives in one poll
 ANCHOR_TOLERANCE_M = 150.0
@@ -222,6 +225,43 @@ def live_lines(prev, rec):
     return out
 
 
+class Pseudonyms:
+    """Driver names as "Driver N" in the shareable files; the names behind them live in
+    `private/names.json`, read again by a restarted watch so the numbers hold."""
+
+    def __init__(self, path):
+        self.path = path
+        try:
+            with open(path, encoding="utf-8") as fh:
+                self.real = {str(k): str(v) for k, v in json.load(fh).items()}
+        except (OSError, ValueError, AttributeError):
+            self.real = {}
+        self.alias = {v: k for k, v in self.real.items()}
+
+    def of(self, name):
+        if not name:
+            return name
+        if name not in self.alias:
+            alias = f"Driver {len(self.alias) + 1}"
+            self.alias[name], self.real[alias] = alias, name
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            with open(self.path, "w", encoding="utf-8") as fh:
+                json.dump(self.real, fh, indent=1)
+        return self.alias[name]
+
+    def apply(self, rec):
+        """`rec` with every driver name replaced; the record itself stays as it was."""
+        out = json.loads(json.dumps(rec))
+        for c in out.get("conns") or []:
+            c["name"] = self.of(c.get("name"))
+        race = out.get("race") or {}
+        for e in race.get("entries") or []:
+            e["driver"] = self.of(e.get("driver"))
+        if race.get("fastest"):
+            race["fastest"]["driver"] = self.of(race["fastest"].get("driver"))
+        return out
+
+
 class Monitor:
     """Polls the relay and writes the results folder. `fetch(path)` returns the decoded
     JSON of a GET or None; `clock` is wall time."""
@@ -229,6 +269,7 @@ class Monitor:
     def __init__(self, out_dir, fetch, clock=time.time, say=print):
         self.out, self.fetch, self.clock, self.say = out_dir, fetch, clock, say
         os.makedirs(os.path.join(out_dir, PROBE_DIR), exist_ok=True)
+        self.names = Pseudonyms(os.path.join(out_dir, PRIVATE_DIR, NAMES_FILE))
         self.prev = None
         self._probe_at = self._print_at = None
         self.polls = 0
@@ -238,7 +279,7 @@ class Monitor:
         probe = self.fetch("/telemetry/probe")
         rec = compact(t, self.fetch("/drivers/data"), self.fetch("/drivers/race"), probe)
         with open(os.path.join(self.out, POLL_FILE), "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
+            fh.write(json.dumps(self.names.apply(rec), separators=(",", ":")) + "\n")
         if isinstance(probe, dict) and probe.get("senders") and (
                 self._probe_at is None or t - self._probe_at >= PROBE_EVERY_S):
             self._probe_at = t
@@ -297,7 +338,7 @@ def load(out_dir):
 def _block_at(marks, t):
     text = None
     for m in marks:
-        if m["t"] <= t:
+        if m["t"] <= t and is_block(m):
             text = m["text"]
     return text
 
@@ -339,6 +380,27 @@ def _rise(series, sub, key):
     return sum(b - a if b >= a else b for a, b in zip(vals, vals[1:], strict=False))
 
 
+def _sending(series, sub, key="received"):
+    """(packets, seconds) over the poll intervals in which the counter rose: idle time
+    before, between and after sending dilutes no rate. A drop is a restarted sender."""
+    n = dt = 0.0
+    seen = False
+    for (t0, a), (t1, b) in zip(series, series[1:], strict=False):
+        x, y = _num((a.get(sub) or {}).get(key)), _num((b.get(sub) or {}).get(key))
+        if x is None or y is None:
+            continue
+        seen = True
+        rise = y - x if y >= x else y
+        if rise > 0:
+            n, dt = n + rise, dt + (t1 - t0)
+    return (n, dt) if seen else (None, 0.0)
+
+
+def _hz(series, sub):
+    n, dt = _sending(series, sub)
+    return None if n is None or dt <= 0 else round(n / dt, 1)
+
+
 def _spread(values):
     vals = sorted(v for v in values if v is not None)
     if not vals:
@@ -358,12 +420,12 @@ def sender_summary(polls):
 
         def sd(k, active=active):
             return _rise(active, "sender", k)
-        rx, dev, lost = pk("received"), sd("received"), pk("lost")
+        rx, lost = pk("received"), pk("lost")
+        _n, sent_s = _sending(active, "packets")
         rows.append({
             "key": key, "name": s["name"], "entry": s["entry"], "segment": s["segment"], "kind": s["kind"],
-            "seconds": round(span, 1), "polls": len(active),
-            "relay_hz": None if rx is None or span <= 0 else round(rx / span, 1),
-            "device_hz": None if dev is None or span <= 0 else round(dev / span, 1),
+            "seconds": round(span, 1), "polls": len(active), "idle_s": round(span - sent_s, 1),
+            "relay_hz": _hz(active, "packets"), "device_hz": _hz(active, "sender"),
             "lost": lost, "lost_pct": None if not rx or lost is None else round(100.0 * lost / (rx + lost), 3),
             "reordered": pk("reordered"), "duplicates": pk("duplicates"), "decrypt_failed": pk("decrypt_failed"),
             "interruptions": sd("interruptions"), "post_failed": sd("post_failed"), "dropped": sd("dropped"),
@@ -375,7 +437,8 @@ def sender_summary(polls):
 
 
 def hz_by_minute(polls, marks=()):
-    """Per sender, one row per wall-clock minute since its first poll: device and relay Hz."""
+    """Per sender, one row per wall-clock minute since its first poll: device and relay Hz
+    over the seconds it sent, and `idle_s`, the seconds of that minute it did not."""
     out = {}
     for key, s in _senders(polls).items():
         rows, series = [], _active(s["series"])
@@ -389,13 +452,10 @@ def hz_by_minute(polls, marks=()):
             pts = buckets[minute]
             prev = [p for p in series if p[0] < pts[0][0]][-1:]
             span = prev + pts
-            dt = span[-1][0] - span[0][0]
-
-            def hz(sub, span=span, dt=dt):
-                n = _rise(span, sub, "received")
-                return None if n is None or dt <= 0 else round(n / dt, 1)
+            _n, sent_s = _sending(span, "packets")
             rows.append({"minute": minute, "block": _block_at(marks, pts[0][0]),
-                         "device_hz": hz("sender"), "relay_hz": hz("packets"),
+                         "device_hz": _hz(span, "sender"), "relay_hz": _hz(span, "packets"),
+                         "idle_s": round(span[-1][0] - span[0][0] - sent_s, 1),
                          "interruptions": _rise(span, "sender", "interruptions")})
         out[key] = {"name": s["name"], "entry": s["entry"], "rows": rows}
     return out
@@ -407,22 +467,25 @@ def _rnd(v):
 
 def positions(polls):
     """0x84 against the relay's order, per entry: how often GT7 named a position at all,
-    how often it matched the relay's place, and the relay's own mismatch flag."""
+    and how often the order of those positions among the entries that carried one
+    matched the relay's order of the same entries (cars without a sender sit between
+    them in GT7's count). `relay_mismatch` counts the relay's own mismatch flag."""
     stats = {}
     for rec in polls:
         race = rec.get("race") or {}
         ranked = [e for e in race.get("entries") or [] if e.get("distance_m") is not None
                   and e.get("status") in ("racing", "box", "red_flag")]
-        for place, e in enumerate(ranked, 1):
+        named = [e for e in ranked if e.get("gt7_position") is not None]
+        by_gt7 = sorted(named, key=lambda e: e["gt7_position"])
+        for e in ranked:
             st = stats.setdefault(e["entry"], {"entry": e["entry"], "polls": 0, "with_0x84": 0,
-                                               "agree": 0, "flagged": 0, "values": set()})
+                                               "agree": 0, "relay_mismatch": 0, "values": set()})
             st["polls"] += 1
-            pos = e.get("gt7_position")
-            if pos is not None:
+            if e.get("gt7_position") is not None:
                 st["with_0x84"] += 1
-                st["values"].add(pos)
-                st["agree"] += pos == place
-            st["flagged"] += bool(e.get("position_mismatch"))
+                st["values"].add(e["gt7_position"])
+                st["agree"] += named.index(e) == by_gt7.index(e)
+            st["relay_mismatch"] += bool(e.get("position_mismatch"))
     rows = []
     for st in stats.values():
         rows.append(dict(st, values=sorted(st["values"]),
@@ -454,8 +517,12 @@ def changes(polls, marks=()):
     """The driver change timeline: change windows and every entry whose active
     connection changed, with its distance and laps right before and after. A change in
     the poll that shows the window closed counts inside it: the change closes it."""
-    events, last, window = [], {}, False
+    resets = sorted(m["t"] for m in marks if m.get("text") == RESET_MARK)
+    events, last, window, prev_t = [], {}, False, None
     for rec in polls:
+        if prev_t is not None and any(prev_t < r <= rec["t"] for r in resets):
+            last = {}
+        prev_t = rec["t"]
         race = rec.get("race") or {}
         now = bool(race.get("change_window"))
         if now and not window:
@@ -598,8 +665,9 @@ def _senders_table(rows):
 
 
 def _positions_tables(positions, car_counts):
-    out = _table(["entry", "polls", "with 0x84", "agree", "agree %", "flagged", "positions seen"],
-                 [(r["entry"], r["polls"], r["with_0x84"], r["agree"], r["agree_pct"], r["flagged"], r["values"])
+    out = _table(["entry", "polls", "with 0x84", "agree", "agree %", "relay mismatch", "positions seen"],
+                 [(r["entry"], r["polls"], r["with_0x84"], r["agree"], r["agree_pct"], r["relay_mismatch"],
+                   r["values"])
                   for r in positions])
     return out + _table(["name", "samples", "with position", "positions", "car counts"],
                         [(c["name"], c["samples"], c["with_position"], c["positions"], c["car_counts"])
@@ -621,20 +689,28 @@ def report_md(a):
     for b in a.get("blocks") or []:
         L += [f"### {b['block']}", "", f"{_clock(b['start'])} to {_clock(b['end'])}, {b['polls']} polls.", ""]
         L += _senders_table(b["senders"])
-    L += ["## Hz per minute", "", f"Minutes below {PASS_HZ:.0f} Hz on the device are marked `low` "
-          "(stage 1's pass mark, a proposal).", ""]
+    L += ["## Hz per minute", "", "Rates over the seconds a sender sent. A minute with seconds "
+          "without packets is marked `idle` and judged by its idle time, not its rate; a minute "
+          f"without a gap below {PASS_HZ:.0f} Hz on the device is marked `low` (stage 1's pass "
+          "mark, a proposal).", ""]
     for h in a["hz"].values():
-        low = sum(1 for r in h["rows"] if r["device_hz"] is not None and r["device_hz"] < PASS_HZ)
-        L += [f"#### {h['name']} ({h['entry'] or 'probe'}), {low} low minutes", ""]
-        L += _table(["minute", "block", "device Hz", "relay Hz", "interruptions", ""],
-                    [(r["minute"], r["block"], r["device_hz"], r["relay_hz"], r["interruptions"],
-                      "low" if r["device_hz"] is not None and r["device_hz"] < PASS_HZ else "")
-                     for r in h["rows"]])
+        def mark(r):
+            if r["idle_s"]:
+                return "idle"
+            return "low" if r["device_hz"] is not None and r["device_hz"] < PASS_HZ else ""
+        clean = [r for r in h["rows"] if not r["idle_s"]]
+        low = sum(1 for r in clean if mark(r) == "low")
+        L += [f"#### {h['name']} ({h['entry'] or 'probe'}), {low} low minutes, "
+              f"minutes without a gap: {len(clean)}", ""]
+        L += _table(["minute", "block", "device Hz", "relay Hz", "idle s", "interruptions", ""],
+                    [(r["minute"], r["block"], r["device_hz"], r["relay_hz"], r["idle_s"], r["interruptions"],
+                      mark(r)) for r in h["rows"]])
     L += ["## 0x84 race position against the relay's order", "",
           "Per entry over the polls in which it was ranked: how often its packets named a "
-          "position, how often that matched the relay's place, and how often the relay flagged "
-          "a mismatch; then per sender the positions and car counts its packets carried. Per "
-          "block when the session has block marks.", ""]
+          "position, how often the order of the named positions matched the relay's order of "
+          "the same entries, and how often the relay itself marked a mismatch; then per sender "
+          "the positions and car counts its packets carried. Per block when the session has "
+          "block marks.", ""]
     for b in a.get("blocks") or [{"block": "", "positions": a["positions"], "car_counts": a["car_counts"]}]:
         if b["block"]:
             L += [f"### {b['block']}", ""]
