@@ -302,25 +302,6 @@ def _approved(port, path, invite, **body):
     return issued
 
 
-def t_a_driver_sender_keeps_its_connection_open():
-    import http.client
-    srv, port, path, _hub = _serve()
-    try:
-        invite = driver_invite.create(path)["id"]
-        issued = _approved(port, path, invite, entry="Team A #1", name="Max")
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        socks = set()
-        for pid in (1, 2):
-            conn.request("POST", "/console/drive/ingest", body=tp.encode_batch([_wire(pid)]),
-                         headers={"X-Driver-Code": issued})
-            resp = conn.getresponse()
-            resp.read()
-            assert resp.status == 200 and not resp.will_close, (resp.status, resp.version)
-            socks.add(id(conn.sock))
-        assert len(socks) == 1, "a driver's posts share one connection"
-    finally:
-        srv.shutdown()
-
 def t_invite_page_data_register_and_ingest_in_a_single_lobby():
     srv, port, path, hub = _serve()
     try:

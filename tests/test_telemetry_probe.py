@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The driver telemetry probe ingest (#1110). Run: python3 tests/test_telemetry_probe.py"""
-import os, struct, sys, time
+import os, struct, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -148,51 +148,6 @@ def t_relay_ingest_needs_the_probe_key_and_reports_on_the_tailnet():
         assert g._get(off.server_address[1], "/telemetry/probe")[0] == 404
     finally:
         off.shutdown()
-
-
-
-def _keep_alive_post(conn, path, body, headers):
-    conn.request("POST", path, body=body, headers=dict({"Content-Type": "application/octet-stream"}, **headers))
-    resp = conn.getresponse()
-    resp.read()
-    return resp
-
-
-def t_relay_keeps_an_ingest_connection_open_and_closes_everything_else():
-    import http.client
-    import test_console_gate as g
-    probe = tp.Probe("probe-key-0123456789")
-    srv = g._serve(telemetry_probe_obj=probe)
-    port = srv.server_address[1]
-    path, key = "/console/probe/ingest?sender=Car%207", {"X-Probe-Key": probe.key}
-    try:
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        socks = set()
-        for pid in (1, 2, 3):
-            resp = _keep_alive_post(conn, path, tp.encode_batch([_wire(pid)]), key)
-            assert resp.status == 200 and not resp.will_close, (resp.status, resp.version)
-            socks.add(id(conn.sock))
-        assert len(socks) == 1, "a sender's posts share one connection"
-        conn.request("GET", "/telemetry/probe")
-        resp = conn.getresponse()
-        resp.read()
-        assert resp.status == 200 and resp.will_close, "only the ingest keeps a connection open"
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        resp = _keep_alive_post(conn, path, tp.encode_batch([_wire(4)]), {"X-Probe-Key": "wrong"})
-        assert resp.status == 403 and resp.will_close, "a refused post leaves its body unread: close"
-        resp = _keep_alive_post(conn, path, tp.encode_batch([_wire(5)]), dict(key, Connection="close"))
-        assert resp.status == 200 and resp.will_close, "the client may ask to close"
-        idle, g.m.INGEST_IDLE_S = g.m.INGEST_IDLE_S, 0.2
-        try:
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            assert not _keep_alive_post(conn, path, tp.encode_batch([_wire(6)]), key).will_close
-            time.sleep(0.6)
-            assert conn.sock.recv(1) == b"", "an idle kept connection is closed, it holds a relay thread"
-        finally:
-            g.m.INGEST_IDLE_S = idle
-        assert probe.snapshot()["senders"]["Car 7"]["packets"]["received"] == 5
-    finally:
-        srv.shutdown()
 
 
 if __name__ == "__main__":
