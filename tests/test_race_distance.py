@@ -3872,6 +3872,28 @@ def t_a_rebase_after_a_red_flag_moves_every_kept_distance():
     assert all(abs(v - now) < 0.01 for v in kept.values()), f"every kept distance moved with the history to {now}: {kept}"
 
 
+def t_a_gap_that_starts_on_the_line_carries_no_lap():
+    race = rd.Race(TRACE, formation=False)
+    car = GridCar(race, "A", 20)
+    t = 0.0
+    while car.along < 2 * L - 10:
+        t += 1.0 / HZ
+        car.tick(t, 50)
+    car.along, t = 2 * L + 8, t + 1.0 / HZ         # just past the line, the counter a sample late
+    x, z = _pos(car.along)
+    race.update("A", "a", "Driver", {"t": t, "lap": car.counter, "x": x, "z": z, "speed_kmh": 180.0,
+                                     "on_track": True, "last_ms": -1})
+    car.counter += 1
+    for _ in range(60 * HZ):                      # the sender is silent from that sample on
+        t += 1.0 / HZ
+        car.tick(t, 50, send=False)
+    for _ in range(3 * HZ):
+        t += 1.0 / HZ
+        car.tick(t, 50)
+    d = _row(race, "A", t)["distance_m"]
+    assert abs(d - car.along) < 10, f"a lap offset read on the line survives no gap: {d} vs {car.along:.0f}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

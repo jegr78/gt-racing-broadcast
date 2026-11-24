@@ -837,7 +837,8 @@ class Race:
                     or abs(self._raw(car, lap, s) - distance) > self.length + allowed:
                 car.t = t                         # implausible: live, but nothing moves
                 return
-            car.lap_off = round((distance - self._raw(car, lap, s)) / self.length)
+            if SNAP_M < self._frac(car, s) < self.length - SNAP_M:   # at the line the counter may be a sample off
+                car.lap_off = round((distance - self._raw(car, lap, s)) / self.length)
         if crossing and car.line_s is None:
             car.line_s = s                        # this car's own crossing marks the line
         car.t, car.lap, car.speed, car.lateral, car.s = t, lap, speed, lateral, s
