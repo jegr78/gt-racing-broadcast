@@ -135,8 +135,8 @@ tear down) is captured in the **`racecast-e2e`** skill, which builds on the
 `docs/superpowers/{specs,plans}/2026-06-17-e2e-regression-harness*.md`.
 
 **Visual acceptance run** (`--visual [--report DIR]`, #772): renders the 13 Control Center
-views, the Director Panel, the cockpit and the Race Control desk (the two crew pages also at
-390 px) against the synthetic run, which serves a Crew roster (`--crew-csv-url`) and runs
+views, the Director Panel, the cockpit, the Race Control desk and the public timing page (these
+three also at 390 px; the timing page on a frozen fixture with the league block, #1256) against the synthetic run, which serves a Crew roster (`--crew-csv-url`) and runs
 `tools/obs-sim.py`. The Telemetry view (`cc-telemetry`) exists only for a solo POV profile,
 so a second Control Center serves it from its own app home in the temp dir: a copy of
 `src/` or the binary, the committed `solo-pov` profile, a learned demo track and one indexed

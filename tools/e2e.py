@@ -1115,8 +1115,10 @@ def run_synthetic(args):
             pov_ui, pov_url = _start_pov_ui(binary if args.binary is not None else None,
                                             tmp, env3, args.timeout)
             procs.append(pov_ui)
+            import timing_link
             urls = {"ui": ui_url, "ui_pov": pov_url, "relay": relay_url, "token": token,
-                    "rc_token": rc_token}
+                    "rc_token": rc_token,
+                    "timing_link": timing_link.create(timing_link.path_in(relay_runtime))["id"]}
             code = max(code, run_visual(urls, args.report, headed=args.headed, slowmo=args.slowmo))
         if args.shots:
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)

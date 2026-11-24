@@ -270,18 +270,25 @@ def t_surfaces_cover_all_four_uis():
     assert len(v.CC_VIEWS) == 13, v.CC_VIEWS
     assert "cc-quit-modal" in names, "the primary buttons only live in modals, so one modal must be a surface"
     phone = {s.name for s in v.SURFACES if "phone" in s.viewports}
-    assert phone == {"cockpit", "race-control", "telemetry-archive", "telemetry-analysis"}, phone
+    assert phone == {"cockpit", "race-control", "telemetry-archive", "telemetry-analysis", "public-timing"}, phone
     assert len({s.name for s in v.SURFACES}) == len(v.SURFACES), "surface names must be unique"
 
 
 def t_surface_url_fills_tokens():
     urls = {"ui": "http://127.0.0.1:1", "ui_pov": "http://127.0.0.1:3",
-            "relay": "http://127.0.0.1:2", "token": "T", "rc_token": "R"}
+            "relay": "http://127.0.0.1:2", "token": "T", "rc_token": "R", "timing_link": "L"}
     by = {s.name: s for s in v.SURFACES}
+    assert v.surface_url(by["public-timing"], urls) == "http://127.0.0.1:2/console/timing?l=L"
     assert v.surface_url(by["race-control"], urls) == "http://127.0.0.1:2/console/race-control?t=R"
     assert v.surface_url(by["cockpit"], urls) == "http://127.0.0.1:2/cockpit?t=T"
     assert v.surface_url(by["cc-home"], urls) == "http://127.0.0.1:1/"
     assert v.surface_url(by["cc-telemetry"], urls) == "http://127.0.0.1:3/"
+
+
+def t_the_public_timing_surface_shows_the_league_block_on_frozen_data():
+    (s,) = [s for s in v.SURFACES if s.name == "public-timing"]
+    assert "window.fetch" in s.prep and "league" in s.prep, "the prep stops the polls, then renders a fixture with the block"
+    assert "getElementById('league').hidden" in s.ready, s.ready
 
 
 def t_telemetry_surface_uses_the_solo_pov_control_center():
