@@ -182,6 +182,7 @@ class Sender:
 
     def new_session(self):
         self.line_t = None
+        self.last_ms = self.best_ms = -1          # GT7 clears both in a new session
 
 
 class Car:

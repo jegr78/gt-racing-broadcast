@@ -358,8 +358,9 @@ It never carries connection ids, corrections or who made them.
   do not count.
 - **The fastest race lap** takes only a lap GT7 accepted: GT7 sends no validity flag,
   but it makes only a valid lap the car's best lap, so a lap counts when GT7's best lap
-  takes its time within 6 seconds of the line. A red lap (tests saw GT7 mark lap 1 of a race red,
-  and laps into the pit lane on Spa) still shows as last lap. A valid lap
+  takes its time within 6 seconds of the line. A red lap still shows as last lap, also
+  when it is faster than the fastest lap. Tests saw GT7 mark lap 1 of a race red, and
+  laps into the pit lane on Spa. A valid lap
   slower than the car's own GT7 best never counts, which only matters when that best was
   a lap the race left out, such as the formation lap; then correct it by hand.
   It is kept across stints and survives a relay restart on the same

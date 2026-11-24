@@ -2049,7 +2049,6 @@ def t_an_invalid_time_trial_lap_never_becomes_the_fastest_lap():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15)
     t = _start(race, a)
-    # 04-laps.log: 1:35.928 best, 1:50.837, 1:36.164 red, 1:35.127 red and faster, 1:34.716 best.
     t, times, seen = _laps(race, a, [50, 44, 49.5, 51, 53], t, red={3, 4})
     assert times[3] < times[0], times
     assert _ms(seen) == [times[0]] * 4 + [times[4]], \
@@ -2062,7 +2061,6 @@ def t_a_red_first_race_lap_never_becomes_the_fastest_lap():
     race.set_classes({"A": "H", "B": "G"})
     a = Car(race, "A", "a", L - 15)
     t = _start(race, a)
-    # 04b-laps-race.log: lap 1 red, best stays empty until lap 2.
     t, times, seen = _laps(race, a, [56, 50], t, red={1})
     assert times[0] < times[1], times
     assert _ms(seen) == [None, times[1]], f"GT7 never takes lap 1 as best lap: {times} {seen}"
@@ -2073,7 +2071,6 @@ def t_a_race_of_red_laps_has_no_fastest_lap():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15)
     t = _start(race, a)
-    # 05-race-box.log: lap 1, the out-lap and the in-lap into the pit, all red, no best.
     t, times, seen = _laps(race, a, [45, 50, 40], t, red={1, 2, 3})
     assert _ms(seen) == [None, None, None], f"no lap GT7 rejected counts: {seen}"
     assert _row(race, "A", t)["last_lap_ms"] == times[2], "the in-lap still shows as last lap"
@@ -2085,7 +2082,6 @@ def t_a_cut_lap_gt7_keeps_valid_counts_also_when_its_best_lap_follows_late():
     a = Car(race, "A", "a", L - 15)
     a.best_late = 3                                       # GT7's best lap three samples after its lap time
     t = _start(race, a)
-    # 04c-laps-spa-penalty.log: lap 1 red, 2:15.867 best, 2:16.328, 2:13.854 with a cut best, 2:12.306 best.
     t, times, seen = _laps(race, a, [44, 50, 49.5, 51, 53], t, red={1})
     assert _ms(seen) == [None, times[1], times[1], times[3], times[4]], \
         f"each new GT7 best is the fastest lap: {times} {seen}"
