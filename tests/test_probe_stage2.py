@@ -183,6 +183,32 @@ def t_a_restarted_sender_counts_from_zero_again():
     assert rows[0]["device_hz"] == 46.0, rows
 
 
+def t_tables_split_by_block_marks_and_observations_stay_in_the_timeline():
+    marks = [{"t": 1000.0, "text": "block B online lobby"}, {"t": 1030.0, "text": "position check 1"},
+             {"t": 1065.0, "text": "block C sport"}]
+    a = ps.analyse(_polls(), marks)
+    assert [b["block"] for b in a["blocks"]] == ["block B online lobby", "block C sport"], a["blocks"]
+    first, second = a["blocks"]
+    assert first["end"] < 1065.0 <= second["start"], (first["start"], first["end"], second["start"])
+    a_rows = {r["entry"]: r for r in first["positions"]}
+    assert a_rows["Team A"]["polls"] == 7, f"block B holds the polls up to block C only: {a_rows}"
+    text = ps.report_md(a)
+    assert "### block B online lobby" in text and "### block C sport" in text, text
+    assert "### position check 1" not in text, "an observation is no block"
+
+
+def t_a_new_session_writes_the_best_it_starts_with():
+    polls = []
+    for i, (lap, best, last) in enumerate([(3, 90000, 90000), (4, 90000, 91000), (0, 90000, 91000),
+                                           (1, 90000, -1)]):
+        polls.append(ps.compact(1000.0 + i, {"connections": [_conn("ca", "Ann", "Team A", 60 * i, 60 * i,
+                     latest={"lap": lap, "best_ms": best, "last_ms": last})]}, None, None))
+    rows = ps.best_laps(polls)[ps.tag("ca")]["rows"]
+    assert [r["event"] for r in rows] == ["best changed", "session start"], rows
+    assert rows[1]["best_ms"] == 90000 and rows[1]["lap"] == 0, \
+        f"a best that GT7 carries into a new session unchanged still gets its row: {rows}"
+
+
 def t_the_sender_summary_reports_device_and_relay_rates_and_latency():
     rows = {r["name"]: r for r in ps.sender_summary(_polls())}
     ann = rows["Ann"]

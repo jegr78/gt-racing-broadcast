@@ -500,12 +500,13 @@ def jumps(polls):
 
 
 def best_laps(polls, marks=()):
-    """Per sender: every change of 0x78 best_ms with the lap and last_ms at that moment.
-    `before_a_lap` marks a best that appeared before this lobby's first lap time, the
-    sign of a best carried over from an earlier session."""
+    """Per sender: every change of 0x78 best_ms with the lap and last_ms at that moment,
+    and the best a new session starts with (the lap counter stepped back), changed or
+    not: GT7 carrying a qualifying best into the race shows only there. `before_a_lap`
+    marks a best that appeared before this stream's first lap time."""
     out = {}
     for key, s in _senders(polls).items():
-        rows, best = [], None
+        rows, best, lap = [], None, None
         for t, c in s["series"]:
             latest = c.get("latest") or {}
             if not latest:
@@ -514,11 +515,32 @@ def best_laps(polls, marks=()):
             b = b if isinstance(b, int) and b > 0 else None
             lm = latest.get("last_ms")
             lm = lm if isinstance(lm, int) and lm > 0 else None
-            if b != best:
+            now = _num(latest.get("lap"))
+            new_session = lap is not None and now is not None and now < lap
+            if b != best or new_session:
                 rows.append({"t": t, "block": _block_at(marks, t), "lap": latest.get("lap"),
+                             "event": "session start" if new_session else "best changed",
                              "best_ms": b, "last_ms": lm, "before_a_lap": b is not None and lm is None})
                 best = b
+            lap = now if now is not None else lap
         out[key] = {"name": s["name"], "rows": rows}
+    return out
+
+
+def is_block(mark):
+    """A mark whose text starts with "block" opens a block; any other is an observation."""
+    return str(mark.get("text", "")).lower().startswith("block")
+
+
+def blocks(polls, marks=()):
+    """The polls of each block, from its mark to the next block mark."""
+    starts = [m for m in sorted(marks, key=lambda m: m["t"]) if is_block(m)]
+    out = []
+    for i, m in enumerate(starts):
+        end = starts[i + 1]["t"] if i + 1 < len(starts) else math.inf
+        part = [p for p in polls if m["t"] <= p["t"] < end]
+        if part:
+            out.append({"block": m["text"], "start": part[0]["t"], "end": part[-1]["t"], "polls": part})
     return out
 
 
@@ -530,7 +552,10 @@ def analyse(polls, marks=()):
             "senders": sender_summary(polls), "hz": hz_by_minute(polls, marks),
             "positions": positions(polls), "car_counts": car_counts(polls),
             "changes": changes(polls, marks), "jumps": jumps(polls), "best_laps": best_laps(polls, marks),
-            "fastest": final.get("fastest"), "final_state": final.get("state")}
+            "fastest": final.get("fastest"), "final_state": final.get("state"),
+            "blocks": [{"block": b["block"], "start": b["start"], "end": b["end"], "polls": len(b["polls"]),
+                        "senders": sender_summary(b["polls"]), "positions": positions(b["polls"]),
+                        "car_counts": car_counts(b["polls"])} for b in blocks(polls, marks)]}
 
 
 def _clock(t):
@@ -555,6 +580,24 @@ def _table(head, rows):
     return out + [""]
 
 
+def _senders_table(rows):
+    return _table(["name", "entry", "kind", "seconds", "device Hz", "relay Hz", "lost %", "reordered",
+                   "duplicates", "decrypt failed", "interruptions", "post failed", "dropped", "post p50 ms",
+                   "post p95 ms", "max idle s"],
+                  [(r["name"], r["entry"], r["kind"], r["seconds"], r["device_hz"], r["relay_hz"], r["lost_pct"],
+                    r["reordered"], r["duplicates"], r["decrypt_failed"], r["interruptions"], r["post_failed"],
+                    r["dropped"], r["post_ms_p50"], r["post_ms_p95"], r["max_idle_s"]) for r in rows])
+
+
+def _positions_tables(positions, car_counts):
+    out = _table(["entry", "polls", "with 0x84", "agree", "agree %", "flagged", "positions seen"],
+                 [(r["entry"], r["polls"], r["with_0x84"], r["agree"], r["agree_pct"], r["flagged"], r["values"])
+                  for r in positions])
+    return out + _table(["name", "samples", "with position", "positions", "car counts"],
+                        [(c["name"], c["samples"], c["with_position"], c["positions"], c["car_counts"])
+                         for c in car_counts.values() if c["samples"]])
+
+
 def report_md(a):
     """The report tables for the stage 2 report (see the runbook's report template)."""
     L = ["# Probe stage 2: measured tables", "",
@@ -564,18 +607,17 @@ def report_md(a):
     L += ["## Senders", "",
           "Hz over the time each sender sent; `device` is what the device received, `relay` what "
           "reached the relay; `duplicates` are packets a sender posted twice. Post latency "
-          "min/median/max of the sender's reported p50 and p95.", ""]
-    L += _table(["name", "entry", "kind", "seconds", "device Hz", "relay Hz", "lost %", "reordered",
-                 "duplicates", "decrypt failed", "interruptions", "post failed", "dropped", "post p50 ms", "post p95 ms",
-                 "max idle s"],
-                [(r["name"], r["entry"], r["kind"], r["seconds"], r["device_hz"], r["relay_hz"], r["lost_pct"],
-                  r["reordered"], r["duplicates"], r["decrypt_failed"], r["interruptions"], r["post_failed"], r["dropped"],
-                  r["post_ms_p50"], r["post_ms_p95"], r["max_idle_s"]) for r in a["senders"]])
+          "min/median/max of the sender's reported p50 and p95. The whole session first, then "
+          "per block (a mark starting with \"block\").", ""]
+    L += _senders_table(a["senders"])
+    for b in a.get("blocks") or []:
+        L += [f"### {b['block']}", "", f"{_clock(b['start'])} to {_clock(b['end'])}, {b['polls']} polls.", ""]
+        L += _senders_table(b["senders"])
     L += ["## Hz per minute", "", f"Minutes below {PASS_HZ:.0f} Hz on the device are marked `low` "
           "(stage 1's pass mark, a proposal).", ""]
     for h in a["hz"].values():
         low = sum(1 for r in h["rows"] if r["device_hz"] is not None and r["device_hz"] < PASS_HZ)
-        L += [f"### {h['name']} ({h['entry'] or 'probe'}), {low} low minutes", ""]
+        L += [f"#### {h['name']} ({h['entry'] or 'probe'}), {low} low minutes", ""]
         L += _table(["minute", "block", "device Hz", "relay Hz", "interruptions", ""],
                     [(r["minute"], r["block"], r["device_hz"], r["relay_hz"], r["interruptions"],
                       "low" if r["device_hz"] is not None and r["device_hz"] < PASS_HZ else "")
@@ -583,14 +625,12 @@ def report_md(a):
     L += ["## 0x84 race position against the relay's order", "",
           "Per entry over the polls in which it was ranked: how often its packets named a "
           "position, how often that matched the relay's place, and how often the relay flagged "
-          "a mismatch.", ""]
-    L += _table(["entry", "polls", "with 0x84", "agree", "agree %", "flagged", "positions seen"],
-                [(r["entry"], r["polls"], r["with_0x84"], r["agree"], r["agree_pct"], r["flagged"], r["values"])
-                 for r in a["positions"]])
-    L += ["### 0x84 per sender", ""]
-    L += _table(["name", "samples", "with position", "positions", "car counts"],
-                [(c["name"], c["samples"], c["with_position"], c["positions"], c["car_counts"])
-                 for c in a["car_counts"].values()])
+          "a mismatch; then per sender the positions and car counts its packets carried. Per "
+          "block when the session has block marks.", ""]
+    for b in a.get("blocks") or [{"block": "", "positions": a["positions"], "car_counts": a["car_counts"]}]:
+        if b["block"]:
+            L += [f"### {b['block']}", ""]
+        L += _positions_tables(b["positions"], b["car_counts"])
     L += ["## Driver changes", "",
           f"An anchor counts as carried when the distance after the change is within "
           f"{ANCHOR_TOLERANCE_M:.0f} m of the distance before it.", ""]
@@ -610,9 +650,9 @@ def report_md(a):
         if not b["rows"]:
             continue
         L += [f"### {b['name']}", ""]
-        L += _table(["time", "block", "lap", "best ms", "last ms", "before a lap"],
-                    [(_clock(r["t"]), r["block"], r["lap"], r["best_ms"], r["last_ms"], r["before_a_lap"])
-                     for r in b["rows"]])
+        L += _table(["time", "block", "event", "lap", "best ms", "last ms", "before a lap"],
+                    [(_clock(r["t"]), r["block"], r["event"], r["lap"], r["best_ms"], r["last_ms"],
+                      r["before_a_lap"]) for r in b["rows"]])
     fl = a.get("fastest") or {}
     L += ["## Fastest race lap", "", f"{fl.get('entry') or '-'}, {fl.get('driver') or '-'}, "
           f"{fl.get('ms') or '-'} ms", ""]
@@ -629,4 +669,6 @@ def facts(a):
             "windows": sum(1 for e in a["changes"] if e["kind"] == "window_open"),
             "with_0x84": sum(r["with_0x84"] for r in a["positions"]),
             "laps_back": sum(1 for j in a["jumps"] if j["kind"] == "laps_back"),
-            "marks": len(a["marks"])}
+            "marks": len(a["marks"]), "blocks": len(a.get("blocks") or []),
+            "session_starts": sum(1 for b in a["best_laps"].values() for r in b["rows"]
+                                  if r["event"] == "session start")}
