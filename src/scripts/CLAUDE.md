@@ -62,6 +62,15 @@ Config comes from **two layers** and one resolver:
   timing host (#1161); `racecast timing-host deploy` writes `TIMING_HOST_URL` and
   `TIMING_HOST_PUBLISH_KEY` (`timing_host_deploy`, Cloudflare REST, no Wrangler). The CLI
   also injects `RACECAST_PROFILE_ENV_FILE` so the relay re-reads those keys live.
+  Optional `LEAGUE_SERVICE_URL` (HTTPS only, refused on save otherwise) and
+  `LEAGUE_SERVICE_KEY` (a secret like `CONSOLE_SECRET`, never injected into children)
+  name the league's own service (#1252). `league_service.py` is its stdlib client: typed
+  parsers that drop what exceeds the contract's limits, `fetch_event`/`post_live`/
+  `post_result`/`fetch_result` over `http_util` without redirects and with a 256 KiB answer
+  cap, the `live_state` allowlist, the `Client` sender thread (2 s tick, backoff to 30 s,
+  values held 30 s) and `runtime/<profile>/league-event.json` (`racecast event league REF`,
+  Control Center Profile view, cleared by `event stop` in `_stop_driver_invite`). In
+  simulation `RACECAST_SIM_LEAGUE_SERVICE_URL`/`_KEY` replace both values.
   The shipped `profiles/example/` is a template, excluded from the usable-league list.
   One install hosts several leagues this way.
 

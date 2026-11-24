@@ -1,6 +1,7 @@
 # League service
 
-Design agreed 2026-11-22. Implementation has not started.
+Design agreed 2026-11-22. Contract, configuration, client and the simulated service are
+implemented (#1253); result export, live widgets and the timing page follow.
 
 A league runs its own management service (the Community Team Cup runs CTC Manager,
 Community League Racing runs CLR). During a race the relay sends the live race state
@@ -32,7 +33,10 @@ League values in `profiles/<name>/profile.env`:
 | `LEAGUE_SERVICE_URL` | Base URL of the service's racecast endpoints. HTTPS only. |
 | `LEAGUE_SERVICE_KEY` | Key the service issued. A secret like `CONSOLE_SECRET`. |
 
-One service per profile.
+One service per profile. The Control Center refuses to save a URL that is not HTTPS,
+and the client refuses one that was edited into the file by hand. In simulation mode
+`RACECAST_SIM_LEAGUE_SERVICE_URL` and `_KEY` replace both values, so a rehearsal reaches
+the loopback fake (`tools/event-sim/fakes/league_sim.py`) and never the real service.
 
 The league service shows a reference on its own match or event page. The producer
 enters it in the Control Center, which then loads the event from the service: its
@@ -104,7 +108,13 @@ service sends no HTML, no CSS and no image for a widget.
 
 Limits the relay enforces: eight widgets, 64 rows per table, bounded string lengths.
 Anything beyond a limit is dropped, and an answer that does not parse leaves the last
-good value in place.
+good value in place. Dropped means the whole element, never a cut string: a race, widget,
+value or row with a field over its limit or of the wrong type is left out, and a list
+keeps its first allowed items. An answer over 256 KiB, one that is not JSON, or one
+without `v: 1` does not parse.
+
+Until the builder slots exist (step 3), the widget list lives with the loaded event in
+`league-event.json`.
 
 The widget list arrives with the event and the Control Center stores it in the
 profile. The scene builders then offer each widget as a slot and work offline with the
@@ -172,7 +182,8 @@ The tick hands it the standings and never waits for it.
   service, and the root `CLAUDE.md` security section changes with the first PR.
 - The key is a profile secret: never logged, never in a status response, excluded from
   anything that reaches the tailnet-facing status.
-- The service URL must be HTTPS. Redirects to another host are refused.
+- The service URL must be HTTPS. The client follows no redirect at all, so the key
+  never reaches another host.
 - Outgoing data is an allowlist. Incoming data is bounded, typed and rendered as text.
 - The graphic fetch accepts only the configured service host, PNG only, size-limited.
 - The driver names leave the producer's machine for the league's own service. The
