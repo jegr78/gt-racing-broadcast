@@ -160,6 +160,7 @@ def _keep_alive_post(conn, path, body, headers):
 
 def t_relay_keeps_an_ingest_connection_open_and_closes_everything_else():
     import http.client
+    import socket
     import test_console_gate as g
     probe = tp.Probe("probe-key-0123456789")
     srv = g._serve(telemetry_probe_obj=probe)
@@ -167,12 +168,19 @@ def t_relay_keeps_an_ingest_connection_open_and_closes_everything_else():
     path, key = "/console/probe/ingest?sender=Car%207", {"X-Probe-Key": probe.key}
     try:
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        socks = set()
-        for pid in (1, 2, 3):
-            resp = _keep_alive_post(conn, path, tp.encode_batch([_wire(pid)]), key)
-            assert resp.status == 200 and not resp.will_close, (resp.status, resp.version)
-            socks.add(id(conn.sock))
+        socks, opts = set(), []
+        real = socket.socket.setsockopt
+        socket.socket.setsockopt = lambda sock, *a: (sock.getsockname()[1] == port and opts.append(a)) or real(sock, *a)
+        try:
+            for pid in (1, 2, 3):
+                resp = _keep_alive_post(conn, path, tp.encode_batch([_wire(pid)]), key)
+                assert resp.status == 200 and not resp.will_close, (resp.status, resp.version)
+                socks.add(id(conn.sock))
+        finally:
+            socket.socket.setsockopt = real
         assert len(socks) == 1, "a sender's posts share one connection"
+        assert (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1) in opts, \
+            "the relay's side of a kept connection must not hold the reply body back for the client's delayed ACK"
         conn.request("GET", "/telemetry/probe")
         resp = conn.getresponse()
         resp.read()
