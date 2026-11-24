@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Unit checks for the in-house guards in tools/lint.py: the empty-except guard,
-which mirrors CodeQL's py/empty-except, and the procedure-return-value guard, which
-mirrors py/procedure-return-value-used. Both fail the gate pre-push.
+"""Unit checks for the in-house guards in tools/lint.py, each mirroring one CodeQL
+query so it fails the gate pre-push: py/empty-except, py/procedure-return-value-used,
+py/side-effect-in-assert, py/import-and-import-from and py/unused-local-variable.
 Run: python3 tests/test_lint.py"""
 import importlib.util, os
 
@@ -191,6 +191,99 @@ def t_import_both_ways_leaves_other_shapes_alone():
 
 def t_import_both_ways_repo_is_clean():
     assert lint.check_import_both_ways(ROOT) == [], lint.check_import_both_ways(ROOT)
+
+
+def _dead(src):
+    return lint.find_unused_last_assignments(src)
+
+
+def t_dead_assignment_flags_a_final_unread_store():
+    src = "def t():\n    t = go(0)\n    check(t)\n    t = go(t)\n"
+    assert _dead(src) == [(4, "t")], "the last store of a name that was read earlier"
+    assert _dead("async def f():\n    x = 1\n    use(x)\n    x = 2\n") == [(4, "x")], "async def too"
+    assert _dead("def f(c):\n    if c:\n        x = 1\n        use(x)\n    else:\n        x = 2\n") == [(6, "x")], \
+        "a store in the other branch that nothing reads afterwards"
+    assert _dead("def f(xs):\n    for v in xs:\n        use(v)\n    v = 0\n") == [(4, "v")], \
+        "a store after the loop is outside it"
+    assert _dead("def f(v):\n    match v:\n        case [y]:\n            use(y)\n            y = 0\n") == [(5, "y")], \
+        "a store in a case body"
+
+
+def t_dead_assignment_handles_try_blocks():
+    assert _dead("def f():\n    x = 0\n    try:\n        x = g()\n    except OSError:\n        x = 1\n"
+                 "    finally:\n        use(x)\n") == [], "the finally block reads the handler's store"
+    assert _dead("def f():\n    try:\n        x = g()\n    except OSError:\n        return\n"
+                 "    else:\n        use(x)\n") == [], "the else block reads the try body's store"
+    assert _dead("def f():\n    x = 0\n    use(x)\n    try:\n        g()\n    except OSError:\n"
+                 "        x = 1\n") == [(7, "x")], "a handler's store nothing reads"
+
+
+def t_dead_assignment_leaves_reads_and_never_read_names_alone():
+    assert _dead("def f():\n    x = 1\n    x = 2\n    use(x)\n") == [], "every store is followed by a read"
+    assert _dead("def f():\n    x = 1\n") == [], "a never-read name is ruff F841's job"
+    assert _dead("x = 1\nuse(x)\nx = 2\n") == [], "module level is not a local scope"
+    assert _dead("class C:\n    x = 1\n    y = x\n    x = 2\n") == [], "a class body is not a local scope"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = x + 1\n    use(x)\n") == [], "read on a later line"
+    assert _dead("def (:\n") == [], "unparseable source is skipped"
+
+
+def t_dead_assignment_skips_conservative_cases():
+    tail = "    use(x)\n    x = 2\n"
+    assert _dead("def f():\n    _x = 1\n    use(_x)\n    _x = 2\n") == [], "an underscore name"
+    assert _dead("def f():\n    global x\n" + tail) == [], "a global"
+    assert _dead("def f():\n    nonlocal x\n" + tail) == [], "a nonlocal"
+    assert _dead("def f():\n" + tail + "    return lambda: x\n") == [], "read in a lambda"
+    assert _dead("def f():\n" + tail + "    def g():\n        return x\n") == [], "read in a nested def"
+    assert _dead("def f(ys):\n" + tail + "    return [x for _ in ys]\n") == [], "read in a comprehension"
+    assert _dead("def f():\n" + tail + "    del x\n") == [], "a del"
+    assert _dead("def f():\n" + tail + "    return locals()\n") == [], "locals() reads every name"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x += 2\n") == [], "an augmented assignment"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x, y = 2, 3\n    use(y)\n") == [], "a tuple target"
+    assert _dead("def f():\n    x: int = 1\n    use(x)\n    x: int = 2\n") == [], "an annotated assignment"
+
+
+def t_dead_assignment_flags_a_tuple_whose_names_are_all_unread():
+    assert _dead("def f():\n    race, (a, b), t = field()\n    use(race, t)\n") == [(2, "a"), (2, "b")], \
+        "a nested tuple nothing reads, even if its names were never read at all"
+    assert _dead("def f():\n    (code, body), _c, _s = take()\n    use(code, body)\n") == [(2, "_c"), (2, "_s")], \
+        "CodeQL exempts only bare underscores in a tuple, not _-prefixed names"
+    assert _dead("def f():\n    cars = a, b = mk()\n    use(cars)\n") == [(2, "a"), (2, "b")], "a chained target"
+    assert _dead("def f(r):\n    _c, r.a, r.b = load()\n") == [(2, "_c")], "attribute elements are not names"
+
+
+def t_dead_assignment_leaves_a_tuple_with_one_read_name_alone():
+    assert _dead("def f():\n    ok, note, _notes = w()\n    use(ok, note)\n") == [], "one element is read"
+    assert _dead("def f():\n    (code, _b), c = take()\n    use(code, c)\n") == [], "the inner tuple has a read name"
+    assert _dead("def f(r):\n    _, r.a = load()\n") == [], "a bare underscore is the accepted placeholder"
+    assert _dead("def f():\n    a, *rest = xs()\n") == [], "a starred element"
+    assert _dead("def f(xs):\n    for v in xs:\n        use(a)\n        a, b = v\n") == [], "read by the next iteration"
+    assert _dead("def f():\n    a, b = xs()\n    return lambda: a\n") == [], "read in a nested scope"
+
+
+def t_dead_assignment_respects_loops():
+    assert _dead("def f(xs):\n    x = 0\n    for v in xs:\n        use(x)\n        x = v\n") == [], \
+        "the next iteration reads it"
+    assert _dead("def f():\n    x = 0\n    while x < 3:\n        x = step()\n") == [], "the loop header reads it"
+    assert _dead("def f(xs):\n    for v in xs:\n        while ok(v):\n            use(x)\n            x = v\n") == [], \
+        "a read in the enclosing loop counts"
+    assert _dead("def f(xs):\n    x = 0\n    use(x)\n    for v in xs:\n        x = v\n") == [], \
+        "the loop repeats the store, a redefinition CodeQL leaves to py/multiple-definition"
+
+
+def t_dead_assignment_leaves_a_redefined_store_alone():
+    assert _dead("def f():\n    (c, b), _s = t()\n    use(c)\n    (c, b), _s = t()\n    use(c)\n") == [(4, "_s")], \
+        "only the last _s is flagged, the later store redefines the first"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    for x in xs:\n        pass\n") == [], \
+        "a loop target redefines it"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    import x\n") == [], "an import redefines it"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    try:\n        g()\n    except OSError as x:\n"
+                 "        pass\n") == [], "an except-as name redefines it"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    def x():\n        pass\n") == [], \
+        "a def redefines it"
+
+
+def t_dead_assignment_repo_is_clean():
+    assert lint.check_unused_last_assignments(ROOT) == [], lint.check_unused_last_assignments(ROOT)
 
 
 if __name__ == "__main__":
