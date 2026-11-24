@@ -79,8 +79,9 @@ standing are open.
 
 - One Python script, standard library only, served by the relay on the invite
   page so its version always matches the relay. It runs on desktops, in Termux
-  (Android) and in a-Shell (iOS, foreground with the screen on and the device
-  charging). Prebuilt Windows and macOS programs exist for drivers without
+  (Android) and in a-Shell (iOS, in the foreground with the device charging). a-Shell
+  keeps the screen on by itself: on an iPhone with Auto-Lock at 1 minute it ran 15
+  minutes at 59.9 Hz. Prebuilt Windows and macOS programs exist for drivers without
   Python; they are unsigned, so the guide covers SmartScreen and Gatekeeper.
 - It requests packet format `A`. The first heartbeat decides the format for every
   receiver, so `A` leaves a driver's SimHub or phone dashboard working. Every
@@ -88,8 +89,16 @@ standing are open.
 - It forwards the encrypted packets unchanged in batched HTTPS POSTs over one
   kept-open connection, at a rate the relay sets when it connects (default 20 Hz).
   The relay decrypts and filters; new fields never need a driver update.
-- It finds the console on the LAN and asks for its address only when discovery
-  fails. It reports an interruption to the driver.
+- It finds the console on the LAN with a broadcast heartbeat and takes its address
+  with `--console` when discovery fails. On an iPhone in probe stage 1 the broadcast
+  to 255.255.255.255 failed with "No route to host", also with Local Network access
+  granted. An iPad was not tested. The sender's first such error therefore names
+  `--console`, and the invite page asks for the PlayStation's IP address and puts it
+  into every command. The sender reports an interruption to the driver.
+- A firewall matters only where it filters inbound UDP. Windows asks when the sender
+  first listens, macOS only with its firewall on, and only Linux with an active
+  firewall needs a rule. A listener that takes packets from another device needs
+  `--bind 0.0.0.0`, because `--listen` binds 127.0.0.1.
 - A self-check (`--check`) proves the setup before a session: 12 s of heartbeat
   and receive, then three empty posts, with OK or FAIL per part and the fix for
   each failure. It sends no telemetry, so a driver runs it before Race Control
@@ -107,10 +116,17 @@ standing are open.
     on the same PC in one of two modes. As forwarder it binds 33740 itself and
     passes every packet unchanged to a local port the other app listens on. As
     listener it sends no heartbeat and reads a local port the other app forwards
-    to, for apps with such an option like GT Race Engineer's "Telemetry
-    Forwarding". The driver's setup then stays unchanged.
+    to, and the driver's setup stays unchanged. Probe stage 1 confirmed:
+    - SimHub works both ways. Its GT7 game configuration has "Game telemetry UDP
+      port" and "Forward UDP packets to" and no heartbeat switch. The sender listens
+      on what SimHub forwards, `--listen 33741` in the probe. Or it forwards to
+      SimHub on a changed port, which needs a SimHub restart.
+    - GT Race Engineer's forwarding setting, labelled "Telemetrie Forwarding" in the
+      German app, makes it receive forwarded telemetry. Its console entry then reads
+      "FORWARDED". It does not forward, so only the forwarder works: `--forward 127.0.0.1:PORT` with the same address and
+      port in the app, verified for 4 minutes with every packet forwarded.
   - A phone dashboard app that can forward: it forwards to the sender in listener
-    mode on a second device. Without that option the second device heartbeats on
+    mode with `--bind 0.0.0.0` on a second device. Without that option the second device heartbeats on
     its own. The iPhone apps Race Dash, ezio dash and Victory offer no forwarding
     (checked 2026-11-12); they only take the console's IP address.
   - No other receiver: the sender runs on the phone or the PC.
@@ -328,6 +344,8 @@ maintainer tool acts as a simulated PS5 that answers heartbeats and replays a
 answers:
 
 - Do the desktop script and a-Shell receive 60 Hz reliably for a full stint?
+  a-Shell on an iPhone, 2026-11-22: 59.9 Hz for 15 minutes without a loss, but only
+  with `--console`, since the broadcast heartbeat failed there. See "Sender".
 - Does Termux run the script in the Android emulator, with the host forwarding
   UDP 33740, and survive forced Doze?
 - Does a second, format-`A` heartbeat on another device leave a phone dashboard
@@ -340,9 +358,13 @@ answers:
   allowed. Open: SimHub, and the format ezio dash requests.
 - With the sender and SimHub on the same PC: does SimHub's GT7 reader accept the
   packets the sender forwards to another local port, with SimHub's own heartbeat
-  on or off?
+  on or off? Answered 2026-11-22: SimHub has no heartbeat switch. Both the
+  sender forwarding to SimHub and the sender listening on SimHub's forwarding work.
+  See "Sender".
 - In listener mode: does the sender take the packets GT Race Engineer forwards to
-  a local port, with no heartbeat of its own?
+  a local port, with no heartbeat of its own? Answered 2026-11-22: no. GT Race
+  Engineer's forwarding setting receives, so the sender forwards to it instead. See
+  "Sender".
 - Does GT7's best lap (0x78) exclude laps invalidated for track limits?
 - Do packets continue during a long box standstill, and does the projection hold
   in the pit lane?

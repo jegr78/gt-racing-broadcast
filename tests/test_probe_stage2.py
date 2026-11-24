@@ -24,6 +24,10 @@ def t_every_platform_sheet_has_the_download_the_check_and_the_stop():
     iphone = ps.kit(INVITE, SCRIPT, "iphone")
     assert "`python3 racecast-sender.py --url ... --code ... --console <PlayStation IP>`" in iphone, \
         "a-Shell cannot discover the console: its command needs --console"
+    assert "iPad was not tested" in iphone and "or iPad" not in iphone, \
+        f"only the iPhone was measured: {iphone[:200]}"
+    assert "keeps the screen on" in iphone and "with the screen on" not in iphone, \
+        "a-Shell kept the screen on by itself in stage 1, so no screen setting is asked for"
     assert "--code ... --console" not in ps.kit(INVITE, SCRIPT, "macos"), "discovery works on a Mac"
     android = ps.kit(INVITE, SCRIPT, "android")
     assert "termux-wake-lock" in android and "termux-wake-unlock" in android and "battery" in android

@@ -50,7 +50,7 @@ def tag(conn):
 PLATFORMS = ("windows", "macos", "linux", "iphone", "android")
 
 _TITLE = {"windows": "Windows PC or laptop", "macos": "Mac", "linux": "Linux PC or Raspberry Pi",
-          "iphone": "iPhone or iPad (a-Shell)", "android": "Android phone or tablet (Termux)"}
+          "iphone": "iPhone (a-Shell)", "android": "Android phone or tablet (Termux)"}
 
 _PREPARE = {
     "windows": [
@@ -73,8 +73,10 @@ _PREPARE = {
         "Install a-Shell from the App Store and open it. Allow Local Network access when asked.",
         "Download the sender: `curl -o racecast-sender.py \"{script}\"`",
         "Find your PlayStation's IP address: Settings, Network, View Connection Status. " +
-        "The iPhone cannot find the console by itself, so the command needs it.",
-        "Keep a-Shell in front with the screen on and the iPhone charging.",
+        "The iPhone cannot find the console by itself, so the command needs it. An iPad was " +
+        "not tested.",
+        "Keep a-Shell in front and the iPhone charging. a-Shell keeps the screen on while the " +
+        "sender runs, so Auto-Lock needs no change.",
     ],
     "android": [
         "Install Termux from F-Droid (the Play Store version is outdated) and open it.",

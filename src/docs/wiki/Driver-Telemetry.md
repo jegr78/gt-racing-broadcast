@@ -72,20 +72,40 @@ program can receive it. Pick the line that matches what you already run:
 - **Nothing else receives your telemetry:** run the command as shown, on a PC, laptop,
   tablet or phone.
 - **A dashboard app on your phone:** run the sender on a second device on the same
-  network. It cannot share the phone with the app.
-- **SimHub on the same PC:** add `--forward 127.0.0.1:PORT`. The sender then passes every
-  packet to that port; point SimHub's GT7 input at it and turn SimHub's own heartbeat off.
-- **GT Race Engineer with "Telemetry Forwarding":** let it forward to a port on the same
-  device and add `--listen PORT`. The sender then sends no heartbeat of its own.
+  network. It cannot share the phone with the app, unless the app takes forwarded
+  packets as GT Race Engineer does below.
+- **SimHub on the same PC:** SimHub's GT7 game configuration has a **Game telemetry UDP
+  port** and **Forward UDP packets to**, and no heartbeat switch. Two setups work:
+  - The sender reads what SimHub forwards: add `--listen PORT` with the port SimHub
+    forwards to on this PC at `127.0.0.1`. The sender sends no heartbeat, and a SimHub
+    that already forwards stays as it is.
+  - The sender forwards to SimHub: add `--forward 127.0.0.1:PORT` and set SimHub's game
+    telemetry port to the same port, then restart SimHub so it takes the new port. The
+    sender keeps 33740 and passes every packet on.
+- **GT Race Engineer on the same device:** its forwarding setting, labelled "Telemetrie
+  Forwarding" in the German app, makes it receive forwarded telemetry. Its console entry
+  then reads "FORWARDED". It does not forward. Add `--forward 127.0.0.1:PORT` to the
+  sender and enter the same address and port in GT Race Engineer.
 
-The sender finds the PlayStation by itself. If it reports "no console found", add
-`--console <PlayStation IP>`; the PlayStation's network settings show its IP address.
+The sender finds the PlayStation by itself, except on an iPhone. There its search
+broadcast to 255.255.255.255 fails with "No route to host". An iPad was not tested.
+On an iPhone, type the PlayStation's IP address into the invite page's **PlayStation IP
+address** field right after registering, and the commands end with `--console
+<PlayStation IP>`. Wherever the sender reports "no console found", add
+`--console <PlayStation IP>` to the command you have. The PlayStation's network
+settings show the address.
 
 ## Your platform
 
-Every platform needs the same thing from its firewall: **allow inbound UDP 33740** for
-the sender (or the `--listen` port). The console sends from a port of its own, so its
-packets do not count as an answer to the sender and a firewall drops them by default.
+The console sends from a port of its own, so its packets do not count as an answer to
+the sender, and a firewall that filters inbound UDP drops them. Whether you have to do
+anything depends on the platform. Windows asks when the sender first listens, and you
+allow it. macOS asks only with its firewall switched on. Only Linux with an active
+firewall needs a rule for UDP 33740. A sender that takes packets another device forwards
+needs `--listen PORT --bind 0.0.0.0` and the same rule for that port. The upload to the relay is one outgoing HTTPS connection, which the
+sender keeps open through Funnel and opens again after an error. A proxy set in the
+system or in `HTTPS_PROXY` carries it through a tunnel, and the sender still checks the
+relay's certificate.
 
 - **Windows.** With Python 3.8 or newer from python.org, download
   `racecast-sender.py` from the invite page and run the Windows Python command (`py
@@ -98,22 +118,30 @@ packets do not count as an answer to the sender and a firewall drops them by def
   or the macOS program: run `chmod +x racecast-sender-macos` once, then the
   `./racecast-sender-macos ...` command. The program is not signed: macOS refuses the
   first start, then open **System Settings → Privacy & Security** and choose **Open
-  Anyway**. Allow incoming connections when the firewall asks.
-- **Linux.** Run the Python command. With ufw: `sudo ufw allow 33740/udp`.
+  Anyway**. With the macOS firewall on, allow incoming connections when it asks. With
+  it off, nothing asks.
+- **Linux.** Run the Python command. Only an active firewall needs a rule, with ufw:
+  `sudo ufw allow 33740/udp`.
 - **Android (Termux).** Install Termux, run `pkg install python`, download the script
   with `curl -o racecast-sender.py "<script link from the invite page>"` (the quotes
   matter), then run the Python command. Run `termux-wake-lock` first so Android does not
-  pause Termux.
-- **iPhone and iPad (a-Shell).** Download the script with
-  `curl -o racecast-sender.py "<script link>"` and run the Python command. iOS runs a-Shell only in the foreground: keep the screen on,
-  a-Shell in front and the device charging.
+  pause Termux. After the race `termux-wake-unlock` in Termux releases it.
+- **iPhone (a-Shell).** Download the script with
+  `curl -o racecast-sender.py "<script link>"` and run the Python command with the
+  PlayStation's IP address in it, as described above. Without `--console` the search
+  fails with "No route to host", also with Local Network access granted, and the sender
+  says to add `--console`. An iPad was not tested. iOS runs a-Shell only in the
+  foreground: keep a-Shell in front and the device charging. a-Shell keeps the screen on
+  while the sender runs, so Auto-Lock needs no change. The probe ran 15 minutes this way
+  at 59.9 packets per second without a loss.
 
 ## While it runs
 
 The sender prints a status line every ten seconds: packets per second received from the
 console and batches sent to the relay. It says when the console goes quiet (menus,
 replays, network) and when the upload is interrupted, and it catches up after a short
-outage. Stop it with Ctrl+C.
+outage. Stop it with Ctrl+C. In a-Shell tap **ctrl** in the bar above the keyboard,
+then `c`, or close the app.
 
 The relay accepts one sender per entry in a single-lobby race and two per team in an
 endurance race (the driver on track and the one waiting for the next stint). If the

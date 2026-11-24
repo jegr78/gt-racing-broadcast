@@ -473,6 +473,25 @@ def t_receiver_survives_windows_udp_errors_and_skips_oversized_packets():
     assert sender.stats["oversized"] == 2 and up.pending() == 1, sender.stats
 
 
+def t_a_failed_search_tells_the_driver_to_name_the_console():
+    class Sock:
+        def sendto(self, data, addr):
+            raise OSError(65, "No route to host")
+    up = snd.Uploader("http://x/ingest", "K", "L", opener=lambda r, timeout: _Reply(b"{}"))
+    said = []
+    searching = snd.Sender(up, bind="127.0.0.1", receive_port=0, say=said.append)
+    pinned = snd.Sender(up, console="10.0.0.9", bind="127.0.0.1", receive_port=0, say=said.append)
+    for s in (searching, pinned):
+        s.sock.close()
+        s.sock = Sock()
+    searching.heartbeat()
+    assert "--console <PlayStation IP>" in said[-1], f"a failed search must name the fix: {said}"
+    searching.heartbeat()
+    assert sum("--console" in line for line in said) == 1, f"the hint shows once: {said}"
+    pinned.heartbeat()
+    assert "--console" not in said[-1], f"a sender that has --console needs no hint: {said}"
+
+
 def t_a_discovered_console_is_searched_again_after_silence():
     said, clock = [], [0.0]
     up = snd.Uploader("http://x/ingest", "K", "L", opener=lambda r, timeout: _Reply(b"{}"))
@@ -1086,6 +1105,7 @@ def t_a_check_whose_heartbeats_all_fail_names_the_console_option():
         sender.sock.close()
     text = "\n".join(said)
     assert code == 1 and "heartbeat: FAIL 1 failed: pass --console" in text, text
+    assert "On an iPhone the search fails" in text, f"the check names the iPhone case like a run: {text}"
 
 
 def t_a_check_that_receives_too_few_packets_fails():

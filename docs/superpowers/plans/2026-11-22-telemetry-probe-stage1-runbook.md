@@ -32,9 +32,14 @@ repo checkout on `main`.
    ```
    Note `key`. Ingest URLs: `https://<magicdns-host>/console/probe/ingest` (Funnel) and
    `http://<tailnet-ip>:8088/console/probe/ingest` (tailnet). Use the Funnel URL for
-   every sender: that is the path drivers take.
-5. Firewall: nothing to prepare on Windows and macOS. Windows asks once when a program
-   first listens, the same prompt SimHub answered: choose Allow. macOS asks only when its
+   every sender: that is the path drivers take. A device on the producer's tailnet
+   resolves the Funnel host to its tailnet address, so a sender there never touches
+   Funnel. Only a machine off the tailnet takes the public path. In stage 1 that was the
+   Linux box, which resolved the Funnel host publicly. The Windows PC, the Mac and the
+   iPhone posted over the tailnet. A sender still needs the PS5's LAN, so a public-path
+   sender is a LAN machine with Tailscale off.
+5. Firewall: nothing to prepare on Windows and macOS. Windows asks when a program first
+   listens, the same prompt SimHub answered: choose Allow. macOS asks only when its
    firewall is on. Only a Linux machine with an active firewall needs a rule:
    `sudo ufw allow 33740/udp`. A sender that gets no packets says so and names the port.
 6. PS5: note its IP address (Settings, Network). Keep it awake; rest mode stops
@@ -73,31 +78,38 @@ shows `A` while ezio dash runs, the console keeps one format per receiver.
 ## 2. Sender and SimHub on the same PC
 
 Question: does SimHub's GT7 reader take the packets the sender forwards to a local
-port, with SimHub's own heartbeat on and off?
+port, and does the sender take what SimHub forwards?
 
-1. Close SimHub. On the Windows PC:
+SimHub's GT7 game configuration has "Game telemetry UDP port" and "Forward UDP packets
+to", and no heartbeat switch. Stage 1 found this on 2026-11-22.
+
+1. Sender forwards to SimHub: set SimHub's game telemetry port to `<SIMHUB_PORT>` and
+   restart SimHub, which takes a changed port only after a restart. On the Windows PC:
    `py src/relay/racecast-sender.py --url <funnel ingest> --key KEY --name Win-fwd --forward 127.0.0.1:<SIMHUB_PORT>`
-2. Point SimHub's GT7 input at `<SIMHUB_PORT>`, heartbeat off. Check live values.
-3. Same with SimHub's heartbeat on.
+   Check live values.
+2. Sender reads SimHub's forwarding: SimHub back on its own port, forwarding to
+   `127.0.0.1:<FWD_PORT>`, 33741 in stage 1. Then
+   `py src/relay/racecast-sender.py --url <funnel ingest> --key KEY --name Win-listen --listen <FWD_PORT>`.
+   Check live values.
 
-Report: SimHub's settings that worked (port field, heartbeat option, if there is one),
-live values yes or no in both variants, `sender_stats.forwarded` against `received`.
-If SimHub has no port setting, note that: the guide's SimHub line then needs a change.
+Report: live values yes or no in both variants, `sender_stats.forwarded` against
+`received` in the first, `packets_per_s` in the second.
 
-## 3. Listener mode behind GT Race Engineer
+## 3. Sender in front of GT Race Engineer
 
-Question: does the sender take the packets GT Race Engineer forwards, with no heartbeat
-of its own? Skip this block if GT Race Engineer is not at hand.
+Question: does GT Race Engineer take the packets the sender forwards? Skip this block
+if GT Race Engineer is not at hand.
 
-1. GT Race Engineer connected to the PS5, "Telemetry Forwarding" to
-   `<PC IP>:<LISTEN_PORT>`.
-2. On that PC: `py src/relay/racecast-sender.py --url <funnel ingest> --key KEY --name GRE --listen <LISTEN_PORT> --bind 0.0.0.0`
-   (`--listen` binds 127.0.0.1 by default; forwarding from another device needs
-   `--bind`). Allow inbound UDP `<LISTEN_PORT>` in the firewall.
+GT Race Engineer's forwarding setting, labelled "Telemetrie Forwarding" in the German
+app, makes it receive forwarded telemetry. Its console entry then reads "FORWARDED". It
+does not forward, so listener mode does not apply. Stage 1 found this on 2026-11-22.
+
+1. GT Race Engineer: forwarding setting to `127.0.0.1:<GRE_PORT>`.
+2. On the same device: `py src/relay/racecast-sender.py --url <funnel ingest> --key KEY --name GRE --forward 127.0.0.1:<GRE_PORT>`
 3. Drive five minutes, save the JSON.
 
-Report: `packets_per_s`, `sender_stats.heartbeats` (expected 0), whether GT Race
-Engineer forwards every packet or a lower rate.
+Report: `packets_per_s`, `sender_stats.forwarded` against `received`, whether GT Race
+Engineer's live values and announcements work.
 
 ## 4. Best lap and track limits
 
@@ -121,8 +133,10 @@ This block uses the real driver path, not the probe ingest.
 
 1. `py src/racecast.py event track --list`, then `event track <ID>` for the GT7 layout
    you drive. Pick one with a racing line (setup warns otherwise).
-2. `py src/racecast.py event invite --new`, open the link on a phone or the PC, pick an
-   entry, type a name, copy the command.
+2. `py src/racecast.py event start` creates the invite, and `event invite` prints the
+   link. `event invite --new` only renews a running event's invite and otherwise
+   refuses with "No event is running". Open the link on a phone or the PC, pick an entry,
+   type a name, copy the command.
 3. Run the command on the Mac (or another machine), approve the request in the Director
    Panel (`py src/racecast.py relay open-panel`), section Driver requests.
 4. Custom Race with a pit stop. Drive in, stand in the box for five minutes, drive out.
@@ -151,8 +165,9 @@ minutes is three times the longest iPhone auto-lock.
    - Linux box: `python3 src/relay/racecast-sender.py ... --name Linux`
    - iPhone, a-Shell: get the script with
      `curl -o racecast-sender.py "<script link from the invite page>"` (an invite from
-     block 5 serves it), then `python3 racecast-sender.py ... --name iPhone`. Screen
-     on, a-Shell in front, charging.
+     block 5 serves it), then `python3 racecast-sender.py ... --name iPhone --console <PS5 IP>`.
+     Discovery failed on the iPhone with "No route to host". a-Shell in front and
+     charging. It keeps the screen on by itself.
 2. Reset the counters, drive 15 minutes with a pit stop, save the JSON every 5 minutes
    and at the end.
 
@@ -175,22 +190,30 @@ run the emulator during a broadcast: it takes CPU and RAM next to OBS.
    (F-Droid APK, `adb install`).
 2. In Termux: `pkg install python`, `termux-wake-lock`, get the script
    (`curl -o` from the invite page link, or `adb push` and `termux-setup-storage`).
-3. Host forwarding: `adb emu redir add udp:33740:33740`, inbound UDP 33740 allowed on
-   the host.
-4. `python racecast-sender.py ... --name Android --console <PS5 IP>`. Check the rate.
+3. Host forwarding: `adb emu redir add udp:33740:33740`. The redirect listens on the
+   host's loopback only, and packets it delivers to the guest carry another source
+   address, which the sender drops when `--console` is set. So a host sender receives
+   from the PS5 and forwards to the redirect:
+   `python3 src/relay/racecast-sender.py --url <funnel ingest> --key KEY --name Host --forward 127.0.0.1:33740`
+   Allow inbound UDP 33740 on the host where its firewall filters.
+4. In Termux: `python racecast-sender.py ... --name Android --listen 33740 --bind 0.0.0.0`.
+   The guest has two interfaces, `eth0` and `wlan0`. The redirect delivers to `eth0`,
+   so the default bind misses it. Check the rate.
 5. Screen off (`adb shell input keyevent 26`), then
    `adb shell dumpsys deviceidle force-idle`; ten minutes in Doze. Back with
    `adb shell dumpsys deviceidle unforce`.
 
-Report: rate before and during Doze, `interruptions`, whether the wake lock held,
-whether discovery worked through the emulator NAT or `--console` was needed.
+Report: rate before and during Doze, `interruptions`, whether the wake lock held.
+`termux-wake-unlock` in the Termux terminal releases the lock. `am startservice` from
+outside is refused.
 
 ## 8. Funnel with 15 simulated senders
 
 Question: how does Funnel carry 15 senders at 20 Hz? Needs no PS5.
 
-Run it from a machine outside the home network (mobile hotspot), so the posts really
-travel through Funnel:
+Run it from a machine off the producer's tailnet, with Tailscale off on a mobile
+hotspot. A tailnet device resolves the Funnel host to its tailnet address and never
+reaches Funnel.
 
 ```
 python3 tools/gt7-probe-load.py --url https://<magicdns-host>/console/probe/ingest --key KEY \
@@ -214,7 +237,7 @@ sets that default.
 1. `py src/racecast.py event timing --new --serve funnel` prints the timing link. Keep the
    senders of block 8 (or `tools/driver-replay.py --profile demo`) running, so the page
    has changing data.
-2. From a machine outside the home network, step the crowd up:
+2. From a machine outside the home network and off the tailnet, step the crowd up:
    ```
    python3 tools/timing-viewer-load.py "<timing link>" --viewers 50 --duration 180
    ```

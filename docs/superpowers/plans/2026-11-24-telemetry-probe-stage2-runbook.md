@@ -88,16 +88,17 @@ what their platform needs: Python 3.8 or newer (Windows, macOS, Linux), a-Shell 
 iPad) or Termux from F-Droid (Android), and notes the PlayStation's IP address. The
 sheets cover the stage 1 findings:
 
-- iPhone and iPad: a-Shell cannot find the console by broadcast ("No route to host"), so
-  the command carries `--console <PlayStation IP>` (#1265).
+- iPhone: a-Shell cannot find the console by broadcast ("No route to host"), so the
+  command carries `--console <PlayStation IP>` (#1265). An iPad was not tested.
 - Android: `pkg install python`, `termux-wake-lock`, battery use unrestricted, charging.
-- Windows and macOS: no firewall rule; Windows asks once on the first start. Linux with an
+- Windows and macOS: no firewall rule; Windows asks when the sender first listens. Linux with an
   active firewall: `sudo ufw allow 33740/udp`.
 - A dashboard app on the same phone blocks the sender: the sender needs another device.
 - SimHub on the same PC: `--listen 33741` with SimHub's "Forward UDP packets to"
   127.0.0.1:33741, or `--forward 127.0.0.1:PORT` with SimHub's "Game telemetry UDP port"
   on PORT (needs a SimHub restart). GT Race Engineer: `--forward 127.0.0.1:PORT` and the
-  same address in its "Telemetry Forwarding" (#1265).
+  same address in its forwarding setting, "Telemetrie Forwarding" in the German app
+  (#1265).
 
 ### 3.4 Open items that change the reading
 
