@@ -58,7 +58,9 @@ serves the sender script of the running relay.
 - header `X-Driver-Code: D1:...`
 - optional header `X-Sender-Stats`: a JSON object of integer counters the sender
   reports (`received`, `forwarded`, `posted`, `dropped`, `post_failed`,
-  `interruptions`, `heartbeats`); other keys are ignored
+  `interruptions`, `heartbeats`) and the median and 95th percentile of its last 200
+  post round trips in milliseconds (`post_ms_p50`, `post_ms_p95`); other keys are
+  ignored
 - body, batch format v1: the four bytes `RCT1`, then for each packet a big-endian
   uint16 length and the packet exactly as the console sent it, still encrypted. At
   most 120 packets of at most 512 bytes each.
@@ -125,7 +127,10 @@ single decisions with the new values and `before`.
   `ingest` for a code issued before the entry filled up), not swapped in. A sender that
   restarts with its own code is the same connection. While the console sends nothing, a
   client keeps its slot with an empty batch (`RCT1` alone) at least every 20 s; the
-  sender script sends one every 5 s.
+  sender script sends one every 5 s. Its self-check (`--check`) posts three empty
+  batches and nothing else: 200 (approved) or 423 (waiting for approval) proves the
+  code and the path; the packets it received during the check are counted on the
+  device and never posted.
 - A league without stint labels registers by entry alone, in endurance too.
 - The producer sees every connection on the tailnet (`GET /drivers/data`) and
   disconnects one with `POST /drivers/disconnect {"conn": "..."}`. The ingest answers

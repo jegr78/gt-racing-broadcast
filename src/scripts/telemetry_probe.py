@@ -27,7 +27,7 @@ RATE_HZ = 20              # how often a sender posts; the reply tells the sender
 SAMPLE_EVERY = 6          # decrypt every 6th packet whole: 10 Hz samples at 60 Hz
 PACKET_HZ = 60.0          # GT7's send rate: back-dates a sample within its batch
 SENDER_STAT_KEYS = ("received", "forwarded", "posted", "dropped", "post_failed",
-                    "interruptions", "heartbeats")
+                    "interruptions", "heartbeats", "post_ms_p50", "post_ms_p95")
 COUNTERS = ("received", "lost", "reordered", "decrypt_failed", "parse_failed")
 RECENT = 4 * MAX_BATCH    # a sender posts a batch again only while it is still queued
 _NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")

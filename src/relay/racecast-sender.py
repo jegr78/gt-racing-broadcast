@@ -15,6 +15,8 @@ Modes:
   default     heartbeat the console, receive on UDP 33740
   --forward   also pass every packet unchanged to HOST:PORT (SimHub on this PC)
   --listen    no heartbeat: read the packets another app forwards to this port
+  --check     test heartbeat, receive and upload for 12 s, send no telemetry, then
+              print OK or FAIL (exit code 0 or 1); run it before the session
 
 The firewall must allow inbound UDP 33740 (or the --listen port): the console sends
 from a port of its own, so the packets do not count as a reply to the heartbeat.
@@ -55,6 +57,10 @@ RELATCH_S = 30.0          # a discovered console silent this long is searched ag
 QUIET_S = 2.0             # no packet for this long is an interruption
 DISCOVERY_HINT_S = 15.0
 STATUS_EVERY_S = 10.0
+CHECK_S = 12.0            # below DISCOVERY_HINT_S: the check prints its own hint
+CHECK_POSTS = 3
+CHECK_MIN_HZ = 50.0       # GT7 sends about 60 packets per second
+LATENCY_WINDOW = 200      # the posts the latency stats cover
 USER_AGENT = "racecast-sender/" + VERSION
 ROUTE_PROBE = "192.0.2.1"   # TEST-NET-1: picks the default-route interface, never contacted
 NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # the relay accepts these names only
@@ -255,11 +261,7 @@ class Uploader:
         if not batch and self._clock() - self._last_post < KEEPALIVE_S:
             return 1.0 / self.rate_hz
         last = batch[-1][0] if batch else None
-        stats = dict(self.stats, **self.extra_stats())
-        req = urllib.request.Request(self.url, data=encode_batch([p for _s, p in batch]),
-                                     method="POST", headers={
-            "Content-Type": "application/octet-stream", "User-Agent": USER_AGENT,
-            "X-Sender-Stats": json.dumps(stats), **self._auth})
+        req = self._request([p for _s, p in batch])
         started = time.perf_counter()        # monotonic ticks in ~15 ms steps on Windows
         try:
             with self._open(req, timeout=5) as resp:
@@ -306,6 +308,44 @@ class Uploader:
         if isinstance(rate, (int, float)) and 1 <= rate <= 60:
             self.rate_hz = float(rate)
         return 1.0 / self.rate_hz
+
+    def _request(self, packets):
+        stats = dict(self.stats, **self.extra_stats(), **self._latency_stats())
+        return urllib.request.Request(self.url, data=encode_batch(packets), method="POST", headers={
+            "Content-Type": "application/octet-stream", "User-Agent": USER_AGENT,
+            "X-Sender-Stats": json.dumps(stats), **self._auth})
+
+    def _latency_stats(self):
+        recent = sorted(list(self.latencies)[-LATENCY_WINDOW:])
+        if not recent:
+            return {}
+        def ms(q):
+            return round(recent[min(len(recent) - 1, int(q * len(recent)))] * 1000)
+        return {"post_ms_p50": ms(0.5), "post_ms_p95": ms(0.95)}
+
+    def check(self, posts=CHECK_POSTS):
+        """Post `posts` empty batches: (ok, what the driver reads, median seconds or None)."""
+        took, verdict = [], None
+        for _ in range(posts):
+            started = time.perf_counter()
+            try:
+                with self._open(self._request([]), timeout=5) as resp:
+                    resp.read()
+                verdict = (True, "approved, the broadcast takes your telemetry")
+            except urllib.error.HTTPError as exc:
+                if exc.code == 423:
+                    verdict = (True, "registered, waiting for approval by Race Control. "
+                                     "Start the sender anyway; it waits")
+                else:
+                    hint = REFUSED.get(exc.code)
+                    return False, f"the relay answered {exc.code} ({_reason(exc)})" + \
+                        (f". {hint}" if hint else ""), None
+            except (OSError, ValueError, http.client.HTTPException) as exc:
+                return False, f"cannot reach the relay ({exc}). Check the link and this device's " \
+                              "internet connection", None
+            took.append(time.perf_counter() - started)
+        took.sort()
+        return verdict[0], verdict[1], took[len(took) // 2]
 
     def _settle(self, delivered):
         with self._lock:
@@ -360,6 +400,7 @@ class Sender:
         uploader.extra_stats = lambda: dict(self.stats)
         self._last_rx = None
         self._quiet = False
+        self.heartbeat_failed = 0
 
     def heartbeat(self):
         target = self.console or "255.255.255.255"
@@ -367,6 +408,7 @@ class Sender:
             self.sock.sendto(HEARTBEAT, (target, self.console_port))
             self.stats["heartbeats"] += 1
         except OSError as exc:
+            self.heartbeat_failed += 1
             self.say(f"heartbeat to {target} failed: {exc}")
 
     def receive_once(self):
@@ -422,7 +464,7 @@ class Sender:
             self.stats["interruptions"] += 1
             self.say("no packets from the console for %.0f s (menu, replay or network?)" % QUIET_S)
 
-    def run(self, stop, duration=None):
+    def run(self, stop, duration=None, status=True):
         started = self.clock()
         next_beat, next_status = started, started + STATUS_EVERY_S
         hinted = False
@@ -442,7 +484,7 @@ class Sender:
             self.receive_once()
             self.check_quiet()
             self.check_relatch()
-            if now >= next_status:
+            if status and now >= next_status:
                 rate = (self.stats["received"] - rx_mark[1]) / (now - rx_mark[0])
                 self.say("received %.1f/s, posted %d, dropped %d, upload failures %d" % (
                     rate, self.up.stats["posted"], self.up.stats["dropped"],
@@ -450,6 +492,55 @@ class Sender:
                 rx_mark = (now, self.stats["received"])
                 next_status = now + STATUS_EVERY_S
         stop.set()
+
+
+class _CheckSink:
+    """Takes the packets of a check in place of the uploader: counted, never sent."""
+
+    def __init__(self):
+        self.sizes = collections.Counter()
+
+    def put(self, packet):
+        self.sizes[len(packet)] += 1
+
+
+def self_check(sender, up, duration=CHECK_S, say=_say):
+    """Heartbeat and receive for `duration` seconds, then post empty batches. Prints one
+    verdict per part and returns the exit code: 0 when no part failed, else 1."""
+    sink = _CheckSink()
+    sender.up = sink
+    say("checking for %.0f s: heartbeat, receive and upload, no telemetry is sent" % duration)
+    sender.run(threading.Event(), duration=duration, status=False)
+    port = sender.sock.getsockname()[1]
+    results = []
+    if sender.listen is not None:
+        results.append(("heartbeat", "skipped", "listening on UDP %d for another app's packets" % port))
+    elif sender.stats["heartbeats"]:
+        results.append(("heartbeat", "OK", "%d sent to %s" % (
+            sender.stats["heartbeats"], sender.console or "the local network (broadcast)")))
+    else:
+        results.append(("heartbeat", "FAIL", "%d failed: pass --console <PlayStation IP>" % sender.heartbeat_failed))
+    received = sender.stats["received"]
+    rate = received / duration if duration else 0.0
+    if not received:
+        fix = ("check that the other app forwards to UDP %d" % port if sender.listen is not None else
+               "start a session in GT7 (on track or in the pits), pass --console <PlayStation IP> "
+               "and allow inbound UDP %d in the firewall" % port)
+        results.append(("receive", "FAIL", "no packets in %.0f s: %s" % (duration, fix)))
+    else:
+        where = " from %s" % sender.console if sender.console else ""
+        sizes = ", ".join("%d bytes" % n for n, _c in sink.sizes.most_common(2))
+        low = "" if rate >= CHECK_MIN_HZ else " (GT7 sends about 60/s: a weak Wi-Fi or a busy device?)"
+        results.append(("receive", "OK" if rate >= CHECK_MIN_HZ else "FAIL",
+                        "%d packets%s, %.1f/s, %s%s" % (received, where, rate, sizes, low)))
+    ok, text, took = up.check()
+    results.append(("relay", "OK" if ok else "FAIL",
+                    text + ("" if took is None else ", post %.0f ms" % (took * 1000))))
+    for n, (part, verdict, text) in enumerate(results, 1):
+        say("check %d/%d %s: %s %s" % (n, len(results), part, verdict, text))
+    failed = [part for part, verdict, _t in results if verdict == "FAIL"]
+    say("RESULT: OK, ready for the session" if not failed else "RESULT: FAIL (%s)" % ", ".join(failed))
+    return 1 if failed else 0
 
 
 def _hostport(value):
@@ -482,6 +573,9 @@ def main(argv=None):
     parser.add_argument("--receive-port", type=int, default=RECEIVE_PORT, help=argparse.SUPPRESS)
     parser.add_argument("--console-port", type=int, default=CONSOLE_PORT, help=argparse.SUPPRESS)
     parser.add_argument("--duration", type=float, help="stop after this many seconds")
+    parser.add_argument("--check", action="store_true",
+                        help="test heartbeat, receive and upload for %.0f s (or --duration), "
+                             "send no telemetry, print OK or FAIL" % CHECK_S)
     args = parser.parse_args(argv)
     if args.listen is not None and args.forward is not None:
         parser.error("--listen and --forward do not combine: the other app already receives")
@@ -503,7 +597,17 @@ def main(argv=None):
         port = args.listen if args.listen is not None else args.receive_port
         _say(f"cannot receive on UDP {port}: {exc}. Another app on this device may own "
              "the port: use --listen with its forwarding, or run the sender on another device")
+        if args.check:
+            _say("RESULT: FAIL (receive)")
+            return 1
         return 2
+    if args.check:
+        try:
+            return self_check(sender, up, duration=args.duration or CHECK_S)
+        except KeyboardInterrupt:
+            return 1
+        finally:
+            sender.sock.close()
     stop = threading.Event()
     poster = threading.Thread(target=up.run, args=(stop,), daemon=True)
     poster.start()
