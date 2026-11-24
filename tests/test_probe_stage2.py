@@ -160,6 +160,17 @@ def t_lap_steps_back_and_distance_jumps_are_listed_per_connection():
         f"a driver change is no jump: the new connection starts its own series: {found}"
 
 
+def t_a_race_reset_is_no_lap_or_distance_step():
+    polls = _polls()
+    for rec in polls[11:]:
+        rec["race"]["entries"][0]["laps"] = 0
+        rec["race"]["entries"][0]["distance_m"] = 10.0
+    reset = [{"t": polls[10]["t"] + 1.0, "text": "race reset"}]
+    found = [j for j in ps.jumps(polls, reset) if j["entry"] == "Team A"]
+    assert found == [], f"the reset starts the race over: {found}"
+    assert [j for j in ps.jumps(polls) if j["entry"] == "Team A"], "without the reset mark it is a step back"
+
+
 def t_a_best_before_the_first_lap_is_marked_carried():
     rows = ps.best_laps(_polls())[ps.tag("cb")]["rows"]
     assert rows and rows[0]["best_ms"] == 95000 and rows[0]["before_a_lap"] is True, rows

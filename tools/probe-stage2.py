@@ -90,7 +90,7 @@ def cmd_kit(args, fetch):
 
 
 def cmd_watch(args, fetch):
-    mon = ps.Monitor(args.out, fetch)
+    mon = ps.Monitor(args.out, fetch, say=lambda line: print(line, flush=True))
     deadline = None if args.duration is None else time.time() + args.duration
     print(f"Writing {os.path.join(args.out, ps.POLL_FILE)}; Ctrl+C ends the watch.")
     try:
@@ -112,7 +112,7 @@ def cmd_race_reset(args, fetch, post):
     if status != 200:
         print(f"The race was not reset: {reply.get('error') or status}")
         return 1
-    rec = ps.mark(args.out, "race reset")
+    rec = ps.mark(args.out, ps.RESET_MARK)
     print(f"{time.strftime('%H:%M:%S', time.localtime(rec['t']))} race reset, state {reply.get('state')}")
     return 0
 

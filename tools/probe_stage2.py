@@ -480,8 +480,13 @@ def changes(polls, marks=()):
     return events
 
 
-def jumps(polls):
-    """Per entry: a lap count that stepped back and distance steps past JUMP_M."""
+RESET_MARK = "race reset"
+
+
+def jumps(polls, marks=()):
+    """Per entry: a lap count that stepped back and distance steps past JUMP_M, for one
+    connection and never across a `race reset` mark, which starts the race over."""
+    resets = [m["t"] for m in marks if m.get("text") == RESET_MARK]
     out, last = [], {}
     for rec in polls:
         for e in (rec.get("race") or {}).get("entries") or []:
@@ -490,6 +495,8 @@ def jumps(polls):
             if prev is None or prev[1].get("tag") != e.get("tag"):
                 continue
             (t0, p) = prev
+            if any(t0 < r <= rec["t"] for r in resets):
+                continue
             if _num(p.get("laps")) is not None and _num(e.get("laps")) is not None and e["laps"] < p["laps"]:
                 out.append({"t": rec["t"], "entry": e["entry"], "kind": "laps_back",
                             "before": p["laps"], "after": e["laps"]})
@@ -552,7 +559,7 @@ def analyse(polls, marks=()):
             "polls": len(polls), "marks": list(marks),
             "senders": sender_summary(polls), "hz": hz_by_minute(polls, marks),
             "positions": positions(polls), "car_counts": car_counts(polls),
-            "changes": changes(polls, marks), "jumps": jumps(polls), "best_laps": best_laps(polls, marks),
+            "changes": changes(polls, marks), "jumps": jumps(polls, marks), "best_laps": best_laps(polls, marks),
             "fastest": final.get("fastest"), "final_state": final.get("state"),
             "blocks": [{"block": b["block"], "start": b["start"], "end": b["end"], "polls": len(b["polls"]),
                         "senders": sender_summary(b["polls"]), "positions": positions(b["polls"]),
