@@ -769,21 +769,18 @@ def _check_league_service(binary, tmp, stub_bin, sheet_url, procs, timeout):
 
 
 def _check_league_live(base, sim, home, until):
-    """The relay posts the live state every two seconds, the Director shows a widget and
-    the Intermission page carries the placed one (#1255)."""
+    """The relay keeps posting the live state, the Director shows a widget and the
+    Intermission page carries the placed one (#1255). The two-second pacing is
+    tests/test_league_service.py's t_client_paces_its_sends_at_the_tick."""
     import league_sim
-    until("the relay never sent the live state", lambda: len(sim.calls(call="live")) >= 3)
+    until("the relay never kept sending the live state", lambda: len(sim.calls(call="live")) >= 3)
     calls = sim.calls(call="live")
-    gaps = [round(calls[i + 1]["time"] - calls[i]["time"], 2) for i in range(len(calls) - 1)]
-    # The fake stamps each call it takes. Without a position change the sender never
-    # goes faster than its two-second tick; that it keeps going shows in the count.
-    assert all(g >= 1.9 for g in gaps), f"one live state every two seconds: {gaps}"
     body = calls[-1]["body"]
     assert (body["ref"], body["race"], body["mode"]) == (league_sim.DEFAULT_REF, "leg-1", "race"), body
     assert body["entries"] == [] and body["track_name"] == "Simulated circuit", \
         f"no roster here: the allowlist rows are checked in tests/test_league_widgets.py: {body}"
     assert calls[-1]["user_agent"].startswith("racecast/"), calls[-1]
-    print(f"  [PASS] the relay posts the live state every two seconds (gaps {gaps[-2:]})")
+    print(f"  [PASS] the relay keeps posting the live state ({len(calls)} calls)")
     status, d = E._get_json(base + "/league/widgets")
     assert status == 200 and [(w["id"], w["shown"]) for w in d["widgets"]] == \
         [("match-score", False), ("standings", False)], d

@@ -3,7 +3,7 @@
 list, the builder slots, the live sender against the simulated service, the relay routes
 and the overlay renderer.
 Run: python3 tests/test_league_widgets.py"""
-import json, os, shutil, subprocess, sys, tempfile, threading, time
+import json, os, shutil, subprocess, sys, tempfile, threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -361,51 +361,69 @@ def t_the_switch_refuses_a_widget_the_event_does_not_list():
 
 
 def t_a_slow_service_never_holds_the_dashboard_tick():
-    class _Relay:
-        def __init__(self):
-            self.ticks = 0
+    import test_console_gate as g
+    ticks, n = [], 20
+    clock = _Clock()
+    started, release, callers = threading.Event(), threading.Event(), []
 
+    def post(*a, **kw):
+        callers.append(threading.current_thread())
+        if threading.current_thread() is sender:
+            started.set()
+            release.wait()
+        return ls.post_live(*a, **kw)
+
+    class _Relay:
         def _tick_ok(self, name):
-            if name == "driver dashboard":
-                self.ticks += 1
+            if name == "league live":
+                ticks.append((started.is_set(), release.is_set(), live.client.held(), len(sim.calls(call="live"))))
 
         def _warn_tick_error(self, name, e):
             raise AssertionError(f"{name}: {e}")
 
     class _Svc:
+        k = 0
+
         def tick(self):
-            pass
+            self.k += 1
+            clock.t += ls.TICK_S
 
         def newest(self):
-            return SNAP
+            return dict(SNAP, entries=SNAP["entries"][::(-1) ** self.k])
 
         def race_state(self):
             return None
 
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("feeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
-    feeds = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(feeds)
+    class _Stop:
+        left = n
+
+        def wait(self, _s):
+            self.left -= 1
+            return self.left < 0
+
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
-        live, _snap = _live(d, sim)
-        sim.fail("call:live", delay=2.5)
-        stop, relay = threading.Event(), _Relay()
+        live, _snap = _live(d, sim, clock=clock, post=post)
+        stop = threading.Event()
         sender = threading.Thread(target=live.run, args=(stop,), daemon=True)
-        ticker = threading.Thread(target=feeds.dashboard_ticks, args=(relay, _Svc(), stop, 0.05, None, live),
-                                  daemon=True)
-        started = time.monotonic()
         sender.start()
-        ticker.start()
-        while not sim.calls(call="live") and time.monotonic() - started < 8:
-            time.sleep(0.05)
-        elapsed = time.monotonic() - started
-        stop.set()
-        live.client.wake()
-        ticker.join(2)
-        sender.join(5)
-        assert elapsed >= 2.4, f"the service answered only after its delay ({elapsed:.2f} s)"
-        assert relay.ticks >= 20, f"the dashboard ticked on while the service took {elapsed:.1f} s: {relay.ticks}"
-        assert live.client.held(), "the slow answer still lands"
+        try:
+            assert started.wait(60), "hang guard: the sender never posted"
+            ticker = threading.Thread(target=g.m.dashboard_ticks, args=(_Relay(), _Svc(), _Stop(), 0, None, live),
+                                      daemon=True)
+            ticker.start()
+            ticker.join(60)
+            assert not ticker.is_alive(), f"the dashboard tick waited for the service request in flight: {ticks}"
+        finally:
+            stop.set()
+            release.set()
+            live.client.wake()
+            sender.join(60)
+        assert not sender.is_alive(), "hang guard: the sender never finished its post"
+        assert ticks == [(True, False, {}, 0)] * n, \
+            f"every tick ran while the service request was still in flight: {ticks}"
+        assert callers == [sender], f"only the sender thread calls the service: {callers}"
+        assert set(live.client.held()) == {"match-score", "standings"} and len(sim.calls(call="live")) == 1, \
+            "the slow answer still lands"
 
 
 def t_a_dead_service_holds_the_value_30_seconds_then_names_the_reason():
