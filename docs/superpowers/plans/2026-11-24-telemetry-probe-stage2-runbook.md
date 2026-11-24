@@ -110,12 +110,26 @@ sheets cover the stage 1 findings:
 
 ## 4. Session timeline
 
-Times are relative to the agreed start. Every block starts with a mark, so the report
-splits by block:
+Times are relative to the agreed start. Every block from B to F starts with a race reset
+and a mark, so each block's race starts fresh and the report splits by block (a mark that
+starts with `block`; any other mark is an observation in the timeline):
 
 ```
+py tools/probe-stage2.py race-reset --out <results>
 py tools/probe-stage2.py mark --out <results> "block B online lobby"
 ```
+
+`race-reset` posts `POST /drivers/race/reset`, a tailnet route that neither desk offers:
+corrections, rejoin marks, retirements and the fastest lap go, tyre compounds, driver
+names and the race recording stay. Without it, a new GT7 session on the same connection
+continues the old race.
+
+The Schedule of the test needs three rows, because the relay's endurance rules follow the
+broadcast stints: row 1 for blocks B, C and lobby 1 of D, row 2 for lobby 2 of D and F,
+row 3, the last, for G. In endurance the lap count (`event race --laps`) applies to the
+last row's lobby only, and a race reset on the last row drops it again (checked on the
+service: a track change keeps it, a reset does not), so block G starts its races with a
+track pick instead of a reset.
 
 ### Block A: bring-up (T-45 to T-15)
 
@@ -171,7 +185,8 @@ Answers Q1, Q4 (first look), starts Q5.
    (one minute of packets as hex lines; it asks for format `~`).
 4. The race runs to its end. Each driver notes their GT7 position at two moments the
    producer calls out (mark `position check 1` and `position check 2`).
-5. At the end: `py tools/probe-stage2.py collect --out <results> --runtime runtime/<profile>`.
+5. At the end: `py tools/probe-stage2.py collect --out <results>` (the race recording
+   CSV and a probe snapshot; the relay keeps running).
 
 Pass (proposal) for Q1: in the report's "0x84 per sender" table every driver's samples
 carry a position, the car counts match the lobby, and the "0x84 against the relay's
@@ -214,7 +229,7 @@ driver's car then leaves the box (spec, "Race distance", "Driver change").
    leave the box one after the other.
 5. Mark `block D lobby 2`. The race runs at least three more laps. The stint 1 drivers
    stop their senders after their car stood in the box for a minute.
-6. Collect as in block B.
+6. `collect` as in block B.
 
 Pass (proposal) for Q3: in "Driver changes" every entry has one `change` inside the
 window, `old status` is `box`, and `anchor carried` is true. "Lap count and distance"
@@ -241,27 +256,31 @@ not judged.
 
 Answers Q6.
 
-1. Mark `block F qualifying`. The lobby host sets qualifying on. The drivers set times.
-2. Mark `block F race`. The race starts from that qualifying. Watch the report's "Best
-   lap (0x78)": a best that appears `before a lap` in the race stream came from
-   qualifying.
+1. Race reset, mark `block F qualifying`. The lobby host sets qualifying on. The drivers
+   set times.
+2. Mark `block F race`. The race starts from that qualifying. In the report's "Best lap
+   (0x78)", the `session start` row at the race start shows the best the race stream
+   starts with: the qualifying time or none.
 3. After two laps Race Control triggers `RED FLAG` on the desk. Mark `block F restart`.
    The lobby host opens a restart lobby; the drivers join, Race Control releases the
    restart. Two more laps.
 
 Pass: none, both are measurements. Report per driver: the best at race start (none, or
-the qualifying time), the best right after the restart (none, the race best, or the
-qualifying best).
+the qualifying time) and the best of the restart lobby's `session start` row (none, the
+race best, or the qualifying best).
 
 ### Block G: Spa 24h Layout, 4 laps (T+100 to T+120)
 
 Answers Q7. One driver is enough; it repeats stage 1's run that found #1263.
 
-1. Producer: `py src/racecast.py event track d60ebc`, then
-   `py src/racecast.py event race --formation off --laps 4`. Mark `block G formation off`.
-2. A 4-lap race on Spa 24h Layout with one pit stop. Collect.
-3. `py src/racecast.py event race --formation on --laps 4`. Mark `block G formation on`.
-   Same race once more. Collect.
+1. Producer: `py src/racecast.py event track d60ebc` (a new layout starts a new race),
+   then `py src/racecast.py event race --formation off --laps 4`. The director switches to
+   the last Schedule row (Next), so the 4 laps apply. Mark `block G formation off`.
+2. A 4-lap race on Spa 24h Layout with one pit stop. `collect`.
+3. `py src/racecast.py event track --clear`, `py src/racecast.py event track d60ebc` (a new
+   race; the last row stays on air with its lap count), then
+   `py src/racecast.py event race --formation on`. Mark `block G formation on`. Same race
+   once more. `collect`.
 
 Pass (proposal): in both runs the entry counts lap 1, the lap count only rises, "Lap
 count and distance" lists nothing for it, and the race state reaches `finished` after
@@ -269,14 +288,15 @@ lap 4.
 
 ### Wrap-up
 
-1. Stop `watch` (Ctrl+C), then:
+1. Stop `watch` (Ctrl+C), then `py tools/probe-stage2.py collect --out <results>`.
+2. Ask each driver for the end of their sender output (the `stopped:` line and the last
+   status lines).
+3. `py src/racecast.py event stop`. Then, with the race recording closed:
    ```
    py tools/probe-stage2.py collect --out <results> --runtime runtime/<profile>
    py tools/probe-stage2.py report <results>
    ```
-2. Ask each driver for the end of their sender output (the `stopped:` line and the last
-   status lines).
-3. `py src/racecast.py event stop`.
+   The second `collect` finds no relay and says so; it copies the files.
 
 ## 5. What the results folder holds
 
@@ -286,12 +306,14 @@ lap 4.
 | `marks.jsonl` | `mark` | the block marks and observations |
 | `probe/probe-*.json` | `watch`, `collect` | full probe snapshots every minute (600 samples per sender) |
 | `race-recording.csv` | `collect` | the relay's race recording |
-| `race-recording-*.sqlite`, `driver-race-audit.jsonl` | `collect --runtime` | the recording file and every desk action |
+| `private/race-recording-*.sqlite` (with `-wal`, `-shm`), `private/driver-race-audit.jsonl` | `collect --runtime` | the recording file and every desk action |
 | `checks/*.txt` | drivers | the self-check outputs |
 | `report.md`, `analysis.json` | `report` | the tables below |
 
-No file carries a driver code, the probe key or the invite id; connection ids are short
-hashes. Driver names stay as typed. The kit folder is not part of the results: its sheets
+Outside `private/` no file carries a driver code, the probe key or the invite id;
+connection ids are short hashes, driver names stay as typed. `private/` holds the relay's
+own files as written: the audit log names connection ids and the crew members who acted,
+so it stays off a public issue. The kit folder is not part of the results: its sheets
 carry the invite link.
 
 `.gt7rec` captures: the relay writes them only from its own GT7 listener, which an
@@ -349,17 +371,26 @@ and the affected section, and the driver guide after #1265.
 
 ## 7. Dress rehearsal and what it cannot cover
 
-`tools/event-sim/scenarios/probe-stage2.toml` plays the producer's side of blocks A, B
-and D against simulated parties: the real relay and Control Center on a demo profile,
-three teams with three drivers each in three lobbies (two changes per team) whose packets
-carry a 0x84 position, the real `racecast-sender.py` as the spectator through the probe
-ingest against a simulated PS5, and the sender's `--check` through the real invite. The
-producer's watch records the run into `OUT/probe-stage2/`, and the scenario asserts the
-report: six changes, all inside the change window with the anchor carried, one probe
-sender, 0x84 seen, no lap count stepping back, the race recording saved. One commentator
-link on all three Schedule rows makes each stint switch a continuation, so the run needs
-no feed and no ffmpeg; the director's Next on a real handover opens the same change
-window.
+`tools/event-sim/scenarios/probe-stage2.toml` plays the producer's side of blocks A, B,
+D and F against simulated parties, every producer step through `tools/probe-stage2.py`
+as this runbook runs it: the real relay and Control Center on a demo profile, `kit` from
+the event's invite, `watch`, `mark`, a `race-reset` between block B and block D, three
+teams with three drivers each whose packets carry a 0x84 position, a change into lobby 2,
+a red flag with a restart lobby and a keep release, a change into lobby 3, the real
+`racecast-sender.py` as the spectator through the probe ingest against a simulated PS5,
+the sender's `--check` through the real invite, then `collect` and `report`. The scenario
+asserts the report: six changes, all inside the change window with the anchor carried,
+four blocks, the restart lobby's session starts, one probe sender, 0x84 seen, no lap or
+distance step across the reset, the race recording saved. It takes about 4 minutes. One
+commentator link on all three Schedule rows makes each stint switch a continuation, so
+the run needs no feed and no ffmpeg; the director's Next on a real handover opens the
+same change window.
+
+Not rehearsed: blocks C and G (a Sport race and the Spa line are GT7's; #1286's tests
+cover the pit-lane counter on the synthetic line), the qualifying session of block F
+(the simulated drivers keep their best across lobbies because the simulation says so,
+which shows the report's `session start` row, not GT7's behaviour), `collect --runtime`
+(the run's app home is temporary) and block E.
 
 What it cannot cover, so the lobby test must:
 

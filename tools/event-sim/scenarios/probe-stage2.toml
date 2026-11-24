@@ -1,14 +1,17 @@
 # The probe stage 2 dress rehearsal (#1116): the runbook's producer side against simulated
-# drivers. The producer's watch (tools/probe_stage2.py) records the run into
-# OUT/probe-stage2/, three teams race three lobbies with GT7 positions in their packets,
-# the real racecast-sender.py sends as the spectator through the probe ingest and runs its
-# self-check through the invite, and the report must find both driver changes of every
-# team inside the change window with the anchor carried. One commentator link on all three
+# drivers, every producer action through tools/probe-stage2.py as the runbook runs it. The
+# kit is written from the invite, the watch records the run into OUT/probe-stage2/, the real
+# racecast-sender.py sends as the spectator through the probe ingest and runs its
+# self-check through the invite. Block B races lobby 1 with GT7 positions in the packets,
+# a race reset starts block D, whose three teams change drivers into lobby 2, block F holds
+# a red flag with a restart lobby, and block D's second change goes into lobby 3. The report
+# must find both changes of every team inside the change window with the anchor carried,
+# the blocks, the restart lobby's session starts and no lap or distance step. One commentator link on all three
 # Schedule rows makes each stint switch (`/next`) a continuation that needs no feed: the
 # rehearsal measures the telemetry, not the program. Real lobbies, the real spectator slot
 # and a real Android device are what it cannot rehearse (see the runbook).
 description = "Probe stage 2 rehearsal: watch, spectator sender, sender self-check, two driver changes, report."
-max_minutes = 10
+max_minutes = 12
 
 [event]
 stints = 3
@@ -56,8 +59,15 @@ do = "start_event"
 expect = ["obs.scene == 'Standby'", "relay.up"]
 
 [[step]]
-id = "watch"
+id = "kit"
 at = "after:start_event"
+role = "probe"
+do = "kit"
+expect = ["len(result('kit').sheets) == 5"]
+
+[[step]]
+id = "watch"
+at = "after:kit"
 role = "probe"
 do = "watch"
 
@@ -77,15 +87,15 @@ do = "approve_drivers"
 expect = ["result('approve_drivers').approved == 9"]
 
 [[step]]
-id = "mark_race"
+id = "mark_b"
 at = "after:approve_drivers"
 role = "probe"
 do = "mark"
-args = { text = "block 2 lobby race" }
+args = { text = "block B online lobby" }
 
 [[step]]
 id = "green"
-at = "after:mark_race"
+at = "after:mark_b"
 role = "drivers"
 do = "start"
 expect = ["race.state == 'racing'"]
@@ -117,15 +127,30 @@ expect = ["race.lap.leader >= 2"]
 timeout = "3m"
 
 [[step]]
-id = "mark_change2"
+id = "race_reset"
 at = "after:lap2"
 role = "probe"
+do = "race_reset"
+
+[[step]]
+id = "mark_d"
+at = "after:race_reset"
+role = "probe"
 do = "mark"
-args = { text = "block 3 change into lobby 2" }
+args = { text = "block D lobby 1" }
+
+[[step]]
+id = "counting_again"
+at = "after:mark_d"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'racing'", "race.lap.leader >= 1"]
+timeout = "90s"
 
 [[step]]
 id = "box1"
-at = "after:mark_change2"
+at = "after:counting_again"
 role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 3"]
@@ -164,15 +189,71 @@ args = { path = "/drivers/race" }
 expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'"]
 
 [[step]]
-id = "mark_change3"
+id = "mark_f"
 at = "after:stint2_lap"
 role = "probe"
 do = "mark"
-args = { text = "block 3 change into lobby 3" }
+args = { text = "block F restart" }
+
+[[step]]
+id = "before_red"
+at = "after:mark_f"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["pluck(result('before_red').entries, 'gap_s')[2] > 0"]
+timeout = "60s"
+
+[[step]]
+id = "red_flag"
+at = "after:before_red"
+role = "race_control"
+do = "red_flag"
+expect = ["race.red_flag"]
+timeout = "20s"
+
+[[step]]
+id = "to_box"
+at = "after:red_flag+3s"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 3"]
+timeout = "90s"
+
+[[step]]
+id = "restart_lobby"
+at = "after:to_box"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "restart_released"
+at = "after:restart_lobby+3s"
+role = "race_control"
+do = "release"
+expect = ["not race.red_flag", "race.state == 'racing'"]
+timeout = "15s"
+
+[[step]]
+id = "leave_box"
+at = "after:restart_released"
+role = "drivers"
+do = "release"
+args = { gaps = "${before_red.entries}" }
+expect = ["page('drivers').driving == 3"]
+timeout = "90s"
+
+[[step]]
+id = "mark_d3"
+at = "after:leave_box+15s"
+role = "probe"
+do = "mark"
+args = { text = "block D lobby 3" }
 
 [[step]]
 id = "box2"
-at = "after:mark_change3"
+at = "after:mark_d3"
 role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 3"]
@@ -228,11 +309,8 @@ id = "report"
 at = "after:stop_spectator"
 role = "probe"
 do = "report"
-expect = ["result('report').changes == 6", "result('report').anchors_carried == 6",
-          "result('report').changes_in_window == 6", "result('report').windows >= 2",
-          "result('report').probe_senders == 1", "result('report').with_0x84 > 0",
-          "result('report').laps_back == 0", "result('report').csv == 200"]
-timeout = "30s"
+expect = ["result('report').changes == 6", "result('report').anchors_carried == 6", "result('report').changes_in_window == 6", "result('report').windows >= 2", "result('report').probe_senders == 1", "result('report').with_0x84 > 0", "result('report').laps_back == 0", "result('report').blocks == 4", "result('report').session_starts >= 3", "result('report').csv"]
+timeout = "60s"
 
 [[step]]
 id = "stop_event"

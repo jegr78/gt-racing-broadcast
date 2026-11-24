@@ -225,11 +225,15 @@ FAIL per part, exit code 0 or 1; it never posts telemetry). The producer's side 
 python3 tools/probe-stage2.py kit --out KIT          # one setup sheet per platform from the invite
 python3 tools/probe-stage2.py watch --out RESULTS    # 1 s poll of /drivers/data, /drivers/race, /telemetry/probe
 python3 tools/probe-stage2.py mark --out RESULTS "block D change"
-python3 tools/probe-stage2.py collect --out RESULTS --runtime runtime/<profile>
+python3 tools/probe-stage2.py race-reset --out RESULTS   # the race over between blocks (tailnet route)
+python3 tools/probe-stage2.py collect --out RESULTS [--runtime runtime/<profile>]   # --runtime after event stop
 python3 tools/probe-stage2.py report RESULTS         # report.md + analysis.json
 ```
 
-The sheets carry the invite link and stay out of the results. A results record carries
+The sheets carry the invite link and stay out of the results; `collect --runtime` puts the
+audit log and the race recording into `RESULTS/private/`, since both name connection ids
+and crew members. The report splits its senders and 0x84 tables by block (marks starting
+with `block`), and no lap or distance step counts across a `race reset` mark. A results record carries
 no driver code, probe key or invite id; a connection id becomes an 8-character hash that
 still joins a sender to its race row. Rates come from counter deltas between polls,
 since the relay's `packets_per_s` is a lifetime average; `dev/s` is the device's own
@@ -711,7 +715,7 @@ action and acts on the controls a person uses; the drivers have no page.
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
-| `probe` | the producer's stage 2 watch and the real `racecast-sender.py` (#1116) | `watch` (interval), `mark` (text), `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (its result is `probe_stage2.facts`) |
+| `probe` | `tools/probe-stage2.py` as the runbook runs it, and the real `racecast-sender.py` (#1116) | `watch`, `mark` (text), `kit` (sheets into the role's temporary folder), `race_reset`, `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (`collect` and `report`; its result is `probe_stage2.facts`) |
 | `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints, positions: 0x84 from the road order), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 
 An action is a mechanism. Which one follows which is the scenario's business, never a
@@ -855,10 +859,11 @@ times on a maintainer machine, start and teardown included:
   flag (the relay shows no gaps while it holds); asserts every gap within 1 s (the exact order is soft: the paces differ, and cars closer than the 0.2 s driver tick may swap).
 
 - `probe-stage2` (#1116): the stage 2 runbook's producer side. The watch records the
-  run into `OUT/probe-stage2/`, three teams change drivers twice with 0x84 in their
-  packets, the real sender sends as the spectator (`[event] probe = true` sets
-  `RACECAST_TELEMETRY_PROBE=1`) and runs its `--check` through the invite; the report
-  step asserts six changes inside the window with the anchor carried.
+  run into `OUT/probe-stage2/`, a race reset opens block D, three teams change drivers
+  twice with 0x84 in their packets and a red flag restart lobby in between, the real
+  sender sends as the spectator (`[event] probe = true` sets `RACECAST_TELEMETRY_PROBE=1`)
+  and runs its `--check` through the invite; the report step asserts six changes inside
+  the window with the anchor carried, four blocks and the restart's session starts.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 

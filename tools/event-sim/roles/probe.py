@@ -1,15 +1,17 @@
-"""The probe stage 2 rehearsal (#1116): the producer's watch and the real sender script.
+"""The probe stage 2 rehearsal (#1116): the producer's tool and the real sender script.
 
-`watch` runs `tools/probe_stage2.Monitor` against the run's relay into
-`OUT/probe-stage2/`; `mark` notes a block. `spectator` starts the real
-`racecast-sender.py` with a probe key against a simulated PS5 on loopback, the stand-in
-for the broadcast's spectator console; `check` registers on the invite and runs the
-sender's `--check` against its own simulated PS5. `report` stops the watch, saves the
-race recording CSV and writes `report.md` and `analysis.json`; its result is
-`probe_stage2.facts`. Needs `[event] probe = true` for the spectator."""
+Every producer action runs `tools/probe-stage2.py` as the runbook does, against the
+run's relay and into `OUT/probe-stage2/`: `watch`, `mark`, `kit` (into the role's
+temporary folder, since the sheets carry the invite link), `race_reset`, and `report`,
+which stops the watch, runs `collect` and `report` and returns `probe_stage2.facts` from
+`analysis.json`. `spectator` starts the real `racecast-sender.py` with a probe key
+against a simulated PS5 on loopback, the stand-in for the broadcast's spectator
+console; `check` registers on the invite and runs the sender's `--check` against its own
+simulated PS5. Needs `[event] probe = true` for the spectator."""
 import http.client
 import importlib.util
 import io
+import json
 import os
 import shutil
 import socket
@@ -23,15 +25,14 @@ import probes
 from roles import Role, StepError, register
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.join(ROOT, "tools"))
-import probe_stage2  # noqa: E402
-
 SENDER = os.path.join(ROOT, "src", "relay", "racecast-sender.py")
+TOOL = os.path.join(ROOT, "tools", "probe-stage2.py")
 RESULTS = "probe-stage2"
 RECORDING_S = 90.0
 HZ = 60
 SPECTATOR_MPS = 40.0
 CHECK_TIMEOUT_S = 60.0
+TOOL_TIMEOUT_S = 60.0
 CHECK_DEVICE = "198.51.100.250"
 
 
@@ -108,15 +109,24 @@ def _sender_args(ps5, rx_port):
             "--console-port", str(ps5.port)]
 
 
+def _stop(proc, log):
+    proc.terminate()
+    try:
+        proc.wait(10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(5)
+    log.close()
+
+
 @register
 class ProbeRole(Role):
-    """`watch` (interval), `mark` (text), `spectator` (name, position, cars),
+    """`watch`, `mark` (text), `kit`, `race_reset`, `spectator` (name, position, cars),
     `stop_spectator`, `check` (entry, segment, name), `report`."""
     kind = "probe"
 
     def open(self):
-        self.monitor = self.watcher = None
-        self._stop = threading.Event()
+        self.watcher = None          # (process, log handle)
         self.spectator = None        # (ps5, process, log handle)
         self.tmp = tempfile.mkdtemp(prefix="probe-stage2-")
         self.out = os.path.join(self.ctx.out_dir or self.tmp, RESULTS)
@@ -131,18 +141,41 @@ class ProbeRole(Role):
     def _length(self):
         return float(self.ctx.event.get("track_length_m", drive.DEFAULT_TRACK_M))
 
+    def _tool(self, *argv):
+        """One `probe-stage2.py` command run to its end; StepError unless it exits 0."""
+        try:
+            done = subprocess.run([sys.executable, TOOL, "--relay", self.ctx.url("relay"), *argv],
+                                  capture_output=True, text=True, errors="replace", timeout=TOOL_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            raise StepError(f"probe-stage2.py {argv[0]} did not end") from None
+        if done.returncode:
+            raise StepError(f"probe-stage2.py {argv[0]}: {(done.stdout + done.stderr).strip()}")
+        return done.stdout
+
     def act_watch(self, args):
         if self.watcher is not None:
             raise StepError("the watch runs already")
-        self.monitor = probe_stage2.Monitor(self.out, self._fetch, say=lambda line: None)
-        interval = float(args.get("interval", probe_stage2.POLL_S))
-        self.watcher = threading.Thread(target=self.monitor.run, args=(self._stop.is_set,),
-                                        kwargs={"interval": interval}, daemon=True)
-        self.watcher.start()
+        os.makedirs(self.out, exist_ok=True)
+        log = io.open(os.path.join(self.out, "watch.log"), "w", encoding="utf-8")  # noqa: SIM115  kept open for the process
+        proc = subprocess.Popen([sys.executable, TOOL, "--relay", self.ctx.url("relay"), "watch", "--out", self.out],
+                                stdout=log, stderr=subprocess.STDOUT)
+        self.watcher = (proc, log)
         return {"out": RESULTS}
 
     def act_mark(self, args):
-        return probe_stage2.mark(self.out, args.get("text") or "mark")
+        text = str(args.get("text") or "mark")
+        self._tool("mark", "--out", self.out, text)
+        return {"text": text}
+
+    def act_kit(self, args):
+        """The setup sheets of the event's invite, with the run's relay as the public base."""
+        folder = os.path.join(self.tmp, "kit")
+        self._tool("kit", "--out", folder, "--base", self.ctx.url("relay"))
+        return {"sheets": sorted(os.listdir(folder))}
+
+    def act_race_reset(self, args):
+        self._tool("race-reset", "--out", self.out)
+        return {"ok": True}
 
     def act_spectator(self, args):
         if self.spectator is not None:
@@ -169,13 +202,7 @@ class ProbeRole(Role):
     def _end_spectator(self):
         ps5, proc, log = self.spectator
         self.spectator = None
-        proc.terminate()
-        try:
-            proc.wait(10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(5)
-        log.close()
+        _stop(proc, log)
         ps5.close()
 
     def act_check(self, args):
@@ -204,43 +231,26 @@ class ProbeRole(Role):
             fh.write(done.stdout)
         return {"ok": done.returncode == 0, "lines": lines, "result": lines[-1] if lines else ""}
 
-    def _save_csv(self):
-        base = self.ctx.url("relay").rsplit(":", 1)
-        conn = http.client.HTTPConnection("127.0.0.1", int(base[1]), timeout=30)
-        try:
-            conn.request("GET", "/drivers/race/recording/csv")
-            resp = conn.getresponse()
-            body = resp.read()
-        finally:
-            conn.close()
-        if resp.status == 200:
-            with io.open(os.path.join(self.out, "race-recording.csv"), "wb") as fh:
-                fh.write(body)
-        return resp.status
-
     def act_report(self, args):
         if self.watcher is None:
             raise StepError("the watch never started")
-        self._stop.set()
-        self.watcher.join(10)
-        try:
-            csv_status = self._save_csv()
-        except (OSError, http.client.HTTPException) as exc:
-            csv_status = str(exc)
-        polls, marks = probe_stage2.load(self.out)
-        a = probe_stage2.analyse(polls, marks)
-        with io.open(os.path.join(self.out, "report.md"), "w", encoding="utf-8") as fh:
-            fh.write(probe_stage2.report_md(a))
-        facts = probe_stage2.facts(a)
-        return dict(facts, csv=csv_status)
+        proc, log = self.watcher
+        self.watcher = None
+        _stop(proc, log)
+        self._tool("collect", "--out", self.out)
+        self._tool("report", self.out)
+        with io.open(os.path.join(self.out, "analysis.json"), encoding="utf-8") as fh:
+            facts = json.load(fh)["facts"]
+        return dict(facts, csv=os.path.isfile(os.path.join(self.out, "race-recording.csv")))
 
     def close(self):
         out = []
-        self._stop.set()
         if self.watcher is not None:
-            self.watcher.join(10)
-            if self.watcher.is_alive():
-                out.append(("soft", "the probe watch did not stop in time"))
+            proc, log = self.watcher
+            if proc.poll() is not None:
+                out.append(("hard", f"the probe watch ended early with exit code {proc.returncode}"))
+            _stop(proc, log)
+            self.watcher = None
         if self.spectator is not None:
             proc = self.spectator[1]
             if proc.poll() is not None:

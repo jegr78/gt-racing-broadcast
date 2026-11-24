@@ -298,7 +298,7 @@ def t_the_registry_has_every_party_and_its_actions():
             "commentator": {"open", "submit_link", "chat"},
             "viewer": {"open", "read"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"},
-            "probe": {"watch", "mark", "spectator", "stop_spectator", "check", "report"}}
+            "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
     for kind, actions in want.items():
         assert kind in REG, f"role {kind} is not registered"
         assert set(REG[kind].action_names()) == actions, f"{kind}: {sorted(REG[kind].action_names())}"
@@ -1393,7 +1393,9 @@ def t_the_probe_role_needs_its_watch_and_the_invite():
             fails(lambda: role.do("report", {}), "watch never started")
             fails(lambda: role.do("check", {"entry": "Apex Works #11"}), "no invite link")
             role.do("mark", {"text": "block 1"})
-            _polls, marks = probe_role.probe_stage2.load(os.path.join(d, probe_role.RESULTS))
+            sys.path.insert(0, os.path.join(ROOT, "tools"))
+            import probe_stage2
+            _polls, marks = probe_stage2.load(os.path.join(d, probe_role.RESULTS))
             assert [m["text"] for m in marks] == ["block 1"], marks
         finally:
             left = role.close()
@@ -1788,7 +1790,8 @@ def t_the_probe_rehearsal_changes_drivers_twice_and_asserts_the_report():
     loaded = scenario.load(path, REG)
     assert loaded.event.get("probe") is True, "the spectator needs the relay's probe ingest"
     lobbies = [s.args.get("stint") for s in loaded.steps if s.role == "drivers" and s.do == "lobby"]
-    assert lobbies == [2, 3], f"two driver changes per team: {lobbies}"
+    assert lobbies == [2, 2, 3], f"a change into lobby 2, its restart lobby, a change into lobby 3: {lobbies}"
+    assert any(s.role == "probe" and s.do == "race_reset" for s in loaded.steps), "a block starts with a race reset"
     report = [s for s in loaded.steps if s.role == "probe" and s.do == "report"]
     checks = " ".join(report[0].expect) if report else ""
     for fact in ("changes == 6", "anchors_carried == 6", "changes_in_window == 6", "probe_senders == 1"):
