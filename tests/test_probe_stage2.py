@@ -248,6 +248,7 @@ def t_tables_split_by_block_marks_and_observations_stay_in_the_timeline():
     assert a_rows["Team A"]["polls"] == 7, f"block B holds the polls up to block C only: {a_rows}"
     text = ps.report_md(a)
     assert "### block B online lobby" in text and "### block C sport" in text, text
+    assert text.count("0x84 per sender:") == 2, "the runbook names this table per block"
     assert "### position check 1" not in text, "an observation is no block"
 
 

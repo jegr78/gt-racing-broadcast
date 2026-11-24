@@ -50,7 +50,7 @@ once, a second person can type them with `probe-stage2.py mark` on the producer 
 1. Send the driver poll (section 8) and collect the answers for the report.
 2. Pick the test group from the answers: two or three drivers, at least one Android
    sender device, one driver who can host lobbies.
-3. Agree with the league on: a date and two hours, the lobby settings of blocks B, D and
+3. Agree with the league on: a date and about three hours (block A starts 45 minutes before the first lobby, block G ends two hours after it), the lobby settings of blocks B, D and
    F (track, car class, laps or time, qualifying on for block F), who hosts, who joins
    the broadcast PS5 as spectator, and which entries and stints the test drivers register
    for. The relay needs a roster entry per test car and, for block D, stint labels in
@@ -69,7 +69,7 @@ the Python script on every platform.
 2. Machine `.env` in the repo root: `RACECAST_TELEMETRY_PROBE=1` (block B's spectator
    sender uses the probe ingest).
 3. Dry run, the dress rehearsal on simulated parties (section 7), on any machine with
-   Playwright's Chromium (on local Linux it runs inside the E2E unit, about 3 minutes):
+   Playwright's Chromium (on local Linux it runs inside the E2E unit, about 4 minutes):
    ```
    python3 tools/event-sim/event_sim.py --scenario probe-stage2 --out <dir> --no-skips
    ```
@@ -141,27 +141,38 @@ Answers nothing by itself; every later block depends on it.
    py src/racecast.py relay start
    py src/racecast.py funnel on
    py src/racecast.py event start
-   py src/racecast.py event race --formation on --laps N
+   py src/racecast.py event race --formation on
    py src/racecast.py event invite
    py tools/probe-stage2.py kit --out <kit>
    py tools/probe-stage2.py watch --out <results>
    ```
    `event start` creates the invite; `event invite --new` only renews it while an event
-   runs (#1265), and a renewed invite needs new sheets and new registrations. The lap
-   count is the league's choice for block B. `kit` writes `windows.md`, `macos.md`,
+   runs (#1265), and a renewed invite needs new sheets and new registrations. No lap count
+   yet: in endurance it applies to the last Schedule row's lobby only, so blocks B to F
+   run without one and Race Control ends a race with "Final lap" on the desk where
+   needed; block G sets it. `kit` writes `windows.md`, `macos.md`,
    `linux.md`, `iphone.md` and `android.md`; they carry the invite link, so they go to
    the test drivers only. `watch` runs in its own terminal until the end of the session.
 2. Producer: send each driver their sheet. Race Control opens the desk.
 3. Drivers: register on the invite page, start a GT7 session, run the self-check
-   (`... --check`) and post the whole output. Race Control approves the registrations.
+   (`... --check`) and post the lines from `checking for 12 s` to `RESULT`, without the
+   command line, which carries their code. Race Control approves the registrations. A
+   check holds its entry's live slot for 20 s like a running sender: with two senders of
+   a team already live, a check for that team is refused (409), so check before the
+   second driver starts.
 4. Producer: in the watch table every driver shows up with `dev/s` near 60 once their
    sender runs.
 
 Pass (proposal): every driver's check prints `RESULT: OK`. A driver whose check fails
 follows the sheet's "If the check fails" or drops out of the blocks that need them.
 
-Record: each check output (into `<results>/checks/<name>.txt`), platform, device model,
-OS version and, for Android, the battery settings the driver changed.
+Record: each check output with `py tools/probe-stage2.py save-check --out <results>
+"<label>" <pasted file>` (it drops LAN addresses and a code), platform, device model, OS
+version and, for Android, the battery settings the driver changed.
+
+On Windows the sender binds UDP 33740 exclusively, so a check next to SimHub on the same
+port fails with `cannot receive on UDP 33740` instead of sharing the port unnoticed. To
+be confirmed on the streaming PC before the session.
 
 Note from stage 1: a sender on a device of the producer's tailnet resolves the Funnel
 host to its tailnet address and does not test Funnel (#1265). The drivers at home take
@@ -178,7 +189,8 @@ Answers Q1, Q4 (first look), starts Q5.
    ```
    python3 racecast-sender.py --url https://<host>/console/probe/ingest --key KEY --name Spectator
    ```
-   `KEY` from `curl -s http://127.0.0.1:8088/telemetry/probe` on the producer PC. The
+   `KEY` from `curl.exe -s http://127.0.0.1:8088/telemetry/probe` in PowerShell on the
+   producer PC. The
    probe ingest keeps the spectator out of the roster and the race.
 3. Optional raw capture of the spectator's packets for later analysis, on another device
    of that network:
@@ -190,8 +202,10 @@ Answers Q1, Q4 (first look), starts Q5.
    CSV and a probe snapshot; the relay keeps running).
 
 Pass (proposal) for Q1: in the report's "0x84 per sender" table every driver's samples
-carry a position, the car counts match the lobby, and the "0x84 against the relay's
-order" table agrees in most polls (a difference right after an overtake is expected,
+carry a position and the car counts match the lobby. In the per-entry table of "0x84 race
+position against the relay's order" the order of the test cars by their GT7 positions
+matches the relay's order of the same cars in most polls (the other cars of the lobby
+send nothing and sit between them; a difference right after an overtake is expected,
 since the relay polls once a second). The noted positions match the samples at the marks.
 
 Q4: the spectator's row in "Senders" and "0x84 per sender". Possible results: no packets
@@ -249,17 +263,18 @@ charging, on the home Wi-Fi.
 2. After block D, optional: ten minutes with the screen off and the wake lock held, then
    ten minutes without the wake lock (`termux-wake-unlock`), mark both.
 
-Pass (proposal): in "Hz per minute" the Android sender has no low minute (below 59 Hz on
-the device), interruptions 0, `max idle s` below 2. The screen-off minutes are reported,
-not judged.
+Pass (proposal): in "Hz per minute" the Android sender has no `low` minute among its
+minutes without a gap (below 59 Hz on the device) and no interruptions there. Rates
+count only the seconds a sender sent, so every gap shows as an `idle` minute with its
+idle seconds: those are reported with what the driver saw, the menus between lobbies
+included, and judged one by one. The screen-off minutes are reported, not judged.
 
 ### Block F: qualifying best and restart lobby (T+80 to T+100)
 
 Answers Q6.
 
-1. Race reset, mark `block F qualifying`. The lobby host sets qualifying on. The drivers
-   set times.
-2. Mark `block F race`. The race starts from that qualifying. In the report's "Best lap
+1. Mark `block F qualifying`. The lobby host sets qualifying on. The drivers set times.
+2. Race reset, mark `block F race`. The race starts from that qualifying. In the report's "Best lap
    (0x78)", the `session start` row at the race start shows the best the race stream
    starts with: the qualifying time or none.
 3. After two laps Race Control triggers `RED FLAG` on the desk. Mark `block F restart`.
@@ -305,15 +320,17 @@ lap 4.
 | `poll.jsonl` | `watch` | one record per second: every driver connection (packets, loss, duplicates, device counters, post latency, the latest sample with 0x84 position, car count, lap, 0x78 best), the race (state, change window, every entry's distance, laps, status, GT7 position) and every probe sender |
 | `marks.jsonl` | `mark` | the block marks and observations |
 | `probe/probe-*.json` | `watch`, `collect` | full probe snapshots every minute (600 samples per sender) |
-| `race-recording.csv` | `collect` | the relay's race recording |
+| `private/race-recording.csv` | `collect` | the relay's race recording, with driver names |
+| `private/names.json` | `watch` | the names behind the pseudonyms |
 | `private/race-recording-*.sqlite` (with `-wal`, `-shm`), `private/driver-race-audit.jsonl` | `collect --runtime` | the recording file and every desk action |
-| `checks/*.txt` | drivers | the self-check outputs |
+| `checks/*.txt` | `save-check` | the self-check outputs, without LAN addresses or a code |
 | `report.md`, `analysis.json` | `report` | the tables below |
 
-Outside `private/` no file carries a driver code, the probe key or the invite id;
-connection ids are short hashes, driver names stay as typed. `private/` holds the relay's
-own files as written: the audit log names connection ids and the crew members who acted,
-so it stays off a public issue. The kit folder is not part of the results: its sheets
+Outside `private/` no file carries a driver code, the probe key, the invite id or a driver
+name: connection ids are short hashes and drivers are `Driver 1`, `Driver 2`, ... in the
+order the watch saw them. `private/` holds the names behind them and the relay's own
+files as written (the race recording names the drivers, the audit log connection ids and
+the crew members who acted), so it stays off a public issue. The kit folder is not part of the results: its sheets
 carry the invite link.
 
 `.gt7rec` captures: the relay writes them only from its own GT7 listener, which an
@@ -406,7 +423,7 @@ What it cannot cover, so the lobby test must:
 - People: a driver who joins late, leaves the box before the window, or types a wrong
   entry.
 
-The real recordings of `~/Documents/Racecast-Analysen` (Grand Valley) can drive the
+The maintainer's own Grand Valley recordings (`.gt7rec`) can drive the
 stage 1 tools (`tools/gt7-sim-ps5.py REC --loop` with a sender) for a by-hand check of
 the sender on a real packet stream; the committed scenario uses synthetic data so it
 runs on any machine.

@@ -669,7 +669,7 @@ def _positions_tables(positions, car_counts):
                  [(r["entry"], r["polls"], r["with_0x84"], r["agree"], r["agree_pct"], r["relay_mismatch"],
                    r["values"])
                   for r in positions])
-    return out + _table(["name", "samples", "with position", "positions", "car counts"],
+    return out + ["0x84 per sender:", ""] + _table(["name", "samples", "with position", "positions", "car counts"],
                         [(c["name"], c["samples"], c["with_position"], c["positions"], c["car_counts"])
                          for c in car_counts.values() if c["samples"]])
 

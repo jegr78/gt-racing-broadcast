@@ -227,13 +227,18 @@ python3 tools/probe-stage2.py watch --out RESULTS    # 1 s poll of /drivers/data
 python3 tools/probe-stage2.py mark --out RESULTS "block D change"
 python3 tools/probe-stage2.py race-reset --out RESULTS   # the race over between blocks (tailnet route)
 python3 tools/probe-stage2.py collect --out RESULTS [--runtime runtime/<profile>]   # --runtime after event stop
+python3 tools/probe-stage2.py save-check --out RESULTS LABEL FILE   # a check output without addresses or code
 python3 tools/probe-stage2.py report RESULTS         # report.md + analysis.json
 ```
 
 The sheets carry the invite link and stay out of the results; `collect --runtime` puts the
 audit log and the race recording into `RESULTS/private/`, since both name connection ids
 and crew members. The report splits its senders and 0x84 tables by block (marks starting
-with `block`), and no lap or distance step counts across a `race reset` mark. A results record carries
+with `block`), and no lap or distance step or change counts across a `race reset` mark.
+Rates count only the poll intervals in which a counter rose (`idle` minutes show the
+rest), 0x84 agreement compares the order of GT7's positions among the cars that carry one
+with the relay's order, and the watch writes driver names as `Driver N` with the names in
+`private/names.json`; the race recording CSV goes to `private/` too. A results record carries
 no driver code, probe key or invite id; a connection id becomes an 8-character hash that
 still joins a sender to its race row. Rates come from counter deltas between polls,
 since the relay's `packets_per_s` is a lifetime average; `dev/s` is the device's own
