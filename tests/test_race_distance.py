@@ -2127,6 +2127,8 @@ def t_each_entry_best_lap_is_its_fastest_counted_lap_and_follows_a_void():
     race.void_fastest()
     assert race.best_laps()["A"] == race.fastest["ms"] > best["A"], \
         f"a voided lap is no entry's best lap any more: {race.best_laps()}"
+    race._entries["B"].counted = [{"entry": "B", "driver": "Marco", "ms": ms} for ms in (61000, 60000, 60500)]
+    assert race.best_laps()["B"] == 60000, "the fastest counted lap, not the latest"
 
 
 def t_voiding_a_class_fastest_lap_brings_back_the_next_one_of_that_class():

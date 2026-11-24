@@ -190,8 +190,10 @@ def t_a_resend_rebuilds_the_finished_race_and_replaces_the_draft():
         exp.step()
         first, second = [c["body"] for c in sim.calls(call="result")]
         assert second["entries"][0]["laps"] == 9 and second["finished_at"] == first["finished_at"], second
-        (ev,) = second["events"]
-        assert ev["kind"] == "correction" and ev["entry"] == "A" and "cut at T1" in ev["detail"], ev
+        assert [e["kind"] for e in second["events"]] == ["correction"], \
+            f"a correction after the finish is in the resend: {second['events']}"
+        ev = second["events"][0]
+        assert ev["entry"] == "A" and "cut at T1" in ev["detail"], ev
         assert "rc:Anna" not in json.dumps(second), "who acted stays on the producer's machine"
         assert sim.results[(REF, "leg-1")]["entries"][0]["laps"] == 9, "the resend replaced the draft"
         assert src.stored[-1]["body"] == second, "the recording keeps the corrected result"
