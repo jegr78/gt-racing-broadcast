@@ -97,7 +97,7 @@ def _correction_detail(rec):
 
 
 def steward_events(records, disconnects, since, until):
-    """The Result's events between `since` and `until`: red flags and releases, Race
+    """The Result's events between `since` and `until`: red flags, Race
     Control's distance and pit stop corrections, confirmed disconnects. Never who acted."""
     out = []
     for rec in records:
@@ -108,8 +108,6 @@ def steward_events(records, disconnects, since, until):
             mode = rec.get("mode") if isinstance(rec.get("mode"), str) else ""
             out.append((rec["ts"], {"kind": "red_flag", "at": iso(rec["ts"]),
                                     "detail": _detail(f"red flag, restart {mode}".strip(", "))}))
-        elif action == "release":
-            out.append((rec["ts"], {"kind": "red_flag", "at": iso(rec["ts"]), "detail": "race released"}))
         elif action == "correct" and isinstance(rec.get("entry"), str):
             out.append((rec["ts"], {"kind": "correction", "at": iso(rec["ts"]), "entry": rec["entry"],
                                     "detail": _correction_detail(rec)}))
@@ -395,7 +393,8 @@ class Exporter:
         else:
             kept = [r for r in self._source.recording_results() if (r.get("ref"), r.get("race")) == (ev["ref"], race)]
             if not kept:
-                return {"ok": False, "error": f"race {race} has no result in the race recording yet"}
+                return {"ok": False, "error": f"race {race} has no result in the race recording yet; "
+                                             "a race finished before the event was loaded goes from Recording"}
             doc = kept[-1]["body"]
         self._queue(doc)
         return {"ok": True, "ref": ev["ref"], "race": race, "rebuilt": live}
@@ -478,9 +477,12 @@ class Exporter:
             if cfg is None:
                 raise league_service.ServiceError(problem or "no league service configured")
             send(cfg, job["doc"], self._dir, post=self._post, fetch=self._fetch)
-        except league_service.ServiceError as e:
-            if cfg is None:
-                record_status(results_path(self._dir), key[0], key[1], state="failed", error=str(e))
+        except (league_service.ServiceError, OSError) as e:
+            if cfg is None or isinstance(e, OSError):
+                try:
+                    record_status(results_path(self._dir), key[0], key[1], state="failed", error=str(e))
+                except OSError:
+                    pass  # the retry below still runs
             with self._lock:
                 if self._jobs.get(key) is job:
                     job["tries"] += 1

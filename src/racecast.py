@@ -6773,8 +6773,20 @@ def _pick_stored_result(docs, race=None, index=None):
 
 
 def _relay_league_send(race):
-    return _relay_post_json(f"http://127.0.0.1:{_relay_port()}/league/result/send",
-                            {"race": race} if race else {}, timeout=5)
+    """The relay's answer to a resend, its refusal reason included."""
+    try:
+        return _relay_post_json(f"http://127.0.0.1:{_relay_port()}/league/result/send",
+                                {"race": race} if race else {}, timeout=5)
+    except http_util.HTTPError as e:
+        try:
+            reply = json.loads(e.read().decode("utf-8"))
+        except ValueError:
+            reply = None
+        finally:
+            e.close()
+        if isinstance(reply, dict) and reply.get("error"):
+            return {"ok": False, "error": str(reply["error"])}
+        raise
 
 
 def league_result_send_data(race=None, recording=None, index=None, ref=None, rc=None, runtime=None,
@@ -6812,7 +6824,7 @@ def league_result_send_data(race=None, recording=None, index=None, ref=None, rc=
         return {"ok": False, "error": problem}
     event = league_service.read(league_service.path_in(runtime))
     ref = ref or doc.get("ref") or (event or {}).get("ref")
-    race = race or doc.get("race")
+    race = race or doc.get("race") or (event or {}).get("current")
     if not ref or not race:
         return {"ok": False, "error": "this result names no league race: give the race and the reference"}
     problem = league_service.ref_problem(ref)

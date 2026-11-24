@@ -237,8 +237,9 @@ def t_steward_events_carry_red_flags_corrections_and_confirmed_disconnects_of_th
           {"entry": "B", "state": "confirmed", "last_packet": 10.0, "opened": 20.0}]
     events = lr.steward_events(records, dc, since, 200.0)
     assert [(e["kind"], e.get("entry")) for e in events] == [
-        ("red_flag", None), ("disconnect", "A"), ("red_flag", None), ("correction", "B")], events
-    assert events[0]["detail"] == "red flag, restart neutralise" and events[3]["detail"] == "-1 pit stop"
+        ("red_flag", None), ("disconnect", "A"), ("correction", "B")], \
+        f"a release is no second red flag and a compound change no steward event: {events}"
+    assert events[0]["detail"] == "red flag, restart neutralise" and events[2]["detail"] == "-1 pit stop"
     assert events[1]["at"] == lr.iso(130.0) and "12 s" in events[1]["detail"]
     long = lr.steward_events([{"ts": 1.0, "action": "correct", "entry": "A", "metres": 1.0,
                                "reason": "x" * 400}], [], 0, 2)
@@ -322,7 +323,8 @@ def t_refresh_files_the_current_status():
 
 
 def t_the_exporter_with_the_real_race_service_and_recording():
-    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+    d = tempfile.mkdtemp()      # the recorder keeps its SQLite file open, which Windows will not delete
+    with league_sim.LeagueSim(key=KEY) as sim:
         path = os.path.join(d, "driver-race.json")
         dr.write_settings(path, {"formation": False})
         clock = [0.0]
@@ -375,6 +377,41 @@ def t_the_sender_thread_stops_with_the_relay():
         exp._wake.set()
         t.join(5)
         assert not t.is_alive() and sim.calls(call="result"), "a queued result goes out on the thread"
+
+
+def t_an_unarmed_exporter_ignores_the_race_until_the_relay_owns_its_port():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        exp, src, wall, path = _setup(d, sim, armed=False)
+        _run_race(exp, src, wall)
+        assert not ls.read(path)["finished"] and not src.stored and exp.status()["watching"] is False, \
+            "a relay that does not own its port touches no league file"
+        exp.arm()
+        _run_race(exp, src, wall, ("racing", "finished"))
+        assert ls.read(path)["finished"] and exp.status()["watching"], "armed, the next finish exports"
+
+
+def t_a_status_file_that_cannot_be_written_still_backs_off():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        exp, src, wall, _path = _setup(d, sim)
+        _run_race(exp, src, wall)
+
+        def broken(*_a, **_k):
+            raise OSError("disk full")
+        exp._post = broken
+        exp.step()
+        assert exp.status()["queued"] == [{"race": "leg-1", "tries": 1}], "an OSError counts as a failed try"
+        assert exp.step() > 1.0, "and waits before the next one instead of posting every tick"
+
+
+def t_an_event_loaded_after_the_finish_points_to_the_recording():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        src, wall = _Source(), _Clock()
+        exp = lr.Exporter(d, lambda: (_cfg(sim), ""), src, wall=wall, clock=wall)
+        _run_race(exp, src, wall)
+        assert src.stored[-1]["race"] is None, "no event, the recording keeps a result without a race"
+        ls.store(ls.path_in(d), REF, ls.fetch_event(_cfg(sim), REF))
+        r = exp.resend()
+        assert not r["ok"] and "goes from Recording" in r["error"], r
 
 
 if __name__ == "__main__":

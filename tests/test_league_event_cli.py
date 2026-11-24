@@ -216,6 +216,36 @@ def t_event_result_verb_sends_and_prints():
         assert "pick 1 to 1" in err.getvalue()
 
 
+def t_a_result_without_a_race_goes_to_the_loaded_events_current_race():
+    REF = league_sim.DEFAULT_REF
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        rc = _rc(sim.url)
+        m.league_event_load_data(REF, rc=rc, path=ls.path_in(d))
+        rec = _recording_with(d, _kept(None, None))
+        r = m.league_result_send_data(recording=rec, index=1, rc=rc, runtime=d, relay_running=_no_relay)
+        assert r["ok"] and (r["ref"], r["race"]) == (REF, "leg-1"), \
+            f"a race finished before the event was loaded goes out as the current race: {r}"
+
+
+def t_the_relays_refusal_reaches_the_operator_with_its_reason():
+    sys.path.insert(0, HERE)
+    import test_league_routes as lrt
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=lrt.KEY) as sim:
+        srv, port, exp, src, wall, _obs, _gfx = lrt._stack(d, sim)
+        orig = m._relay_port
+        m._relay_port = lambda: port
+        try:
+            r = m.league_result_send_data(rc=_rc(sim.url, lrt.KEY), runtime=d, relay_running=lambda: True)
+            assert r == {"ok": False, "error": "race leg-1 has no result in the race recording yet; "
+                                               "a race finished before the event was loaded goes from Recording"}, r
+            lrt._run_race(exp, src, wall)
+            r = m.league_result_send_data(rc=_rc(sim.url, lrt.KEY), runtime=d, relay_running=lambda: True)
+            assert r["ok"] and r["via"] == "relay" and r["rebuilt"] is True, r
+        finally:
+            m._relay_port = orig
+            srv.shutdown()
+
+
 def _profile_home(td, text):
     prof = os.path.join(td, "profiles", "demo")
     os.makedirs(prof)

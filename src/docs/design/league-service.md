@@ -54,7 +54,9 @@ After the last listed race the relay keeps sending live state but exports no fur
 result, and the Director Panel says so. `league-event.json` keeps the `finished` mark,
 the finish time and the `done` mark next to the current race, so a relay restart between
 the finish and the next start still moves on. The first race state a relay sees is its
-baseline: a restart inside a finished race sends nothing again.
+baseline: a restart inside a finished race sends nothing again. The Director's hand pick
+names the race that runs next: it clears the `finished` and `done` marks, so a resend
+of the picked race comes from the recording, never from the live race just run.
 
 Whether the widgets appear on the public timing page is a separate profile switch,
 default off.
@@ -147,7 +149,10 @@ roster, the saved race actions and `driver-race-audit.jsonl`, does not work afte
 event: a race reset deletes the fastest lap and the corrections, `event start` clears
 the actions, each car's counted laps live in memory only, the audit log has no event
 boundary, and `event stop` clears the reference and the race list. A recording without
-a stored result (one from before this version) cannot be sent; the CLI says so.
+a stored result (one from before this version) cannot be sent; the CLI says so. A race
+that finished before the event was loaded is kept without a reference and race; sent
+from the recording, it goes out for the loaded event's current race unless the operator
+names another (`--race`, `--ref`).
 
 The relay builds the Result from the race service and the recording:
 
@@ -157,7 +162,8 @@ The relay builds the Result from the race service and the recording:
   lap any more. A fastest lap Race Control sets by hand is its car's best lap.
 - `fastest` is the race service's confirmed fastest lap with the roster team, never the
   fastest raw lap time.
-- `events` are the audit log's `red_flag` and `release` actions (kind `red_flag`), its
+- `events` are the audit log's `red_flag` actions (kind `red_flag`, one per flag; the
+  release is no event, since the contract has no kind for it), its
   `correct` actions with metres, pit stops and reason (kind `correction`) and the
   recording's confirmed disconnects, dated by their last packet (kind `disconnect`).
   The window starts at the latest of the recording's start, the previous finish and the
