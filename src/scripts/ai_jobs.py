@@ -593,12 +593,16 @@ def _ignore(_sig, _frame):
     pass  # A signal during cleanup must not skip the group kill.
 
 
+def _termination_signals():
+    return [sig for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)) if sig is not None]
+
+
 @contextlib.contextmanager
 def _cleanup_shielded():
     """Ignore SIGTERM/SIGHUP while cleanup runs, then restore interrupt_on_termination's handler."""
     held = []
     if os.name != "nt" and threading.current_thread() is threading.main_thread():
-        held = [sig for sig in (signal.SIGTERM, signal.SIGHUP) if signal.getsignal(sig) is _interrupt]
+        held = [sig for sig in _termination_signals() if signal.getsignal(sig) is _interrupt]
     for sig in held:
         signal.signal(sig, _ignore)
     try:
@@ -614,7 +618,7 @@ def interrupt_on_termination():
     terminate_tree ignores both while it runs."""
     if os.name == "nt" or threading.current_thread() is not threading.main_thread():
         return
-    for sig in (signal.SIGTERM, signal.SIGHUP):
+    for sig in _termination_signals():
         signal.signal(sig, _interrupt)
 
 

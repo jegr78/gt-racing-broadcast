@@ -176,6 +176,15 @@ def t_success_handoff_and_frozen_profile():
         assert pending['state']=='awaiting_validation' and pending['report'] is None
 
 
+def t_the_cleanup_shield_skips_signals_the_platform_lacks():
+    import signal, types
+    bare = types.SimpleNamespace(SIGTERM=signal.SIGTERM, getsignal=signal.getsignal, signal=signal.signal)
+    with mock.patch.object(j, 'signal', bare), mock.patch.object(j.os, 'name', 'posix'):
+        with j._cleanup_shielded():
+            shielded = True
+    assert shielded, "a platform without SIGHUP (Windows) still runs the cleanup"
+
+
 def t_cleanup_rejects_unsafe_or_untyped_process_ids_before_any_signal():
     # Every termination primitive stays mocked even when the guard is broken.
     for platform_name in ('posix','nt'):
