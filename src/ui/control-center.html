@@ -3136,7 +3136,7 @@ function showLeagueResults(d) {
     row.append(name, text);
     if (r.link && /^https:\/\//.test(r.link)) {
       const a = document.createElement('a');
-      a.href = r.link; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'Open ↗';
+      a.className = 'linkbtn'; a.href = r.link; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'Open ↗';
       row.appendChild(a);
     }
     if (r.status === 'pending' && d.configured) {

@@ -259,6 +259,7 @@ def install_graphic(staged, graphics_dir):
     os.close(fd)
     try:
         shutil.copyfile(staged, tmp)
+        os.chmod(tmp, 0o644)        # mkstemp's 0600 is not what the Sheet download leaves
         atomic_replace.replace(tmp, dest)
     finally:
         if os.path.exists(tmp):
