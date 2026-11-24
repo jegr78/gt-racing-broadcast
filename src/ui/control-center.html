@@ -413,6 +413,7 @@
             <button id="overlay-undo" onclick="ovUndo()" disabled title="Undo (Ctrl/Cmd-Z)">↶ Undo</button>
             <button id="overlay-redo" onclick="ovRedo()" disabled title="Redo (Ctrl/Cmd-Shift-Z)">↷ Redo</button>
             <button id="audience-open" onclick="audienceOpen()">Audience widgets</button>
+            <button id="league-open" onclick="leagueWidgetsOpen()" title="Place the widgets of the league service in this scene">League widgets</button>
             <button id="overlay-save" onclick="saveOverlay()">
               <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save</button>
             <button id="overlay-apply" onclick="applyOverlay()" title="Reload the relay-served HUD/timer browser sources in OBS (needs the relay up + obs-websocket)">
@@ -996,6 +997,12 @@
     </div>
   </form>
 </dialog>
+<dialog id="league-dialog" style="width:min(640px,90vw);max-height:85vh;overflow:auto;background:#172030;color:#fff;border:1px solid #52647f;border-radius:12px;padding:24px">
+  <h3>League widgets</h3>
+  <p>The league service lists these widgets when you load its event under Profile. The canvas shows each one with its sample values. Placement and style use Save, then Apply in OBS. On air the Director shows and hides each widget.</p>
+  <div id="league-list"></div>
+  <button type="button" onclick="document.getElementById('league-dialog').close()">Close</button>
+</dialog>
 <dialog id="youtube-dialog" style="width:min(700px,90vw);max-height:85vh;overflow:auto;background:#172030;color:#fff;border:1px solid #52647f;border-radius:12px;padding:24px">
   <h3>YouTube audience connection</h3>
   <p>Select your broadcast output explicitly. Incoming commentator feeds do not change this selection.</p>
@@ -1044,6 +1051,7 @@
   </form>
 </dialog>
 <script src="/audience.js"></script>
+<script src="/league-widgets.js"></script>
 <script src="/overlay-fit.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -3540,6 +3548,9 @@ const OV_SHADOW_CSS =
   '.ov-hidden::after{content:"hidden";position:absolute;top:0;left:0;z-index:60;' +
   'font:700 9px/1.4 system-ui,sans-serif;background:#f59e0b;color:#111;padding:0 3px;border-radius:2px}' +
   '.ov-grid{position:absolute;inset:0;pointer-events:none}' +
+  '.league-widget.lw-unlisted{opacity:.4!important}' +
+  '.league-widget.lw-unlisted::after{content:"no longer listed";position:absolute;top:0;right:0;' +
+  'font:700 9px/1.4 system-ui,sans-serif;background:#f59e0b;color:#111;padding:0 3px;border-radius:2px}' +
   '[data-solo]::before,[data-video]::before,[data-edit-lock-aspect="true"]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
   'content:attr(data-edit) " preview";font:32px system-ui;color:#fff}' +
   '.el[data-edit-lock-aspect="true"]::before{font-size:16px}';
@@ -3577,6 +3588,8 @@ async function loadOverlay(retry = 0) {
   ovState.allSlots = slotsR.slots || [];
   ovState.slots = ovState.allSlots;
   ovState.audience = slotsR.audience || {widgets: []};
+  ovState.league = slotsR.league || {widgets: []};
+  $('league-open').hidden = requestedPage === 'drivers';   // the driver dashboard has no league widgets
   ovState.sample = slotsR.sample || {};
   ovState.flagPresets = slotsR.flagPresets || [];
   ovState.templates = slotsR.templates || [];
@@ -3650,6 +3663,45 @@ function ovPopulateSlotPicker() {
     sp.appendChild(o);
   });
   sp.value = ovState.sel || '';
+}
+
+// Audience and league widgets are placed per scene; a canvas shows only the placed ones.
+function ovSharedWidget(id) {
+  return id.startsWith('audience-') || id.startsWith('league-widget-');
+}
+function leagueWidgetsOpen() {
+  leagueWidgetsList();
+  $('league-dialog').showModal();
+}
+function leagueWidgetsList() {
+  const list = $('league-list'); list.replaceChildren();
+  const widgets = ovState.league.widgets || [];
+  if (ovState.league.ok === false || !widgets.length) {
+    const p = document.createElement('p');
+    p.textContent = ovState.league.ok === false ? ovState.league.error
+      : 'No league widgets yet. Load the league event under Profile → League service.';
+    list.appendChild(p); return;
+  }
+  widgets.forEach(w => {
+    const id = 'league-widget-' + w.id;
+    const row = document.createElement('p');
+    const title = document.createElement('span');
+    title.textContent = w.title + ' · ' + w.form + (w.listed ? '' : ' · no longer listed by the league service, stays hidden on air') + ' ';
+    row.appendChild(title);
+    const placed = Object.prototype.hasOwnProperty.call(ovState.layout.slots, id);
+    const b = document.createElement('button'); b.type = 'button';
+    b.textContent = placed ? 'Remove from this scene' : 'Place in this scene';
+    b.onclick = () => leagueWidgetPlace(id, !placed);
+    row.appendChild(b);
+    list.appendChild(row);
+  });
+}
+function leagueWidgetPlace(id, place) {
+  // Each widget starts below the one before it, so two new ones never sit on top of each other.
+  const i = Math.max(0, (ovState.league.widgets || []).findIndex(w => 'league-widget-' + w.id === id));
+  if (place) ovState.layout.slots[id] = {left: 1400, top: Math.min(70 + i * 150, 900), width: 420};
+  else delete ovState.layout.slots[id];
+  ovReloadCanvasFromLayout(); ovCommit(); leagueWidgetsList();
 }
 
 // Shared goal edits are explicit live operations; Undo covers scene design only.
@@ -4164,7 +4216,7 @@ function ovDefaultHiddenCss() {
 }
 
 function ovBuildCanvas() {
-  ovState.slots = (ovState.allSlots || ovState.slots).filter(s => !s.id.startsWith('audience-') ||
+  ovState.slots = (ovState.allSlots || ovState.slots).filter(s => !ovSharedWidget(s.id) ||
     Object.prototype.hasOwnProperty.call(ovState.layout.slots, s.id));
   ovPopulateSlotPicker();
   const host = $('ov-stage');
@@ -4178,7 +4230,7 @@ function ovBuildCanvas() {
   sh.innerHTML = '<style>' + ovState.baseCss + '\n' + ovFontFaceCss() + '</style>' +
     '<style id="ov-body-font"></style><style id="ov-slot-css"></style><style id="ov-custom-css"></style>' +
     '<style>' + OV_SHADOW_CSS + ovDefaultHiddenCss() + '</style>' + ovState.body;
-  sh.querySelectorAll('[data-audience-widget]').forEach(el => {
+  sh.querySelectorAll('[data-audience-widget],[data-league-widget]').forEach(el => {
     if (!Object.prototype.hasOwnProperty.call(ovState.layout.slots, el.id)) el.remove();
   });
   ovState.slotRules = {};
@@ -4283,7 +4335,7 @@ function ovFillSample() {
   ovState.slots.forEach(s => {
     const el = ovState.shadow.getElementById(s.id);
     if (!el) return;
-    if (s.id.startsWith('audience-')) return;
+    if (ovSharedWidget(s.id)) return;
     if (s.id === 'chat' || s.id === 'ichat') { ovFillChat(el, vals[s.id]); return; }
     const img = el.querySelector('img');
     // Flag status: colour from the picked state (data-state), text from its label.
@@ -4334,6 +4386,13 @@ function ovFillSample() {
       precision: widget.source === 'youtube' && widget.metric === 'subscribers' ? {exact:false,significantDigits:3} : {exact:true}, holdFor: null});
   });
   RacecastAudience.render(ovState.shadow, {widgets: rows});
+  const league = ovState.league.widgets || [];
+  RacecastLeague.render(ovState.shadow, {widgets: league.map(w =>
+    ({id: w.id, form: w.form, title: w.title, value: w.sample || {}, holdFor: null}))});
+  league.forEach(w => {
+    const el = ovState.shadow.getElementById('league-widget-' + w.id);
+    if (el) el.classList.toggle('lw-unlisted', !w.listed);
+  });
   // A webfont that loads after this pass widens the names again; the live HUD refits on
   // every poll, the canvas once more here.
   document.fonts.ready.then(() => ovState.slots.forEach(s => {
@@ -5378,6 +5437,16 @@ function ovRenderPanel() {
     const edit = document.createElement('button'); edit.textContent = 'Edit shared value';
     edit.onclick = () => audienceOpen(id); panel.appendChild(edit);
   }
+  if (id.startsWith('league-widget-')) {
+    const w = (ovState.league.widgets || []).find(x => 'league-widget-' + x.id === id);
+    const note = document.createElement('p'); note.className = 'ovhint';
+    note.textContent = w && !w.listed
+      ? 'The league service no longer lists this widget. It stays placed and stays hidden on air.'
+      : 'Sample values from the league service. On air the Director shows and hides it.';
+    panel.appendChild(note);
+    const remove = document.createElement('button'); remove.textContent = 'Remove from this scene';
+    remove.onclick = () => leagueWidgetPlace(id, false); panel.appendChild(remove);
+  }
   if (has('showBrands')) {
     const label = document.createElement('label');
     const input = document.createElement('input'); input.type = 'checkbox'; input.checked = ov.showBrands !== false;
@@ -5482,7 +5551,7 @@ function ovRenderPanel() {
 }
 
 function ovResetSlot(id) {
-  if (id.startsWith('audience-')) {
+  if (ovSharedWidget(id)) {
     ovState.layout.slots[id] = {}; ovReloadCanvasFromLayout(); ovCommit(); return;
   }
   if (ovState.layout.slots) delete ovState.layout.slots[id];

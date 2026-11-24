@@ -215,6 +215,12 @@
   #leagueRace{width:100%;min-width:0}
   #leagueNote{color:#ffd361}
   #leagueState.failed{color:#ff8080}
+  #leagueWidgets{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+  .lwrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .lwrow .lwname{font-weight:600;min-width:0;overflow-wrap:anywhere}
+  .lwrow .lwstate{color:var(--muted);flex:1 1 200px;min-width:0}
+  .lwrow .lwstate.warn{color:#ffd361}
+  .lwrow .lwstate.on{color:#2bd66a}
   #leagueGfx img{max-width:100%;max-height:160px;border:1px solid var(--edge);border-radius:6px;display:block;margin:8px 0}
   #feedHealth .downline{color:#ff8080;font-weight:600}
 
@@ -943,7 +949,7 @@
           <div class="desksub" id="deskPane-dashboard" data-sub="dashboard" role="tabpanel" aria-labelledby="deskTab-dashboard"><div data-desk="dashboard"></div></div>
           <div class="desksub" id="deskPane-setup" data-sub="setup" role="tabpanel" aria-labelledby="deskTab-setup"><div data-desk="setup"></div></div>
         </section>
-        <section class="bus" id="leagueSec" hidden><div class="cap">League result</div>
+        <section class="bus" id="leagueSec" hidden><div class="cap">League service</div>
           <div class="body">
             <div class="setrow"><div class="fld" style="flex:1 1 260px">
               <label for="leagueRace" id="leagueEvent">Current race</label>
@@ -956,7 +962,8 @@
               <img id="leagueGfxImg" alt="Result graphic from the league service">
               <button class="k" id="leagueTake" title="Copy this graphic over the Race Results graphic; RACE RESULTS then puts it on air">USE AS RACE RESULTS</button>
             </div>
-            <div class="hint">The relay sends each race's result when it finishes. The next race becomes current when a new race starts counting after the finish. A graphic from the league service never goes on air by itself.</div>
+            <div id="leagueWidgets" hidden></div>
+            <div class="hint">The relay sends each race's result when it finishes. The next race becomes current when a new race starts counting after the finish. A graphic from the league service never goes on air by itself. A widget goes on air only when you show it, is placed in the scene and has a value from the last 30 s.</div>
           </div>
         </section>
       </div>
@@ -2453,10 +2460,50 @@ function renderLeague(d){
   }
   leagueGfxRace = gfx;
 }
+function leagueWidgetState(w){
+  if (w.reason) return {text: (w.shown ? "Shown, but hidden: " : "Hidden · ") + w.reason, cls: "warn"};
+  return w.shown ? {text: "On air · " + w.placed.join(", "), cls: "on"} : {text: "Hidden · ready in " + w.placed.join(", "), cls: ""};
+}
+function renderLeagueWidgets(d){
+  const box = $("#leagueWidgets");
+  const rows = (d && d.widgets) || [];
+  box.hidden = !rows.length;
+  const sig = JSON.stringify(rows.map(w => [w.id, w.title, w.form, w.listed, w.shown, w.reason, w.placed]));
+  if (box.dataset.sig === sig) return;   // a rebuild would swap a button under the pointer
+  box.dataset.sig = sig;
+  box.replaceChildren(...rows.map(w => {
+    const row = document.createElement("div"); row.className = "lwrow";
+    const name = document.createElement("span"); name.className = "lwname";
+    name.textContent = w.title + (w.form === "table" ? " (table)" : " (score)");
+    const state = leagueWidgetState(w);
+    const st = document.createElement("span"); st.className = "lwstate " + state.cls; st.textContent = state.text;
+    row.append(name, st);
+    if (w.listed){
+      const b = document.createElement("button"); b.className = "k" + (w.shown ? " on" : "");
+      b.textContent = w.shown ? "HIDE" : "SHOW";
+      b.title = (w.shown ? "Hide" : "Show") + " this league widget on air";
+      b.addEventListener("click", () => leagueWidget(w.id, w.shown ? "hide" : "show", w.title));
+      row.appendChild(b);
+    }
+    return row;
+  }));
+}
+async function leagueWidget(id, action, title){
+  try{
+    const d = await (await fetch("/league/widget/" + encodeURIComponent(id) + "/" + action, {cache:"no-store"})).json();
+    if (!d.ok){ log("League widget " + title + ": " + (d.error || "refused"), "err"); toast("League widget: " + (d.error || "refused")); return; }
+    log("League widget " + title + " → " + action);
+    leaguePoll();
+  }catch(err){ log("League widget failed (relay reachable?): " + err, "err"); toast("League widget failed: relay unreachable"); }
+}
 async function leaguePoll(){
   try{
     const r = await fetch("/league/status", {cache:"no-store"});
     renderLeague(r.ok ? await r.json() : null);
+  }catch(e){ /* relay unreachable: the relay poll says so */ }
+  try{
+    const r = await fetch("/league/widgets", {cache:"no-store"});
+    renderLeagueWidgets(r.ok ? await r.json() : null);
   }catch(e){ /* relay unreachable: the relay poll says so */ }
 }
 async function leaguePost(path, body, what){

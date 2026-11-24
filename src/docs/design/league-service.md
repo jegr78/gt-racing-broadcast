@@ -1,8 +1,8 @@
 # League service
 
 Design agreed 2026-11-22. Contract, configuration, client and the simulated service
-(#1253) and the result export (#1254) are implemented; live widgets and the timing page
-follow.
+(#1253), the result export (#1254) and the live state with its widgets and Director control
+(#1255) are implemented; the widgets on the timing page follow.
 
 A league runs its own management service (the Community Team Cup runs CTC Manager,
 Community League Racing runs CLR). During a race the relay sends the live race state
@@ -122,12 +122,24 @@ keeps its first allowed items. An answer over 256 KiB, one that takes longer tha
 one that is not JSON, one without `v: 1`, or an event or status whose own title or
 message is invalid does not parse.
 
-Until the builder slots exist (step 3), the widget list lives with the loaded event in
-`league-event.json`.
+The widget list arrives with the event. Loading the event (Control Center or `racecast
+event league REF`) keeps it in `league-event.json` for the relay and in the profile's
+`profiles/<name>/league-widgets.json` for the scene builders, outside `overlay/` like the
+audience widgets. The scene builders then offer each widget as a slot
+(`league-widget-<id>` in the HUD, Intermission and Split HUD layouts, not the driver
+dashboard) and work offline with the sample values. A widget the service no longer lists
+stays in the profile file marked unlisted: it stays placed with its style, the builder
+shows it dimmed, and on air it stays hidden because the loaded event does not name it.
 
-The widget list arrives with the event and the Control Center stores it in the
-profile. The scene builders then offer each widget as a slot and work offline with the
-sample values. A widget the service no longer lists stays placed and stays hidden.
+A placed widget reaches a live page as a hidden element; the page polls
+`/league-widgets/data` once a second and fills it from elements and text only. The
+league look comes from the profile's overlay CSS: the widget inherits the page font, and
+its colours are the variables `--league-widget-bg`, `--league-widget-text` and
+`--league-widget-accent` (the border), which a league sets in `:root` of its overlay CSS.
+Without them the widget is white on translucent black with a green border. The builder
+keeps those colours as variable references on save; position, size, font and a colour
+the producer sets by hand are slot props like any HUD slot. A table shows only the whole
+rows that fit its box, the last line counting the rest ("+11 more"); a row is never cut.
 
 ### Result
 
@@ -212,19 +224,36 @@ A new stdlib-only module under `src/scripts` holds the client, following
 `timing_publish.py`: its own thread, bounded socket calls, backoff after a failure.
 The tick hands it the standings and never waits for it.
 
+- The relay starts the sender on its own thread once it owns its port. The dashboard tick
+  hands it the newest undelayed snapshot (`driver_race.Service.live`, which adds each
+  car's best counted lap) and only wakes it: at once when the running order or the mode
+  changed, but never sooner than one second after the last send, and with a settings
+  reload when `profile.env` changed. Without a loaded event nothing is sent.
 - The HUD shows a widget value as soon as it arrives.
 - The public timing page shows it with the same `delay_s` as the timing itself, so the
   score never gives away an overtake before the picture does. The relay delays the
   value; the service knows nothing about the delay.
 - A value is held for 30 seconds after the last good answer. After that the widget
-  hides, and the Director Panel names the reason.
+  hides, and the Director Panel names the reason. Each value goes to the page with the
+  seconds of hold it has left, so a page also hides it when the relay stops answering.
 
 ## Control
 
 - Placement: a slot per widget in the scene builders, positioned and styled per scene
   like the audience counters.
-- On air: the Director shows and hides each widget. Default hidden. A Companion button
-  uses a GET route.
+- On air: the Director shows and hides each widget. Default hidden. The switch lives in
+  the relay's memory, so a relay restart hides every widget again, and so does loading an
+  event (another reference or a reload of the same one), which also drops the values the
+  old event's answers left; a change of the current race keeps both, and so does a
+  `league-event.json` that cannot be read for a moment. `event stop` removes the file and
+  hides everything. A widget is on air
+  only when it is shown, placed in the scene and has a value inside the hold. The routes
+  are `GET /league/widgets` (each widget with its switch, the scenes it is placed in and
+  the reason it cannot show) and `GET /league/widget/<id or place>/<show|hide|toggle>`,
+  director-only under `/console`. The place (1 to 8) is the widget's 1-based position in the
+  event's list, so the Companion buttons **LEAGUE WIDGET 1** and **LEAGUE WIDGET 2** on
+  page 3 work for any league. A service that reorders its widget list moves what a
+  button switches.
 - Timing page: the profile switch decides, independent of the on-air state. The block
   sits above the table. The league timing host stores and broadcasts the relay's state
   body unparsed, so the block reaches hosted viewers without a Worker change; the

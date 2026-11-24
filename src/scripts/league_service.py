@@ -38,6 +38,7 @@ TICK_S = 2.0
 BACKOFF_MIN_S = 2.0
 BACKOFF_MAX_S = 30.0
 HOLD_S = 30.0                   # a widget value outlives its last good answer this long
+MIN_GAP_S = 1.0                 # a wake on a position change sends no sooner after the last send
 
 MAX_REF = 128
 MAX_RACES = 16
@@ -469,14 +470,25 @@ class Client:
         self._wake.set()
 
     def wake(self):
-        """Send now, e.g. on a position change."""
+        """Send now, e.g. on a position change, but no sooner than MIN_GAP_S after the last send."""
         self._wake.set()
+
+    def forget(self):
+        """Drop every value, e.g. when another event is loaded."""
+        with self._lock:
+            self._values = {}
 
     def values(self):
         """{widget id: value} answered within the last HOLD_S."""
         now = self._clock()
         with self._lock:
             return {k: v for k, (v, t) in self._values.items() if now - t <= HOLD_S}
+
+    def held(self):
+        """{widget id: (value, seconds it may still be shown)} within the hold."""
+        now = self._clock()
+        with self._lock:
+            return {k: (v, HOLD_S - (now - t)) for k, (v, t) in self._values.items() if now - t <= HOLD_S}
 
     def status(self):
         with self._lock:
@@ -509,6 +521,8 @@ class Client:
         now = self._clock()
         if now < self._next_attempt:
             return self._next_attempt - now
+        if self._last_sent is not None and now - self._last_sent < MIN_GAP_S:
+            return round(self._last_sent + MIN_GAP_S - now, 6)
         body = self._body_fn()
         if body is None:
             return TICK_S

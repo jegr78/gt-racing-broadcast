@@ -104,7 +104,12 @@ TELEMETRY_RECORD=
   In the Control Center's **Profile** view, **League service** takes the reference the
   service shows on its match or event page and **Load** fetches the event's races and
   widgets (`racecast event league REF` does the same). `racecast event stop` clears the
-  loaded event. Without these keys nothing changes. When a race finishes, the relay sends
+  loaded event. Without these keys nothing changes. While an event is loaded, the relay
+  sends the live race state every two seconds and at once when a position changes, in
+  race and qualifying mode: positions, drivers and teams as the Sheet roster names them,
+  laps, gaps, pit stops and lap times, never fuel, tyres or stream links. The service
+  answers with the widget values the Director can put on air
+  ([HUD overlays](HUD-Overlays#league-service-widgets)). When a race finishes, the relay sends
   its result to the service: the classification with teams, best laps and pit stops, the
   fastest lap, and the red flags, corrections and confirmed disconnects. The section shows
   the service's answer per race; see [Control Center](Control-Center).

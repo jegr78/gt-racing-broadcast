@@ -252,7 +252,9 @@ Security boundaries that apply everywhere:
   against the contract. The service never calls the relay, and nothing new is funnelled.
   A result graphic is fetched only from the service URL's own scheme, host and port, PNG
   up to 4 MB, and reaches OBS only through the Director's take (`/league/*`, director-only
-  under `/console`).
+  under `/console`). Widget values from the service reach the overlay pages only as text
+  (`src/ui/league-widgets.js` builds elements, never parses markup) and only after the
+  Director shows the widget.
 - No destructive HTTP endpoint for chat or cues: clear/import/pull stay producer-only CLI
   actions. A commentator's stream-link submission is own-rows-only and lands as pending,
   never auto-published.

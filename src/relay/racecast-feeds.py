@@ -210,6 +210,7 @@ import timing_host      # optional external fan-out of the public timing (#1161)
 import timing_publish
 import league_result
 import league_service
+import league_widgets
 import driver_ingest    # driver telemetry connections behind the invite (#1111)
 import driver_race      # race distance, gaps and finish from driver telemetry (#1112)
 import brand_logos      # the timing pages' brand logos
@@ -12351,7 +12352,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  drive_page_path=None, sender_script_path=None, driver_segments=None,
                  driver_desk_path=None, race_snapshot_page_path=None,
                  driver_race_svc=None, timing_link_path=None, timing_page_path=None,
-                 timing_publisher=None, funnel_host=None, league_exporter=None):
+                 timing_publisher=None, funnel_host=None, league_exporter=None,
+                 league_live=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -12387,6 +12389,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     audience_runtime = audience_runtime or audience_widgets.Runtime(
         os.path.join(os.path.dirname(overlay_dir), "audience.json") if overlay_dir else None)
     audience_script = os.path.join(_SRC_BASE, "ui", "audience.js")
+    league_widgets_script = os.path.join(_SRC_BASE, "ui", "league-widgets.js")
     # Shared text auto-fit of the overlay pages and the builder canvas (#957).
     fit_script = os.path.join(_SRC_BASE, "ui", "overlay-fit.js")
 
@@ -12546,7 +12549,22 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
         def _league_get(self, sub):
-            """The league result export (#1254): its status, and a staged graphic."""
+            """The league result export (#1254): its status, and a staged graphic. The
+            live widgets (#1255): their list for the Director and the on-air switch, a GET
+            so a Companion button reaches it."""
+            if sub == ["widgets"]:
+                if league_live is None:
+                    return self._send({"error": "league widgets unavailable"}, 404)
+                return self._send(league_live.director(), no_store=True)
+            if len(sub) == 3 and sub[0] == "widget":
+                if league_live is None:
+                    return self._send({"ok": False, "error": "league widgets unavailable"}, 404)
+                ok, out = league_live.set(sub[1], sub[2])
+                if not ok:
+                    return self._send({"ok": False, "error": out}, 400)
+                LOG.info("league widget %s: %s", out.replace("\r", "").replace("\n", ""),
+                         sub[2].replace("\r", "").replace("\n", ""))
+                return self._send({"ok": True, "id": out, "action": sub[2]}, no_store=True)
             if league_exporter is None:
                 return self._send({"error": "league result export unavailable"}, 404)
             if sub == ["status"]:
@@ -12949,7 +12967,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         def _send_audience_page(self, path, page):
             try:
                 with open(path, encoding="utf-8") as source:
-                    return self._send_html(audience_widgets.live_html(source.read(), overlay_dir, page))
+                    return self._send_html(league_widgets.live_html(
+                        audience_widgets.live_html(source.read(), overlay_dir, page), overlay_dir, page))
             except OSError:
                 return self._send({"error": "overlay page unavailable"}, 404)
 
@@ -14065,6 +14084,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send(audience_runtime.data())
                 if p == ["audience.js"]:
                     return self._send_file(audience_script, "application/javascript; charset=utf-8")
+                if p == ["league-widgets", "data"]:
+                    return self._send(league_live.data() if league_live else {"ok": True, "widgets": []},
+                                      no_store=True)
+                if p == ["league-widgets.js"]:
+                    return self._send_file(league_widgets_script, "application/javascript; charset=utf-8")
                 if p == ["overlay-fit.js"]:
                     return self._send_file(fit_script, "application/javascript; charset=utf-8")
                 if p == ["hud"]:
@@ -14174,7 +14198,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"error": "hud disabled"}, 404)
                     try:
                         with open(hud_path, encoding="utf-8") as fh:
-                            return self._send_html(audience_widgets.live_html(split_layout.hud_html(fh.read()), overlay_dir, "splitscreen"))
+                            page = audience_widgets.live_html(split_layout.hud_html(fh.read()), overlay_dir, "splitscreen")
+                            return self._send_html(league_widgets.live_html(page, overlay_dir, "splitscreen"))
                     except OSError:
                         return self._send({"error": "hud page unavailable"}, 404)
                 if p == ["splitscreen", "hud", "override.css"]:
@@ -15976,16 +16001,22 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     return store
 
 
-def dashboard_ticks(relay, race_svc, stop_evt, every, league=None):
-    """Advance the driver dashboard snapshots and hand the race state to the league
-    result export until stop_evt; a failure warns once per distinct error and never
-    touches the broadcast."""
+def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None):
+    """Advance the driver dashboard snapshots, hand the newest one to the league live
+    sender and the race state to the league result export until stop_evt; a failure
+    warns once per distinct error and never touches the broadcast."""
     while not stop_evt.wait(every):
         try:
             race_svc.tick()
             relay._tick_ok("driver dashboard")
         except Exception as e:  # noqa: BLE001
             relay._warn_tick_error("driver dashboard", e)
+        if live is not None:
+            try:
+                live.observe(race_svc.newest())
+                relay._tick_ok("league live")
+            except Exception as e:  # noqa: BLE001
+                relay._warn_tick_error("league live", e)
         if league is None:
             continue
         try:
@@ -17060,8 +17091,14 @@ def main():
     league_exporter = league_result.Exporter(
         runtime, lambda: league_service.relay_settings(os.environ.get("RACECAST_PROFILE_ENV_FILE", "")),
         race_svc, log=LOG, armed=False)
+    # League live state and widgets (#1255): sent on its own thread, started below.
+    league_live = league_widgets.Live(
+        lambda: league_service.relay_settings(os.environ.get("RACECAST_PROFILE_ENV_FILE", "")),
+        race_svc.live, league_service.path_in(runtime), overlay_dir=args.overlay_dir,
+        env_path=os.environ.get("RACECAST_PROFILE_ENV_FILE", ""))
     threading.Thread(target=dashboard_ticks, daemon=True,
-                     args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S, league_exporter)).start()
+                     args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S, league_exporter,
+                           league_live)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),
@@ -17175,7 +17212,7 @@ def main():
         driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
         driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
-        driver_segments=driver_segments, driver_race_svc=race_svc, league_exporter=league_exporter,
+        driver_segments=driver_segments, driver_race_svc=race_svc, league_exporter=league_exporter, league_live=league_live,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
         timing_publisher=lambda **fns: timing_pubs.append(
             _start_timing_publisher(timing_go, stop_evt, **fns)) or timing_pubs[-1],
@@ -17191,6 +17228,7 @@ def main():
     race_svc.open_recording()   # the port is ours, so the recording file is too
     league_exporter.arm()
     threading.Thread(target=league_exporter.run, args=(stop_evt,), daemon=True, name="league-result").start()
+    threading.Thread(target=league_live.run, args=(stop_evt,), daemon=True, name="league-live").start()
     timing_go.set()             # ... and the timing host's link
     radio_service.start()
     if coach_service is not None:coach_service.start()

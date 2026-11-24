@@ -240,6 +240,22 @@ The common renderer also fills the isolated sample canvas without live polling.
 Look restore cannot rewind shared state. `tools/e2e-audience.py` drives the actual
 manager, scene callbacks, live pages and fake-clock rendering without services.
 
+### League service widgets (#1255)
+
+`league_widgets_read_data` (in `src/racecast.py`) reads the profile's
+`league-widgets.json`; `_overlay_base_html` adds every kept widget as a slot
+(`league-widget-<id>`, box and font props) for HUD, Intermission and the Split
+HUD, and `overlay_slots_data` returns it as `league`. The builder's **League widgets** dialog
+places or removes a widget per scene (hidden on the driver dashboard); the canvas shows only
+placed ones, filled by the shared `league-widgets.js` from each widget's `sample`, an
+unlisted one dimmed. Save compiles their rules like any slot. Each placed widget carries
+its own `#league-widget-<id>` colour rule of `var(--league-widget-text|bg|accent, …)`, so
+`extract_slots` reports them as `vars` and the save keeps the references (the league
+look from the profile's `:root`). The default height (130 px score, 330 px table) gets
+pinned by the save-all; the renderer then caps a table to the whole rows that fit plus a
+"+N more" line. `tools/e2e-league-widgets.py
+--shots` writes `cc-league-widgets.png` and `director-panel-league.png`.
+
 ### Asset aliases (#936)
 
 The local producer asset API retains filename identities and adds optional

@@ -95,7 +95,9 @@ Ctrl+C ends inspection; never use broad `pkill` commands to stop test services.
   league service: `racecast event league`, the Control Center routes and `event stop`.
   A relay of that home then finishes a race and sends the result, the Director's resend
   replaces it, and after the relay stops `racecast event result send` sends it from the
-  race recording (#1254).
+  race recording (#1254). Before the finish the same relay must post the live state every
+  two seconds, and a widget the Director shows reaches `/league-widgets/data` and the
+  Intermission page (#1255).
 - **Solo coaching** (`--coach-only`, **CI-runnable on Linux, Windows and macOS**):
   copies the committed `solo-pov` profile into an owned temporary app home, clears inherited
   `RACECAST_*` configuration and uses a loopback OBS stand-in and synthetic replay.
@@ -432,6 +434,15 @@ profile's service. The event simulation's stack starts one with a random key. Te
 ```bash
 python3 tools/event-sim/fakes/league_sim.py --port 0 --ready-file league.json [--result-status stored]
 ```
+
+## League widgets browser run (`tools/e2e-league-widgets.py`, #1255)
+
+Playwright Python, CI `visual` job. A synthetic profile loads the simulated league event;
+the real Control Center builder places both widgets and saves; a relay handler with a
+`league_widgets.Live` against `league_sim` serves the Director Panel and the HUD. It shows a
+widget from the panel, checks that markup in a label stays text, then answers 503 and
+waits for the 30 s hold to hide the widget and for the panel to name the reason (about
+35 s). `--shots` refreshes `cc-league-widgets.png` and `director-panel-league.png`.
 
 ## League replay (`tools/league-replay.py`, #1253)
 

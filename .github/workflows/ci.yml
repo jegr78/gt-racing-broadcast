@@ -251,6 +251,8 @@ jobs:
         run: python tools/e2e.py --visual --report visual-report
       - name: Verify audience widgets and live scene values
         run: python tools/e2e-audience.py
+      - name: Verify league widgets, the Director's switch and the 30 s hold
+        run: python tools/e2e-league-widgets.py
       - name: Verify local Telemetry workspace and profile isolation
         run: python tools/e2e-telemetry-workspace.py
       - name: Verify the optional analysis browser workflow
