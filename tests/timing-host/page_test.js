@@ -107,3 +107,85 @@ Deno.test("a logo from the host's socket becomes bytes for that key only when it
     eq(L.brandMessage(bad), null, JSON.stringify(bad).slice(0, 60));
   }
 });
+
+// A document stand-in: elements with children and text, nothing that parses markup.
+const fakeDoc = {
+  createElement(tag) {
+    const n = { tagName: tag, className: "", textContent: "", children: [] };
+    n.appendChild = (c) => { n.children.push(c); return c; };
+    n.append = (...cs) => { n.children.push(...cs); };
+    return n;
+  },
+};
+function flat(n, out = []) {
+  out.push(`${n.tagName}.${n.className}:${n.textContent}`);
+  n.children.forEach((c) => flat(c, out));
+  return out;
+}
+const LEAGUE = { league: [
+  { id: "match-score", form: "score", title: "Match",
+    value: { provisional: true, values: [{ label: "Team A", value: "3" }, { label: "Team B", value: "1" }] } },
+  { id: "standings", form: "table", title: "Championship",
+    value: { value_title: "Pts", rows: [{ rank: 1, name: "Ann", value: "25" }, { rank: 2, name: "Bob", value: "18" }] } },
+] };
+
+Deno.test("the league block renders a score and a table card from text", () => {
+  const cards = L.leagueBlock(fakeDoc, L.leagueWidgets(LEAGUE));
+  eq(cards.map((c) => flat(c)), [
+    ["div.lw:", "div.lw-title:Match", "span.lw-prov:provisional", "div.lw-score:",
+     "div.lw-item:", "span.lw-label:Team A", "span.lw-value:3", "div.lw-item:", "span.lw-label:Team B", "span.lw-value:1"],
+    ["div.lw:", "div.lw-title:Championship", "div.lw-rows:", "span.lw-head:Pts",
+     "span.lw-rank:1", "span.lw-name:Ann", "span.lw-val:25", "span.lw-rank:2", "span.lw-name:Bob", "span.lw-val:18"],
+  ], "cards");
+});
+
+Deno.test("without a league block the page shows none", () => {
+  for (const d of [null, {}, { league: null }, { league: "x" }, { league: {} }]) {
+    eq(L.leagueWidgets(d), [], JSON.stringify(d));
+  }
+});
+
+Deno.test("a hostile or oversized league element is left out, never cut", () => {
+  const long = "x".repeat(41);
+  const got = L.leagueWidgets({ league: [
+    { id: "../x", form: "score", title: "Bad id", value: {} },
+    { id: "s", form: "chart", title: "Bad form", value: {} },
+    { id: "s", form: "score", title: { toString: () => "x" }, value: { values: [
+      { label: long, value: "1" }, { label: "<img src=x onerror=alert(1)>", value: "2" }, { label: "n", value: 3 }] } },
+    { id: "t", form: "table", title: "T", value: { value_title: 5, rows: [
+      { rank: 0, name: "a", value: "1" }, { rank: 1.5, name: "b", value: "1" }, { rank: 2, name: "c", value: "9" }] } },
+    ...Array.from({ length: 9 }, (_, i) => ({ id: `w${i}`, form: "score", title: "", value: {} })),
+  ] });
+  eq(got[0], { id: "s", form: "score", title: "", provisional: false,
+               items: [{ label: "<img src=x onerror=alert(1)>", value: "2" }] }, "score: only the valid label, as text");
+  eq(got[1], { id: "t", form: "table", title: "T", provisional: false, head: "",
+               rows: [{ rank: 2, name: "c", value: "9" }] }, "table: whole rows only");
+  eq(got.length, 8, "eight widgets at most");
+  const rows = Array.from({ length: 70 }, (_, i) => ({ rank: i + 1, name: `D${i}`, value: "1" }));
+  eq(L.leagueWidgets({ league: [{ id: "t", form: "table", title: "", value: { rows } }] })[0].rows.length, 64, "64 rows");
+});
+
+Deno.test("the league block never parses its text as markup", () => {
+  for (const sink of ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("]) {
+    if (html.includes(sink)) throw new Error(`${sink} would parse service text`);
+  }
+});
+
+Deno.test("the block sits above the timing table", () => {
+  const league = html.indexOf('<section id="league" hidden>'), table = html.indexOf('<table id="timing">');
+  if (!(league > 0 && league < table)) throw new Error(`league block at ${league}, table at ${table}`);
+});
+
+Deno.test("text limits count characters as the relay does, not UTF-16 units", () => {
+  const label = "\u{1F3C1}".repeat(40);
+  const got = L.leagueWidgets({ league: [{ id: "s", form: "score", title: "\u{1F3C6}".repeat(60),
+    value: { values: [{ label, value: "\u{1F947}".repeat(16) }, { label: label + "x", value: "1" }] } }] });
+  eq(got[0].title.length, 120, "a 60-emoji title stays");
+  eq(got[0].items.map((i) => i.label), [label], "40 emoji fit, 41 characters do not");
+});
+
+Deno.test("a row ranked beyond 999 is left out whole", () => {
+  const rows = [{ rank: 999, name: "a", value: "1" }, { rank: 1000, name: "b", value: "1" }];
+  eq(L.leagueWidgets({ league: [{ id: "t", form: "table", title: "", value: { rows } }] })[0].rows.map((r) => r.rank),
+     [999], "rank cap");
+});

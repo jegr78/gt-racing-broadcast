@@ -512,3 +512,15 @@ Deno.test("end clears the room's logos", async () => {
   await publish(room, ws, JSON.stringify({ t: "end" }));
   assert(!room.ctx.storage.data.has("brand:bmw") && room.brands.length === 0, "storage and memory cleared");
 });
+
+Deno.test("a state carrying the league widgets reaches every viewer as the relay sent it", async () => {
+  const env = makeEnv();
+  const { room, ws } = await publisher(env);
+  const league = [{ id: "match-score", form: "score", title: "Match",
+                    value: { provisional: true, values: [{ label: "<b>A</b>", value: "3" }] } }];
+  const text = JSON.stringify({ t: "state", seq: 1, age_s: 0.5, fallback: "https://f/x",
+                                data: { v: 1, mode: "race", delay_s: 30, entries: [], league } });
+  await publish(room, ws, text);
+  const a = await viewer(env);
+  eq(a.ws.sent[0].data.league, league, "the block is carried unparsed, no Worker change");
+});

@@ -120,7 +120,7 @@ components:
             type: object
             required: [rank, name, value]
             properties:
-              rank: { type: integer, minimum: 1 }
+              rank: { type: integer, minimum: 1, maximum: 999 }
               name: { type: string, maxLength: 40 }
               value: { type: string, maxLength: 16 }
     WidgetValues:

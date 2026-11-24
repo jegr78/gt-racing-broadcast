@@ -800,6 +800,27 @@ def _check_league_live(base, sim, home, until):
     assert st == 200 and 'data-league-widget="match-score"' in page and "/league-widgets.js" in page, st
     assert E._get_json(base + "/league/widget/match-score/hide")[0] == 200
     print("  [PASS] the Director shows and hides a league widget and the Intermission page carries the placed one")
+    _check_league_timing(base, home, until)
+
+
+def _check_league_timing(base, home, until):
+    """The profile switch puts every league widget on the public timing page, none of
+    them on air (#1256)."""
+    import league_widgets
+    import timing_link
+    link = timing_link.create(timing_link.path_in(os.path.join(home, "runtime", "demo")))["id"]
+
+    def timing():
+        status, d = E._get_json(base + f"/console/timing/data?l={link}")
+        assert status == 200, (status, d)
+        return d
+    assert "league" not in timing(), "default off: the timing body carries no league block"
+    with open(os.path.join(home, "profiles", "demo", "profile.env"), "a", encoding="utf-8") as fh:
+        fh.write(f"\n{league_widgets.TIMING_KEY}=1\n")
+    until("the timing page never carried the league widgets",
+          lambda: [w["id"] for w in timing().get("league", [])] == ["match-score", "standings"])
+    assert E._get_json(base + "/league-widgets/data")[1]["widgets"] == [], "the timing page switch puts nothing on air"
+    print("  [PASS] the profile switch puts the league widgets on the public timing page, none on air")
 
 
 def _check_league_result(launcher, home, env, cli, sim, sheet_url, ui_url, procs, timeout):
@@ -1091,8 +1112,10 @@ def run_synthetic(args):
             pov_ui, pov_url = _start_pov_ui(binary if args.binary is not None else None,
                                             tmp, env3, args.timeout)
             procs.append(pov_ui)
+            import timing_link
             urls = {"ui": ui_url, "ui_pov": pov_url, "relay": relay_url, "token": token,
-                    "rc_token": rc_token}
+                    "rc_token": rc_token,
+                    "timing_link": timing_link.create(timing_link.path_in(relay_runtime))["id"]}
             code = max(code, run_visual(urls, args.report, headed=args.headed, slowmo=args.slowmo))
         if args.shots:
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)

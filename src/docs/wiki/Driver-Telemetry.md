@@ -522,6 +522,18 @@ these columns existed shows them only after a redeploy. It has the
 same delay as the broadcast dashboard. Readers can switch columns on and off, and an
 activity list notes new fastest laps, red flags and the chequered flag.
 
+With a [league service](Configuration) a league can also show its widgets above the
+table, for example a team score or a championship table. The switch is
+`LEAGUE_WIDGETS_TIMING=1` in the profile, or **Timing page** in the Control Center's
+League service section; it is off by default. The page then shows every widget of the
+loaded event, whatever the Director has on air, and each value appears with the same
+delay as the timing, so the score never shows an overtake before the table does. A
+[timing host](#hosted-live-timing-optional) deployed before this needs a redeploy to
+show the widgets. The page shows the first 20 rows of a table, and a table longer than
+its card scrolls inside it.
+
+![The public live timing page with a league score and a championship table above it](images/public-timing-league.png)
+
 ![The public live timing page on a phone](images/public-timing.png)
 
 All viewers together share an upload budget (`RACECAST_TIMING_BUDGET_KBPS` in the

@@ -1752,6 +1752,24 @@ def t_api_league_event_routes():
         httpd.shutdown()
 
 
+def t_api_league_timing_switch_route():
+    calls = []
+    ctx = _ctx()
+    ctx["active_profile"] = lambda: "demo"
+    ctx["league_timing_set"] = lambda on: calls.append(on) or {"ok": True, "timing_widgets": on}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/league-event/timing", {"on": True, "expectedProfile": "demo"})
+        assert code == 200 and json.loads(body)["timing_widgets"] is True, body
+        code, _b = _post_json(port, "/api/league-event/timing", {"on": True, "expectedProfile": "other"})
+        assert code == 409, "a switch for a league that is no longer active is refused"
+        code, _b = _post_json(port, "/api/league-event/timing", {"on": "1", "expectedProfile": "demo"})
+        assert code == 400, "only a bool switches"
+        assert calls == [True], calls
+    finally:
+        httpd.shutdown()
+
+
 def t_api_league_result_routes():
     sends, refreshes = [], []
     ctx = _ctx()

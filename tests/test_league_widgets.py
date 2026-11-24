@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import league_service as ls  # noqa: E402
 import league_sim  # noqa: E402
 import league_widgets as lw  # noqa: E402
+import driver_race  # noqa: E402
 import overlay_build as ob  # noqa: E402
 
 KEY = "fixture-league-key-5"
@@ -513,6 +514,262 @@ def t_the_director_sees_a_dropped_widget_that_stays_placed():
         assert rows["standings"]["reason"].startswith("not placed"), rows["standings"]
         assert rows["match-score"]["reason"] == "" and rows["match-score"]["placed"] == ["hud"]
         assert not live.set("old-table", "show")[0], "an unlisted widget cannot go on air"
+
+
+# The public timing page (#1256)
+
+def _timing_env(d, value):
+    env = os.path.join(d, "profile.env")
+    with open(env, "w", encoding="utf-8") as fh:
+        fh.write(f"NAME=x\n{lw.TIMING_KEY}={value}\n" if value is not None else "NAME=x\n")
+    return env
+
+
+def t_the_profile_switch_decides_the_timing_block_independent_of_the_director():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        env = _timing_env(d, None)
+        live, _snap = _live(d, sim, env_path=env)
+        live.client.step()
+        assert live.public(0) is None, "default off: no block"
+        for value in ("0", "off", "maybe", ""):
+            _timing_env(d, value)
+            os.utime(env, (len(value) + 1, len(value) + 1))
+            assert live.public(0) is None, f"{value!r} is off"
+        _timing_env(d, "1")
+        os.utime(env, (90, 90))
+        block = live.public(0)
+        assert [w["id"] for w in block] == ["match-score", "standings"], \
+            f"every widget of the event, none shown by the Director: {block}"
+        assert live.data()["widgets"] == [], "the timing page switch never puts a widget on air"
+        os.remove(env)
+        assert live.public(0) is None, "an unreadable profile.env is off"
+
+
+def t_the_timing_block_is_an_allowlist_of_id_form_title_and_value():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        live, _snap = _live(d, sim, env_path=_timing_env(d, "1"))
+        sim.answer("live", body={"v": 1, "widgets": {
+            "match-score": {"provisional": True, "values": [{"label": "A", "value": "1"}]},
+            "standings": {"value_title": "Pts", "rows": [{"rank": 1, "name": "Ann", "value": "25"}]}}})
+        live.client.step()
+        live.set("1", "show")
+        score, table = live.public(0)
+        assert score == {"id": "match-score", "form": "score", "title": "Match",
+                         "value": {"provisional": True, "values": [{"label": "A", "value": "1"}]}}, score
+        assert table == {"id": "standings", "form": "table", "title": "Championship",
+                         "value": {"value_title": "Pts", "rows": [{"rank": 1, "name": "Ann", "value": "25"}]}}, table
+        assert json.dumps(live.public(0)) == json.dumps(live.public(0)), \
+            "nothing in the block counts down, so an unchanged value keeps the body's ETag"
+        assert KEY not in json.dumps(live.public(0))
+
+
+def t_the_public_cut_keeps_only_the_allowlisted_fields():
+    score = {"provisional": True, "extra": "x", "values": [{"label": "A", "value": "1", "color": "#f00"}]}
+    table = {"value_title": "Pts", "note": "x", "rows": [{"rank": 1, "name": "Ann", "value": "2", "ref": "d1"}],
+             "values": [{"label": "A", "value": "1"}]}
+    assert lw.public_value("score", score) == {"provisional": True, "values": [{"label": "A", "value": "1"}]}
+    assert lw.public_value("table", table) == {"value_title": "Pts", "rows": [{"rank": 1, "name": "Ann", "value": "2"}]}, \
+        "a field the parser might keep one day never reaches the public body"
+    assert lw.public_value("chart", score) == {}
+    rows = [{"rank": i, "name": f"D{i}", "value": "1"} for i in range(1, ls.MAX_ROWS + 1)]
+    assert [r["rank"] for r in lw.public_value("table", {"rows": rows})["rows"]] == list(range(1, lw.PUBLIC_ROWS + 1)), \
+        f"the public body keeps the first {lw.PUBLIC_ROWS} rows of a table"
+
+
+def t_a_widget_value_reaches_the_timing_page_delay_s_after_it_arrived():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        live.client.step()                                      # t=100: Ann leads
+        first = live.public(0)[0]["value"]
+        snap[0] = dict(SNAP, entries=[dict(SNAP["entries"][1], pos=1), dict(SNAP["entries"][0], pos=2)])
+        clock.t = 110.0
+        live.client.step()                                      # t=110: Bob leads
+        second = live.public(0)[0]["value"]
+        assert first != second, (first, second)
+        clock.t = 159.9
+        assert live.public(60) == [], "no answer is 60 s old yet: nothing ahead of the delayed timing"
+        clock.t = 160.0
+        assert live.public(60)[0]["value"] == first, "60 s after it arrived"
+        clock.t = 169.9
+        assert live.public(60)[0]["value"] == first, "the overtake waits for the picture"
+        clock.t = 170.0
+        assert live.public(60)[0]["value"] == second
+
+
+def t_the_hold_shifts_with_the_delay_when_the_service_dies():
+    with tempfile.TemporaryDirectory() as d:
+        clock = _Clock()
+        with league_sim.LeagueSim(key=KEY) as sim:
+            live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+            live.client.step()                                  # last good answer at t=100
+            sim.stop()
+            clock.t = 105.0
+            live.client.step()
+        clock.t = 100.0 + 60 + ls.HOLD_S
+        assert live.public(60), "the delayed page holds the value as long as the live one did"
+        clock.t = 100.0 + 60 + ls.HOLD_S + 0.1
+        assert live.public(60) == [], "then it hides, delay_s after the live pages"
+        clock.t = 100.0 + 200
+        assert live.public(driver_race.MAX_DELAY_S) == [], "never older than its hold, whatever the delay"
+
+
+def t_a_gap_longer_than_the_hold_stays_a_gap_for_an_unchanged_value():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        live.client.step()                                      # t=100
+        clock.t = 150.0
+        live.client.step()                                      # the same value again after 50 s of silence
+        clock.t = 185.0
+        assert live.public(50) == [], "at t=135 the value had been gone for 35 s, longer than the hold"
+        assert live.public(30), "and at t=155 it was back"
+
+
+def t_a_new_event_forgets_the_delayed_values_too():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        live.client.step()
+        clock.t += 30
+        assert live.public(30), "held"
+        ls.store(ls.path_in(d), REF, ls.fetch_event(_cfg(sim), REF), now=4e9)
+        assert live.public(30) == [], "a reload of the event drops what the old one answered"
+
+
+def t_a_delay_beyond_the_history_shows_nothing():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        for _ in range(100):
+            live.client.step()
+            clock.t += ls.TICK_S
+        limit = ls.HISTORY_S - ls.HOLD_S
+        assert live.client.delayed(limit), "the longest covered delay still shows"
+        assert live.client.delayed(limit + 1) == {} and live.client.delayed(10 ** 6) == {}, \
+            "a delay the history cannot cover fails closed instead of showing a newer value"
+
+
+def t_wake_bursts_keep_the_history_small():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, snap = _live(d, sim, clock=clock)
+        sim.answer("live", body={"v": 1, "widgets": {"standings": {"rows": [
+            {"rank": i, "name": f"D{i}", "value": "1"} for i in range(1, ls.MAX_ROWS + 1)]}}})
+        for _ in range(300):
+            clock.t += ls.MIN_GAP_S
+            live.client._last_sent = None
+            live.client.step()
+        (kept,) = live.client._history.values()
+        assert len(kept) == 1, f"an unchanged value is kept once, not per answer: {len(kept)}"
+        assert len(kept[0][-1]["rows"]) == lw.PUBLIC_ROWS, "the history keeps only what the page can show"
+        sim.clear_answers()
+        for lap in range(300):
+            clock.t += ls.MIN_GAP_S
+            snap[0] = dict(SNAP, entries=[dict(e, laps=lap) for e in SNAP["entries"]])   # a new value every answer
+            live.client._last_sent = None
+            live.client.step()
+        kept = max(len(h) for h in live.client._history.values())
+        assert 100 < kept <= ls.HISTORY_S / ls.MIN_GAP_S + 1, f"{kept} answers kept per widget in a wake burst"
+
+
+def t_the_answer_history_covers_the_longest_delay_and_stays_bounded():
+    assert ls.HISTORY_S >= driver_race.MAX_DELAY_S + ls.HOLD_S, "the longest timing delay plus the hold"
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock)
+        for _ in range(400):
+            clock.t += ls.TICK_S
+            live.client.step()
+        kept = max(len(h) for h in live.client._history.values())
+        assert kept <= ls.HISTORY_S / ls.TICK_S + 1, f"{kept} answers kept per widget, older than HISTORY_S"
+
+
+def _timing_data(live, delay_s, publisher=None):
+    """(public timing body, timing host body) of a relay whose delayed snapshot carries `delay_s`."""
+    import test_driver_routes as dr
+    pub = dr._FakePublisher() if publisher else None
+    srv, port, _lp, link, _hub = dr._timing_server(league_live=live, **(
+        {"timing_publisher": pub.make, "funnel_host": dr.FUNNEL_HOST} if pub else {}))
+    srv.race_svc.dashboard = lambda: {"v": 1, "mode": "race", "delay_s": delay_s, "entries": []}
+    try:
+        st, body, _h = dr._req(port, f"/console/timing/data?l={link}")
+        assert st == 200, (st, body)
+        return json.loads(body), json.loads(pub.fns["body_fn"]()[0]) if pub else None
+    finally:
+        srv.shutdown()
+
+
+def t_the_public_timing_body_carries_the_delayed_block_and_the_host_the_same():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        env = _timing_env(d, "1")
+        live, _snap = _live(d, sim, clock=clock, env_path=env)
+        live.client.step()
+        clock.t += 20
+        body, hosted = _timing_data(live, 20, publisher=True)
+        assert [w["id"] for w in body.get("league", [])] == ["match-score", "standings"], \
+            f"the switch puts every event widget in the public body: {body}"
+        assert hosted == body, "the timing host carries the same body, block included"
+        body, _ = _timing_data(live, 30)
+        assert "league" not in body, f"a value newer than the delay stays off the page: {body}"
+        _timing_env(d, "0")
+        os.utime(env, (50, 50))
+        body, _ = _timing_data(live, 20)
+        assert "league" not in body, "switch off: the body is the timing alone"
+
+
+def _timing_bytes(league):
+    """Bytes per answer of a 20-car public timing body carrying `league`, gzip plus headers."""
+    import random
+    import timing_feed
+    rnd = random.Random(3)
+    snap = {"v": 1, "mode": "race", "stint": "Stint 3", "remaining": 3600, "remaining_running": True,
+            "delay_s": 30, "track_name": "Spa", "state": "racing", "lap": {"leader": 42, "count": 60},
+            "entries": [{"pos": i + 1, "entry": f"Team {i} #{i + 1}", "number": str(i + 1),
+                         "driver": f"Driver {rnd.randint(100, 999)}", "team": f"Team {i}", "laps": 42,
+                         "gap_s": round(i * rnd.uniform(2, 4), 3), "interval_s": round(rnd.uniform(0.2, 4), 3),
+                         "pit_stops": 2, "last_lap_ms": rnd.randint(97000, 99999), "best_ms": rnd.randint(96000, 97999),
+                         "compound": "RM", "fuel_l": round(rnd.uniform(10, 90), 1), "brand": "bmw", "brand_name": "BMW"}
+                        for i in range(20)]}
+    body = dict(driver_race.public_view(snap), **({"league": league} if league else {}))
+    raw = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return len(timing_feed.encode(raw)[2]) + timing_feed.HEADER_BYTES
+
+
+def _block(answer, forms):
+    values = ls.parse_widget_values(dict(answer, v=1), forms)
+    return [{"id": wid, "form": forms[wid], "title": "T" * ls.MAX_TITLE,
+             "value": lw.public_value(forms[wid], values[wid])} for wid in forms]
+
+
+def t_the_upload_budget_still_holds_with_the_block():
+    import random
+    import test_timing_feed as tf
+    rnd = random.Random(5)
+    real = _block(league_sim.widget_values({"entries": [
+        {"pos": i + 1, "team": f"Team {i % 2}", "driver": f"Driver {i}", "laps": 42} for i in range(20)]}),
+        {"match-score": "score", "standings": "table"})
+    letters = "abcdefghijklmnopqrstuvwxyz "
+    worst = _block({"widgets": {f"w{i}": {"provisional": True, "value_title": "V" * ls.MAX_VALUE, "rows": [
+        {"rank": ls.MAX_RANK - r, "name": "".join(rnd.choice(letters) for _ in range(ls.MAX_LABEL)),
+         "value": str(rnd.randrange(10 ** (ls.MAX_VALUE - 1), 10 ** ls.MAX_VALUE))} for r in range(ls.MAX_ROWS)]}
+        for i in range(ls.MAX_WIDGETS)}}, {f"w{i}": "table" for i in range(ls.MAX_WIDGETS)})
+    assert len(worst) == ls.MAX_WIDGETS and all(len(w["value"]["rows"]) == lw.PUBLIC_ROWS for w in worst)
+    for league, crowd in ((None, 2500), (real, 2000), (worst, 350)):
+        nbytes = _timing_bytes(league)
+        covered = int(1000 * 125 * tf.tf.MAX_INTERVAL_S / nbytes)
+        assert crowd < covered, f"{nbytes} B per answer covers {covered} viewers, fewer than {crowd}"
+        rates = tf._obeying_crowd(crowd, 400, nbytes=nbytes)
+        assert max(rates) < 1000 * 1.3, f"{crowd} viewers at {nbytes} B reach {max(rates):.0f} kbit/s"
+
+
+def t_a_failing_block_never_freezes_the_timing():
+    class Broken:
+        def public(self, _delay):
+            raise RuntimeError("widget bug")
+    body, _ = _timing_data(Broken(), 0)
+    assert body["mode"] == "race" and "league" not in body, body
 
 
 # The relay routes

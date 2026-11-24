@@ -39,6 +39,7 @@ BACKOFF_MIN_S = 2.0
 BACKOFF_MAX_S = 30.0
 HOLD_S = 30.0                   # a widget value outlives its last good answer this long
 MIN_GAP_S = 1.0                 # a wake on a position change sends no sooner after the last send
+HISTORY_S = 150.0               # the public timing page's longest delay (120 s) plus HOLD_S
 
 MAX_REF = 128
 MAX_RACES = 16
@@ -49,6 +50,7 @@ MAX_EVENT_TITLE = 80
 MAX_TITLE = 60
 MAX_LABEL = 40
 MAX_VALUE = 16
+MAX_RANK = 999
 MAX_MESSAGE = 200
 RACE_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 WIDGET_ID_RE = re.compile(r"[a-z0-9-]{1,32}")
@@ -155,10 +157,10 @@ def _optional(doc, key, limit):
     return _ABSENT if value is None else value
 
 
-def _int(v, minimum=None):
+def _int(v, minimum=None, maximum=None):
     if isinstance(v, bool) or not isinstance(v, int):
         return None
-    return v if minimum is None or v >= minimum else None
+    return v if (minimum is None or v >= minimum) and (maximum is None or v <= maximum) else None
 
 
 def parse_widget_value(doc, form=None):
@@ -191,7 +193,7 @@ def parse_widget_value(doc, form=None):
             for item in doc["rows"]:
                 if not isinstance(item, dict):
                     continue
-                rank, name = _int(item.get("rank"), 1), _text(item.get("name"), MAX_LABEL)
+                rank, name = _int(item.get("rank"), 1, MAX_RANK), _text(item.get("name"), MAX_LABEL)
                 value = _text(item.get("value"), MAX_VALUE, True)
                 if rank is not None and name is not None and value is not None:
                     rows.append({"rank": rank, "name": name, "value": value})
@@ -449,14 +451,16 @@ class Client:
     or None while there is nothing to send; forms_fn() -> {widget id: form}."""
 
     def __init__(self, settings_fn, body_fn, forms_fn, post=post_live,
-                 clock=time.monotonic, log=LOG):
+                 clock=time.monotonic, log=LOG, history_cut=None):
         self._settings_fn, self._body_fn, self._forms_fn = settings_fn, body_fn, forms_fn
+        self._history_cut = history_cut     # (form, value) -> the part delayed() hands out
         self._post, self._clock, self._log = post, clock, log
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._reload = True
         self._settings = None
         self._values = {}               # widget id -> (value, monotonic time of the answer)
+        self._history = {}              # widget id -> deque of [first answer, last answer, value]
         self._backoff = 0.0
         self._next_attempt = 0.0
         self._last_sent = None
@@ -476,7 +480,7 @@ class Client:
     def forget(self):
         """Drop every value, e.g. when another event is loaded."""
         with self._lock:
-            self._values = {}
+            self._values, self._history = {}, {}
 
     def values(self):
         """{widget id: value} answered within the last HOLD_S."""
@@ -489,6 +493,22 @@ class Client:
         now = self._clock()
         with self._lock:
             return {k: (v, HOLD_S - (now - t)) for k, (v, t) in self._values.items() if now - t <= HOLD_S}
+
+    def delayed(self, delay_s):
+        """{widget id: value} as held `delay_s` seconds ago: the newest answer at least that
+        old, while its hold lasted then. Nothing before an answer is that old."""
+        if not 0 <= delay_s <= HISTORY_S - HOLD_S:
+            return {}
+        at = self._clock() - delay_s
+        out = {}
+        with self._lock:
+            for wid, answers in self._history.items():
+                for first, last, value in reversed(answers):
+                    if first <= at:
+                        if at - min(last, at) <= HOLD_S:
+                            out[wid] = value
+                        break
+        return out
 
     def status(self):
         with self._lock:
@@ -514,7 +534,7 @@ class Client:
             cfg = self._settings_fn()
             with self._lock:
                 if cfg != self._settings:
-                    self._values, self._backoff, self._next_attempt = {}, 0.0, 0.0
+                    self._values, self._history, self._backoff, self._next_attempt = {}, {}, 0.0, 0.0
                 self._settings = cfg
         if self._settings is None:
             return TICK_S
@@ -528,7 +548,8 @@ class Client:
             return TICK_S
         self._last_sent = now
         try:
-            values = self._post(self._settings, body, self._forms_fn())
+            forms = self._forms_fn()
+            values = self._post(self._settings, body, forms)
         except ServiceError as e:
             self._fail(str(e), now)
             return self._backoff
@@ -536,11 +557,24 @@ class Client:
             done = self._clock()
             for wid, value in values.items():
                 self._values[wid] = (value, done)
+                self._remember(wid, self._history_cut(forms.get(wid), value) if self._history_cut else value, done)
             self._last_ok, self._backoff, self._last_error = done, 0.0, None
         if self._logged_error:
             self._log.info("league service: reachable again")
             self._logged_error = None
         return max(0.1, self._last_sent + TICK_S - self._clock())
+
+    def _remember(self, wid, value, done):
+        answers = self._history.get(wid)
+        if answers is None:
+            answers = self._history[wid] = collections.deque(maxlen=int(HISTORY_S / MIN_GAP_S) + 1)
+        # An unchanged value only moves its last answer while the hold never lapsed in between.
+        if answers and answers[-1][2] == value and done - answers[-1][1] <= HOLD_S:
+            answers[-1][1] = done
+        else:
+            answers.append([done, done, value])
+        while done - answers[0][1] > HISTORY_S:
+            answers.popleft()
 
     def _fail(self, message, now):
         self._backoff = min(BACKOFF_MAX_S, max(BACKOFF_MIN_S, self._backoff * 2))

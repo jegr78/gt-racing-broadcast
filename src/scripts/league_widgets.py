@@ -17,6 +17,7 @@ import threading
 
 import atomic_replace
 import league_service
+import timing_host
 
 FILENAME = "league-widgets.json"
 SLOT_PREFIX = "league-widget-"
@@ -24,6 +25,8 @@ MAX_KEPT = 32           # listed widgets plus the ones a service stopped listing
 PAGES = ("hud", "intermission", "splitscreen")
 SCRIPT = "/league-widgets.js"
 DATA = "/league-widgets/data"
+TIMING_KEY = "LEAGUE_WIDGETS_TIMING"   # profile.env switch: the widgets on the public timing page
+_ON = ("1", "true", "yes", "on")
 
 _lock = threading.Lock()
 
@@ -181,6 +184,32 @@ def order_key(snap):
     return mode, tuple(r.get("entry") for r in rows or () if isinstance(r, dict))
 
 
+def timing_switch(env_path):
+    """The profile's TIMING_KEY as a bool; off when unset, unknown or unreadable."""
+    try:
+        with open(env_path, encoding="utf-8") as fh:
+            value = timing_host._parse_env(fh.read()).get(TIMING_KEY, "")
+    except (OSError, ValueError, TypeError):
+        return False
+    return value.strip().lower() in _ON
+
+
+# The public timing page's cut of a value: its own allowlist, whatever the parser keeps.
+_PUBLIC_VALUE = {"score": ("provisional", "values"), "table": ("provisional", "value_title", "rows")}
+_PUBLIC_ITEM = {"values": ("label", "value"), "rows": ("rank", "name", "value")}
+PUBLIC_ROWS = 20                # a table's rows on the public page; each answer goes to every viewer
+
+
+def public_value(form, value):
+    out = {}
+    for key in _PUBLIC_VALUE.get(form, ()):
+        if key in value:
+            item = _PUBLIC_ITEM.get(key)
+            items = value[key][:PUBLIC_ROWS] if key == "rows" else value[key]
+            out[key] = [{k: v[k] for k in item if k in v} for v in items] if item else value[key]
+    return out
+
+
 def _stamp(path):
     try:
         return os.stat(path).st_mtime_ns if path else None
@@ -206,7 +235,9 @@ class Live:
         self._widgets = []
         self._order = None
         self._env_stamp = _stamp(env_path)
-        self.client = league_service.Client(lambda: self._settings()[0], self.body, self.forms, **client_kw)
+        self._timing = (None, False)    # (profile.env stamp, timing switch) last read
+        self.client = league_service.Client(lambda: self._settings()[0], self.body, self.forms,
+                                            history_cut=public_value, **client_kw)
 
     def body(self):
         """The LiveState to send, or None without a loaded event or a snapshot."""
@@ -291,6 +322,25 @@ class Live:
                 out.append({"id": w["id"], "form": w["form"], "title": w["title"],
                             "value": value[0], "holdFor": round(value[1], 1)})
         return {"ok": True, "widgets": out}
+
+    def timing_on(self):
+        """The profile's timing page switch, read again whenever profile.env changes."""
+        stamp = _stamp(self._env_path)
+        if stamp is None:
+            return False
+        if stamp != self._timing[0]:
+            self._timing = (stamp, timing_switch(self._env_path))
+        return self._timing[1]
+
+    def public(self, delay_s):
+        """The public timing page's block: every widget of the loaded event with the value
+        it held `delay_s` seconds ago, shown or not; None while the profile switch is off."""
+        if not self.timing_on():
+            return None
+        widgets = self._event_widgets()
+        held = self.client.delayed(delay_s)
+        return [{"id": w["id"], "form": w["form"], "title": w["title"],
+                 "value": public_value(w["form"], held[w["id"]])} for w in widgets if w["id"] in held]
 
     def director(self):
         """The Director Panel's list: every widget of the event and every placed one the

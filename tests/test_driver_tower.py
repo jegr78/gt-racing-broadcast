@@ -944,6 +944,10 @@ function node(tag) {
           addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
           appendChild(c) { this.children.push(c); return c; }, append(...c) { this.children.push(...c); },
           prepend(...c) { this.children.unshift(...c); }, replaceChildren(...c) { this.children = c; },
+          querySelectorAll(sel) {   // class selectors only
+            return flat(this).slice(1).filter(n => (n.className || "").split(" ").includes(sel.slice(1)));
+          },
+          querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
           remove() {}}, Node.prototype);
 }
 const els = {timing: Object.assign(node("table"), {tHead: node("thead"), tBodies: [node("tbody")]})};

@@ -6711,7 +6711,34 @@ def league_event_data(rc=None, path=None):
     return {"ok": True, "configured": cfg is not None, "problem": problem,
             "url": (rc.league_service_url if rc is not None else "") or "",
             "key_set": bool(rc is not None and rc.league_service_key), "event": event,
-            "results": results[:LEAGUE_RESULTS_SHOWN], "recordings": recordings}
+            "results": results[:LEAGUE_RESULTS_SHOWN], "recordings": recordings,
+            "timing_widgets": _league_timing_on(rc)}
+
+
+def _league_timing_env(rc):
+    return os.path.join(rc.profile_dir, pcfg.PROFILE_ENV_NAME) if rc is not None and rc.profile_dir else None
+
+
+def _league_timing_on(rc):
+    import league_widgets
+    path = _league_timing_env(rc)
+    return bool(path) and league_widgets.timing_switch(path)
+
+
+def league_timing_data(on, rc=None):
+    """Switch the league widgets on the public timing page (LEAGUE_WIDGETS_TIMING in
+    profile.env); a running relay picks it up on its next timing tick."""
+    import league_widgets
+    rc = _active_config() if rc is None else rc
+    if not isinstance(on, bool):
+        return {"ok": False, "error": "on must be true or false"}
+    path = _league_timing_env(rc)
+    if not path:
+        return {"ok": False, "error": "no active profile"}
+    written = _set_env_key(path, league_widgets.TIMING_KEY, "1" if on else "0")
+    if not written.get("ok"):
+        return {"ok": False, "error": written.get("error") or "could not write profile.env"}
+    return {"ok": True, "timing_widgets": _league_timing_on(rc)}
 
 
 LEAGUE_RESULTS_SHOWN = 12
@@ -11218,6 +11245,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "timing_host_status": timing_host_status_data,
         "league_event": league_event_data,
         "league_event_load": league_event_load_data,
+        "league_timing_set": league_timing_data,
         "league_result_send": league_result_send_data,
         "league_result_refresh": league_result_refresh_data,
         "backup_list": backup_list_data,

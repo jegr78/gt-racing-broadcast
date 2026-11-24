@@ -251,6 +251,21 @@ TELEMETRY_READY = ("(() => { const q = s => document.querySelector(s);"
                    " && !!q('#tm-charts path.tm-b') && !!q('#tm-sectors tbody tr')"
                    " && q('#tm-err').hidden; })()")
 
+# The synthetic relay has no league service and no drivers: the prep stops the page's polls
+# and renders a fixed body with the league block (#1256).
+_TIMING_ROWS = ", ".join(
+    f"{{pos: {i + 1}, entry: 'Team {i} #{i + 1}', number: '{i + 7}', driver: 'Driver {i + 1}', "
+    f"team: 'Team {'AB'[i % 2]}', laps: 23, gap_s: {i * 2.5}, interval_s: 2.5, pit_stops: 1, "
+    f"last_lap_ms: {98000 + i * 70}, compound: 'RM', fuel_l: {40 - i}}}" for i in range(12))
+TIMING_PREP = (
+    "window.fetch = () => new Promise(() => {}); render({v: 1, mode: 'race', delay_s: 30, remaining: 1500,"
+    " track_name: 'Spa', lap: {leader: 23, count: 40}, entries: [" + _TIMING_ROWS + "],"
+    " league: [{id: 'match-score', form: 'score', title: 'Match', value: {provisional: true,"
+    " values: [{label: 'Team A', value: '36'}, {label: 'Team B', value: '30'}]}},"
+    " {id: 'standings', form: 'table', title: 'Championship', value: {value_title: 'Pts',"
+    " rows: [" + ", ".join(f"{{rank: {r}, name: 'Driver {r}', value: '{60 - 3 * r}'}}" for r in range(1, 21))
+    + "]}}]})")
+
 SURFACES = [
     Surface("director-panel", "relay", "/panel", ("desktop",), None,
             "!!document.querySelector('#schedBody tr')", 15000),
@@ -258,6 +273,8 @@ SURFACES = [
             TALLY_READY, 15000),
     Surface("race-control", "relay", "/console/race-control?t={rc_token}",
             ("desktop", "phone"), None, TALLY_READY, 15000),
+    Surface("public-timing", "relay", "/console/timing?l={timing_link}", ("desktop", "phone"),
+            TIMING_PREP, "!document.getElementById('league').hidden", 15000),
 ] + [
     # The preflight view runs real hardware/tool/port checks and needs a much longer timeout.
     Surface(f"cc-{view}", "ui", "/", ("desktop",), f"showView('{view}')",
@@ -317,7 +334,8 @@ def demo_learned_tracks(row):
 
 def surface_url(surface, urls):
     """Absolute URL of *surface*; *urls* holds the ui/relay base URLs and the two tokens."""
-    return urls[surface.base] + surface.path.format(token=urls["token"], rc_token=urls["rc_token"])
+    return urls[surface.base] + surface.path.format(token=urls["token"], rc_token=urls["rc_token"],
+                                                    timing_link=urls.get("timing_link", ""))
 
 
 def result_code(results):

@@ -1218,6 +1218,21 @@ def make_handler(ctx):
                     return self._json({"ok": False, "error": f"could not load the league event: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/league-event/timing":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error}, code=400)
+                if (body.get("expectedProfile") or None) != (ctx.get("active_profile", lambda: None)() or None):
+                    return self._json({"ok": False, "error": "Active league changed. Reload and try again"},
+                                      code=409)
+                if not isinstance(body.get("on"), bool):
+                    return self._json({"ok": False, "error": "on must be true or false"}, code=400)
+                try:
+                    result = ctx["league_timing_set"](body["on"])
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not switch the timing page: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
             if path in ("/api/league-result/send", "/api/league-result/refresh"):
                 body = self._body_json()
                 if body is None:

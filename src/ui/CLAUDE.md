@@ -22,7 +22,9 @@ Loaded when working under `src/ui/`.
   `league_event_data`/`league_event_load_data`; the status names the URL, never the key,
   and lists the result statuses and the race recordings holding a result),
   `POST /api/league-result/send` and `/refresh` (#1254, `league_result_send_data`/
-  `league_result_refresh_data`, both guarded by `expectedProfile`).
+  `league_result_refresh_data`, both guarded by `expectedProfile`), and
+  `POST /api/league-event/timing` (#1256, `{on: bool}`, `league_timing_data`, guarded by
+  `expectedProfile`), the section's **Timing page** checkbox.
 - **General Settings**, machine-wide knobs: the `.env` editor (`RACECAST_*` vars),
   cookie refresh, and the **overlay font library** (`runtime/fonts/`, shared across
   leagues). A curated baseline set (`overlay_build.GOOGLE_FONTS`) is downloaded at build
