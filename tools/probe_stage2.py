@@ -313,6 +313,18 @@ def _senders(polls):
     return out
 
 
+def _active(series):
+    """`series` up to its last poll in which a packet counter rose: the relay lists a
+    connection that stopped sending for minutes, and that tail is no measurement."""
+    end = 0
+    for i in range(1, len(series)):
+        a, b = series[i - 1][1], series[i][1]
+        if any((_num((b.get(sub) or {}).get("received")) or 0) > (_num((a.get(sub) or {}).get("received")) or 0)
+               for sub in ("packets", "sender")):
+            end = i
+    return series[:end + 1]
+
+
 def _spread(values):
     vals = sorted(v for v in values if v is not None)
     if not vals:
@@ -323,8 +335,8 @@ def _spread(values):
 def sender_summary(polls):
     rows = []
     for key, s in _senders(polls).items():
-        series = [p for p in s["series"] if p[1].get("live", True) is not False]
-        first, last = s["series"][0], s["series"][-1]
+        active = _active(s["series"])
+        first, last = active[0], active[-1]
         span = last[0] - first[0]
         pk0, pk1 = first[1].get("packets") or {}, last[1].get("packets") or {}
         sd0, sd1 = first[1].get("sender") or {}, last[1].get("sender") or {}
@@ -336,16 +348,16 @@ def sender_summary(polls):
         lost = delta(pk0, pk1, "lost")
         rows.append({
             "key": key, "name": s["name"], "entry": s["entry"], "segment": s["segment"], "kind": s["kind"],
-            "seconds": round(span, 1), "live_polls": len(series), "polls": len(s["series"]),
+            "seconds": round(span, 1), "polls": len(active),
             "relay_hz": None if rx is None or span <= 0 else round(rx / span, 1),
             "device_hz": None if dev is None or span <= 0 else round(dev / span, 1),
             "lost": lost, "lost_pct": None if not rx or lost is None else round(100.0 * lost / (rx + lost), 3),
             "reordered": delta(pk0, pk1, "reordered"), "decrypt_failed": delta(pk0, pk1, "decrypt_failed"),
             "interruptions": delta(sd0, sd1, "interruptions"), "post_failed": delta(sd0, sd1, "post_failed"),
             "dropped": delta(sd0, sd1, "dropped"),
-            "post_ms_p50": _spread(p[1].get("sender", {}).get("post_ms_p50") for p in s["series"]),
-            "post_ms_p95": _spread(p[1].get("sender", {}).get("post_ms_p95") for p in s["series"]),
-            "max_idle_s": max((_num(p[1].get("idle_s")) or 0.0 for p in s["series"]), default=None),
+            "post_ms_p50": _spread(p[1].get("sender", {}).get("post_ms_p50") for p in active),
+            "post_ms_p95": _spread(p[1].get("sender", {}).get("post_ms_p95") for p in active),
+            "max_idle_s": max((_num(p[1].get("idle_s")) or 0.0 for p in active), default=None),
             "kinds": last[1].get("kinds")})
     return sorted(rows, key=lambda r: (r["kind"], r["entry"] or "", r["name"] or ""))
 
@@ -354,7 +366,7 @@ def hz_by_minute(polls, marks=()):
     """Per sender, one row per wall-clock minute since its first poll: device and relay Hz."""
     out = {}
     for key, s in _senders(polls).items():
-        rows, series = [], s["series"]
+        rows, series = [], _active(s["series"])
         if not series:
             continue
         t0 = series[0][0]
@@ -424,14 +436,14 @@ def car_counts(polls):
 
 def changes(polls, marks=()):
     """The driver change timeline: change windows and every entry whose active
-    connection changed, with its distance and laps right before and after."""
+    connection changed, with its distance and laps right before and after. A change in
+    the poll that shows the window closed counts inside it: the change closes it."""
     events, last, window = [], {}, False
     for rec in polls:
         race = rec.get("race") or {}
-        if bool(race.get("change_window")) != window:
-            window = bool(race.get("change_window"))
-            events.append({"t": rec["t"], "kind": "window_open" if window else "window_closed",
-                           "block": _block_at(marks, rec["t"])})
+        now = bool(race.get("change_window"))
+        if now and not window:
+            events.append({"t": rec["t"], "kind": "window_open", "block": _block_at(marks, rec["t"])})
         for e in race.get("entries") or []:
             prev = last.get(e["entry"])
             if prev is not None and e.get("tag") and prev.get("tag") and e["tag"] != prev["tag"]:
@@ -444,8 +456,11 @@ def changes(polls, marks=()):
                                "old_status": prev.get("status"), "old_in_box": prev.get("in_box"),
                                "distance_before": before, "distance_after": after,
                                "laps_before": prev.get("laps"), "laps_after": e.get("laps"),
-                               "in_window": window, "anchor_carried": carried})
+                               "in_window": window or now, "anchor_carried": carried})
             last[e["entry"]] = e
+        if window and not now:
+            events.append({"t": rec["t"], "kind": "window_closed", "block": _block_at(marks, rec["t"])})
+        window = now
     return events
 
 
@@ -532,7 +547,7 @@ def report_md(a):
          f"Final race state: {a['final_state'] or '-'}.", ""]
     L += ["## Timeline (marks)", ""] + _table(["time", "mark"], [(_clock(m["t"]), m["text"]) for m in a["marks"]])
     L += ["## Senders", "",
-          "Hz over each sender's whole span; `device` is what the device received, `relay` what "
+          "Hz over the time each sender sent; `device` is what the device received, `relay` what "
           "reached the relay. Post latency min/median/max of the sender's reported p50 and p95.", ""]
     L += _table(["name", "entry", "kind", "seconds", "device Hz", "relay Hz", "lost %", "reordered",
                  "decrypt failed", "interruptions", "post failed", "dropped", "post p50 ms", "post p95 ms",

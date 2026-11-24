@@ -109,6 +109,15 @@ def t_the_change_timeline_finds_the_change_and_the_carried_anchor():
     assert change["anchor_carried"] is True and change["block"] == "block 3 change", change
 
 
+def t_a_change_that_closes_the_window_counts_inside_it():
+    polls = _polls()
+    for i, rec in enumerate(polls):
+        rec["race"]["change_window"] = 6 <= i <= 7       # the relay closes it with the change
+    events = ps.changes(polls)
+    assert [e["kind"] for e in events] == ["window_open", "change", "window_closed"], events
+    assert events[1]["in_window"] is True, f"the change ended the window, it did not miss it: {events[1]}"
+
+
 def t_a_distance_that_moves_away_at_the_change_is_no_carried_anchor():
     polls = _polls()
     for rec in polls[8:]:
@@ -152,6 +161,14 @@ def t_lap_steps_back_and_distance_jumps_are_listed_per_connection():
 def t_a_best_before_the_first_lap_is_marked_carried():
     rows = ps.best_laps(_polls())[ps.tag("cb")]["rows"]
     assert rows and rows[0]["best_ms"] == 95000 and rows[0]["before_a_lap"] is True, rows
+
+
+def t_a_sender_that_stopped_is_measured_over_the_time_it_sent():
+    ann = {r["name"]: r for r in ps.sender_summary(_polls())}["Ann"]
+    assert ann["device_hz"] == 60.0 and ann["relay_hz"] == 60.0, \
+        f"the relay lists a stopped connection for minutes; its rate covers the sending time: {ann}"
+    rows = ps.hz_by_minute(_polls())[ps.tag("ca")]["rows"]
+    assert all(r["device_hz"] == 60.0 for r in rows), f"no low minute after the sender stopped: {rows}"
 
 
 def t_the_sender_summary_reports_device_and_relay_rates_and_latency():
