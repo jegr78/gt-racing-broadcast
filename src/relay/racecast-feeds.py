@@ -12548,9 +12548,6 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.protocol_version = "HTTP/1.1"
                 self.close_connection = False
                 self.connection.settimeout(INGEST_IDLE_S)
-                # The reply's header and body go out as two writes: without this the body
-                # waits for the client's delayed ACK of the header.
-                self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         def _send(self, obj, code=200, no_store=False, compact=False):
             body = json.dumps(obj, ensure_ascii=False, indent=None if compact else 2).encode("utf-8")
