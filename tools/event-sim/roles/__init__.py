@@ -71,5 +71,5 @@ def register(cls):
 
 
 def default_registry():
-    from roles import builtin, drivers, party  # noqa: F401  registers the roles
+    from roles import builtin, drivers, party, probe  # noqa: F401  registers the roles
     return dict(REGISTRY)

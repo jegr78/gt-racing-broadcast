@@ -363,6 +363,7 @@ class Stack:
                                      "RACECAST_PROFILE": PROFILE,
                                      "RACECAST_UPDATE_CHECK": "0",
                                      "RACECAST_CONSOLE_SECRET": self.secret,
+                                     **({"RACECAST_TELEMETRY_PROBE": "1"} if self.scn.event.get("probe") else {}),
                                      "PYTHONDONTWRITEBYTECODE": "1"})
         home = os.path.dirname(os.path.dirname(racecast))
         self.racecast, self.env, self.home = racecast, env, home

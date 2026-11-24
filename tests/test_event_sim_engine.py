@@ -187,10 +187,11 @@ def t_scenario_checks_the_event_keys_and_values_at_load():
                      ("track_length_m", 10), ("track_length_m", "1200"), ("track_length_m", True),
                      ("track_length_m", float("nan")), ("track_length_m", float("inf")), ("track_length_m", 1e9),
                      ("track_length_m", 30001),
-                     ("qualifying_part", "yes")):
+                     ("qualifying_part", "yes"), ("probe", "yes"), ("probe", 1)):
         _refused(go, f"event.{key}", event={key: bad})
     scn = _scn(go, event={"stints": 3, "track": "6e378b", "track_length_m": 1200, "cars": 6,
-                          "classes": ["GT3", "GT4"], "parts": 2, "qualifying_part": True, "seed": 7})
+                          "classes": ["GT3", "GT4"], "parts": 2, "qualifying_part": True, "seed": 7,
+                          "probe": True})
     assert scn.event["parts"] == 2
 
 

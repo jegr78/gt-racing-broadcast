@@ -73,8 +73,15 @@ def device_address(car, stint):
     return f"198.51.100.{10 + car * 4 + stint % 4}"
 
 
-def packet(pid, lap, speed, x, z, last_ms, best_ms, fuel, fuel_cap=FUEL_CAP):
-    """One encrypted GT7 'A' packet with the fields the race engine reads."""
+def packet(pid, lap, speed, x, z, last_ms, best_ms, fuel, fuel_cap=FUEL_CAP, position=None, cars=None):
+    """One encrypted GT7 'A' packet with the fields the race engine reads; `position`
+    and `cars` fill 0x84, which stays empty without them."""
+    return gt7_crypto.encrypt(plain_packet(pid, lap, speed, x, z, last_ms, best_ms, fuel, fuel_cap,
+                                           position, cars), "A", iv=pid)
+
+
+def plain_packet(pid, lap, speed, x, z, last_ms, best_ms, fuel, fuel_cap=FUEL_CAP, position=None, cars=None):
+    """`packet` before encryption, as a recording holds it."""
     b = bytearray(0x128)
     struct.pack_into("<I", b, gt7_telemetry.OFF_MAGIC, 0x47375330)
     struct.pack_into("<f", b, gt7_telemetry.OFF_FUEL_LEVEL, fuel)
@@ -86,7 +93,9 @@ def packet(pid, lap, speed, x, z, last_ms, best_ms, fuel, fuel_cap=FUEL_CAP):
     struct.pack_into("<H", b, gt7_telemetry.OFF_FLAGS, gt7_telemetry.FLAG_ON_TRACK)
     struct.pack_into("<3f", b, gt7_telemetry.OFF_POS, x, 0.0, z)
     struct.pack_into("<i", b, 0x70, pid)
-    return gt7_crypto.encrypt(bytes(b), "A", iv=pid)
+    if position is not None:
+        struct.pack_into("<hh", b, gt7_telemetry.OFF_RACE_POSITION, position, cars)
+    return bytes(b)
 
 
 class Line:
@@ -218,8 +227,11 @@ class Field:
     moves the cars and posts one batch per sending driver. Not thread-safe: `Runner`
     serialises a field with its lock."""
 
-    def __init__(self, line_trace, send, seed=7, pace_mps=RACE_MPS, gap_m=GRID_GAP_M):
+    def __init__(self, line_trace, send, seed=7, pace_mps=RACE_MPS, gap_m=GRID_GAP_M, positions=False):
+        """`positions` fills GT7's race position (0x84) with each car's place on the road."""
         self.line = Line(line_trace)
+        self.positions = positions
+        self._places = {}
         if self.line.length < MIN_LENGTH_M:
             raise ValueError(f"a lap is at least {MIN_LENGTH_M:.0f} m, not {self.line.length:.0f}")
         self.send = send
@@ -356,6 +368,9 @@ class Field:
         wait in `outbox` for a `flush()` outside the caller's lock."""
         if self._release:
             self._release, self.released_at = False, now
+        if self.positions:
+            running = sorted((c for c in self.cars if c.mode not in ("dropped", "off")), key=lambda c: -c.odo)
+            self._places = {c.entry: (k, len(running)) for k, c in enumerate(running, 1)}
         for car in self.cars:
             self._step(car, now, dt)
         if flush:
@@ -444,17 +459,19 @@ class Field:
             frac = (car.odo - line) / max(car.odo - before, 1e-6)
             self._crossed(car, now - frac * dt)
         x, z = self.line.at(car.odo, car.lat)
-        self._post(car.sender, car.lap, speed, x, z, car.fuel)
+        place = self._places.get(car.entry, (None, None))
+        self._post(car.sender, car.lap, speed, x, z, car.fuel, place)
         if car.extra is not None and car.mode == "stand":
-            self._post(car.senders[car.extra], 0, 0.0, x, z, FUEL_CAP)
+            self._post(car.senders[car.extra], 0, 0.0, x, z, FUEL_CAP, place)
 
-    def _post(self, sender, lap, speed, x, z, fuel):
+    def _post(self, sender, lap, speed, x, z, fuel, place=(None, None)):
         if sender.code is None:
             return
         batch = []
         for _ in range(PACKETS_PER_TICK):
             sender.pid += 1
-            batch.append(packet(sender.pid, lap, speed, x, z, sender.last_ms, sender.best_ms, fuel))
+            batch.append(packet(sender.pid, lap, speed, x, z, sender.last_ms, sender.best_ms, fuel,
+                                position=place[0], cars=place[1]))
         self.outbox.append((sender.code, telemetry_probe.encode_batch(batch)))
 
 

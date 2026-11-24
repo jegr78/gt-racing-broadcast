@@ -1466,6 +1466,8 @@ class Service:
             if final_row and race.multi_lobby:
                 self._final_on_air, self._final_lobby_laps = True, final_laps
                 race.final_lobby(final_laps, self._clock())
+            elif race.multi_lobby:
+                self._final_on_air, self._final_lobby_laps = False, None
 
     def final_lap(self, who="tailnet"):
         with self._lock:
@@ -1500,7 +1502,8 @@ class Service:
     def reset(self, who="tailnet"):
         """Start the race over: its corrections, rejoin marks, retirements, fastest lap
         and open disconnects go with it; tyre compounds, driver names, qualifying
-        corrections and the recording stay."""
+        corrections, the recording and, in endurance, the final lobby on air with its
+        lap count stay."""
         def drop_race(doc):
             for key in ("corrections", "rejoin", "retired"):
                 doc.pop(key, None)
@@ -1513,7 +1516,6 @@ class Service:
                 atomic_replace.retry_windows_file_operation(lambda: os.remove(self._fastest_path()))
             except FileNotFoundError:
                 pass  # no fastest lap recorded
-            self._final_lobby_laps, self._final_on_air = None, False
             self._race = self._build(self._pick()["id"] if self._pick() else None)
             # Under the lock, so a tick reads the new race and the new generation together.
             rec = self._rec

@@ -913,6 +913,272 @@ def t_the_shutdown_flush_waits_for_a_poster_that_still_runs():
     assert snd.flush(up, Poster(alive=False)) is True and posted == [1] and up.pending() == 0
 
 
+def _free_udp_port():
+    s = _udp()
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+class _SimConsole:
+    """The simulated PS5 on loopback: answers heartbeats and loops a recording to `reply_port`."""
+
+    def __init__(self, path, reply_port):
+        self.hb, self.tx = _udp(), _udp()
+        self.hb.settimeout(0.2)
+        self.console = sim.Console(sim.load(path), self.tx.sendto, reply_port=reply_port)
+        self.stop = threading.Event()
+        threading.Thread(target=self._answer, daemon=True).start()
+        threading.Thread(target=self.console.run, args=(self.stop,), kwargs={"loop": True}, daemon=True).start()
+
+    def _answer(self):
+        while not self.stop.is_set():
+            try:
+                data, addr = self.hb.recvfrom(64)
+            except OSError:
+                continue
+            self.console.heartbeat(data, addr)
+
+    def close(self):
+        self.stop.set()
+        self.hb.close()
+        self.tx.close()
+
+
+def _check(argv):
+    out = io.StringIO()
+    old = sys.stdout
+    sys.stdout = out
+    try:
+        code = snd.main(argv)
+    finally:
+        sys.stdout = old
+    return code, out.getvalue()
+
+
+def t_check_proves_heartbeat_receive_and_a_waiting_code_and_sends_no_telemetry():
+    import test_driver_routes as r
+    import driver_invite
+    srv, port, path, hub = r._serve()
+    with tempfile.TemporaryDirectory() as d:
+        rec, _n = _recording(d, seconds=1.0)
+        rx_port = _free_udp_port()
+        ps5 = _SimConsole(rec, rx_port)
+        try:
+            invite = driver_invite.create(path)["id"]
+            st, text, _h = r._register(port, invite, entry="Team A #1", name="Max")
+            assert st == 200, text
+            pending = json.loads(text)["code"]
+            base = ["--url", f"http://127.0.0.1:{port}/console/drive/ingest", "--check", "--duration", "2",
+                    "--console", "127.0.0.1", "--bind", "127.0.0.1", "--receive-port", str(rx_port),
+                    "--console-port", str(ps5.hb.getsockname()[1])]
+            code, out = _check(base + ["--code", pending])
+            assert code == 0, f"a waiting code is ready for the session: {out}"
+            for part in ("heartbeat: OK", "receive: OK", "relay: OK", "waiting for approval", "RESULT: OK"):
+                assert part in out, f"the check prints {part!r}: {out}"
+            approved = r._approved(port, path, invite, entry="Team B #2", name="Ann")
+            code, out = _check(base + ["--code", approved])
+            assert code == 0 and "approved" in out, out
+            conns = json.loads(r._req(port, "/drivers/data")[1])["connections"]
+            assert all(c["packets"].get("received", 0) == 0 for c in conns), \
+                f"a check posts empty batches only, never telemetry into the race: {conns}"
+            driver_invite.create(path)                      # the producer renews the invite
+            code, out = _check(base + ["--code", approved])
+            assert code == 1 and "relay: FAIL" in out and "RESULT: FAIL" in out, out
+            assert "Register again" in out, f"a refused code tells the driver what to do: {out}"
+        finally:
+            ps5.close()
+            srv.shutdown()
+
+
+def t_check_without_a_console_fails_and_names_the_fix():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    silent = _udp()
+    said = []
+    sender = snd.Sender(up, console="127.0.0.1", bind="127.0.0.1", receive_port=0,
+                        console_port=silent.getsockname()[1], say=said.append)
+    try:
+        code = snd.self_check(sender, up, duration=0.6, say=said.append)
+    finally:
+        sender.sock.close()
+        silent.close()
+    text = "\n".join(said)
+    assert code == 1 and "receive: FAIL" in text and "RESULT: FAIL" in text, text
+    assert "--console" in text and "UDP" in text, f"a check without packets names the console and the firewall: {text}"
+    assert "relay: OK" in text, f"the upload verdict stands on its own: {text}"
+
+
+def t_check_in_listen_mode_skips_the_heartbeat():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    said, clock = [], [0.0]
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append, clock=lambda: clock[0])
+    other = _udp()
+    for _ in range(60):                       # one second of packets, queued once the port is bound
+        other.sendto(b"\0" * 296, ("127.0.0.1", sender.sock.getsockname()[1]))
+    real = sender.receive_once
+
+    def receive_once():
+        got = real()                           # the real socket path, on a clock of 60 packets a second
+        clock[0] += 1 / 60
+        return got
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=1.0, say=said.append)
+    finally:
+        sender.sock.close()
+        other.close()
+    text = "\n".join(said)
+    assert code == 0 and "heartbeat: skipped" in text and "receive: OK 60 packets" in text, \
+        f"listen mode: heartbeat skipped, 60 packets at 60/s, check output:\n{text}"
+    assert sender.stats["heartbeats"] == 0, "listen mode leaves the console to the other app"
+    assert up.pending() == 0, "packets of a check are counted, never queued for upload"
+
+
+def t_sender_stats_carry_the_post_latency_the_relay_keeps():
+    headers = []
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: headers.append(dict(req.header_items())) or _Reply(b"{}"))
+    up.latencies.extend([0.010, 0.020, 0.030, 0.200])
+    up.put(b"p")
+    up.post_once()
+    stats = json.loads(headers[0]["X-sender-stats"])
+    assert stats["post_ms_p50"] == 30 and stats["post_ms_p95"] == 200, stats
+    probe = tp.Probe("k")
+    probe.ingest("L", tp.encode_batch([]), stats)
+    kept = probe.snapshot()["senders"]["L"]["sender_stats"]
+    assert kept["post_ms_p50"] == 30 and kept["post_ms_p95"] == 200, f"the relay keeps the latency: {kept}"
+
+
+def t_a_full_length_check_prints_verdicts_not_upload_status_lines():
+    said, clock = [], [0.0]
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append, clock=lambda: clock[0])
+
+    def receive_once():
+        sender.stats["received"] += 6
+        clock[0] = round(clock[0] + 0.1, 6)
+        return True
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=snd.CHECK_S, say=said.append)
+    finally:
+        sender.sock.close()
+    assert code == 0, said
+    assert not [line for line in said if line.startswith("received")], \
+        f"a check posts nothing, so it prints no upload status line: {said}"
+
+
+def t_a_check_whose_heartbeats_all_fail_names_the_console_option():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    said = []
+    sender = snd.Sender(up, bind="127.0.0.1", receive_port=0, say=said.append)
+
+    def refused():
+        sender.heartbeat_failed += 1            # iOS: the broadcast has no route
+    sender.heartbeat = refused
+    try:
+        code = snd.self_check(sender, up, duration=0.3, say=said.append)
+    finally:
+        sender.sock.close()
+    text = "\n".join(said)
+    assert code == 1 and "heartbeat: FAIL 1 failed: pass --console" in text, text
+
+
+def t_a_check_that_receives_too_few_packets_fails():
+    said, clock = [], [0.0]
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append, clock=lambda: clock[0])
+
+    def receive_once():
+        sender.stats["received"] += 1
+        clock[0] = round(clock[0] + 0.1, 6)
+        return True
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=3.0, say=said.append)
+    finally:
+        sender.sock.close()
+    text = "\n".join(said)
+    assert code == 1 and "receive: FAIL" in text and "about 60/s" in text, \
+        f"10 packets/s is not what GT7 sends: {text}"
+
+
+
+def t_the_check_rate_counts_from_the_first_packet():
+    said, clock = [], [0.0]
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append, clock=lambda: clock[0])
+
+    def receive_once():
+        clock[0] = round(clock[0] + 0.1, 6)
+        if clock[0] <= 4.0:                       # the console answers after 4 s
+            return False
+        sender.stats["received"] += 6
+        return True
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=snd.CHECK_S, say=said.append)
+    finally:
+        sender.sock.close()
+    line = [x for x in said if "receive:" in x][0]
+    assert code == 0 and ", 60.0/s," in line, f"a late first packet is no low rate: {line}"
+
+
+def t_on_windows_the_receive_port_is_bound_exclusively():
+    calls = []
+
+    class Fake:
+        def __init__(self, *a):
+            pass
+
+        def setsockopt(self, level, opt, value):
+            calls.append(("opt", opt))
+
+        def bind(self, addr):
+            calls.append(("bind", addr))
+
+        def settimeout(self, t):
+            pass
+
+        def getsockname(self):
+            return ("127.0.0.1", 1)
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None)   # before the patch: ssl reads the OS
+    old_socket, old_platform = snd.socket.socket, snd.sys.platform
+    had = hasattr(snd.socket, "SO_EXCLUSIVEADDRUSE")
+    old_opt = getattr(snd.socket, "SO_EXCLUSIVEADDRUSE", None)
+    snd.socket.socket, snd.sys.platform, snd.socket.SO_EXCLUSIVEADDRUSE = Fake, "win32", -5
+    try:
+        snd.Sender(up, console="127.0.0.1", bind="127.0.0.1", receive_port=33740, say=lambda line: None)
+        win = list(calls)
+        calls.clear()
+        snd.sys.platform = "linux"
+        snd.Sender(up, console="127.0.0.1", bind="127.0.0.1", receive_port=33740, say=lambda line: None)
+    finally:
+        snd.socket.socket, snd.sys.platform = old_socket, old_platform
+        if had:
+            snd.socket.SO_EXCLUSIVEADDRUSE = old_opt
+        else:
+            del snd.socket.SO_EXCLUSIVEADDRUSE
+    assert ("opt", -5) in win and win.index(("opt", -5)) < win.index(("bind", ("127.0.0.1", 33740))), \
+        f"Windows lets a second program share UDP 33740 unless the port is exclusive: {win}"
+    assert ("opt", -5) not in calls, calls
+
+
+def t_post_latency_stats_stay_within_a_minute():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None)
+    up.latencies.extend([500.0, 600.0])
+    assert up._latency_stats() == {"post_ms_p50": 60000, "post_ms_p95": 60000}
+    probe = tp.Probe("k")
+    probe.ingest("L", tp.encode_batch([]), {"post_ms_p50": 10 ** 12, "post_ms_p95": -4, "received": 3})
+    kept = probe.snapshot()["senders"]["L"]["sender_stats"]
+    assert kept["post_ms_p50"] == 60000 and kept["post_ms_p95"] == 0 and kept["received"] == 3, kept
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

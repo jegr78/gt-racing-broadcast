@@ -233,6 +233,7 @@ class Hub:
                         "reassigned": conn in moved,
                         "idle_s": round(now - meta["last"], 1),
                         "packets": stats.get("packets", {}),
+                        "duplicates": stats.get("duplicates", 0),
                         "packets_per_s": stats.get("packets_per_s"),
                         "sender_stats": stats.get("sender_stats", {}),
                         "latest": samples[-1] if samples else None})

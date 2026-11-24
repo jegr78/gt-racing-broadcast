@@ -393,6 +393,67 @@ def check_assert_side_effects(root):
     return sorted(bad)
 
 
+_STRING_STARTS = {tokenize.STRING} | ({tokenize.FSTRING_START} if hasattr(tokenize, "FSTRING_START") else set())
+
+
+def _string_parts(segment):
+    """How many string literals the source of one expression joins."""
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO("(" + segment + ")").readline))
+    except (tokenize.TokenError, SyntaxError):
+        return 0
+    return sum(1 for t in tokens if t.type in _STRING_STARTS)
+
+
+def _is_str(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _parenthesized(source, node):
+    """True when `node` sits in its own parentheses in `source`."""
+    lines = source.splitlines(True)
+    offset = sum(len(line) for line in lines[:node.lineno - 1]) + node.col_offset
+    before = source[:offset].rstrip()
+    return before.endswith("(")
+
+
+def find_implicit_concat_in_lists(source):
+    """Line numbers of the list elements CodeQL's py/implicit-string-concatenation-in-list
+    flags: two or more adjacent plain string literals, not in parentheses of their own,
+    in a list that holds another string. It reads like a missing comma. Returns [] for
+    unparseable source."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    bad = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.List):
+            continue
+        strings = [e for e in node.elts if _is_str(e)]
+        if len(strings) < 2:
+            continue
+        for elt in strings:
+            segment = ast.get_source_segment(source, elt)
+            if segment and _string_parts(segment) > 1 and not _parenthesized(source, elt):
+                bad.append(elt.lineno)
+    return sorted(bad)
+
+
+def check_implicit_concat_in_lists(root):
+    """(relpath, lineno) for every implicitly concatenated string in a collection literal
+    in the repo (CodeQL py/implicit-string-concatenation-in-list)."""
+    bad = []
+    for path in _python_files(root):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+        except OSError:
+            continue
+        bad += [(os.path.relpath(path, root), ln) for ln in find_implicit_concat_in_lists(src)]
+    return sorted(bad)
+
+
 def check_import_both_ways(root):
     """(relpath, lineno, name) for every module imported both ways in the repo
     (CodeQL py/import-and-import-from)."""
@@ -458,6 +519,14 @@ def main():
               "module one way only:")
         for relpath, lineno, name in both:
             print(f"  {relpath}:{lineno}: '{name}' is imported with both import and from-import")
+        rc = rc or 1
+    concat = check_implicit_concat_in_lists(ROOT)
+    if concat:
+        print("\nimplicit-string-concatenation-in-list (CodeQL "
+              "py/implicit-string-concatenation-in-list): join the parts with an explicit + "
+              "or build the string outside the list, so a missing comma cannot hide:")
+        for relpath, lineno in concat:
+            print(f"  {relpath}:{lineno}: adjacent strings joined inside a list")
         rc = rc or 1
     dead = check_unused_last_assignments(ROOT)
     if dead:
