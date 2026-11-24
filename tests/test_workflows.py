@@ -9,6 +9,8 @@ import glob, os, re
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 WF_DIR = os.path.join(ROOT, ".github", "workflows")
+ACTIONS_DIR = os.path.join(ROOT, ".github", "actions")
+APT_ACTION = os.path.join(ACTIONS_DIR, "apt-install", "action.yml")
 
 _USES_RE = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
 _SHA_RE = re.compile(r"@[0-9a-f]{40}$")
@@ -85,10 +87,10 @@ def t_workflow_downloads_retry_transient_server_errors():
     # #1097: one GitHub 504 on the pinned gitleaks download failed a required check.
     # The checksum still guards the artifact, so a bounded retry is safe.
     found = 0
-    for name in sorted(os.listdir(WF_DIR)):
-        if not name.endswith((".yml", ".yaml")):
-            continue
-        with open(os.path.join(WF_DIR, name), encoding="utf-8") as fh:
+    paths = sorted(glob.glob(os.path.join(WF_DIR, "*.yml")) + glob.glob(os.path.join(ACTIONS_DIR, "*", "action.yml")))
+    for path in paths:
+        name = os.path.relpath(path, ROOT)
+        with open(path, encoding="utf-8") as fh:
             for line in fh:
                 if re.search(r"(^|[\s;|&(])curl\s", line):
                     found += 1
@@ -103,6 +105,51 @@ def t_plain_scalars_have_no_bare_colon():
     assert not offenders, ("an unquoted value containing ': ' breaks the YAML parser "
                            "and the workflow never runs; quote it or reword: "
                            + "; ".join(offenders))
+
+
+def _workflow_steps(base):
+    """Step bodies of one workflow, split on the step-level `- name:` / `- uses:` lines."""
+    with open(os.path.join(WF_DIR, base), encoding="utf-8") as fh:
+        return re.split(r"\n(?=      - (?:name|uses):)", fh.read())[1:]
+
+
+def t_workflows_run_apt_only_through_the_shared_action():
+    for base in sorted(os.listdir(WF_DIR)):
+        if not base.endswith(".yml"):
+            continue
+        with open(os.path.join(WF_DIR, base), encoding="utf-8") as fh:
+            for i, line in enumerate(fh, 1):
+                assert not re.search(r"\bapt(-get)?\s+(update|install)\b", line), (
+                    f"{base}:{i} runs apt directly and would use the runner's regional mirror; "
+                    "use ./.github/actions/apt-install")
+
+
+def t_the_apt_action_skips_the_regional_mirror_and_bounds_every_download():
+    with open(APT_ACTION, encoding="utf-8") as fh:
+        text = fh.read()
+    mirrors = re.findall(r"https?://[\w.-]+\.ubuntu\.com/ubuntu/", text)
+    assert mirrors[:2] == ["https://archive.ubuntu.com/ubuntu/", "http://azure.archive.ubuntu.com/ubuntu/"], (
+        "first the primary Ubuntu archive, then one other official mirror: " + repr(mirrors))
+    assert "ec2" not in text, "the throttled AWS regional mirror must not be in the path"
+    network = [ln for ln in text.splitlines() if re.search(r"apt-get .*(\bupdate\b|--download-only)", ln)]
+    assert len(network) == 2 and all("timeout --kill-after" in ln for ln in network), (
+        "apt update and the download each run under coreutils timeout: " + repr(network))
+    assert "install -y --no-download" in text, "the install itself must only use the downloaded cache"
+    assert "::error::" in text, "a failed download must say so instead of being cancelled"
+
+
+def t_every_apt_install_step_has_a_step_timeout():
+    for base in ("ci.yml", "event-sim.yml"):
+        steps = [body for body in _workflow_steps(base) if "uses: ./.github/actions/apt-install" in body]
+        assert any(re.search(r"^\s+packages:\s*ffmpeg\s*$", body, re.M) for body in steps), (
+            f"{base} installs ffmpeg through ./.github/actions/apt-install")
+    for base in sorted(os.listdir(WF_DIR)):
+        if base.endswith(".yml"):
+            for body in _workflow_steps(base):
+                if "uses: ./.github/actions/apt-install" in body:
+                    m = re.search(r"^\s+timeout-minutes:\s*(\d+)\s*$", body, re.M)
+                    assert m and int(m.group(1)) >= 10, (
+                        f"{base}: an apt-install step needs timeout-minutes >= 10, above the action's own limits")
 
 
 def _preview_step(name):
