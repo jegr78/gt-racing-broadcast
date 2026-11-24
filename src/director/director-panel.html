@@ -2417,7 +2417,8 @@ $("#trackPick").addEventListener("change", async (e)=>{
 let leagueGfxRace = null;
 function leagueResultLine(r){
   if (!r) return "No result sent for this race yet.";
-  if (r.state === "failed") return "Not sent: " + (r.error || "failed") + ". The relay retries.";
+  if (r.state === "failed") return "Not sent: " + (r.error || "failed")
+    + (r.final ? ". Refused: SEND AGAIN once the service accepts it." : ". The relay retries.");
   if (r.state === "sending") return "Sending…";
   return "League service: " + (r.status || "sent") + (r.message ? " · " + r.message : "")
     + (r.graphic_error ? " · graphic refused: " + r.graphic_error : "");

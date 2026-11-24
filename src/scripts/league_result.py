@@ -276,10 +276,16 @@ def send(cfg, doc, runtime_dir, post=None, fetch=None):
         answer = (post or league_service.post_result)(cfg, doc)
     except league_service.ServiceError as e:
         old = status_of(path, ref, race) or {}
-        record_status(path, ref, race, state="failed", error=str(e), attempts=(old.get("attempts") or 0) + 1)
+        record_status(path, ref, race, state="failed", error=str(e), final=is_final(e),
+                      attempts=(old.get("attempts") or 0) + 1)
         raise
     return _file_answer(cfg, ref, race, answer, runtime_dir, fetch, state="sent", sent_at=time.time(),
-                        attempts=0, error="")
+                        attempts=0, error="", final=False)
+
+
+def is_final(error):
+    """Whether a failed send is a refusal that a retry cannot change."""
+    return getattr(error, "code", None) in league_service.FINAL_CODES
 
 
 def refresh(cfg, ref, race, runtime_dir, get=None, fetch=None):
@@ -484,6 +490,10 @@ class Exporter:
                 except OSError:
                     pass  # the retry below still runs
             with self._lock:
+                if self._jobs.get(key) is job and is_final(e):
+                    del self._jobs[key]
+                    self._log.warning("league result %s: %s (not retried)", key[1], e)
+                    return
                 if self._jobs.get(key) is job:
                     job["tries"] += 1
                     job["next"] = self._clock() + min(RETRY_MAX_S, RETRY_MIN_S * 2 ** (job["tries"] - 1))

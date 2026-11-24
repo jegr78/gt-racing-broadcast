@@ -54,9 +54,9 @@ After the last listed race the relay keeps sending live state but exports no fur
 result, and the Director Panel says so. `league-event.json` keeps the `finished` mark,
 the finish time and the `done` mark next to the current race, so a relay restart between
 the finish and the next start still moves on. The first race state a relay sees is its
-baseline: a restart inside a finished race sends nothing again. The Director's hand pick
-names the race that runs next: it clears the `finished` and `done` marks, so a resend
-of the picked race comes from the recording, never from the live race just run.
+baseline: a restart inside a finished race sends nothing again. The Director's pick
+names the next race to send: it clears the `finished` and `done` marks, so a resend of
+the picked race comes from the recording, never from the live race just run.
 
 Whether the widgets appear on the public timing page is a separate profile switch,
 default off.
@@ -164,7 +164,8 @@ The relay builds the Result from the race service and the recording:
   fastest raw lap time.
 - `events` are the audit log's `red_flag` actions (kind `red_flag`, one per flag; the
   release is no event, since the contract has no kind for it), its
-  `correct` actions with metres, pit stops and reason (kind `correction`) and the
+  `correct` actions with metres, pit stops and Race Control's reason text (kind
+  `correction`; the reason leaves the machine for the league's own service) and the
   recording's confirmed disconnects, dated by their last packet (kind `disconnect`).
   The window starts at the latest of the recording's start, the previous finish and the
   last race reset or new event, and ends when the result is built, so a correction made
@@ -184,9 +185,13 @@ the status is `pending`, a refresh action in the Control Center asks the service
 Nothing waits for the answer: the race, the next race and the event stop go on without
 it.
 
-The relay sends on its own thread. A failed send, a refusal included, is retried after
-2 s, doubling up to 60 s, as long as the relay runs: the operator may fix the key or the
-service meanwhile. A newer result for the same reference and race replaces a queued one.
+The relay sends on its own thread. A refusal a retry cannot change (HTTP 400, 401, 403,
+404, 409, 422) is final: the result stands `failed` with the service's own reason (its
+`error` or `message`, bounded and typed like every answer) in the Control Center and the
+Director Panel, and nothing retries it. A timeout, an overload (408, 429), a server error
+(5xx) or a network failure is retried after 2 s, doubling up to 60 s, as long as the
+relay runs. A manual resend is always possible. A newer result for the same reference
+and race replaces a queued one.
 Every answer, and every failure with its reason, lands in
 `runtime/<profile>/league-results.json` (the newest 64 sends), which the Control Center,
 `racecast event result` and the Director Panel show. `event stop` keeps it.

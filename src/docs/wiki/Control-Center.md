@@ -110,7 +110,8 @@ Everything that belongs to a **league**, gathered in one view (the model behind 
   widgets. See [Configuration](Configuration). The relay sends each race's result to the
   service when the race finishes and retries after a failure. The section lists what the
   service answered per race: its status, message and an **Open ↗** link, with
-  **Refresh** while the status is `pending`. **Send result** sends the picked race again
+  **Refresh** while the status is `pending`. A refusal (for example an unknown race) is
+  final and shows the service's reason; a timeout or server error is retried. **Send result** sends the picked race again
   and replaces the draft on the service; **Recording** sends the result a race recording
   keeps, also after the event. Same as `racecast event result send` and
   `racecast event result refresh`.

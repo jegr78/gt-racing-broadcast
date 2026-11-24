@@ -363,8 +363,8 @@ With a league event loaded from the league service, the **Race** area shows a **
 result** card under the race desk. The relay sends the race's result when it finishes;
 the card shows what the service answered and **SEND AGAIN** sends it once more after a
 correction (it replaces the draft). The select is the current race: the next race
-becomes current when a new race starts counting after the finish, and you can pick
-another one by hand. After the event's last listed race the card says that no further
+becomes current when a new race starts counting after the finish. Picking a race by hand
+names the next race to send. After the event's last listed race the card says that no further
 result is sent. When the service returns a result graphic, the card shows it;
 **USE AS RACE RESULTS** copies it over the Race Results graphic and the **RACE RESULTS**
 key then puts it on air. The graphic never goes on air by itself.

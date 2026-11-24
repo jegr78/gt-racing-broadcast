@@ -137,6 +137,42 @@ def t_a_failed_send_is_retried_with_backoff_until_it_lands():
         assert exp.status()["queued"] == [] and len(sim.calls(call="result")) == 1
 
 
+def t_a_refusal_is_final_and_names_the_services_reason():
+    for code in (400, 401, 403, 404, 409, 422):
+        with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+            exp, src, wall, _path = _setup(d, sim)
+            sim.answer("result", status=code, body={"error": "race is locked\u0007 on the service"})
+            _run_race(exp, src, wall)
+            exp.step()
+            st = lr.status_of(lr.results_path(d), REF, "leg-1")
+            assert st["state"] == "failed" and st["final"] is True and f"HTTP {code}" in st["error"], (code, st)
+            assert exp.status()["queued"] == [], f"HTTP {code} is final: no retry"
+            if code not in (401, 403):
+                assert "race is locked" not in st["error"], "a reason with a control character is dropped"
+            sim.answer("result", status=code, body={"error": "race is locked"})
+            assert exp.resend()["ok"]
+            exp.step()
+            st = lr.status_of(lr.results_path(d), REF, "leg-1")
+            assert "race is locked" in st["error"], f"the service's own reason reaches the operator: {st}"
+            sim.clear_answers()
+            assert exp.resend()["ok"], "a manual resend is always possible"
+            exp.step()
+            st = lr.status_of(lr.results_path(d), REF, "leg-1")
+            assert st["state"] == "sent" and st["final"] is False, st
+
+
+def t_overload_and_timeouts_are_retried():
+    for code in (408, 429, 500, 503):
+        with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+            exp, src, wall, _path = _setup(d, sim)
+            sim.answer("result", status=code, body={})
+            _run_race(exp, src, wall)
+            exp.step()
+            st = lr.status_of(lr.results_path(d), REF, "leg-1")
+            assert st["state"] == "failed" and not st["final"], (code, st)
+            assert exp.status()["queued"] == [{"race": "leg-1", "tries": 1}], f"HTTP {code} is retried"
+
+
 def t_a_missing_service_keeps_the_result_queued():
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
         exp, src, wall, _path = _setup(d, sim)

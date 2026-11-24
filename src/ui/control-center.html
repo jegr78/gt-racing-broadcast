@@ -3112,7 +3112,8 @@ function showLeagueEvent(d) {
   $('ls-send').disabled = !d.configured;
 }
 function leagueResultText(r) {
-  if (r.state === 'failed') return 'not sent: ' + (r.error || 'failed') + ' (retrying while the relay runs)';
+  if (r.state === 'failed') return 'not sent: ' + (r.error || 'failed')
+    + (r.final ? ' (refused: fix it on the service, then Send result)' : ' (retrying while the relay runs)');
   if (r.state === 'sending') return 'sending…';
   let t = r.status || 'sent';
   if (r.message) t += ' · ' + r.message;

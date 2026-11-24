@@ -76,7 +76,8 @@ Config comes from **two layers** and one resolver:
   the dashboard tick (`finished` builds and queues the Result, a race that starts counting
   after a finish moves `league-event.json` to the next race or marks it `done`), keeps the
   Result in the race recording's `meta` `results` (`race_recording.stored_results`), sends
-  on its own thread with retries (2 s doubling to 60 s), files every answer in
+  on its own thread (a refusal, `league_service.FINAL_CODES`, is final with the service's
+reason; 408, 429, 5xx and network failures retry 2 s doubling to 60 s), files every answer in
   `league-results.json` and a returned PNG (same scheme, host and port as the service,
   4 MB) under `league-graphics/`. `racecast event result [send|refresh]` sends through
   the running relay for the current event, else from a recording

@@ -67,7 +67,30 @@ LOG = logging.getLogger("racecast.league_service")
 
 
 class ServiceError(Exception):
-    """A failed call, worded for the producer; it never carries the key."""
+    """A failed call, worded for the producer; it never carries the key. `code` is the
+    HTTP status of a refusal, else None."""
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
+
+
+FINAL_CODES = (400, 401, 403, 404, 409, 422)   # a refusal a retry cannot change
+
+
+def _reason(e):
+    """The service's own `error` or `message` from a refusal's JSON body, or ""."""
+    try:
+        doc = json.loads(e.read(4096).decode("utf-8"))
+    except (OSError, ValueError, http.client.HTTPException):
+        return ""
+    if not isinstance(doc, dict):
+        return ""
+    for key in ("error", "message"):
+        text = _text(doc.get(key), MAX_MESSAGE)
+        if text:
+            return text
+    return ""
 
 
 def url_problem(url, environ=None):
@@ -335,8 +358,9 @@ def call(cfg, method, path, query=None, body=None, opener=None, timeout=SOCKET_T
                     allow_redirects=False) as r:
             raw = _read_bounded(r, deadline)
     except http_util.HTTPError as e:
+        reason = _reason(e) if 400 <= e.code < 500 else ""
         e.close()
-        raise ServiceError(_explain_http(e.code)) from None
+        raise ServiceError(_explain_http(e.code) + (f": {reason}" if reason else ""), e.code) from None
     except http_util.URLError as e:
         raise ServiceError(f"cannot reach the league service: {e.reason}") from None
     except (OSError, ValueError, http.client.HTTPException) as e:
