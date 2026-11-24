@@ -486,6 +486,8 @@ def t_a_failed_search_tells_the_driver_to_name_the_console():
         s.sock = Sock()
     searching.heartbeat()
     assert "--console <PlayStation IP>" in said[-1], f"a failed search must name the fix: {said}"
+    searching.heartbeat()
+    assert sum("--console" in line for line in said) == 1, f"the hint shows once: {said}"
     pinned.heartbeat()
     assert "--console" not in said[-1], f"a sender that has --console needs no hint: {said}"
 

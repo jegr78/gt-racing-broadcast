@@ -40,7 +40,8 @@ def t_a_console_address_goes_into_the_command():
 
 
 def t_only_a_plain_ipv4_address_reaches_the_shell():
-    for bad in ("192.168.1.256", "192.168.1", "1.2.3.4; rm -rf ~", "ps5.local", "01.2.3.4"):
+    for bad in ("192.168.1.256", "192.168.1", "1.2.3.4; rm -rf ~", "ps5.local", "01.2.3.4",
+                "0.0.0.0", "255.255.255.255", "127.0.0.1", "224.0.0.1"):
         got = _call(f"senderArgs('https://h.example', 'C1', {json.dumps(bad)})")
         if got is None:
             return

@@ -16,13 +16,13 @@ Modes:
   --forward   also pass every packet unchanged to HOST:PORT (SimHub or GT Race
               Engineer on this PC)
   --listen    no heartbeat: read the packets another app forwards to this port (SimHub)
-  --console   the PlayStation's IP address; needed on an iPhone or iPad
+  --console   the PlayStation's IP address, needed on an iPhone
   --check     test heartbeat, receive and upload for 12 s, send no telemetry, then
               print OK or FAIL (exit code 0 or 1); run it before the session
 
-A firewall that filters inbound UDP must allow 33740 (or the --listen port): the
-console sends from a port of its own, so the packets do not count as a reply to the
-heartbeat.
+A firewall that filters inbound UDP must allow 33740, or the --listen port when
+another device forwards to it with --bind 0.0.0.0. The console sends from a port of
+its own, so the packets do not count as a reply to the heartbeat.
 
 Standard library only, Python 3.8 or newer.
 """
@@ -409,6 +409,7 @@ class Sender:
         self._quiet = False
         self.heartbeat_failed = 0
         self.first_rx = None            # (clock, received) at the first packet
+        self._search_hinted = False
 
     def heartbeat(self):
         target = self.console or "255.255.255.255"
@@ -417,8 +418,11 @@ class Sender:
             self.stats["heartbeats"] += 1
         except OSError as exc:
             self.heartbeat_failed += 1
-            hint = ("" if self.console else ". On an iPhone or iPad the search cannot "
-                    "work: start the sender with --console <PlayStation IP>")
+            hint = ""
+            if not self.console and not self._search_hinted:
+                self._search_hinted = True
+                hint = (". On an iPhone the search fails like this: start the sender with "
+                        "--console <PlayStation IP>")
             self.say(f"heartbeat to {target} failed: {exc}{hint}")
 
     def receive_once(self):
@@ -577,7 +581,7 @@ def main(argv=None):
     parser.add_argument("--key", help="maintainer probe only: the probe key")
     parser.add_argument("--name", help="maintainer probe only: up to 32 ASCII letters, "
                                        "digits, spaces, _ . -")
-    parser.add_argument("--console", help="PlayStation IP: needed on iPhone and iPad, elsewhere "
+    parser.add_argument("--console", help="PlayStation IP: needed on an iPhone, elsewhere "
                                           "when discovery does not find it")
     parser.add_argument("--forward", type=_hostport, metavar="HOST:PORT",
                         help="also pass every packet to this local app (SimHub, "
