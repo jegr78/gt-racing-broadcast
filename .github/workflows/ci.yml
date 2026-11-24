@@ -219,8 +219,10 @@ jobs:
         run: python tools/engineer-replay.py --check
       # After the e2e steps, which assume no ffmpeg: the simulated OBS and the stream stub use a real one.
       - name: Install ffmpeg
-        timeout-minutes: 6
-        uses: ./.github/actions/install-ffmpeg
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ffmpeg
       - name: Event-sim fakes with a real ffmpeg
         env:
           OBS_SIM_REQUIRE_FFMPEG: "1"

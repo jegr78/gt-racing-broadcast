@@ -10,7 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 WF_DIR = os.path.join(ROOT, ".github", "workflows")
 ACTIONS_DIR = os.path.join(ROOT, ".github", "actions")
-FFMPEG_ACTION = os.path.join(ACTIONS_DIR, "install-ffmpeg", "action.yml")
+APT_ACTION = os.path.join(ACTIONS_DIR, "apt-install", "action.yml")
 
 _USES_RE = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
 _SHA_RE = re.compile(r"@[0-9a-f]{40}$")
@@ -113,31 +113,43 @@ def _workflow_steps(base):
         return re.split(r"\n(?=      - (?:name|uses):)", fh.read())[1:]
 
 
-def t_ffmpeg_never_comes_from_the_apt_mirror():
+def t_workflows_run_apt_only_through_the_shared_action():
     for base in sorted(os.listdir(WF_DIR)):
         if not base.endswith(".yml"):
             continue
         with open(os.path.join(WF_DIR, base), encoding="utf-8") as fh:
             for i, line in enumerate(fh, 1):
-                assert not ("apt-get install" in line and "ffmpeg" in line), (
-                    f"{base}:{i} installs ffmpeg from the runner's apt mirror; use ./.github/actions/install-ffmpeg")
+                assert not re.search(r"\bapt(-get)?\s+(update|install)\b", line), (
+                    f"{base}:{i} runs apt directly and would use the runner's regional mirror; "
+                    "use ./.github/actions/apt-install")
 
 
-def t_the_ffmpeg_download_is_pinned_and_checksummed():
-    with open(FFMPEG_ACTION, encoding="utf-8") as fh:
+def t_the_apt_action_skips_the_regional_mirror_and_bounds_every_download():
+    with open(APT_ACTION, encoding="utf-8") as fh:
         text = fh.read()
-    assert re.search(r"FFMPEG_RELEASE: autobuild-\d{4}-\d{2}-\d{2}-", text), "the ffmpeg build must come from a dated release tag"
-    assert "latest" not in text.lower(), "the ffmpeg build must not follow a moving 'latest'"
-    assert re.search(r"\b[0-9a-f]{64}\b", text) and "sha256sum -c" in text, "the ffmpeg download must be sha256-checked"
-    assert "--max-time" in text, "a throttled download must fail inside the step timeout, not hang"
+    mirrors = re.findall(r"https?://[\w.-]+\.ubuntu\.com/ubuntu/", text)
+    assert mirrors[:2] == ["https://archive.ubuntu.com/ubuntu/", "http://azure.archive.ubuntu.com/ubuntu/"], (
+        "first the primary Ubuntu archive, then one other official mirror: " + repr(mirrors))
+    assert "ec2" not in text, "the throttled AWS regional mirror must not be in the path"
+    network = [ln for ln in text.splitlines() if re.search(r"apt-get .*(\bupdate\b|--download-only)", ln)]
+    assert len(network) == 2 and all("timeout --kill-after" in ln for ln in network), (
+        "apt update and the download each run under coreutils timeout: " + repr(network))
+    assert "install -y --no-download" in text, "the install itself must only use the downloaded cache"
+    assert "::error::" in text, "a failed download must say so instead of being cancelled"
 
 
-def t_both_ffmpeg_workflows_use_the_shared_action_under_a_step_timeout():
+def t_every_apt_install_step_has_a_step_timeout():
     for base in ("ci.yml", "event-sim.yml"):
-        steps = [body for body in _workflow_steps(base) if "uses: ./.github/actions/install-ffmpeg" in body]
-        assert len(steps) == 1, f"{base} installs ffmpeg through the shared action exactly once"
-        assert re.search(r"^\s+timeout-minutes:\s*\d+\s*$", steps[0], re.M), (
-            f"{base}: the ffmpeg install needs a step timeout-minutes so a slow download fails fast")
+        steps = [body for body in _workflow_steps(base) if "uses: ./.github/actions/apt-install" in body]
+        assert any(re.search(r"^\s+packages:\s*ffmpeg\s*$", body, re.M) for body in steps), (
+            f"{base} installs ffmpeg through ./.github/actions/apt-install")
+    for base in sorted(os.listdir(WF_DIR)):
+        if base.endswith(".yml"):
+            for body in _workflow_steps(base):
+                if "uses: ./.github/actions/apt-install" in body:
+                    m = re.search(r"^\s+timeout-minutes:\s*(\d+)\s*$", body, re.M)
+                    assert m and int(m.group(1)) >= 10, (
+                        f"{base}: an apt-install step needs timeout-minutes >= 10, above the action's own limits")
 
 
 def _preview_step(name):
