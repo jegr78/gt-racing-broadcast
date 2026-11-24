@@ -137,6 +137,18 @@ jobs:
         timeout-minutes: 2
         run: python tools/e2e-event-info.py
 
+      # ERR_NO_BUFFER_SPACE (WSAENOBUFS) points at ephemeral port exhaustion; record the socket state.
+      - name: Windows socket state after a failure
+        if: failure() && runner.os == 'Windows'
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          netsh int ipv4 show dynamicport tcp
+          $c = Get-NetTCPConnection -ErrorAction SilentlyContinue
+          $c | Group-Object State | Sort-Object Count -Descending | Format-Table Count, Name -AutoSize
+          $c | Where-Object State -eq 'TimeWait' | Group-Object RemotePort |
+            Sort-Object Count -Descending | Select-Object -First 10 | Format-Table Count, Name -AutoSize
+
   build:
     needs: scope
     if: needs.scope.outputs.release_only != 'true'
