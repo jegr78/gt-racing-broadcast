@@ -778,9 +778,8 @@ def _check_league_live(base, sim, home, until):
     assert all(1.5 <= g <= 3.0 for g in gaps[-2:]), f"one live state every two seconds: {gaps}"
     body = calls[-1]["body"]
     assert (body["ref"], body["race"], body["mode"]) == (league_sim.DEFAULT_REF, "leg-1", "race"), body
-    assert body["entries"], f"the roster stands in the live state: {body}"
-    for row in body["entries"]:
-        assert not {"fuel_l", "compound", "x", "z"} & set(row), row
+    assert body["entries"] == [] and body["track_name"] == "Simulated circuit", \
+        f"no roster here: the allowlist rows are checked in tests/test_league_widgets.py: {body}"
     assert calls[-1]["user_agent"].startswith("racecast/"), calls[-1]
     print(f"  [PASS] the relay posts the live state every two seconds (gaps {gaps[-2:]})")
     status, d = E._get_json(base + "/league/widgets")
