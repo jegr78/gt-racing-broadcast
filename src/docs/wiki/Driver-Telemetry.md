@@ -362,7 +362,9 @@ It never carries connection ids, corrections or who made them.
   when it is faster than the fastest lap. Tests saw GT7 mark lap 1 of a race red, and
   laps into the pit lane on Spa. A valid lap
   slower than the car's own GT7 best never counts, which only matters when that best was
-  a lap the race left out, such as the formation lap; then correct it by hand.
+  a lap the race left out, such as a lap with a red flag in it, a lap lost in a sender
+  gap or a lap before a race reset in the same GT7 session; then correct it by hand.
+  Voiding the fastest lap brings back the fastest of the other laps that counted.
   It is kept across stints and survives a relay restart on the same
   track layout; the next [new event](#new-event-or-continued-event) or a race reset clears it. A lap faster than the
   line allows at 120 m/s never counts. Race Control and the director can clear or set it

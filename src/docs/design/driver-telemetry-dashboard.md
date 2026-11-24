@@ -240,9 +240,11 @@ is valid; Race Control and the director correct the time.
     still shows as the entry's last lap.
   - A valid lap slower than the console's own best never shows in `best_ms` and never
     counts. It can only be the race's fastest when that best was a lap the race left
-    out: the formation lap, a lap with a red flag in it, a lap the relay missed in a
-    sender gap or a relay restart, or a lap before a race reset in the same GT7
-    session. Race Control and the director correct it then.
+    out: a lap with a red flag in it, a lap the relay missed in a sender gap or a
+    relay restart, or a lap before a race reset in the same GT7 session. Race Control
+    and the director correct it then.
+  - A void by Race Control or the director brings back the fastest of the other laps
+    that counted, overall and in each class that held the voided lap.
   - Each console keeps its own best. In single-player sessions GT7 cleared it at each
     new session. Whether a lobby carries the qualifying best into the race, or the
     race best into a restart lobby, was not measured; Race Control corrects the fastest lap then.
