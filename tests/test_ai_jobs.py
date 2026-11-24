@@ -567,8 +567,7 @@ def t_a_signal_after_cleanup_interrupts_again():
     after = textwrap.dedent("""
         ai_jobs.terminate_tree(p)
         try:
-            os.kill(os.getpid(), signal.SIGTERM)
-            time.sleep(30)
+            signal.raise_signal(signal.SIGTERM)
         except KeyboardInterrupt:
             pass  # the handler is back
         else:
