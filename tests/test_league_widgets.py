@@ -522,6 +522,16 @@ def t_a_profile_edit_reloads_the_sender_settings():
         assert live.client._reload, "an edited profile.env applies without a relay restart"
 
 
+def t_companion_toggles_the_first_two_widgets_with_a_get_route():
+    with open(os.path.join(ROOT, "src", "companion", "racecast-buttons.companionconfig"), encoding="utf-8") as fh:
+        page = json.load(fh)["pages"]["3"]["controls"]["1"]
+    for col, n in (("6", 1), ("7", 2)):
+        (action,) = page[col]["steps"]["0"]["action_sets"]["down"]
+        assert action["definitionId"] == "get", "a Companion button sends no body: it must be a GET"
+        assert action["options"]["url"]["value"] == f"http://127.0.0.1:8088/league/widget/{n}/toggle", action
+        assert page[col]["style"]["text"] == f"LEAGUE\nWIDGET {n}"
+
+
 # The overlay renderer
 
 _DOM = r"""
