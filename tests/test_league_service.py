@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The league service client (#1253) against the simulated league service.
 Run: python3 tests/test_league_service.py"""
+import inspect
 import json, logging, os, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler
 
@@ -438,11 +439,8 @@ def t_client_holds_a_value_30_seconds_then_hides_it():
 
 
 def t_client_needs_the_event_forms():
-    try:
-        ls.Client(lambda: None, lambda: None)
-        raise AssertionError("forms_fn must be required")
-    except TypeError:
-        pass
+    forms = inspect.signature(ls.Client).parameters["forms_fn"]
+    assert forms.default is inspect.Parameter.empty, "forms_fn must be required"
 
 
 def t_client_without_a_service_sends_nothing():
