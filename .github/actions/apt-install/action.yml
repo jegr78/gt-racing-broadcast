@@ -1,0 +1,51 @@
+name: Install apt packages
+description: >-
+  Installs Ubuntu packages from an official Ubuntu archive instead of the runner's
+  regional cloud mirror. It downloads under a time limit, retries once against a second
+  official mirror and then installs from the apt cache. The chosen mirror stays set for
+  later steps. Callers set a step timeout-minutes of at least 10.
+inputs:
+  packages:
+    description: Space-separated package names
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Download and install from an official Ubuntu mirror
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        UPDATE_SECONDS: "90"
+        DOWNLOAD_SECONDS: "150"
+      run: |
+        read -ra packages <<< "$PACKAGES"
+        # GitHub's images resolve every Ubuntu source through this list; its first entry is
+        # the cloud region's mirror, which can be throttled.
+        mirrors=/etc/apt/apt-mirrors.txt
+        opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+        use_mirror() {
+          if grep -rqs "mirror+file:$mirrors" /etc/apt/sources.list /etc/apt/sources.list.d/; then
+            printf '%s\tpriority:1\n' "$1" | sudo tee "$mirrors" > /dev/null
+            echo "apt mirror: $1"
+          else
+            echo "::warning::the apt sources do not read $mirrors, so the image's mirror stays in use"
+          fi
+        }
+        fetch() {
+          sudo timeout --kill-after=10 "$UPDATE_SECONDS" apt-get "${opts[@]}" update &&
+            sudo timeout --kill-after=10 "$DOWNLOAD_SECONDS" apt-get "${opts[@]}" install -y --download-only "${packages[@]}"
+        }
+        fetched=""
+        for mirror in https://archive.ubuntu.com/ubuntu/ http://azure.archive.ubuntu.com/ubuntu/; do
+          use_mirror "$mirror"
+          if fetch; then
+            fetched=1
+            break
+          fi
+          echo "::warning::apt download from $mirror failed or ran past its time limit"
+        done
+        if [ -z "$fetched" ]; then
+          echo "::error::could not download ${PACKAGES} from an official Ubuntu mirror within ${UPDATE_SECONDS}+${DOWNLOAD_SECONDS} s per attempt"
+          exit 1
+        fi
+        sudo apt-get install -y --no-download "${packages[@]}"
