@@ -850,10 +850,9 @@ def t_the_desk_state_names_what_needs_attention():
 
 def t_the_race_control_areas_match_the_nav_and_the_tab_bar():
     html = _src("racecontrol", "race-control.html")
-    areas = json.loads(re.search(r"const DESK_AREAS = (\[[^\]]*\]);", html).group(1).replace("'", '"'))
+    areas = re.findall(r'class="navbtn" data-area="([a-z]+)"', html)
     assert areas == ["race", "drivers", "corrections", "qualifying", "dashboard", "graphics", "note", "setup",
-                     "trouble"], areas
-    assert re.findall(r'class="navbtn" data-area="([a-z]+)"', html) == areas, "one nav button per area, in order"
+                     "trouble"], f"one nav button per area, in order: {areas}"
     assert re.findall(r'<div class="area" data-area="([a-z]+)" data-tab="([a-z]+)">', html) == \
         [(a, a) for a in areas], "each area is the tab of the same name below 820 px"
     tabs = [t[0] for t in json.loads(re.search(r"data-tabs='([^']*)'", html).group(1))]
@@ -866,7 +865,7 @@ def t_the_race_control_areas_match_the_nav_and_the_tab_bar():
 
 def t_a_short_window_scrolls_the_live_column_and_hide_lasts_one_session():
     html = _src("racecontrol", "race-control.html")
-    assert "#liveCol > * { flex-shrink: 0; }" in html, \
+    assert "#liveCol > * { flex-shrink: 0; }" in _src("console", "crew-frame.html"), \
         "a flex child with overflow:hidden shrinks below its content and clips Restart released"
     assert "sessionStorage.getItem(PV_KEY)" in html and "localStorage.setItem(PV_KEY" not in html, \
         "a hidden preview never survives into the next event's first load"
@@ -1031,18 +1030,23 @@ def t_qualifying_preselects_its_area_on_a_switch_only():
         "document.querySelector('dialog[open]')" in _src("racecontrol", "race-control.html")
 
 
+def _frame_scripts(n=2):
+    """The crew frame's first `n` inline scripts: the tab bar, then the desk areas."""
+    frame, out, at = _src("console", "crew-frame.html"), [], 0
+    for _ in range(n):
+        at = frame.index("<script>", at) + 8
+        out.append(frame[at:frame.index("</script>", at)])
+    return "\n".join(out)
+
+
 def _desk_tabs_run(phone, saved, body):
-    """Runs the crew frame's tab bar and the desk's area code under node with a stub DOM."""
-    frame = _src("console", "crew-frame.html")
-    frame_js = frame[frame.index("<script>") + 8:frame.index("</script>")]
+    """Runs the crew frame's tab bar and areas and the desk's mode code under node with a stub DOM."""
     path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
     page = _src("racecontrol", "race-control.html")
     tabs = re.search(r"data-tabs='([^']*)'", page).group(1)
-    wrap = page[page.index("<!--__CREW_FRAME__-->"):]
-    wrap = wrap[wrap.index("(function () {"):wrap.index("})();") + 5]
-    areas = re.search(r"const DESK_AREAS = (\[[^\]]*\]);", page).group(1).replace("'", '"')
+    areas = json.dumps(re.findall(r'class="navbtn" data-area="([a-z]+)"', page))
     dom = r"""
-var stored = %s, writes = [], buttons = [], areaEls = [], scrolled = 0;
+var stored = %s, writes = [], buttons = [], areaEls = [], navBtns = [], scrolled = 0;
 function el(extra) {
   var e = {attrs: {}, cls: {}, handlers: {}, offsetParent: null, textContent: "",
            setAttribute: function (k, v) { this.attrs[k] = String(v); },
@@ -1056,13 +1060,17 @@ function el(extra) {
 var nav = el({appendChild: function (b) { buttons.push(b); },
               querySelectorAll: function () { return buttons; }});
 nav.attrs["data-tabs"] = %s;
-DESK_AREAS_.forEach(function (a) { areaEls.push(el({dataset: {area: a}})); });
+AREAS_.forEach(function (a) {
+  areaEls.push(el({dataset: {area: a}}));
+  navBtns.push(el({dataset: {area: a}, querySelector: function () { return {firstChild: {textContent: a}}; }}));
+});
+var areaNav = el({querySelectorAll: function () { return navBtns; }});
 var body = el();
 var document = {
   body: body, activeElement: null,
-  getElementById: function (id) { return id === "crewTabs" ? nav : null; },
+  getElementById: function (id) { return id === "crewTabs" ? nav : id === "areaNav" ? areaNav : null; },
   createElement: function () { return el(); },
-  querySelectorAll: function (sel) { return sel === ".area" ? areaEls : []; },
+  querySelectorAll: function (sel) { return sel === ".area" ? areaEls : sel === ".navbtn" ? navBtns : []; },
   querySelector: function (sel) {
     var m = /data-id="([a-z]+)"/.exec(sel);
     if (m) return buttons.filter(function (b) { return b.attrs["data-id"] === m[1]; })[0] || null;
@@ -1081,9 +1089,8 @@ function tap(id) { buttons.filter(function (b) { return b.attrs["data-id"] === i
 function tab() { var b = document.querySelector('#crewTabs button[aria-selected="true"]'); return b && b.attrs["data-id"]; }
 function area() { return areaEls.filter(function (a) { return a.cls.active; }).map(function (a) { return a.dataset.area; }).join(); }
 """ % (json.dumps(saved), json.dumps(tabs), "true" if phone else "false")
-    funcs = "\n".join(tower._function(path, n) for n in ("applyArea", "showArea", "editing", "phoneTab", "followMode"))
-    return tower._run("var DESK_AREAS_ = " + areas + ";" + dom + frame_js + "\nconst DESK_AREAS = DESK_AREAS_;"
-                      "\nlet deskArea = 'race', lastMode = null, storedArea = false;\n" + funcs + "\n" + wrap
+    funcs = "\n".join(tower._function(path, n) for n in ("editing", "phoneTab", "followMode"))
+    return tower._run("var AREAS_ = " + areas + ";" + dom + funcs + "\nlet lastMode = null;\n" + _frame_scripts()
                       + "\n;console.log(JSON.stringify((function () {" + body + "})()));")
 
 
@@ -1120,21 +1127,24 @@ def t_an_automatic_area_is_shown_but_never_stored():
 
 def t_the_phone_tab_bar_marks_the_running_qualifying():
     path = os.path.join(ROOT, "src", "racecontrol", "race-control.html")
-    got = _js_fn(path, "setDot,deskDots", """(function () {
+    quiet = re.findall(r'data-area="([a-z]+)"[^>]*data-ok-quiet', _src("racecontrol", "race-control.html"))
+    got = _js_fn(path, "deskDots", """(function () {
       deskDots({waiting: 0, events: 0, mode: "qualifying", dashboard: false, stale: false, gaps: false});
       var on = {};
       Object.keys(tabs).forEach(function (k) { on[k] = Object.keys(tabs[k].cls).filter(function (c) { return tabs[k].cls[c]; }); });
       return on;
     })()""", prelude="""var tabs = {};
-function stub() { var cls = {}; return {cls: cls, textContent: "", firstChild: {textContent: "X"}, className: "",
+function stub(area) { var cls = {}; return {cls: cls, textContent: "", firstChild: {textContent: "X"}, className: "",
   setAttribute: function () {}, querySelector: function () { return this; },
+  hasAttribute: function (k) { return k === "data-ok-quiet" && QUIET.indexOf(area) >= 0; },
   classList: {toggle: function (c, v) { cls[c] = !!v; }}}; }
 var document = {querySelector: function (sel) {
   var m = /data-(area|id)="([a-z]+)"/.exec(sel);
-  if (m[1] === "area") return stub();
+  if (m[1] === "area") return stub(m[2]);
   return tabs[m[2]] || (tabs[m[2]] = stub());
 }};
-""")
+var QUIET = """ + json.dumps(quiet) + ";\n" + tower._function(os.path.join(ROOT, "src", "console", "crew-frame.html"),
+                                                       "setDot") + "\n")
     if got is None:
         return
     assert got["qualifying"] == ["dot-ok"], f"the Quali tab carries the session's dot on a phone: {got}"
@@ -1185,6 +1195,55 @@ def t_an_answer_shows_in_the_part_it_was_asked_from():
     assert 'box.addEventListener("pointerdown", function () { part = name; }, true);' in js and \
         'box.addEventListener("focusin", function () { part = name; }, true);' in js
     assert ".dd>.msg.part{position:sticky;top:0" in js, "a long part keeps its line in view"
+
+
+def t_a_first_poll_that_answers_while_the_desk_loads_finds_the_frame():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; the desk's load order is measured with visual acceptance)")
+        return
+    page = _src("racecontrol", "race-control.html")
+    i = page.index("</script>", page.index('pgmAudioInit("/cockpit/program-audio");')) + len("</script>")
+    slow = tower.SlowScript()
+    page = page[:i] + f'<script src="{slow.url}"></script>' + page[i:]
+    for token, value in (("__RC_API_BASE__", ""), ("__RC_VERSION__", "dev"),
+                         ("<!--__CREW_FRAME__-->", _src("console", "crew-frame.html")),
+                         ("<!--__EVENT_INFO__-->", _src("console", "event-info.html"))):
+        page = page.replace(token, value)
+
+    def serve(route):
+        path = route.request.url.split("://", 1)[1].split("/", 1)[1].split("?", 1)[0]
+        if path == "slow.js":
+            return route.continue_()
+        if path == "rc":
+            return route.fulfill(body=page, content_type="text/html")
+        if path == "driver-desk.js":
+            return route.fulfill(body=_src("console", "driver-desk.js"), content_type="application/javascript")
+        if path == "race-control/data":
+            return route.fulfill(body=json.dumps({"mode": "qualifying", "schedule": []}), content_type="application/json")
+        if path == "race-control/drivers/readiness":
+            return route.fulfill(body='{"rows": []}', content_type="application/json")
+        return route.fulfill(body="{}", content_type="application/json")
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return
+        try:
+            tab = browser.new_page(viewport={"width": 1440, "height": 900})
+            errors = []
+            tab.on("pageerror", lambda e: errors.append(str(e) + " " + (e.stack or "")[:300]))
+            tab.route(slow.base + "/**", serve)
+            tab.goto(slow.base + "/rc", wait_until="load")
+            tab.wait_for_timeout(1000)
+            area = tab.evaluate("[...document.querySelectorAll('.area.active')].map(a => a.dataset.area)")
+        finally:
+            browser.close()
+            slow.close()
+    assert errors == [] and area == ["qualifying"], \
+        f"a first poll answered before the page finished loading still opens Qualifying: {errors} {area}"
 
 
 if __name__ == "__main__":

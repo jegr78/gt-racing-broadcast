@@ -191,8 +191,7 @@ def main():
                         ))
                     desk.on("pageerror", lambda error: errors.append(error.stack))
                     desk.goto(f"http://127.0.0.1:{relay_port}{path}?t={gate._tok(who)}")
-                    if who == "dave":
-                        desk.locator('.navbtn[data-area="graphics"]').click()
+                    desk.locator('.navbtn[data-area="graphics"]').click()
                     tile = desk.locator(".gtile").filter(has_text="Community standings")
                     tile.wait_for()
                     assert (

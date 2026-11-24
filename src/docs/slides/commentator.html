@@ -86,15 +86,13 @@ Note: Now send your watch link. The preferred way is to submit it from your cock
 <section data-markdown><script type="text/template">
 ## Your cockpit
 - **Header**: the event title, and a **Notes** button when the league posted notes or documents.
-- **Tally**: large **YOU ARE ON AIR**, or **UP NEXT · stint N · in X handovers**.
-- **Program**: the live broadcast picture, program audio and the public broadcast chat.
-- **Talk**: crew chat, **Message director** and the **Race Control** notes.
-- **Timing** and **Stint plan**: the driver race and every stint with its streamer.
-- **Race timer**, **stream-link submission** and the broadcast **Graphics**.
+- **Areas** on the left: **Timing**, **My stint**, **Graphics** and **Notes**. Timing opens first.
+- **Live column**: the tally (**YOU ARE ON AIR** or **UP NEXT · stint N · in X handovers**), the program, the race timer, **Message director** and the **Race Control** notes.
+- **Middle**: the area you picked. **Right**: the crew chat and the broadcast chat.
 
 More: [Commentator Cockpit](https://github.com/jegr78/gt-racing-broadcast/wiki/Commentator-Cockpit)
 
-Note: Your cockpit gives you everything on one page. The header shows the event title, and a Notes button when the league posted notes or documents. The tally shows a large "you are on air" indicator, or "up next" with your stint number and how many handovers away you are. The program area shows the live broadcast picture, the program audio and the public broadcast chat. The talk area holds the crew chat, a card to message the director, and the notes from Race Control. Then there is the timing of the driver race, the stint plan, the race timer, the stream-link form and the broadcast graphics. The next slides go through them one by one.
+Note: Your cockpit gives you everything on one page. The header shows the event title, and a Notes button when the league posted notes or documents. On the left you pick an area: Timing, which opens first, My stint, Graphics and Notes. Next to it, the live column always stays in view. It holds the tally, which says "you are on air", or "up next" with your stint number and how many handovers away you are, then the program picture, the race timer, a card to message the director and the notes from Race Control. The area you picked fills the middle, and the crew chat and the broadcast chat sit on the right. The next slides go through them one by one.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -102,21 +100,21 @@ Note: Your cockpit gives you everything on one page. The header shows the event 
 
 ![Commentator Cockpit](assets/img/console-cockpit.png)
 
-Tally on top. Program and broadcast chat, timer, Message director, Race Control, Timing, Stint plan and Graphics below.
+Areas, live column, the timing of every car, chats.
 
-Note: This is the cockpit on a desktop screen. The tally runs across the top. Below it sit the program picture with its audio button, the broadcast chat, the crew chat and the stream-link form. The right column holds the race timer, Message director, the Race Control notes, the timing table, the stint plan and the graphics.
+Note: This is the cockpit on a desktop screen during a race. The areas run down the left side, with a dot on My stint while a link of yours is missing. The live column holds the tally, the program picture with its audio button, the race timer, Message director and the Race Control notes. The Timing area fills the middle with every car and every column. The crew chat and the broadcast chat sit on the right. Below fourteen hundred forty pixels the areas show as letters, and below twelve hundred eighty pixels the chats also move under the area.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Program and broadcast chat
-- **Program monitor**: low-bandwidth stills of the real broadcast output.
+- **Program monitor**: low-bandwidth stills of the real broadcast output. **Hide** folds it away and stops the stills and the audio until you close the tab.
 - **Audio**: when the relay offers program audio, a button and a volume slider play the on-air sound.
 - A yellow note **"Program is N s behind live"** means the producer's machine lags. Your stream is fine.
 - **Broadcast chat**: a read-only mirror of the public YouTube or Twitch chat. **Write in YouTube chat** opens the platform chat in a pop-up.
 
 More: [Commentator Cockpit](https://github.com/jegr78/gt-racing-broadcast/wiki/Commentator-Cockpit)
 
-Note: The program monitor shows low-bandwidth stills of the real broadcast output. When the producer's relay offers program audio, an Audio button and a volume slider under the picture play the on-air sound. If a yellow note says the program is some seconds behind live, the producer's machine has fallen behind. The delay is on the producer side, not in your stream. Next to the picture, the broadcast chat mirrors the public YouTube or Twitch chat. It is read-only. To write in it, the button opens the platform's own chat in a pop-up window.
+Note: The program monitor shows low-bandwidth stills of the real broadcast output. Hide folds it away. While it is hidden the page loads no pictures and stops the program audio, until you close the browser tab. When the producer's relay offers program audio, an Audio button and a volume slider under the picture play the on-air sound. If a yellow note says the program is some seconds behind live, the producer's machine has fallen behind. The delay is on the producer side, not in your stream. On the right, the broadcast chat mirrors the public YouTube or Twitch chat. It is read-only. To write in it, the button opens the platform's own chat in a pop-up window.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -148,15 +146,16 @@ Note: Directors send short text cues to your cockpit. A text-only stand-in for a
 </script></section>
 
 <section data-markdown><script type="text/template">
-## Timing and stint plan
-- **Timing** appears once a car sends telemetry. It shows the same delayed data as the on-air driver dashboard.
+## Timing and My stint
+- **Timing** is the area the cockpit opens with. Once a car sends telemetry it shows the same delayed data as the on-air driver dashboard.
 - Every column at once: position, brand logo, number, driver and team, tyre, laps, gap, interval, last lap, fuel and pit stops.
 - In a multiclass event the table groups the cars under a header per class and lists the fastest lap of each class.
-- **Stint plan**: every stint with its streamer. Your own stints are marked, the stint on air is highlighted.
+- **My stint**: the stream-link form and the **stint plan**, every stint with its streamer. Your own stints are marked, the stint on air is highlighted.
+- A dot on **My stint** means a stint of yours still to come has no link, or its link waits for approval. In qualifying it also covers your race stints.
 
 More: [Driver telemetry](https://github.com/jegr78/gt-racing-broadcast/wiki/Driver-Telemetry#on-air-and-in-the-cockpit)
 
-Note: The Timing card appears as soon as a car sends telemetry. Until then it stays hidden, even when the league lists its entries. It shows the same delayed race as the on-air driver dashboard, so it matches what viewers see. Unlike the broadcast overlay, it shows every column at once, with the brand logos, the tyre compound, the gaps, the last lap and the fuel. In an event with several car classes, the table groups the cars under a header per class, and lists the fastest lap of each class. Below it, the stint plan lists every stint with its streamer. Your own stints are marked, and the stint on air is highlighted.
+Note: The cockpit opens with the Timing area. Until a car sends telemetry it says there is no driver data yet, even when the league lists its entries. It shows the same delayed race as the on-air driver dashboard, so it matches what viewers see. Unlike the broadcast overlay, it shows every column at once, with the brand logos, the tyre compound, the gaps, the last lap and the fuel. In an event with several car classes, the table groups the cars under a header per class, and lists the fastest lap of each class. The My stint area holds the stream-link form and the stint plan, which lists every stint with its streamer. Your own stints are marked, and the stint on air is highlighted. A dot on My stint means one of your stints still to come has no link yet, or its link waits for the director's approval. During qualifying it also counts every one of your race stints.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -169,28 +168,27 @@ Note: The Timing card appears as soon as a car sends telemetry. Until then it st
 
 More: [Console: Graphics](https://github.com/jegr78/gt-racing-broadcast/wiki/Console#graphics)
 
-Note: The Graphics card shows the league's broadcast stills as tiles. Tap a tile to see the graphic large in the page. A tile with a red frame and the words on air is in the broadcast right now. Whether you may put a graphic on air is the league's choice, set with GRAPHICS TAKE. If the league leaves it unset, the tiles are for reference only. In direct mode each graphic gets Put on air and Take off air. Only one crew graphic is on air at a time, and graphics the director put on air are never touched. In request mode the button says Request. The director takes or declines it, and an unanswered request expires after sixty seconds. Commentators never set the flag graphics, and the director keeps every control in the panel.
+Note: The Graphics area shows the league's broadcast stills as tiles. Tap a tile to see the graphic large in the page. A tile with a red frame and the words on air is in the broadcast right now. Whether you may put a graphic on air is the league's choice, set with GRAPHICS TAKE. If the league leaves it unset, the tiles are for reference only. In direct mode each graphic gets Put on air and Take off air. Only one crew graphic is on air at a time, and graphics the director put on air are never touched. In request mode the button says Request. The director takes or declines it, and an unanswered request expires after sixty seconds. Commentators never set the flag graphics, and the director keeps every control in the panel.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## On a phone
-At 820 px and below, a tab bar at the bottom shows one part of the cockpit at a time:
+At 820 px and below, a tab bar at the bottom takes the place of the areas:
 
-- **Talk**: Message director, crew chat, Race Control notes.
-- **Program**: picture, audio, broadcast chat.
-- **Graphics**: the graphic tiles.
-- **Plan**: timing, stint plan, stream-link submission.
+- **Live**: program, Message director, Race Control notes.
+- **Timing**, **Stint**, **Graphics** and **Notes**: the areas.
+- **Chat**: crew chat and broadcast chat.
 
 The on-air banner, the race timer and a critical cue stay at the top while you scroll. The page remembers the last tab.
 
 More: [Console: On a phone](https://github.com/jegr78/gt-racing-broadcast/wiki/Console#on-a-phone)
 
-Note: On a phone, or any screen of eight hundred twenty pixels or less, a tab bar at the bottom shows one part of the cockpit at a time. Talk holds Message director, the crew chat and the Race Control notes. Program holds the picture, the audio and the broadcast chat. Graphics holds the graphic tiles. Plan holds the timing, the stint plan and the stream-link form. The on-air banner, the race timer and a critical director cue stay at the top while you scroll, and the page remembers the last tab you used.
+Note: On a phone, or any screen of eight hundred twenty pixels or less, a tab bar at the bottom shows one part of the cockpit at a time. Live holds the program, Message director and the Race Control notes. Timing, Stint, Graphics and Notes are the areas, and the Stint tab carries the same dot as My stint. Chat holds the crew chat and the broadcast chat. The on-air banner, the race timer and a critical director cue stay at the top while you scroll, and the page remembers the last tab you used.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Event notes, documents and health
-- **Notes** in the header opens the league's event notes and document links, in two tabs.
+- The **Notes** area shows the league's event notes and document links. The **Notes** button in the header opens the same in a dialog.
 - Documents open in a new browser tab. The button hides when the league posted neither.
 - The **Health Monitor** card on the Console launcher shows how the relay runs, live and over time. It is read-only.
 
@@ -198,7 +196,7 @@ Note: On a phone, or any screen of eight hundred twenty pixels or less, a tab ba
 
 More: [Sheet template: Event Notes](https://github.com/jegr78/gt-racing-broadcast/wiki/Sheet-Template#event-notes-tab) · [Health Monitor](https://github.com/jegr78/gt-racing-broadcast/wiki/Health-Monitor)
 
-Note: Two more things on the page and the launcher. The Notes button in the header opens the league owner's event notes and document links, such as the rulebook, in two tabs. A document opens in a new browser tab. When the league posted neither notes nor documents, the button hides. And every signed-in crew member sees a Health Monitor card on the Console launcher. It shows how the producer's relay has been running, live and over time. It is read-only and changes nothing on air.
+Note: Two more things on the page and the launcher. The Notes area lists the league owner's event notes and document links, such as the rulebook. The Notes button in the header opens the same in a dialog with two tabs. A document opens in a new browser tab. When the league posted neither notes nor documents, the button hides. And every signed-in crew member sees a Health Monitor card on the Console launcher. It shows how the producer's relay has been running, live and over time. It is read-only and changes nothing on air.
 </script></section>
 
 <section data-markdown><script type="text/template">

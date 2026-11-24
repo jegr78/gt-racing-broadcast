@@ -20,6 +20,8 @@
 .event-info-documents a{display:block;color:#8ac6ff;border:1px solid #344155;border-radius:6px;padding:11px 12px;text-decoration:underline;overflow-wrap:anywhere}
 .event-info-empty,.event-info-hint{color:#aeb8c5;font-size:13px}
 .event-info-actions{display:flex;justify-content:flex-end;margin-top:14px}
+.event-info-inline h3{margin:14px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#aeb8c5}
+.event-info-inline h3:first-child{margin-top:0}
 </style>
 <dialog id="notesModal" class="event-info" aria-labelledby="eventInfoTitle">
   <h3 id="eventInfoTitle">Event information</h3>
@@ -79,32 +81,48 @@
       return ['https:', 'http:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password;
     } catch (error) { return false; }
   }
+  // A page may also show them inline in #eventInfoInline; window.onEventInfo hears the counts.
+  function renderNotes(body) {
+    body.replaceChildren();
+    notes.forEach(note => {
+      const item = document.createElement('div'); item.className = 'event-info-note' + (note.priority === 'important' ? ' important' : '');
+      if (note.heading) {
+        const heading = document.createElement('div'); heading.className = 'event-info-heading'; heading.textContent = note.heading; item.append(heading);
+      }
+      const text = document.createElement('div'); text.className = 'event-info-text'; text.textContent = note.note; item.append(text); body.append(item);
+    });
+    if (!notes.length) empty(body, 'No event notes.');
+  }
+  function renderDocuments(body) {
+    body.replaceChildren();
+    documents.forEach(doc => {
+      const item = document.createElement('li'), link = document.createElement('a');
+      link.textContent = doc.title; link.href = doc.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      item.append(link); body.append(item);
+    });
+    if (!documents.length) empty(body, 'No documents.');
+  }
+  function renderInline(inline) {
+    inline.replaceChildren();
+    const title = text => { const h = document.createElement('h3'); h.textContent = text; inline.append(h); };
+    const list = document.createElement('div'); list.className = 'event-info-notes';
+    const docs = document.createElement('ul'); docs.className = 'event-info-documents';
+    title('Notes'); inline.append(list); renderNotes(list);
+    title('Documents'); inline.append(docs); renderDocuments(docs);
+  }
   function render(data) {
     notes = Array.isArray(data.notes) ? data.notes.filter(n => n && typeof n.note === 'string' && n.note.trim()) : [];
     documents = Array.isArray(data.documents) ? data.documents.filter(validDocument) : [];
     trigger.hidden = !notes.length && !documents.length;
     // A normal poll must not replace links while a reader is focusing one.
     const nk = JSON.stringify(notes), dk = JSON.stringify(documents);
-    if (nk !== notesKey) {
-      notesKey = nk; const body = get('notesBody'); body.replaceChildren();
-      notes.forEach(note => {
-        const item = document.createElement('div'); item.className = 'event-info-note' + (note.priority === 'important' ? ' important' : '');
-        if (note.heading) {
-          const heading = document.createElement('div'); heading.className = 'event-info-heading'; heading.textContent = note.heading; item.append(heading);
-        }
-        const text = document.createElement('div'); text.className = 'event-info-text'; text.textContent = note.note; item.append(text); body.append(item);
-      });
-      if (!notes.length) empty(body, 'No event notes.');
-    }
-    if (dk !== documentsKey) {
-      documentsKey = dk; const body = get('documentsBody'); body.replaceChildren();
-      documents.forEach(doc => {
-        const item = document.createElement('li'), link = document.createElement('a');
-        link.textContent = doc.title; link.href = doc.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-        item.append(link); body.append(item);
-      });
-      if (!documents.length) empty(body, 'No documents.');
-    }
+    const changed = nk !== notesKey || dk !== documentsKey;
+    if (nk !== notesKey) { notesKey = nk; renderNotes(get('notesBody')); }
+    if (dk !== documentsKey) { documentsKey = dk; renderDocuments(get('documentsBody')); }
+    const inline = get('eventInfoInline');
+    if (inline && changed) renderInline(inline);
+    window.eventInfoCounts = [notes.length, documents.length];
+    if (typeof window.onEventInfo === 'function') window.onEventInfo(notes.length, documents.length);
   }
   async function poll() {
     if (stopped) return;
@@ -123,6 +141,12 @@
       }
     } catch (error) { /* A transient failure retains the last received list. */ }
     finally { clearTimeout(timeout); if (controller === request) controller = null; }
+    // Before any answer the inline mount says it is retrying rather than loading for ever.
+    const inline = get('eventInfoInline');
+    if (!answered && inline && notesKey === undefined) {
+      const note = document.createElement('p'); note.className = 'event-info-empty';
+      note.textContent = 'Could not load the event notes. Trying again…'; inline.replaceChildren(note);
+    }
     // A failed poll retries soon, so a relay hiccup at page load does not hide the
     // Notes button for a whole refresh period (#1031).
     if (!stopped && epoch === generation) timer = setTimeout(poll, answered ? 30000 : 5000);

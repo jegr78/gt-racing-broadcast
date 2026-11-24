@@ -44,68 +44,12 @@
     padding: 6px 10px; font-size: 12px; font-weight: 600; }
   .appmeta a:hover { border-color: #3da9fc; }
   .appmeta .ver { color: #ffb454; font-variant-numeric: tabular-nums; }
-  /* Frame (#1267): areas | live column | selected area | chats. Each column scrolls on its
-     own, so the race controls in the live column never scroll away. */
+  /* The desk frame (areas, live column, chats) comes with the crew frame. */
   html, body { height: 100%; }
-  .app { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; }
-  .frame { display: grid; grid-template-columns: 158px 340px minmax(0, 1fr) 330px; gap: 12px;
-           padding: 12px; min-height: 0; }
-  .frame > * { min-height: 0; min-width: 0; overflow-y: auto; }
-  #areaNav { display: flex; flex-direction: column; gap: 4px; padding: 8px 6px; background: var(--panel);
-             border: 1px solid var(--line); border-radius: 10px; }
-  .navbtn { display: flex; align-items: center; gap: 9px; min-height: 46px; padding: 6px 9px;
-            border-radius: 8px; border: 1px solid transparent; background: none; color: var(--ink);
-            font: 600 13px/1.2 system-ui, sans-serif; text-align: left; cursor: pointer; }
-  .navbtn:hover { border-color: var(--edge); }
-  .navbtn.active { border-color: var(--blue); background: #16212e; }
-  .navbtn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
-  .ndot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: #3a434d; }
-  .ndot.ok { background: var(--live); }
-  .ndot.warn { background: var(--amber); }
-  .ndot.alarm { background: var(--alarm); }
-  .nlbl { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .nwhy { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden;
-          text-overflow: ellipsis; }
-  .nwhy:empty { display: none; }
-  #liveCol { display: flex; flex-direction: column; gap: 10px; }
-  #liveCol > * { flex-shrink: 0; }   /* a short window scrolls the column, it never clips a card */
   #previewCard { order: -1; }
-  .area { display: flex; flex-direction: column; gap: 12px; }
-  @media (min-width: 821px) {
-    .area:not(.active) { display: none; }
-  }
-  .rail { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
-  .rail > .card { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
-  /* 821 to 1279 px: the nav shows letters and the chats sit under the area. */
-  @media (min-width: 821px) and (max-width: 1279px) {
-    .frame { grid-template-columns: 64px 320px minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
-    #areaNav, #liveCol { grid-row: 1 / 3; }
-    #workspace { grid-column: 3; grid-row: 1; }
-    .rail { grid-column: 3; grid-row: 2; flex-direction: row; }
-    .navbtn { flex-direction: column; justify-content: center; gap: 3px; padding: 6px 0; }
-    .navbtn .nlbl { display: none; }
-    .navbtn::after { content: attr(data-short); font: 700 13px var(--mono); }
-  }
   @media (max-width: 820px) {
     html, body { height: auto; }
-    .app { display: block; height: auto; }
-    .frame { display: flex; flex-direction: column; }
-    .frame > * { overflow: visible; }
-    #areaNav { display: none; }
-    #liveCol { display: contents; }
     #previewCard { order: 0; }
-    .livestrip { order: -1; margin: -12px -12px 0; }
-    .rail { overflow: visible; }
-    .rail > .card { flex: none; }
-    .rail #chat { flex: none; height: 300px; }   /* beats the later #chat rule */
-    .rail #bchat { flex: none; height: 280px; }
-    .crewtabs-on .crewtabs { overflow-x: auto; }
-    .crewtabs button { flex: 0 0 auto; min-width: 64px; padding: 0 10px; position: relative; }
-    .crewtabs button.dot-warn::after, .crewtabs button.dot-alarm::after,
-    .crewtabs button.dot-ok::after { content: ""; position: absolute;
-      top: 9px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
-    .crewtabs button.dot-alarm::after { background: var(--alarm); }
-    .crewtabs button.dot-ok::after { background: var(--live); }
   }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: clip; }   /* clip, not hidden: a sticky status line needs the area as its scroll box */
   /* On-air banner, modelled on the cockpit tally. This is a global monitoring view
@@ -252,7 +196,7 @@
     <button type="button" class="navbtn" data-area="graphics" data-short="G"><span class="ndot"></span><span class="nlbl">Graphics<small class="nwhy"></small></span></button>
     <button type="button" class="navbtn" data-area="note" data-short="N"><span class="ndot"></span><span class="nlbl">Note<small class="nwhy"></small></span></button>
     <button type="button" class="navbtn" data-area="setup" data-short="T"><span class="ndot"></span><span class="nlbl">Setup<small class="nwhy"></small></span></button>
-    <button type="button" class="navbtn" data-area="trouble" data-short="!"><span class="ndot"></span><span class="nlbl">Troubleshoot<small class="nwhy"></small></span></button>
+    <button type="button" class="navbtn" data-area="trouble" data-short="!" data-ok-quiet><span class="ndot"></span><span class="nlbl">Troubleshoot<small class="nwhy"></small></span></button>
   </nav>
   <section id="liveCol" aria-label="Live">
     <div class="livestrip">
@@ -364,6 +308,12 @@
 </div>
 </div>
 
+<!-- The crew frame comes before the page script, so its area and dot functions exist
+     before the first poll answers. -->
+<!--__EVENT_INFO__-->
+<nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
+     data-tabs='[["live","Live"],["race","Race"],["drivers","Drivers"],["corrections","Fix"],["qualifying","Quali"],["dashboard","Tyres"],["graphics","Gfx"],["note","Note"],["setup","Setup"],["trouble","!"],["chat","Chat"]]'></nav>
+<!--__CREW_FRAME__-->
 <script>
 const $ = (id) => document.getElementById(id);
 
@@ -383,9 +333,6 @@ function fmtTs(ts) {
   if (typeof ts !== 'number' || !isFinite(ts)) return '';
   try { return new Date(ts * 1000).toLocaleTimeString(); } catch (e) { return ''; }
 }
-// True when a scroll container is at or near its bottom, so a new message only
-// auto-scrolls when the reader has not scrolled up to read back.
-function atBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
 // Source label for the handover overlap badge: "TW:<login>" for Twitch,
 // "YT:<last4>" for a YouTube videoId.
 function srcBadge(source) {
@@ -414,43 +361,7 @@ function renderOnAir(o) {
   }
 }
 
-// Areas (#1267): the nav on a desktop, the tab bar below 820 px; one choice for both.
-const DESK_AREAS = ['race', 'drivers', 'corrections', 'qualifying', 'dashboard', 'graphics', 'note', 'setup', 'trouble'];
-let deskArea = 'race';
-function applyArea(name) {
-  if (!DESK_AREAS.includes(name)) return;
-  deskArea = name;
-  document.querySelectorAll('.navbtn').forEach(b => {
-    const on = b.dataset.area === name;
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-current', on ? 'page' : 'false');
-  });
-  document.querySelectorAll('.area').forEach(a => a.classList.toggle('active', a.dataset.area === name));
-}
-function showArea(name, auto) {
-  if (window.crewSelectTab) window.crewSelectTab(name, auto); else applyArea(name);
-}
-document.querySelectorAll('.navbtn').forEach(b => {
-  b.addEventListener('click', () => showArea(b.dataset.area));
-  b.title = b.querySelector('.nlbl').firstChild.textContent.trim();
-  b.setAttribute('aria-label', b.title);
-});
-// A dot marks an area that needs attention; the tab bar mirrors warn and alarm.
-function setDot(area, level, why) {
-  const b = document.querySelector(`.navbtn[data-area="${area}"]`);
-  if (!b) return;
-  b.querySelector('.ndot').className = 'ndot' + (level ? ' ' + level : '');
-  b.querySelector('.nwhy').textContent = why || '';
-  const name = b.querySelector('.nlbl').firstChild.textContent.trim();
-  b.title = why ? name + ' · ' + why : name;
-  b.setAttribute('aria-label', b.title);
-  const tab = document.querySelector(`#crewTabs button[data-id="${area}"]`);
-  if (tab) {
-    tab.classList.toggle('dot-warn', level === 'warn');
-    tab.classList.toggle('dot-alarm', level === 'alarm');
-    tab.classList.toggle('dot-ok', level === 'ok' && area !== 'trouble');   // '!' is ok while nothing is wrong
-  }
-}
+// Areas, showArea and setDot come with the crew frame (#1267).
 function deskDots(st) {
   setDot('drivers', st.waiting ? 'warn' : '', st.waiting ? st.waiting + ' waiting' : '');
   setDot('race', st.events ? 'alarm' : '', st.events ? st.events + ' disconnect' + (st.events > 1 ? 's' : '') + ' open' : '');
@@ -472,7 +383,7 @@ function phoneTab() {
   const b = document.querySelector('#crewTabs button[aria-selected="true"]');
   return b ? b.getAttribute('data-id') : null;
 }
-let lastMode = null, storedArea = false;
+let lastMode = null;
 function followMode(mode) {
   if (mode === lastMode) return;
   const first = lastMode === null;
@@ -717,7 +628,7 @@ async function pollChat() {
   try {
     const d = await j('/cockpit/chat/data');
     const log = $('chatlog');
-    const stick = atBottom(log);            // only auto-scroll if already at the bottom
+    const stick = chatFollows(log);         // only auto-scroll unless the reader scrolled up
     log.textContent = '';
     (d.messages || []).forEach(msg => {
       const row = document.createElement('div');
@@ -793,7 +704,7 @@ function bchatTarget(target) {
 }
 function renderBroadcastChat(msgs) {
   const log = $('bchatlog');
-  const stick = atBottom(log);             // preserve scroll-back position
+  const stick = chatFollows(log);          // preserve scroll-back position
   log.textContent = '';
   if (!msgs.length) {
     const e = document.createElement('div');
@@ -854,23 +765,7 @@ async function refreshBroadcastChat() {
 pollSchedule(); pollProgram(); pollTimer(); pollChat(); pollBroadcastChat(); loadRcPresets();
 pgmAudioInit("/cockpit/program-audio");
 </script>
-<!--__EVENT_INFO__-->
-<nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
-     data-tabs='[["live","Live"],["race","Race"],["drivers","Drivers"],["corrections","Fix"],["qualifying","Quali"],["dashboard","Tyres"],["graphics","Gfx"],["note","Note"],["setup","Setup"],["trouble","!"],["chat","Chat"]]'></nav>
-<!--__CREW_FRAME__-->
 <script>
-/* The tab bar's choice is the area's: a tab that names an area shows it on a desktop too. */
-(function () {
-  var pick = window.crewSelectTab, saved = null;
-  if (pick) window.crewSelectTab = function (id, auto) {
-    pick(id, auto); applyArea(id);
-    var tab = document.querySelector('#crewTabs button[data-id="' + id + '"]');
-    if (tab && tab.offsetParent) tab.scrollIntoView({block: 'nearest', inline: 'nearest'});
-  };
-  try { saved = localStorage.getItem('crewTab:' + location.pathname); } catch (e) { /* private mode */ }
-  storedArea = DESK_AREAS.includes(saved);
-  applyArea(storedArea ? saved : deskArea);
-})();
 /* Driver telemetry controls (#1114), shared with the Director Panel; RED FLAG here is
    the full one: banner, Standby Cover and the race's red flag mode. */
 (function () {

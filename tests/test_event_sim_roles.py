@@ -218,7 +218,8 @@ class Page:
         return Locator(self, selector)
 
     def evaluate(self, script, arg=None):
-        assert script == roles.builtin.FIT_SCRIPT, "the only script a role runs measures the live column"
+        assert script in (roles.builtin.FIT_SCRIPT, roles.builtin.ROWS_SCRIPT), \
+            "the only scripts a role runs measure the live column and the rows"
         found = self.fit.get(arg)
         return found(self.size) if callable(found) else found
 
@@ -295,7 +296,7 @@ def t_the_registry_has_every_party_and_its_actions():
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
                              "note", "fit", "confirm_dc", "class_laps", "view"},
-            "commentator": {"open", "submit_link", "chat"},
+            "commentator": {"open", "submit_link", "chat", "fit", "view"},
             "viewer": {"open", "read"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
@@ -306,8 +307,8 @@ def t_the_registry_has_every_party_and_its_actions():
 
 def t_shared_actions_have_one_implementation():
     for name in ("area", "act_view", "act_fit"):
-        assert getattr(REG["director"], name) is getattr(REG["race_control"], name), \
-            f"director and race_control share {name}"
+        for kind in ("race_control", "commentator"):
+            assert getattr(REG["director"], name) is getattr(REG[kind], name), f"director and {kind} share {name}"
     assert REG["director"].act_chat is REG["commentator"].act_chat, "director and commentator share act_chat"
 
 
@@ -1239,20 +1240,23 @@ def t_race_control_approves_one_driver_or_every_waiting_one():
 def t_a_commentator_submits_a_link_and_gets_the_submission_id():
     role, page, _ = make(party.CommentatorRole, "commentator:Comms 2")
     page.els["#tally"].text, page.els["#tally"].attrs = "UP NEXT · Stint 2", {"class": "tally next"}
-    page.add("#subStint", options=["Stint 2"])
-    page.add("#subUrl")
+    form = [page.add("#subStint", options=["Stint 2"], visible=False), page.add("#subUrl", visible=False),
+            page.add("#subBtn", visible=False)]
+    page.add('.navbtn[data-area="stint"]', on_click=lambda: [setattr(e, "visible", True) for e in form])
     page.add("#subMsg", text="")
     page.add("#subPending", text="")
+    page.add("#timing tbody tr:not(.cls)", count=3)
 
     def submit():
         page.respond("/cockpit/submit", body={"ok": True, "id": 7})
         page.els["#subMsg"].text = "Submitted ✓ — see status below."
         page.els["#subPending"].text = "Stint 2 — awaiting director approval"
-    page.add("#subBtn", on_click=submit)
+    form[2].on_click = submit
     assert role.do("submit_link", {"url": "sim://comms2", "stint": 2}) == {"id": 7, "stint": "Stint 2"}
     assert page.els["#subUrl"].value == "sim://comms2"
     facts = role.page()
     assert facts["tally"] == "UP NEXT · Stint 2" and facts["on_air"] is False and "awaiting" in facts["pending"]
+    assert facts["timing_rows"] == 3, facts
     fails(lambda: role.do("submit_link", {"url": "sim://x", "stint": "Stint 9"}), "Your stint", "no option")
     page.els["#tally"].attrs = {"class": "tally onair"}
     assert role.page()["on_air"] is True
@@ -1668,8 +1672,8 @@ def _controls(labels, cut=0, clip=0):
 
 
 def t_fit_fails_when_a_live_control_needs_scrolling():
-    for cls in (party.RaceControlRole, party.DirectorRole):
-        role, page, _ = make(cls)
+    for cls in (party.RaceControlRole, party.DirectorRole, party.CommentatorRole):
+        role, page, _ = make(cls, *(["commentator:Comms 1"] if cls is party.CommentatorRole else []))
         need = list(cls.live_required)
         fails(lambda role=role: role.do("fit", {}), "has no live column (#liveCol)")
         page.fit["#liveCol"] = []
@@ -1681,6 +1685,27 @@ def t_fit_fails_when_a_live_control_needs_scrolling():
         fails(lambda role=role: role.do("fit", {"require": ["Restart released"]}), "lacks Restart released")
         page.fit["#liveCol"].append({"label": "CUT 2", "cut": 37, "clip": 0})
         fails(lambda role=role: role.do("fit", {}), f"1 of {len(need) + 2} live controls need scrolling: CUT 2 37px")
+
+
+def t_fit_measures_the_rows_a_page_must_show_whole():
+    role, page, _ = make(party.CommentatorRole, "commentator:Comms 1")
+    need = list(party.CommentatorRole.live_required)
+    rows = party.CommentatorRole.selectors["rows"]
+    page.fit["#liveCol"] = _controls(need)
+    fails(lambda: role.do("fit", {"rows": 14}), "shows 0 of 14 rows")
+    page.fit[rows] = _controls([f"P{i}" for i in range(13)])
+    fails(lambda: role.do("fit", {"rows": 14}), "shows 13 of 14 rows")
+    page.fit[rows] = _controls([f"P{i}" for i in range(14)])
+    assert role.do("fit", {"rows": 14}) == {"controls": len(need), "rows": 14}, "every row in view"
+    page.fit[rows][13]["cut"] = 30
+    fails(lambda: role.do("fit", {"rows": 14}), "1 of 14 rows need scrolling: P13 30px")
+    page.fit[rows][13]["cut"] = 0
+    page.fit[rows][2]["side"] = 25
+    fails(lambda: role.do("fit", {"rows": 14}), "1 of 14 rows need scrolling: P2 25px")
+    fails(lambda: role.do("fit", {"rows": 0}), "rows is a whole number of at least 1")
+    role, page, _ = make(party.RaceControlRole)
+    page.fit["#liveCol"] = _controls(party.RaceControlRole.live_required)
+    fails(lambda: role.do("fit", {"rows": 3}), "has no rows to measure")
 
 
 def t_fit_lets_the_layout_settle_before_it_fails():
@@ -1729,17 +1754,25 @@ def t_fit_script_measures_a_real_page():
             tab.set_content(page)
             got = {c["label"]: (c["cut"] > 0, c["clip"] > 0) for c in tab.evaluate(roles.builtin.FIT_SCRIPT, "#col")}
             missing = tab.evaluate(roles.builtin.FIT_SCRIPT, "#none")
+            rows = {c["label"]: c["cut"] > 0 for c in tab.evaluate(roles.builtin.ROWS_SCRIPT, "body > button, #col > button")}
+            tab.set_content('<div style="width:100px;overflow-x:auto"><button style="width:300px">Wide</button></div>')
+            side = [c["side"] for c in tab.evaluate(roles.builtin.ROWS_SCRIPT, "button")]
+            no_rows = tab.evaluate(roles.builtin.ROWS_SCRIPT, "#none tr")
         finally:
             browser.close()
     assert got == {"Hidden": (True, True), "Below": (True, False)}, \
         f"a box that cannot scroll clips, the scrolling column only hides: {got}"
     assert missing is None
+    assert side == [200], f"a row wider than its scrolling box is cut at the side: {side}"
+    assert rows == {"Below": True, "Outside": False} and no_rows == [], \
+        f"ROWS_SCRIPT measures every visible match the same way: {rows} {no_rows}"
 
 
 def t_the_smoke_scenario_checks_both_live_columns():
     loaded = scenario.load(os.path.join(SIM, "scenarios", "smoke.toml"), REG)
     fit = {(s.role, s.id) for s in loaded.steps if s.do == "fit"}
-    assert {r for r, _ in fit} == {"race_control", "director"}, f"each live column is measured: {fit}"
+    assert {r.split(":")[0] for r, _ in fit} == {"race_control", "director", "commentator"}, \
+        f"each live column is measured: {fit}"
     order = [s.id for s in loaded.steps]
     waiting = [i for r, i in fit if r == "race_control" and order.index(i) < order.index("approve_drivers")]
     assert waiting, "the desk is measured while driver requests wait"
@@ -1756,12 +1789,19 @@ def t_the_desk_fit_scenario_measures_the_tallest_states():
         during = {r for r, i in fits if order.index(state) < i < end}
         assert roles_wanted <= during, f"a fit runs while {state} holds: {fits}"
     assert loaded.event.get("classes"), "the class lap row shows only with classes"
-    laptop = {s.role for s in loaded.steps if s.do == "fit" and s.args.get("viewport") == [1366, 650]
+    laptop = {s.role.split(":")[0] for s in loaded.steps if s.do == "fit" and s.args.get("viewport") == [1366, 650]
               and s.args.get("reachable")}
-    assert laptop == {"race_control", "director"}, f"a laptop window still reaches every live control: {laptop}"
+    assert laptop == {"race_control", "director", "commentator"}, \
+        f"a laptop window still reaches every live control: {laptop}"
     timed = [s.id for s in loaded.steps if s.at.kind == "time" or s.at.seconds]
     assert not timed, f"a fit waits for its state, not for a fixed time: {timed}"
-    assert not any(s.role == "drivers" and s.do == "start" for s in loaded.steps), "no state waits on a lap"
+    on_laps = re.compile(r"\blaps?\b|\blap\.")
+    laps = [s.id for s in loaded.steps if (s.at.kind == "race" and "lap" in s.at.condition)
+            or any(on_laps.search(e) for e in s.expect)]
+    assert not laps, f"no step waits on a lap, by its trigger or a lap count in an expect: {laps}"
+    cockpit = [s for s in loaded.steps if s.role.startswith("commentator") and s.do == "fit" and not s.args.get("viewport")]
+    assert cockpit and cockpit[0].args.get("rows") == loaded.event["cars"] == 14, \
+        f"the cockpit shows all 14 cars of the timing at 1440x900: {[s.args for s in cockpit]}"
 
 
 def t_the_smoke_scenario_uses_every_party_once():

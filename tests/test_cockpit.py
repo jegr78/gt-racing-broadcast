@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import os
+import re
+import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,9 @@ m = _load("irofeeds", ("src", "relay", "racecast-feeds.py"))
 cad = _load("console_admin", ("src", "scripts", "console_admin.py"))
 
 SECRET = "test-secret-do-not-ship"
+sys.path.insert(0, HERE)
+import test_driver_tower as tower  # noqa: E402
+COCKPIT = os.path.join(ROOT, "src", "cockpit", "cockpit.html")
 
 
 def t_streamer_key_normalizes():
@@ -383,7 +388,8 @@ def _cockpit_client(secret="sek", rows=None, live_idx=0,
                     console_page_path=None, discord_client_id=None,
                     discord_client_secret=None, preview_manager=None,
                     cue_store=None, crew_source=None,
-                    program_audio_service=None, fanout=False, backlogged=None):
+                    program_audio_service=None, fanout=False, backlogged=None,
+                    mode="race", race_rows=None):
     """Stand up make_handler over a real ThreadingHTTPServer on an ephemeral port.
     Returns (server, get, post); caller must srv.shutdown() in a finally block."""
     import threading as _t
@@ -407,7 +413,8 @@ def _cockpit_client(secret="sek", rows=None, live_idx=0,
     class _Relay:
         def __init__(self):
             self.source = _Source(rows if rows is not None else _rows())
-            self.mode = "race"
+            self.race_source = _Source(race_rows) if race_rows is not None else self.source
+            self.mode = mode
             self.feeds = {"A": _Feed(live_idx), "B": _Feed(live_idx + 1)}
             self.fanout = fanout
             self._desync = {"active": False}
@@ -498,6 +505,29 @@ def t_data_authed_tally():
         # or raw relay status.
         assert "u1" not in body.decode() and "u3" not in body.decode()
         assert "schedule_len" not in body.decode()
+    finally:
+        srv.shutdown()
+
+
+def t_cockpit_race_stints_only_in_qualifying_and_without_urls():
+    race = [("u0", "Alpha Racing", "S1", 2), ("", "Alpha Racing", "S3", 4), ("u9", "Beta", "S2", 3)]
+    assert m.cockpit_race_stints("race", race, "alpha-racing") == [], \
+        "in a race the cockpit's own stints are the race stints already"
+    got = m.cockpit_race_stints("qualifying", race, "alpha-racing")
+    assert got == [{"row": 1, "stint": "S1", "has_link": True}, {"row": 2, "stint": "S3", "has_link": False}], got
+
+
+def t_data_in_qualifying_carries_the_own_race_stints():
+    quali = [("q0", "Alpha Racing", "Qualifying", 2)]
+    race = [("u0", "Alpha Racing", "S1", 2), ("", "Alpha Racing", "S3", 4), ("u9", "Beta", "S2", 3)]
+    srv, get, _post = _cockpit_client(rows=quali, race_rows=race, mode="qualifying")
+    try:
+        code, _h, body = get("/cockpit/data?t=" + ca.mint_token("sek", "alpha-racing"))
+        assert code == 200, code
+        d = json.loads(body)
+        assert d["race_stints"] == [{"row": 1, "stint": "S1", "has_link": True},
+                                    {"row": 2, "stint": "S3", "has_link": False}], d.get("race_stints")
+        assert "u0" not in body.decode() and "u9" not in body.decode(), "race stint links never leave the relay"
     finally:
         srv.shutdown()
 
@@ -946,6 +976,332 @@ def t_cockpit_syncing_pure():
     assert m.cockpit_syncing({"active": True, "serving_feed": "B"}) is True
     assert m.cockpit_syncing({"active": False}) is False
     assert m.cockpit_syncing({}) is False       # missing key -> not syncing
+
+
+def _page():
+    with open(COCKPIT, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _between(text, start, end):
+    i = text.index(start)
+    return text[i:text.index(end, i + 1)]
+
+
+def t_the_cockpit_areas_match_the_nav_and_the_tab_bar():
+    html = _page()
+    areas = re.findall(r'class="navbtn" data-area="([a-z]+)"', html)
+    assert areas == ["timing", "stint", "graphics", "notes"], f"Timing first, so it is the default area: {areas}"
+    assert re.findall(r'<div class="area" data-area="([a-z]+)" data-tab="([a-z]+)">', html) == \
+        [(a, a) for a in areas], "each area is the tab of the same name below 820 px"
+    tabs = [t[0] for t in json.loads(re.search(r"data-tabs='([^']*)'", html).group(1))]
+    assert tabs == ["live"] + areas + ["chat"], f"the tab bar maps onto the areas, Timing has its own tab: {tabs}"
+    used = set(re.findall(r'data-tab="([a-z]+)"', html))
+    assert used == set(tabs), f"every tab shows something and nothing hides behind an unknown tab: {used}"
+    live = _between(html, '<section id="liveCol"', "</section>")
+    assert html.index('id="cueCritical"') < html.index('<div class="frame wrap"'), \
+        "a critical cue spans the page above the frame on a desktop"
+    for cid in ("tally", "program", "pgmToggle", "pgmAudioBtn", "timer", "cbSend", "rcCard"):
+        assert f'id="{cid}"' in live, f"#{cid} sits in the live column"
+    rail = _between(html, '<aside class="rail"', "</aside>")
+    assert rail.index('id="chatCard"') < rail.index('id="bchatCard"'), "crew chat on top, broadcast chat below"
+    for cid, area in (("timingCard", "timing"), ("submitCard", "stint"), ("stintPlan", "stint"),
+                      ("gfxList", "graphics"), ("eventInfoInline", "notes")):
+        part = _between(html, f'<div class="area" data-area="{area}"', '<div class="area"' if area != "notes"
+                        else "</main>")
+        assert f'id="{cid}"' in part, f"#{cid} is in the {area} area"
+    assert '<div class="frame wrap"' in html, "the crew frame's 44 px phone targets apply to the frame"
+
+
+def _stint_dot(d):
+    return tower._run(tower._function(COCKPIT, "stintDot") + "\n;console.log(JSON.stringify(stintDot("
+                      + json.dumps(d) + ")));")
+
+
+def t_my_stint_dot_marks_a_missing_or_pending_link():
+    def data(on_air, stints, pending=(), enabled=True):
+        rows = [{"stint": f"Stint {i + 1}", "on_air": i == on_air, "mine": i + 1 in [s[0] for s in stints]}
+                for i in range(6)]
+        return {"submit_enabled": enabled, "schedule": rows,
+                "my_stints": [{"row": r, "stint": f"Stint {r}", "has_link": link, "url": "u" if link else ""}
+                              for r, link in stints],
+                "my_pending": [{"id": "x", "stint": f"Stint {r}"} for r in pending]}
+    if _stint_dot(data(-1, [])) is None:
+        return
+    got = {
+        "past stint without a link": _stint_dot(data(3, [(1, False), (5, True)])),
+        "next stint without a link": _stint_dot(data(1, [(1, True), (3, False)])),
+        "nothing on air": _stint_dot(data(-1, [(1, False)])),   # the relay's index is past the end
+        "pending replacement": _stint_dot(data(1, [(3, True)], pending=[3])),
+        "first link pending": _stint_dot(data(1, [(3, False)], pending=[3])),
+        "all linked": _stint_dot(data(0, [(1, True), (3, True)])),
+        "submissions off": _stint_dot(data(-1, [(1, False)], enabled=False)),
+        "no stints": _stint_dot(data(-1, [])),
+    }
+    off = {"level": "", "why": ""}
+    assert got == {
+        "past stint without a link": off,
+        "next stint without a link": {"level": "warn", "why": "Stint 3: link missing"},
+        "nothing on air": off,
+        "pending replacement": {"level": "warn", "why": "Stint 3: awaiting approval"},
+        "first link pending": {"level": "warn", "why": "Stint 3: awaiting approval"},
+        "all linked": off,
+        "submissions off": off,
+        "no stints": off,
+    }, f"the dot shows only for an own stint still to come whose link is missing or awaits approval: {got}"
+    quali = dict(data(0, [(1, True)]), race_stints=[{"row": 1, "stint": "Stint 1", "has_link": True},
+                                                    {"row": 4, "stint": "Stint 4", "has_link": False}])
+    assert _stint_dot(quali) == {"level": "warn", "why": "Stint 4: link missing"}, \
+        f"in qualifying every own race stint is still to come: {_stint_dot(quali)}"
+    quali["my_pending"] = [{"id": "x", "stint": "Stint 4"}]
+    assert _stint_dot(quali) == {"level": "warn", "why": "Stint 4: awaiting approval"}, _stint_dot(quali)
+    past = data(6, [(1, False), (3, False)])
+    assert _stint_dot(past) == off, f"past the schedule's end no stint is still to come: {_stint_dot(past)}"
+    missing_wins = _stint_dot(data(0, [(3, True), (5, False)], pending=[3]))
+    assert missing_wins == {"level": "warn", "why": "Stint 5: link missing"}, \
+        f"a missing link is named before a pending one: {missing_wins}"
+
+
+def t_the_stint_dot_follows_a_good_poll_only():
+    poll = _between(_page(), "async function pollTally()", "\n}\n")
+    ok = poll[poll.index("try"):poll.index("catch")]
+    assert "renderStintDot(d)" in ok and ok.index("renderStintDot(d)") < ok.index("renderSubmit(d)"), \
+        "the dot updates on a good answer, before the submit form may return early, and a failed poll keeps it"
+
+
+def t_a_hidden_preview_fetches_no_program_and_lasts_one_session():
+    html = _page()
+    poll = _between(html, "function pollProgram()", "\n}\n")
+    assert poll.index("if (!previewShown())") < poll.index("new Image()"), "a hidden preview loads no program still"
+    assert "sessionStorage.getItem(PV_KEY)" in html and "localStorage.setItem(PV_KEY" not in html, \
+        "a hidden preview never survives into the next event's first load"
+    toggle = _between(html, "$('pgmToggle').addEventListener", "});")
+    assert "$('pgmAudioBtn').click()" in toggle, "hiding the preview stops the program audio"
+
+
+def _composed(page, slow_after=None):
+    """`page` as the relay serves it at the tailnet root; `slow_after` (a marker in the page's
+    main script) inserts an external script there that the test answers late."""
+    def src(*rel):
+        with open(os.path.join(ROOT, "src", *rel), encoding="utf-8") as fh:
+            return fh.read()
+    html = src(*page)
+    if slow_after:
+        i = html.index("</script>", html.index(slow_after[0])) + len("</script>")
+        html = html[:i] + f'<script src="{slow_after[1]}"></script>' + html[i:]
+    for token, value in (("__RC_API_BASE__", ""), ("__RC_VERSION__", "dev"),
+                         ("<!--__CREW_FRAME__-->", src("console", "crew-frame.html")),
+                         ("<!--__EVENT_INFO__-->", src("console", "event-info.html"))):
+        html = html.replace(token, value)
+    return html
+
+
+def _browser_run(fn, routes):
+    """Runs `fn(pw, browser, serve)` with Chromium; None without Playwright or a browser."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; the cockpit page is measured with visual acceptance)")
+        return None
+    def serve(route):
+        path = route.request.url.split("://", 1)[1].split("/", 1)[1].split("?", 1)[0]
+        if path == "slow.js":
+            return route.continue_()
+        got = routes.get(path)
+        if callable(got):
+            got = got()
+        if isinstance(got, str):
+            return route.fulfill(body=got, content_type="text/html")
+        if got is None:
+            return route.fulfill(status=404, body="{}", content_type="application/json")
+        return route.fulfill(body=json.dumps(got), content_type="application/json")
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return None
+        try:
+            return fn(browser, serve)
+        finally:
+            browser.close()
+
+
+def _cockpit_data(**kw):
+    d = {"me": "comms-1", "mode": "race", "on_air": False, "up_next": None, "scheduled": True,
+         "submit_enabled": True, "schedule": [{"stint": "S1", "streamer": "Comms 1", "on_air": True, "mine": True},
+                                              {"stint": "S2", "streamer": "Comms 1", "on_air": False, "mine": True}],
+         "my_stints": [{"row": 1, "stint": "S1", "has_link": True, "url": "u"},
+                       {"row": 2, "stint": "S2", "has_link": False, "url": ""}],
+         "my_pending": [], "race_stints": []}
+    d.update(kw)
+    return d
+
+
+def t_the_cockpit_page_runs_its_frame_before_a_poll_answers():
+    data = _cockpit_data()
+    slow = tower.SlowScript()
+    page = _composed(("cockpit", "cockpit.html"), slow_after=("pollBroadcastChat();", slow.url))
+
+    def run(browser, serve):
+        tab = browser.new_page(viewport={"width": 1440, "height": 900})
+        errors = []
+        tab.on("pageerror", lambda e: errors.append(str(e) + " " + (e.stack or "")[:300]))
+        tab.route(slow.base + "/**", serve)
+        tab.goto(slow.base + "/cockpit", wait_until="load")
+        tab.wait_for_timeout(200)   # before the 2 s poll: only the first answer can have set the dot
+        return {"errors": errors, "why": tab.evaluate(
+            "document.querySelector('.navbtn[data-area=\"stint\"] .nwhy').textContent")}
+    try:
+        got = _browser_run(run, {"cockpit": page, "cockpit/data": data})
+    finally:
+        slow.close()
+    if got is None:
+        return
+    assert got == {"errors": [], "why": "S2: link missing"}, \
+        f"a poll that answers while the page still loads finds the frame ready: {got}"
+
+
+def t_a_chat_opened_on_a_phone_shows_and_follows_the_newest_message():
+    msgs = {"messages": [{"ts": 1_800_000_000 + i, "user": "Director", "text": f"message {i}"} for i in range(40)]}
+    more = {"n": 40}
+
+    def chat():
+        more["n"] += 1
+        return {"messages": msgs["messages"] + [{"ts": 1_800_001_000 + more["n"], "user": "Director",
+                                                 "text": f"message {more['n']}"}]}
+    bmsgs = {"messages": [{"ts": 1_800_000_000 + i, "user": f"viewer{i}", "text": "hi", "source": "yt:abcd"}
+                          for i in range(40)]}
+    page = _composed(("cockpit", "cockpit.html"))
+
+    def run(browser, serve):
+        ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+        tab = ctx.new_page()
+        tab.route("http://ck.test/**", serve)
+        tab.goto("http://ck.test/cockpit")
+        tab.wait_for_timeout(1500)
+        tab.click('#crewTabs button[data-id="chat"]')
+        tab.wait_for_timeout(300)
+        first = tab.evaluate("""() => ['chatlog', 'bchatlog'].map(id => {
+          const l = document.getElementById(id); return l.scrollHeight - l.scrollTop - l.clientHeight; })""")
+        tab.wait_for_timeout(3500)
+        later = tab.evaluate("""() => { const l = document.getElementById('chatlog');
+          return [l.scrollHeight - l.scrollTop - l.clientHeight, l.lastElementChild.textContent]; }""")
+        ctx.close()
+        return {"first": first, "later": later}
+    got = _browser_run(run, {"cockpit": page, "cockpit/data": _cockpit_data(), "cockpit/chat/data": chat,
+                             "broadcast-chat/data": bmsgs})
+    if got is None:
+        return
+    assert all(gap < 24 for gap in got["first"]), f"both chats open at their newest message: {got}"
+    assert got["later"][0] < 24 and "message 4" in got["later"][1], f"the crew chat keeps following: {got}"
+
+
+def t_the_stint_dot_updates_on_a_good_answer_and_survives_a_failed_poll():
+    js = "\n".join(tower._function(COCKPIT, n) for n in ("stintDot", "renderStintDot")) + "\nasync " + \
+        tower._function(COCKPIT, "pollTally")
+    got = tower._run("""
+var dots = [], answers = [%s, null], waits = [];
+function setDot(a, l, w) { dots.push([a, l, w]); }
+function renderTally() {} function renderStintPlan() {}
+function renderSubmit() { throw new Error("the form returned early"); }
+async function j() { const a = answers.shift(); if (!a) throw new Error("502"); return a; }
+function setTimeout(fn, ms) { waits.push(ms); }
+%s
+(async () => { await pollTally(); await pollTally(); console.log(JSON.stringify({dots, waits})); })();
+""" % (json.dumps(_cockpit_data()), js))
+    if got is None:
+        return
+    assert got == {"dots": [["stint", "warn", "S2: link missing"]], "waits": [2000, 2000]}, \
+        f"the dot follows a good answer even when the form stops early, and a failed poll keeps it: {got}"
+
+
+def t_hide_stops_the_program_stills_and_audio_for_the_tab_session():
+    page = _composed(("cockpit", "cockpit.html"))
+    stills = {"n": 0}
+
+    def program():
+        stills["n"] += 1
+        return None
+
+    def run(browser, serve):
+        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+        tab = ctx.new_page()
+        tab.route("http://ck.test/**", serve)
+        tab.goto("http://ck.test/cockpit")
+        tab.wait_for_selector("#pgmAudioBtn", state="visible")
+        tab.evaluate("""() => { const au = document.getElementById('pgmAudio');
+          Object.defineProperty(au, 'paused', {get: () => !window.playing});
+          au.play = () => { window.playing = true; return Promise.resolve(); };
+          au.pause = () => { window.playing = false; }; }""")
+        tab.click("#pgmAudioBtn")
+        playing = tab.evaluate("window.playing === true")
+        tab.click("#pgmToggle")
+        tab.wait_for_timeout(300)
+        before = stills["n"]
+        tab.wait_for_timeout(3500)
+        hidden = {"stills": stills["n"] - before, "playing": tab.evaluate("window.playing"),
+                  "pressed": tab.get_attribute("#pgmAudioBtn", "aria-pressed")}
+        tab.reload()
+        tab.wait_for_timeout(500)
+        reloaded = tab.evaluate("document.getElementById('pgmBody').hidden")
+        fresh = ctx.new_page()
+        fresh.route("http://ck.test/**", serve)
+        fresh.goto("http://ck.test/cockpit")
+        fresh.wait_for_timeout(500)
+        other_tab = fresh.evaluate("document.getElementById('pgmBody').hidden")
+        keys = tab.evaluate("Object.keys(sessionStorage)")
+        ctx.close()
+        return {"playing": playing, "hidden": hidden, "reloaded": reloaded, "other_tab": other_tab, "keys": keys}
+    got = _browser_run(run, {"cockpit": page, "cockpit/data": _cockpit_data(), "cockpit/program": program,
+                             "cockpit/program-audio": {"ok": True}})
+    if got is None:
+        return
+    assert got["playing"] and got["hidden"] == {"stills": 0, "playing": False, "pressed": "false"}, \
+        f"a hidden preview loads no still and its audio stops: {got}"
+    assert got["reloaded"] is True and got["other_tab"] is False, f"Hide lasts for this tab only: {got}"
+    assert "cockpit_preview" in got["keys"] and "rc_preview" not in got["keys"], \
+        f"the cockpit keeps its own Hide, apart from the desk's: {got}"
+
+
+def t_a_stint_label_with_markup_stays_text_in_the_picker():
+    label = '<img src=x onerror="window.pwned=1">S1'
+    data = _cockpit_data(my_stints=[{"row": 1, "stint": label, "has_link": True, "url": "u"}])
+    page = _composed(("cockpit", "cockpit.html"))
+
+    def run(browser, serve):
+        tab = browser.new_page(viewport={"width": 1440, "height": 900})
+        tab.route("http://ck.test/**", serve)
+        tab.goto("http://ck.test/cockpit")
+        tab.wait_for_timeout(1500)
+        return tab.evaluate("""() => { const sel = document.getElementById('subStint');
+          return {options: [...sel.options].map(o => [o.value, o.textContent]), imgs: sel.querySelectorAll('img').length,
+                  pwned: !!window.pwned}; }""")
+    got = _browser_run(run, {"cockpit": page, "cockpit/data": data})
+    if got is None:
+        return
+    assert got == {"options": [[label, label + " (replace)"]], "imgs": 0, "pwned": False}, \
+        f"the Sheet's stint label is text, never markup: {got}"
+
+
+def t_an_old_browser_without_media_query_listeners_still_polls():
+    page = _composed(("cockpit", "cockpit.html"))
+
+    def run(browser, serve):
+        tab = browser.new_page(viewport={"width": 390, "height": 844})
+        errors = []
+        tab.on("pageerror", lambda e: errors.append(str(e)))
+        tab.add_init_script("MediaQueryList.prototype.addEventListener = undefined;")
+        tab.route("http://ck.test/**", serve)
+        tab.goto("http://ck.test/cockpit")
+        tab.wait_for_timeout(1500)
+        return {"errors": errors, "tally": tab.text_content("#tally"),
+                "cue_in_strip": tab.evaluate("document.getElementById('cueCritical').parentElement.id")}
+    got = _browser_run(run, {"cockpit": page, "cockpit/data": _cockpit_data(on_air=True)})
+    if got is None:
+        return
+    assert got == {"errors": [], "tally": "YOU ARE ON AIR", "cue_in_strip": "liveStrip"}, \
+        f"Safari before 14 places the cue with addListener and keeps polling: {got}"
 
 
 if __name__ == "__main__":

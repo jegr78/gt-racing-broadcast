@@ -437,6 +437,35 @@ def t_the_public_page_flags_a_finished_row_with_its_gap():
         "a finish is final: the flag and gap stay when the car parks or leaves"
 
 
+
+class SlowScript:
+    """A local server that answers /slow.js after `seconds`, off the browser's route thread,
+    so a page's other requests answer while its parser waits on the script. A test routes
+    every other path of `base` and lets /slow.js through, so the page stays same-origin."""
+    def __init__(self, seconds=1.5):
+        import http.server
+        import threading
+        import time as _time
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                _time.sleep(seconds)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.end_headers()
+                self.wfile.write(b"window.slowDone = true;")
+
+            def log_message(self, *a):
+                pass
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+        self.url = "/slow.js"
+
+    def close(self):
+        self.srv.shutdown()
+
+
 def _function(path, name):
     """The source of one top-level JS function in a page or script, by brace matching."""
     with open(path, encoding="utf-8") as fh:
@@ -1165,9 +1194,11 @@ def t_the_cockpit_flags_a_finished_row_with_its_final_gap():
     assert got[0]["row"] == "", f"a finished car in the box is not marked as boxed: {got}"
 
 
-def t_the_cockpit_hides_the_timing_card_until_a_car_has_data():
+def t_the_cockpit_shows_an_empty_state_until_a_car_has_data():
     def card(payload):
-        return _cockpit(payload, probe="els.timingCard.hidden")
+        got = _cockpit(payload, probe="['timingData', 'timingEmpty'].map(id => document.getElementById(id).hidden)")
+        assert got is None or got[0] != got[1], f"the table or the empty state shows, never both: {got}"
+        return got and got[0]
 
     def race(*rows):
         return {"mode": "race", "entries": [dict(CAR, entry=f"E #{i}", pos=i + 1, **{"laps": 0, "finished": False, **r})
@@ -1186,7 +1217,7 @@ def t_the_cockpit_hides_the_timing_card_until_a_car_has_data():
     }
     assert got == {"empty": True, "roster only": True, "never sent": True, "waiting": False,
                    "quiet after laps": False, "finished and quiet": False, "qualifying": False}, \
-        f"the card shows once a car sent data, and a roster of no-data rows keeps it hidden: {got}"
+        f"the table shows once a car sent data, a roster of no-data rows keeps the empty state: {got}"
 
 
 def t_the_cockpit_renders_one_class_as_today():

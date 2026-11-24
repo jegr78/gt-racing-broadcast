@@ -7200,8 +7200,8 @@ def race_control_schedule(rows, live_map, live_idx):
 
 
 def cockpit_schedule(rows, live_idx, me_key):
-    """Redacted stint plan for the cockpit's read-only stint-plan card (right
-    column, below the timer). Per row: stint + streamer, plus an on_air flag
+    """Redacted stint plan for the cockpit's read-only stint plan (My stint
+    area). Per row: stint + streamer, plus an on_air flag
     (row == live_idx) and a mine flag (asset_key match for the token's streamer).
     NO stream URL: the cockpit is reachable over the public Funnel, so this stays
     inside the /console/takeover/status redaction boundary. rows are
@@ -7336,6 +7336,16 @@ def cockpit_own_stints(rows, me_key):
             u = (url or "").strip()
             out.append({"row": i + 1, "stint": stint, "has_link": bool(u), "url": u})
     return out
+
+
+def cockpit_race_stints(mode, race_rows, me_key):
+    """In qualifying, *me_key*'s own race stints as {"row", "stint", "has_link"}, so the
+    cockpit's My stint dot covers the race while the feeds serve qualifying; no URL.
+    [] in a race, where /cockpit/data's my_stints are the race stints already. Pure."""
+    if mode != "qualifying":
+        return []
+    return [{"row": s["row"], "stint": s["stint"], "has_link": s["has_link"]}
+            for s in cockpit_own_stints(race_rows, me_key)]
 
 
 def schedule_rows(relay):
@@ -14489,8 +14499,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       # (#193); empty -> the cockpit hides the form.
                                       "submit_enabled": submission_store is not None,
                                       "my_stints": cockpit_own_stints(rows, me),
+                                      "race_stints": cockpit_race_stints(
+                                          relay.mode, relay.race_source.get_rows()
+                                          if getattr(relay, "race_source", None) else [], me),
                                       # read-only redacted stint plan for the
-                                      # right-column card (no stream URLs).
+                                      # My stint area (no stream URLs).
                                       "schedule": cockpit_schedule(rows, live_idx, me),
                                       "syncing": cockpit_syncing(relay._desync),
                                       "program_behind_s": cockpit_program_behind(

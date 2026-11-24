@@ -561,10 +561,12 @@ python3 tools/event-sim/event_sim.py --scenario desk-fit --out DIR --no-skips   
 python3 tools/event-sim/event_sim.py --scenario red-flag --out DIR --no-skips --repeat 12 [--load cpu:2]
 ```
 
-`desk-fit` runs the `fit` action of the Race Control desk and the Director Panel (no live-column
-control may need scrolling at 1440x900) with requests waiting, a red flag with a class lap row
-(`[event] classes` gives the roster a Class column), a graphic request under a two-row panel
-header, and in qualifying. Nobody drives, so no step waits on a lap.
+`desk-fit` runs the `fit` action of the Race Control desk, the Director Panel and the
+Commentator Cockpit (no live-column control may need scrolling at 1440x900) with requests
+waiting, a red flag with a class lap row (`[event] classes` gives the roster a Class column),
+a graphic request under a two-row panel header, and in qualifying. Its 14 cars drive only
+while the cockpit's fit with `rows = 14` asks for every timing row in view (ROWS_SCRIPT, `rows`
+selector), then park; no step waits on a lap.
 
 `--no-skips` is for a run that must have its browser (the workflow): every skipped step
 and every missing screenshot becomes a hard finding. The generic `page` role is skipped
