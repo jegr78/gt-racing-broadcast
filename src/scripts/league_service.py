@@ -25,6 +25,7 @@ from urllib.parse import urlencode, urlsplit
 import atomic_replace
 import http_util
 import simulation
+import timing_host
 
 V = 1
 FILENAME = "league-event.json"
@@ -520,19 +521,25 @@ def path_in(runtime_dir):
 
 
 def _stored(doc):
-    """A league-event.json document checked again, or None."""
+    """A league-event.json document checked again, or None. `finished` says the current
+    race has finished and waits for the next one to start counting, `done` that the
+    event's last race lay behind it then."""
     if not isinstance(doc, dict) or ref_problem(doc.get("ref")):
         return None
     event = parse_event(dict(doc, v=V))
     if event is None or doc.get("current") not in [r["race"] for r in event["races"]]:
         return None
     loaded = doc.get("loaded_at")
+    at = doc.get("finished_at")
     return dict(event, ref=doc["ref"], current=doc["current"],
-                loaded_at=loaded if isinstance(loaded, str) and len(loaded) <= 40 else "")
+                loaded_at=loaded if isinstance(loaded, str) and len(loaded) <= 40 else "",
+                finished=doc.get("finished") is True, done=doc.get("done") is True,
+                finished_at=at if isinstance(at, (int, float)) and not isinstance(at, bool) else None)
 
 
 def read(path):
-    """The loaded event {ref, title, races, widgets, current, loaded_at}, or None."""
+    """The loaded event {ref, title, races, widgets, current, loaded_at, finished, done,
+    finished_at}, or None."""
     try:
         with open(path, encoding="utf-8") as fh:
             return _stored(json.load(fh))
@@ -540,14 +547,7 @@ def read(path):
         return None
 
 
-def store(path, ref, event, now=None):
-    """Write the loaded event. The current race stays when the reloaded event still
-    lists it, else it is the first race. Returns what was written."""
-    old = read(path)
-    races = [r["race"] for r in event["races"]]
-    current = old["current"] if old and old["ref"] == ref and old["current"] in races else races[0]
-    stamp = datetime.datetime.fromtimestamp(time.time() if now is None else now, datetime.timezone.utc)
-    doc = dict(event, ref=ref, current=current, loaded_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
+def _write(path, doc):
     folder = os.path.dirname(os.path.abspath(path))
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=".league-event-", suffix=".tmp")
@@ -559,6 +559,50 @@ def store(path, ref, event, now=None):
         if os.path.exists(tmp):
             os.remove(tmp)
     return _stored(doc)
+
+
+def store(path, ref, event, now=None):
+    """Write the loaded event. The current race and its finished and done marks stay
+    when the reloaded event still lists it, else it is the first race. Returns what was
+    written."""
+    old = read(path)
+    races = [r["race"] for r in event["races"]]
+    keep = old is not None and old["ref"] == ref and old["current"] in races
+    stamp = datetime.datetime.fromtimestamp(time.time() if now is None else now, datetime.timezone.utc)
+    doc = dict(event, ref=ref, current=old["current"] if keep else races[0],
+               loaded_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    if keep:
+        doc.update({k: old[k] for k in ("finished", "done", "finished_at")})
+    return _write(path, doc)
+
+
+def update(path, **fields):
+    """Change the loaded event's `current`, `finished`, `done` or `finished_at`; the
+    stored event, or None without one. ValueError for a race the event does not list."""
+    old = read(path)
+    if old is None:
+        return None
+    if "current" in fields and fields["current"] not in [r["race"] for r in old["races"]]:
+        raise ValueError("the event does not list that race")
+    return _write(path, dict(old, **fields))
+
+
+def relay_settings(profile_env_path, environ=None):
+    """(Settings or None, problem) for the relay: the simulated service in simulation
+    mode, else LEAGUE_SERVICE_URL and LEAGUE_SERVICE_KEY from the league's profile.env,
+    read on every call so an edit applies without a restart."""
+    environ = os.environ if environ is None else environ
+    if simulation.active(environ):
+        url = simulation.endpoint(simulation.LEAGUE_SERVICE_URL, environ)
+        return settings(url, environ.get(simulation.LEAGUE_SERVICE_KEY, "") if url else "", environ)
+    env = {}
+    if profile_env_path:
+        try:
+            with open(profile_env_path, encoding="utf-8") as fh:
+                env = timing_host._parse_env(fh.read())
+        except OSError:
+            env = {}
+    return settings(env.get("LEAGUE_SERVICE_URL", ""), env.get("LEAGUE_SERVICE_KEY", ""), environ)
 
 
 def clear(path):

@@ -6,6 +6,7 @@ src/docs/design/league-service.openapi.yaml.
     POST /racecast/v1/live              widget values computed from the standings
     POST /racecast/v1/result            stores the draft, a resend replaces it
     GET  /racecast/v1/result?ref=&race= the stored draft's status
+    GET  /racecast/v1/graphic/<race>.png the result graphic, with --graphic
 
 Every call needs `Authorization: Bearer <key>`; a wrong or missing key gets 401 and is
 counted in `unauthorized`, never logged. A body that breaks the contract gets 400 with
@@ -18,7 +19,7 @@ User-Agent and the body; the key is never recorded.
                                  call with exactly this until an empty body clears it
     POST /_sim/fail              fault rules (loopback_http); targets `call:<call>`, `service`
 
-Calls: event, live, result, result-status. `LeagueSim.env()` gives RACECAST_SIMULATION=1
+Calls: event, live, result, result-status, graphic. `LeagueSim.env()` gives RACECAST_SIMULATION=1
 and the RACECAST_SIM_LEAGUE_SERVICE_URL/_KEY pair.
 
     python3 tools/event-sim/fakes/league_sim.py --port 0 --ready-file league.json
@@ -28,9 +29,11 @@ import argparse
 import hmac
 import json
 import os
+import struct
 import sys
 import threading
 import time
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -43,8 +46,17 @@ KEY_ENV = "RACECAST_SIM_LEAGUE_SERVICE_KEY"             # simulation.LEAGUE_SERV
 BASE = "/racecast"
 DEFAULT_KEY = "sim-league-key"
 DEFAULT_REF = "SIM-MATCH-1"
-CALLS = ("event", "live", "result", "result-status")
+CALLS = ("event", "live", "result", "result-status", "graphic")
 RESULT_LINK = "https://league.example/sim/results/{ref}/{race}"   # never fetched
+
+
+def png_bytes(width=2, height=2):
+    """A small valid RGB PNG."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    raw = b"".join(b"\x00" + b"\xc0\x10\x10" * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
 def default_events():
@@ -100,9 +112,11 @@ def widget_values(body):
 
 class LeagueSim(loopback_http.LoopbackServer):
     def __init__(self, port=0, key=DEFAULT_KEY, events=None, result_status="pending",
-                 clock=time.time, faults=None, sleep=None):
+                 clock=time.time, faults=None, sleep=None, graphic=False):
         super().__init__(port, faults=faults, sleep=sleep)
         self.key = key
+        self.graphic = graphic          # a result status names its graphic
+        self.graphic_body = png_bytes()
         self.events = default_events() if events is None else events
         self.result_status = result_status
         self.clock = clock
@@ -149,6 +163,8 @@ class LeagueSim(loopback_http.LoopbackServer):
 
     @staticmethod
     def _call_name(method, path):
+        if method == "GET" and path.startswith(BASE + "/v1/graphic/") and path.endswith(".png"):
+            return "graphic"
         return {("GET", BASE + "/v1/event"): "event", ("POST", BASE + "/v1/live"): "live",
                 ("POST", BASE + "/v1/result"): "result",
                 ("GET", BASE + "/v1/result"): "result-status"}.get((method, path))
@@ -189,6 +205,13 @@ class LeagueSim(loopback_http.LoopbackServer):
             status, payload, location = canned
             return (status, "application/json", payload, {"Location": location} if location else {})
         q = {k: v[0] for k, v in query.items()}
+        if name == "graphic":
+            with self.lock:
+                self.seq += 1
+                self._calls.append({"seq": self.seq, "time": self.clock(), "call": name, "ref": None,
+                                    "race": path.rsplit("/", 1)[-1][:-4],
+                                    "user_agent": headers.get("User-Agent"), "body": None})
+            return 200, "image/png", self.graphic_body
         doc = json.loads(body) if method == "POST" else None
         handler = getattr(self, "_on_" + name.replace("-", "_"))
         status, answer = handler(q, doc)
@@ -213,8 +236,11 @@ class LeagueSim(loopback_http.LoopbackServer):
         return (400, {"error": problem}) if problem else (200, widget_values(doc))
 
     def _status(self, ref, race):
-        return {"v": 1, "status": self.result_status, "message": "Draft waits for a steward.",
-                "link": RESULT_LINK.format(ref=ref, race=race)}
+        out = {"v": 1, "status": self.result_status, "message": "Draft waits for a steward.",
+               "link": RESULT_LINK.format(ref=ref, race=race)}
+        if self.graphic:
+            out["graphic_url"] = f"{self.url}/v1/graphic/{race}.png"
+        return out
 
     def _on_result(self, _q, doc):
         if not isinstance(doc, dict) or doc.get("v") != 1 or not isinstance(doc.get("entries"), list):
@@ -238,6 +264,7 @@ def build_parser():
     ap.add_argument("--key", default=DEFAULT_KEY, help="the bearer key it accepts")
     ap.add_argument("--result-status", choices=("pending", "stored"), default="pending",
                     help="the status every result gets (default pending)")
+    ap.add_argument("--graphic", action="store_true", help="every result status names a PNG graphic")
     ap.add_argument("--ready-file", help="write {port, url, env} here once listening")
     return ap
 
@@ -245,7 +272,8 @@ def build_parser():
 def main(argv=None):
     logsetup.harden_stdio()
     args = build_parser().parse_args(argv)
-    sim = LeagueSim(port=args.port, key=args.key, result_status=args.result_status).start()
+    sim = LeagueSim(port=args.port, key=args.key, result_status=args.result_status,
+                    graphic=args.graphic).start()
     loopback_http.serve_cli(sim, args.ready_file, {"port": sim.port, "url": sim.url, "env": sim.env()},
                             f"league-sim: {sim.url} (ref {DEFAULT_REF})")
 

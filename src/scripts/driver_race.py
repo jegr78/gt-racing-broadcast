@@ -1214,6 +1214,14 @@ class Service:
                 "disconnects": [e for e in rec["events"] if e.get("state") == "confirmed"],
                 "audit_path": audit_path_for(self._path)}
 
+    def recording_results(self):
+        """The league results the open recording keeps; [] without one."""
+        try:
+            rec = self._open_recorder()
+            return rec.results() if rec else []
+        except (RuntimeError, *_STORE_ERRORS):
+            return []
+
     def store_result(self, doc):
         """Keep a league result in the open recording; False without one or when it failed."""
         try:

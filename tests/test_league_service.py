@@ -499,6 +499,46 @@ def t_event_file_round_trip_keeps_the_current_race():
         assert not os.path.exists(path)
 
 
+def t_the_finished_and_done_marks_survive_a_reload_of_the_same_event_only():
+    with tempfile.TemporaryDirectory() as d:
+        path = ls.path_in(d)
+        assert ls.update(path, current="leg-2") is None, "no event, nothing to change"
+        event = ls.parse_event(_event(races=[{"race": "leg-1"}, {"race": "leg-2"}]))
+        doc = ls.store(path, "REF", event)
+        assert (doc["finished"], doc["done"], doc["finished_at"]) == (False, False, None), doc
+        doc = ls.update(path, current="leg-2", finished=True, finished_at=1700.5)
+        assert (doc["current"], doc["finished"], doc["finished_at"]) == ("leg-2", True, 1700.5), doc
+        try:
+            ls.update(path, current="leg-9")
+        except ValueError:
+            pass  # expected
+        else:
+            raise AssertionError("a race outside the event is refused")
+        ls.update(path, done=True)
+        again = ls.store(path, "REF", event)
+        assert again["finished"] and again["done"] and again["finished_at"] == 1700.5, \
+            f"reloading the event keeps where it stands: {again}"
+        other = ls.store(path, "OTHER", event)
+        assert not other["finished"] and not other["done"] and other["current"] == "leg-1", other
+
+
+def t_the_relay_reads_the_service_from_the_profile_or_the_simulation():
+    with tempfile.TemporaryDirectory() as d:
+        env_file = os.path.join(d, "profile.env")
+        with open(env_file, "w", encoding="utf-8") as fh:
+            fh.write("LEAGUE_SERVICE_URL=https://league.example/r\nLEAGUE_SERVICE_KEY='fixture-key'\n")
+        cfg, problem = ls.relay_settings(env_file, {})
+        assert cfg == ls.Settings("https://league.example/r", "fixture-key") and problem == "", (cfg, problem)
+        assert ls.relay_settings(os.path.join(d, "missing.env"), {}) == (None, "")
+        assert ls.relay_settings("", {}) == (None, "")
+        sim = {"RACECAST_SIMULATION": "1", "RACECAST_SIM_LEAGUE_SERVICE_URL": "http://127.0.0.1:9/racecast",
+               "RACECAST_SIM_LEAGUE_SERVICE_KEY": "sim-key"}
+        assert ls.relay_settings(env_file, sim)[0] == ls.Settings("http://127.0.0.1:9/racecast", "sim-key"), \
+            "simulation replaces the profile's service"
+        assert ls.relay_settings(env_file, {"RACECAST_SIMULATION": "1"}) == (None, ""), \
+            "simulation never reaches the real service"
+
+
 def t_client_logs_carry_no_key():
     records = []
 

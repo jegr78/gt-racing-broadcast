@@ -457,6 +457,10 @@ class Recorder:
         when the write queue was full."""
         return self._writer.put(lambda s: s.set_meta(RESULTS_KEY, merged_results(s.meta(RESULTS_KEY), doc)))
 
+    def results(self):
+        """The league results this recording keeps, oldest first."""
+        return _results(self._store.meta(RESULTS_KEY))
+
     def _status_head(self):
         return {"running": self._running, "started_by": self._started_by,
                 "started_at": self._started_at}
