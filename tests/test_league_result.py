@@ -303,6 +303,12 @@ def t_a_graphic_from_the_service_is_filed_for_the_director():
         gfx = os.path.join(d, "graphics")
         assert not os.path.exists(gfx), "a fetched graphic never reaches OBS by itself"
         dest = lr.install_graphic(staged, gfx)
+        if os.name == "posix":
+            umask = os.umask(0)
+            os.umask(umask)
+            assert os.stat(dest).st_mode & 0o777 == 0o666 & ~umask, \
+                f"the taken graphic gets the user's default file mode: {oct(os.stat(dest).st_mode)}"
+            assert not [n for n in os.listdir(gfx) if n.endswith(".tmp")]
         with open(dest, "rb") as fh:
             assert os.path.basename(dest) == "Race Results.png" and fh.read() == sim.graphic_body
 

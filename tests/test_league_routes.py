@@ -110,6 +110,31 @@ def t_the_panel_loads_the_graphic_through_the_console_mount():
         "behind Funnel the graphic preview resolves under /console like every other panel request"
 
 
+def t_a_taken_graphic_logs_no_line_break_from_the_request():
+    import logging
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY, graphic=True) as sim:
+        srv, port, exp, src, wall, _obs, _gfx = _stack(d, sim)
+        lines = []
+        handler = logging.Handler()
+        handler.emit = lambda rec: lines.append(rec.getMessage())
+        g.m.LOG.addHandler(handler)
+        level = g.m.LOG.level
+        g.m.LOG.setLevel(logging.INFO)
+        try:
+            _run_race(exp, src, wall)
+            exp.step()
+            staged = exp.staged_graphic("leg-1")
+            exp.staged_graphic = lambda race: staged      # a lookup that let any text through
+            code, _b = g._post(port, "/league/graphic/take", body={"race": "leg-1\nFAKE relay line"})
+            assert code == 200
+        finally:
+            g.m.LOG.removeHandler(handler)
+            g.m.LOG.setLevel(level)
+            srv.shutdown()
+        taken = [ln for ln in lines if "Race Results graphic now" in ln]
+        assert taken and all("\n" not in ln and "\r" not in ln for ln in taken), taken
+
+
 def t_the_league_routes_are_director_only_under_console():
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
         srv, port, *_rest = _stack(d, sim)

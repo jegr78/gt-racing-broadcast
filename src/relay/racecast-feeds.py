@@ -12578,7 +12578,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 dest = league_result.install_graphic(staged, graphics_dir)
                 ok, note = (relay._obs.set_input_file(league_result.GRAPHIC_TARGET, dest)
                             if relay._obs is not None else (False, "OBS control unavailable"))
-                LOG.info("league result graphic of %s is the %s graphic now", race, league_result.GRAPHIC_TARGET)
+                LOG.info("league result graphic of %s is the %s graphic now",
+                         race.replace("\r", "").replace("\n", ""), league_result.GRAPHIC_TARGET)
                 out = {"ok": True, "obs": bool(ok), "note": "" if ok else str(note or "")}
             else:
                 return self._send({"ok": False, "error": "unknown", "path": self.path}, 404)

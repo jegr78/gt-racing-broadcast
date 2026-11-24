@@ -211,7 +211,7 @@ class LeagueSim(loopback_http.LoopbackServer):
                 self._calls.append({"seq": self.seq, "time": self.clock(), "call": name, "ref": None,
                                     "race": path.rsplit("/", 1)[-1][:-4],
                                     "user_agent": headers.get("User-Agent"), "body": None})
-            return 200, "image/png", self.graphic_body
+            return 200, "image/png", self.graphic_body, {}
         doc = json.loads(body) if method == "POST" else None
         handler = getattr(self, "_on_" + name.replace("-", "_"))
         status, answer = handler(q, doc)

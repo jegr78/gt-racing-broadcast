@@ -285,11 +285,10 @@ def install_graphic(staged, graphics_dir):
         raise FileNotFoundError(staged)
     dest = os.path.join(graphics_dir, GRAPHIC_TARGET + ".png")
     os.makedirs(graphics_dir, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=graphics_dir, prefix=".race-results-", suffix=".tmp")
-    os.close(fd)
+    # A plain new file gets the user's umask, like the Sheet download it replaces.
+    tmp = os.path.join(graphics_dir, f".race-results-{os.getpid()}-{threading.get_ident()}.tmp")
     try:
         shutil.copyfile(staged, tmp)
-        os.chmod(tmp, 0o644)        # mkstemp's 0600 is not what the Sheet download leaves
         atomic_replace.replace(tmp, dest)
     finally:
         if os.path.exists(tmp):

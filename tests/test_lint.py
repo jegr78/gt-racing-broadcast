@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Unit checks for the in-house guards in tools/lint.py, each mirroring one CodeQL
 query so it fails the gate pre-push: py/empty-except, py/procedure-return-value-used,
-py/side-effect-in-assert, py/import-and-import-from and py/unused-local-variable.
+py/side-effect-in-assert, py/import-and-import-from, py/unused-local-variable and
+py/mixed-tuple-returns.
 Run: python3 tests/test_lint.py"""
 import importlib.util, os
 
@@ -178,6 +179,24 @@ def t_assert_side_effect_leaves_other_calls_alone():
 
 def t_assert_side_effect_repo_is_clean():
     assert lint.check_assert_side_effects(ROOT) == [], lint.check_assert_side_effects(ROOT)
+
+
+def t_mixed_tuple_returns_flags_tuples_of_different_lengths():
+    src = "def f(x):\n    if x:\n        return 1, 2\n    return 1, 2, 3\n"
+    assert lint.find_mixed_tuple_returns(src) == [(1, "f")]
+
+
+def t_mixed_tuple_returns_leaves_other_shapes_alone():
+    for src, why in (("def f(x):\n    if x:\n        return 1, 2\n    return 3, 4\n", "one length"),
+                     ("def f(x):\n    if x:\n        return g()\n    return 3, 4\n", "a call result"),
+                     ("def f(x):\n    if x:\n        return (*a, 1)\n    return 3, 4\n", "a starred tuple"),
+                     ("def f():\n    def g():\n        return 1, 2, 3\n    return 1, 2\n", "a nested scope"),
+                     ("def f(:\n", "unparseable")):
+        assert lint.find_mixed_tuple_returns(src) == [], why
+
+
+def t_the_repo_has_no_mixed_tuple_returns():
+    assert lint.check_mixed_tuple_returns(lint.ROOT) == []
 
 
 def t_import_both_ways_flags_a_module_imported_with_import_and_from():
