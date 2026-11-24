@@ -15,8 +15,9 @@ def _call(expr):
         return None
     with open(PAGE, encoding="utf-8") as fh:
         html = fh.read()
-    i = html.index("function senderArgs(")
-    src = html[i:html.index("\n  }\n", i) + 4]
+    i = html.index("function consoleProblem(")
+    j = html.index("function senderArgs(")
+    src = html[i:html.index("\n  }\n", j) + 4]
     out = subprocess.run([node, "-"], input=f"{src}\nconsole.log(JSON.stringify({expr}));",
                          capture_output=True, text=True, encoding="utf-8", errors="replace",
                          check=True, timeout=30).stdout
@@ -46,6 +47,15 @@ def t_only_a_plain_ipv4_address_reaches_the_shell():
         if got is None:
             return
         assert got is False, f"{bad!r} must never be pasted into a shell command: {got}"
+
+
+def t_a_non_lan_address_says_why_it_is_refused():
+    got = _call("[consoleProblem('127.0.0.1'), consoleProblem('224.0.0.1'), "
+                "consoleProblem('192.168.1'), consoleProblem('192.168.1.20')]")
+    if got is not None:
+        loop, multicast, short, ok = got
+        assert "home network" in loop and loop == multicast, f"a non-LAN address needs its reason: {got}"
+        assert "four numbers" in short and ok == "", f"a malformed address keeps its own hint: {got}"
 
 
 if __name__ == "__main__":

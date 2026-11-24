@@ -111,20 +111,24 @@ li{margin-bottom:6px}
 
   let registered = null;
 
+  function consoleProblem(ip) {
+    const octet = '(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
+    if (!new RegExp('^' + octet + '(\\.' + octet + '){3}$').test(ip)) return 'Type the address as four numbers, like 192.168.1.20.';
+    const first = Number(ip.split('.')[0]);
+    if (first === 0 || first === 127 || first >= 224) return 'This is not a PlayStation address on your home network. The PlayStation\'s network settings show the right one.';
+    return '';
+  }
   function senderArgs(origin, code, ip) {
     const args = '--url ' + origin + '/console/drive/ingest --code ' + code;
     ip = ip.trim();
     if (!ip) return args;
-    const octet = '(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
-    if (!new RegExp('^' + octet + '(\\.' + octet + '){3}$').test(ip)) return false;
-    const first = Number(ip.split('.')[0]);
-    if (first === 0 || first === 127 || first >= 224) return false;   // never a console on the LAN
+    if (consoleProblem(ip)) return false;
     return args + ' --console ' + ip;
   }
   function showCommands() {
     if (!registered) return;
     let args = senderArgs(location.origin, registered, $('console').value);
-    $('consoleErr').textContent = args === false ? 'Type the address as four numbers, like 192.168.1.20.' : '';
+    $('consoleErr').textContent = args === false ? consoleProblem($('console').value.trim()) : '';
     $('consoleErr').hidden = args !== false;
     if (args === false) args = senderArgs(location.origin, registered, '');
     $('cmdPy').textContent = 'python3 racecast-sender.py ' + args;
