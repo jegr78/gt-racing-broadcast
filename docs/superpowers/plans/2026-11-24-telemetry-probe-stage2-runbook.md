@@ -68,8 +68,8 @@ the Python script on every platform.
 1. `git pull` on `main`.
 2. Machine `.env` in the repo root: `RACECAST_TELEMETRY_PROBE=1` (block B's spectator
    sender uses the probe ingest).
-3. Dry run, the dress rehearsal on simulated parties (section 7). It needs the E2E unit
-   and Playwright's Chromium:
+3. Dry run, the dress rehearsal on simulated parties (section 7), on any machine with
+   Playwright's Chromium (on local Linux it runs inside the E2E unit, about 3 minutes):
    ```
    python3 tools/event-sim/event_sim.py --scenario probe-stage2 --out <dir> --no-skips
    ```
@@ -82,8 +82,10 @@ the Python script on every platform.
 
 ### 3.3 Driver devices (day before)
 
-Each test driver gets the sheet of their platform from `tools/probe-stage2.py kit`
-(written in step 4.1 once the event runs) and does the "Before the session" part. The
+The setup sheets carry the event's invite link, so `tools/probe-stage2.py kit` writes
+them in block A once the event runs. The day before, each test driver only installs
+what their platform needs: Python 3.8 or newer (Windows, macOS, Linux), a-Shell (iPhone,
+iPad) or Termux from F-Droid (Android), and notes the PlayStation's IP address. The
 sheets cover the stage 1 findings:
 
 - iPhone and iPad: a-Shell cannot find the console by broadcast ("No route to host"), so
@@ -112,7 +114,7 @@ Times are relative to the agreed start. Every block starts with a mark, so the r
 splits by block:
 
 ```
-python3 tools/probe-stage2.py mark --out <results> "block B online lobby"
+py tools/probe-stage2.py mark --out <results> "block B online lobby"
 ```
 
 ### Block A: bring-up (T-45 to T-15)
@@ -124,10 +126,10 @@ Answers nothing by itself; every later block depends on it.
    py src/racecast.py relay start
    py src/racecast.py funnel on
    py src/racecast.py event start
-   py src/racecast.py event race --formation on --laps 10
+   py src/racecast.py event race --formation on --laps N
    py src/racecast.py event invite
-   python3 tools/probe-stage2.py kit --out <kit>
-   python3 tools/probe-stage2.py watch --out <results>
+   py tools/probe-stage2.py kit --out <kit>
+   py tools/probe-stage2.py watch --out <results>
    ```
    `event start` creates the invite; `event invite --new` only renews it while an event
    runs (#1265), and a renewed invite needs new sheets and new registrations. The lap
@@ -169,7 +171,7 @@ Answers Q1, Q4 (first look), starts Q5.
    (one minute of packets as hex lines; it asks for format `~`).
 4. The race runs to its end. Each driver notes their GT7 position at two moments the
    producer calls out (mark `position check 1` and `position check 2`).
-5. At the end: `python3 tools/probe-stage2.py collect --out <results> --runtime runtime/<profile>`.
+5. At the end: `py tools/probe-stage2.py collect --out <results> --runtime runtime/<profile>`.
 
 Pass (proposal) for Q1: in the report's "0x84 per sender" table every driver's samples
 carry a position, the car counts match the lobby, and the "0x84 against the relay's
@@ -269,8 +271,8 @@ lap 4.
 
 1. Stop `watch` (Ctrl+C), then:
    ```
-   python3 tools/probe-stage2.py collect --out <results> --runtime runtime/<profile>
-   python3 tools/probe-stage2.py report <results>
+   py tools/probe-stage2.py collect --out <results> --runtime runtime/<profile>
+   py tools/probe-stage2.py report <results>
    ```
 2. Ask each driver for the end of their sender output (the `stopped:` line and the last
    status lines).
