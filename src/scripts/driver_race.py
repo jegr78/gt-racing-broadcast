@@ -792,16 +792,16 @@ class Service:
         """Audit, then change the fastest lap; the caller holds the lock."""
         self._log(who, "fastest", **({"class": cls} if cls is not None else {}),
                   **({"entry": entry, "ms": ms} if entry else {"cleared": True}))
-        lap = None if entry is None else {"entry": entry, "driver": driver, "ms": ms}
+        if entry is None:
+            race.void_fastest(cls)
+            return
+        lap = {"entry": entry, "driver": driver, "ms": ms}
         if cls is not None:
-            race.fastest_by_class.pop(cls, None)
-            if lap is not None:
-                race.fastest_by_class[cls] = lap
+            race.fastest_by_class[cls] = lap
         else:
             race.fastest_by_class = {c: f for c, f in race.fastest_by_class.items() if f != race.fastest}
             race.fastest = lap
-            if lap is not None:
-                race.fastest_by_class[race.class_of(entry)] = dict(lap)
+            race.fastest_by_class[race.class_of(entry)] = dict(lap)
 
     def _viewer(self, ctx):
         """The dashboard payload: an allowlist, safe for viewers and the public page."""

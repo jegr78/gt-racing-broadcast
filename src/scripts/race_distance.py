@@ -220,6 +220,7 @@ class _Entry:
         self.switch_pit = False    # a pit stop already counted since the latest stint switch
         self.finished_at = None
         self.last_lap_ms = None
+        self.counted = []          # its laps that counted for the fastest lap, kept for a void
         self.stint_laps = 0        # race laps since the active car began counting
         self.parked = None         # (conn, counting state) of the car moved away from it
         self.resume = False        # an undone retirement: count on from `distance`
@@ -944,11 +945,36 @@ class Race:
             return
         last_ms, car.pending = car.pending[2], None
         lap = {"entry": ent.entry, "driver": car.name, "ms": last_ms}
+        ent.counted.append(dict(lap))
         if self.fastest is None or last_ms < self.fastest["ms"]:
             self.fastest = dict(lap)
         cls = self._classes.get(ent.entry, "")
         if cls not in self.fastest_by_class or last_ms < self.fastest_by_class[cls]["ms"]:
             self.fastest_by_class[cls] = lap
+
+    def void_fastest(self, cls=None):
+        """Race Control voids the fastest lap, or with `cls` that class's: the fastest of
+        the other counted laps takes its place, in every class that held the voided lap."""
+        lap = self.fastest if cls is None else self.fastest_by_class.get(cls)
+        if lap is None:
+            return
+        ents = list(self._entries.values()) + list(self._parked.values())
+        for e in ents:
+            e.counted = [c for c in e.counted if c != lap]
+
+        def best(name=None):
+            laps = [c for e in ents for c in e.counted
+                    if name is None or self._classes.get(e.entry, "") == name]
+            return min(laps, key=lambda c: c["ms"], default=None)
+        names = [cls] if cls is not None else [n for n, f in self.fastest_by_class.items() if f == lap]
+        if cls is None:
+            self.fastest = best()
+        for name in names:
+            found = best(name)
+            if found is None:
+                self.fastest_by_class.pop(name, None)
+            else:
+                self.fastest_by_class[name] = dict(found)
 
     def _box(self, car, t):
         car.left_box = False

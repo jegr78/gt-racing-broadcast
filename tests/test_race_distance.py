@@ -2097,6 +2097,48 @@ def t_a_best_lap_that_never_arrives_in_time_sets_no_fastest_lap():
     assert race.standings(t)["fastest"] is None, "a best lap later than GT7's lap time window is no proof"
 
 
+def _two_cars_with_laps(classes=None):
+    """A sets the faster laps, B the slower ones; both GT7 best laps count."""
+    race = rd.Race(TRACE, formation=False)
+    if classes:
+        race.set_classes(classes)
+    a, b = Car(race, "A", "a", L - 15, "Lena"), Car(race, "B", "b", L - 60, "Marco")
+    t = _drive(race, [a, b], [50, 50], 0.0, 1.5)
+    t = _drive(race, [a, b], [55, 50], t, 2 * L / 50 + 2)
+    return race, a, b, t
+
+
+def t_voiding_the_fastest_lap_brings_back_the_next_counted_one():
+    race, a, b, t = _two_cars_with_laps()
+    first, best = race.fastest["ms"], a.best_ms
+    race.void_fastest()
+    assert race.fastest["entry"] == "A" and race.fastest["ms"] > best, \
+        f"A's earlier counted lap moves up when its best is voided: {best} {race.fastest}"
+    race.void_fastest()
+    assert first == best and race.fastest == {"entry": "B", "driver": "Marco", "ms": b.best_ms}, \
+        f"then B's counted best lap: {race.fastest}"
+
+
+def t_voiding_a_class_fastest_lap_brings_back_the_next_one_of_that_class():
+    race, a, b, t = _two_cars_with_laps({"A": "H", "B": "H"})
+    assert race.fastest_by_class["H"]["entry"] == "A", race.fastest_by_class
+    race.void_fastest("H")
+    race.void_fastest("H")
+    assert race.fastest_by_class["H"] == {"entry": "B", "driver": "Marco", "ms": b.best_ms}, race.fastest_by_class
+    assert race.fastest["entry"] == "A", "a class void leaves the overall lap"
+
+
+def t_after_a_void_a_lap_slower_than_its_own_gt7_best_still_never_counts():
+    race, a, b, t = _two_cars_with_laps()
+    voided = race.fastest["ms"]
+    race.void_fastest()
+    race.void_fastest()
+    _drive(race, [a, b], [52, 50], t, L / 52 + 2)
+    assert voided < a.last_ms < b.best_ms, f"A's lap beats B's but not A's own GT7 best: {a.last_ms} {b.best_ms}"
+    assert race.fastest["entry"] == "B", \
+        f"GT7 kept A's voided lap as best, so A's slower lap is not known valid: {race.fastest} {a.last_ms}"
+
+
 def t_a_sample_without_gt7_best_lap_sets_no_fastest_lap():
     race = rd.Race(TRACE, formation=False)
     a = Car(race, "A", "a", L - 15)

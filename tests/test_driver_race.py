@@ -1243,6 +1243,21 @@ def t_voiding_the_fastest_lap_removes_it_from_its_class():
         f"the voided lap leaves its class, the other class keeps its lap: {svc._current().fastest_by_class}"
 
 
+def t_voiding_the_fastest_lap_brings_back_the_next_counted_lap():
+    ctx = {"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"}
+    svc, _clock, _path = _dash_service(ctx)
+    race = svc._current()
+    for entry, ms in (("A", 61000), ("B", 62000)):
+        ent = dr.race_distance._Entry(entry, None)
+        ent.counted = [{"entry": entry, "driver": "Max " + entry, "ms": ms}]
+        race._entries[entry] = ent
+    race.fastest = {"entry": "A", "driver": "Max A", "ms": 61000}
+    svc.set_fastest("rc:Anna")
+    assert svc._current().fastest == {"entry": "B", "driver": "Max B", "ms": 62000}, \
+        f"Race Control's void lets the next counted lap move up: {svc._current().fastest}"
+    assert dr._read_json(svc._fastest_path())["ms"] == 62000, "the next lap is saved"
+
+
 def t_a_failing_recording_does_not_stop_the_fastest_lap_save():
     d = tempfile.mkdtemp()
     blocker = os.path.join(d, "file")
