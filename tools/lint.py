@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the ruff linter over the repo (config: ruff.toml at the repo root), plus four
+"""Run the ruff linter over the repo (config: ruff.toml at the repo root), plus five
 in-house guards that mirror CodeQL classes ruff has no rule for.
 
     python3 tools/lint.py          # check only (what CI runs)
@@ -30,6 +30,11 @@ The assert guard (find_assert_side_effects) reproduces py/side-effect-in-assert 
 CodeQL's own name list, so a test that calls `.append`/`.close`/... inside an assert
 fails here instead of on main after the merge. The import guard
 (find_import_both_ways) does the same for py/import-and-import-from.
+
+The unread-store guard (find_unused_last_assignments) covers the part of
+py/unused-local-variable ruff F841 misses: a store nobody reads afterwards although
+the name is read elsewhere in the function, typically a trailing `t = step(t)`,
+and an unpacked tuple none of whose names is read afterwards.
 """
 import ast, io, os, shutil, subprocess, sys, tokenize
 
@@ -231,6 +236,104 @@ def find_import_both_ways(source, local):
                   if name in froms and name.split(".")[0] in local)
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+           ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_LOOPS = (ast.For, ast.AsyncFor, ast.While)
+
+
+def _dead_stores_in(fn):
+    """(lineno, name) for the stores in *fn*'s own scope that no later Load reads,
+    skipping every shape where source order is not enough."""
+    stores, loads, rebinds, nested_loads, skip = [], [], [], set(), set()
+
+    def walk(node, loops):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, _SCOPES):
+                if hasattr(child, "name"):
+                    rebinds.append((child.name, (child.lineno, child.col_offset)))
+                nested_loads.update(n.id for n in ast.walk(child) if isinstance(n, ast.Name))
+                continue
+            if isinstance(child, (ast.Global, ast.Nonlocal)):
+                skip.update(child.names)
+            elif isinstance(child, ast.Call) and getattr(child.func, "id", None) in ("locals", "vars", "eval", "exec"):
+                return None
+            elif isinstance(child, ast.Name):
+                pos = (child.lineno, child.col_offset)
+                if isinstance(child.ctx, ast.Load):
+                    loads.append((child.id, pos))
+                else:
+                    rebinds.append((child.id, pos))
+            elif isinstance(child, (ast.Import, ast.ImportFrom, ast.ExceptHandler)):
+                names = [(a.asname or a.name).split(".")[0] for a in getattr(child, "names", ())]
+                names += [child.name] if isinstance(getattr(child, "name", None), str) else []
+                rebinds.extend((n, (child.lineno, child.col_offset)) for n in names)
+            elif isinstance(child, ast.Assign):
+                stores.append((child, loops))
+            inner = loops + (child,) if isinstance(child, _LOOPS) else loops
+            if walk(child, inner) is None:
+                return None
+        return True
+
+    if walk(fn, ()) is None:
+        return []
+
+    def unread(name, stmt, loops):
+        # In a loop the store redefines itself, and CodeQL leaves a redefined store
+        # to py/multiple-definition; so does a later store of the name.
+        end = (stmt.end_lineno, stmt.end_col_offset)
+        return not loops and not any(n == name and pos > end
+                                     for n, pos in loads + rebinds)
+
+    def tuples(node):
+        if isinstance(node, (ast.Tuple, ast.List)):
+            yield node
+            for elt in node.elts:
+                yield from tuples(elt)
+
+    hits = []
+    for stmt, loops in stores:
+        target = stmt.targets[0]
+        if len(stmt.targets) == 1 and isinstance(target, ast.Name):
+            name = target.id
+            if (not name.startswith("_") and name not in skip and name not in nested_loads
+                    and any(n == name for n, _ in loads)   # never read: ruff F841 covers it
+                    and unread(name, stmt, loops)):
+                hits.append((target.lineno, name))
+            continue
+        for tup in (t for tgt in stmt.targets for t in tuples(tgt)):
+            if any(isinstance(e, ast.Starred) for e in tup.elts):
+                continue
+            names = [e for e in tup.elts if isinstance(e, ast.Name)]
+            # CodeQL flags a tuple's names only when none of them is used; `_` counts as used.
+            if names and all(set(e.id) != {"_"} and e.id not in skip and e.id not in nested_loads
+                             and unread(e.id, stmt, loops) for e in names):
+                hits += [(e.lineno, e.id) for e in names]
+    return hits
+
+
+def find_unused_last_assignments(source):
+    """(lineno, name) for each store in a function that nothing reads afterwards, the
+    part of CodeQL's py/unused-local-variable that ruff F841 misses. A plain
+    `name = value` counts when the name is read elsewhere in the function and does not
+    start with `_`; F841 has the never-read case. In tuple unpacking, CodeQL's rule
+    applies: each immediate tuple's names are flagged only when none of them is
+    read later, and a bare `_` or a starred element exempts the tuple. Augmented
+    and annotated stores are left out. Skipped everywhere: global/nonlocal
+    names, names read in a nested scope, functions that call
+    locals()/vars()/eval()/exec(), a store that a later store or del of the
+    name redefines (CodeQL's py/multiple-definition), which includes every
+    store inside a loop. Returns [] for unparseable source."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    hits = []
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            hits += _dead_stores_in(fn)
+    return sorted(hits)
+
+
 def _python_files(root):
     """Tracked .py files (git, so dist/runtime/incoming stay excluded); a plain
     walk is the fallback when git is unavailable."""
@@ -307,6 +410,20 @@ def check_import_both_ways(root):
     return sorted(bad)
 
 
+def check_unused_last_assignments(root):
+    """(relpath, lineno, name) for every unread last store in the repo (CodeQL
+    py/unused-local-variable)."""
+    bad = []
+    for path in _python_files(root):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+        except OSError:
+            continue
+        bad += [(os.path.relpath(path, root), ln, name) for ln, name in find_unused_last_assignments(src)]
+    return sorted(bad)
+
+
 def main():
     if not shutil.which("ruff"):
         sys.exit("lint: ruff not found on PATH.\n"
@@ -341,6 +458,14 @@ def main():
               "module one way only:")
         for relpath, lineno, name in both:
             print(f"  {relpath}:{lineno}: '{name}' is imported with both import and from-import")
+        rc = rc or 1
+    dead = check_unused_last_assignments(ROOT)
+    if dead:
+        print("\nunused-local-variable (CodeQL py/unused-local-variable): nothing reads "
+              "this value; drop the assignment and keep the call, or use the value. In an "
+              "unpacked tuple only a bare `_` is a placeholder, or read one of its names:")
+        for relpath, lineno, name in dead:
+            print(f"  {relpath}:{lineno}: the value stored in '{name}' is never read")
         rc = rc or 1
     return rc
 
