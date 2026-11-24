@@ -140,13 +140,9 @@ class StreamRole(Role):
 # Each visible control under a root: its label, how many px the viewport or a clipping
 # ancestor cuts off it (`cut`: 0 means it works without scrolling) and how many px an
 # ancestor that cannot scroll cuts off it (`clip`: 0 means scrolling reaches it).
-FIT_SCRIPT = """(root) => {
-  const box = document.querySelector(root);
-  if (!box) return null;
-  const out = [];
-  for (const el of box.querySelectorAll('button, select, input, textarea, a.btn')) {
+_MEASURE = """(el) => {
     const r = el.getBoundingClientRect();
-    if (el.offsetParent === null || !r.width || !r.height) continue;
+    if (el.offsetParent === null || !r.width || !r.height) return null;
     let top = 0, bottom = window.innerHeight, ctop = -Infinity, cbottom = Infinity;
     for (let p = el.parentElement; p; p = p.parentElement) {
       const o = getComputedStyle(p).overflowY;
@@ -156,11 +152,20 @@ FIT_SCRIPT = """(root) => {
       if (o === 'hidden' || o === 'clip') { ctop = Math.max(ctop, b.top); cbottom = Math.min(cbottom, b.bottom); }
     }
     const name = el.dataset.label || el.getAttribute('aria-label') || el.textContent || el.id || el.tagName;
-    out.push({label: name.trim().replace(/\\s+/g, ' ').slice(0, 40),
-              cut: Math.max(0, Math.ceil(r.bottom - bottom), Math.ceil(top - r.top)),
-              clip: Math.max(0, Math.ceil(r.bottom - cbottom), Math.ceil(ctop - r.top))});
-  }
-  return out;
+    return {label: name.trim().replace(/\\s+/g, ' ').slice(0, 40),
+            cut: Math.max(0, Math.ceil(r.bottom - bottom), Math.ceil(top - r.top)),
+            clip: Math.max(0, Math.ceil(r.bottom - cbottom), Math.ceil(ctop - r.top))};
+  }"""
+FIT_SCRIPT = """(root) => {
+  const box = document.querySelector(root);
+  if (!box) return null;
+  const measure = """ + _MEASURE + """;
+  return [...box.querySelectorAll('button, select, input, textarea, a.btn')].map(measure).filter(Boolean);
+}"""
+# The same measure for every visible match of a selector, such as the rows of a table.
+ROWS_SCRIPT = """(selector) => {
+  const measure = """ + _MEASURE + """;
+  return [...document.querySelectorAll(selector)].map(measure).filter(Boolean);
 }"""
 # Sub-pixel layout: a control 1 px past its box still shows and takes clicks.
 FIT_TOLERANCE_PX = 1
@@ -420,6 +425,10 @@ class PageRole(Role):
     def fit_report(self, root):
         """FIT_SCRIPT's measure of the visible controls under `root`; None without `root`."""
         return self.pg.evaluate(FIT_SCRIPT, root)
+
+    def rows_report(self, selector):
+        """ROWS_SCRIPT's measure of every visible match of `selector`."""
+        return self.pg.evaluate(ROWS_SCRIPT, selector)
 
     def close(self):
         # A failed image or fetch (an idle feed's preview answers 503) is the browser's

@@ -2,16 +2,33 @@
 
 > New here? Start with the visual [Commentator onboarding deck ↗](https://jegr78.github.io/gt-racing-broadcast/commentator.html), then come back for the detail below.
 
-![Commentator Cockpit: the on-air tally, live program monitor, race timer, stream-link submission, crew chat and the graphics browser](images/console-cockpit.png)
+![Commentator Cockpit: the area navigation, the live column with tally, program, race timer, Message director and Race Control notes, the timing of 14 cars in the middle and the chats on the right](images/console-cockpit.png)
 
 A **commentator-facing** page served by the relay, the counterpart to the Director
 Panel, but for the **commentators**. Each commentator opens the Console and signs in
-(with Discord) to get a self-contained cockpit:
+(with Discord) to get a self-contained cockpit.
+
+The cockpit uses the frame of the [Race Control desk](Console#race-control-desk):
+
+- **Areas** on the left: **Timing** (the default), **My stint**, **Graphics** and **Notes**.
+  A dot on **My stint** shows while one of your stints still to come has no link or its
+  link waits for the director's approval; the line under it names the stint.
+- **The live column** stays on screen whichever area is open: the tally, the program
+  preview, the race timer, **Message director** and the **Race Control** notes. In a short
+  window the column scrolls on its own.
+- **The selected area** fills the middle. Timing gets the full width with every column.
+- **The chats** sit on the right: the crew chat, and the broadcast chat below it.
+- **Between 821 and 1279 px** the areas show as letters (T, S, G, N) and the chats move
+  under the area.
+
+What each part does:
 
 - **Event title**, the round's free-text title (e.g. `GTEC - 2026 - Round 4 -
   Nürburgring 24h`) in the header, the same label the director and Discord see.
   Read-only here; the director sets it (see [Director](Director#event-title)).
 - **Live program monitor**, the actual broadcast output (low-bandwidth JPEG stills).
+  **Hide** folds it away: while it is hidden the page loads no stills and stops the
+  program audio. Hide lasts until you close the browser tab.
   If the producer's machine falls behind, a yellow note under it says
   `Program is 12 s behind live. The delay is on the producer side, not your stream.`
   It appears only when the delay is past the relay's threshold. When the relay offers
@@ -19,26 +36,26 @@ Panel, but for the **commentators**. Each commentator opens the Console and sign
   on-air sound.
 - **Broadcast chat**, a read-only mirror of the public YouTube or Twitch chat. **Write in
   YouTube chat** (or Twitch) opens the platform's chat in a pop-up window.
-- **Tally**, a large **YOU ARE ON AIR** indicator plus an **UP NEXT · stint N · in
-  X handovers** cue (and, while on air, their next own stint).
+- **Tally**, a **YOU ARE ON AIR** indicator at the top of the live column plus an
+  **UP NEXT · stint N · in X handovers** cue (and, while on air, their next own stint).
 - **Crew chat**, the same chat as the Director Panel, attributed to the commentator.
 - **Message director**: send the director a short note, by one tap on a preset (`Ready`,
   `Need 2 min`, `Come to me`, `Wrap me up?`) or as free text (see below).
 - **Race Control** card: notes Race Control sends to the commentators (see below).
 - **Race timer**, the live remaining-time clock.
 - **Timing**, the driver race when drivers send telemetry: the same delayed data as the
-  on-air driver dashboard, with every column at once and the brand logos. The card stays
-  hidden until a car sends telemetry: the entries of the Configuration tab alone do not
-  show it. See
+  on-air driver dashboard, with every column at once and the brand logos. Until a car sends
+  telemetry the area says so: the entries of the Configuration tab alone do not fill the
+  table. See
   [Driver telemetry](Driver-Telemetry#on-air-and-in-the-cockpit).
-- **Stint plan**, every stint with its streamer; your own stints are marked and the stint
-  on air is highlighted.
-- **Submit a stream link**: propose the stream URL for one of *their own* stints; it
+- **My stint**: the **stint plan**, every stint with its streamer; your own stints are
+  marked and the stint on air is highlighted. Above it, **Submit a stream link**: propose the stream URL for one of *their own* stints; it
   lands as a pending request the director approves before it can go on air (see below).
 - **Graphics**: browse the league's broadcast graphics; when the league allows it, put
   one on air or request it (see below).
-- **Notes**: the header button opens the league owner's notes and document links, when
-  the Sheet has any ([Sheet template](Sheet-Template#event-notes-tab)).
+- **Notes**: the area shows the league owner's notes and document links, when the Sheet
+  has any ([Sheet template](Sheet-Template#event-notes-tab)). The nav counts them, and
+  the header's **Notes** button opens the same in a dialog.
 
 You reach your cockpit from the **[Console](Console)** page: open the link your producer
 shares and **sign in with Discord**; the cockpit appears as one of its role-gated cards.
@@ -104,11 +121,12 @@ The rules are in [Console → Graphics](Console#graphics).
 
 ## On a phone
 
-On a narrow screen (820 px and below) a tab bar at the bottom shows one part of the
-cockpit at a time: **Talk** (message the director, crew chat, Race Control notes),
-**Program** (picture, audio, broadcast chat), **Graphics** and **Plan** (timing, stint
-plan, stream-link submission). The on-air banner, the race timer and a critical director
-cue stay at the top while you scroll. See [Console → On a phone](Console#on-a-phone).
+On a narrow screen (820 px and below) a tab bar at the bottom takes the place of the
+areas and shows one part of the cockpit at a time: **Live** (program preview, Message
+director, Race Control notes), **Timing**, **Stint** (stream-link submission and stint
+plan, with the same dot as My stint), **Graphics**, **Notes** and **Chat** (crew chat and
+broadcast chat). The tally, the race timer and a critical director cue stay at the top
+while you scroll. See [Console → On a phone](Console#on-a-phone).
 
 ## Setup & administration (producers)
 

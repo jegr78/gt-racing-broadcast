@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import os
+import re
+import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,9 @@ m = _load("irofeeds", ("src", "relay", "racecast-feeds.py"))
 cad = _load("console_admin", ("src", "scripts", "console_admin.py"))
 
 SECRET = "test-secret-do-not-ship"
+sys.path.insert(0, HERE)
+import test_driver_tower as tower  # noqa: E402
+COCKPIT = os.path.join(ROOT, "src", "cockpit", "cockpit.html")
 
 
 def t_streamer_key_normalizes():
@@ -946,6 +951,99 @@ def t_cockpit_syncing_pure():
     assert m.cockpit_syncing({"active": True, "serving_feed": "B"}) is True
     assert m.cockpit_syncing({"active": False}) is False
     assert m.cockpit_syncing({}) is False       # missing key -> not syncing
+
+
+def _page():
+    with open(COCKPIT, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _between(text, start, end):
+    i = text.index(start)
+    return text[i:text.index(end, i + 1)]
+
+
+def t_the_cockpit_areas_match_the_nav_and_the_tab_bar():
+    html = _page()
+    areas = re.findall(r'class="navbtn" data-area="([a-z]+)"', html)
+    assert areas == ["timing", "stint", "graphics", "notes"], f"Timing first, so it is the default area: {areas}"
+    assert re.findall(r'<div class="area" data-area="([a-z]+)" data-tab="([a-z]+)">', html) == \
+        [(a, a) for a in areas], "each area is the tab of the same name below 820 px"
+    tabs = [t[0] for t in json.loads(re.search(r"data-tabs='([^']*)'", html).group(1))]
+    assert tabs == ["live"] + areas + ["chat"], f"the tab bar maps onto the areas, Timing has its own tab: {tabs}"
+    used = set(re.findall(r'data-tab="([a-z]+)"', html))
+    assert used == set(tabs), f"every tab shows something and nothing hides behind an unknown tab: {used}"
+    live = _between(html, '<section id="liveCol"', "</section>")
+    assert html.index('id="cueCritical"') < html.index('<div class="frame wrap"'), \
+        "a critical cue spans the page above the frame on a desktop"
+    for cid in ("tally", "program", "pgmToggle", "pgmAudioBtn", "timer", "cbSend", "rcCard"):
+        assert f'id="{cid}"' in live, f"#{cid} sits in the live column"
+    rail = _between(html, '<aside class="rail"', "</aside>")
+    assert rail.index('id="chatCard"') < rail.index('id="bchatCard"'), "crew chat on top, broadcast chat below"
+    for cid, area in (("timingCard", "timing"), ("submitCard", "stint"), ("stintPlan", "stint"),
+                      ("gfxList", "graphics"), ("eventInfoInline", "notes")):
+        part = _between(html, f'<div class="area" data-area="{area}"', '<div class="area"' if area != "notes"
+                        else "</main>")
+        assert f'id="{cid}"' in part, f"#{cid} is in the {area} area"
+    assert '<div class="frame wrap"' in html, "the crew frame's 44 px phone targets apply to the frame"
+
+
+def _stint_dot(d):
+    return tower._run(tower._function(COCKPIT, "stintDot") + "\n;console.log(JSON.stringify(stintDot("
+                      + json.dumps(d) + ")));")
+
+
+def t_my_stint_dot_marks_a_missing_or_pending_link():
+    def data(on_air, stints, pending=(), enabled=True):
+        rows = [{"stint": f"Stint {i + 1}", "on_air": i == on_air, "mine": i + 1 in [s[0] for s in stints]}
+                for i in range(6)]
+        return {"submit_enabled": enabled, "schedule": rows,
+                "my_stints": [{"row": r, "stint": f"Stint {r}", "has_link": link, "url": "u" if link else ""}
+                              for r, link in stints],
+                "my_pending": [{"id": "x", "stint": f"Stint {r}"} for r in pending]}
+    if _stint_dot(data(-1, [])) is None:
+        return
+    got = {
+        "past stint without a link": _stint_dot(data(3, [(1, False), (5, True)])),
+        "next stint without a link": _stint_dot(data(1, [(1, True), (3, False)])),
+        "nothing on air": _stint_dot(data(-1, [(1, False)])),
+        "pending replacement": _stint_dot(data(1, [(3, True)], pending=[3])),
+        "first link pending": _stint_dot(data(1, [(3, False)], pending=[3])),
+        "all linked": _stint_dot(data(0, [(1, True), (3, True)])),
+        "submissions off": _stint_dot(data(-1, [(1, False)], enabled=False)),
+        "no stints": _stint_dot(data(-1, [])),
+    }
+    off = {"level": "", "why": ""}
+    assert got == {
+        "past stint without a link": off,
+        "next stint without a link": {"level": "warn", "why": "Stint 3: link missing"},
+        "nothing on air": {"level": "warn", "why": "Stint 1: link missing"},
+        "pending replacement": {"level": "warn", "why": "Stint 3: awaiting approval"},
+        "first link pending": {"level": "warn", "why": "Stint 3: awaiting approval"},
+        "all linked": off,
+        "submissions off": off,
+        "no stints": off,
+    }, f"the dot shows only for an own stint still to come whose link is missing or awaits approval: {got}"
+    missing_wins = _stint_dot(data(0, [(3, True), (5, False)], pending=[3]))
+    assert missing_wins == {"level": "warn", "why": "Stint 5: link missing"}, \
+        f"a missing link is named before a pending one: {missing_wins}"
+
+
+def t_the_stint_dot_follows_a_good_poll_only():
+    poll = _between(_page(), "async function pollTally()", "\n}\n")
+    ok = poll[poll.index("try"):poll.index("catch")]
+    assert "renderStintDot(d)" in ok and ok.index("renderStintDot(d)") < ok.index("renderSubmit(d)"), \
+        "the dot updates on a good answer, before the submit form may return early, and a failed poll keeps it"
+
+
+def t_a_hidden_preview_fetches_no_program_and_lasts_one_session():
+    html = _page()
+    poll = _between(html, "function pollProgram()", "\n}\n")
+    assert poll.index("if (!previewShown())") < poll.index("new Image()"), "a hidden preview loads no program still"
+    assert "sessionStorage.getItem(PV_KEY)" in html and "localStorage.setItem(PV_KEY" not in html, \
+        "a hidden preview never survives into the next event's first load"
+    toggle = _between(html, "$('pgmToggle').addEventListener", "});")
+    assert "$('pgmAudioBtn').click()" in toggle, "hiding the preview stops the program audio"
 
 
 if __name__ == "__main__":

@@ -226,8 +226,9 @@ class LiveColumn:
     `viewport` ([width, height]) measures in that window; `reachable` then only asks that
     scrolling the column reaches every control, so nothing clips one. The page may still
     settle its layout (the panel's program tile shrinks a frame later), so it measures
-    again until the controls fit or the time is up. `view` (area) opens one of its
-    areas, so a screenshot shows it."""
+    again until the controls fit or the time is up. `rows` (a count) also asks that the
+    page shows at least that many of its `rows` (the cockpit's timing cars) whole, without
+    scrolling. `view` (area) opens one of its areas, so a screenshot shows it."""
     live_required = ()
 
     def area(self, name):
@@ -249,6 +250,12 @@ class LiveColumn:
             raise StepError(f"fit: viewport is [width, height], not {size!r}")
         want = list(self.live_required) + [str(x) for x in args.get("require", [])]
         key = "clip" if args.get("reachable") else "cut"
+        rows = args.get("rows")
+        if rows is not None:
+            if type(rows) is not int or rows < 1:
+                raise StepError(f"fit: rows is a whole number of at least 1, not {rows!r}")
+            if "rows" not in self.selectors:
+                raise StepError(f"{self.kind}: the page has no rows to measure")
         if size:
             self.pg.set_viewport_size({"width": size[0], "height": size[1]})
         last = {}
@@ -257,8 +264,14 @@ class LiveColumn:
             found = last["found"] = self.fit_report(self.sel("live"))
             if not found or self._labels_in(found, want):
                 return None
+            if rows:
+                shown = last["rows"] = self.rows_report(self.sel("rows")) or []
+                if len(shown) < rows:
+                    return None
             last["cut"] = [(c["label"], c[key]) for c in found if c[key] > builtin.FIT_TOLERANCE_PX]
-            return not last["cut"]
+            last["rows_cut"] = [(c["label"], c["cut"]) for c in last.get("rows", [])
+                                if c["cut"] > builtin.FIT_TOLERANCE_PX]
+            return not last["cut"] and not last["rows_cut"]
         try:
             try:
                 self.until(settled, f"{self.kind}: the live controls", slow=None)
@@ -271,6 +284,9 @@ class LiveColumn:
                 if self._labels_in(found, want):
                     raise StepError(f"{self.kind}: the live column lacks {', '.join(self._labels_in(found, want))}") \
                         from None
+                if rows and len(last.get("rows", [])) < rows:
+                    raise StepError(f"{self.kind}: the page shows {len(last.get('rows', []))} of {rows} rows "
+                                    f"({self.sel('rows')})") from None
         finally:
             if size:
                 self.pg.set_viewport_size(dict(self.viewport))
@@ -279,7 +295,10 @@ class LiveColumn:
             how = "are clipped" if key == "clip" else "need scrolling"
             raise StepError(f"{self.kind}: {len(cut)} of {len(found)} live controls {how}: " +
                             ", ".join(f"{label} {px}px" for label, px in cut[:8]))
-        return {"controls": len(found)}
+        if last.get("rows_cut"):
+            raise StepError(f"{self.kind}: {len(last['rows_cut'])} of {len(last['rows'])} rows need scrolling: " +
+                            ", ".join(f"{label} {px}px" for label, px in last["rows_cut"][:8]))
+        return {"controls": len(found), "rows": len(last["rows"])} if rows else {"controls": len(found)}
 
 
 class CrewChat:
@@ -776,13 +795,15 @@ class RaceControlRole(LiveColumn, Surface):
 
 
 @register
-class CommentatorRole(CrewChat, Surface):
+class CommentatorRole(LiveColumn, CrewChat, Surface):
     """A commentator in the cockpit (`commentator:<crew name>`): `submit_link` (url,
-    stint), `chat` (text). `page(role)` reads the tally."""
+    stint; it opens My stint), `chat` (text), `view` (area), `fit` (with `rows`, the
+    timing cars). `page(role)` reads the tally and counts the timing rows."""
     kind = "commentator"
     by_commentator = True
     path, ready = "/cockpit", selectors.READY["COMMENTATOR"]
     sources = selectors.SOURCES["COMMENTATOR"]
+    live_required = selectors.LIVE_REQUIRED["COMMENTATOR"]
     selectors = selectors.COMMENTATOR
 
     def open(self):
@@ -792,6 +813,7 @@ class CommentatorRole(CrewChat, Surface):
 
     def act_submit_link(self, args):
         url, stint = str(args.get("url", "")), stint_label(args.get("stint", ""))
+        self.area("stint")
         self.choose(self.sel("stint"), "Your stint", label=stint)
         self.fill(self.sel("url"), url, "stream link")
         resp = self.answered(lambda: self.click(self.sel("submit"), "Submit for approval"),
@@ -807,7 +829,8 @@ class CommentatorRole(CrewChat, Surface):
         tally = self.sel("tally")
         return {"tally": self.text(tally),
                 "on_air": "onair" in self.attr(tally, "class").split(),
-                "pending": self.text(self.sel("pending")), "message": self.text(self.sel("message"))}
+                "pending": self.text(self.sel("pending")), "message": self.text(self.sel("message")),
+                "timing_rows": self.count(self.sel("rows"))}
 
 
 @register

@@ -56,6 +56,7 @@ RACE_CONTROL = {
 }
 
 COMMENTATOR = {
+    "area": '.navbtn[data-area="{area}"]', "live": "#liveCol", "rows": "#timing tbody tr:not(.cls)",
     "tally": "#tally", "card": "#submitCard", "stint": "#subStint", "url": "#subUrl",
     "submit": "#subBtn", "message": "#subMsg", "pending": "#subPending",
     "chat_text": "#chatin", "chat_send": "#chatsend", "chat_log": "#chatlog",
@@ -99,7 +100,8 @@ DESK = {
 
 # The live-column controls `fit` waits for and fails without, by label (a label may run on).
 LIVE_REQUIRED = {"DIRECTOR": ("NEXT", "CUT", "FADE", "STINGER"),
-                 "RACE_CONTROL": (DESK["red_flag"], DESK["final_lap"], DESK["finish"])}
+                 "RACE_CONTROL": (DESK["red_flag"], DESK["final_lap"], DESK["finish"]),
+                 "COMMENTATOR": ("Hide", "Ready", "Wrap me up?", "Send")}
 
 # The link texts a screenshot of any page blacks out: the driver invite and the timing link.
 LINKS = ("#evt-invite-text", "#evt-timing-text", ".dd .mono.grow")

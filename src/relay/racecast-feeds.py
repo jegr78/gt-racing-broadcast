@@ -7200,8 +7200,8 @@ def race_control_schedule(rows, live_map, live_idx):
 
 
 def cockpit_schedule(rows, live_idx, me_key):
-    """Redacted stint plan for the cockpit's read-only stint-plan card (right
-    column, below the timer). Per row: stint + streamer, plus an on_air flag
+    """Redacted stint plan for the cockpit's read-only stint plan (My stint
+    area). Per row: stint + streamer, plus an on_air flag
     (row == live_idx) and a mine flag (asset_key match for the token's streamer).
     NO stream URL: the cockpit is reachable over the public Funnel, so this stays
     inside the /console/takeover/status redaction boundary. rows are
@@ -14490,7 +14490,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       "submit_enabled": submission_store is not None,
                                       "my_stints": cockpit_own_stints(rows, me),
                                       # read-only redacted stint plan for the
-                                      # right-column card (no stream URLs).
+                                      # My stint area (no stream URLs).
                                       "schedule": cockpit_schedule(rows, live_idx, me),
                                       "syncing": cockpit_syncing(relay._desync),
                                       "program_behind_s": cockpit_program_behind(

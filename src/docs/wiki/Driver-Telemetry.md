@@ -315,7 +315,7 @@ count, the class lap inputs and the Schedule `Laps` cells stay GT7 counts. The h
 reads a lap past the count, and once the leader has taken the flag it reads the leader's
 race laps, also in a timed race. GT7's own lap of the lobby on
 air (**Lobby lap**, the lobby's counter on the road) shows only to the crew: next to the
-race lap on the Race Control and director desks and in the cockpit's Timing card. The
+race lap on the Race Control and director desks and in the cockpit's Timing area. The
 tower, the public timing page and the league timing host never carry it.
 
 ### Classes
@@ -506,8 +506,8 @@ It never carries connection ids, corrections or who made them.
   until the next [new event](#new-event-or-continued-event).
 - **Style** it like the HUD: pick **Driver dashboard** in the overlay builder's scene
   selector ([HUD Overlays](HUD-Overlays#driver-dashboard-layout)).
-- **Commentator Cockpit**: the **Timing** card shows the same delayed data with every
-  column at once, logos included; in qualifying best lap, gap, interval and last lap,
+- **Commentator Cockpit**: the **Timing** area, its default, shows the same delayed data
+  with every column at once, logos included; in qualifying best lap, gap, interval and last lap,
   per class with classes. The desks show the same columns live, without the delay.
 
 ### Public live timing

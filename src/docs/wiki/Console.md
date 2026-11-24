@@ -118,17 +118,18 @@ standings page. Race Control and the director can use all of it. Details:
 
 ### On a phone
 
-The Commentator Cockpit and the Race Control desk use the same layout on a narrow screen
-(820 px and below). The on-air banner, the race timer and a critical director cue stay at
-the top while you scroll. A tab bar at the bottom shows one part of the page at a time:
+The Commentator Cockpit and the Race Control desk share one frame: areas on the left, a live
+column, the selected area and the chats. On a narrow screen (820 px and below) the on-air
+banner, the race timer and a critical director cue stay at the top while you scroll. A tab
+bar at the bottom shows one part of the page at a time:
 
 | Page | Tabs |
 |---|---|
-| Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (timing, stint plan, stream-link submission) |
+| Commentator Cockpit | **Live** (program, Message director, Race Control notes), then one tab per area: **Timing**, **Stint** (stream-link submission and stint plan), **Graphics**, **Notes**, and **Chat** (crew and broadcast). The Stint tab carries the My stint dot |
 | Race Control | **Live** (program, race controls), then one tab per area: **Race**, **Drivers**, **Fix** (Corrections), **Quali**, **Tyres** (Dashboard), **Gfx**, **Note**, **Setup**, **!** (Troubleshoot), and **Chat** (crew and broadcast). The bar scrolls sideways and carries the areas' attention dots |
 
-The page remembers the last tab; on the desk the tab and the area are one choice. On a
-wider screen both pages keep their multi-column layout.
+The page remembers the last tab; the tab and the area are one choice. On a wider screen
+both pages keep their multi-column layout.
 
 ### Graphics
 

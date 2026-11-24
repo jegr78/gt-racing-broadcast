@@ -1,16 +1,16 @@
-# Layout check (#1267): every live-column control of the Race Control desk and every key
-# row of the Director Panel works in a 1440x900 window without scrolling, in the tallest
-# states: driver requests waiting, a red flag with a class lap row, a graphic request
-# under a two-row panel header, and qualifying. Nobody drives, so no state waits on a lap.
-# Each fit waits for the controls its state shows; in a 1366x650 laptop window scrolling the
-# column must reach every live control.
-description = "Desk and panel live columns fit 1440x900 in their tallest states."
-max_minutes = 8
+# Layout check (#1267, #1304): every live-column control of the Race Control desk, the
+# Director Panel and the Commentator Cockpit works in a 1440x900 window without scrolling,
+# in the tallest states: driver requests waiting, a red flag with a class lap row, a graphic
+# request under a two-row panel header, and qualifying. The cockpit shows all 14 cars of its
+# timing while they drive. No state waits on a lap. Each fit waits for the controls its state
+# shows; in a 1366x650 laptop window scrolling the column must reach every live control.
+description = "Desk, panel and cockpit live columns fit 1440x900 in their tallest states."
+max_minutes = 10
 
 [event]
 stints = 3
 track = "6e378b"
-cars = 6
+cars = 14
 classes = ["GT3", "GT4"]
 seed = 7
 
@@ -56,14 +56,14 @@ at = "after:panel_open"
 role = "drivers"
 do = "register"
 args = { stints = 1 }
-expect = ["result('register').registered == 6"]
+expect = ["result('register').registered == 14"]
 
 [[step]]
 id = "desk_waiting"
 at = "after:register"
 role = "race_control"
 do = "open"
-expect = ["page('race_control').waiting == 6"]
+expect = ["page('race_control').waiting == 14"]
 timeout = "15s"
 
 [[step]]
@@ -81,8 +81,47 @@ do = "approve_drivers"
 expect = ["page('race_control').waiting == 0"]
 
 [[step]]
-id = "red_flag"
+id = "drive"
 at = "after:approve_drivers"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'", "page('drivers').driving == 14"]
+timeout = "60s"
+
+[[step]]
+id = "cockpit_timing"
+at = "after:drive"
+role = "commentator:Comms 1"
+do = "open"
+expect = ["page('commentator:Comms 1').timing_rows == 14"]
+timeout = "30s"
+
+[[step]]
+id = "cockpit_fit"
+at = "after:cockpit_timing"
+role = "commentator:Comms 1"
+do = "fit"
+args = { rows = 14 }
+expect = ["result('cockpit_fit').rows == 14"]
+shot = "cockpit-timing"
+
+[[step]]
+id = "cockpit_reach_laptop"
+at = "after:cockpit_fit"
+role = "commentator:Comms 1"
+do = "fit"
+args = { viewport = [1366, 650], reachable = true }
+
+[[step]]
+id = "park"
+at = "after:cockpit_reach_laptop"
+role = "drivers"
+do = "stop"
+expect = ["page('drivers').sending == 0"]
+
+[[step]]
+id = "red_flag"
+at = "after:park"
 role = "race_control"
 do = "red_flag"
 expect = ["race.red_flag"]

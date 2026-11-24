@@ -170,6 +170,49 @@ def t_event_info_keeps_the_slow_period_for_a_definite_answer():
     assert out["delays"][:2] == [30000, 30000], out
 
 
+def t_event_info_renders_inline_where_a_page_asks():
+    import json, shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    with open(os.path.join(ROOT, "src", "console", "event-info.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    start = page.index("<script>") + len("<script>")
+    script = page[start:page.index("</script>", start)]
+    harness = r"""
+const mk = tag => ({tagName: (tag || 'div').toUpperCase(), hidden: false, tabIndex: 0, children: [], textContent: '',
+  className: '', setAttribute() {}, addEventListener() {}, focus() {}, showModal() {}, close() {},
+  replaceChildren(...c) { this.children = c; }, append(...c) { this.children.push(...c); }});
+const els = {eventInfoInline: mk()};
+const document = {getElementById: id => els[id] || (els[id] = mk()), createElement: mk};
+const counts = [];
+const window = {addEventListener() {}, onEventInfo: (n, d) => counts.push([n, d])};
+global.setTimeout = () => 0; global.clearTimeout = () => {};
+global.AbortController = class { constructor() { this.signal = {}; } abort() {} };
+global.fetch = async () => ({ok: true, status: 200, json: async () => ({
+  notes: [{heading: 'Pit window', note: 'Opens on lap 10.', priority: 'important'}, {note: 'Dry.'}],
+  documents: [{title: 'Regulations', url: 'https://example.org/regs.pdf'}]})});
+const flat = n => [n].concat(...(n.children || []).map(flat));
+(async () => {
+%s
+  for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r));
+  const inline = els.eventInfoInline;
+  console.log(JSON.stringify({counts, heads: inline.children.filter(c => c.tagName === 'H3').map(c => c.textContent),
+    texts: flat(inline).map(c => c.textContent).filter(Boolean),
+    important: flat(inline).filter(c => c.className.includes('important')).length,
+    links: flat(inline).filter(c => c.tagName === 'A').map(c => [c.href, c.rel])}));
+})();
+""" % script
+    got = json.loads(subprocess.run([node, "-"], input=harness, capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", check=True, timeout=30).stdout)
+    assert got["heads"] == ["Notes", "Documents"], got
+    assert got["texts"] == ["Notes", "Pit window", "Opens on lap 10.", "Dry.", "Documents", "Regulations"], \
+        f"the inline mount shows the notes and the documents as text: {got}"
+    assert got["important"] == 1 and got["links"] == [["https://example.org/regs.pdf", "noopener noreferrer"]], got
+    assert got["counts"] == [[2, 1]], f"the page hears the counts after each answer: {got}"
+
+
 def run():
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

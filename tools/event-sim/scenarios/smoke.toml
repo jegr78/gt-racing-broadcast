@@ -213,8 +213,23 @@ role = "director"
 do = "fit"
 
 [[step]]
-id = "timing"
+id = "cockpit_timing"
 at = "after:panel_fit_racing"
+role = "commentator:Comms 2"
+do = "view"
+args = { area = "timing" }
+
+[[step]]
+id = "cockpit_fit_racing"
+at = "after:cockpit_timing"
+role = "commentator:Comms 2"
+do = "fit"
+args = { rows = 4 }
+expect = ["result('cockpit_fit_racing').rows == 4"]
+
+[[step]]
+id = "timing"
+at = "after:cockpit_fit_racing"
 role = "viewer"
 do = "read"
 args = { cars = 4 }
