@@ -679,7 +679,7 @@ stay dark and light up while their graphic is on air.
 > link answers an error and OBS stays unchanged. The panel's **Flag Gfx** row is the
 > equivalent control; it shows only the linked flags, Checkered included.
 
-![Companion page 3, flags & graphics: the race-condition flag and flag-graphic rows, the pre-race info and starting-grid toggles, the standings/results/weather overlays, and the per-row grid reveals](images/companion-page3-flags-graphics.png)
+![Companion page 3, flags & graphics: the race-condition flag and flag-graphic rows with the two league widget keys, the pre-race info and starting-grid toggles, the standings/results/weather overlays, and the per-row grid reveals](images/companion-page3-flags-graphics.png)
 
 How the board is imported and built: [Companion](Companion).
 
