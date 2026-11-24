@@ -358,6 +358,24 @@
         </section>
 
         <section>
+          <div class="viewhead"><h3>League service</h3>
+            <span class="sub">the league's own management service: event, races, widgets</span></div>
+          <div class="row"><span class="name">Service</span>
+            <span class="dim grow" id="ls-status">…</span></div>
+          <div class="row"><span class="name">Event</span>
+            <input id="ls-ref" class="grow" maxlength="128" placeholder="reference from the league service's match or event page"
+                   aria-label="League service event reference" onkeydown="if (event.key === 'Enter') loadLeagueEventRef()">
+            <button id="ls-load" onclick="loadLeagueEventRef()" title="Ask the league service for this event's races and widgets">Load</button></div>
+          <div class="enverr" id="ls-err" hidden></div>
+          <div id="ls-event" hidden>
+            <div class="row"><span class="name">Loaded</span><span class="grow" id="ls-title"></span></div>
+            <div class="row"><span class="name">Races</span><span class="dim grow" id="ls-races"></span></div>
+            <div class="row"><span class="name">Widgets</span><span class="dim grow" id="ls-widgets"></span></div>
+          </div>
+          <p class="envhint">Set <b>LEAGUE_SERVICE_URL</b> (https only) and <b>LEAGUE_SERVICE_KEY</b> above, then enter the reference the league service shows for the match or event and <b>Load</b>. racecast keeps the races and the current race until <b>Stop event</b>. Same as <code>racecast event league REF</code>.</p>
+        </section>
+
+        <section>
           <div class="viewhead"><h3>Crew</h3>
             <span class="sub">named roster for Director Panel access + /console roles</span>
             <span class="spacer"></span>
@@ -1050,7 +1068,7 @@ function showView(name) {
   // Profile view: switcher/profile.env loaded once; graphics/media gallery
   // (the old 'assets' view's job) likewise re-uses fetchAssetFiles.
   if (name === 'profile' && !profilesLoaded) { profilesLoaded = true; loadProfiles(); }
-  if (name === 'profile' && !timingHostLoaded) { timingHostLoaded = true; loadTimingHost(); }
+  if (name === 'profile' && !timingHostLoaded) { timingHostLoaded = true; loadTimingHost(); loadLeagueEvent(); }
   if (name === 'profile' && !assetsLoaded) { assetsLoaded = true; fetchAssetFiles(); }
   if (name === 'preflight' && !preflightRun) { preflightRun = true; runPreflight(); }
   if (name === 'preflight') loadSpeedtest();
@@ -3061,6 +3079,41 @@ async function deployTimingHost() {
   }
 }
 
+function showLeagueEvent(d) {
+  $('ls-status').textContent = d.configured ? d.url
+    : (d.problem || 'not set up: add LEAGUE_SERVICE_URL and LEAGUE_SERVICE_KEY above');
+  $('ls-load').disabled = !d.configured;
+  const ev = d.event;
+  $('ls-event').hidden = !ev;
+  if (!ev) return;
+  $('ls-title').textContent = ev.ref + (ev.title ? ' · ' + ev.title : '');
+  $('ls-races').textContent = ev.races.map((r, i) => (i + 1) + '. ' + (r.title || r.race)
+    + (r.race === ev.current ? ' (current)' : '')).join('   ');
+  $('ls-widgets').textContent = ev.widgets.length
+    ? ev.widgets.map(w => w.title + ' (' + w.form + ')').join(', ') : 'none offered';
+}
+async function loadLeagueEvent() {
+  let d;
+  try { d = await (await fetch('/api/league-event', {cache: 'no-store'})).json(); }
+  catch (e) { $('ls-status').textContent = 'Control Center not reachable.'; return; }
+  showLeagueEvent(d);
+}
+async function loadLeagueEventRef() {
+  const ref = $('ls-ref').value.trim();
+  $('ls-err').hidden = true;
+  if (!ref) { $('ls-err').hidden = false; $('ls-err').textContent = 'Enter the reference first.'; return; }
+  const b = $('ls-load'); b.disabled = true;
+  let d;
+  try {
+    d = await (await fetch('/api/league-event/load', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ref, expectedProfile: activeProfile})})).json();
+  } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  b.disabled = false;
+  if (!d.ok) { $('ls-err').hidden = false; $('ls-err').textContent = d.error || 'loading failed'; return; }
+  await loadLeagueEvent();
+}
+
 async function loadProfiles(force) {
   let d;
   try { d = await (await fetch('/api/profiles', {cache: 'no-store'})).json(); }
@@ -3172,6 +3225,7 @@ async function useProfile(name) {
   tmReset();                              // the recordings belong to the profile
   loadProfiles();
   loadProfileEnv();
+  loadLeagueEvent();
   refresh();
   offerRestart();                         // running services still serve the old league
 }
@@ -3326,6 +3380,7 @@ async function saveProfileEnv() {
   b.textContent = 'Saved ✓';
   setTimeout(() => { b.innerHTML = orig; b.disabled = false; }, 1400);
   loadProfileEnv();                        // reflect the canonical file (masked again)
+  loadLeagueEvent();
   fetch('/api/profiles', {cache: 'no-store'}).then(r => r.json())
     .then(d => { if (d.ok) setHeaderLogo(d.active, d.logo); }).catch(() => {});
 }

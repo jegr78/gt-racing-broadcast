@@ -272,6 +272,16 @@ def t_profile_show_masks_timing_secrets():
     assert line.split()[1] == "https://h.example.workers.dev", "the host URL is public and shown"
 
 
+def t_profile_show_masks_the_league_service_key():
+    cfg_obj = m.cfg.ResolvedConfig(
+        profile="demo", name="Demo", sheet_id="S", league_service_url="https://league.example/r",
+        league_service_key="LEAGUEKEY77", profile_dir="/p/profiles/demo", runtime_dir="/p/runtime/demo")
+    out = m.format_profile_show(cfg_obj, active="demo")
+    assert "LEAGUEKEY77" not in out, out
+    line = next(ln for ln in out.splitlines() if ln.startswith("league_service:"))
+    assert line.split()[1:] == ["https://league.example/r", "(key", "set)"], line
+
+
 def t_parse_export_defaults():
     o = m.parse_profile_args(["export", "iro-gtec"])
     assert o["verb"] == "export" and o["name"] == "iro-gtec"

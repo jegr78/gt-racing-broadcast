@@ -1727,6 +1727,31 @@ def t_api_timing_host_routes():
         httpd.shutdown()
 
 
+def t_api_league_event_routes():
+    loads = []
+    ctx = _ctx()
+    ctx["active_profile"] = lambda: "demo"
+    ctx["league_event"] = lambda: {"ok": True, "configured": True, "url": "https://l.example/r",
+                                   "key_set": True, "problem": "", "event": None}
+    ctx["league_event_load"] = lambda ref: loads.append(ref) or (
+        {"ok": True, "event": {"ref": ref}} if ref == "M1" else {"ok": False, "error": "HTTP 404"})
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/league-event")
+        assert code == 200 and json.loads(body)["configured"] is True, body
+        code, body = _post_json(port, "/api/league-event/load", {"ref": "M1", "expectedProfile": "demo"})
+        assert code == 200 and json.loads(body)["event"]["ref"] == "M1", body
+        code, body = _post_json(port, "/api/league-event/load", {"ref": "X", "expectedProfile": "demo"})
+        assert code == 400 and "404" in json.loads(body)["error"], body
+        code, _b = _post_json(port, "/api/league-event/load", {"ref": "M1", "expectedProfile": "other"})
+        assert code == 409, "a load for a league that is no longer active is refused"
+        code, _b = _post_json(port, "/api/league-event/load", {"ref": 5, "expectedProfile": "demo"})
+        assert code == 400
+        assert loads == ["M1", "X"], loads
+    finally:
+        httpd.shutdown()
+
+
 def t_gt7_data_routes():
     httpd, port = _serve(_ctx())
     try:

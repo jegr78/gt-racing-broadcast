@@ -261,6 +261,10 @@ def _solo_profile_env_text(display, template):
         "TIMING_HOST_API_TOKEN=\n"
         "TIMING_HOST_PUBLISH_KEY=\n"
         "TIMING_HOST_URL=\n"
+        "\n# OPTIONAL: the league's own management service (https only). It loads the\n"
+        "# event and computes league widgets. Treat the key like a password.\n"
+        "LEAGUE_SERVICE_URL=\n"
+        "LEAGUE_SERVICE_KEY=\n"
     )
     return head + pov + tail
 
@@ -351,6 +355,8 @@ def format_profile_show(rcfg, active):
         f"logo:           {rcfg.logo_path or '(none)'}",
         f"timing_host:    {rcfg.timing_host_url or '(unset)'}"
         f"{' (token set)' if rcfg.timing_host_api_token else ''}",
+        f"league_service: {rcfg.league_service_url or '(unset)'}"
+        f"{' (key set)' if rcfg.league_service_key else ''}",
         f"profile_dir:    {rcfg.profile_dir}",
         f"runtime_dir:    {rcfg.runtime_dir}",
     ])

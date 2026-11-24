@@ -16,6 +16,7 @@
   racecast event invite [--new]             # driver telemetry invite link (event start creates it, stop ends it)
   racecast event timing [--new] [--serve hosted|funnel]  # public live timing link (event start creates it, stop ends it)
   racecast event race [--formation on|off] [--laps N|--time] [--restart keep|neutralise] [--last-lap-seconds N]  # driver telemetry race
+  racecast event league [REF]                # load the event REF from the league service (LEAGUE_SERVICE_URL), or show the loaded one; stop clears it
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
@@ -1144,7 +1145,7 @@ EXTRA_VERBS = {
 # Internal verbs: routed but never advertised (frozen feed children use run-feed).
 HIDDEN_VERBS = {"streams": ("run-feed",)}
 ONESHOTS = ("preflight", "speedtest", "cookies", "graphics", "media", "brands", "setup", "install-tools", "install-apps", "obs-browser", "update")
-EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite", "timing", "race")
+EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite", "timing", "race", "league")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
@@ -6528,14 +6529,18 @@ def _relay_new_event():
 
 
 def _stop_driver_invite(path=None):
-    """Event stop ends the invite, the drivers' requests and the public timing link."""
+    """Event stop ends the invite, the drivers' requests, the public timing link and
+    the loaded league event."""
     import driver_invite
     import driver_requests
+    import league_service
     import timing_link
     path = path or _driver_invite_path()
+    folder = os.path.dirname(os.path.abspath(path))
     driver_invite.clear(path)
-    driver_requests.clear(driver_requests.path_in(os.path.dirname(os.path.abspath(path))))
-    timing_link.clear(timing_link.path_in(os.path.dirname(os.path.abspath(path))))
+    driver_requests.clear(driver_requests.path_in(folder))
+    timing_link.clear(timing_link.path_in(folder))
+    league_service.clear(league_service.path_in(folder))
 
 
 def _timing_links(link_id, magic=None, host=None):
@@ -6664,6 +6669,94 @@ def event_timing_cmd(rest):
             print(f"  host:    {state}, {host.get('viewers', 0)} viewers")
     print(f"  funnel:  {funnel}\n"
           f"  tailnet: {d['tailnet'] or 'unknown (is Tailscale up?)'}")
+
+
+NO_LEAGUE_SERVICE = "No league service: set LEAGUE_SERVICE_URL and LEAGUE_SERVICE_KEY in the profile."
+
+
+def _league_settings(rc):
+    """(Settings or None, problem) of the active league's service."""
+    import league_service
+    if rc is None:
+        return None, "no active profile: create or select one first"
+    return league_service.settings(rc.league_service_url, rc.league_service_key)
+
+
+def league_event_data(rc=None, path=None):
+    """The league service and the event loaded from it, for `racecast event league` and
+    the Control Center. Names the URL, never the key. Never raises."""
+    import league_service
+    rc = _active_config() if rc is None else rc
+    cfg, problem = _league_settings(rc)
+    try:
+        event = league_service.read(path or league_service.path_in(_runtime_dir()))
+    except Exception:  # noqa: BLE001  a status read never fails the page
+        event = None
+    return {"ok": True, "configured": cfg is not None, "problem": problem,
+            "url": (rc.league_service_url if rc is not None else "") or "",
+            "key_set": bool(rc is not None and rc.league_service_key), "event": event}
+
+
+def league_event_load_data(ref, rc=None, path=None, fetch=None):
+    """Load the event behind `ref` from the league service into league-event.json.
+    {ok, event} or {ok: false, error}. `rc`, `path` and `fetch` are test seams."""
+    import league_service
+    rc = _active_config() if rc is None else rc
+    cfg, problem = _league_settings(rc)
+    if cfg is None:
+        return {"ok": False, "error": problem or NO_LEAGUE_SERVICE}
+    problem = league_service.ref_problem(ref)
+    if problem:
+        return {"ok": False, "error": problem}
+    ref = ref.strip()
+    try:
+        event = (fetch or league_service.fetch_event)(cfg, ref)
+    except league_service.ServiceError as exc:
+        return {"ok": False, "error": str(exc)}
+    try:
+        doc = league_service.store(path or league_service.path_in(_runtime_dir()), ref, event)
+    except OSError as exc:
+        return {"ok": False, "error": f"could not save the league event: {exc}"}
+    return {"ok": True, "event": doc}
+
+
+def _league_event_lines(d):
+    if not d["configured"]:
+        return [d["problem"] or NO_LEAGUE_SERVICE]
+    lines = [f"League service: {d['url']}"]
+    event = d.get("event")
+    if not event:
+        lines.append("No league event loaded: `racecast event league REF` loads one.")
+        return lines
+    lines.append(f"Event {event['ref']}: {event['title'] or '(no title)'}")
+    for i, race in enumerate(event["races"], 1):
+        mark = "  <- current" if race["race"] == event["current"] else ""
+        lines.append(f"  {i}. {race['race']} {race['title']}".rstrip() + mark)
+    for w in event["widgets"]:
+        lines.append(f"  widget {w['id']} ({w['form']}): {w['title']}")
+    return lines
+
+
+def event_league_cmd(rest):
+    """racecast event league [REF]: load the event REF from the league service, or show
+    the loaded one (#1253)."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="racecast event league",
+        description="Load the event behind REF from the league's own service (LEAGUE_SERVICE_URL "
+                    "and LEAGUE_SERVICE_KEY in the profile): its races in order and its widgets. "
+                    "Without REF, show the loaded event. `racecast event stop` clears it.")
+    parser.add_argument("ref", nargs="?", help="the reference the league service shows on its "
+                                               "match or event page")
+    args = parser.parse_args(rest)
+    _apply_active_profile_env()
+    if args.ref is not None:
+        r = league_event_load_data(args.ref)
+        if not r["ok"]:
+            print(r["error"])
+            sys.exit(1)
+    for line in _league_event_lines(league_event_data()):
+        print(line)
 
 
 def event_invite_cmd(rest):
@@ -7800,6 +7893,7 @@ DISPATCH = {
     ("event", "invite"): event_invite_cmd,
     ("event", "timing"): event_timing_cmd,
     ("event", "race"): event_race_cmd,
+    ("event", "league"): event_league_cmd,
     ("tailscale", "up"): tailscale_up_cmd, ("tailscale", "down"): tailscale_down_cmd,
     ("tailscale", "status"): tailscale_status_cmd,
     ("obs", "refresh"): obs_refresh_cmd, ("obs", "collection"): obs_collection_cmd,
@@ -8674,14 +8768,28 @@ def _timing_host_values(path):
         return {k: v for k, v in parse_env_text(fh.read()).items() if k.startswith("TIMING_HOST_")}
 
 
+def _league_url_problem(entries):
+    """Why the LEAGUE_SERVICE_URL among `entries` cannot be saved, or ""."""
+    import league_service
+    for e in entries or []:
+        if str(e.get("key", "")).strip() == "LEAGUE_SERVICE_URL":
+            value = str(e.get("value", "")).strip()
+            return league_service.url_problem(value, {}) if value else ""
+    return ""
+
+
 def profile_env_write_data(entries, nudge=None):
     """Persist the Profile editor entries to the active profile's profile.env
     (validate + comment-preserving merge, atomic). {ok,path} or {ok:false,error}.
     Server resolves the path from the active profile, never a client value. A changed
-    timing host key reaches a running relay at once (`nudge` is a test seam)."""
+    timing host key reaches a running relay at once (`nudge` is a test seam). A
+    LEAGUE_SERVICE_URL that is not HTTPS is refused."""
     active, path = _active_profile_env_strict()
     if not active:
         return {"ok": False, "error": "no active profile: create or select one first"}
+    problem = _league_url_problem(entries)
+    if problem:
+        return {"ok": False, "error": problem}
     before = _timing_host_values(path)
     result = _write_env_file(path, entries)
     if result.get("ok") and _timing_host_values(path) != before:
@@ -10840,6 +10948,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "fonts_restore": restore_bundled_fonts_data,
         "gt7_data_status": gt7_data_status_data,
         "timing_host_status": timing_host_status_data,
+        "league_event": league_event_data,
+        "league_event_load": league_event_load_data,
         "backup_list": backup_list_data,
         "backup_create": backup_create_data,
         "backup_restore": backup_restore_data,

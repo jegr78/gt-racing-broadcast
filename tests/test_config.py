@@ -381,6 +381,18 @@ def t_timing_host_keys_resolve():
                                         "https://racecast-timing-demo.example.workers.dev")
 
 
+def t_league_service_keys_resolve():
+    with tempfile.TemporaryDirectory() as td:
+        root = _mkroot(td)
+        _mkprofile(root, "demo", "NAME=Demo\nSHEET_ID=abc\nLEAGUE_SERVICE_URL=https://league.example/r\n"
+                                 "LEAGUE_SERVICE_KEY=fixture-key\n")
+        rc = m.resolve_config(root, override="demo", environ={})
+        assert (rc.league_service_url, rc.league_service_key) == ("https://league.example/r", "fixture-key")
+        _mkprofile(root, "bare", "NAME=Bare\nSHEET_ID=abc\n")
+        rc = m.resolve_config(root, override="bare", environ={})
+        assert (rc.league_service_url, rc.league_service_key) == ("", ""), "no service configured by default"
+
+
 def t_resolve_config_graphics_take():
     with tempfile.TemporaryDirectory() as td:
         root = _mkroot(td)
