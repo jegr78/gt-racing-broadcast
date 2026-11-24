@@ -209,6 +209,8 @@ def t_event_result_verb_sends_and_prints():
         finally:
             (m._active_config, m._runtime_dir, m._apply_active_profile_env,
              m._relay_already_running_for_active_profile) = orig
+        assert "result" in m.EVENT_VERBS and m.DISPATCH[("event", "result")] is m.event_result_cmd, \
+            "racecast event result dispatches to the verb"
         text = out.getvalue()
         assert f"Sent leg-2 of {REF}" in text and "leg-2: pending" in text, text
         assert "pick 1 to 1" in err.getvalue()

@@ -1,7 +1,8 @@
 # League service
 
-Design agreed 2026-11-22. Contract, configuration, client and the simulated service are
-implemented (#1253); result export, live widgets and the timing page follow.
+Design agreed 2026-11-22. Contract, configuration, client and the simulated service
+(#1253) and the result export (#1254) are implemented; live widgets and the timing page
+follow.
 
 A league runs its own management service (the Community Team Cup runs CTC Manager,
 Community League Racing runs CLR). During a race the relay sends the live race state
@@ -50,7 +51,10 @@ The current race starts at the first one. It moves to the next when a new race s
 counting after a finished one, the moment the recording re-arms. Until then a resend
 still belongs to the finished race. The Director can set the current race by hand.
 After the last listed race the relay keeps sending live state but exports no further
-result, and the Director Panel says so.
+result, and the Director Panel says so. `league-event.json` keeps the `finished` mark,
+the finish time and the `done` mark next to the current race, so a relay restart between
+the finish and the next start still moves on. The first race state a relay sees is its
+baseline: a restart inside a finished race sends nothing again.
 
 Whether the widgets appear on the public timing page is a separate profile switch,
 default off.
@@ -135,20 +139,51 @@ the same reference and race replaces the draft, so corrections made after the fi
 arrive.
 
 A recording sample holds position, entry, driver, laps, gaps, status and pit stops,
-but no team, no lap time and no fastest lap; those come from the roster and the saved
-race actions, and the corrections from `driver-race-audit.jsonl`. A resend from a
-recording file chosen after the event therefore needs those files of the same event,
-or the recording has to store them. That is part of the result export issue.
+but no team, no lap time and no fastest lap. The recording therefore stores the result
+itself: at the finish the relay builds the Result and keeps it in the recording's `meta`
+table under `results`, one document per race with its reference, race and finish time.
+A resend rewrites that document. The other way, rebuilding the result later from the
+roster, the saved race actions and `driver-race-audit.jsonl`, does not work after the
+event: a race reset deletes the fastest lap and the corrections, `event start` clears
+the actions, each car's counted laps live in memory only, the audit log has no event
+boundary, and `event stop` clears the reference and the race list. A recording without
+a stored result (one from before this version) cannot be sent; the CLI says so.
 
-The first version exports the race only. The recording writes in race mode only, so a
+The relay builds the Result from the race service and the recording:
+
+- The classification is the standings at the finish after Race Control's corrections,
+  with the roster's number and team. `best_ms` is a car's fastest lap that counted for
+  the fastest lap (GT7 took it as its best lap, #1264), so a voided lap is no car's best
+  lap any more. A fastest lap Race Control sets by hand is its car's best lap.
+- `fastest` is the race service's confirmed fastest lap with the roster team, never the
+  fastest raw lap time.
+- `events` are the audit log's `red_flag` and `release` actions (kind `red_flag`), its
+  `correct` actions with metres, pit stops and reason (kind `correction`) and the
+  recording's confirmed disconnects, dated by their last packet (kind `disconnect`).
+  The window starts at the latest of the recording's start, the previous finish and the
+  last race reset or new event, and ends when the result is built, so a correction made
+  after the finish is in a resend. Who acted stays on the producer's machine. Retirements,
+  estimates, driver names and fastest lap changes are not steward events in this version.The first version exports the race only. The recording writes in race mode only, so a
 qualifying export is a later step.
 
 The answer carries `status` (`stored` or `pending`), an optional `message`, an
-optional `link` and an optional `graphic_url`. The relay fetches the graphic from the
-service's host over HTTPS, accepts PNG only up to 4 MB, and files it as a graphic the
-Director can take. It never goes on air by itself. While the status is `pending`, a
-refresh action in the Control Center asks the service again. Nothing waits for the
-answer: the race, the next race and the event stop go on without it.
+optional `link` and an optional `graphic_url`. The relay fetches the graphic only from
+the service URL's own scheme, host and port, follows no redirect, accepts PNG only (the
+`image/png` type and the PNG signature) up to 4 MB, and files it under
+`runtime/<profile>/league-graphics/`. It never goes on air by itself. The Director Panel
+shows it, and the Director's **Use as Race Results** copies it over the `Race Results`
+graphic and has OBS reload that image; the existing RACE RESULTS key then puts it on
+air. A `racecast graphics` download brings back the Sheet's Race Results graphic. While
+the status is `pending`, a refresh action in the Control Center asks the service again.
+Nothing waits for the answer: the race, the next race and the event stop go on without
+it.
+
+The relay sends on its own thread. A failed send, a refusal included, is retried after
+2 s, doubling up to 60 s, as long as the relay runs: the operator may fix the key or the
+service meanwhile. A newer result for the same reference and race replaces a queued one.
+Every answer, and every failure with its reason, lands in
+`runtime/<profile>/league-results.json` (the newest 64 sends), which the Control Center,
+`racecast event result` and the Director Panel show. `event stop` keeps it.
 
 ## In the relay
 
@@ -174,9 +209,16 @@ The tick hands it the standings and never waits for it.
   body unparsed, so the block reaches hosted viewers without a Worker change; the
   hosted viewer page gets the same rendering.
 - Result: sent automatically at `finished` and retried after a failure. "Send result"
-  is also an action in the Control Center and a `racecast` verb, for the current event
-  or for a recording file chosen after the event. The Control Center shows the
-  service's status and link.
+  is also an action in the Control Center and a `racecast` verb (`racecast event result
+  send [RACE]`), for the current event or for a recording file chosen after the event
+  (`--recording FILE`, `--index N`, `--ref REF`). For the current event a running relay
+  rebuilds the result from the live race while it still stands finished, otherwise it
+  sends the copy in the recording. The Control Center shows the service's status,
+  message and link, and a refresh while the status is `pending`
+  (`racecast event result refresh`). The Director Panel shows the current race, lets the
+  Director set it, send again and take the graphic, and says when the event's races are
+  over. Its routes (`/league/status`, `/league/race`, `/league/result/send`,
+  `/league/graphic`, `/league/graphic/take`) are director-only under `/console`.
 
 ## Security
 
@@ -188,7 +230,8 @@ The tick hands it the standings and never waits for it.
 - The service URL must be HTTPS. The client follows no redirect at all, so the key
   never reaches another host.
 - Outgoing data is an allowlist. Incoming data is bounded, typed and rendered as text.
-- The graphic fetch accepts only the configured service host, PNG only, size-limited.
+- The graphic fetch accepts only the service URL's own scheme, host and port, PNG only,
+  up to 4 MB, no redirect. The key goes with it, to that origin only.
 - The driver names leave the producer's machine for the league's own service. The
   league decides that by configuring the service.
 

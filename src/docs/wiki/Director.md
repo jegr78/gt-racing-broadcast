@@ -357,6 +357,20 @@ a disconnect, a rejection) ask for a second press within four seconds.
 
 ![Director Panel: the Race area with the race controls, the desk tabs and the race order](images/director-panel-drivers.png)
 
+### League result
+
+With a league event loaded from the league service, the **Race** area shows a **League
+result** card under the race desk. The relay sends the race's result when it finishes;
+the card shows what the service answered and **SEND AGAIN** sends it once more after a
+correction (it replaces the draft). The select is the current race: the next race
+becomes current when a new race starts counting after the finish, and you can pick
+another one by hand. After the event's last listed race the card says that no further
+result is sent. When the service returns a result graphic, the card shows it;
+**USE AS RACE RESULTS** copies it over the Race Results graphic and the **RACE RESULTS**
+key then puts it on air. The graphic never goes on air by itself.
+
+![Director Panel: the League result card with the current race, the service's answer and its graphic](images/director-panel-league.png)
+
 ### Warning banners
 
 Ongoing problems show as banners directly under the header, they appear

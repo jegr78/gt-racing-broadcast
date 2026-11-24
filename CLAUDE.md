@@ -250,6 +250,9 @@ Security boundaries that apply everywhere:
   at `LEAGUE_SERVICE_URL`. HTTPS only, a bearer `LEAGUE_SERVICE_KEY` that is never logged
   or in a status response, no redirect followed, and every answer bounded and typed
   against the contract. The service never calls the relay, and nothing new is funnelled.
+  A result graphic is fetched only from the service URL's own scheme, host and port, PNG
+  up to 4 MB, and reaches OBS only through the Director's take (`/league/*`, director-only
+  under `/console`).
 - No destructive HTTP endpoint for chat or cues: clear/import/pull stay producer-only CLI
   actions. A commentator's stream-link submission is own-rows-only and lands as pending,
   never auto-published.

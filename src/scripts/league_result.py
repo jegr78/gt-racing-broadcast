@@ -420,7 +420,7 @@ class Exporter:
         cfg, problem = self._settings_fn()
         ev = league_service.read(self._event_path)
         out = {"configured": cfg is not None, "problem": problem, "event": None, "results": [],
-               "queued": [], "note": ""}
+               "queued": [], "note": "", "watching": self._armed and self._last is not None}
         if ev is None:
             return out
         out["event"] = {k: ev[k] for k in ("ref", "title", "races", "current", "finished", "done")}
