@@ -1012,24 +1012,26 @@ def t_check_without_a_console_fails_and_names_the_fix():
 def t_check_in_listen_mode_skips_the_heartbeat():
     up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
                       opener=lambda req, timeout: _Reply(b'{"ok": true}'))
-    said = []
-    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append)
+    said, clock = [], [0.0]
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append, clock=lambda: clock[0])
     other = _udp()
-    stop = threading.Event()
+    for _ in range(60):                       # one second of packets, queued once the port is bound
+        other.sendto(b"\0" * 296, ("127.0.0.1", sender.sock.getsockname()[1]))
+    real = sender.receive_once
 
-    def feed():
-        while not stop.is_set():
-            other.sendto(b"\0" * 296, ("127.0.0.1", sender.sock.getsockname()[1]))
-            time.sleep(1 / 60)
-    threading.Thread(target=feed, daemon=True).start()
+    def receive_once():
+        got = real()                           # the real socket path, on a clock of 60 packets a second
+        clock[0] += 1 / 60
+        return got
+    sender.receive_once = receive_once
     try:
-        code = snd.self_check(sender, up, duration=0.8, say=said.append)
+        code = snd.self_check(sender, up, duration=1.0, say=said.append)
     finally:
-        stop.set()
         sender.sock.close()
         other.close()
     text = "\n".join(said)
-    assert code == 0 and "heartbeat: skipped" in text and "receive: OK" in text, text
+    assert code == 0 and "heartbeat: skipped" in text and "receive: OK 60 packets" in text, \
+        f"listen mode: heartbeat skipped, 60 packets at 60/s, check output:\n{text}"
     assert sender.stats["heartbeats"] == 0, "listen mode leaves the console to the other app"
     assert up.pending() == 0, "packets of a check are counted, never queued for upload"
 
