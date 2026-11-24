@@ -66,6 +66,7 @@ CHECK_MIN_HZ = 50.0       # GT7 sends about 60 packets per second
 LATENCY_WINDOW = 200      # the posts the latency stats cover
 MAX_POST_MS = 60000
 USER_AGENT = "racecast-sender/" + VERSION
+IPHONE_HINT = "On an iPhone the search fails like this: start the sender with --console <PlayStation IP>"
 ROUTE_PROBE = "192.0.2.1"   # TEST-NET-1: picks the default-route interface, never contacted
 NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # the relay accepts these names only
 
@@ -421,8 +422,7 @@ class Sender:
             hint = ""
             if not self.console and not self._search_hinted:
                 self._search_hinted = True
-                hint = (". On an iPhone the search fails like this: start the sender with "
-                        "--console <PlayStation IP>")
+                hint = ". " + IPHONE_HINT
             self.say(f"heartbeat to {target} failed: {exc}{hint}")
 
     def receive_once(self):
@@ -535,7 +535,8 @@ def self_check(sender, up, duration=CHECK_S, say=_say):
         results.append(("heartbeat", "OK", "%d sent to %s" % (
             sender.stats["heartbeats"], sender.console or "the local network (broadcast)")))
     else:
-        results.append(("heartbeat", "FAIL", "%d failed: pass --console <PlayStation IP>" % sender.heartbeat_failed))
+        results.append(("heartbeat", "FAIL", "%d failed: pass --console <PlayStation IP>. %s" % (
+            sender.heartbeat_failed, IPHONE_HINT)))
     received = sender.stats["received"]
     first_t, first_n = sender.first_rx or (ended, received)
     span = ended - first_t

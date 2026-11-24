@@ -1105,6 +1105,7 @@ def t_a_check_whose_heartbeats_all_fail_names_the_console_option():
         sender.sock.close()
     text = "\n".join(said)
     assert code == 1 and "heartbeat: FAIL 1 failed: pass --console" in text, text
+    assert "On an iPhone the search fails" in text, f"the check names the iPhone case like a run: {text}"
 
 
 def t_a_check_that_receives_too_few_packets_fails():
