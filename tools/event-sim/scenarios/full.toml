@@ -1066,8 +1066,16 @@ expect = ["relay.up"]
 shot = { name = "finished-2", role = "viewer" }
 
 [[step]]
+id = "fastest_public"
+at = "after:shot_finished_2"
+role = "viewer"
+do = "read"
+expect = ["page('viewer').fastest.startswith('Fastest lap')"]
+timeout = "20s"
+
+[[step]]
 id = "shot_new_cockpit_finished"
-at = "after:shot_finished_2+3s"
+at = "after:fastest_public+3s"
 role = "api"
 do = "get"
 args = { path = "/status" }
