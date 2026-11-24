@@ -256,7 +256,7 @@ def t_live_state_sends_null_only_where_the_contract_allows_it():
             "entries": [{"pos": 1, "entry": "e1", "driver": "Ann", "class": None, "laps": None,
                          "gap_s": None, "best_ms": None}]}
     body = ls.live_state("REF", "leg-1", snap)
-    assert body["track_name"] is None and body["state"] is None, \
+    assert body.get("track_name", "absent") is None and body.get("state", "absent") is None, \
         "a track or state not known yet goes out as null, as the contract allows"
     assert body["lap"] is None and body["fastest"] == {"entry": "e1", "driver": "Ann", "ms": 90000}
     (row,) = body["entries"]
