@@ -26,13 +26,26 @@
       parts.push(box);
     } else if (row.form === 'table') {
       const grid = node('div', 'lw-table');
-      if (typeof v.value_title === 'string' && v.value_title) grid.appendChild(node('span', 'lw-head', v.value_title));
-      (Array.isArray(v.rows) ? v.rows : []).forEach(r => {
-        grid.append(node('span', 'lw-rank', r.rank), node('span', 'lw-name', r.name), node('span', 'lw-row-value', r.value));
-      });
+      grid.head = typeof v.value_title === 'string' && v.value_title ? [node('span', 'lw-head', v.value_title)] : [];
+      grid.rows = (Array.isArray(v.rows) ? v.rows : []).map(r =>
+        [node('span', 'lw-rank', r.rank), node('span', 'lw-name', r.name), node('span', 'lw-row-value', r.value)]);
+      grid.append(...grid.head, ...grid.rows.flat());
       parts.push(grid);
     }
     el.replaceChildren(...parts);
+  }
+  // A table keeps only the whole rows that fit the box, its last line saying how many
+  // are left out. Measured once the slot is shown: a hidden slot has no height.
+  function capRows(el) {
+    const grid = el.querySelector('.lw-table');
+    if (!grid || !grid.rows || !(el.clientHeight > 0)) return;
+    const fits = () => el.scrollHeight <= el.clientHeight;
+    if (fits()) return;
+    for (let n = grid.rows.length - 1; n >= 0; n--) {
+      grid.replaceChildren(...grid.head, ...grid.rows.slice(0, n).flat(),
+        node('span', 'lw-more', '+' + (grid.rows.length - n) + ' more'));
+      if (fits()) return;
+    }
   }
   function expire(root, now = performance.now()) {
     slots(root).forEach(el => {
@@ -57,6 +70,7 @@
       deadlines.set(el, row.holdFor === null ? Infinity
         : Number.isFinite(row.holdFor) ? now + Math.max(0, Math.min(30, row.holdFor) - transit) * 1000 : now);
       el.hidden = false;
+      capRows(el);
     });
     expire(root, now);
     return true;

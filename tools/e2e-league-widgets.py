@@ -34,6 +34,7 @@ from test_league_result import _Source  # noqa: E402
 
 KEY = "e2e-league-widgets-key"
 HOSTILE = '<img src=x onerror="window.__pwned=1">'
+LOOK = ":root { --league-widget-bg: #0b2545; --league-widget-accent: #f2c14e; }"
 SCENES = (("hud", 1460, "/hud"), ("intermission", 300, "/intermission"), ("splitscreen", 700, "/splitscreen/hud"))
 SNAP = {"mode": "race", "state": "racing", "lap": 12, "entries": [
     {"pos": 1, "entry": "e1", "driver": "Ann Weber", "team": "Red Bulls", "laps": 12},
@@ -70,6 +71,9 @@ def builder(page, overlay, shots):
     for prop, value in (("left", 1460), ("top", 330)):
         page.evaluate("([p, v]) => { const f = ovState.fields[p]; f.value = v; f.dispatchEvent(new Event('input'));"
                       " f.dispatchEvent(new Event('change')); }", [prop, value])
+    page.evaluate("(css) => { document.getElementById('overlayCss').value = css; ovCustomCssChanged(); }", LOOK)
+    assert score.evaluate("el => getComputedStyle(el).backgroundColor") == "rgb(11, 37, 69)", \
+        "the canvas takes the league look from the profile's overlay variables"
     page.select_option("#ov-slotpick", "league-widget-match-score")
     page.evaluate("() => { const f = ovState.fields.left; f.value = 1460; f.dispatchEvent(new Event('input'));"
                   " f.dispatchEvent(new Event('change')); }")
@@ -77,6 +81,8 @@ def builder(page, overlay, shots):
     page.wait_for_function("() => document.getElementById('overlay-save').textContent.includes('Saved')")
     css = (overlay / "hud.css").read_text(encoding="utf-8")
     assert "#league-widget-standings { left: 1460px; top: 330px; width: 420px; height: 330px; font-size: 24px;" in css, css
+    assert "background: var(--league-widget-bg, rgba(0,0,0,.8))" in css and LOOK in css, \
+        "the saved style keeps the colours as variable references"
     if shots:
         page.locator("#ov-modal .ovmodal-card").screenshot(path=str(ROOT / "src/docs/wiki/images/cc-league-widgets.png"))
     for scene, left, _path in SCENES[1:]:
@@ -117,6 +123,8 @@ def live_pages(browser, relay_port, sim, shots):
     hud.on("pageerror", lambda error: errors.append(str(error)))
     hud.goto(f"http://127.0.0.1:{relay_port}/hud")
     hud.wait_for_function("() => !document.getElementById('league-widget-match-score').hidden")
+    assert hud.locator("#league-widget-match-score").evaluate("el => getComputedStyle(el).backgroundColor") \
+        == "rgb(11, 37, 69)", "on air the widget wears the league look"
     labels = hud.locator("#league-widget-match-score .lw-label").all_text_contents()
     assert labels == ["Red Bulls", "Blue Sharks"], labels
     assert hud.locator("#league-widget-standings").get_attribute("hidden") is not None, "the hidden one stays hidden"
@@ -125,6 +133,22 @@ def live_pages(browser, relay_port, sim, shots):
     hud.wait_for_function("() => document.querySelector('#league-widget-match-score .lw-value').textContent === '7'")
     assert hud.locator("#league-widget-match-score .lw-label").text_content() == HOSTILE
     assert hud.locator("#league-widget-match-score img").count() == 0 and not hud.evaluate("window.__pwned")
+    long_table = {"value_title": "Pts", "rows": [{"rank": i, "name": f"Driver {i}", "value": str(40 - i)}
+                                                 for i in range(1, 21)]}
+    sim.answer("live", body={"v": 1, "widgets": {"match-score": {"values": [{"label": "A", "value": "1"}]},
+                                                 "standings": long_table}})
+    hud.request.get(f"http://127.0.0.1:{relay_port}/league/widget/2/show")
+    hud.wait_for_function("() => document.querySelector('#league-widget-standings .lw-more')")
+    more = hud.locator("#league-widget-standings .lw-more").text_content()
+    shown = hud.locator("#league-widget-standings .lw-name").count()
+    assert more == f"+{20 - shown} more" and 0 < shown < 20, (more, shown)
+    bottom = hud.locator("#league-widget-standings").evaluate("el => el.getBoundingClientRect().bottom")
+    for kind in (".lw-name", ".lw-more"):
+        for box in hud.locator("#league-widget-standings " + kind).evaluate_all(
+                "els => els.map(e => e.getBoundingClientRect().bottom)"):
+            assert box <= bottom, f"{kind} cut at the box edge: {box} > {bottom}"
+    hud.request.get(f"http://127.0.0.1:{relay_port}/league/widget/2/hide")
+    print(f"  [PASS] a 20-row table shows {shown} whole rows and '{more}'")
     sim.clear_answers()
     for _scene, left, path in SCENES[1:]:
         view = browser.new_page(viewport={"width": 1920, "height": 1080})
@@ -137,6 +161,7 @@ def live_pages(browser, relay_port, sim, shots):
         assert view.locator("[data-league-widget]").count() == placed, f"{path}: only the placed widgets"
         view.close()
     panel.wait_for_function("() => document.querySelector('#leagueWidgets .lwrow .lwstate').textContent.startsWith('On air')")
+    panel.wait_for_function("() => document.querySelectorAll('#leagueWidgets .lwrow button')[1].textContent === 'SHOW'")
     if shots:
         panel.locator("#leagueSec").screenshot(path=str(ROOT / "src/docs/wiki/images/director-panel-league.png"))
     print("  [PASS] the Director shows a widget and the HUD renders the service's text as text")

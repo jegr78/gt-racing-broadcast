@@ -64,6 +64,7 @@ that's the operator's reference for actually using the board.
 
 This page covers only how the board is wired up. The relay buttons (`Feeds Next`,
 `Feeds Reload`, `Feed A Reload`, `Feed B Reload`, `POV Reload`, `POV Stop`, the **BREAK** visibility/defaults buttons,
+`LEAGUE WIDGET 1`/`2` → `/league/widget/<n>/toggle` (the first and second widget of the loaded league event, by position in the service's list),
 `POV Toggle` → `/pov/toggle`, `Telemetry Toggle` → `/telemetry/toggle` (solo POV only; elsewhere the relay answers 404 and the press does nothing), and the `FEED A/B ROBUST/AUTO` quality switches → `/feed/<A|B>/quality/<tier>`)
 use the **Generic HTTP Requests**
 connection: see [Relay Mode §4](Relay-Mode#4-control-it-companion--relay). Everything else

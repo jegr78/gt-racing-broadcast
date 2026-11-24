@@ -124,6 +124,18 @@ def t_markup_escapes_the_title_and_only_placed_widgets_reach_a_page():
         pass
 
 
+def t_the_widget_colours_follow_the_profiles_overlay_variables():
+    page = lw.enhance_html(BASE, [SCORE], {lw.slot_id("match-score"): {}})
+    (slot,) = ob.extract_slots(page)
+    assert slot["vars"] == {"color": "var(--league-widget-text, #ffffff)",
+                            "background": "var(--league-widget-bg, rgba(0,0,0,.8))",
+                            "borderColor": "var(--league-widget-accent, #27d34d)"}, \
+        "the builder saves the colours as references, so a profile's :root variables restyle the widget"
+    css = ob.compile_overlay_css({"slots": {slot["id"]: {"left": 10, **slot["vars"]}},
+                                  "customCss": ":root { --league-widget-bg: #102030; }"}, [slot])
+    assert "background: var(--league-widget-bg, rgba(0,0,0,.8))" in css and "--league-widget-bg: #102030" in css, css
+
+
 def t_the_builder_offers_each_widget_as_a_slot_and_compiles_its_style():
     page = lw.enhance_html(BASE, [SCORE, TABLE], {lw.slot_id(w["id"]): {} for w in (SCORE, TABLE)})
     slots = {s["id"]: s for s in ob.extract_slots(page)}
@@ -263,6 +275,20 @@ def t_a_value_change_reaches_the_pages_only_once_the_director_shows_it():
         assert live.set("2", "toggle") == (True, "standings") and len(live.data()["widgets"]) == 2
         assert live.set("match-score", "toggle") == (True, "match-score")
         assert [w["id"] for w in live.data()["widgets"]] == ["standings"]
+
+
+def t_loading_an_event_hides_every_widget_again():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        live, _snap = _live(d, sim)
+        live.client.step()
+        live.set("1", "show")
+        assert live.data()["widgets"], "shown"
+        live.client.step()
+        ls.update(ls.path_in(d), current="leg-2")
+        assert live.data()["widgets"], "a race change keeps the switch"
+        ls.store(ls.path_in(d), REF, ls.fetch_event(_cfg(sim), REF), now=4e9)
+        assert live.data()["widgets"] == [], "a reload of the event starts hidden again"
+        assert [r["shown"] for r in live.director()["widgets"]] == [False, False]
 
 
 def t_the_switch_refuses_a_widget_the_event_does_not_list():
@@ -542,6 +568,8 @@ function el(tag) {
   const e = {tagName: tag, children: [], _text: '', className: '', hidden: false, attrs: {},
     classList: {contains(c) { return e.className.split(' ').includes(c); }},
     getAttribute(a) { return e.attrs[a]; },
+    querySelector(sel) { const c = sel.slice(1); const find = n => n.className === c ? n
+      : n.children.map(find).find(Boolean); return e.children.map(find).find(Boolean) || null; },
     append(...k) { e.children.push(...k); }, appendChild(k) { e.children.push(k); return k; },
     replaceChildren(...k) { e.children = k; },
     set textContent(v) { e._text = String(v); e.children = []; }, get textContent() { return e._text; }};
@@ -553,8 +581,13 @@ function el(tag) {
 }
 global.window = global;
 global.performance = {now: () => 0};
+// A slot of `height` px: 40 px of title, 20 of table head, 30 per table line.
+const lines = e => e.children.reduce((n, k) => n + (['lw-rank', 'lw-more'].includes(k.className) ? 30
+  : k.className === 'lw-head' ? 20 : 0) + lines(k), 0);
 const slots = JSON.parse(process.argv[3]).map(s => { const e = el('div');
-  e.className = 'league-widget lw-form-' + s.form; e.attrs['data-league-widget'] = s.id; e.hidden = true; return e; });
+  e.className = 'league-widget lw-form-' + s.form; e.attrs['data-league-widget'] = s.id; e.hidden = true;
+  if (s.height) { e.clientHeight = s.height; Object.defineProperty(e, 'scrollHeight', {get: () => 40 + lines(e)}); }
+  return e; });
 made.length = 0;
 global.document = {currentScript: null, readyState: 'complete', createElement: el,
   querySelectorAll: () => slots};
@@ -596,6 +629,23 @@ def t_the_renderer_draws_score_and_table_and_hides_the_rest():
     assert out["texts"] == ["Match", "provisional", "", "", "A", "3",
                             "Champ", "", "Pts", "1", "Ann", "25"], out["texts"]
     assert out["expired"] == [True, False, True, True], "a held value hides at its deadline, a sample never"
+
+
+def t_a_table_keeps_only_the_whole_rows_that_fit_and_counts_the_rest():
+    rows = [{"rank": i, "name": f"Driver {i}", "value": str(30 - i)} for i in range(1, 21)]
+    data = {"widgets": [{"id": "t", "form": "table", "title": "Champ", "holdFor": 30,
+                         "value": {"value_title": "Pts", "rows": rows}},
+                        {"id": "u", "form": "table", "title": "Short", "holdFor": 30,
+                         "value": {"rows": rows[:2]}}]}
+    out = _render([{"id": "t", "form": "table", "height": 200}, {"id": "u", "form": "table", "height": 200}], data)
+    if out is None:
+        return
+    first = out["texts"][:out["texts"].index("Short")]
+    # 200 px: 40 title + 20 head + 3 rows + the "+17 more" line = 190
+    assert first == ["Champ", "", "Pts", "1", "Driver 1", "29", "2", "Driver 2", "28", "3", "Driver 3", "27",
+                     "+17 more"], first
+    assert out["texts"][out["texts"].index("Short"):] == ["Short", "", "1", "Driver 1", "29", "2", "Driver 2", "28"], \
+        "a table that fits keeps every row and no count line"
 
 
 def t_the_renderer_never_parses_service_text_as_markup():

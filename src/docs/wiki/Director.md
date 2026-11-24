@@ -376,8 +376,9 @@ where the producer placed it in the Overlay builder, and only while the service 
 30 seconds after the last good answer it hides by itself, and the card says why (for
 example "no good answer from the league service for 31 s" with the service's error). A
 widget the service no longer lists stays in the list without a switch. A relay restart
-hides every widget again. On the Companion board, **LEAGUE WIDGET 1** and **LEAGUE
-WIDGET 2** (page 3) switch the first and second widget of the event's list.
+or loading the event again hides every widget. On the Companion board, **LEAGUE WIDGET 1** and **LEAGUE
+WIDGET 2** (page 3) switch the first and second widget of the event's list, by position:
+if the service reorders its list, the buttons follow the new order.
 
 ![Director Panel: the League service card with the current race, the result line and the two widgets, one on air](images/director-panel-league.png)
 

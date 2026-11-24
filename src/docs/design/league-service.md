@@ -133,8 +133,13 @@ shows it dimmed, and on air it stays hidden because the loaded event does not na
 
 A placed widget reaches a live page as a hidden element; the page polls
 `/league-widgets/data` once a second and fills it from elements and text only. The
-league look is the scene's own: the widget inherits the page font, and its position, size,
-colours, border and font are slot props of the builder like any HUD slot.
+league look comes from the profile's overlay CSS: the widget inherits the page font, and
+its colours are the variables `--league-widget-bg`, `--league-widget-text` and
+`--league-widget-accent` (the border), which a league sets in `:root` of its overlay CSS.
+Without them the widget is white on translucent black with a green border. The builder
+keeps those colours as variable references on save; position, size, font and a colour
+the producer sets by hand are slot props like any HUD slot. A table shows only the whole
+rows that fit its box, the last line counting the rest ("+11 more"); a row is never cut.
 
 ### Result
 
@@ -237,13 +242,16 @@ The tick hands it the standings and never waits for it.
 - Placement: a slot per widget in the scene builders, positioned and styled per scene
   like the audience counters.
 - On air: the Director shows and hides each widget. Default hidden. The switch lives in
-  the relay's memory, so a relay restart hides every widget again. A widget is on air
+  the relay's memory, so a relay restart hides every widget again, and so does loading an
+  event (another reference or a reload of the same one); a change of the current race
+  keeps it. A widget is on air
   only when it is shown, placed in the scene and has a value inside the hold. The routes
   are `GET /league/widgets` (each widget with its switch, the scenes it is placed in and
   the reason it cannot show) and `GET /league/widget/<id or place>/<show|hide|toggle>`,
   director-only under `/console`. The place is the widget's 1-based position in the
   event's list, so the Companion buttons **LEAGUE WIDGET 1** and **LEAGUE WIDGET 2** on
-  page 3 work for any league.
+  page 3 work for any league. A service that reorders its widget list moves what a
+  button switches.
 - Timing page: the profile switch decides, independent of the on-air state. The block
   sits above the table. The league timing host stores and broadcasts the relay's state
   body unparsed, so the block reaches hosted viewers without a Worker change; the

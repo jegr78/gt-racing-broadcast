@@ -339,6 +339,14 @@ resize and restyle it like any other slot (position, size, font, colours, border
 and the Split HUD can show the same widget in different places. The driver dashboard has
 no league widgets.
 
+The widget uses the scene's font. Its colours follow three variables a league sets in
+the overlay CSS (**Fonts & advanced CSS**), for example
+`:root { --league-widget-bg: #0b2545; --league-widget-accent: #f2c14e; }`
+(`--league-widget-text` for the text). Without them it is white on translucent black
+with a green border. A colour you set on the slot itself wins for that scene. A table
+shows as many whole rows as its box holds and ends with a line such as "+11 more"; make
+the box taller to show more rows.
+
 A placed widget stays hidden on air until the Director shows it
 ([Director → League service](Director#league-service)). If the league service stops
 listing a widget, the builder keeps it dimmed and marked "no longer listed": its placement

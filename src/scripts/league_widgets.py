@@ -90,8 +90,7 @@ WIDGET_PROPS = ("left", "top", "width", "height", "padding", "fontSize", "fontFa
 WIDGET_CSS = """
 .league-widget{position:absolute;box-sizing:border-box;left:1400px;top:70px;width:420px;
 height:130px;padding:12px 16px;z-index:10;font-size:24px;line-height:1.2;font-family:inherit;
-color:#fff;background:rgba(0,0,0,.8);border:2px solid var(--lw-accent,#27d34d);border-radius:12px;
-overflow:hidden}
+border:2px solid;border-radius:12px;overflow:hidden}
 .league-widget.lw-form-table{height:330px}
 .league-widget[hidden],.league-widget [hidden]{display:none!important}
 .lw-title{display:block;font-size:.7em;opacity:.85;text-transform:uppercase;letter-spacing:.04em}
@@ -104,7 +103,17 @@ overflow:hidden}
 .lw-head{grid-column:3;font-size:.7em;opacity:.8;text-align:right}
 .lw-rank,.lw-row-value{font-variant-numeric:tabular-nums;text-align:right}
 .lw-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lw-more{grid-column:1/-1;font-size:.8em;opacity:.8}
 """
+# The league look: a profile sets these in its overlay CSS (`:root { --league-widget-bg: ... }`).
+COLOURS = {"color": "var(--league-widget-text, #ffffff)",
+           "background": "var(--league-widget-bg, rgba(0,0,0,.8))",
+           "border-color": "var(--league-widget-accent, #27d34d)"}
+
+
+def _colour_rule(wid):
+    """The slot's own #id rule, so the builder keeps the colours as variable references."""
+    return f"#{slot_id(wid)}{{" + ";".join(f"{k}:{v}" for k, v in COLOURS.items()) + "}\n"
 
 
 def markup(widget):
@@ -122,8 +131,8 @@ def enhance_html(base, definitions, placements, live=False):
     selected = [w for w in definitions if slot_id(w["id"]) in placements]
     if not selected:
         return base
-    base = base.replace("</style>", WIDGET_CSS + "</style>", 1)
     elements = "".join(markup(w) for w in selected)
+    base = base.replace("</style>", WIDGET_CSS + "".join(_colour_rule(w["id"]) for w in selected) + "</style>", 1)
     script = f'<script src="{SCRIPT}" data-league-live></script>' if live else ""
     marker = "<script" if "<script" in base else "</body>"
     return base.replace(marker, elements + script + marker, 1)
@@ -193,6 +202,7 @@ class Live:
         self._env_path = env_path
         self._shown = set()
         self._lock = threading.Lock()
+        self._loaded = None             # (ref, loaded_at) of the event the switch belongs to
         self._order = None
         self._env_stamp = _stamp(env_path)
         self.client = league_service.Client(lambda: self._settings()[0], self.body, self.forms, **client_kw)
@@ -221,7 +231,13 @@ class Live:
         self.client.run(stop)
 
     def _event_widgets(self):
+        """The loaded event's widgets; loading an event hides every widget again."""
         ev = league_service.read(self._event_path)
+        loaded = (ev["ref"], ev["loaded_at"]) if ev else None
+        with self._lock:
+            if loaded != self._loaded:
+                self._loaded = loaded
+                self._shown.clear()
         return ev["widgets"] if ev else []
 
     def forms(self):
@@ -256,11 +272,12 @@ class Live:
     def data(self):
         """What the overlay pages render: each widget the Director shows that has a
         value inside the hold, with the seconds it may still be shown."""
+        widgets = self._event_widgets()
         held = self.client.held()
         with self._lock:
             shown = set(self._shown)
         out = []
-        for w in self._event_widgets():
+        for w in widgets:
             value = held.get(w["id"])
             if w["id"] in shown and value is not None:
                 out.append({"id": w["id"], "form": w["form"], "title": w["title"],
@@ -274,9 +291,9 @@ class Live:
         st = dict(self.client.status(), problem=self._settings()[1])
         held = self.client.held()
         placed = placements(self._overlay_dir) if self._overlay_dir else {}
+        listed = self._event_widgets()
         with self._lock:
             shown = set(self._shown)
-        listed = self._event_widgets()
         rows = []
         for i, w in enumerate(listed, 1):
             rows.append({"id": w["id"], "index": i, "title": w["title"], "form": w["form"], "listed": True,
