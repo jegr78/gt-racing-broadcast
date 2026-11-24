@@ -274,37 +274,35 @@ def t_a_broken_http_answer_raises_a_service_error():
 
 
 def t_a_dripping_answer_is_cut_off_at_the_deadline():
-    import socket
-    srv = socket.socket()
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    stop = threading.Event()
+    clock, reads, opened = [1000.0], [], {}
 
-    def serve():
-        conn, _ = srv.accept()
-        conn.recv(65536)
-        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
-        try:
-            end = time.monotonic() + 4.0   # a client without a deadline waits this long, then fails
-            while not stop.wait(0.2) and time.monotonic() < end:
-                conn.sendall(b" ")
-        except OSError:
-            pass  # the client hung up
-        conn.close()
-    t = threading.Thread(target=serve, daemon=True)
-    t.start()
-    cfg = ls.Settings(f"http://127.0.0.1:{srv.getsockname()[1]}/racecast", KEY)
-    started = time.monotonic()
+    class _Drip:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read1(self, _n):
+            reads.append(clock[0])
+            clock[0] += 0.25    # each byte arrives in time for the socket, never for the deadline
+            return b" "
+
+    def opener(url, **kw):
+        opened.update(kw)
+        return _Drip()
+
+    real = ls.time
+    ls.time = type("_T", (), {"monotonic": staticmethod(lambda: clock[0])})
     try:
-        ls.fetch_event(cfg, "REF", deadline_s=1.0)
+        ls.fetch_event(ls.Settings("https://l.example/racecast", KEY), "REF", opener=opener, deadline_s=1.0)
         raise AssertionError("a dripping answer must not be waited for")
     except ls.ServiceError as e:
-        took = time.monotonic() - started
-        assert took < 3.0 and "s" in str(e), (took, str(e))
+        assert str(e) == "the league service's answer took too long", str(e)
     finally:
-        stop.set()
-        t.join(2)
-        srv.close()
+        ls.time = real
+    assert opened["timeout"] == 1.0, f"no socket wait outlasts the deadline: {opened}"
+    assert reads == [1000.0, 1000.25, 1000.5, 1000.75, 1001.0], f"reading stops at the first chunk past the deadline: {reads}"
     assert ls.READ_DEADLINE_S == 10.0
 
 
@@ -450,6 +448,22 @@ def t_client_keeps_a_minimum_gap_between_sends():
     assert sent == [100.0, 100.0 + ls.MIN_GAP_S], sent
 
 
+def t_client_paces_its_sends_at_the_tick():
+    clock, sent = _Clock(), []
+
+    def post(*_a):
+        sent.append(clock.t)
+        clock.t += 0.5
+        return {}
+    c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1}, dict,
+                  post=post, clock=clock, log=_Log())
+    wait = c.step()
+    assert wait == ls.TICK_S - 0.5, f"the next send is due one tick after the last one started: {wait}"
+    clock.t += wait
+    c.step()
+    assert sent == [100.0, 100.0 + ls.TICK_S], sent
+
+
 def t_client_forgets_its_values():
     c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1}, dict,
                   post=lambda *a: {"w": {"values": []}}, clock=_Clock(), log=_Log())
@@ -476,20 +490,24 @@ def t_client_without_a_service_sends_nothing():
 
 
 def t_client_thread_posts_live_state_to_the_sim():
+    stop, posted = threading.Event(), threading.Event()
+
+    def post(*a, **kw):
+        try:
+            return ls.post_live(*a, **kw)
+        finally:
+            stop.set()
+            posted.set()
+
     with _sim() as sim:
         cfg = _cfg(sim)
         c = ls.Client(lambda: cfg, lambda: ls.live_state(league_sim.DEFAULT_REF, "leg-1", SNAP),
-                      lambda: {"match-score": "score", "standings": "table"}, log=_Log())
-        stop = threading.Event()
+                      lambda: {"match-score": "score", "standings": "table"}, post=post, log=_Log())
         t = threading.Thread(target=c.run, args=(stop,), daemon=True)
         t.start()
-        deadline = time.monotonic() + 5
-        while not c.values() and time.monotonic() < deadline:
-            time.sleep(0.05)
+        assert posted.wait(60), "hang guard: the client thread never posted"
         c.wake()
-        stop.set()
-        c.wake()
-        t.join(5)
+        t.join(60)
         assert not t.is_alive(), "the client thread ends on stop"
         assert set(c.values()) == {"match-score", "standings"}, c.values()
         assert sim.calls(call="live")[0]["body"]["entries"][0]["driver_ref"] == ""

@@ -413,19 +413,23 @@ def t_the_exporter_with_the_real_race_service_and_recording():
 
 
 def t_the_sender_thread_stops_with_the_relay():
+    stop, posted = threading.Event(), threading.Event()
+
+    def post(*a, **kw):
+        try:
+            return ls.post_result(*a, **kw)
+        finally:
+            stop.set()
+            posted.set()
+
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
-        exp, src, wall, _path = _setup(d, sim)
-        stop = threading.Event()
+        exp, src, wall, _path = _setup(d, sim, post=post)
         t = threading.Thread(target=exp.run, args=(stop,), daemon=True)
         t.start()
         _run_race(exp, src, wall)
-        for _ in range(100):
-            if sim.calls(call="result"):
-                break
-            threading.Event().wait(0.05)
-        stop.set()
+        assert posted.wait(60), "hang guard: the sender thread never posted"
         exp._wake.set()
-        t.join(5)
+        t.join(60)
         assert not t.is_alive() and sim.calls(call="result"), "a queued result goes out on the thread"
 
 
