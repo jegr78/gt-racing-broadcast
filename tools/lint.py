@@ -251,14 +251,9 @@ def _dead_stores_in(fn):
                 if hasattr(child, "name"):
                     rebinds.append((child.name, (child.lineno, child.col_offset)))
                 nested_loads.update(n.id for n in ast.walk(child) if isinstance(n, ast.Name))
-                for decl in ast.walk(child):
-                    if isinstance(decl, (ast.Global, ast.Nonlocal)):
-                        skip.update(decl.names)
                 continue
             if isinstance(child, (ast.Global, ast.Nonlocal)):
                 skip.update(child.names)
-            elif isinstance(child, ast.Delete):
-                skip.update(n.id for t in child.targets for n in ast.walk(t) if isinstance(n, ast.Name))
             elif isinstance(child, ast.Call) and getattr(child.func, "id", None) in ("locals", "vars", "eval", "exec"):
                 return None
             elif isinstance(child, ast.Name):
@@ -322,11 +317,11 @@ def find_unused_last_assignments(source):
     the never-read case and _-prefixed names. In tuple unpacking, CodeQL's rule
     applies: each immediate tuple's names are flagged only when none of them is
     read later, and a bare `_` or a starred element exempts the tuple. Augmented
-    and annotated stores are left out. Skipped everywhere: global/nonlocal/del
+    and annotated stores are left out. Skipped everywhere: global/nonlocal
     names, names read in a nested scope, functions that call
-    locals()/vars()/eval()/exec(), a store that a later store of the name
-    redefines (CodeQL's py/multiple-definition), which includes every store
-    inside a loop. Returns [] for unparseable source."""
+    locals()/vars()/eval()/exec(), a store that a later store or del of the
+    name redefines (CodeQL's py/multiple-definition), which includes every
+    store inside a loop. Returns [] for unparseable source."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
