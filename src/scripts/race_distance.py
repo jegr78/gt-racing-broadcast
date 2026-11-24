@@ -86,8 +86,10 @@ prediction may move a sample a lap.
   of GT7's counter. A lap counts only when the car counted for all of it (not the
   formation lap, not lap 1 of a follow-up lobby, not a lap with a start, red flag,
   change or move in it), and GT7's `last_ms` for it is taken only when it agrees with
-  the relay's own timing within LAP_TIME_TOLERANCE. The fastest of those is the race's
-  fastest lap.
+  the relay's own timing within LAP_TIME_TOLERANCE. GT7 marks no lap invalid in
+  `last_ms`; its `best_ms` takes only valid laps, so a lap counts for the fastest lap
+  only when `best_ms` equals its time within LAP_TIME_WAIT_S of the line. The fastest
+  of those is the race's fastest lap.
 - Corrections add metres and pit stops per entry; `override_change` makes a team's
   connection active at once, continuing from the current distance.
 - Estimate: Race Control puts a quiet car S seconds behind or ahead of a reference car.

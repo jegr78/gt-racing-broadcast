@@ -356,7 +356,13 @@ It never carries connection ids, corrections or who made them.
   from GT7 only when both agree within a second (3 % on long laps). The formation lap,
   lap 1 of a follow-up lobby and any lap with a start, red flag, change or move in it
   do not count.
-- **The fastest race lap** is kept across stints and survives a relay restart on the same
+- **The fastest race lap** takes only a lap GT7 accepted: GT7 sends no validity flag,
+  but it makes only a valid lap the car's best lap, so a lap counts when GT7's best lap
+  takes its time within 6 seconds of the line. A red lap (tests saw GT7 mark lap 1 of a race red,
+  and laps into the pit lane on Spa) still shows as last lap. A valid lap
+  slower than the car's own GT7 best never counts, which only matters when that best was
+  a lap the race left out, such as the formation lap; then correct it by hand.
+  It is kept across stints and survives a relay restart on the same
   track layout; the next [new event](#new-event-or-continued-event) or a race reset clears it. A lap faster than the
   line allows at 120 m/s never counts. Race Control and the director can clear or set it
   (`POST /drivers/race/fastest`, with an optional `class` for one class's lap).

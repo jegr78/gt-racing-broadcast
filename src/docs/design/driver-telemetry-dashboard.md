@@ -229,6 +229,22 @@ director.
   Laps outside the race do not count: the formation lap, lap 1 of a follow-up
 lobby and the lap containing a change or red flag wait. GT7 decides whether a lap
 is valid; Race Control and the director correct the time.
+  - GT7 sends no validity flag. Its lap time (`last_ms`) carries every lap, red ones
+    too; its best lap (`best_ms`) takes only a valid lap and only when it is no slower
+    than the console's best so far. The probe (#1110) saw GT7 mark lap 1 of all three races
+    red, in one Spa 24h Layout race every lap touching the pit lane, and in Time Trial
+    cut laps; a race lap with a cut and a time penalty stayed valid.
+  - So a lap counts for the fastest lap, overall and per class, only when GT7 takes
+    it as the car's best lap: `best_ms` equals the lap's time in a sample within
+    6 s of the line, the same window the relay waits for `last_ms`. Every lap time
+    still shows as the entry's last lap.
+  - A valid lap slower than the console's own best never shows in `best_ms` and never
+    counts. It can only be the race's fastest when that best was a lap the race left
+    out (the formation lap, a lap with a red flag in it, a lap the relay missed in a
+    sender gap or a relay restart); Race Control and the director correct it then.
+    Each console keeps its own best and clears it in a new session, so every lobby and
+    every driver of an endurance team starts empty.
+  - Qualifying ranks by `best_ms` directly and needs no such check.
 - Qualifying shows the ranking of the running segment by GT7 best lap with gaps
   between best laps. Elimination and grid stay with the league and the Sheet.
 - A readiness list shows per entry whether a sender is connected before the start;
