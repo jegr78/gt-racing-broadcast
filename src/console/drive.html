@@ -56,6 +56,12 @@ li{margin-bottom:6px}
     <p class="note">Race Control approves your registration before the broadcast uses your
       telemetry. Start the sender anyway: until then it prints <code>waiting for approval by
       Race Control</code> and asks again every 10 seconds.</p>
+    <label for="console">PlayStation IP address</label>
+    <input id="console" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="Needed on iPhone and iPad">
+    <p class="dim">On an iPhone or iPad the sender cannot find the PlayStation by itself, so
+      enter its address here (the PlayStation's network settings show it) and the commands
+      below include it. Elsewhere leave it empty.</p>
+    <div id="consoleErr" class="err" role="alert" hidden></div>
     <p>With Python 3.8 or newer: download
       <a id="script" download="racecast-sender.py">racecast-sender.py</a>, open a terminal in
       that folder and run, on macOS, Linux, Termux (Android) or a-Shell (iOS)</p>
@@ -77,13 +83,16 @@ li{margin-bottom:6px}
       <li><b>Nothing else receives your telemetry:</b> run the command as shown.</li>
       <li><b>A dashboard app on your phone:</b> run the sender on a second device on the same
         network (PC, laptop, tablet). Two programs cannot share one device's telemetry port.</li>
-      <li><b>SimHub on the same PC:</b> add <code>--forward 127.0.0.1:PORT</code> and point
-        SimHub at that port with its own heartbeat off.</li>
-      <li><b>GT Race Engineer forwards to a port:</b> add <code>--listen PORT</code>; the sender
-        then sends no heartbeat.</li>
+      <li><b>SimHub on the same PC:</b> if SimHub forwards its UDP packets, add
+        <code>--listen PORT</code> with its forwarding port and leave SimHub as it is. Or add
+        <code>--forward 127.0.0.1:PORT</code> and set SimHub's game telemetry port to that
+        port, then restart SimHub.</li>
+      <li><b>GT Race Engineer on the same device:</b> add <code>--forward 127.0.0.1:PORT</code>
+        and enter the same address and port under its telemetry forwarding, which makes it
+        receive from the sender.</li>
     </ul>
-    <p class="dim">Allow inbound UDP 33740 in the device's firewall: the console answers from a
-      port of its own. On iOS keep a-Shell in front with the screen on and the device charging.
+    <p class="dim">A firewall that filters inbound UDP must allow port 33740: the console
+      answers from a port of its own. On iOS keep a-Shell in front and the device charging.
       The driver guide in the GT Racing Broadcast wiki covers every platform.</p>
   </section>
 </main>
@@ -98,6 +107,27 @@ li{margin-bottom:6px}
   const release = /^v\d+\.\d+\.\d+$/.test(version) ? repo + 'download/' + version + '/' : repo + 'latest/download/';
   let multi = false;
 
+  let registered = null;
+
+  function senderArgs(origin, code, ip) {
+    const args = '--url ' + origin + '/console/drive/ingest --code ' + code;
+    ip = ip.trim();
+    if (!ip) return args;
+    const octet = '(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
+    if (!new RegExp('^' + octet + '(\\.' + octet + '){3}$').test(ip)) return false;
+    return args + ' --console ' + ip;
+  }
+  function showCommands() {
+    if (!registered) return;
+    const args = senderArgs(location.origin, registered, $('console').value);
+    $('consoleErr').textContent = args === false ? 'Type the address as four numbers, like 192.168.1.20.' : '';
+    $('consoleErr').hidden = args !== false;
+    if (args === false) return;
+    $('cmdPy').textContent = 'python3 racecast-sender.py ' + args;
+    $('cmdPyWin').textContent = 'py racecast-sender.py ' + args;
+    $('cmdWin').textContent = '.\\racecast-sender-windows.exe ' + args;
+    $('cmdMac').textContent = './racecast-sender-macos ' + args;
+  }
   function fail(text) { $('err').textContent = text; $('err').hidden = !text; }
   function fill(select, values) {
     for (const v of values) select.appendChild(new Option(v, v));
@@ -133,17 +163,15 @@ li{margin-bottom:6px}
       d = await r.json();
     } catch (e) { return fail('The broadcast is not reachable.'); }
     if (!r.ok || !d.ok) return fail(d.error || 'Registration failed.');
-    const args = '--url ' + location.origin + '/console/drive/ingest --code ' + d.code;
-    $('cmdPy').textContent = 'python3 racecast-sender.py ' + args;
-    $('cmdPyWin').textContent = 'py racecast-sender.py ' + args;
-    $('cmdWin').textContent = '.\\racecast-sender-windows.exe ' + args;
-    $('cmdMac').textContent = './racecast-sender-macos ' + args;
+    registered = d.code;
+    showCommands();
     $('script').href = '/console/drive/sender.py?i=' + encodeURIComponent(invite);
     $('winExe').href = release + 'racecast-sender-windows.exe';
     $('macExe').href = release + 'racecast-sender-macos';
     $('runSec').hidden = false;
     $('runSec').scrollIntoView({behavior: 'smooth', block: 'start'});
   });
+  $('console').addEventListener('input', showCommands);
   document.addEventListener('click', e => {
     const id = e.target.dataset && e.target.dataset.copy;
     if (id) navigator.clipboard.writeText($(id).textContent).then(() => {
