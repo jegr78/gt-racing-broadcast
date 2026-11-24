@@ -175,3 +175,17 @@ Deno.test("the block sits above the timing table", () => {
   const league = html.indexOf('<section id="league" hidden>'), table = html.indexOf('<table id="timing">');
   if (!(league > 0 && league < table)) throw new Error(`league block at ${league}, table at ${table}`);
 });
+
+Deno.test("text limits count characters as the relay does, not UTF-16 units", () => {
+  const label = "\u{1F3C1}".repeat(40);
+  const got = L.leagueWidgets({ league: [{ id: "s", form: "score", title: "\u{1F3C6}".repeat(60),
+    value: { values: [{ label, value: "\u{1F947}".repeat(16) }, { label: label + "x", value: "1" }] } }] });
+  eq(got[0].title.length, 120, "a 60-emoji title stays");
+  eq(got[0].items.map((i) => i.label), [label], "40 emoji fit, 41 characters do not");
+});
+
+Deno.test("a row ranked beyond 999 is left out whole", () => {
+  const rows = [{ rank: 999, name: "a", value: "1" }, { rank: 1000, name: "b", value: "1" }];
+  eq(L.leagueWidgets({ league: [{ id: "t", form: "table", title: "", value: { rows } }] })[0].rows.map((r) => r.rank),
+     [999], "rank cap");
+});

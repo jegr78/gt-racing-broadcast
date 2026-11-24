@@ -141,6 +141,13 @@ def t_widget_values_are_bounded_and_cut_to_their_form():
         {f"w{i}" for i in range(8)}, "eight widgets at most"
 
 
+def t_a_row_ranked_beyond_max_rank_is_dropped_whole():
+    rows = [{"rank": ls.MAX_RANK, "name": "Last", "value": "1"}, {"rank": ls.MAX_RANK + 1, "name": "Over", "value": "2"},
+            {"rank": 10 ** 30, "name": "Huge", "value": "3"}]
+    v = ls.parse_widget_value({"rows": rows}, "table")
+    assert [r["name"] for r in v["rows"]] == ["Last"], f"a rank over {ls.MAX_RANK} drops its row: {v}"
+
+
 def t_result_status_keeps_the_graphic_only_on_the_service_host():
     url = "https://league.example/racecast"
     s = ls.parse_result_status({"v": 1, "status": "stored", "message": "ok",

@@ -230,8 +230,9 @@ Security boundaries that apply everywhere:
   timing page `/console/timing` and its `/data` (#1128), authorized by the event's
   separate timing link (`timing_link`): GET only, the delayed timing allowlist
   (`driver_race.public_view`, plus the league widgets' id, form, title and value with the
-  same delay when the profile's `LEAGUE_WIDGETS_TIMING` is on, #1256), one upload budget for all viewers that stretches their
-  poll interval instead of turning anyone away, plus the roster's brand logos
+  same delay when the profile's `LEAGUE_WIDGETS_TIMING` is on, #1256), one upload budget
+  for all viewers that stretches their poll interval instead of turning anyone away, plus
+  the roster's brand logos
   (`/console/timing/brand/<key>`, PNG only).
 - The `race_control` role reaches exactly one program change: the full `RED FLAG`
   (`POST /console/race-control/red-flag`, #1114) raises the Standby Cover, sets the HUD

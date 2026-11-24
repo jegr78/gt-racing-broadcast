@@ -596,6 +596,18 @@ def t_the_hold_shifts_with_the_delay_when_the_service_dies():
         assert live.public(driver_race.MAX_DELAY_S) == [], "never older than its hold, whatever the delay"
 
 
+def t_a_gap_longer_than_the_hold_stays_a_gap_for_an_unchanged_value():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        live.client.step()                                      # t=100
+        clock.t = 150.0
+        live.client.step()                                      # the same value again after 50 s of silence
+        clock.t = 185.0
+        assert live.public(50) == [], "at t=135 the value had been gone for 35 s, longer than the hold"
+        assert live.public(30), "and at t=155 it was back"
+
+
 def t_a_new_event_forgets_the_delayed_values_too():
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
         clock = _Clock()
@@ -605,6 +617,42 @@ def t_a_new_event_forgets_the_delayed_values_too():
         assert live.public(30), "held"
         ls.store(ls.path_in(d), REF, ls.fetch_event(_cfg(sim), REF), now=4e9)
         assert live.public(30) == [], "a reload of the event drops what the old one answered"
+
+
+def t_a_delay_beyond_the_history_shows_nothing():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        for _ in range(100):
+            live.client.step()
+            clock.t += ls.TICK_S
+        limit = ls.HISTORY_S - ls.HOLD_S
+        assert live.client.delayed(limit), "the longest covered delay still shows"
+        assert live.client.delayed(limit + 1) == {} and live.client.delayed(10 ** 6) == {}, \
+            "a delay the history cannot cover fails closed instead of showing a newer value"
+
+
+def t_wake_bursts_keep_the_history_small():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, snap = _live(d, sim, clock=clock)
+        sim.answer("live", body={"v": 1, "widgets": {"standings": {"rows": [
+            {"rank": i, "name": f"D{i}", "value": "1"} for i in range(1, ls.MAX_ROWS + 1)]}}})
+        for _ in range(300):
+            clock.t += ls.MIN_GAP_S
+            live.client._last_sent = None
+            live.client.step()
+        (kept,) = live.client._history.values()
+        assert len(kept) == 1, f"an unchanged value is kept once, not per answer: {len(kept)}"
+        assert len(kept[0][-1]["rows"]) == lw.PUBLIC_ROWS, "the history keeps only what the page can show"
+        sim.clear_answers()
+        for lap in range(300):
+            clock.t += ls.MIN_GAP_S
+            snap[0] = dict(SNAP, entries=[dict(e, laps=lap) for e in SNAP["entries"]])   # a new value every answer
+            live.client._last_sent = None
+            live.client.step()
+        kept = max(len(h) for h in live.client._history.values())
+        assert 100 < kept <= ls.HISTORY_S / ls.MIN_GAP_S + 1, f"{kept} answers kept per widget in a wake burst"
 
 
 def t_the_answer_history_covers_the_longest_delay_and_stays_bounded():
@@ -686,7 +734,7 @@ def t_the_upload_budget_still_holds_with_the_block():
         {"match-score": "score", "standings": "table"})
     letters = "abcdefghijklmnopqrstuvwxyz "
     worst = _block({"widgets": {f"w{i}": {"provisional": True, "value_title": "V" * ls.MAX_VALUE, "rows": [
-        {"rank": 1000 + r, "name": "".join(rnd.choice(letters) for _ in range(ls.MAX_LABEL)),
+        {"rank": ls.MAX_RANK - r, "name": "".join(rnd.choice(letters) for _ in range(ls.MAX_LABEL)),
          "value": str(rnd.randrange(10 ** (ls.MAX_VALUE - 1), 10 ** ls.MAX_VALUE))} for r in range(ls.MAX_ROWS)]}
         for i in range(ls.MAX_WIDGETS)}}, {f"w{i}": "table" for i in range(ls.MAX_WIDGETS)})
     assert len(worst) == ls.MAX_WIDGETS and all(len(w["value"]["rows"]) == lw.PUBLIC_ROWS for w in worst)

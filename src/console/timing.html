@@ -175,8 +175,9 @@
     // The league widgets block (#1256), typed and bounded again: the hosted page renders
     // what the host replays. Returns [{id, form, title, provisional, items | head + rows}].
     leagueWidgets: function (d) {
+      // Limits count characters (code points), as the relay does.
       const text = function (v, max, empty) {
-        return typeof v === "string" && v.length <= max && (empty || v.length > 0) ? v : null;
+        return typeof v === "string" && [...v].length <= max && (empty || v.length > 0) ? v : null;
       };
       if (!d || !Array.isArray(d.league)) return [];
       const out = [];
@@ -192,7 +193,7 @@
         } else {
           one.head = text(v.value_title, 16) || "";
           one.rows = (Array.isArray(v.rows) ? v.rows : []).filter(function (r) {
-            return r && Number.isInteger(r.rank) && r.rank >= 1 && text(r.name, 40) !== null
+            return r && Number.isInteger(r.rank) && r.rank >= 1 && r.rank <= 999 && text(r.name, 40) !== null
               && text(r.value, 16, true) !== null;
           }).slice(0, 64).map(function (r) { return {rank: r.rank, name: r.name, value: r.value}; });
         }

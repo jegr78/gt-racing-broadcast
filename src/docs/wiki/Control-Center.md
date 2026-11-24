@@ -109,8 +109,8 @@ Everything that belongs to a **league**, gathered in one view (the model behind 
   enter the reference the league's own service shows and **Load** the event's races and
   widgets. See [Configuration](Configuration). **Timing page** puts the league widgets
   above the [public live timing](Driver-Telemetry#public-live-timing) table, with the
-  timing's delay and independent of the Director's on-air switch (default off). The relay sends each race's result to the
-  service when the race finishes and retries after a failure. The section lists what the
+  timing's delay and independent of the Director's on-air switch (default off). The relay
+  sends each race's result to the service when the race finishes and retries after a failure. The section lists what the
   service answered per race: its status, message and an **Open ↗** link, with
   **Refresh** while the status is `pending`. A refusal (for example an unknown race) is
   final and shows the service's reason; a timeout or server error is retried. **Send result** sends the picked race again

@@ -108,7 +108,7 @@ corrections, so it never sees a missing car.
 A widget has a stable `id`, a title, one of two forms and sample values:
 
 - `score`: up to eight labelled values, for example two teams and their points.
-- `table`: up to 64 rows of rank, name and value, with an optional column title.
+- `table`: up to 64 rows of rank (1 to 999), name and value, with an optional column title.
 
 The answer to `POST /v1/live` maps widget ids to their current values. racecast
 renders both forms itself in the league look and sets every string as text. The

@@ -236,7 +236,8 @@ class Live:
         self._order = None
         self._env_stamp = _stamp(env_path)
         self._timing = (None, False)    # (profile.env stamp, timing switch) last read
-        self.client = league_service.Client(lambda: self._settings()[0], self.body, self.forms, **client_kw)
+        self.client = league_service.Client(lambda: self._settings()[0], self.body, self.forms,
+                                            history_cut=public_value, **client_kw)
 
     def body(self):
         """The LiveState to send, or None without a loaded event or a snapshot."""
