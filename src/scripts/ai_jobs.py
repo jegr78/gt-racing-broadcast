@@ -283,8 +283,30 @@ class WindowsTree:
             self.kernel.CloseHandle(handle)
 
 
+def _reap(proc, timeout):
+    """Wait for the owned leader without Popen's waitpid lock, which a KeyboardInterrupt
+    raised inside Popen.poll() or wait() leaves held."""
+    deadline = time.monotonic() + timeout
+    while proc.returncode is None:
+        try:
+            pid, status = os.waitpid(proc.pid, os.WNOHANG)
+        except ChildProcessError:
+            return  # Popen reaped it.
+        if pid:
+            proc.returncode = os.waitstatus_to_exitcode(status)
+            return
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        time.sleep(0.01)
+
+
 def terminate_tree(proc, tree=None):
     """Terminate only the owned process group/Job Object, never a saved PID."""
+    with _cleanup_shielded():
+        _terminate_tree(proc, tree)
+
+
+def _terminate_tree(proc, tree):
     pid = proc.pid
     # Never coerce process identities: int(MagicMock()) is 1, and killpg(1)
     # becomes kill(-1), targeting every permitted process on POSIX systems.
@@ -309,7 +331,7 @@ def terminate_tree(proc, tree=None):
             # a new process could have reused the released group identity.
             deadline = time.monotonic() + 10
             try:
-                proc.wait(timeout=10)
+                _reap(proc, 10)
             except (OSError, subprocess.TimeoutExpired) as reap_error:
                 raise JobError("cleanup_failed", "Could not reap the owned analysis process") from reap_error
             while True:
@@ -328,7 +350,10 @@ def terminate_tree(proc, tree=None):
                 else:
                     raise JobError("cleanup_failed", "The analysis process group remains after termination")
     try:
-        proc.wait(timeout=10)
+        if os.name == "nt":
+            proc.wait(timeout=10)
+        else:
+            _reap(proc, 10)
     except subprocess.TimeoutExpired:
         raise JobError(
             "cleanup_failed", "The analysis process tree did not terminate"
@@ -560,16 +585,41 @@ class BackgroundJobs:
 _BACKGROUND = BackgroundJobs()
 
 
+def _interrupt(_sig, _frame):
+    raise KeyboardInterrupt
+
+
+def _ignore(_sig, _frame):
+    pass  # A signal during cleanup must not skip the group kill.
+
+
+def _termination_signals():
+    return [sig for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)) if sig is not None]
+
+
+@contextlib.contextmanager
+def _cleanup_shielded():
+    """Ignore SIGTERM/SIGHUP while cleanup runs, then restore interrupt_on_termination's handler."""
+    held = []
+    if os.name != "nt" and threading.current_thread() is threading.main_thread():
+        held = [sig for sig in _termination_signals() if signal.getsignal(sig) is _interrupt]
+    for sig in held:
+        signal.signal(sig, _ignore)
+    try:
+        yield
+    finally:
+        for sig in held:
+            signal.signal(sig, _interrupt)
+
+
 def interrupt_on_termination():
     """POSIX: SIGTERM and SIGHUP raise KeyboardInterrupt in the main thread, so the
-    caller's cleanup ends a provider tree in its own session before the process exits."""
+    caller's cleanup ends a provider tree in its own session before the process exits.
+    terminate_tree ignores both while it runs."""
     if os.name == "nt" or threading.current_thread() is not threading.main_thread():
         return
-
-    def interrupt(_sig, _frame):
-        raise KeyboardInterrupt
-    for sig in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, interrupt)
+    for sig in _termination_signals():
+        signal.signal(sig, _interrupt)
 
 
 def shutdown_background():
@@ -852,7 +902,7 @@ class Runner:
 
                     def drain_impl(stream, target, parse=False):
                         count = 0
-                        pending = b""
+                        pending = bytearray()
                         with open(target, "wb") as f:
                             while True:
                                 chunk = stream.read1(8192)
@@ -865,6 +915,8 @@ class Runner:
                                 f.write(chunk)
                                 if parse:
                                     pending += chunk
+                                    if b"\n" not in chunk:
+                                        continue  # Re-splitting a long line on every chunk is quadratic.
                                     lines = pending.split(b"\n")
                                     pending = lines.pop()
                                     if len(pending) > MAX_OUTPUT_BYTES:
