@@ -242,14 +242,42 @@ def t_dead_assignment_skips_conservative_cases():
     assert _dead("def f():\n    x: int = 1\n    use(x)\n    x: int = 2\n") == [], "an annotated assignment"
 
 
+def t_dead_assignment_flags_a_tuple_whose_names_are_all_unread():
+    assert _dead("def f():\n    race, (a, b), t = field()\n    use(race, t)\n") == [(2, "a"), (2, "b")], \
+        "a nested tuple nothing reads, even if its names were never read at all"
+    assert _dead("def f():\n    (code, body), _c, _s = take()\n    use(code, body)\n") == [(2, "_c"), (2, "_s")], \
+        "CodeQL exempts only bare underscores in a tuple, not _-prefixed names"
+    assert _dead("def f():\n    cars = a, b = mk()\n    use(cars)\n") == [(2, "a"), (2, "b")], "a chained target"
+    assert _dead("def f(r):\n    _c, r.a, r.b = load()\n") == [(2, "_c")], "attribute elements are not names"
+
+
+def t_dead_assignment_leaves_a_tuple_with_one_read_name_alone():
+    assert _dead("def f():\n    ok, note, _notes = w()\n    use(ok, note)\n") == [], "one element is read"
+    assert _dead("def f():\n    (code, _b), c = take()\n    use(code, c)\n") == [], "the inner tuple has a read name"
+    assert _dead("def f(r):\n    _, r.a = load()\n") == [], "a bare underscore is the accepted placeholder"
+    assert _dead("def f():\n    a, *rest = xs()\n") == [], "a starred element"
+    assert _dead("def f(xs):\n    for v in xs:\n        use(a)\n        a, b = v\n") == [], "read by the next iteration"
+    assert _dead("def f():\n    a, b = xs()\n    return lambda: a\n") == [], "read in a nested scope"
+
+
 def t_dead_assignment_respects_loops():
     assert _dead("def f(xs):\n    x = 0\n    for v in xs:\n        use(x)\n        x = v\n") == [], \
         "the next iteration reads it"
     assert _dead("def f():\n    x = 0\n    while x < 3:\n        x = step()\n") == [], "the loop header reads it"
     assert _dead("def f(xs):\n    for v in xs:\n        while ok(v):\n            use(x)\n            x = v\n") == [], \
         "a read in the enclosing loop counts"
-    assert _dead("def f(xs):\n    x = 0\n    use(x)\n    for v in xs:\n        x = v\n") == [(5, "x")], \
-        "a loop that never reads the name does not save the store"
+    assert _dead("def f(xs):\n    x = 0\n    use(x)\n    for v in xs:\n        x = v\n") == [], \
+        "the loop repeats the store, a redefinition CodeQL leaves to py/multiple-definition"
+
+
+def t_dead_assignment_leaves_a_redefined_store_alone():
+    assert _dead("def f():\n    (c, b), _s = t()\n    use(c)\n    (c, b), _s = t()\n    use(c)\n") == [(4, "_s")], \
+        "only the last _s is flagged, the later store redefines the first"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    for x in xs:\n        pass\n") == [], \
+        "a loop target redefines it"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    import x\n") == [], "an import redefines it"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    def x():\n        pass\n") == [], \
+        "a def redefines it"
 
 
 def t_dead_assignment_repo_is_clean():

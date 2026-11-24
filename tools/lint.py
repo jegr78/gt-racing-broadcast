@@ -241,13 +241,15 @@ _LOOPS = (ast.For, ast.AsyncFor, ast.While)
 
 
 def _dead_stores_in(fn):
-    """(lineno, name) for the plain `name = value` stores in *fn*'s own scope that no
-    later Load reads, skipping every shape where source order is not enough."""
-    stores, loads, nested_loads, skip = [], [], set(), set()
+    """(lineno, name) for the stores in *fn*'s own scope that no later Load reads,
+    skipping every shape where source order is not enough."""
+    stores, loads, rebinds, nested_loads, skip = [], [], [], set(), set()
 
     def walk(node, loops):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, _SCOPES):
+                if hasattr(child, "name"):
+                    rebinds.append((child.name, (child.lineno, child.col_offset)))
                 nested_loads.update(n.id for n in ast.walk(child) if isinstance(n, ast.Name))
                 for decl in ast.walk(child):
                     if isinstance(decl, (ast.Global, ast.Nonlocal)):
@@ -259,11 +261,18 @@ def _dead_stores_in(fn):
                 skip.update(n.id for t in child.targets for n in ast.walk(t) if isinstance(n, ast.Name))
             elif isinstance(child, ast.Call) and getattr(child.func, "id", None) in ("locals", "vars", "eval", "exec"):
                 return None
-            elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
-                loads.append((child.id, (child.lineno, child.col_offset), loops))
-            elif (isinstance(child, ast.Assign) and len(child.targets) == 1
-                  and isinstance(child.targets[0], ast.Name)):
-                stores.append((child.targets[0].id, child, loops))
+            elif isinstance(child, ast.Name):
+                pos = (child.lineno, child.col_offset)
+                if isinstance(child.ctx, ast.Load):
+                    loads.append((child.id, pos))
+                else:
+                    rebinds.append((child.id, pos))
+            elif isinstance(child, (ast.Import, ast.ImportFrom, ast.ExceptHandler)):
+                names = [(a.asname or a.name).split(".")[0] for a in getattr(child, "names", ())]
+                names += [child.name] if isinstance(getattr(child, "name", None), str) else []
+                rebinds.extend((n, (child.lineno, child.col_offset)) for n in names)
+            elif isinstance(child, ast.Assign):
+                stores.append((child, loops))
             inner = loops + (child,) if isinstance(child, _LOOPS) else loops
             if walk(child, inner) is None:
                 return None
@@ -271,30 +280,53 @@ def _dead_stores_in(fn):
 
     if walk(fn, ()) is None:
         return []
-    hits = []
-    for name, stmt, loops in stores:
-        if name.startswith("_") or name in skip or name in nested_loads:
-            continue
-        reads = [(pos, lps) for n, pos, lps in loads if n == name]
-        if not reads:
-            continue                       # never read at all: ruff F841 covers it
+
+    def unread(name, stmt, loops):
+        # In a loop the store redefines itself, and CodeQL leaves a redefined store
+        # to py/multiple-definition; so does a later store of the name.
         end = (stmt.end_lineno, stmt.end_col_offset)
-        if any(pos > end for pos, _ in reads):
+        return not loops and not any(n == name and pos > end
+                                     for n, pos in loads + rebinds)
+
+    def tuples(node):
+        if isinstance(node, (ast.Tuple, ast.List)):
+            yield node
+            for elt in node.elts:
+                yield from tuples(elt)
+
+    hits = []
+    for stmt, loops in stores:
+        target = stmt.targets[0]
+        if len(stmt.targets) == 1 and isinstance(target, ast.Name):
+            name = target.id
+            if (not name.startswith("_") and name not in skip and name not in nested_loads
+                    and any(n == name for n, _ in loads)   # never read: ruff F841 covers it
+                    and unread(name, stmt, loops)):
+                hits.append((target.lineno, name))
             continue
-        if loops and any(loops[0] in lps for _, lps in reads):
-            continue                       # a later iteration of the loop may read it
-        hits.append((stmt.lineno, name))
+        for tup in (t for tgt in stmt.targets for t in tuples(tgt)):
+            if any(isinstance(e, ast.Starred) for e in tup.elts):
+                continue
+            names = [e for e in tup.elts if isinstance(e, ast.Name)]
+            # CodeQL flags a tuple's names only when none of them is used; `_` counts as used.
+            if names and all(set(e.id) != {"_"} and e.id not in skip and e.id not in nested_loads
+                             and unread(e.id, stmt, loops) for e in names):
+                hits += [(e.lineno, e.id) for e in names]
     return hits
 
 
 def find_unused_last_assignments(source):
-    """(lineno, name) for each `name = value` in a function whose name is read
-    elsewhere in that function but never after this store, the case of CodeQL's
-    py/unused-local-variable that ruff F841 misses. Plain Name targets only (tuple
-    unpacking, augmented and annotated stores are left out). It skips underscore
-    names, global/nonlocal/del names, names read in a nested scope, functions that
-    call locals()/vars()/eval()/exec(), and a store inside a loop whose outermost
-    loop also reads the name. Returns [] for unparseable source."""
+    """(lineno, name) for each store in a function that nothing reads afterwards, the
+    part of CodeQL's py/unused-local-variable that ruff F841 misses. A plain
+    `name = value` counts when the name is read elsewhere in the function; F841 has
+    the never-read case and _-prefixed names. In tuple unpacking, CodeQL's rule
+    applies: each immediate tuple's names are flagged only when none of them is
+    read later, and a bare `_` or a starred element exempts the tuple. Augmented
+    and annotated stores are left out. Skipped everywhere: global/nonlocal/del
+    names, names read in a nested scope, functions that call
+    locals()/vars()/eval()/exec(), a store that a later store of the name
+    redefines (CodeQL's py/multiple-definition), which includes every store
+    inside a loop. Returns [] for unparseable source."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
