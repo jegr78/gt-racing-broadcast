@@ -34,6 +34,7 @@ def _conn(conn, name, entry, received, sender_rx, t_lost=0, latest=None, live=Tr
     return {"conn": conn, "entry": entry, "segment": "Stint 1", "name": name, "live": live,
             "idle_s": 0.1, "packets": {"received": received, "lost": t_lost, "reordered": 0,
                                        "decrypt_failed": 0, "parse_failed": 0},
+            "duplicates": received // 100,
             "packets_per_s": 59.0,
             "sender_stats": {"received": sender_rx, "posted": 10, "post_ms_p50": 80, "post_ms_p95": 210,
                              "code": "D1:secret.sig"},
@@ -187,6 +188,7 @@ def t_the_sender_summary_reports_device_and_relay_rates_and_latency():
     ann = rows["Ann"]
     assert ann["device_hz"] is not None and ann["post_ms_p50"] == {"min": 80, "p50": 80, "max": 80}, ann
     assert rows["Cid"]["lost"] == 0
+    assert rows["Cid"]["duplicates"] == 60, f"packets posted twice, from the relay's count: {rows['Cid']}"
 
 
 def t_the_monitor_writes_a_record_per_poll_and_a_probe_snapshot():
@@ -219,6 +221,7 @@ def t_live_lines_show_the_rate_since_the_last_poll():
                      _race([_row("Team A", "ca", "Ann", 1234.0, 3)]), None)
     line = [x for x in ps.live_lines(prev, cur) if x.startswith("Ann")][0]
     assert "60.0" in line and "59.0" in line and "4/9" in line and "1234" in line and "80/210" in line, line
+    assert line.split()[7] == "1", f"the duplicates column after lost and reordered: {line}"
 
 
 def t_marks_split_the_report_into_blocks():

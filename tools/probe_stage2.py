@@ -147,7 +147,8 @@ def compact(t, drivers, race, probe):
         rec["conns"] = [{
             "tag": tag(c.get("conn")), "entry": c.get("entry"), "segment": c.get("segment"),
             "name": c.get("name"), "live": c.get("live"), "idle_s": c.get("idle_s"),
-            "packets": {k: (c.get("packets") or {}).get(k) for k in PACKET_KEYS},
+            "packets": dict({k: (c.get("packets") or {}).get(k) for k in PACKET_KEYS},
+                            duplicates=c.get("duplicates")),
             "sender": {k: v for k, v in (c.get("sender_stats") or {}).items() if k in SENDER_KEYS},
             "latest": {k: (c.get("latest") or {}).get(k) for k in LATEST_KEYS} if c.get("latest") else None,
         } for c in drivers.get("connections") or []]
@@ -161,7 +162,8 @@ def compact(t, drivers, race, probe):
                         for e in race.get("entries") or []]}
     if isinstance(probe, dict) and probe.get("senders") is not None:
         rec["probe"] = {name: {
-            "packets": {k: (s.get("packets") or {}).get(k) for k in PACKET_KEYS},
+            "packets": dict({k: (s.get("packets") or {}).get(k) for k in PACKET_KEYS},
+                            duplicates=s.get("duplicates")),
             "kinds": s.get("kinds"), "idle_s": s.get("idle_s"),
             "sender": {k: v for k, v in (s.get("sender_stats") or {}).items() if k in SENDER_KEYS},
             "latest": {k: (s.get("samples") or [{}])[-1].get(k) for k in LATEST_KEYS}
@@ -200,17 +202,18 @@ def live_lines(prev, rec):
     head = "%s  race %s%s" % (time.strftime("%H:%M:%S", time.localtime(rec["t"])),
                               (rec.get("race") or {}).get("state"),
                               "  CHANGE WINDOW" if (rec.get("race") or {}).get("change_window") else "")
-    out = [head, "%-16s %-20s %6s %6s %5s %5s %9s %5s %4s %8s %-8s" % (
-        "name", "entry", "relay/s", "dev/s", "lost", "reord", "post p50/95", "0x84", "lap", "dist m", "status")]
+    out = [head, "%-16s %-20s %6s %6s %5s %5s %4s %9s %5s %4s %8s %-8s" % (
+        "name", "entry", "relay/s", "dev/s", "lost", "reord", "dup", "post p50/95", "0x84", "lap", "dist m", "status")]
     for key, name, entry, c in rows:
         now = (rec["t"], c)
         relay_hz, dev_hz = _rate(old.get(key), now, "received", "packets"), _rate(old.get(key), now, "received", "sender")
         sender, latest, pk = c.get("sender") or {}, c.get("latest") or {}, c.get("packets") or {}
         r = race.get(key, {})
         pos = latest.get("race_position")
-        out.append("%-16.16s %-20.20s %6s %6s %5s %5s %9s %5s %4s %8s %-8s" % (
+        out.append("%-16.16s %-20.20s %6s %6s %5s %5s %4s %9s %5s %4s %8s %-8s" % (
             name or "?", entry or "", "-" if relay_hz is None else "%.1f" % relay_hz,
             "-" if dev_hz is None else "%.1f" % dev_hz, pk.get("lost", "-"), pk.get("reordered", "-"),
+            "-" if pk.get("duplicates") is None else pk["duplicates"],
             "%s/%s" % (sender.get("post_ms_p50", "-"), sender.get("post_ms_p95", "-")),
             "-" if pos is None else "%s/%s" % (pos, latest.get("car_count")),
             latest.get("lap", "-") if latest else "-",
@@ -361,7 +364,7 @@ def sender_summary(polls):
             "relay_hz": None if rx is None or span <= 0 else round(rx / span, 1),
             "device_hz": None if dev is None or span <= 0 else round(dev / span, 1),
             "lost": lost, "lost_pct": None if not rx or lost is None else round(100.0 * lost / (rx + lost), 3),
-            "reordered": pk("reordered"), "decrypt_failed": pk("decrypt_failed"),
+            "reordered": pk("reordered"), "duplicates": pk("duplicates"), "decrypt_failed": pk("decrypt_failed"),
             "interruptions": sd("interruptions"), "post_failed": sd("post_failed"), "dropped": sd("dropped"),
             "post_ms_p50": _spread(p[1].get("sender", {}).get("post_ms_p50") for p in active),
             "post_ms_p95": _spread(p[1].get("sender", {}).get("post_ms_p95") for p in active),
@@ -560,12 +563,13 @@ def report_md(a):
     L += ["## Timeline (marks)", ""] + _table(["time", "mark"], [(_clock(m["t"]), m["text"]) for m in a["marks"]])
     L += ["## Senders", "",
           "Hz over the time each sender sent; `device` is what the device received, `relay` what "
-          "reached the relay. Post latency min/median/max of the sender's reported p50 and p95.", ""]
+          "reached the relay; `duplicates` are packets a sender posted twice. Post latency "
+          "min/median/max of the sender's reported p50 and p95.", ""]
     L += _table(["name", "entry", "kind", "seconds", "device Hz", "relay Hz", "lost %", "reordered",
-                 "decrypt failed", "interruptions", "post failed", "dropped", "post p50 ms", "post p95 ms",
+                 "duplicates", "decrypt failed", "interruptions", "post failed", "dropped", "post p50 ms", "post p95 ms",
                  "max idle s"],
                 [(r["name"], r["entry"], r["kind"], r["seconds"], r["device_hz"], r["relay_hz"], r["lost_pct"],
-                  r["reordered"], r["decrypt_failed"], r["interruptions"], r["post_failed"], r["dropped"],
+                  r["reordered"], r["duplicates"], r["decrypt_failed"], r["interruptions"], r["post_failed"], r["dropped"],
                   r["post_ms_p50"], r["post_ms_p95"], r["max_idle_s"]) for r in a["senders"]])
     L += ["## Hz per minute", "", f"Minutes below {PASS_HZ:.0f} Hz on the device are marked `low` "
           "(stage 1's pass mark, a proposal).", ""]

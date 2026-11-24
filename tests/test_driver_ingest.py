@@ -60,6 +60,16 @@ def t_ingest_counts_per_connection_and_sets_the_rate():
     assert conn["live"] is True and conn["latest"]["lap"] == 2, conn
 
 
+def t_a_batch_posted_twice_shows_as_duplicates_on_the_connection():
+    hub, clock = _hub()
+    batch = _batch(1, 2, 3)
+    hub.ingest(_reg("c1"), batch, None)
+    clock.t += 0.05
+    hub.ingest(_reg("c1"), batch, None)              # the reply was lost, the sender posts again
+    (conn,) = hub.connections()
+    assert conn["packets"]["received"] == 3 and conn["duplicates"] == 3, conn
+
+
 def t_one_sender_per_entry_in_one_lobby_two_per_team_in_endurance():
     hub, clock = _hub()
     hub.ingest(_reg("c1"), _batch(1), None)

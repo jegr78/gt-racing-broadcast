@@ -132,7 +132,9 @@ single decisions with the new values and `before`.
   code and the path; the packets it received during the check are counted on the
   device and never posted.
 - A league without stint labels registers by entry alone, in endurance too.
-- The producer sees every connection on the tailnet (`GET /drivers/data`) and
+- The producer sees every connection on the tailnet (`GET /drivers/data`: its packet
+  counters, the packets a sender posted twice as `duplicates`, its own counters and the
+  latest sample) and
   disconnects one with `POST /drivers/disconnect {"conn": "..."}`. The ingest answers
   that code 410 from then on, also after a relay restart; the relay remembers the last
   500 disconnected codes of the invite. A connection quiet

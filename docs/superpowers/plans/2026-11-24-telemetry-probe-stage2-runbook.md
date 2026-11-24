@@ -101,10 +101,10 @@ sheets cover the stage 1 findings:
 
 ### 3.4 Open items that change the reading
 
-- #1262: the sender opens a new TLS connection per post, which caps Funnel at about five
-  to six posts per second in total. Two or three drivers and the spectator still fit,
-  with post latencies of a second or more. If #1262 has not landed, post rate and
-  latency are recorded but are no pass criterion.
+- #1262, fixed in #1288: a sender keeps one connection to the relay open. Stage 1's post
+  rates and latencies predate it, so this run's "Senders" table is the first measurement
+  of real drivers through Funnel with it. A packet a sender posts twice after a lost
+  reply shows in the `duplicates` column.
 - #1264: the fastest race lap can take a lap GT7 marked invalid. Block F records the
   0x78 data the fix needs; the desk's fastest lap is not judged.
 
@@ -282,7 +282,7 @@ lap 4.
 
 | File | From | Content |
 |---|---|---|
-| `poll.jsonl` | `watch` | one record per second: every driver connection (packets, loss, device counters, post latency, the latest sample with 0x84 position, car count, lap, 0x78 best), the race (state, change window, every entry's distance, laps, status, GT7 position) and every probe sender |
+| `poll.jsonl` | `watch` | one record per second: every driver connection (packets, loss, duplicates, device counters, post latency, the latest sample with 0x84 position, car count, lap, 0x78 best), the race (state, change window, every entry's distance, laps, status, GT7 position) and every probe sender |
 | `marks.jsonl` | `mark` | the block marks and observations |
 | `probe/probe-*.json` | `watch`, `collect` | full probe snapshots every minute (600 samples per sender) |
 | `race-recording.csv` | `collect` | the relay's race recording |
