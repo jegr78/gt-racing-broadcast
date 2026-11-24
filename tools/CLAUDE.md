@@ -214,6 +214,27 @@ simulated PS5 cannot share a host on the default ports: both need UDP 33740 or
 sender's own upload code; `--status` adds the relay's counts to its JSON report and
 `--reset` clears the probe's counters first.
 
+Stage 2 (#1116) runs in a league lobby; its runbook is
+`docs/superpowers/plans/2026-11-24-telemetry-probe-stage2-runbook.md`. The driver's
+side is the sender's `--check` (12 s of heartbeat and receive, three empty posts, OK or
+FAIL per part, exit code 0 or 1; it never posts telemetry). The producer's side is
+`tools/probe-stage2.py` (logic in `tools/probe_stage2.py`, covered by
+`tests/test_probe_stage2.py`):
+
+```bash
+python3 tools/probe-stage2.py kit --out KIT          # one setup sheet per platform from the invite
+python3 tools/probe-stage2.py watch --out RESULTS    # 1 s poll of /drivers/data, /drivers/race, /telemetry/probe
+python3 tools/probe-stage2.py mark --out RESULTS "block D change"
+python3 tools/probe-stage2.py collect --out RESULTS --runtime runtime/<profile>
+python3 tools/probe-stage2.py report RESULTS         # report.md + analysis.json
+```
+
+The sheets carry the invite link and stay out of the results. A results record carries
+no driver code, probe key or invite id; a connection id becomes an 8-character hash that
+still joins a sender to its race row. Rates come from counter deltas between polls,
+since the relay's `packets_per_s` is a lifetime average; `dev/s` is the device's own
+`received`, `relay/s` what reached the relay.
+
 `tools/timing-viewer-load.py LINK --viewers N` runs simulated viewers of the public
 timing page (#1128) against an event's timing link: one page load each, then the page's
 own poll (gzip, `If-None-Match`, the wait from `X-Poll-After`). Its JSON report gives
@@ -690,7 +711,8 @@ action and acts on the controls a person uses; the drivers have no page.
 | `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
-| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
+| `probe` | the producer's stage 2 watch and the real `racecast-sender.py` (#1116) | `watch` (interval), `mark` (text), `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (its result is `probe_stage2.facts`) |
+| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints, positions: 0x84 from the road order), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 
 An action is a mechanism. Which one follows which is the scenario's business, never a
 role's: `box`, the director's `next`, `lobby` and `release` are four steps, not one "swap".
@@ -741,7 +763,8 @@ chained to it with `after:` or `${...}` are skipped too. So chain every party st
 
 Event data a scenario sets for the roles (`[event]`): `track` (a GT7 layout id), `track_length_m`
 (default 1200, at least 860), `cars` (1-15, the roster in the Configuration tab's Teams
-column, `drive.TEAMS`), `seed`, `parts` (0-9) and `qualifying_part`. The stack then gives the temporary app home a racing
+column, `drive.TEAMS`), `seed`, `parts` (0-9), `qualifying_part` and `probe` (the relay's
+telemetry probe ingest on). The stack then gives the temporary app home a racing
 line (`drive.write_track_data`: a stadium-shaped lap as the layout's `signatures.json`
 row, since the relay's race needs a downloaded line and the network guard blocks
 `gt7-data update`), one placeholder graphic (Start event refuses a machine without any)
@@ -830,6 +853,12 @@ times on a maintainer machine, start and teardown included:
 - `red-flag` (5 min): the desk's RED FLAG in stint 2 (cover, banner, race held), a
   restart lobby and Restart released; the drivers leave the box by their gaps of before the
   flag (the relay shows no gaps while it holds); asserts every gap within 1 s (the exact order is soft: the paces differ, and cars closer than the 0.2 s driver tick may swap).
+
+- `probe-stage2` (#1116): the stage 2 runbook's producer side. The watch records the
+  run into `OUT/probe-stage2/`, three teams change drivers twice with 0x84 in their
+  packets, the real sender sends as the spectator (`[event] probe = true` sets
+  `RACECAST_TELEMETRY_PROBE=1`) and runs its `--check` through the invite; the report
+  step asserts six changes inside the window with the anchor carried.
 
 ## Driver replay (`tools/driver-replay.py`, #1115)
 

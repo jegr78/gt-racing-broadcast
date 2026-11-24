@@ -90,6 +90,11 @@ standing are open.
   The relay decrypts and filters; new fields never need a driver update.
 - It finds the console on the LAN and asks for its address only when discovery
   fails. It reports an interruption to the driver.
+- A self-check (`--check`) proves the setup before a session: 12 s of heartbeat
+  and receive, then three empty posts, with OK or FAIL per part and the fix for
+  each failure. It sends no telemetry, so a driver runs it before Race Control
+  approves the registration. Every post reports the sender's post round trip
+  (median and 95th percentile) with its counters.
 - GT7 sends to port 33740 on every device that heartbeats, but two programs on one
   device cannot both bind 33740. The sender therefore needs a device of its own
   next to a driver's existing receiver:
