@@ -22,6 +22,7 @@ from a port of its own, so the packets do not count as a reply to the heartbeat.
 Standard library only, Python 3.8 or newer.
 """
 import argparse
+import base64
 import collections
 import http.client
 import io
@@ -112,9 +113,27 @@ class Connection:
         self._lock = threading.Lock()
 
     def _new(self, scheme, host, port, timeout):
+        """A connection to the relay, through a CONNECT tunnel when the environment or
+        the system names a proxy for it, as urlopen would use."""
+        proxy = urllib.request.getproxies().get(scheme)
+        if proxy and urllib.request.proxy_bypass(host):
+            proxy = None
+        target = (host, port)
+        if proxy:
+            via = urllib.parse.urlsplit(proxy if "://" in proxy else "http://" + proxy)
+            target = (via.hostname, via.port or 8080)
         if scheme == "https":
-            return http.client.HTTPSConnection(host, port, timeout=timeout, context=self._tls)
-        return http.client.HTTPConnection(host, port, timeout=timeout)
+            conn = http.client.HTTPSConnection(*target, timeout=timeout, context=self._tls)
+        else:
+            conn = http.client.HTTPConnection(*target, timeout=timeout)
+        if proxy:
+            auth = {}
+            if via.username is not None:
+                login = "%s:%s" % (urllib.parse.unquote(via.username),
+                                   urllib.parse.unquote(via.password or ""))
+                auth["Proxy-Authorization"] = "Basic " + base64.b64encode(login.encode()).decode()
+            conn.set_tunnel(host, port, headers=auth)
+        return conn
 
     def close(self):
         if self._conn is not None:

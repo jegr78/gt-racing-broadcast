@@ -656,6 +656,115 @@ def t_https_checks_the_certificate_and_the_host_name():
     assert isinstance(snd.Connection()._new("http", "127.0.0.1", 8, 5), http.client.HTTPConnection)
 
 
+
+class _ConnectProxy:
+    """A loopback CONNECT proxy that counts tunnels and keeps what each one asked for."""
+
+    def __init__(self):
+        import socketserver
+        outer = self
+        self.tunnels, self.auth = [], []
+
+        class H(socketserver.BaseRequestHandler):
+            def handle(self):
+                f = self.request.makefile("rb")
+                target = f.readline().split()[1].decode()
+                for line in iter(f.readline, b"\r\n"):
+                    if line.lower().startswith(b"proxy-authorization:"):
+                        outer.auth.append(line.split(b":", 1)[1].strip().decode())
+                outer.tunnels.append(target)
+                host, port = target.rsplit(":", 1)
+                up = socket.create_connection((host, int(port)))
+                self.request.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+
+                def back():
+                    try:
+                        for chunk in iter(lambda: up.recv(65536), b""):
+                            self.request.sendall(chunk)
+                    except OSError:
+                        pass  # the relay closed its side
+                    try:
+                        self.request.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass  # the client is already gone
+                threading.Thread(target=back, daemon=True).start()
+                try:
+                    for chunk in iter(lambda: f.read1(65536), b""):
+                        up.sendall(chunk)
+                except OSError:
+                    pass  # the client closed its side
+                up.close()
+
+        class S(socketserver.ThreadingMixIn, socketserver.TCPServer):
+            daemon_threads = True
+        self.srv = S(("127.0.0.1", 0), H)
+        self.url = "http://user:secret@127.0.0.1:%d" % self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+def _proxy_env(**values):
+    """Replace every proxy variable of the environment; returns the undo."""
+    keys = [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy", "no_proxy")]
+    saved = {k: os.environ.pop(k) for k in keys}
+    os.environ.update(values)
+
+    def undo():
+        for k in values:
+            os.environ.pop(k, None)
+        os.environ.update(saved)
+    return undo
+
+
+def t_a_proxy_from_the_environment_tunnels_to_the_relay():
+    import base64
+    relay, proxy = _Relay(), _ConnectProxy()
+    undo = _proxy_env(HTTP_PROXY=proxy.url)
+    try:
+        up = _uploader(relay)
+        for i in range(3):
+            up.put(b"p%d" % i)
+            up.post_once()
+    finally:
+        undo()
+        relay.close()
+        proxy.close()
+    host_port = relay.url.split("/")[2]
+    assert proxy.tunnels == [host_port], f"one CONNECT tunnel to the relay, not {proxy.tunnels}"
+    assert proxy.auth == ["Basic " + base64.b64encode(b"user:secret").decode()], proxy.auth
+    assert relay.accepted == [[b"p0"], [b"p1"], [b"p2"]] and up.stats["post_failed"] == 0, up.stats
+
+
+def t_no_proxy_reaches_the_relay_directly():
+    relay, proxy = _Relay(), _ConnectProxy()
+    undo = _proxy_env(HTTP_PROXY=proxy.url, NO_PROXY="127.0.0.1")
+    try:
+        up = _uploader(relay)
+        up.put(b"p0")
+        up.post_once()
+    finally:
+        undo()
+        relay.close()
+        proxy.close()
+    assert proxy.tunnels == [] and relay.accepted == [[b"p0"]], (proxy.tunnels, relay.accepted)
+
+
+def t_a_tunnel_still_checks_the_relays_certificate():
+    import ssl
+    undo = _proxy_env(HTTPS_PROXY="http://127.0.0.1:3128")
+    try:
+        conn = snd.Connection()._new("https", "relay.example", None, 5)
+    finally:
+        undo()
+    assert (conn.host, conn.port) == ("127.0.0.1", 3128), (conn.host, conn.port)
+    assert conn._tunnel_host == "relay.example" and conn._tunnel_port == 443, \
+        "TLS runs inside the tunnel and checks the relay's name, not the proxy's"
+    assert conn._context.verify_mode == ssl.CERT_REQUIRED and conn._context.check_hostname
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
