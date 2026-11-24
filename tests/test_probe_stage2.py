@@ -88,13 +88,13 @@ def _polls():
         conns.append(_conn("cc", "Cid", "Team B", rx_b, rx_b,
                            latest={"lap": 1 + i // 4, "race_position": None, "car_count": None,
                                    "best_ms": None, "last_ms": None}))
-        rows = [_row("Team A", a_conn, a_name, dist_a, 1 + i // 5, "box" if 6 <= i < 8 else "racing",
-                     pos=1, box=6 <= i < 8),
+        rows = [_row("Team A", a_conn, a_name, dist_a, 1 + i // 5, "box" if i in (6, 7) else "racing",
+                     pos=1, box=i in (6, 7)),
                 _row("Team B", "cc", "Cid", 400.0 + 280.0 * i - (3000.0 if i == 11 else 0.0), 1 + i // 5,
                      pos=None)]
         if i == 12:
             rows[1]["laps"] = 0                                      # a lap count stepping back
-        polls.append(ps.compact(t, {"connections": conns}, _race(rows, window=6 <= i <= 9), None))
+        polls.append(ps.compact(t, {"connections": conns}, _race(rows, window=i in range(6, 10)), None))
         t += 10.0
     return polls
 
