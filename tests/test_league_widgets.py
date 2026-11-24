@@ -407,7 +407,11 @@ def t_a_slow_service_never_holds_the_dashboard_tick():
         sender.start()
         try:
             assert started.wait(60), "hang guard: the sender never posted"
-            g.m.dashboard_ticks(_Relay(), _Svc(), _Stop(), 0, None, live)
+            ticker = threading.Thread(target=g.m.dashboard_ticks, args=(_Relay(), _Svc(), _Stop(), 0, None, live),
+                                      daemon=True)
+            ticker.start()
+            ticker.join(60)
+            assert not ticker.is_alive(), f"the dashboard tick waited for the service request in flight: {ticks}"
         finally:
             stop.set()
             release.set()
