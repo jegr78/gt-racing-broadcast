@@ -1232,6 +1232,10 @@ def make_handler(ctx):
                                                             or not isinstance(args["index"], int))):
                     return self._json({"ok": False, "error": "race, ref and recording are text, index a number"},
                                       code=400)
+                rec = args.get("recording")
+                if rec is not None and (rec != os.path.basename(rec) or "\\" in rec or rec in ("", ".", "..")):
+                    return self._json({"ok": False, "error": "recording is a file name in the profile's runtime folder"},
+                                      code=400)
                 key = "league_result_send" if path.endswith("/send") else "league_result_refresh"
                 try:
                     result = ctx[key](**args)

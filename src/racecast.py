@@ -6747,9 +6747,9 @@ def _league_recording_path(recording, runtime):
     if not recording:
         path = race_recording.current_path(runtime)
         return (path, "") if path and os.path.isfile(path) else (None, "no current race recording")
-    for path in (recording, os.path.join(runtime, os.path.basename(recording))):
-        if os.path.isfile(path):
-            return path, ""
+    path = os.path.join(runtime, recording) if recording == os.path.basename(recording) else recording
+    if os.path.isfile(path):
+        return path, ""
     return None, f"no such recording: {recording}"
 
 
@@ -6830,7 +6830,7 @@ def league_result_send_data(race=None, recording=None, index=None, ref=None, rc=
     problem = league_service.ref_problem(ref)
     if problem or not league_service.RACE_RE.fullmatch(race):
         return {"ok": False, "error": problem or f"{race} is no race id"}
-    body = dict(doc.get("body") or {}, ref=ref, race=race)
+    body = dict(league_result.clean_body(doc.get("body")), ref=ref, race=race)
     try:
         status = league_result.send(cfg, body, runtime, post=post, fetch=fetch)
     except league_service.ServiceError as exc:
@@ -6852,6 +6852,9 @@ def league_result_refresh_data(race=None, ref=None, rc=None, runtime=None, get=N
     ref, race = ref or event.get("ref"), race or event.get("current")
     if not isinstance(ref, str) or not isinstance(race, str) or not ref or not race:
         return {"ok": False, "error": "no league event loaded: give the race and the reference"}
+    problem = league_service.ref_problem(ref)
+    if problem or not league_service.RACE_RE.fullmatch(race):
+        return {"ok": False, "error": problem or f"{race} is no race id"}
     try:
         status = league_result.refresh(cfg, ref, race, runtime, get=get, fetch=fetch)
     except league_service.ServiceError as exc:

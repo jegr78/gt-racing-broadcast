@@ -539,6 +539,28 @@ def t_the_relay_reads_the_service_from_the_profile_or_the_simulation():
             "simulation never reaches the real service"
 
 
+def t_the_event_file_lock_waits_and_breaks_a_stale_lock():
+    with tempfile.TemporaryDirectory() as d:
+        path = ls.path_in(d)
+        ls.store(path, "REF", ls.parse_event(_event(races=[{"race": "leg-1"}, {"race": "leg-2"}])))
+        open(path + ".lock", "w").close()
+        orig = ls.LOCK_WAIT_S
+        ls.LOCK_WAIT_S = 0.2
+        try:
+            ls.update(path, current="leg-2")
+        except OSError as e:
+            assert "held" in str(e)
+        else:
+            raise AssertionError("a held lock keeps the update out")
+        finally:
+            ls.LOCK_WAIT_S = orig
+        assert ls.read(path)["current"] == "leg-1"
+        old = time.time() - ls.LOCK_STALE_S - 5
+        os.utime(path + ".lock", (old, old))
+        assert ls.update(path, current="leg-2")["current"] == "leg-2", "a crashed holder's lock is broken"
+        assert not os.path.exists(path + ".lock")
+
+
 def t_client_logs_carry_no_key():
     records = []
 

@@ -246,6 +246,28 @@ def t_the_relays_refusal_reaches_the_operator_with_its_reason():
             srv.shutdown()
 
 
+def t_refresh_refuses_a_race_or_reference_outside_the_contract():
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        asked = []
+        for race, ref in (("a/../../../graphics/Race Results", "R"), ("leg-1", "x\u0007")):
+            r = m.league_result_refresh_data(race, ref, rc=_rc(sim.url), runtime=d,
+                                             get=lambda *a, **k: asked.append(a))
+            assert not r["ok"] and asked == [], (race, ref, r)
+
+
+def t_a_recording_result_is_cut_to_the_allowlist_before_it_goes_out():
+    REF = league_sim.DEFAULT_REF
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        doc = _kept(REF, "leg-1")
+        doc["body"]["entries"][0]["conn"] = "secret-conn"
+        doc["body"]["extra"] = "x"
+        rec = _recording_with(d, doc)
+        r = m.league_result_send_data(recording=rec, rc=_rc(sim.url), runtime=d, relay_running=_no_relay)
+        assert r["ok"], r
+        sent = json.dumps(sim.results[(REF, "leg-1")])
+        assert "secret-conn" not in sent and '"extra"' not in sent, sent
+
+
 def _profile_home(td, text):
     prof = os.path.join(td, "profiles", "demo")
     os.makedirs(prof)

@@ -78,7 +78,8 @@ Config comes from **two layers** and one resolver:
   Result in the race recording's `meta` `results` (`race_recording.stored_results`), sends
   on its own thread (a refusal, `league_service.FINAL_CODES`, is final with the service's
 reason; 408, 429, 5xx and network failures retry 2 s doubling to 60 s), files every answer in
-  `league-results.json` and a returned PNG (same scheme, host and port as the service,
+  `league-results.json` (both JSON files under `league_service.file_lock`, an O_EXCL lock
+file) and a returned PNG (same scheme, host and port as the service,
   4 MB) under `league-graphics/`. `racecast event result [send|refresh]` sends through
   the running relay for the current event, else from a recording
   (`league_result_send_data`). Spec: `src/docs/design/league-service.md` ("Result").

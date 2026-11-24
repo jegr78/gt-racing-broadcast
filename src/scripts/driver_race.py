@@ -1214,6 +1214,11 @@ class Service:
                 "disconnects": [e for e in rec["events"] if e.get("state") == "confirmed"],
                 "audit_path": audit_path_for(self._path)}
 
+    def mark_race_start(self):
+        """Note in the audit log that a race starts counting; a league result's steward
+        events begin here."""
+        self._audit("race", "race_start")
+
     def recording_results(self):
         """The league results the open recording keeps; [] without one."""
         try:

@@ -60,12 +60,19 @@ class _Source:
     def recording_results(self):
         return list(self.stored)
 
+    def mark_race_start(self):
+        self.starts = getattr(self, "starts", 0) + 1
+        if self.audit_path:
+            with open(self.audit_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"ts": self.clock(), "who": "race", "action": "race_start"}) + "\n")
+
 
 def _setup(d, sim, src=None, wall=None, **kw):
     path = ls.path_in(d)
     ls.store(path, REF, ls.fetch_event(_cfg(sim), REF))
     src = src or _Source()
     wall = wall or _Clock()
+    src.clock = wall
     exp = lr.Exporter(d, lambda: (_cfg(sim), ""), src, wall=wall, clock=wall, **kw)
     return exp, src, wall, path
 
@@ -268,6 +275,7 @@ def t_steward_events_carry_red_flags_corrections_and_confirmed_disconnects_of_th
                 "who": "rc:Bo"},
                {"ts": 170.0, "action": "compound", "entry": "B", "code": "RS"}]
     since = lr.race_start(records, started_at=90.0)
+    assert lr.race_start([], started_at=90.0) == 90.0 and lr.race_start([]) == 0.0
     assert since == 100.0, "the last reset starts the race"
     dc = [{"entry": "A", "state": "confirmed", "last_packet": 130.0, "opened": 140.0, "dropout_s": 12.4},
           {"entry": "B", "state": "confirmed", "last_packet": 10.0, "opened": 20.0}]
@@ -448,6 +456,139 @@ def t_an_event_loaded_after_the_finish_points_to_the_recording():
         ls.store(ls.path_in(d), REF, ls.fetch_event(_cfg(sim), REF))
         r = exp.resend()
         assert not r["ok"] and "goes from Recording" in r["error"], r
+
+
+def t_an_earlier_races_steward_events_stay_out_after_a_track_change_and_a_restart():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        audit = os.path.join(d, dr.AUDIT)
+        exp, src, wall, path = _setup(d, sim, src=_Source(audit))
+        wall.t = 1050
+        exp.observe("racing")
+        with open(audit, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": 1100, "who": "rc", "action": "red_flag", "mode": "keep"}) + "\n")
+        wall.t = 1200
+        src.state = "finished"
+        exp.observe("finished")
+        for t, state in ((1300, "waiting"), (1400, "racing"), (1500, "finished")):   # a new pick, no reset
+            wall.t = t
+            src.state = state
+            exp.observe(state)
+        exp.step()
+        bodies = {c["race"]: c["body"] for c in sim.calls(call="result")}
+        assert [e["kind"] for e in bodies["leg-1"]["events"]] == ["red_flag"], bodies["leg-1"]["events"]
+        assert bodies["leg-2"]["events"] == [], f"race 1's red flag is not race 2's: {bodies['leg-2']['events']}"
+        restarted = lr.Exporter(d, lambda: (_cfg(sim), ""), src, wall=wall, clock=wall)
+        wall.t = 1600
+        assert restarted.resend("leg-2")["rebuilt"] is True
+        restarted.step()
+        assert sim.calls(call="result")[-1]["body"]["events"] == [], "a relay restart keeps the window"
+
+
+def t_a_held_red_flag_raised_again_is_one_event():
+    records = [{"ts": 10.0, "action": "red_flag", "mode": "keep"}, {"ts": 12.0, "action": "red_flag", "mode": "keep"},
+               {"ts": 20.0, "action": "release"}, {"ts": 30.0, "action": "red_flag", "mode": ""}]
+    events = lr.steward_events(records, [], 0, 40)
+    assert [(e["at"], e["detail"]) for e in events] == [(lr.iso(10.0), "red flag, restart keep"),
+                                                        (lr.iso(30.0), "red flag")], events
+
+
+def t_a_failed_file_update_does_not_lose_the_finish():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        exp, src, wall, path = _setup(d, sim)
+        _run_race(exp, src, wall, ("waiting", "racing"))
+        real = ls.update
+        ls.update = lambda *_a, **_k: (_ for _ in ()).throw(OSError("disk full"))
+        try:
+            src.state = "finished"
+            try:
+                exp.observe("finished")
+            except OSError:
+                pass  # the relay's tick logs it
+        finally:
+            ls.update = real
+        exp.observe("finished")
+        assert ls.read(path)["finished"], "the next tick finishes what the failed one could not"
+        exp.step()
+        assert len(sim.calls(call="result")) == 1
+
+
+def t_a_send_the_restart_interrupted_is_marked_not_resumed():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        path = lr.results_path(d)
+        lr.record_status(path, REF, "leg-1", state="sending")
+        lr.record_status(path, REF, "leg-2", state="failed", error="HTTP 503", final=False)
+        lr.record_status(path, "OLD", "leg-1", state="failed", error="HTTP 404", final=True)
+        exp, src, wall, _path = _setup(d, sim, armed=False)
+        exp.arm()
+        for race in ("leg-1", "leg-2"):
+            st = lr.status_of(path, REF, race)
+            assert st["state"] == "failed" and st["final"] and "relay restarted" in st["error"], st
+        assert lr.status_of(path, "OLD", "leg-1")["error"] == "HTTP 404", "a final refusal keeps its reason"
+        exp.step()
+        assert not sim.calls(call="result"), "nothing is resent by itself"
+
+
+def t_a_status_file_lock_serializes_two_processes():
+    import subprocess
+    with tempfile.TemporaryDirectory() as d:
+        path = lr.results_path(d)
+        code = ("import sys; sys.path.insert(0, %r); import league_result as lr\n"
+                "for i in range(25): lr.record_status(%r, 'R', sys.argv[1] + str(i), state='sent')") % (
+                    os.path.join(ROOT, "src", "scripts"), path)
+        procs = [subprocess.Popen([sys.executable, "-c", code, tag]) for tag in ("a", "b")]
+        assert all(p.wait(60) == 0 for p in procs)
+        races = {i["race"] for i in lr.read_statuses(path)}
+        assert len(races) == 50, f"no write lost another process's status: {len(races)}"
+        assert not os.path.exists(path + ".lock")
+
+
+def t_an_unsafe_race_never_names_a_graphic_file():
+    for race in ("a/../../../graphics/Race Results", "..", "x y"):
+        try:
+            lr.graphic_name("REF", race)
+        except ValueError:
+            continue
+        raise AssertionError(f"{race!r} must not name a file")
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY, graphic=True) as sim:
+        answer = {"status": "stored", "message": "", "link": None, "graphic_url": sim.url + "/v1/graphic/x.png"}
+        st = lr._file_answer(_cfg(sim), REF, "a/../../x", answer, d, None)
+        assert st["graphic"] is None and "race id" in st["graphic_error"], st
+        assert not os.path.exists(os.path.join(d, "x.png"))
+
+
+def t_an_answer_that_cannot_be_saved_here_is_not_posted_again():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        exp, src, wall, _path = _setup(d, sim)
+        _run_race(exp, src, wall)
+        real = lr._file_answer
+        lr._file_answer = lambda *_a, **_k: (_ for _ in ()).throw(OSError("read-only"))
+        try:
+            exp.step()
+            wall.t += 120
+            exp.step()
+        finally:
+            lr._file_answer = real
+        assert len(sim.calls(call="result")) == 1, "the service has it: no second post"
+        (res,) = exp.status()["results"]
+        assert res["state"] == "sent" and "not saved here" in res["local_error"] and res["status"] == "pending", res
+
+
+def t_a_resend_from_the_recording_is_cut_to_the_allowlist():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        exp, src, wall, _path = _setup(d, sim)
+        src.stored = [{"ref": REF, "race": "leg-1", "finished_at": 1.0, "body": {
+            "v": 1, "ref": REF, "race": "leg-1", "finished_at": "2026-01-01T00:00:00Z", "secret": "x",
+            "entries": [{"pos": 1, "entry": "A", "driver": "Ann", "fuel_l": 3.0, "conn": "c1"}],
+            "fastest": {"entry": "A", "ms": 60000, "conn": "c1"},
+            "events": [{"kind": "red_flag", "at": "2026-01-01T00:00:00Z", "who": "rc:Bo"},
+                       {"kind": "chat", "at": "2026-01-01T00:00:00Z"}]}}]
+        assert exp.resend("leg-1")["ok"]
+        exp.step()
+        body = sim.calls(call="result")[-1]["body"]
+        flat = json.dumps(body)
+        for leak in ("secret", "fuel_l", "conn", "rc:Bo", "chat"):
+            assert leak not in flat, f"{leak} reached the service: {body}"
+        assert body["entries"][0]["driver_ref"] == "" and body["fastest"] == {"entry": "A", "ms": 60000}
 
 
 if __name__ == "__main__":

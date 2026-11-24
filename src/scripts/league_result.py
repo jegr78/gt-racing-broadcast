@@ -38,7 +38,8 @@ MAX_STATUSES = 64
 RETRY_MIN_S = 2.0
 RETRY_MAX_S = 60.0
 COUNTING = ("racing", "final_lap", "finishing")
-RACE_START_ACTIONS = ("reset", "new_event")
+RACE_START_ACTIONS = ("reset", "new_event", "race_start")
+EVENT_KINDS = ("red_flag", "disconnect", "correction")
 ROW_KEYS = ("pos", "entry", "number", "driver", "team", "class", "class_pos", "laps", "gap_s",
             "interval_s", "lapped", "status", "pit_stops", "last_lap_ms", "best_ms", "finished")
 NULLABLE = {"gap_s", "interval_s", "last_lap_ms", "best_ms"}
@@ -74,11 +75,13 @@ def read_audit(path, until):
     return out
 
 
-def race_start(records, started_at=None, previous_finish=None):
-    """When the race the result belongs to began: the latest of the recording's start,
-    the previous finish and the last race reset or new event."""
+def race_start(records, started_at=None):
+    """When the race the result belongs to began: the latest of the recording's start
+    and the last race start, reset or new event in the audit log."""
     marks = [r["ts"] for r in records if r.get("action") in RACE_START_ACTIONS]
-    return max([t for t in (started_at, previous_finish) if _num(t)] + marks, default=0.0)
+    if _num(started_at):
+        marks.append(started_at)
+    return max(marks, default=0.0)
 
 
 def _detail(text):
@@ -97,17 +100,24 @@ def _correction_detail(rec):
 
 
 def steward_events(records, disconnects, since, until):
-    """The Result's events between `since` and `until`: red flags, Race
-    Control's distance and pit stop corrections, confirmed disconnects. Never who acted."""
-    out = []
-    for rec in records:
+    """The Result's events between `since` and `until`: each red flag once while it is
+    held, Race Control's distance and pit stop corrections, confirmed disconnects. Never
+    who acted."""
+    out, held = [], False
+    for rec in sorted(records, key=lambda r: r["ts"]):
+        action = rec.get("action")
+        if action in ("release",) + RACE_START_ACTIONS:
+            held = False
+            continue
+        if action == "red_flag" and held:
+            continue
+        held = held or action == "red_flag"
         if not since <= rec["ts"] <= until:
             continue
-        action = rec.get("action")
         if action == "red_flag":
-            mode = rec.get("mode") if isinstance(rec.get("mode"), str) else ""
+            mode = rec.get("mode") if isinstance(rec.get("mode"), str) and rec.get("mode") else ""
             out.append((rec["ts"], {"kind": "red_flag", "at": iso(rec["ts"]),
-                                    "detail": _detail(f"red flag, restart {mode}".strip(", "))}))
+                                    "detail": _detail(f"red flag, restart {mode}" if mode else "red flag")}))
         elif action == "correct" and isinstance(rec.get("entry"), str):
             out.append((rec["ts"], {"kind": "correction", "at": iso(rec["ts"]), "entry": rec["entry"],
                                     "detail": _correction_detail(rec)}))
@@ -123,7 +133,8 @@ def steward_events(records, disconnects, since, until):
 
 
 def _row(r):
-    row = {k: r[k] for k in ROW_KEYS if k in r and (r[k] is not None or k in NULLABLE)}
+    row = {k: r[k] for k in ROW_KEYS if k in r and (r[k] is not None or k in NULLABLE)
+           and not isinstance(r[k], (dict, list))}
     row["driver_ref"] = ""
     return row
 
@@ -140,12 +151,30 @@ def body(ref, race, source, finished_at, events):
     return out
 
 
-def build(source, ref, race, finished_at, now, previous_finish=None):
+def clean_body(doc):
+    """A Result read back from a recording, cut to the contract's allowlist again."""
+    doc = doc if isinstance(doc, dict) else {}
+    out = {"v": league_service.V, "ref": doc.get("ref"), "race": doc.get("race"),
+           "entries": [_row(r) for r in doc.get("entries") or () if isinstance(r, dict)],
+           "events": [{k: e[k] for k in ("kind", "at", "entry", "detail") if isinstance(e.get(k), str)}
+                      for e in doc.get("events") or ()
+                      if isinstance(e, dict) and e.get("kind") in EVENT_KINDS and isinstance(e.get("at"), str)]}
+    for key in ("finished_at", "track_name"):
+        if isinstance(doc.get(key), str):
+            out[key] = doc[key]
+    fl = doc.get("fastest")
+    out["fastest"] = {k: fl[k] for k in LAP_KEYS if fl.get(k) is not None} if isinstance(fl, dict) else None
+    for e in out["events"]:
+        if "detail" in e:
+            e["detail"] = _detail(e["detail"])
+    return out
+
+
+def build(source, ref, race, finished_at, now):
     """(body, stored doc) of a race that finished at `finished_at`, with the steward
     events up to `now`, so a correction after the finish is in a resend."""
     records = read_audit(source.get("audit_path"), now) if source.get("audit_path") else []
-    since = race_start([r for r in records if r["ts"] <= finished_at], source.get("started_at"),
-                       previous_finish)
+    since = race_start([r for r in records if r["ts"] <= finished_at], source.get("started_at"))
     events = steward_events(records, source.get("disconnects"), since, now)
     doc = body(ref, race, source, finished_at, events)
     return doc, {"ref": ref, "race": race, "finished_at": finished_at, "body": doc}
@@ -175,7 +204,7 @@ def status_of(path, ref, race):
 
 def record_status(path, ref, race, **fields):
     """Merge `fields` into the status of (ref, race) and keep the newest MAX_STATUSES."""
-    with _files_lock:
+    with _files_lock, league_service.file_lock(path):
         items = read_statuses(path)
         old = next((i for i in items if i.get("ref") == ref and i.get("race") == race), {})
         new = dict(old, ref=ref, race=race, updated_at=time.time(), **fields)
@@ -196,7 +225,10 @@ def record_status(path, ref, race, **fields):
 # --- graphic ----------------------------------------------------------------------
 
 def graphic_name(ref, race):
-    """A file name for the graphic of (ref, race) that holds no path character."""
+    """A file name for the graphic of (ref, race) that holds no path character;
+    ValueError for a race outside the contract's charset."""
+    if not isinstance(race, str) or not league_service.RACE_RE.fullmatch(race):
+        raise ValueError("the race id is not a contract race id")
     slug = re.sub(r"[^A-Za-z0-9_-]", "_", ref)[:40]
     return f"{slug}-{hashlib.sha256(ref.encode('utf-8')).hexdigest()[:8]}-{race}.png"
 
@@ -279,8 +311,12 @@ def send(cfg, doc, runtime_dir, post=None, fetch=None):
         record_status(path, ref, race, state="failed", error=str(e), final=is_final(e),
                       attempts=(old.get("attempts") or 0) + 1)
         raise
-    return _file_answer(cfg, ref, race, answer, runtime_dir, fetch, state="sent", sent_at=time.time(),
-                        attempts=0, error="", final=False)
+    try:
+        return _file_answer(cfg, ref, race, answer, runtime_dir, fetch, state="sent", sent_at=time.time(),
+                            attempts=0, error="", final=False)
+    except OSError as e:
+        # The service has the result; only this machine could not keep its answer.
+        return dict(answer, ref=ref, race=race, state="sent", local_error=f"answer not saved here: {e}")
 
 
 def is_final(error):
@@ -298,11 +334,11 @@ def _file_answer(cfg, ref, race, answer, runtime_dir, fetch, **fields):
     fields.update(status=answer["status"], message=answer["message"], link=answer["link"])
     graphic, problem = None, ""
     if answer.get("graphic_url"):
-        dest = os.path.join(runtime_dir, GRAPHICS, graphic_name(ref, race))
         try:
+            dest = os.path.join(runtime_dir, GRAPHICS, graphic_name(ref, race))
             (fetch or fetch_graphic)(cfg, answer["graphic_url"], dest)
             graphic = os.path.basename(dest)
-        except GraphicError as e:
+        except (GraphicError, ValueError) as e:
             problem = str(e)
     old = status_of(results_path(runtime_dir), ref, race) or {}
     if graphic is None and not problem:
@@ -328,13 +364,19 @@ class Exporter:
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._jobs = {}                # (ref, race) -> {"doc", "next", "tries"}
+        self._unsaved = {}             # (ref, race) -> a sent answer this machine could not keep
         self._last = None
-        self._previous_finish = None
         self._armed = armed
 
     def arm(self):
-        """Start acting on the race state; the relay arms it once it owns its port."""
+        """Start acting on the race state; the relay arms it once it owns its port. A
+        send the previous relay left unfinished is marked as such, never resumed."""
         self._armed = True
+        path = results_path(self._dir)
+        for item in read_statuses(path):
+            if item.get("state") == "sending" or (item.get("state") == "failed" and not item.get("final")):
+                record_status(path, item.get("ref"), item["race"], state="failed", final=True,
+                              error="not sent: the relay restarted before it went out; send it again")
 
     # The tick ---------------------------------------------------------------------
 
@@ -344,11 +386,15 @@ class Exporter:
         is the baseline, so a relay restart never sends again."""
         if state is None or not self._armed:
             return
-        last, self._last = self._last, state
-        if state in COUNTING and last not in COUNTING:
+        last = self._last
+        if state in COUNTING and last not in COUNTING and last is not None:
+            self._source.mark_race_start()
+            self._advance()
+        elif state in COUNTING and last is None:
             self._advance()
         elif state == "finished" and last not in (None, "finished"):
             self._finished()
+        self._last = state      # only after the action, so a failed one runs again next tick
 
     def _advance(self):
         ev = league_service.read(self._event_path)
@@ -368,16 +414,15 @@ class Exporter:
         ev = league_service.read(self._event_path)
         target = ev is not None and not ev["done"]
         ref, race = (ev["ref"], ev["current"]) if target else (None, None)
-        doc, stored = build(self._source.result_source(), ref, race, now, now, self._previous_finish)
-        self._previous_finish = now
+        doc, stored = build(self._source.result_source(), ref, race, now, now)
         if not self._source.store_result(stored):
             self._log.warning("league result: the race recording could not keep the result")
         if not target:
             if ev is not None:
                 self._log.info("league result: past the event's last race, nothing is sent")
             return
-        league_service.update(self._event_path, finished=True, finished_at=now)
         self._queue(doc)
+        league_service.update(self._event_path, finished=True, finished_at=now)
 
     # Operator actions -------------------------------------------------------------
 
@@ -393,21 +438,16 @@ class Exporter:
         live = race == ev["current"] and ev["finished"] and self._source.race_state() == "finished"
         if live:
             at = ev["finished_at"] if ev["finished_at"] is not None else self._wall()
-            doc, stored = build(self._source.result_source(), ev["ref"], race, at, self._wall(),
-                                self._previous_finish_before(at))
+            doc, stored = build(self._source.result_source(), ev["ref"], race, at, self._wall())
             self._source.store_result(stored)
         else:
             kept = [r for r in self._source.recording_results() if (r.get("ref"), r.get("race")) == (ev["ref"], race)]
             if not kept:
                 return {"ok": False, "error": f"race {race} has no result in the race recording yet; "
                                              "a race finished before the event was loaded goes from Recording"}
-            doc = kept[-1]["body"]
+            doc = dict(clean_body(kept[-1]["body"]), ref=ev["ref"], race=race)
         self._queue(doc)
         return {"ok": True, "ref": ev["ref"], "race": race, "rebuilt": live}
-
-    def _previous_finish_before(self, at):
-        prev = self._previous_finish
-        return prev if prev is not None and prev < at else None
 
     def set_race(self, race):
         """The Director sets the current race; it counts as not finished yet."""
@@ -432,6 +472,9 @@ class Exporter:
         out["event"] = {k: ev[k] for k in ("ref", "title", "races", "current", "finished", "done")}
         out["results"] = [i for i in read_statuses(results_path(self._dir)) if i.get("ref") == ev["ref"]]
         with self._lock:
+            unsaved = {race: a for (ref, race), a in self._unsaved.items() if ref == ev["ref"]}
+        out["results"] = [i for i in out["results"] if i["race"] not in unsaved] + list(unsaved.values())
+        with self._lock:
             out["queued"] = [{"race": race, "tries": job["tries"]} for (ref, race), job in self._jobs.items()
                              if ref == ev["ref"]]
         if ev["done"]:
@@ -444,7 +487,7 @@ class Exporter:
         ev = league_service.read(self._event_path)
         if ev is None or not isinstance(race, str) or race not in [r["race"] for r in ev["races"]]:
             return None
-        path = os.path.join(self._dir, GRAPHICS, graphic_name(ev["ref"], race))
+        path = os.path.join(self._dir, GRAPHICS, graphic_name(ev["ref"], race))  # listed races match RACE_RE
         return path if os.path.isfile(path) else None
 
     # The sender -------------------------------------------------------------------
@@ -482,7 +525,7 @@ class Exporter:
         try:
             if cfg is None:
                 raise league_service.ServiceError(problem or "no league service configured")
-            send(cfg, job["doc"], self._dir, post=self._post, fetch=self._fetch)
+            answer = send(cfg, job["doc"], self._dir, post=self._post, fetch=self._fetch)
         except (league_service.ServiceError, OSError) as e:
             if cfg is None or isinstance(e, OSError):
                 try:
@@ -502,4 +545,11 @@ class Exporter:
         with self._lock:
             if self._jobs.get(key) is job:
                 del self._jobs[key]
-        self._log.info("league result %s sent", key[1])
+            if answer.get("local_error"):
+                self._unsaved[key] = answer
+            else:
+                self._unsaved.pop(key, None)
+        if answer.get("local_error"):
+            self._log.warning("league result %s sent, %s", key[1], answer["local_error"])
+        else:
+            self._log.info("league result %s sent", key[1])

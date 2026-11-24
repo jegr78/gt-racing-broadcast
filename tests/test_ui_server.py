@@ -1774,6 +1774,11 @@ def t_api_league_result_routes():
         for bad in ({"race": 5}, {"recording": 5}, {"index": "2"}, {"index": True}, {"ref": ["x"]}):
             code, _b = _post_json(port, "/api/league-result/send", dict(bad, expectedProfile="demo"))
             assert code == 400, bad
+        for rec in ("../race-recording-x.sqlite", "/tmp/race-recording-x.sqlite", "sub\\x.sqlite", ".."):
+            code, _b = _post_json(port, "/api/league-result/send", {"recording": rec, "expectedProfile": "demo"})
+            assert code == 400, f"{rec} is no file name in the runtime folder"
+        code, body = _post_json(port, "/api/league-result/send", ["leg-1"])
+        assert code == 400 and "malformed" in json.loads(body)["error"], "a body that is no object is refused"
         code, body = _post_json(port, "/api/league-result/refresh", {"race": "leg-1", "expectedProfile": "demo"})
         assert code == 200 and json.loads(body)["status"]["status"] == "stored", body
         code, _b = _post_json(port, "/api/league-result/refresh", {"race": "leg-1", "expectedProfile": "x"})

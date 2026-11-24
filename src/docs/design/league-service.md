@@ -152,7 +152,7 @@ boundary, and `event stop` clears the reference and the race list. A recording w
 a stored result (one from before this version) cannot be sent; the CLI says so. A race
 that finished before the event was loaded is kept without a reference and race; sent
 from the recording, it goes out for the loaded event's current race unless the operator
-names another (`--race`, `--ref`).
+names another (the `RACE` argument and `--ref`).
 
 The relay builds the Result from the race service and the recording:
 
@@ -162,15 +162,20 @@ The relay builds the Result from the race service and the recording:
   lap any more. A fastest lap Race Control sets by hand is its car's best lap.
 - `fastest` is the race service's confirmed fastest lap with the roster team, never the
   fastest raw lap time.
-- `events` are the audit log's `red_flag` actions (kind `red_flag`, one per flag; the
-  release is no event, since the contract has no kind for it), its
+- `events` are the audit log's `red_flag` actions (kind `red_flag`, once per flag: a
+  repeated hold before the release is the same flag; the release is no event, since the
+  contract has no kind for it), its
   `correct` actions with metres, pit stops and Race Control's reason text (kind
   `correction`; the reason leaves the machine for the league's own service) and the
   recording's confirmed disconnects, dated by their last packet (kind `disconnect`).
-  The window starts at the latest of the recording's start, the previous finish and the
-  last race reset or new event, and ends when the result is built, so a correction made
-  after the finish is in a resend. Who acted stays on the producer's machine. Retirements,
-  estimates, driver names and fastest lap changes are not steward events in this version.The first version exports the race only. The recording writes in race mode only, so a
+  The window starts at the latest of the recording's start and the last race start,
+  reset or new event in the audit log (the relay writes a `race_start` line when a race
+  starts counting), so it survives a relay restart and a new track pick. It ends when the
+  result is built, so a correction made after the finish is in a resend. Who acted stays
+  on the producer's machine. Retirements, estimates, driver names and fastest lap
+  changes are not steward events in this version.
+
+The first version exports the race only. The recording writes in race mode only, so a
 qualifying export is a later step.
 
 The answer carries `status` (`stored` or `pending`), an optional `message`, an
@@ -185,7 +190,12 @@ the status is `pending`, a refresh action in the Control Center asks the service
 Nothing waits for the answer: the race, the next race and the event stop go on without
 it.
 
-The relay sends on its own thread. A refusal a retry cannot change (HTTP 400, 401, 403,
+The relay sends on its own thread. A send that a relay restart interrupted is marked
+`failed` (final) with "the relay restarted", never resumed by itself. When the service
+took a result but this machine cannot write its answer, the relay does not post again
+and shows the answer as sent with the local error. `league-event.json` and
+`league-results.json` are written under a lock file, so the relay and the CLI never
+lose each other's change. A refusal a retry cannot change (HTTP 400, 401, 403,
 404, 409, 422) is final: the result stands `failed` with the service's own reason (its
 `error` or `message`, bounded and typed like every answer) in the Control Center and the
 Director Panel, and nothing retries it. A timeout, an overload (408, 429), a server error
@@ -222,7 +232,8 @@ The tick hands it the standings and never waits for it.
 - Result: sent automatically at `finished` and retried after a failure. "Send result"
   is also an action in the Control Center and a `racecast` verb (`racecast event result
   send [RACE]`), for the current event or for a recording file chosen after the event
-  (`--recording FILE`, `--index N`, `--ref REF`). For the current event a running relay
+  (`racecast event result send RACE --recording FILE [--index N] [--ref REF]`; the
+  Control Center takes only a recording file name in the profile's runtime folder). For the current event a running relay
   rebuilds the result from the live race while it still stands finished, otherwise it
   sends the copy in the recording. The Control Center shows the service's status,
   message and link, and a refresh while the status is `pending`

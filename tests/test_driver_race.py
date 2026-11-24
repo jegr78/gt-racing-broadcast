@@ -2274,6 +2274,14 @@ def t_without_a_recording_the_result_source_still_has_the_classification():
     assert svc.race_state() is None, "no dashboard tick yet"
 
 
+def t_a_race_start_is_noted_in_the_audit_log():
+    svc, _clock, path = _dash_service({"roster": ROSTER, "mode": "race"})
+    svc.mark_race_start()
+    with open(dr.audit_path_for(path), encoding="utf-8") as fh:
+        last = json.loads(fh.read().splitlines()[-1])
+    assert (last["action"], last["who"]) == ("race_start", "race"), last
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

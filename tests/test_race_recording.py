@@ -865,6 +865,21 @@ def t_a_full_writer_queue_reports_a_result_it_could_not_store():
             store.close()
 
 
+def t_reading_a_closed_recording_leaves_no_wal_or_shm():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        h.rec.store_result(_result("M", "leg-1", 1.0))
+        h.flush()
+        path = h.store.path
+        h.close()
+        for ext in ("-wal", "-shm"):
+            if os.path.exists(path + ext):
+                os.remove(path + ext)
+        assert rr.stored_results(path)[0]["race"] == "leg-1"
+        assert not [ext for ext in ("-wal", "-shm") if os.path.exists(path + ext)], \
+            "a read of a closed recording writes nothing next to it"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -65,8 +65,10 @@ def stored_results(path):
     OSError when it cannot be read."""
     if not os.path.isfile(path):
         raise OSError(f"no such recording: {path}")
+    # A closed recording opens immutable, so the read leaves no -wal or -shm file behind.
+    mode = "?mode=ro" if os.path.exists(path + "-wal") else "?mode=ro&immutable=1"
     try:
-        conn = sqlite3.connect(pathlib.Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+        conn = sqlite3.connect(pathlib.Path(path).resolve().as_uri() + mode, uri=True)
         try:
             row = conn.execute("SELECT value FROM meta WHERE key=?", (RESULTS_KEY,)).fetchone()
         finally:

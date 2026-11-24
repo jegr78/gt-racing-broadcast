@@ -3112,6 +3112,7 @@ function showLeagueEvent(d) {
   $('ls-send').disabled = !d.configured;
 }
 function leagueResultText(r) {
+  if (r.local_error) return (r.status || 'sent') + ' · ' + r.local_error;
   if (r.state === 'failed') return 'not sent: ' + (r.error || 'failed')
     + (r.final ? ' (refused: fix it on the service, then Send result)' : ' (retrying while the relay runs)');
   if (r.state === 'sending') return 'sending…';
@@ -3172,7 +3173,8 @@ async function leagueResultAction(path, payload, button) {
         body: JSON.stringify(Object.assign({expectedProfile: activeProfile}, payload))})).json();
   } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
   if (button) button.disabled = false;
-  if (!d.ok) { $('ls-result-err').hidden = false; $('ls-result-err').textContent = d.error || 'failed'; }
+  const note = d.ok ? (d.status || {}).local_error : (d.error || 'failed');
+  if (note) { $('ls-result-err').hidden = false; $('ls-result-err').textContent = note; }
   await loadLeagueEvent();
 }
 function sendLeagueResult() {

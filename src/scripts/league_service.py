@@ -11,6 +11,7 @@ appears in a message, a log line or a status. Stdlib only.
 failure. The event the producer loaded lives in runtime/<profile>/league-event.json.
 """
 import collections
+import contextlib
 import datetime
 import http.client
 import json
@@ -544,6 +545,36 @@ def path_in(runtime_dir):
     return os.path.join(runtime_dir, FILENAME)
 
 
+LOCK_WAIT_S = 2.0
+LOCK_STALE_S = 10.0       # a lock older than this was left by a crashed process
+
+
+@contextlib.contextmanager
+def file_lock(path):
+    """Serialize a read-modify-write of `path` across processes with an O_EXCL lock
+    file next to it. OSError when another holder keeps it past LOCK_WAIT_S."""
+    lock = path + ".lock"
+    os.makedirs(os.path.dirname(os.path.abspath(lock)), exist_ok=True)
+    deadline = time.monotonic() + LOCK_WAIT_S
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(lock) > LOCK_STALE_S:
+                    os.remove(lock)
+                    continue
+            if time.monotonic() >= deadline:
+                raise OSError(f"{lock} is held by another process") from None
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(lock)
+
+
 def _stored(doc):
     """A league-event.json document checked again, or None. `finished` says the current
     race has finished and waits for the next one to start counting, `done` that the
@@ -589,26 +620,28 @@ def store(path, ref, event, now=None):
     """Write the loaded event. The current race and its finished and done marks stay
     when the reloaded event still lists it, else it is the first race. Returns what was
     written."""
-    old = read(path)
-    races = [r["race"] for r in event["races"]]
-    keep = old is not None and old["ref"] == ref and old["current"] in races
-    stamp = datetime.datetime.fromtimestamp(time.time() if now is None else now, datetime.timezone.utc)
-    doc = dict(event, ref=ref, current=old["current"] if keep else races[0],
-               loaded_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
-    if keep:
-        doc.update({k: old[k] for k in ("finished", "done", "finished_at")})
-    return _write(path, doc)
+    with file_lock(path):
+        old = read(path)
+        races = [r["race"] for r in event["races"]]
+        keep = old is not None and old["ref"] == ref and old["current"] in races
+        stamp = datetime.datetime.fromtimestamp(time.time() if now is None else now, datetime.timezone.utc)
+        doc = dict(event, ref=ref, current=old["current"] if keep else races[0],
+                   loaded_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        if keep:
+            doc.update({k: old[k] for k in ("finished", "done", "finished_at")})
+        return _write(path, doc)
 
 
 def update(path, **fields):
     """Change the loaded event's `current`, `finished`, `done` or `finished_at`; the
     stored event, or None without one. ValueError for a race the event does not list."""
-    old = read(path)
-    if old is None:
-        return None
-    if "current" in fields and fields["current"] not in [r["race"] for r in old["races"]]:
-        raise ValueError("the event does not list that race")
-    return _write(path, dict(old, **fields))
+    with file_lock(path):
+        old = read(path)
+        if old is None:
+            return None
+        if "current" in fields and fields["current"] not in [r["race"] for r in old["races"]]:
+            raise ValueError("the event does not list that race")
+        return _write(path, dict(old, **fields))
 
 
 def relay_settings(profile_env_path, environ=None):

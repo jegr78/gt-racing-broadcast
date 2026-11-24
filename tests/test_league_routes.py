@@ -103,6 +103,13 @@ def t_a_graphic_is_shown_and_taken_only_by_the_directors_action():
             srv.shutdown()
 
 
+def t_the_panel_loads_the_graphic_through_the_console_mount():
+    with open(os.path.join(ROOT, "src", "director", "director-panel.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    assert 'RC_API("/league/graphic")' in html and '"/league/graphic?race=' not in html, \
+        "behind Funnel the graphic preview resolves under /console like every other panel request"
+
+
 def t_the_league_routes_are_director_only_under_console():
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
         srv, port, *_rest = _stack(d, sim)

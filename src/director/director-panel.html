@@ -2417,6 +2417,7 @@ $("#trackPick").addEventListener("change", async (e)=>{
 let leagueGfxRace = null;
 function leagueResultLine(r){
   if (!r) return "No result sent for this race yet.";
+  if (r.local_error) return "Sent: " + (r.status || "sent") + ", but " + r.local_error;
   if (r.state === "failed") return "Not sent: " + (r.error || "failed")
     + (r.final ? ". Refused: SEND AGAIN once the service accepts it." : ". The relay retries.");
   if (r.state === "sending") return "Sending…";
@@ -2447,7 +2448,7 @@ function renderLeague(d){
   const gfx = res && res.graphic ? ev.current : null;
   $("#leagueGfx").hidden = !gfx;
   if (gfx && (gfx !== leagueGfxRace || res.updated_at !== $("#leagueGfxImg").dataset.at)){
-    $("#leagueGfxImg").src = "/league/graphic?race=" + encodeURIComponent(gfx) + "&t=" + (res.updated_at || 0);
+    $("#leagueGfxImg").src = RC_API("/league/graphic") + "?race=" + encodeURIComponent(gfx) + "&t=" + (res.updated_at || 0);
     $("#leagueGfxImg").dataset.at = res.updated_at;
   }
   leagueGfxRace = gfx;
