@@ -355,6 +355,8 @@ def t_the_switch_refuses_a_widget_the_event_does_not_list():
                                ("\u0661", "show"), ("01", "show"), ("9", "show")):
             ok, why = live.set(target, action)
             assert not ok and why, (target, action)
+        assert live.set("9", "show") == (False, "the loaded event lists no such widget"), \
+            "an event holds at most 8 widgets, so 9 is no place"
 
 
 def t_a_slow_service_never_holds_the_dashboard_tick():
