@@ -252,19 +252,20 @@ TELEMETRY_READY = ("(() => { const q = s => document.querySelector(s);"
                    " && q('#tm-err').hidden; })()")
 
 # The synthetic relay has no league service and no drivers: the prep stops the page's polls
-# and renders a fixed body with the league block (#1256).
+# and pins every render to a fixed body with the league block, so a poll already in flight
+# cannot replace it (#1256).
 _TIMING_ROWS = ", ".join(
     f"{{pos: {i + 1}, entry: 'Team {i} #{i + 1}', number: '{i + 7}', driver: 'Driver {i + 1}', "
     f"team: 'Team {'AB'[i % 2]}', laps: 23, gap_s: {i * 2.5}, interval_s: 2.5, pit_stops: 1, "
     f"last_lap_ms: {98000 + i * 70}, compound: 'RM', fuel_l: {40 - i}}}" for i in range(12))
 TIMING_PREP = (
-    "window.fetch = () => new Promise(() => {}); render({v: 1, mode: 'race', delay_s: 30, remaining: 1500,"
+    "window.fetch = () => new Promise(() => {}); const shown = render, fixture = {v: 1, mode: 'race', delay_s: 30, remaining: 1500,"
     " track_name: 'Spa', lap: {leader: 23, count: 40}, entries: [" + _TIMING_ROWS + "],"
     " league: [{id: 'match-score', form: 'score', title: 'Match', value: {provisional: true,"
     " values: [{label: 'Team A', value: '36'}, {label: 'Team B', value: '30'}]}},"
     " {id: 'standings', form: 'table', title: 'Championship', value: {value_title: 'Pts',"
     " rows: [" + ", ".join(f"{{rank: {r}, name: 'Driver {r}', value: '{60 - 3 * r}'}}" for r in range(1, 21))
-    + "]}}]})")
+    + "]}}]}; render = () => shown(fixture); render();")
 
 SURFACES = [
     Surface("director-panel", "relay", "/panel", ("desktop",), None,
