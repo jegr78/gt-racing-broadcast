@@ -110,7 +110,7 @@ sheets cover the stage 1 findings:
 
 ## 4. Session timeline
 
-Times are relative to the agreed start. Every block from B to F starts with a race reset
+Times are relative to the agreed start. Every block from B on starts with a race reset
 and a mark, so each block's race starts fresh and the report splits by block (a mark that
 starts with `block`; any other mark is an observation in the timeline):
 
@@ -127,9 +127,7 @@ continues the old race.
 The Schedule of the test needs three rows, because the relay's endurance rules follow the
 broadcast stints: row 1 for blocks B, C and lobby 1 of D, row 2 for lobby 2 of D and F,
 row 3, the last, for G. In endurance the lap count (`event race --laps`) applies to the
-last row's lobby only, and a race reset on the last row drops it again (checked on the
-service: a track change keeps it, a reset does not), so block G starts its races with a
-track pick instead of a reset.
+last row's lobby only; a race reset there keeps it.
 
 ### Block A: bring-up (T-45 to T-15)
 
@@ -277,10 +275,9 @@ Answers Q7. One driver is enough; it repeats stage 1's run that found #1263.
    then `py src/racecast.py event race --formation off --laps 4`. The director switches to
    the last Schedule row (Next), so the 4 laps apply. Mark `block G formation off`.
 2. A 4-lap race on Spa 24h Layout with one pit stop. `collect`.
-3. `py src/racecast.py event track --clear`, `py src/racecast.py event track d60ebc` (a new
-   race; the last row stays on air with its lap count), then
-   `py src/racecast.py event race --formation on`. Mark `block G formation on`. Same race
-   once more. `collect`.
+3. `py src/racecast.py event race --formation on`, then
+   `py tools/probe-stage2.py race-reset --out <results>` (the last row stays on air with
+   its 4 laps). Mark `block G formation on`. Same race once more. `collect`.
 
 Pass (proposal): in both runs the entry counts lap 1, the lap count only rises, "Lap
 count and distance" lists nothing for it, and the race state reaches `finished` after
