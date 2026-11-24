@@ -448,6 +448,22 @@ def t_client_keeps_a_minimum_gap_between_sends():
     assert sent == [100.0, 100.0 + ls.MIN_GAP_S], sent
 
 
+def t_client_paces_its_sends_at_the_tick():
+    clock, sent = _Clock(), []
+
+    def post(*_a):
+        sent.append(clock.t)
+        clock.t += 0.5
+        return {}
+    c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1}, dict,
+                  post=post, clock=clock, log=_Log())
+    wait = c.step()
+    assert wait == ls.TICK_S - 0.5, f"the next send is due one tick after the last one started: {wait}"
+    clock.t += wait
+    c.step()
+    assert sent == [100.0, 100.0 + ls.TICK_S], sent
+
+
 def t_client_forgets_its_values():
     c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1}, dict,
                   post=lambda *a: {"w": {"values": []}}, clock=_Clock(), log=_Log())
