@@ -114,7 +114,11 @@ def t_result_status_keeps_the_graphic_only_on_the_service_host():
 
 def t_fetch_event_sends_key_and_user_agent():
     with _sim() as sim:
-        e = ls.fetch_event(_cfg(sim), league_sim.DEFAULT_REF)
+        try:
+            e = ls.fetch_event(_cfg(sim), league_sim.DEFAULT_REF)
+        except ls.ServiceError as exc:
+            e = exc
+        assert sim.unauthorized == 0, f"the call must carry the bearer key: {e}"
         assert [r["race"] for r in e["races"]] == ["leg-1", "leg-2"]
         assert [w["id"] for w in e["widgets"]] == ["match-score", "standings"]
         (call,) = sim.calls()
@@ -158,15 +162,18 @@ def t_no_redirect_is_followed():
     threading.Thread(target=other.serve_forever, daemon=True).start()
     try:
         with _sim() as sim:
+            errors = {}
             for status in (301, 302, 307, 308):
                 sim.answer("event", status=status, body={},
                            location=f"http://127.0.0.1:{other.server_address[1]}/steal")
                 try:
                     ls.fetch_event(_cfg(sim), league_sim.DEFAULT_REF)
-                    raise AssertionError(f"{status} must not be followed")
+                    errors[status] = None
                 except ls.ServiceError as e:
-                    assert "redirect" in str(e), str(e)
+                    errors[status] = str(e)
         assert hits == [], "the key reached the redirect target"
+        for status, error in errors.items():
+            assert error and "redirect" in error, (status, error)
     finally:
         other.shutdown()
         other.server_close()
@@ -244,12 +251,13 @@ def t_live_state_is_an_allowlist():
 
 
 def t_live_state_sends_null_only_where_the_contract_allows_it():
-    snap = {"track_name": None, "state": None, "lap": None,
+    snap = {"track_name": None, "lap": None,
             "fastest": {"entry": "e1", "driver": "Ann", "team": None, "ms": 90000},
             "entries": [{"pos": 1, "entry": "e1", "driver": "Ann", "class": None, "laps": None,
                          "gap_s": None, "best_ms": None}]}
     body = ls.live_state("REF", "leg-1", snap)
-    assert "track_name" not in body and "state" not in body, "a missing track is left out, not null"
+    assert body["track_name"] is None and body["state"] is None, \
+        "a track or state not known yet goes out as null, as the contract allows"
     assert body["lap"] is None and body["fastest"] == {"entry": "e1", "driver": "Ann", "ms": 90000}
     (row,) = body["entries"]
     assert "class" not in row and "laps" not in row

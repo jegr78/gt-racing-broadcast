@@ -76,7 +76,8 @@ Every request carries `Authorization: Bearer <LEAGUE_SERVICE_KEY>` and the racec
 
 The body is an allowlist of its own next to `driver_race.public_view`, built from the
 undelayed standings: reference, current race, `mode`, race state, red flag, stint, lap,
-remaining distance or time, track name, the fastest lap, and one row per car with
+remaining distance or time, track name (null until a track is picked; the race state
+is null until it is known), the fastest lap, and one row per car with
 position, entry, number, driver, team, class and class position, laps, gap and
 interval, lapped count, status, pit stops, last and best lap time and the finished
 flag. No fuel, no tyre compound, no stream URL, no telemetry channel. The rows are

@@ -170,12 +170,12 @@ components:
         ref: { type: string, maxLength: 128, description: The reference the service showed for this event }
         race: { type: string, maxLength: 64, description: The current race from the event's list }
         mode: { type: string, enum: [race, qualifying] }
-        state: { type: string }
+        state: { type: string, nullable: true, description: Null before the race state is known }
         red_flag: { type: boolean }
         stint: { type: integer, nullable: true }
         lap: { type: integer, nullable: true }
         remaining: { type: number, nullable: true }
-        track_name: { type: string }
+        track_name: { type: string, nullable: true, description: Null before a track is picked }
         fastest: { allOf: [{ $ref: "#/components/schemas/Lap" }], nullable: true }
         entries:
           type: array

@@ -322,7 +322,7 @@ LIVE_ROW = ("pos", "entry", "number", "driver", "team", "class", "class_pos", "l
             "interval_s", "gap_ms", "interval_ms", "lapped", "status", "pit_stops", "last_lap_ms",
             "best_ms", "finished")
 LIVE_LAP = ("entry", "driver", "team", "ms")
-LIVE_NULLABLE = {"stint", "lap", "remaining", "fastest", "gap_s", "interval_s", "gap_ms", "interval_ms",
+LIVE_NULLABLE = {"state", "track_name", "stint", "lap", "remaining", "fastest", "gap_s", "interval_s", "gap_ms", "interval_ms",
                  "last_lap_ms", "best_ms"}
 
 
@@ -338,6 +338,7 @@ def live_state(ref, race, snap):
     mode = snap.get("mode") if snap.get("mode") in MODES else "race"
     out = {"v": V, "ref": ref, "race": race, "mode": mode}
     out.update(_present(snap, LIVE_TOP))
+    out.update({k: snap.get(k) for k in ("state", "track_name")})   # null until known
     out["red_flag"] = bool(snap.get("red_flag"))
     stint = snap.get("stint")
     out["stint"] = stint if _int(stint) is not None else None
