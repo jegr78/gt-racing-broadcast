@@ -640,6 +640,51 @@ def t_the_public_timing_body_carries_the_delayed_block_and_the_host_the_same():
         assert "league" not in body, "switch off: the body is the timing alone"
 
 
+def _timing_bytes(league):
+    """Bytes per answer of a 20-car public timing body carrying `league`, gzip plus headers."""
+    import random
+    import timing_feed
+    rnd = random.Random(3)
+    snap = {"v": 1, "mode": "race", "stint": "Stint 3", "remaining": 3600, "remaining_running": True,
+            "delay_s": 30, "track_name": "Spa", "state": "racing", "lap": {"leader": 42, "count": 60},
+            "entries": [{"pos": i + 1, "entry": f"Team {i} #{i + 1}", "number": str(i + 1),
+                         "driver": f"Driver {rnd.randint(100, 999)}", "team": f"Team {i}", "laps": 42,
+                         "gap_s": round(i * rnd.uniform(2, 4), 3), "interval_s": round(rnd.uniform(0.2, 4), 3),
+                         "pit_stops": 2, "last_lap_ms": rnd.randint(97000, 99999), "best_ms": rnd.randint(96000, 97999),
+                         "compound": "RM", "fuel_l": round(rnd.uniform(10, 90), 1), "brand": "bmw", "brand_name": "BMW"}
+                        for i in range(20)]}
+    body = dict(driver_race.public_view(snap), **({"league": league} if league else {}))
+    raw = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return len(timing_feed.encode(raw)[2]) + timing_feed.HEADER_BYTES
+
+
+def _block(answer, forms):
+    values = ls.parse_widget_values(dict(answer, v=1), forms)
+    return [{"id": wid, "form": forms[wid], "title": "T" * ls.MAX_TITLE,
+             "value": lw.public_value(forms[wid], values[wid])} for wid in forms]
+
+
+def t_the_upload_budget_still_holds_with_the_block():
+    import random
+    import test_timing_feed as tf
+    rnd = random.Random(5)
+    real = _block(league_sim.widget_values({"entries": [
+        {"pos": i + 1, "team": f"Team {i % 2}", "driver": f"Driver {i}", "laps": 42} for i in range(20)]}),
+        {"match-score": "score", "standings": "table"})
+    letters = "abcdefghijklmnopqrstuvwxyz "
+    worst = _block({"widgets": {f"w{i}": {"provisional": True, "value_title": "V" * ls.MAX_VALUE, "rows": [
+        {"rank": 1000 + r, "name": "".join(rnd.choice(letters) for _ in range(ls.MAX_LABEL)),
+         "value": str(rnd.randrange(10 ** (ls.MAX_VALUE - 1), 10 ** ls.MAX_VALUE))} for r in range(ls.MAX_ROWS)]}
+        for i in range(ls.MAX_WIDGETS)}}, {f"w{i}": "table" for i in range(ls.MAX_WIDGETS)})
+    assert len(worst) == ls.MAX_WIDGETS and all(len(w["value"]["rows"]) == ls.MAX_ROWS for w in worst)
+    for league, crowd in ((None, 2500), (real, 2000), (worst, 120)):
+        nbytes = _timing_bytes(league)
+        covered = int(1000 * 125 * tf.tf.MAX_INTERVAL_S / nbytes)
+        assert crowd < covered, f"{nbytes} B per answer covers {covered} viewers, fewer than {crowd}"
+        rates = tf._obeying_crowd(crowd, 400, nbytes=nbytes)
+        assert max(rates) < 1000 * 1.3, f"{crowd} viewers at {nbytes} B reach {max(rates):.0f} kbit/s"
+
+
 def t_a_failing_block_never_freezes_the_timing():
     class Broken:
         def public(self, _delay):

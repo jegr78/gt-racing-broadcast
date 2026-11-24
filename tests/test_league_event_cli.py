@@ -343,6 +343,27 @@ def t_event_league_verb_parses():
     assert out.getvalue().isascii() and "REF" in out.getvalue()
 
 
+def t_the_timing_page_switch_is_kept_in_profile_env_and_shown_in_the_status():
+    import league_widgets as lw
+    with tempfile.TemporaryDirectory() as d:
+        env = os.path.join(d, "profile.env")
+        with open(env, "w", encoding="utf-8") as fh:
+            fh.write("# league\nNAME=Demo\nLEAGUE_SERVICE_KEY=k\n")
+        rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="S", profile_dir=d)
+        path = ls.path_in(d)
+        assert m.league_event_data(rc=rc, path=path)["timing_widgets"] is False, "default off"
+        r = m.league_timing_data(True, rc=rc)
+        assert r == {"ok": True, "timing_widgets": True}, r
+        assert m.league_event_data(rc=rc, path=path)["timing_widgets"] is True
+        with open(env, encoding="utf-8") as fh:
+            text = fh.read()
+        assert "LEAGUE_SERVICE_KEY=k" in text and "NAME=Demo" in text, f"every other key stays: {text}"
+        assert lw.timing_switch(env), text
+        assert m.league_timing_data(False, rc=rc)["timing_widgets"] is False and not lw.timing_switch(env)
+        assert m.league_timing_data("yes", rc=rc)["ok"] is False, "only a bool switches"
+    assert m.league_timing_data(True, rc=m.pcfg.ResolvedConfig(profile="", name="", sheet_id=""))["ok"] is False, "no profile"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -265,6 +265,8 @@ def _solo_profile_env_text(display, template):
         "# event and computes league widgets. Treat the key like a password.\n"
         "LEAGUE_SERVICE_URL=\n"
         "LEAGUE_SERVICE_KEY=\n"
+        "# 1 shows the league widgets on the public live timing page (default off).\n"
+        "LEAGUE_WIDGETS_TIMING=\n"
     )
     return head + pov + tail
 

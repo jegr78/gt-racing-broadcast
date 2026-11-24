@@ -367,6 +367,9 @@
                    aria-label="League service event reference" onkeydown="if (event.key === 'Enter') loadLeagueEventRef()">
             <button id="ls-load" onclick="loadLeagueEventRef()" title="Ask the league service for this event's races and widgets">Load</button></div>
           <div class="enverr" id="ls-err" hidden></div>
+          <div class="row"><span class="name">Timing page</span>
+            <label class="grow" title="Shows every widget of the loaded event above the public live timing table, with the timing's delay. Independent of what the Director puts on air.">
+              <input type="checkbox" id="ls-timing" onchange="setLeagueTiming()"> League widgets on the public live timing page</label></div>
           <div id="ls-event" hidden>
             <div class="row"><span class="name">Loaded</span><span class="grow" id="ls-title"></span></div>
             <div class="row"><span class="name">Races</span><span class="dim grow" id="ls-races"></span></div>
@@ -381,6 +384,7 @@
           <div class="enverr" id="ls-result-err" hidden></div>
           <div id="ls-results"></div>
           <p class="envhint">Set <b>LEAGUE_SERVICE_URL</b> (https only) and <b>LEAGUE_SERVICE_KEY</b> above, then enter the reference the league service shows for the match or event and <b>Load</b>. racecast keeps the races and the current race until <b>Stop event</b>. Same as <code>racecast event league REF</code>.
+            <b>Timing page</b> puts the league widgets above the public live timing table, with the timing's delay and independent of the Director's on-air switch (<b>LEAGUE_WIDGETS_TIMING</b> in profile.env, default off; a running relay picks it up within seconds).
             The relay sends each race's result when it finishes and retries after a failure. <b>Send result</b> sends it again, <b>Recording</b> sends the result a race recording keeps, also after the event. Same as <code>racecast event result send</code>.</p>
         </section>
 
@@ -3100,6 +3104,7 @@ function showLeagueEvent(d) {
   $('ls-status').textContent = d.configured ? d.url
     : (d.problem || 'not set up: add LEAGUE_SERVICE_URL and LEAGUE_SERVICE_KEY above');
   $('ls-load').disabled = !d.configured;
+  $('ls-timing').checked = d.timing_widgets === true;
   const ev = d.event;
   $('ls-event').hidden = !ev;
   if (!ev) return;
@@ -3202,6 +3207,20 @@ async function loadLeagueEvent() {
   catch (e) { $('ls-status').textContent = 'Control Center not reachable.'; return; }
   showLeagueEvent(d);
   showLeagueResults(d);
+}
+async function setLeagueTiming() {
+  const box = $('ls-timing');
+  $('ls-err').hidden = true;
+  box.disabled = true;
+  let d;
+  try {
+    d = await (await fetch('/api/league-event/timing', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({on: box.checked, expectedProfile: activeProfile})})).json();
+  } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  box.disabled = false;
+  if (!d.ok) { $('ls-err').hidden = false; $('ls-err').textContent = d.error || 'switching failed'; }
+  await loadLeagueEvent();
 }
 async function loadLeagueEventRef() {
   const ref = $('ls-ref').value.trim();

@@ -61,6 +61,21 @@
   #feed div { font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--edge); }
   #feed time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
   #state { color: var(--muted); font-size: 13px; padding: 14px; text-align: center; }
+  #league { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  #league[hidden] { display: none; }
+  .lw { border: 1px solid var(--edge); border-left: 3px solid var(--accent); border-radius: 10px;
+        background: var(--panel); padding: 8px 12px; min-width: 0; }
+  .lw-title { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .lw-prov { margin-left: 8px; color: var(--warn); letter-spacing: 0; text-transform: none; font-weight: 400; }
+  .lw-score { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 4px; }
+  .lw-item { display: flex; flex-direction: column; min-width: 0; }
+  .lw-label { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .lw-value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .lw-rows { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; margin-top: 4px; max-height: 16.5em;
+             overflow-y: auto; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .lw-head { grid-column: 3; font-size: 12px; color: var(--muted); text-align: right; }
+  .lw-rank, .lw-val { text-align: right; }
+  .lw-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 600px) { main { padding: 10px 8px 20px; } td, th { padding: 6px 5px; } body { font-size: 14px; }
                               td.drv { min-width: 88px; } td.brand { width: 28px; padding: 0 1px; }
                               td.brand img { width: 26px; height: 18px; padding: 1px; }
@@ -77,6 +92,7 @@
   <div id="session"></div>
 </div></header>
 <main>
+  <section id="league" hidden></section>
   <div class="tools">
     <label id="classpick" hidden><span>Class</span><select id="class-filter"></select></label>
     <div class="cols" id="cols"></div>
@@ -88,7 +104,7 @@
 </main>
 <script id="timing-logic">
   "use strict";
-  // Transport decisions for the hosted page and the Funnel page (#1161); pure, tested by deno.
+  // Transport decisions and the league block for the hosted page and the Funnel page; pure, tested by deno.
   window.TimingLogic = {
     hostedLink: function (pathname) {
       const m = /^\/t\/([A-Za-z0-9_-]{16,64})\/?$/.exec(pathname);
@@ -154,6 +170,66 @@
     logoWanted: function (fail, now) {
       if (!fail) return true;
       return now - fail.at >= Math.min(this.LOGO_RETRY_MAX_MS, this.LOGO_RETRY_MS * Math.pow(2, fail.n - 1));
+    },
+    // The league widgets block (#1256), typed and bounded again: the hosted page renders
+    // what the host replays. Returns [{id, form, title, provisional, items | head + rows}].
+    leagueWidgets: function (d) {
+      const text = function (v, max, empty) {
+        return typeof v === "string" && v.length <= max && (empty || v.length > 0) ? v : null;
+      };
+      if (!d || !Array.isArray(d.league)) return [];
+      const out = [];
+      d.league.forEach(function (w) {
+        if (out.length >= 8 || !w || typeof w.id !== "string" || !/^[a-z0-9-]{1,32}$/.test(w.id)) return;
+        if (w.form !== "score" && w.form !== "table") return;
+        const v = w.value && typeof w.value === "object" ? w.value : {};
+        const one = {id: w.id, form: w.form, title: text(w.title, 60) || "", provisional: v.provisional === true};
+        if (w.form === "score") {
+          one.items = (Array.isArray(v.values) ? v.values : []).filter(function (i) {
+            return i && text(i.label, 40) !== null && text(i.value, 16, true) !== null;
+          }).slice(0, 8).map(function (i) { return {label: i.label, value: i.value}; });
+        } else {
+          one.head = text(v.value_title, 16) || "";
+          one.rows = (Array.isArray(v.rows) ? v.rows : []).filter(function (r) {
+            return r && Number.isInteger(r.rank) && r.rank >= 1 && text(r.name, 40) !== null
+              && text(r.value, 16, true) !== null;
+          }).slice(0, 64).map(function (r) { return {rank: r.rank, name: r.name, value: r.value}; });
+        }
+        out.push(one);
+      });
+      return out;
+    },
+    // One card per widget, built from elements; every string is set as text.
+    leagueBlock: function (doc, widgets) {
+      const el = function (tag, cls, txt) {
+        const n = doc.createElement(tag);
+        n.className = cls;
+        if (txt !== undefined) n.textContent = String(txt);
+        return n;
+      };
+      return widgets.map(function (w) {
+        const card = el("div", "lw");
+        const title = el("div", "lw-title", w.title);
+        if (w.provisional) title.appendChild(el("span", "lw-prov", "provisional"));
+        card.appendChild(title);
+        if (w.form === "score") {
+          const box = el("div", "lw-score");
+          w.items.forEach(function (i) {
+            const item = el("div", "lw-item");
+            item.append(el("span", "lw-label", i.label), el("span", "lw-value", i.value));
+            box.appendChild(item);
+          });
+          card.appendChild(box);
+        } else {
+          const grid = el("div", "lw-rows");
+          if (w.head) grid.appendChild(el("span", "lw-head", w.head));
+          w.rows.forEach(function (r) {
+            grid.append(el("span", "lw-rank", r.rank), el("span", "lw-name", r.name), el("span", "lw-val", r.value));
+          });
+          card.appendChild(grid);
+        }
+        return card;
+      });
     },
     funnelMove: function (data, search, sinceLoadS) {
       const to = data && data.moved_to;
@@ -356,6 +432,9 @@
 
   function render(d) {
     last = d;
+    const league = LOGIC.leagueWidgets(d);
+    $("league").replaceChildren(...LOGIC.leagueBlock(document, league));
+    $("league").hidden = !league.length;
     const quali = d.mode === "qualifying";
     const allowed = function (key) { return !hidden.has(key); };
     const cols = (quali ? QUALI : RACE).filter(function (c) { return allowed(c[0]); });
