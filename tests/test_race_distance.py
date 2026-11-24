@@ -3832,6 +3832,46 @@ def t_two_stops_400_m_apart_are_two_pit_stops():
             f"stands {apart:.0f} m apart: {stops} pit stop(s), got {_row(race, 'A', t)['pit_stops']}"
 
 
+def t_moving_a_car_away_and_back_restores_how_it_counts():
+    race = rd.Race(STEP_TRACE, formation=False)
+    car = PitCar(race, "A", "a", L - 20)
+    t = _go(race, car, 0.0, 2, 0)
+    t = _go(race, car, t, (L / 2 + 20) / 50, 50)                   # A counts from the reference start
+    car.entry = "X"                                                 # moved by mistake
+    t = _go(race, car, t, (L / 2 + 100) / 50, 50)                   # X's own crossing rebases it
+    moved = race._cars["a"]
+    assert not moved.provisional and moved.line_s is not None, "on X the car crossed and moved its line"
+    car.entry = "A"
+    t = _go(race, car, t, 1, 50)
+    back = race._cars["a"]
+    assert (back.provisional, back.from_line, back.line, back.lap_off) == (True, True, 0.0, 0), \
+        f"back on A it counts as A did: {(back.provisional, back.from_line, back.line, back.lap_off)}"
+
+
+def t_a_rebase_after_a_red_flag_moves_every_kept_distance():
+    race = rd.Race(STEP_TRACE, formation=False)
+    car = PitCar(race, "A", "a", L - 20)
+    t = _go(race, car, 0.0, 2, 0)
+    t = _go(race, car, t, (L - 400 + 20) / 50, 50)
+    race.red_flag(t, "keep")
+    t_red, ent = t, race._entries["A"]
+    t = _go(race, car, t, 600 / 50, 50)                             # crosses the line, not counting
+    race.release(t)
+    t = _go(race, car, t, (2 * L - 400 - car.along) / 50, 50)
+    assert race._cars["a"].provisional, "the next crossing on track rebases it"
+    held = rd.Race._distance_at(ent, t_red)
+    ent.stint_end = ent.change_anchor = ent.halted = held
+    ent.crossed, ent.resumed = (t_red, t_red, held), (1, t_red, held)
+    frozen = ent.frozen
+    t = _go(race, car, t, 600 / 50, 50)
+    assert not race._cars["a"].provisional, "rebased after the release"
+    now = rd.Race._distance_at(ent, t_red)
+    assert abs((now - held) - CHORD_M) < 10, f"the history moved by the chord: {now - held}"
+    kept = {"frozen": ent.frozen - frozen + held, "stint_end": ent.stint_end, "change_anchor": ent.change_anchor,
+            "halted": ent.halted, "resumed": ent.resumed[2]}     # the crossing itself rewrites `crossed`
+    assert all(abs(v - now) < 0.01 for v in kept.values()), f"every kept distance moved with the history to {now}: {kept}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

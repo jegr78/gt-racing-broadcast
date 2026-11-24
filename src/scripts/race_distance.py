@@ -828,7 +828,7 @@ class Race:
             and car.t is not None and t - car.t <= CROSSING_GAP_S
         distance = None
         if active and car.counting and ent.finished_at is None:
-            if crossing and car.provisional and self._red is None:
+            if crossing and car.provisional:
                 self._rebase(ent, car, lap, s)
             distance = self._next_distance(ent, car, t, lap, s)
             allowed = MAX_SPEED_MPS * (t - ent.ts[-1]) + STEP_SLACK_M if ent.ts else math.inf
