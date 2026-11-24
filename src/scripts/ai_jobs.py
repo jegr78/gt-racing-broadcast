@@ -302,6 +302,11 @@ def _reap(proc, timeout):
 
 def terminate_tree(proc, tree=None):
     """Terminate only the owned process group/Job Object, never a saved PID."""
+    with _cleanup_shielded():
+        _terminate_tree(proc, tree)
+
+
+def _terminate_tree(proc, tree):
     pid = proc.pid
     # Never coerce process identities: int(MagicMock()) is 1, and killpg(1)
     # becomes kill(-1), targeting every permitted process on POSIX systems.
@@ -580,21 +585,37 @@ class BackgroundJobs:
 _BACKGROUND = BackgroundJobs()
 
 
+def _interrupt(_sig, _frame):
+    raise KeyboardInterrupt
+
+
+def _ignore(_sig, _frame):
+    pass  # A signal during cleanup must not skip the group kill.
+
+
+@contextlib.contextmanager
+def _cleanup_shielded():
+    """Ignore SIGTERM/SIGHUP while cleanup runs, then restore interrupt_on_termination's handler."""
+    held = []
+    if os.name != "nt" and threading.current_thread() is threading.main_thread():
+        held = [sig for sig in (signal.SIGTERM, signal.SIGHUP) if signal.getsignal(sig) is _interrupt]
+    for sig in held:
+        signal.signal(sig, _ignore)
+    try:
+        yield
+    finally:
+        for sig in held:
+            signal.signal(sig, _interrupt)
+
+
 def interrupt_on_termination():
-    """POSIX: the first SIGTERM or SIGHUP raises KeyboardInterrupt in the main thread and
-    later ones are ignored, so the caller's cleanup ends a provider tree in its own session
-    before the process exits."""
+    """POSIX: SIGTERM and SIGHUP raise KeyboardInterrupt in the main thread, so the
+    caller's cleanup ends a provider tree in its own session before the process exits.
+    terminate_tree ignores both while it runs."""
     if os.name == "nt" or threading.current_thread() is not threading.main_thread():
         return
-
-    signals = (signal.SIGTERM, signal.SIGHUP)
-
-    def interrupt(_sig, _frame):
-        for sig in signals:
-            signal.signal(sig, lambda *_: None)  # A second signal must not cut the cleanup short.
-        raise KeyboardInterrupt
-    for sig in signals:
-        signal.signal(sig, interrupt)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, _interrupt)
 
 
 def shutdown_background():

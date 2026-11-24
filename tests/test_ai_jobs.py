@@ -546,11 +546,35 @@ def t_an_interrupt_inside_popen_bookkeeping_does_not_stall_the_cleanup():
     assert_parent_ends_provider(setup=setup)
 
 
-def t_a_second_termination_signal_does_not_skip_the_cleanup():
+def t_a_signal_during_cleanup_does_not_skip_the_group_kill():
     if os.name == 'nt':
         return
     import signal
-    assert_parent_ends_provider(signal.SIGTERM, interrupted='os.kill(os.getpid(), signal.SIGHUP)')
+    setup = textwrap.dedent("""
+        kill_group = os.killpg
+        def signalled_kill(pid, sig):
+            os.kill(os.getpid(), signal.SIGHUP)
+            kill_group(pid, sig)
+        os.killpg = signalled_kill
+    """)
+    assert_parent_ends_provider(signal.SIGTERM, setup=setup)
+
+
+def t_a_signal_after_cleanup_interrupts_again():
+    if os.name == 'nt':
+        return
+    import signal
+    after = textwrap.dedent("""
+        ai_jobs.terminate_tree(p)
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(30)
+        except KeyboardInterrupt:
+            pass  # the handler is back
+        else:
+            raise AssertionError('a SIGTERM after cleanup was ignored')
+    """).replace('\n', '\n    ')
+    assert_parent_ends_provider(signal.SIGTERM, interrupted=after)
 
 
 if __name__=='__main__':
