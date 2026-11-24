@@ -104,9 +104,9 @@ and accepts cleanup only when a non-destructive signal-zero probe confirms the
 group no longer exists. A remaining, inaccessible or unconfirmed group is a
 cleanup failure. It never retries SIGKILL after releasing the process identity.
 
-On POSIX, `interrupt_on_termination` turns the first SIGTERM or SIGHUP into a
-KeyboardInterrupt and ignores later ones, so a second signal cannot cut the group
-kill short. The interrupt can land while `Popen.poll()` holds Popen's internal
+On POSIX, `interrupt_on_termination` turns SIGTERM and SIGHUP into a
+KeyboardInterrupt. `terminate_tree` ignores both while it runs, so a second signal
+cannot cut the group kill short, and restores the handler afterwards. The interrupt can land while `Popen.poll()` holds Popen's internal
 waitpid lock and leave it held. Cleanup therefore reaps the owned leader with
 `os.waitpid` directly instead of `Popen.wait()`, which would wait out its whole
 budget behind that lock and report a killed tree as a cleanup failure.
