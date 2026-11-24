@@ -104,7 +104,10 @@ class Connection:
     """One kept-open connection to the relay, called like urllib's urlopen for a POST.
     Never follows a redirect: a reply of 300 or more raises HTTPError. After an error
     the next call connects again. A post on a reused connection that the relay closed
-    in the meantime goes out once more on a new one."""
+    in the meantime goes out once more on a new one; a timeout is never repeated."""
+
+    _CLOSED = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError,
+               ConnectionAbortedError, ssl.SSLEOFError)
 
     def __init__(self):
         self._conn = None
@@ -113,15 +116,19 @@ class Connection:
         self._lock = threading.Lock()
 
     def _new(self, scheme, host, port, timeout):
-        """A connection to the relay, through a CONNECT tunnel when the environment or
-        the system names a proxy for it, as urlopen would use."""
+        """A connection to the relay. When getproxies() names a proxy for the scheme and
+        proxy_bypass() does not exempt host:port, it runs through a CONNECT tunnel to the
+        relay, for http too; TLS inside the tunnel checks the relay's name. A port left
+        out is the scheme's, for the relay and for the proxy, as urlopen does."""
+        port = port or (443 if scheme == "https" else 80)
         proxy = urllib.request.getproxies().get(scheme)
-        if proxy and urllib.request.proxy_bypass(host):
+        netloc = ("[%s]" % host if ":" in host else host) + ":%d" % port
+        if proxy and urllib.request.proxy_bypass(netloc):
             proxy = None
         target = (host, port)
         if proxy:
             via = urllib.parse.urlsplit(proxy if "://" in proxy else "http://" + proxy)
-            target = (via.hostname, via.port or 8080)
+            target = (via.hostname, via.port or (443 if scheme == "https" else 80))
         if scheme == "https":
             conn = http.client.HTTPSConnection(*target, timeout=timeout, context=self._tls)
         else:
@@ -158,15 +165,14 @@ class Connection:
                     self._conn.request("POST", path, body=req.data, headers=dict(req.header_items()))
                     resp = self._conn.getresponse()
                     body = resp.read()
-                except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError,
-                        ConnectionAbortedError):
+                except self._CLOSED:
                     self.close()
                     if again:
                         again = False
                         continue
                     raise
-                except (OSError, http.client.HTTPException):
-                    self.close()
+                except BaseException:
+                    self.close()             # never reuse a connection a request stopped half-way
                     raise
                 if resp.will_close:
                     self.close()
@@ -174,6 +180,18 @@ class Connection:
                     raise urllib.error.HTTPError(req.full_url, resp.status, resp.reason,
                                                  resp.headers, io.BytesIO(body))
                 return io.BytesIO(body)
+
+
+def flush(up, poster, wait=10.0):
+    """Post what is still queued once the poster has stopped. False, and nothing posted,
+    while it still runs: a post beside it could send a batch twice."""
+    poster.join(wait)
+    if poster.is_alive():
+        return False
+    deadline = time.monotonic() + wait
+    while up.pending() and up._failing_since is None and time.monotonic() < deadline:
+        up.post_once()
+    return True
 
 
 def _say(line):
@@ -496,10 +514,8 @@ def main(argv=None):
     except KeyboardInterrupt:
         stop.set()
     try:
-        poster.join(10)                                 # never post one batch twice
-        deadline = time.monotonic() + 10
-        while up.pending() and up._failing_since is None and time.monotonic() < deadline:
-            up.post_once()                              # flush what is still queued
+        if not flush(up, poster):
+            _say("the last upload still runs: packets still queued are not sent")
     except KeyboardInterrupt:
         pass  # a second Ctrl+C skips the flush
     _say("stopped: received %d, posted %d batches, dropped %d" % (
