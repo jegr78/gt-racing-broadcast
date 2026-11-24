@@ -145,6 +145,7 @@ _COVERED = [
     ("src", "scripts", "obs_browser_linux.py"),
     ("src", "scripts", "preflight.py"),
     ("src", "scripts", "league_service.py"),
+    ("src", "scripts", "league_result.py"),
 ]
 
 

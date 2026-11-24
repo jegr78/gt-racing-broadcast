@@ -17,7 +17,7 @@
   racecast event timing [--new] [--serve hosted|funnel]  # public live timing link (event start creates it, stop ends it)
   racecast event race [--formation on|off] [--laps N|--time] [--restart keep|neutralise] [--last-lap-seconds N]  # driver telemetry race
   racecast event league [REF]                # load the event REF from the league service (LEAGUE_SERVICE_URL), or show the loaded one; stop clears it
-  racecast event result [send|refresh] [RACE] [--recording FILE] [--index N] [--ref REF]  # the race result for the league service: show, send again (replaces the draft), refresh a pending status
+  racecast event result show|send|refresh [RACE] [--recording FILE] [--index N] [--ref REF]  # the race result for the league service: show, send again (replaces the draft), refresh a pending status
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)

@@ -206,5 +206,17 @@
   "event league": {
     "handler": "loadLeagueEventRef",
     "surface": "ui/control-center.html"
+  },
+  "event result show": {
+    "handler": "loadLeagueEvent",
+    "surface": "ui/control-center.html"
+  },
+  "event result send": {
+    "handler": "sendLeagueResult",
+    "surface": "ui/control-center.html"
+  },
+  "event result refresh": {
+    "handler": "refreshLeagueResult",
+    "surface": "ui/control-center.html"
   }
 }
