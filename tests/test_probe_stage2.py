@@ -21,8 +21,9 @@ def t_every_platform_sheet_has_the_download_the_check_and_the_stop():
     assert "py racecast-sender.py" in ps.kit(INVITE, SCRIPT, "windows")
     assert "curl.exe -o" in ps.kit(INVITE, SCRIPT, "windows"), "PowerShell's curl is an alias"
     iphone = ps.kit(INVITE, SCRIPT, "iphone")
-    assert "--console <PlayStation IP>" in iphone.split("## For the session")[1], \
+    assert "`python3 racecast-sender.py --url ... --code ... --console <PlayStation IP>`" in iphone, \
         "a-Shell cannot discover the console: its command needs --console"
+    assert "--code ... --console" not in ps.kit(INVITE, SCRIPT, "macos"), "discovery works on a Mac"
     android = ps.kit(INVITE, SCRIPT, "android")
     assert "termux-wake-lock" in android and "termux-wake-unlock" in android and "battery" in android
     assert "python racecast-sender.py" in android, "Termux names it python"
@@ -129,9 +130,12 @@ def t_hz_per_minute_shows_the_device_rate_and_the_low_minute():
 
 
 def t_positions_compare_0x84_with_the_relay_order():
-    rows = {r["entry"]: r for r in ps.positions(_polls())}
+    polls = _polls()
+    polls[3]["race"]["entries"][0]["gt7_position"] = 2          # GT7 disagrees once
+    rows = {r["entry"]: r for r in ps.positions(polls)}
     a, b = rows["Team A"], rows["Team B"]
-    assert a["with_0x84"] == a["polls"] and a["agree"] == a["polls"], a
+    assert a["with_0x84"] == a["polls"] and a["agree"] == a["polls"] - 1, a
+    assert a["values"] == [1, 2], a
     assert b["with_0x84"] == 0 and b["agree_pct"] is None, f"no 0x84 is no agreement: {b}"
     counts = ps.car_counts(_polls())
     assert counts[ps.tag("ca")]["car_counts"] == [2] and counts[ps.tag("cc")]["with_position"] == 0
