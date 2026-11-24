@@ -87,12 +87,12 @@ def prepared(root):
     return pkg
 
 
-def wait_for(fn,timeout=30):
+def wait_for(fn,timeout=30,message='state did not arrive'):
     end=time.monotonic()+timeout
     while time.monotonic()<end:
         if fn():return
         time.sleep(.02)
-    raise AssertionError('state did not arrive')
+    raise AssertionError(message)
 
 
 def t_continuous_status_polling_preserves_every_atomic_snapshot():
@@ -350,7 +350,8 @@ def t_success_still_terminates_closed_stream_descendants():
                 finally:kernel.CloseHandle(h)
             p=subprocess.run(['ps','-p',str(pid),'-o','stat='],capture_output=True,text=True,errors='replace')
             return not p.stdout.strip() or p.stdout.strip().startswith('Z')
-        try:assert dead(), 'normal CLI exit left a descendant alive'
+        # A SIGKILLed process can still show as running until the kernel finishes its exit.
+        try:wait_for(dead,message='normal CLI exit left a descendant alive')
         finally:
             if not dead():
                 if os.name=='nt':subprocess.run(['taskkill','/PID',str(pid),'/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
