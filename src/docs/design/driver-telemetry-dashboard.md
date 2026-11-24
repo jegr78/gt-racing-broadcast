@@ -153,18 +153,23 @@ director.
 
 - **Start.** With the event setting "formation lap" (default on) a car's distance
   starts when it crosses the line into lap 2. The crossing times form the starting
-  gaps. Without it, distance starts at lap 1. In a race GT7 reads lap 1 on the grid,
-  so without a formation lap a car counts from the grid, behind the line.
-- **Laps and the line** (#1263). A car's own counter step on track, on the line and
-  moving, marks the finish line's station. Where the finish line runs through the pit
+  gaps. Without it, distance starts at lap 1. In a race GT7 reads lap 1 on the grid
+  and keeps it over the start, so without a formation lap a car counts from the line
+  on lap 1; a car seen first up to 500 m before the line may stand on the grid or roll
+  to it, so it counts once it passes the line.
+- **Laps and the line** (#1263). A car's own counter step on track, on the line,
+  moving and right after its previous sample, marks the finish line's station. On the
+  line means within 12 m: on Grand Valley Highway 1 the counter stepped 0 to 9 m off
+  the line on track and 19 m off it in the pit lane at 80 km/h. Where the finish line runs through the pit
   lane, GT7 also steps the counter in the pit lane or while the car stands in its box;
   such steps mark nothing. Between samples close enough that a car cannot have driven
   half a lap, its own movement along the line decides its laps, so a counter step away
   from the line moves no distance and the lap count never steps back; after a longer
-  gap, such as a sender outage, the counter decides. A car that has not crossed yet
-  counts from the reference line's start, where reference laps begin; its first own
-  crossing moves its distance once by the difference, which is zero on a line that
-  starts at the finish line. The downloaded line of Spa 24h Layout (`d60ebc`) starts
+  gap, such as a sender outage, the counter decides, kept by the lap it differed at
+  the car's last sample. A car that has not crossed yet counts from the reference
+  line's start, where reference laps begin; its first own crossing moves its distance
+  once to the lap GT7's counter gives there, by the difference to the start, which is
+  zero on a line that starts at the finish line. The downloaded line of Spa 24h Layout (`d60ebc`) starts
   past La Source and closes over it with a 193 m chord, so there the move is about
   190 m; a reference line of that layout that starts at the finish line removes it.
 - **Driver change** (multi-lobby layer). The broadcast stint switch opens the
