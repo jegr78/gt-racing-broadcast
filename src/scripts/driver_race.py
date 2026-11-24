@@ -1466,6 +1466,8 @@ class Service:
             if final_row and race.multi_lobby:
                 self._final_on_air, self._final_lobby_laps = True, final_laps
                 race.final_lobby(final_laps, self._clock())
+            elif race.multi_lobby:
+                self._final_on_air, self._final_lobby_laps = False, None
 
     def final_lap(self, who="tailnet"):
         with self._lock:
