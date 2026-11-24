@@ -877,7 +877,7 @@ class Runner:
 
                     def drain_impl(stream, target, parse=False):
                         count = 0
-                        pending = b""
+                        pending = bytearray()
                         with open(target, "wb") as f:
                             while True:
                                 chunk = stream.read1(8192)
@@ -890,6 +890,8 @@ class Runner:
                                 f.write(chunk)
                                 if parse:
                                     pending += chunk
+                                    if b"\n" not in chunk:
+                                        continue  # Re-splitting a long line on every chunk is quadratic.
                                     lines = pending.split(b"\n")
                                     pending = lines.pop()
                                     if len(pending) > MAX_OUTPUT_BYTES:
