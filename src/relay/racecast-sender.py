@@ -417,8 +417,8 @@ class Sender:
             self.stats["heartbeats"] += 1
         except OSError as exc:
             self.heartbeat_failed += 1
-            hint = ("" if self.console else ". This device cannot search the network "
-                    "(iPhone, iPad): start the sender with --console <PlayStation IP>")
+            hint = ("" if self.console else ". On an iPhone or iPad the search cannot "
+                    "work: start the sender with --console <PlayStation IP>")
             self.say(f"heartbeat to {target} failed: {exc}{hint}")
 
     def receive_once(self):

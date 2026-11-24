@@ -58,7 +58,7 @@ li{margin-bottom:6px}
       telemetry. Start the sender anyway: until then it prints <code>waiting for approval by
       Race Control</code> and asks again every 10 seconds.</p>
     <label for="console">PlayStation IP address</label>
-    <input id="console" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="Needed on iPhone and iPad">
+    <input id="console" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Needed on iPhone and iPad">
     <p class="dim">On an iPhone or iPad the sender cannot find the PlayStation by itself, so
       enter its address here (the PlayStation's network settings show it) and the commands
       below include it. Elsewhere leave it empty.</p>
@@ -120,10 +120,10 @@ li{margin-bottom:6px}
   }
   function showCommands() {
     if (!registered) return;
-    const args = senderArgs(location.origin, registered, $('console').value);
+    let args = senderArgs(location.origin, registered, $('console').value);
     $('consoleErr').textContent = args === false ? 'Type the address as four numbers, like 192.168.1.20.' : '';
     $('consoleErr').hidden = args !== false;
-    if (args === false) return;
+    if (args === false) args = senderArgs(location.origin, registered, '');
     $('cmdPy').textContent = 'python3 racecast-sender.py ' + args;
     $('cmdPyWin').textContent = 'py racecast-sender.py ' + args;
     $('cmdWin').textContent = '.\\racecast-sender-windows.exe ' + args;

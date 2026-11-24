@@ -87,10 +87,11 @@ program can receive it. Pick the line that matches what you already run:
   port in GT Race Engineer.
 
 The sender finds the PlayStation by itself, except on an iPhone or iPad, where iOS does
-not let it search the network. There, and wherever the sender reports "no console
-found", type the PlayStation's IP address into the invite page's **PlayStation IP
-address** field: the commands then end with `--console <PlayStation IP>`. The
-PlayStation's network settings show the address.
+not let it search the network. There, type the PlayStation's IP address into the invite
+page's **PlayStation IP address** field right after registering: the commands then end
+with `--console <PlayStation IP>`. Wherever the sender reports "no console found", add
+`--console <PlayStation IP>` to the command you have. The PlayStation's network
+settings show the address.
 
 ## Your platform
 

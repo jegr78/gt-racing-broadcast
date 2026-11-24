@@ -34,8 +34,10 @@ repo checkout on `main`.
    `http://<tailnet-ip>:8088/console/probe/ingest` (tailnet). Use the Funnel URL for
    every sender: that is the path drivers take. A device on the producer's tailnet
    resolves the Funnel host to its tailnet address, so a sender there never touches
-   Funnel. Only a machine off the tailnet (Tailscale off, or a phone on mobile data)
-   takes the public path; note for each block which machine that was.
+   Funnel. Only a machine off the tailnet takes the public path: in stage 1 the Linux
+   box, which resolved the Funnel host publicly, while the Windows PC, the Mac and the
+   iPhone posted over the tailnet. A sender still needs the PS5's LAN, so a public-path
+   sender is a LAN machine with Tailscale off.
 5. Firewall: nothing to prepare on Windows and macOS. Windows asks once when a program
    first listens, the same prompt SimHub answered: choose Allow. macOS asks only when its
    firewall is on. Only a Linux machine with an active firewall needs a rule:
