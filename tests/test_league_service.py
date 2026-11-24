@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""The league service client (#1253) against the simulated league service.
+Run: python3 tests/test_league_service.py"""
+import json, logging, os, sys, tempfile, threading, time
+from http.server import BaseHTTPRequestHandler
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "tools", "event-sim", "fakes"))
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
+import http_util  # noqa: E402
+import league_service as ls  # noqa: E402
+import league_sim  # noqa: E402
+from http_server import NumericThreadingHTTPServer  # noqa: E402
+
+ON = {"RACECAST_SIMULATION": "1"}
+KEY = "fixture-league-key-1"
+
+
+def _sim(**kw):
+    return league_sim.LeagueSim(key=KEY, **kw).start()
+
+
+def _cfg(sim, key=KEY):
+    cfg, problem = ls.settings(sim.url, key, ON)
+    assert cfg is not None, problem
+    return cfg
+
+
+def t_only_https_is_accepted_outside_simulation():
+    assert ls.url_problem("https://league.example/racecast", {}) == ""
+    assert "https" in ls.url_problem("http://league.example/racecast", {}), "plain http must be refused"
+    assert "https" in ls.url_problem("http://127.0.0.1:9/racecast", {}), \
+        "a loopback http URL outside simulation is refused too"
+    assert ls.url_problem("http://127.0.0.1:9/racecast", ON) == "", "simulation takes its loopback fake"
+    assert ls.url_problem("http://league.example/racecast", ON) != "", "simulation never takes a remote http URL"
+    for bad in ("https://user:pw@league.example/x", "https://league.example/x?k=1",
+                "https://league.example/x#f", "ftp://league.example/", "https://", "league.example"):
+        assert ls.url_problem(bad, {}) != "", bad
+
+
+def t_settings_need_both_values():
+    assert ls.settings("", "", {}) == (None, ""), "no service configured is not a problem"
+    cfg, problem = ls.settings("https://league.example/racecast/", "k", {})
+    assert cfg == ls.Settings("https://league.example/racecast", "k") and problem == ""
+    assert "KEY" in ls.settings("https://league.example/x", "", {})[1]
+    assert "URL" in ls.settings("", "k", {})[1]
+    cfg, problem = ls.settings("http://league.example/x", "k", {})
+    assert cfg is None and "https" in problem
+
+
+def _event(**over):
+    return dict({"v": 1, "title": "Match", "races": [{"race": "leg-1", "title": "Leg 1"}],
+                 "widgets": [{"id": "score", "title": "Score", "form": "score"}]}, **over)
+
+
+def t_parse_event_keeps_a_valid_event():
+    e = ls.parse_event(_event())
+    assert e == {"v": 1, "title": "Match", "races": [{"race": "leg-1", "title": "Leg 1"}],
+                 "widgets": [{"id": "score", "title": "Score", "form": "score"}]}, e
+
+
+def t_parse_event_drops_what_is_beyond_a_limit():
+    races = [{"race": f"r{i}"} for i in range(20)] + [{"race": "bad id"}, {"race": "r1"}, "x"]
+    widgets = [{"id": f"w{i}", "title": "T", "form": "table"} for i in range(10)]
+    widgets[0] = {"id": "w0", "title": "x" * 61, "form": "table"}
+    widgets[1] = {"id": "W1", "title": "T", "form": "table"}
+    widgets[2] = {"id": "w2", "title": "T", "form": "html"}
+    e = ls.parse_event(_event(races=races, widgets=widgets, title="t" * 81))
+    assert [r["race"] for r in e["races"]] == [f"r{i}" for i in range(16)], "16 races at most, bad ids dropped"
+    assert [w["id"] for w in e["widgets"]] == [f"w{i}" for i in range(3, 10)][:8], e["widgets"]
+    assert e["title"] == "", "an over-long event title is dropped"
+
+
+def t_parse_event_refuses_a_body_off_the_contract():
+    for doc in (None, [], {"v": 2, "races": [{"race": "a"}]}, {"v": True, "races": [{"race": "a"}]},
+                {"v": 1, "races": []}, {"v": 1, "races": [{"race": "bad id"}]}, {"v": 1}):
+        assert ls.parse_event(doc) is None, doc
+
+
+def t_widget_values_are_bounded_and_cut_to_their_form():
+    rows = [{"rank": i + 1, "name": f"D{i}", "value": str(i)} for i in range(70)]
+    rows[0]["name"] = "n" * 41
+    rows[1]["rank"] = True
+    doc = {"v": 1, "widgets": {
+        "table": {"rows": rows, "value_title": "Pts", "values": [{"label": "x", "value": "1"}]},
+        "score": {"values": [{"label": "A", "value": "12345678901234567"}, {"label": "B", "value": "3"}]
+                  + [{"label": f"L{i}", "value": "1"} for i in range(10)], "provisional": True},
+        "unknown": {"values": []}, "Bad Id": {}}}
+    v = ls.parse_widget_values(doc, {"table": "table", "score": "score"})
+    assert set(v) == {"table", "score"}, "widgets the event did not list are dropped"
+    assert len(v["table"]["rows"]) == 64 and v["table"]["rows"][0]["rank"] == 3, \
+        "64 rows at most; an over-long name and a bool rank drop their row"
+    assert "values" not in v["table"], "a table carries no score values"
+    assert v["score"]["values"][0] == {"label": "B", "value": "3"} and len(v["score"]["values"]) == 8
+    assert v["score"]["provisional"] is True
+    assert ls.parse_widget_values({"v": 1, "widgets": []}) is None
+    assert ls.parse_widget_values({"v": 1, "widgets": {f"w{i}": {} for i in range(12)}}).keys() == \
+        {f"w{i}" for i in range(8)}, "eight widgets at most"
+
+
+def t_result_status_keeps_the_graphic_only_on_the_service_host():
+    url = "https://league.example/racecast"
+    s = ls.parse_result_status({"v": 1, "status": "stored", "message": "ok",
+                                "link": "https://league.example/r/1",
+                                "graphic_url": "https://league.example/r/1.png"}, url)
+    assert s == {"status": "stored", "message": "ok", "link": "https://league.example/r/1",
+                 "graphic_url": "https://league.example/r/1.png"}
+    s = ls.parse_result_status({"v": 1, "status": "pending", "link": "http://league.example/r",
+                                "graphic_url": "https://evil.example/x.png", "message": "m" * 201}, url)
+    assert s == {"status": "pending", "message": "", "link": None, "graphic_url": None}, s
+    assert ls.parse_result_status({"v": 1, "status": "done"}, url) is None
+
+
+def t_fetch_event_sends_key_and_user_agent():
+    with _sim() as sim:
+        e = ls.fetch_event(_cfg(sim), league_sim.DEFAULT_REF)
+        assert [r["race"] for r in e["races"]] == ["leg-1", "leg-2"]
+        assert [w["id"] for w in e["widgets"]] == ["match-score", "standings"]
+        (call,) = sim.calls()
+        assert call["call"] == "event" and call["ref"] == league_sim.DEFAULT_REF
+        assert call["user_agent"] == http_util.RACECAST_UA, call["user_agent"]
+
+
+def t_a_wrong_key_fails_without_naming_it():
+    with _sim() as sim:
+        try:
+            ls.fetch_event(_cfg(sim, key="wrong-key-value"), league_sim.DEFAULT_REF)
+            raise AssertionError("a refused key must raise")
+        except ls.ServiceError as e:
+            assert "LEAGUE_SERVICE_KEY" in str(e) and "wrong-key-value" not in str(e), str(e)
+        assert sim.unauthorized == 1 and sim.calls() == []
+
+
+def t_an_unknown_ref_and_a_bad_ref_fail():
+    with _sim() as sim:
+        for ref, needle in (("NOPE", "404"), ("", "empty"), ("x" * 129, "longer"), ("a\nb", "control")):
+            try:
+                ls.fetch_event(_cfg(sim), ref)
+                raise AssertionError(ref)
+            except ls.ServiceError as e:
+                assert needle in str(e), (ref, str(e))
+
+
+def t_no_redirect_is_followed():
+    hits = []
+
+    class Elsewhere(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_a):
+            pass
+
+    other = NumericThreadingHTTPServer(("127.0.0.1", 0), Elsewhere)
+    threading.Thread(target=other.serve_forever, daemon=True).start()
+    try:
+        with _sim() as sim:
+            for status in (301, 302, 307, 308):
+                sim.answer("event", status=status, body={},
+                           location=f"http://127.0.0.1:{other.server_address[1]}/steal")
+                try:
+                    ls.fetch_event(_cfg(sim), league_sim.DEFAULT_REF)
+                    raise AssertionError(f"{status} must not be followed")
+                except ls.ServiceError as e:
+                    assert "redirect" in str(e), str(e)
+        assert hits == [], "the key reached the redirect target"
+    finally:
+        other.shutdown()
+        other.server_close()
+
+
+def t_an_answer_off_the_contract_raises():
+    deep = "[" * 100000 + "]" * 100000
+    with _sim() as sim:
+        for raw, needle in (("x" * (ls.MAX_BODY + 1), "KiB"), ("not json", "JSON"), (deep, "JSON"),
+                            (json.dumps({"v": 1, "races": []}), "contract")):
+            sim.answer("event", raw=raw)
+            try:
+                ls.fetch_event(_cfg(sim), league_sim.DEFAULT_REF)
+                raise AssertionError(needle)
+            except ls.ServiceError as e:
+                assert needle in str(e), (needle, str(e))
+
+
+def t_an_unreachable_service_raises():
+    sim = _sim()
+    cfg = _cfg(sim)
+    sim.stop()
+    try:
+        ls.fetch_event(cfg, league_sim.DEFAULT_REF, timeout=1.0)
+        raise AssertionError("a stopped service must raise")
+    except ls.ServiceError as e:
+        assert "reach" in str(e) or "HTTP" in str(e), str(e)
+
+
+SNAP = {"v": 1, "mode": "race", "stint": 2, "remaining": 1200, "track_name": "Spa", "state": "racing",
+        "red_flag": False, "lap": 7, "delay_s": 30, "visible": True, "lobby_lap": 8,
+        "fastest": {"entry": "e1", "driver": "Ann", "team": "A", "ms": 138000, "pick": "x"},
+        "entries": [{"pos": 1, "entry": "e1", "number": "7", "driver": "Ann", "team": "A", "laps": 7,
+                     "gap_s": 0, "interval_s": None, "lapped": 0, "status": "racing", "pit_stops": 1,
+                     "last_lap_ms": 139000, "finished": False, "fuel_l": 40.1, "compound": "RM",
+                     "x": 1.0, "z": 2.0, "color": "#fff", "stream_url": "https://yt/x"}]}
+
+
+def t_live_state_is_an_allowlist():
+    body = ls.live_state("REF", "leg-1", SNAP)
+    assert body["v"] == 1 and (body["ref"], body["race"], body["mode"]) == ("REF", "leg-1", "race")
+    assert (body["stint"], body["lap"], body["remaining"], body["track_name"]) == (2, 7, 1200, "Spa")
+    assert body["fastest"] == {"entry": "e1", "driver": "Ann", "team": "A", "ms": 138000}
+    (row,) = body["entries"]
+    for banned in ("fuel_l", "compound", "x", "z", "color", "stream_url"):
+        assert banned not in row, f"{banned} must never leave the machine"
+    assert row["driver_ref"] == "" and row["pit_stops"] == 1 and row["number"] == "7"
+    for banned in ("delay_s", "visible", "lobby_lap"):
+        assert banned not in body, banned
+
+
+def t_live_state_rows_are_entries_in_qualifying():
+    snap = {"mode": "qualifying", "stint": "Q", "qualifying": [{"pos": 1, "entry": "e1", "driver": "Ann",
+                                                               "best_ms": 90000, "gap_ms": None}]}
+    body = ls.live_state("REF", "leg-1", snap)
+    assert body["mode"] == "qualifying" and body["entries"][0]["best_ms"] == 90000
+    assert body["stint"] is None, "a stint that is not a number is sent as null"
+    assert "qualifying" not in body
+
+
+def t_post_live_and_results_round_trip_against_the_sim():
+    with _sim() as sim:
+        cfg = _cfg(sim)
+        values = ls.post_live(cfg, ls.live_state(league_sim.DEFAULT_REF, "leg-1", SNAP),
+                              {"match-score": "score", "standings": "table"})
+        assert values["match-score"]["values"] == [{"label": "A", "value": "0"}], values
+        assert values["standings"]["rows"] == [{"rank": 1, "name": "Ann", "value": "7"}]
+        result = {"v": 1, "ref": league_sim.DEFAULT_REF, "race": "leg-1", "entries": []}
+        s = ls.post_result(cfg, result)
+        assert s["status"] == "pending" and s["link"].startswith("https://")
+        assert ls.fetch_result(cfg, league_sim.DEFAULT_REF, "leg-1")["status"] == "pending"
+        try:
+            ls.post_live(cfg, ls.live_state(league_sim.DEFAULT_REF, "leg-9", SNAP))
+            raise AssertionError("a race outside the event is refused by the service")
+        except ls.ServiceError as e:
+            assert "400" in str(e)
+
+
+class _Clock:
+    def __init__(self):
+        self.t = 100.0
+
+    def __call__(self):
+        return self.t
+
+
+class _Log:
+    def __init__(self):
+        self.lines = []
+
+    def warning(self, msg, *a):
+        self.lines.append(msg % a)
+
+    info = warning
+
+
+def t_client_backs_off_and_recovers():
+    clock, log, outcomes, sent = _Clock(), _Log(), [], []
+    cfg = ls.Settings("https://league.example/racecast", KEY)
+
+    def post(c, body, forms):
+        sent.append(clock.t)
+        result = outcomes.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+    c = ls.Client(lambda: cfg, lambda: {"v": 1}, post=post, clock=clock, log=log)
+    outcomes[:] = [ls.ServiceError("boom")] * 6 + [{"w": {"values": []}}]
+    waits = []
+    for _ in range(7):
+        waits.append(c.step())
+        clock.t += waits[-1]
+    assert waits[:6] == [2.0, 4.0, 8.0, 16.0, 30.0, 30.0], f"backoff doubles up to 30 s: {waits}"
+    assert len(sent) == 7, "one call per due step, none while backing off"
+    assert log.lines.count("league service: boom") == 1, "a repeated error is logged once"
+    assert c.status()["last_error"] is None and c.values() == {"w": {"values": []}}
+    assert log.lines[-1] == "league service: reachable again"
+    assert KEY not in json.dumps(c.status()) and KEY not in " ".join(log.lines)
+
+
+def t_client_holds_a_value_30_seconds_then_hides_it():
+    clock = _Clock()
+    answers = [{"w": {"values": [{"label": "A", "value": "1"}]}}]
+    c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1},
+                  post=lambda *a: answers[0], clock=clock, log=_Log())
+    c.step()
+    answers[0] = {}
+    clock.t += ls.HOLD_S
+    c.step()
+    assert "w" in c.values(), "a missing id keeps its last value until it expires"
+    clock.t += 0.1
+    assert c.values() == {}, "the value hides 30 s after its last good answer"
+
+
+def t_client_without_a_service_sends_nothing():
+    calls = []
+    c = ls.Client(lambda: None, lambda: {"v": 1}, post=lambda *a: calls.append(a), log=_Log())
+    assert c.step() == ls.TICK_S and calls == []
+    assert c.status()["configured"] is False
+    c2 = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: None,
+                   post=lambda *a: calls.append(a), log=_Log())
+    c2.step()
+    assert calls == [], "no body (no event loaded) sends nothing"
+
+
+def t_client_thread_posts_live_state_to_the_sim():
+    with _sim() as sim:
+        cfg = _cfg(sim)
+        c = ls.Client(lambda: cfg, lambda: ls.live_state(league_sim.DEFAULT_REF, "leg-1", SNAP),
+                      lambda: {"match-score": "score", "standings": "table"}, log=_Log())
+        stop = threading.Event()
+        t = threading.Thread(target=c.run, args=(stop,), daemon=True)
+        t.start()
+        deadline = time.monotonic() + 5
+        while not c.values() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        c.wake()
+        stop.set()
+        c.wake()
+        t.join(5)
+        assert not t.is_alive(), "the client thread ends on stop"
+        assert set(c.values()) == {"match-score", "standings"}, c.values()
+        assert sim.calls(call="live")[0]["body"]["entries"][0]["driver_ref"] == ""
+
+
+def t_event_file_round_trip_keeps_the_current_race():
+    with tempfile.TemporaryDirectory() as d:
+        path = ls.path_in(d)
+        assert ls.read(path) is None
+        event = ls.parse_event(_event(races=[{"race": "leg-1"}, {"race": "leg-2"}]))
+        doc = ls.store(path, "REF", event)
+        assert doc["current"] == "leg-1" and ls.read(path)["races"][1]["race"] == "leg-2"
+        with open(path, encoding="utf-8") as fh:
+            raw = json.load(fh)
+        raw["current"] = "leg-2"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(raw, fh)
+        assert ls.store(path, "REF", event)["current"] == "leg-2", "a reload keeps the current race"
+        assert ls.store(path, "OTHER", event)["current"] == "leg-1", "another event starts at the first race"
+        raw["current"] = "leg-9"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(raw, fh)
+        assert ls.read(path) is None, "a current race outside the list is not trusted"
+        ls.clear(path)
+        ls.clear(path)
+        assert not os.path.exists(path)
+
+
+def t_client_logs_carry_no_key():
+    records = []
+
+    class H(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+    h = H()
+    ls.LOG.addHandler(h)
+    try:
+        with _sim() as sim:
+            c = ls.Client(lambda: _cfg(sim, key="leaky-key-123"), lambda: {"v": 1}, clock=_Clock())
+            c.step()
+    finally:
+        ls.LOG.removeHandler(h)
+    assert records and all("leaky-key-123" not in r for r in records), records
+
+
+if __name__ == "__main__":
+    for name, fn in sorted(globals().items()):
+        if name.startswith("t_") and callable(fn):
+            fn(); print("ok", name)
+    print("ALL PASS")

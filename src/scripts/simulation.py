@@ -24,6 +24,8 @@ OBS_WS = "RACECAST_SIM_OBS_WS"                      # ws://127.0.0.1:<port>
 SHEET_URL = "RACECAST_SIM_SHEET_URL"                # stands in for https://docs.google.com/spreadsheets/d/<id>
 SHEET_PUSH_URL = "RACECAST_SIM_SHEET_PUSH_URL"      # stands in for the league SHEET_PUSH_URL
 DISCORD_WEBHOOK_URL = "RACECAST_SIM_DISCORD_WEBHOOK_URL"
+LEAGUE_SERVICE_URL = "RACECAST_SIM_LEAGUE_SERVICE_URL"  # stands in for the league LEAGUE_SERVICE_URL
+LEAGUE_SERVICE_KEY = "RACECAST_SIM_LEAGUE_SERVICE_KEY"  # the key the simulated service accepts
 STREAM_BIN = "RACECAST_SIM_STREAM_BIN"              # directory with yt-dlp and streamlink stand-ins
 FORCE = "RACECAST_SIM_FORCE"                        # the one profile a --force run allowed
 RELAY_PORT = "RACECAST_SIM_RELAY_PORT"              # the relay control port, on 127.0.0.1 (required)
@@ -31,7 +33,7 @@ FEED_PORTS = "RACECAST_SIM_FEED_PORTS"              # Feed A, Feed B, POV: three
 DEFAULT_RELAY_PORT = 8088
 
 SCHEMES = {OBS_WS: ("ws",), SHEET_URL: ("http",), SHEET_PUSH_URL: ("http",),
-           DISCORD_WEBHOOK_URL: ("http",)}
+           DISCORD_WEBHOOK_URL: ("http",), LEAGUE_SERVICE_URL: ("http",)}
 REQUIRED = (SHEET_URL, STREAM_BIN)
 STREAM_TOOLS = ("yt-dlp", "streamlink")
 GOOGLE_SHEET = "https://docs.google.com/spreadsheets/d/"
@@ -315,11 +317,15 @@ def with_stream_bin(environ):
 
 def config_overrides(environ=None):
     """ResolvedConfig field -> value for simulation: the simulated webhooks, and every
-    other league endpoint (Discord OAuth and voice, the timing host) blank."""
+    other league endpoint (Discord OAuth and voice, the timing host) blank. The league
+    service is the simulated one, off without a loopback URL."""
     environ = os.environ if environ is None else environ
     if not active(environ):
         return {}
+    league = endpoint(LEAGUE_SERVICE_URL, environ)
     return {"sheet_push_url": endpoint(SHEET_PUSH_URL, environ),
+            "league_service_url": league,
+            "league_service_key": (environ.get(LEAGUE_SERVICE_KEY) or "").strip() if league else "",
             "discord_webhook_url": endpoint(DISCORD_WEBHOOK_URL, environ),
             "discord_client_id": "", "discord_client_secret": "", "discord_voice_url": "",
             "timing_host_account_id": "", "timing_host_api_token": "",

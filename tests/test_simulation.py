@@ -20,6 +20,8 @@ def t_env_names_are_the_documented_contract():
         "RACECAST_SIMULATION", "RACECAST_SIM_OBS_WS", "RACECAST_SIM_SHEET_URL",
         "RACECAST_SIM_SHEET_PUSH_URL", "RACECAST_SIM_DISCORD_WEBHOOK_URL",
         "RACECAST_SIM_STREAM_BIN", "RACECAST_SIM_FORCE"), "the RACECAST_SIM_* names changed"
+    assert (sim.LEAGUE_SERVICE_URL, sim.LEAGUE_SERVICE_KEY) == (
+        "RACECAST_SIM_LEAGUE_SERVICE_URL", "RACECAST_SIM_LEAGUE_SERVICE_KEY")
     assert sim.SKIPPED == "skipped (simulation)"
     assert sim.skipped("obs") == "obs: skipped (simulation)."
 
@@ -122,6 +124,11 @@ def t_config_overrides_replace_every_external_league_value():
         assert o[k] == "", f"{k} must be blank in simulation"
     assert sim.config_overrides(dict(ON))["sheet_push_url"] == ""
     assert sim.config_overrides({}) == {}
+    assert (o["league_service_url"], o["league_service_key"]) == ("", ""), \
+        "an unset simulated league service is off, never the real one"
+    off = sim.config_overrides(dict(ON, RACECAST_SIM_LEAGUE_SERVICE_URL="https://league.example/x",
+                                    RACECAST_SIM_LEAGUE_SERVICE_KEY="k"))
+    assert off["league_service_url"] == "", "a non-loopback simulated service is refused"
 
 
 def t_profile_guard():
@@ -304,7 +311,8 @@ LEAGUE_ENV = ("NAME=League\nSHEET_ID=SHEET\nSHEET_PUSH_URL=https://script.google
               "DISCORD_CLIENT_ID=cid\nDISCORD_CLIENT_SECRET=csec\n"
               "DISCORD_VOICE_URL=https://discord.com/channels/1/2\n"
               "TIMING_HOST_URL=https://timing.example.com\nTIMING_HOST_PUBLISH_KEY=k\n"
-              "TIMING_HOST_ACCOUNT_ID=a\nTIMING_HOST_API_TOKEN=t\n")
+              "TIMING_HOST_ACCOUNT_ID=a\nTIMING_HOST_API_TOKEN=t\n"
+              "LEAGUE_SERVICE_URL=https://league.example/racecast\nLEAGUE_SERVICE_KEY=fake-league-key\n")
 
 
 def _root(name="demo", text=LEAGUE_ENV):
@@ -329,6 +337,18 @@ def t_resolve_config_hands_out_only_simulated_endpoints():
                   "timing_host_account_id"):
         assert getattr(rc, field) == "", f"{field} leaked into simulation"
     assert rc.sheet_id == "SHEET", "the sheet id stays; only its origin moves"
+    assert (rc.league_service_url, rc.league_service_key) == ("", ""), \
+        "the league's real service must never be called in simulation"
+
+
+def t_resolve_config_points_the_league_service_at_its_simulation():
+    import config
+    env = dict(ON, RACECAST_SIM_LEAGUE_SERVICE_URL="http://127.0.0.1:9/racecast",
+               RACECAST_SIM_LEAGUE_SERVICE_KEY="sim-key")
+    rc = config.resolve_config(_root(), environ=env)
+    assert (rc.league_service_url, rc.league_service_key) == ("http://127.0.0.1:9/racecast", "sim-key")
+    rc = config.resolve_config(_root(), environ={})
+    assert rc.league_service_url == "https://league.example/racecast", "outside simulation the profile wins"
 
 
 _RELAY = None
