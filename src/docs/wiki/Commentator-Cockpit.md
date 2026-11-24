@@ -18,8 +18,9 @@ The cockpit uses the frame of the [Race Control desk](Console#race-control-desk)
   window the column scrolls on its own.
 - **The selected area** fills the middle. Timing gets the full width with every column.
 - **The chats** sit on the right: the crew chat, and the broadcast chat below it.
-- **Between 821 and 1279 px** the areas show as letters (T, S, G, N) and the chats move
-  under the area.
+- **Below 1440 px** the areas show as letters (T, S, G, N), so the timing keeps every
+  column. Between 821 and 1279 px the chats also move under the area. In a short window
+  the timing table scrolls inside its card and keeps its column header in view.
 
 What each part does:
 

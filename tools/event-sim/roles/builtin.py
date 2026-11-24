@@ -139,22 +139,25 @@ class StreamRole(Role):
 
 # Each visible control under a root: its label, how many px the viewport or a clipping
 # ancestor cuts off it (`cut`: 0 means it works without scrolling) and how many px an
-# ancestor that cannot scroll cuts off it (`clip`: 0 means scrolling reaches it).
+# ancestor that cannot scroll cuts off it (`clip`: 0 means scrolling reaches it), and `side`,
+# what the viewport or a clipping ancestor cuts off its left or right edge.
 _MEASURE = """(el) => {
     const r = el.getBoundingClientRect();
     if (el.offsetParent === null || !r.width || !r.height) return null;
     let top = 0, bottom = window.innerHeight, ctop = -Infinity, cbottom = Infinity;
+    let left = 0, right = window.innerWidth;
     for (let p = el.parentElement; p; p = p.parentElement) {
-      const o = getComputedStyle(p).overflowY;
+      const st = getComputedStyle(p), o = st.overflowY, b = p.getBoundingClientRect();
+      if (st.overflowX !== 'visible') { left = Math.max(left, b.left); right = Math.min(right, b.right); }
       if (o === 'visible') continue;
-      const b = p.getBoundingClientRect();
       top = Math.max(top, b.top); bottom = Math.min(bottom, b.bottom);
       if (o === 'hidden' || o === 'clip') { ctop = Math.max(ctop, b.top); cbottom = Math.min(cbottom, b.bottom); }
     }
     const name = el.dataset.label || el.getAttribute('aria-label') || el.textContent || el.id || el.tagName;
     return {label: name.trim().replace(/\\s+/g, ' ').slice(0, 40),
             cut: Math.max(0, Math.ceil(r.bottom - bottom), Math.ceil(top - r.top)),
-            clip: Math.max(0, Math.ceil(r.bottom - cbottom), Math.ceil(ctop - r.top))};
+            clip: Math.max(0, Math.ceil(r.bottom - cbottom), Math.ceil(ctop - r.top)),
+            side: Math.max(0, Math.ceil(r.right - right), Math.ceil(left - r.left))};
   }"""
 FIT_SCRIPT = """(root) => {
   const box = document.querySelector(root);

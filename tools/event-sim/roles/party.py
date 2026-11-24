@@ -227,8 +227,8 @@ class LiveColumn:
     scrolling the column reaches every control, so nothing clips one. The page may still
     settle its layout (the panel's program tile shrinks a frame later), so it measures
     again until the controls fit or the time is up. `rows` (a count) also asks that the
-    page shows at least that many of its `rows` (the cockpit's timing cars) whole, without
-    scrolling. `view` (area) opens one of its areas, so a screenshot shows it."""
+    page shows at least that many of its `rows` (the cockpit's timing cars) whole, every
+    column included, without scrolling. `view` (area) opens one of its areas, so a screenshot shows it."""
     live_required = ()
 
     def area(self, name):
@@ -269,8 +269,8 @@ class LiveColumn:
                 if len(shown) < rows:
                     return None
             last["cut"] = [(c["label"], c[key]) for c in found if c[key] > builtin.FIT_TOLERANCE_PX]
-            last["rows_cut"] = [(c["label"], c["cut"]) for c in last.get("rows", [])
-                                if c["cut"] > builtin.FIT_TOLERANCE_PX]
+            last["rows_cut"] = [(c["label"], max(c["cut"], c.get("side", 0))) for c in last.get("rows", [])
+                                if max(c["cut"], c.get("side", 0)) > builtin.FIT_TOLERANCE_PX]
             return not last["cut"] and not last["rows_cut"]
         try:
             try:

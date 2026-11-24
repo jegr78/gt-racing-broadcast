@@ -1699,6 +1699,9 @@ def t_fit_measures_the_rows_a_page_must_show_whole():
     assert role.do("fit", {"rows": 14}) == {"controls": len(need), "rows": 14}, "every row in view"
     page.fit[rows][13]["cut"] = 30
     fails(lambda: role.do("fit", {"rows": 14}), "1 of 14 rows need scrolling: P13 30px")
+    page.fit[rows][13]["cut"] = 0
+    page.fit[rows][2]["side"] = 25
+    fails(lambda: role.do("fit", {"rows": 14}), "1 of 14 rows need scrolling: P2 25px")
     fails(lambda: role.do("fit", {"rows": 0}), "rows is a whole number of at least 1")
     role, page, _ = make(party.RaceControlRole)
     page.fit["#liveCol"] = _controls(party.RaceControlRole.live_required)
@@ -1752,12 +1755,15 @@ def t_fit_script_measures_a_real_page():
             got = {c["label"]: (c["cut"] > 0, c["clip"] > 0) for c in tab.evaluate(roles.builtin.FIT_SCRIPT, "#col")}
             missing = tab.evaluate(roles.builtin.FIT_SCRIPT, "#none")
             rows = {c["label"]: c["cut"] > 0 for c in tab.evaluate(roles.builtin.ROWS_SCRIPT, "body > button, #col > button")}
+            tab.set_content('<div style="width:100px;overflow-x:auto"><button style="width:300px">Wide</button></div>')
+            side = [c["side"] for c in tab.evaluate(roles.builtin.ROWS_SCRIPT, "button")]
             no_rows = tab.evaluate(roles.builtin.ROWS_SCRIPT, "#none tr")
         finally:
             browser.close()
     assert got == {"Hidden": (True, True), "Below": (True, False)}, \
         f"a box that cannot scroll clips, the scrolling column only hides: {got}"
     assert missing is None
+    assert side == [200], f"a row wider than its scrolling box is cut at the side: {side}"
     assert rows == {"Below": True, "Outside": False} and no_rows == [], \
         f"ROWS_SCRIPT measures every visible match the same way: {rows} {no_rows}"
 

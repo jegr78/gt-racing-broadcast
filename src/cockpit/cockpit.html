@@ -55,6 +55,13 @@
   @media (max-width: 820px) {
     html, body { height: auto; }
   }
+  /* 1280 to 1439 px: the areas show as letters, so the timing keeps every column in view. */
+  @media (min-width: 1280px) and (max-width: 1439px) {
+    #ckFrame { grid-template-columns: 64px 320px minmax(0, 1fr) 300px; }
+    #ckFrame .navbtn { flex-direction: column; justify-content: center; gap: 3px; padding: 6px 0; }
+    #ckFrame .navbtn .nlbl { display: none; }
+    #ckFrame .navbtn::after { content: attr(data-short); font: 700 13px var(--mono); }
+  }
   .card { background: #14171c; border: 1px solid #232830; border-radius: 10px; overflow: hidden; }
   /* Compact tally at the top of the live column; it stays in view while the column scrolls. */
   @media (min-width: 821px) {
@@ -86,14 +93,24 @@
   #timingHead { display: flex; gap: 10px; padding: 0 12px 6px; font-size: 13px; opacity: .85; flex-wrap: wrap; }
   #timingHead .flag { color: #ff6b6b; font-weight: 700; }
   #timingEmpty { padding: 14px 12px; opacity: .6; font-size: 13px; }
-  #timingWrap { overflow-x: auto; }   /* a phone scrolls the columns sideways */
+  /* The table scrolls inside its card, so its header stays in view and wide columns scroll sideways. */
+  #workspace > .area[data-area="timing"] { height: 100%; }
+  #timingCard { display: flex; flex-direction: column; max-height: 100%; }
+  #timingData:not([hidden]) { display: flex; flex-direction: column; min-height: 0; }
+  #timingWrap { overflow: auto; min-height: 0; }
+  @media (max-width: 820px) {
+    #workspace > .area[data-area="timing"] { height: auto; }
+    #timingCard { max-height: none; }
+    #timingWrap { max-height: 70vh; }
+  }
   #timing { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
   #timing th { position: sticky; top: 0; background: #14171c; text-align: left; font-weight: 600;
                opacity: .7; padding: 4px 4px; white-space: nowrap; }
   #timing td { padding: 4px 4px; border-top: 1px solid #232830; white-space: nowrap; }
   #timing td.num span { display: inline-block; min-width: 26px; text-align: center; border-radius: 4px;
                         padding: 1px 4px; font-weight: 700; background: #39414d; color: #fff; }
-  #timing td.drv { min-width: 96px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  /* The driver column takes what the other columns leave of the area. */
+  #timing td.drv { min-width: 96px; max-width: max(150px, 100vw - 1290px); overflow: hidden; text-overflow: ellipsis; }
   #timing td.logo { width: 28px; padding-right: 0; }
   #timing td.logo img { display: block; width: 26px; height: 18px; box-sizing: border-box; padding: 1px;
                         border-radius: 3px; background: #f2f4f7; object-fit: contain; }
@@ -908,6 +925,7 @@ function timingDriver(e) {
   d.textContent = fitName(e.driver, NAME_MAX);
   const small = document.createElement('small');
   small.textContent = e.team || e.entry || '';
+  d.title = (e.driver || '') + ' · ' + small.textContent;
   d.appendChild(small);
   return {cls: 'drv', node: d};
 }
