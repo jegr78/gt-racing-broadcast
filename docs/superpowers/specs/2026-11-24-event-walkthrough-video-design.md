@@ -1,0 +1,210 @@
+# Event walkthrough video
+
+Status: approved by the user on 2026-11-24. Decided: crew onboarding as the
+audience, the `full` scenario as the base (extended, not copied), a real OBS for the
+program picture, generated title clips as feeds, text captions from the scenario, no
+length limit, reproducible by one command outside the normal CI.
+
+## Problem
+
+The slide decks and the wiki show each desk on its own. Nobody sees what a race day looks
+like when all desks work at the same time: the commentator submits a link while Race
+Control approves drivers, the director takes the splitscreen while the drivers swap, the
+public timing follows a decision made at the desk seconds earlier. A new crew member
+learns this on their first real event.
+
+The event simulation already plays a whole race day through the real pages. It keeps
+only still images, and its program picture is a drawn test pattern.
+
+## Goal
+
+One command records the extended `full` scenario and renders a film that shows every
+perspective at once:
+
+- every view runs for the whole film, the active ones large, the others as live previews,
+- the program picture is what a real broadcast shows: scenes, transitions, splitscreen,
+  the demo profile's HUD, intro, trailer and outro,
+- captions say who acts and what they do, chapters mark the phases,
+- every action the film is about stays in real time and readable; only waiting is sped up,
+- after a UI change the same command produces the film again.
+
+Non-goals: a spoken commentary (a later second track), Companion buttons as a view, a run
+in the normal CI, real league data or real race footage.
+
+## The film
+
+### Views
+
+| View | Source | Shape |
+|---|---|---|
+| Program | the real OBS instance's own recording | 16:9 |
+| Director Panel | `director` page | 16:10 |
+| Race Control desk | `race_control` page | 16:10 |
+| Commentator Cockpit | the cockpit of the commentator on air or up next | 16:10 |
+| Public live timing | `viewer` page | 16:10 |
+| Control Center | `producer` page, at the start and the end | 16:10 |
+| Driver | the invite page in a phone viewport, at registration and at the sender failure | 9:19 |
+
+### Stage
+
+- The canvas is 2560x1440 at 30 fps.
+- At most two views are large. The others sit in a rail as live previews with the role
+  name and a highlight ring while something happens there.
+- The stage follows the scenario: the role of the running step takes the large slot. A
+  step can name its own focus, for example Director and Program together at a driver
+  swap.
+- Changes of size and position are animated (about 600 ms), never cut.
+- A visible pointer and a click mark show what was operated. The simulation clicks
+  without a pointer today.
+- A caption line names the role and the action ("Race Control confirms the disconnect of
+  #33"). A chapter title appears at each phase. A clock shows the race time, and a
+  fast-forward mark shows while time is sped up.
+
+### Pace
+
+- A step with a caption plays in real time, with a lead-in and a hold after it so the
+  result is readable on every view it changes.
+- Stretches where the scenario only waits (for a lap, a pit exit, a lobby) are sped up
+  by a factor chosen so that the timing still moves continuously. No stretch is cut out:
+  positions never jump.
+- The film has no length limit.
+
+### Sound
+
+The feeds are silent. A quiet music bed runs under the film, as in the trailer. Where
+sound matters in operation (program audio in the cockpit, the handover), a caption says
+so.
+
+## Storyboard
+
+The order is the order of `full`. New steps are marked **new**.
+
+| # | Chapter | What happens | Large |
+|---|---|---|---|
+| 1 | Start the event | Producer picks the track, sets the race, starts the event | Control Center |
+| 2 | First link | **new:** Comms 1 submits the stream link, the director approves it and arms feed A | Cockpit, Director |
+| 3 | Drivers sign up | **new:** a driver registers on the invite page; the others follow. Race Control approves, **new:** corrects one registration, **new:** rejects one | Driver, Race Control |
+| 4 | On air: qualifying | Director starts the part: **new:** intro, **new:** trailer, then program with Comms 1. Race Control adds qualifying laps, the public page ranks them | Program, Director, then Race Control, Timing |
+| 5 | Race start | Director switches to race mode. Formation lap, start | Program, Timing |
+| 6 | Stint 1 at the desk | Pit stop and **new:** tyre compound confirmed. A disconnect: suspected, confirmed, marked for rejoin. A sender stops: estimate behind another car. A retirement | Race Control, Timing |
+| 7 | Next commentator | Comms 2 submits late, the director approves and arms | Cockpit, Director |
+| 8 | Driver swap 1 | Cars box, splitscreen, new lobby, release, switch to stint 2 | Director, Program |
+| 9 | Stint 2 at the desk | The disconnected car rejoins a lap down. Red flag, cars to the box, restart with kept gaps. **new:** pit stop with a compound change | Race Control, Program |
+| 10 | Driver swap 2 | As chapter 8, to stint 3 | Director, Program |
+| 11 | The finish | Final lap called, chequered flag, result, fastest lap | Race Control, Timing |
+| 12 | Off air | **new:** outro, end of the part, the producer stops the event | Director, Program, Control Center |
+
+The retirement stays in stint 1, as in `full`: the deck's images depend on it.
+
+## Design
+
+Three stages, each usable on its own.
+
+### 1. Record: `event_sim.py --scenario full --record DIR`
+
+- **Pages.** Every page role records its page for the whole run. Which mechanism
+  (Playwright's video recording or CDP screencast frames) is decided by gate G2.
+- **Pointer.** In record mode an init script draws the pointer and the click mark. It is
+  not injected in any other mode, so tests and deck screenshots stay as they are.
+- **Driver page.** A new `driver` page role opens `/console/drive` with the invite link in
+  a phone viewport and registers through the form. The other drivers keep registering
+  over HTTP.
+- **Program.** `--obs real` starts OBS as a separate instance: its own configuration
+  directory inside the run's work dir, the localized demo scene collection, its
+  WebSocket on a free port, no stream target. The run starts and stops OBS's recording
+  over the WebSocket. The user's own OBS configuration is never read or written. Without
+  `--obs real` the stand-in stays, as today.
+- **Feeds.** The stream stub gets a `card` look: dark background in the demo colours,
+  the title ("Stint 1"), the commentator's name, a running clock and slow motion in the
+  background, all drawn by ffmpeg as today's test pattern is. `--record` selects it.
+- **Intro, trailer, outro.** Generated the same way as short clips (8 to 10 s) into the
+  run's media directory, where the demo collection's media sources expect them. Nothing
+  is committed and nothing is downloaded.
+- **Timeline.** The run writes `timeline.json`: per step its id, role, action, start and
+  end time, caption, chapter and focus, plus each recording's start offset.
+
+### 2. Scenario: `full`, extended
+
+New step keys, all optional and ignored outside record mode:
+
+- `caption`: the line shown while the step runs. A step without one is waiting time.
+- `chapter`: starts a chapter with this title.
+- `focus`: the views to enlarge, when it is not the step's own role.
+
+New actions:
+
+| Role | Action | Does |
+|---|---|---|
+| `race_control` | `reject_driver` | rejects one waiting request |
+| `race_control` | `correct_driver` | changes a registration's entry or stint before approving |
+| `race_control` | `compound` | sets an entry's tyre compound |
+| `director` | `play` | takes the Intro, Trailer or Outro scene and waits for its media to end |
+| `driver` | `register` | registers through the invite page |
+| `commentator` | `submit_link` | exists; used for Comms 1 before the event goes on air |
+
+The deck's 50 image names and their content stay as they are. A test compares the set of
+shot names before and after, and the new steps carry no deck shot names.
+
+### 3. Render: `tools/build-event-video.py DIR`
+
+- A stage page (HTML and CSS, as `tools/trailer/trailer.html` does) holds one element per
+  view and lays them out from the timeline: sizes, positions, rings, captions, chapter
+  titles, the clock.
+- The film is captured frame by frame: for each output frame the stage page shows every
+  recording at the source time that frame stands for, then the frames are encoded with
+  ffmpeg and the music bed is added. Speeding up waiting time is therefore exact and
+  needs no second pass.
+- Outputs under `runtime/event-video/<run>/`: `event-walkthrough.mp4`, `chapters.txt`
+  (time and title per chapter, in the form video platforms read) and `captions.vtt`.
+- Rendering reads only the recording directory. A recording can be rendered again with a
+  changed stage without a new simulation run.
+
+### Limits and safety
+
+- Recording needs a machine with a display and OBS, and more memory than the local E2E
+  unit's 2 GiB (`full` already exceeds it). `--record` states its own limit, checked
+  before the stack starts, and fails closed like the other runs. An OOM kill is a hard
+  failure.
+- The demo profile only. Ports 8088 and 8089 stay untouched, as in every simulation.
+- The recording shows console links and tokens of the demo run. They are masked with the
+  existing redaction before a frame is written.
+
+## Gates before the build
+
+Each gate is a short experiment with a written result. A failed gate goes back to the
+user before anything else is built.
+
+| Gate | Question | Passes when |
+|---|---|---|
+| G1 | Does a second OBS instance with its own configuration directory run next to the user's OBS on the workstation, without touching it? | it starts without a dialog, records the demo collection with the HUD browser source, and the user's OBS files are byte-identical afterwards |
+| G2 | Which page capture is sharp enough? | text of a desk in a rail preview and in a large slot is readable in a 1440p test frame |
+| G3 | How long does frame-by-frame rendering take? | a 60 s test film with six views renders in a time that makes the whole film practical (target: under two hours for the film) |
+| G4 | Does the run fit the machine? | six recordings plus OBS stay under the stated memory limit for the whole run |
+
+## Tests
+
+- **Scenario:** the new actions get role tests as the existing ones have. `full --check`
+  stays valid. The deck shot names are unchanged.
+- **Timeline:** unit tests for the pace rules (a captioned step is never sped up, waiting
+  is, no source time is skipped) and for the focus rules (own role, override, at most two
+  large views).
+- **Stage:** a rendering test lays out a fixed timeline and checks that no view overlaps
+  a caption and that every view is inside the canvas.
+- **End to end:** a short scenario (`smoke`) records and renders a few seconds in the
+  manual workflow, with the stand-in instead of a real OBS, to keep the pipeline from
+  rotting. The full film is a maintainer run.
+
+## Delivery
+
+An epic with these sub-issues, in this order:
+
+1. Gates G1 to G4, with their results written into this spec.
+2. The missing simulation actions and the driver page role.
+3. Record mode: page recordings, pointer, timeline, the `card` feed look, generated
+   intro, trailer and outro, the real OBS instance.
+4. `full` extended: new steps, captions, chapters, focus.
+5. The renderer and its stage.
+6. Maintainer docs (`tools/CLAUDE.md`) and a first full film for review.
+
+The finished film is uploaded by the user. The repository holds the scenario and the
+tools, never the clips or the film.
