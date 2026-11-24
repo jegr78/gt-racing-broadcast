@@ -26,6 +26,7 @@ input + .dim{margin-top:6px}
 #consoleErr{margin:0 0 10px}
 .note{border-left:3px solid var(--warn);padding:4px 0 4px 10px}
 .cmd{display:flex;gap:8px;align-items:flex-start;margin:6px 0 12px}
+#helpSec code{white-space:nowrap}
 .cmd code{flex:1;min-width:0;display:block;font:13px/1.45 var(--mono);background:#0e141b;border:1px solid var(--edge);border-radius:6px;padding:9px 10px;overflow-wrap:anywhere;white-space:pre-wrap}
 a{color:#8ac6ff}
 ul{margin:0 0 10px;padding-left:20px}
@@ -85,14 +86,15 @@ li{margin-bottom:6px}
       <li><b>Nothing else receives your telemetry:</b> run the command as shown.</li>
       <li><b>A dashboard app on your phone:</b> run the sender on a second device on the same
         network, such as a PC, laptop or tablet. Two programs cannot share one device's
-        telemetry port, unless the app takes forwarded packets like GT Race Engineer below.</li>
+        telemetry port, unless the app takes forwarded packets like those below.</li>
       <li><b>SimHub on the same PC:</b> if SimHub forwards its UDP packets, add
         <code>--listen PORT</code> with its forwarding port and leave SimHub as it is. Or add
         <code>--forward 127.0.0.1:PORT</code> and set SimHub's game telemetry port to that
         port, then restart SimHub.</li>
-      <li><b>GT Race Engineer on the same device:</b> add <code>--forward 127.0.0.1:PORT</code>
-        and enter the same address and port in its forwarding setting. That setting makes
-        it receive from the sender.</li>
+      <li><b>GT Race Engineer, Coach Dave Delta or Sim-to-Motec on the same device:</b> add
+        <code>--forward 127.0.0.1:PORT</code> and enter the same port in the app (GT Race
+        Engineer: its forwarding setting, Delta: "Enable Custom Port", Sim-to-Motec: any
+        port other than 33740).</li>
     </ul>
     <p class="dim">A firewall that filters inbound UDP must allow port 33740, because the
       console answers from a port of its own. On iOS keep a-Shell in front and the device charging.
