@@ -197,6 +197,7 @@ def timing_switch(env_path):
 # The public timing page's cut of a value: its own allowlist, whatever the parser keeps.
 _PUBLIC_VALUE = {"score": ("provisional", "values"), "table": ("provisional", "value_title", "rows")}
 _PUBLIC_ITEM = {"values": ("label", "value"), "rows": ("rank", "name", "value")}
+PUBLIC_ROWS = 20                # a table's rows on the public page; each answer goes to every viewer
 
 
 def public_value(form, value):
@@ -204,7 +205,8 @@ def public_value(form, value):
     for key in _PUBLIC_VALUE.get(form, ()):
         if key in value:
             item = _PUBLIC_ITEM.get(key)
-            out[key] = [{k: v[k] for k in item if k in v} for v in value[key]] if item else value[key]
+            items = value[key][:PUBLIC_ROWS] if key == "rows" else value[key]
+            out[key] = [{k: v[k] for k in item if k in v} for v in items] if item else value[key]
     return out
 
 

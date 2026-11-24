@@ -553,6 +553,9 @@ def t_the_public_cut_keeps_only_the_allowlisted_fields():
     assert lw.public_value("table", table) == {"value_title": "Pts", "rows": [{"rank": 1, "name": "Ann", "value": "2"}]}, \
         "a field the parser might keep one day never reaches the public body"
     assert lw.public_value("chart", score) == {}
+    rows = [{"rank": i, "name": f"D{i}", "value": "1"} for i in range(1, ls.MAX_ROWS + 1)]
+    assert [r["rank"] for r in lw.public_value("table", {"rows": rows})["rows"]] == list(range(1, lw.PUBLIC_ROWS + 1)), \
+        f"the public body keeps the first {lw.PUBLIC_ROWS} rows of a table"
 
 
 def t_a_widget_value_reaches_the_timing_page_delay_s_after_it_arrived():
@@ -686,8 +689,8 @@ def t_the_upload_budget_still_holds_with_the_block():
         {"rank": 1000 + r, "name": "".join(rnd.choice(letters) for _ in range(ls.MAX_LABEL)),
          "value": str(rnd.randrange(10 ** (ls.MAX_VALUE - 1), 10 ** ls.MAX_VALUE))} for r in range(ls.MAX_ROWS)]}
         for i in range(ls.MAX_WIDGETS)}}, {f"w{i}": "table" for i in range(ls.MAX_WIDGETS)})
-    assert len(worst) == ls.MAX_WIDGETS and all(len(w["value"]["rows"]) == ls.MAX_ROWS for w in worst)
-    for league, crowd in ((None, 2500), (real, 2000), (worst, 120)):
+    assert len(worst) == ls.MAX_WIDGETS and all(len(w["value"]["rows"]) == lw.PUBLIC_ROWS for w in worst)
+    for league, crowd in ((None, 2500), (real, 2000), (worst, 350)):
         nbytes = _timing_bytes(league)
         covered = int(1000 * 125 * tf.tf.MAX_INTERVAL_S / nbytes)
         assert crowd < covered, f"{nbytes} B per answer covers {covered} viewers, fewer than {crowd}"

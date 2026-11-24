@@ -529,7 +529,7 @@ League service section; it is off by default. The page then shows every widget o
 loaded event, whatever the Director has on air, and each value appears with the same
 delay as the timing, so the score never shows an overtake before the table does. A
 [timing host](#hosted-live-timing-optional) deployed before this needs a redeploy to
-show the widgets. A table longer than its card scrolls inside it.
+show the widgets. The page shows the first 20 rows of a table, and a table longer than its card scrolls inside it.
 
 ![The public live timing page with a league score and a championship table above it](images/public-timing-league.png)
 

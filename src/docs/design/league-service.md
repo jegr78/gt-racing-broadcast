@@ -259,7 +259,8 @@ The tick hands it the standings and never waits for it.
   sits above the table. The league timing host stores and broadcasts the relay's state
   body unparsed, so the block reaches hosted viewers without a Worker change; the
   hosted viewer page gets the same rendering. The block lists every widget of the loaded event
-  that held a value `delay_s` ago, each as id, form, title and value, nothing else. A
+  that held a value `delay_s` ago, each as id, form, title and value, nothing else, a
+  table cut to its first 20 rows to keep the page's upload small. A
   value newer than the delay, or one whose hold ended before it, stays off the page.
 - Result: sent automatically at `finished` and retried after a failure. "Send result"
   is also an action in the Control Center and a `racecast` verb (`racecast event result
