@@ -161,7 +161,7 @@ class _Car:
         self.fuel = self.x = self.z = None
         self.line_t = None         # relay time of the last counter step while counting
         self.lap_ok = False        # the running lap has been counted from its line
-        self.pending = None        # (relay lap time, line time) waiting for GT7's last_ms
+        self.pending = None        # [relay lap time, line time, GT7's lap time once it agrees] waiting for GT7
         self.last_ms = None        # the last last_ms seen
 
 
@@ -889,7 +889,7 @@ class Race:
         ent.ds.append(ent.distance)
         self._trim(ent, t)
         self._lap_timing(ent, car, t, prev_lap is not None and lap > prev_lap,
-                         last_ms if new_lap_time else None)
+                         last_ms if new_lap_time else None, sample.get("best_ms"))
         # A single lobby counts laps in race distance: after a red flag restart from the
         # box the restart lobby's line no longer sits on a whole lap of it.
         if self.multi_lobby:
@@ -915,25 +915,32 @@ class Race:
         """The shortest believable lap: the line at MAX_SPEED_MPS."""
         return self.length / MAX_SPEED_MPS if self.length else math.inf
 
-    def _lap_timing(self, ent, car, t, line, last_ms):
-        """Time the active counting car's laps and take GT7's time when it agrees."""
+    def _lap_timing(self, ent, car, t, line, last_ms, best_ms):
+        """Time the active counting car's laps, show GT7's time when it agrees and count
+        it for the fastest lap once GT7 takes it as the car's best lap."""
         if line:
             if car.lap_ok:
                 ent.stint_laps += 1               # a lap counted from its own line
             if car.lap_ok and car.line_t is not None:
-                car.pending = (t - car.line_t, t)
+                car.pending = [t - car.line_t, t, None]
             car.line_t, car.lap_ok = t, True
         if car.pending is not None and t - car.pending[1] > LAP_TIME_WAIT_S:
             car.pending = None
-        if last_ms is None or car.pending is None:
+        if car.pending is None:
             return
-        measured = car.pending[0]
-        car.pending = None
-        if measured < self.min_lap_s():
-            return                                # faster than any car can drive the line
-        if abs(last_ms / 1000 - measured) > max(LAP_TIME_TOLERANCE[0], LAP_TIME_TOLERANCE[1] * measured):
+        if car.pending[2] is None:
+            if last_ms is None:
+                return
+            measured = car.pending[0]
+            if measured < self.min_lap_s() or abs(last_ms / 1000 - measured) > \
+                    max(LAP_TIME_TOLERANCE[0], LAP_TIME_TOLERANCE[1] * measured):
+                car.pending = None                # faster than the line allows, or not this lap's time
+                return
+            ent.last_lap_ms = car.pending[2] = last_ms
+        # GT7 keeps only a valid lap as best lap, so an invalid one never matches.
+        if best_ms != car.pending[2]:
             return
-        ent.last_lap_ms = last_ms
+        last_ms, car.pending = car.pending[2], None
         lap = {"entry": ent.entry, "driver": car.name, "ms": last_ms}
         if self.fastest is None or last_ms < self.fastest["ms"]:
             self.fastest = dict(lap)

@@ -40,13 +40,27 @@ class Car:
             self.last_ms = getattr(self, "forge", None) or (
                 round((t - self._line_t) * 1000) if hasattr(self, "_line_t") else -1)
             self._line_t = t
+            if self.last_ms > 0 and not getattr(self, "red", False):   # GT7 keeps a valid lap as best when it is no slower
+                best = getattr(self, "best_ms", -1)
+                self._best_due = [self.last_ms if best <= 0 else min(best, self.last_ms),
+                                  getattr(self, "best_late", 0)]
         elif not hasattr(self, "_line_t") and lap >= 1:
             self._line_t = t
         self._lap = lap
-        self.race.update(self.entry, self.conn, self.name, {
+        due = getattr(self, "_best_due", None)
+        if due is not None:
+            if due[1] <= 0:
+                self.best_ms, self._best_due = due[0], None
+            else:
+                due[1] -= 1                            # GT7's best lap may follow its lap time a few samples later
+        sample = {
             "t": t, "lap": lap, "x": x, "z": z, "speed_kmh": self.speed * 3.6,
             "race_position": position, "on_track": True, "paused": False, "loading": False,
-            "last_ms": getattr(self, "last_ms", -1), "fuel_l": getattr(self, "fuel", 50.0)})
+            "last_ms": getattr(self, "last_ms", -1), "best_ms": getattr(self, "best_ms", -1),
+            "fuel_l": getattr(self, "fuel", 50.0)}
+        if getattr(self, "no_best", False):
+            del sample["best_ms"]
+        self.race.update(self.entry, self.conn, self.name, sample)
 
 
 def _drive(race, cars, speeds, t0, seconds, positions=None):
@@ -2007,6 +2021,94 @@ def t_a_lap_faster_than_the_line_allows_never_counts():
     a.along += 10
     a.send(t)
     assert _row(race, "A", t)["distance_m"] == before, "a sample without new time never moves a car"
+
+
+def _laps(race, car, speeds, t, red=()):
+    """Drive `car` one lap per speed, each lap's line inside its drive; GT7 marks the laps
+    numbered in `red` invalid. Returns the time, each lap's GT7 time and the fastest lap
+    after each lap."""
+    times, seen = [], []
+    for i, v in enumerate(speeds, start=1):
+        car.red = i in red
+        t = _drive(race, [car], [v], t, L / v + 1)        # GT7's time and best lap arrive after the line
+        times.append(car.last_ms)
+        seen.append(race.standings(t)["fastest"])
+    return t, times, seen
+
+
+def _start(race, car):
+    """The car on lap 1 just past the line, counted."""
+    return _drive(race, [car], [50], 0.0, 0.5)
+
+
+def _ms(seen):
+    return [None if f is None else f["ms"] for f in seen]
+
+
+def t_an_invalid_time_trial_lap_never_becomes_the_fastest_lap():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    t = _start(race, a)
+    # 04-laps.log: 1:35.928 best, 1:50.837, 1:36.164 red, 1:35.127 red and faster, 1:34.716 best.
+    t, times, seen = _laps(race, a, [50, 44, 49.5, 51, 53], t, red={3, 4})
+    assert times[3] < times[0], times
+    assert _ms(seen) == [times[0]] * 4 + [times[4]], \
+        f"GT7 kept its best through the faster red lap, the next valid faster lap counts: {times} {seen}"
+    assert _row(race, "A", t)["last_lap_ms"] == times[4], "the last lap shows GT7's time"
+
+
+def t_a_red_first_race_lap_never_becomes_the_fastest_lap():
+    race = rd.Race(TRACE, formation=False)
+    race.set_classes({"A": "H", "B": "G"})
+    a = Car(race, "A", "a", L - 15)
+    t = _start(race, a)
+    # 04b-laps-race.log: lap 1 red, best stays empty until lap 2.
+    t, times, seen = _laps(race, a, [56, 50], t, red={1})
+    assert times[0] < times[1], times
+    assert _ms(seen) == [None, times[1]], f"GT7 never takes lap 1 as best lap: {times} {seen}"
+    assert race.fastest_by_class["H"] == seen[1], race.fastest_by_class
+
+
+def t_a_race_of_red_laps_has_no_fastest_lap():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    t = _start(race, a)
+    # 05-race-box.log: lap 1, the out-lap and the in-lap into the pit, all red, no best.
+    t, times, seen = _laps(race, a, [45, 50, 40], t, red={1, 2, 3})
+    assert _ms(seen) == [None, None, None], f"no lap GT7 rejected counts: {seen}"
+    assert _row(race, "A", t)["last_lap_ms"] == times[2], "the in-lap still shows as last lap"
+    assert race.fastest_by_class == {}, race.fastest_by_class
+
+
+def t_a_cut_lap_gt7_keeps_valid_counts_also_when_its_best_lap_follows_late():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    a.best_late = 3                                       # GT7's best lap three samples after its lap time
+    t = _start(race, a)
+    # 04c-laps-spa-penalty.log: lap 1 red, 2:15.867 best, 2:16.328, 2:13.854 with a cut best, 2:12.306 best.
+    t, times, seen = _laps(race, a, [44, 50, 49.5, 51, 53], t, red={1})
+    assert _ms(seen) == [None, times[1], times[1], times[3], times[4]], \
+        f"each new GT7 best is the fastest lap: {times} {seen}"
+
+
+def t_a_best_lap_that_never_arrives_in_time_sets_no_fastest_lap():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    a.best_late = int((rd.LAP_TIME_WAIT_S + 1) * HZ)
+    t = _start(race, a)
+    t = _drive(race, [a], [50], t, L / 50 + rd.LAP_TIME_WAIT_S + 2)
+    assert a.best_ms > 0, "GT7's best lap arrived"
+    assert race.standings(t)["fastest"] is None, "a best lap later than GT7's lap time window is no proof"
+
+
+def t_a_sample_without_gt7_best_lap_sets_no_fastest_lap():
+    race = rd.Race(TRACE, formation=False)
+    a = Car(race, "A", "a", L - 15)
+    a.no_best = True
+    t = _start(race, a)
+    t = _drive(race, [a], [50], t, L / 50 + 2)
+    assert _row(race, "A", t)["last_lap_ms"] is not None, "the lap time still shows"
+    assert race.standings(t)["fastest"] is None, "without GT7's best lap no lap is known valid"
 
 
 def t_a_lap_with_a_red_flag_or_a_restart_never_sets_the_fastest_lap():
