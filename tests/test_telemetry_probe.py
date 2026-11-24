@@ -150,6 +150,39 @@ def t_relay_ingest_needs_the_probe_key_and_reports_on_the_tailnet():
         off.shutdown()
 
 
+
+def t_a_batch_posted_twice_counts_once_and_samples_once():
+    got = []
+    clock = _Clock()
+    probe = tp.Probe("k", clock=clock, on_sample=lambda name, s: got.append(s["pid"]))
+    batch = tp.encode_batch([_wire(p, lap=3) for p in range(1, 121)])
+    probe.ingest("Car 7", batch, None)
+    clock.t += 5
+    probe.ingest("Car 7", batch, None)                  # the reply was lost: posted again
+    snap = probe.snapshot()["senders"]["Car 7"]
+    assert snap["packets"]["received"] == 120 and snap["duplicates"] == 120, snap["packets"]
+    assert snap["stream"] == 1, "a resent batch is no new stream"
+    assert got == [1] + list(range(6, 121, 6)), f"each packet is sampled once: {got}"
+
+
+def t_a_late_packet_is_counted_but_never_sampled_backwards():
+    got = []
+    probe = tp.Probe("k", clock=_Clock(), on_sample=lambda name, s: got.append(s["pid"]))
+    probe.ingest("Car 7", tp.encode_batch([_wire(p) for p in (1, 2, 12)]), None)
+    probe.ingest("Car 7", tp.encode_batch([_wire(6)]), None)     # arrives after 12
+    assert got == [1, 12], got
+    assert probe.snapshot()["senders"]["Car 7"]["packets"]["received"] == 4
+
+
+def t_a_restarted_console_samples_again_from_its_new_ids():
+    got = []
+    probe = tp.Probe("k", clock=_Clock(), on_sample=lambda name, s: got.append((s["pid"], s["lap"])))
+    probe.ingest("Car 7", tp.encode_batch([_wire(p, lap=4) for p in range(6, 601, 6)]), None)
+    got.clear()
+    probe.ingest("Car 7", tp.encode_batch([_wire(p, lap=1) for p in (6, 12, 18)]), None)
+    assert got == [(6, 1), (12, 1), (18, 1)], f"a new stream with lower ids is sampled: {got}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

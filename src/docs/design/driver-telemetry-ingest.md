@@ -64,7 +64,13 @@ serves the sender script of the running relay.
   most 120 packets of at most 512 bytes each.
 
 A sender posts batches at `rate_hz` (default 20 per second) and keeps every packet
-in order. The relay decrypts and filters, so a new field never needs a sender update.
+in order. It keeps one connection open and reuses it for every post, and connects
+again when that connection closes: a new TLS connection per post caps 15 senders
+through Funnel at about 6 posts per second. Funnel keeps the sender's connection open
+while the relay answers every request in HTTP/1.0 and closes; on the tailnet the
+sender connects once per post. The sender never follows a redirect. A batch it posts
+again after a lost reply counts once: the relay drops packets the sender already posted. The relay
+decrypts and filters, so a new field never needs a sender update.
 Packets of any GT7 format (`A`, `B`, `~`) are accepted; the sender script requests `A`
 so a driver's other receivers keep working.
 

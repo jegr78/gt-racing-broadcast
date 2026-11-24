@@ -85,9 +85,9 @@ standing are open.
 - It requests packet format `A`. The first heartbeat decides the format for every
   receiver, so `A` leaves a driver's SimHub or phone dashboard working. Every
   dashboard field is in the base packet.
-- It forwards the encrypted packets unchanged in batched HTTPS POSTs at a rate the
-  relay sets when it connects (default 20 Hz). The relay decrypts and filters;
-  new fields never need a driver update.
+- It forwards the encrypted packets unchanged in batched HTTPS POSTs over one
+  kept-open connection, at a rate the relay sets when it connects (default 20 Hz).
+  The relay decrypts and filters; new fields never need a driver update.
 - It finds the console on the LAN and asks for its address only when discovery
   fails. It reports an interruption to the driver.
 - GT7 sends to port 33740 on every device that heartbeats, but two programs on one
