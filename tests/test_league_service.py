@@ -272,7 +272,8 @@ def t_a_dripping_answer_is_cut_off_at_the_deadline():
         conn.recv(65536)
         conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
         try:
-            while not stop.wait(0.2):
+            end = time.monotonic() + 4.0   # a client without a deadline waits this long, then fails
+            while not stop.wait(0.2) and time.monotonic() < end:
                 conn.sendall(b" ")
         except OSError:
             pass  # the client hung up
