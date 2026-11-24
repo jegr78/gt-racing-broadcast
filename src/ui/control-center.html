@@ -3589,6 +3589,7 @@ async function loadOverlay(retry = 0) {
   ovState.slots = ovState.allSlots;
   ovState.audience = slotsR.audience || {widgets: []};
   ovState.league = slotsR.league || {widgets: []};
+  $('league-open').hidden = requestedPage === 'drivers';   // the driver dashboard has no league widgets
   ovState.sample = slotsR.sample || {};
   ovState.flagPresets = slotsR.flagPresets || [];
   ovState.templates = slotsR.templates || [];

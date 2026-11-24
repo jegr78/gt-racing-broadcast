@@ -88,9 +88,10 @@ WIDGET_PROPS = ("left", "top", "width", "height", "padding", "fontSize", "fontFa
                 "borderRadius", "opacity", "rotation", "visible")
 WIDGET_CSS = """
 .league-widget{position:absolute;box-sizing:border-box;left:1400px;top:70px;width:420px;
-min-height:60px;padding:12px 16px;z-index:10;font-size:24px;line-height:1.2;font-family:inherit;
+height:130px;padding:12px 16px;z-index:10;font-size:24px;line-height:1.2;font-family:inherit;
 color:#fff;background:rgba(0,0,0,.8);border:2px solid var(--lw-accent,#27d34d);border-radius:12px;
 overflow:hidden}
+.league-widget.lw-form-table{height:330px}
 .league-widget[hidden],.league-widget [hidden]{display:none!important}
 .lw-title{display:block;font-size:.7em;opacity:.85;text-transform:uppercase;letter-spacing:.04em}
 .lw-provisional{font-size:.5em;margin-left:.5em;opacity:.7}
@@ -111,7 +112,7 @@ def markup(widget):
     if not league_service.WIDGET_ID_RE.fullmatch(wid) or widget.get("form") not in league_service.FORMS:
         raise ValueError("invalid widget")
     label = html.escape("League: " + widget["title"], quote=True)
-    return (f'<div id="{slot_id(wid)}" class="league-widget lw-{widget["form"]}" data-league-widget="{wid}" '
+    return (f'<div id="{slot_id(wid)}" class="league-widget lw-form-{widget["form"]}" data-league-widget="{wid}" '
             f'data-edit="{label}" data-edit-props="{",".join(WIDGET_PROPS)}" hidden></div>')
 
 

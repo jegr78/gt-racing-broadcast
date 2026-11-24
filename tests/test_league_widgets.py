@@ -543,7 +543,7 @@ function el(tag) {
 global.window = global;
 global.performance = {now: () => 0};
 const slots = JSON.parse(process.argv[3]).map(s => { const e = el('div');
-  e.className = 'league-widget lw-' + s.form; e.attrs['data-league-widget'] = s.id; e.hidden = true; return e; });
+  e.className = 'league-widget lw-form-' + s.form; e.attrs['data-league-widget'] = s.id; e.hidden = true; return e; });
 made.length = 0;
 global.document = {currentScript: null, readyState: 'complete', createElement: el,
   querySelectorAll: () => slots};

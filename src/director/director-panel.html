@@ -2468,6 +2468,9 @@ function renderLeagueWidgets(d){
   const box = $("#leagueWidgets");
   const rows = (d && d.widgets) || [];
   box.hidden = !rows.length;
+  const sig = JSON.stringify(rows.map(w => [w.id, w.title, w.form, w.listed, w.shown, w.reason, w.placed]));
+  if (box.dataset.sig === sig) return;   // a rebuild would swap a button under the pointer
+  box.dataset.sig = sig;
   box.replaceChildren(...rows.map(w => {
     const row = document.createElement("div"); row.className = "lwrow";
     const name = document.createElement("span"); name.className = "lwname";

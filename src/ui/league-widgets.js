@@ -48,7 +48,7 @@
     const rows = new Map(data.widgets.filter(r => r && typeof r.id === 'string').map(r => [r.id, r]));
     slots(root).forEach(el => {
       const row = rows.get(el.getAttribute('data-league-widget'));
-      if (!row || row.form !== (el.classList.contains('lw-table') ? 'table' : 'score')) {
+      if (!row || row.form !== (el.classList.contains('lw-form-table') ? 'table' : 'score')) {
         el.hidden = true;
         deadlines.delete(el);
         return;
