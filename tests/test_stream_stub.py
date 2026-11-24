@@ -908,6 +908,26 @@ def t_a_held_lock_blocks_and_a_stale_one_is_broken():
     assert not glob.glob(lock + ".*"), "nothing is left aside"
 
 
+def t_a_lock_being_deleted_on_windows_is_waited_for():
+    directory = tempfile.mkdtemp(prefix="stub-pending-")
+    os.makedirs(os.path.join(directory, "channels"))
+    real, calls = stream_stub.os.open, []
+
+    def pending_delete(path, flags, *a):
+        calls.append(path)
+        if len(calls) < 3:
+            raise PermissionError(13, "Permission denied", path)
+        return real(path, flags, *a)
+    stream_stub.os.open, held_before = pending_delete, stream_stub._HELD_ON_WINDOWS
+    stream_stub._HELD_ON_WINDOWS = (PermissionError,)
+    try:
+        with stream_stub.state_lock(directory, wait=2):
+            held = True
+    finally:
+        stream_stub.os.open, stream_stub._HELD_ON_WINDOWS = real, held_before
+    assert held and len(calls) == 3, f"a lock file Windows still deletes counts as held, not as an error: {len(calls)} tries"
+
+
 def t_windows_stand_in_is_a_launcher_with_a_zipped_main():
     try:
         launcher = stream_stub.windows_launcher()

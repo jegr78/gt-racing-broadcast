@@ -159,6 +159,10 @@ def _write_json(path, data):
     _retry_permission(lambda: os.replace(tmp, path))
 
 
+# Windows refuses to create a file another process is still deleting.
+_HELD_ON_WINDOWS = (PermissionError,) if os.name == "nt" else ()
+
+
 @contextlib.contextmanager
 def state_lock(directory, wait=LOCK_WAIT, stale=LOCK_STALE):
     """Serialize read-modify-write of the channel state across processes (O_EXCL lock file)."""
@@ -168,7 +172,7 @@ def state_lock(directory, wait=LOCK_WAIT, stale=LOCK_STALE):
         try:
             os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
             break
-        except FileExistsError:
+        except (FileExistsError, *_HELD_ON_WINDOWS):
             with contextlib.suppress(OSError):
                 seen = os.stat(lock)
                 if time.time() - seen.st_mtime > stale and _break_stale(lock, seen):
