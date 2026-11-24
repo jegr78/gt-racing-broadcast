@@ -1183,6 +1183,11 @@ class Service:
                    league=read_league(self._league), last_action=self._last_action)
         return out
 
+    def newest(self):
+        """The newest dashboard snapshot as it was taken; None before the first tick."""
+        with self._lock:
+            return self._snapshots[-1][1] if self._snapshots else None
+
     def live(self):
         """The newest dashboard snapshot, undelayed, each race row with its best counted
         lap; None before the first tick. The league service's live state is cut from it."""

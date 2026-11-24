@@ -194,6 +194,29 @@ def t_loading_the_event_keeps_the_widget_list_in_the_profile():
             os.environ["RACECAST_SIMULATION"] = saved
 
 
+def t_a_widget_list_that_cannot_be_saved_has_its_own_message():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("racecast", os.path.join(ROOT, "src", "racecast.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    saved = os.environ.get("RACECAST_SIMULATION")
+    os.environ["RACECAST_SIMULATION"] = "1"
+    try:
+        with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+            rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="S", league_service_url=sim.url,
+                                       league_service_key=KEY, profile_dir=d)
+            blocked = os.path.join(d, "league-widgets.json")
+            os.makedirs(blocked)                       # a folder where the file belongs
+            r = m.league_event_load_data(REF, rc=rc, path=ls.path_in(os.path.join(d, "rt")), widgets_path=blocked)
+            assert not r["ok"] and r["error"].startswith("loaded the event, but could not save its widget list"), r
+            assert ls.read(ls.path_in(os.path.join(d, "rt")))["ref"] == REF, "the event itself is loaded"
+    finally:
+        if saved is None:
+            os.environ.pop("RACECAST_SIMULATION", None)
+        else:
+            os.environ["RACECAST_SIMULATION"] = saved
+
+
 # The live sender against the simulated service
 
 def t_the_body_is_cut_from_the_snapshot_for_the_loaded_events_current_race():
@@ -247,6 +270,9 @@ def t_live_state_goes_out_every_two_seconds_and_at_once_on_a_position_change():
         snap[0] = dict(SNAP, entries=[dict(SNAP["entries"][1], pos=1), dict(SNAP["entries"][0], pos=2)])
         live.observe(snap[0])
         assert live.client._wake.is_set(), "a position change wakes the sender at once"
+        assert live.client.step() == ls.MIN_GAP_S and len(sim.calls(call="live")) == 1, \
+            "a wake right after a send waits for the minimum gap"
+        clock.t += ls.MIN_GAP_S
         live.client.step()
         calls = sim.calls(call="live")
         assert [r["entry"] for r in calls[-1]["body"]["entries"]] == ["e2", "e1"], calls[-1]["body"]
@@ -254,6 +280,7 @@ def t_live_state_goes_out_every_two_seconds_and_at_once_on_a_position_change():
         snap[0] = dict(snap[0], mode="qualifying", qualifying=snap[0]["entries"])
         live.observe(snap[0])
         assert live.client._wake.is_set(), "a switch to qualifying is a new running order"
+        clock.t += ls.MIN_GAP_S
         live.client.step()
         body = sim.calls(call="live")[-1]["body"]
         assert body["mode"] == "qualifying" and [r["entry"] for r in body["entries"]] == ["e2", "e1"]
@@ -261,7 +288,8 @@ def t_live_state_goes_out_every_two_seconds_and_at_once_on_a_position_change():
 
 def t_a_value_change_reaches_the_pages_only_once_the_director_shows_it():
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
-        live, snap = _live(d, sim)
+        clock = _Clock()
+        live, snap = _live(d, sim, clock=clock)
         live.client.step()
         assert live.data() == {"ok": True, "widgets": []}, "default hidden"
         assert live.set("match-score", "show") == (True, "match-score")
@@ -269,6 +297,7 @@ def t_a_value_change_reaches_the_pages_only_once_the_director_shows_it():
         assert (w["id"], w["form"], w["title"]) == ("match-score", "score", "Match")
         first = w["value"]["values"]
         snap[0] = dict(SNAP, entries=[dict(SNAP["entries"][1], pos=1), dict(SNAP["entries"][0], pos=2)])
+        clock.t += ls.TICK_S
         live.client.step()
         second = live.data()["widgets"][0]["value"]["values"]
         assert first != second and second[0] == {"label": "B", "value": "1"}, (first, second)
@@ -291,12 +320,39 @@ def t_loading_an_event_hides_every_widget_again():
         assert [r["shown"] for r in live.director()["widgets"]] == [False, False]
 
 
+def t_a_failed_read_of_the_event_keeps_the_switch():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        live, _snap = _live(d, sim)
+        live.client.step()
+        live.set("1", "show")
+        real = ls.read
+        ls.read = lambda path: None          # a file caught mid-write by another process
+        try:
+            assert [w["id"] for w in live.data()["widgets"]] == ["match-score"], "a read error is no new event"
+        finally:
+            ls.read = real
+        assert live.data()["widgets"] and live.client.held(), "the switch and the values stay"
+        ls.clear(ls.path_in(d))
+        assert live.data()["widgets"] == [] and live.client.held() == {}, "event stop: the file is gone"
+
+
+def t_a_new_event_forgets_the_values_of_the_old_one():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        live, _snap = _live(d, sim)
+        live.client.step()
+        assert "match-score" in live.client.held()
+        ls.store(ls.path_in(d), "OTHER-MATCH", dict(ls.fetch_event(_cfg(sim), REF)), now=4e9)
+        live.set("1", "show")
+        assert live.client.held() == {} and live.data()["widgets"] == [], \
+            "the same widget id of another event never shows the old event's value"
+
+
 def t_the_switch_refuses_a_widget_the_event_does_not_list():
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
         live, _snap = _live(d, sim)
         for target, action in (("3", "show"), ("0", "show"), ("other", "show"), ("../x", "show"),
                                ("match-score", "flip"), ("x" * 40, "show"), ("\u00b2", "show"),
-                               ("\u0661", "show"), ("01", "show")):
+                               ("\u0661", "show"), ("01", "show"), ("9", "show")):
             ok, why = live.set(target, action)
             assert not ok and why, (target, action)
 
@@ -317,7 +373,7 @@ def t_a_slow_service_never_holds_the_dashboard_tick():
         def tick(self):
             pass
 
-        def live(self):
+        def newest(self):
             return SNAP
 
         def race_state(self):
@@ -463,7 +519,7 @@ def t_the_director_shows_and_hides_each_widget_with_a_get_route():
             assert [w["id"] for w in json.loads(g._get(port, "/league-widgets/data")[1])["widgets"]] == ["match-score"]
             assert g._get(port, "/league/widget/match-score/hide")[0] == 200
             assert json.loads(g._get(port, "/league-widgets/data")[1])["widgets"] == []
-            code, body = g._get(port, "/league/widget/9/show")
+            code, body = g._get(port, "/league/widget/8/show")
             assert code == 400 and "lists 2" in json.loads(body)["error"], body
             assert g._get(port, "/league/widget/match-score/explode")[0] == 400
             code, body = g._get(port, "/league-widgets.js")
@@ -481,6 +537,13 @@ def t_the_widget_routes_are_director_only_under_console():
             assert g._get(port, "/console/league/widget/1/show", g._tok("dave"))[0] == 403, "Race Control"
             assert g._get(port, "/console/league/widget/1/show", g._tok("bob"))[0] == 200, "the director"
             assert g._get(port, "/console/league/widgets", g._tok("bob"))[0] == 200
+            for path in ("/console/league-widgets/data", "/console/league-widgets.js"):
+                assert g._get(port, path, g._tok("bob"))[0] == 404, f"{path}: the overlay feed is never funnelled"
+            live.set("1", "hide")
+            cross = {"Sec-Fetch-Site": "cross-site"}
+            for path, token in (("/league/widget/1/show", None), ("/console/league/widget/1/show", g._tok("bob"))):
+                assert g._get(port, path, token, headers=cross)[0] == 403, f"{path}: a foreign page cannot switch"
+            assert not any(r["shown"] for r in live.director()["widgets"]), "the refused requests changed nothing"
         finally:
             srv.shutdown()
 
@@ -510,7 +573,7 @@ def t_the_dashboard_tick_hands_the_newest_snapshot_to_the_sender():
         def tick(self):
             self.ticks += 1
 
-        def live(self):
+        def newest(self):
             return {"n": self.ticks}
 
         def race_state(self):

@@ -437,6 +437,27 @@ def t_client_holds_a_value_30_seconds_then_hides_it():
     assert c.values() == {}, "the value hides 30 s after its last good answer"
 
 
+def t_client_keeps_a_minimum_gap_between_sends():
+    clock, sent = _Clock(), []
+    c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1}, dict,
+                  post=lambda *a: sent.append(clock.t) or {}, clock=clock, log=_Log())
+    c.step()
+    clock.t += 0.3
+    assert c.step() == round(ls.MIN_GAP_S - 0.3, 6) and len(sent) == 1, "a wake 0.3 s after a send waits"
+    clock.t += ls.MIN_GAP_S - 0.3
+    c.step()
+    assert sent == [100.0, 100.0 + ls.MIN_GAP_S], sent
+
+
+def t_client_forgets_its_values():
+    c = ls.Client(lambda: ls.Settings("https://l.example", KEY), lambda: {"v": 1}, dict,
+                  post=lambda *a: {"w": {"values": []}}, clock=_Clock(), log=_Log())
+    c.step()
+    assert c.values()
+    c.forget()
+    assert c.values() == {} and c.held() == {}
+
+
 def t_client_needs_the_event_forms():
     try:
         ls.Client(lambda: None, lambda: None)

@@ -16013,7 +16013,7 @@ def dashboard_ticks(relay, race_svc, stop_evt, every, league=None, live=None):
             relay._warn_tick_error("driver dashboard", e)
         if live is not None:
             try:
-                live.observe(race_svc.live())
+                live.observe(race_svc.newest())
                 relay._tick_ok("league live")
             except Exception as e:  # noqa: BLE001
                 relay._warn_tick_error("league live", e)

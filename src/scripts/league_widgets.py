@@ -170,7 +170,7 @@ def placements(overlay_dir):
 
 
 ACTIONS = ("show", "hide", "toggle")
-PLACE_RE = re.compile(r"[1-9]")      # ASCII only: str.isdigit() also takes "²"
+PLACE_RE = re.compile(r"[1-8]")      # MAX_WIDGETS places; ASCII only, str.isdigit() also takes "²"
 
 
 def order_key(snap):
@@ -203,6 +203,7 @@ class Live:
         self._shown = set()
         self._lock = threading.Lock()
         self._loaded = None             # (ref, loaded_at) of the event the switch belongs to
+        self._widgets = []
         self._order = None
         self._env_stamp = _stamp(env_path)
         self.client = league_service.Client(lambda: self._settings()[0], self.body, self.forms, **client_kw)
@@ -231,14 +232,21 @@ class Live:
         self.client.run(stop)
 
     def _event_widgets(self):
-        """The loaded event's widgets; loading an event hides every widget again."""
+        """The loaded event's widgets. Another event, or a reload of it, hides every
+        widget and drops the old values; so does a missing file (event stop). A file that
+        cannot be read keeps the last event, it may be in the middle of a write."""
         ev = league_service.read(self._event_path)
+        if ev is None and os.path.exists(self._event_path):
+            with self._lock:
+                return self._widgets
         loaded = (ev["ref"], ev["loaded_at"]) if ev else None
         with self._lock:
             if loaded != self._loaded:
                 self._loaded = loaded
                 self._shown.clear()
-        return ev["widgets"] if ev else []
+                self.client.forget()
+            self._widgets = ev["widgets"] if ev else []
+            return self._widgets
 
     def forms(self):
         """{widget id: form} of the loaded event, for the live sender."""

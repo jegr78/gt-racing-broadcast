@@ -775,7 +775,9 @@ def _check_league_live(base, sim, home, until):
     until("the relay never sent the live state", lambda: len(sim.calls(call="live")) >= 3)
     calls = sim.calls(call="live")
     gaps = [round(calls[i + 1]["time"] - calls[i]["time"], 2) for i in range(len(calls) - 1)]
-    assert all(1.5 <= g <= 3.0 for g in gaps[-2:]), f"one live state every two seconds: {gaps}"
+    # The fake stamps each call it takes. Without a position change the sender never
+    # goes faster than its two-second tick; that it keeps going shows in the count.
+    assert all(g >= 1.9 for g in gaps), f"one live state every two seconds: {gaps}"
     body = calls[-1]["body"]
     assert (body["ref"], body["race"], body["mode"]) == (league_sim.DEFAULT_REF, "leg-1", "race"), body
     assert body["entries"] == [] and body["track_name"] == "Simulated circuit", \

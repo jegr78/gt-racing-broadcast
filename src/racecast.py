@@ -6883,11 +6883,15 @@ def league_event_load_data(ref, rc=None, path=None, fetch=None, widgets_path=Non
         return {"ok": False, "error": str(exc)}
     try:
         doc = league_service.store(path or league_service.path_in(_runtime_dir()), ref, event)
-        widgets_path = widgets_path or (league_widgets.path_in(rc.profile_dir) if rc.profile_dir else None)
+    except OSError as exc:
+        return {"ok": False, "error": f"could not save the league event: {exc}"}
+    widgets_path = widgets_path or (league_widgets.path_in(rc.profile_dir) if rc.profile_dir else None)
+    try:
         if widgets_path:
             league_widgets.remember(widgets_path, event["widgets"])
     except OSError as exc:
-        return {"ok": False, "error": f"could not save the league event: {exc}"}
+        return {"ok": False, "event": doc, "error": "loaded the event, but could not save its widget list "
+                f"for the scene builders: {exc}"}
     return {"ok": True, "event": doc}
 
 

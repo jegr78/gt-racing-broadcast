@@ -227,8 +227,8 @@ The tick hands it the standings and never waits for it.
 - The relay starts the sender on its own thread once it owns its port. The dashboard tick
   hands it the newest undelayed snapshot (`driver_race.Service.live`, which adds each
   car's best counted lap) and only wakes it: at once when the running order or the mode
-  changed, and with a settings reload when `profile.env` changed. Without a loaded event
-  nothing is sent.
+  changed, but never sooner than one second after the last send, and with a settings
+  reload when `profile.env` changed. Without a loaded event nothing is sent.
 - The HUD shows a widget value as soon as it arrives.
 - The public timing page shows it with the same `delay_s` as the timing itself, so the
   score never gives away an overtake before the picture does. The relay delays the
@@ -243,12 +243,14 @@ The tick hands it the standings and never waits for it.
   like the audience counters.
 - On air: the Director shows and hides each widget. Default hidden. The switch lives in
   the relay's memory, so a relay restart hides every widget again, and so does loading an
-  event (another reference or a reload of the same one); a change of the current race
-  keeps it. A widget is on air
+  event (another reference or a reload of the same one), which also drops the values the
+  old event's answers left; a change of the current race keeps both, and so does a
+  `league-event.json` that cannot be read for a moment. `event stop` removes the file and
+  hides everything. A widget is on air
   only when it is shown, placed in the scene and has a value inside the hold. The routes
   are `GET /league/widgets` (each widget with its switch, the scenes it is placed in and
   the reason it cannot show) and `GET /league/widget/<id or place>/<show|hide|toggle>`,
-  director-only under `/console`. The place is the widget's 1-based position in the
+  director-only under `/console`. The place (1 to 8) is the widget's 1-based position in the
   event's list, so the Companion buttons **LEAGUE WIDGET 1** and **LEAGUE WIDGET 2** on
   page 3 work for any league. A service that reorders its widget list moves what a
   button switches.

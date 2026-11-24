@@ -3697,7 +3697,9 @@ function leagueWidgetsList() {
   });
 }
 function leagueWidgetPlace(id, place) {
-  if (place) ovState.layout.slots[id] = {left: 1400, top: 70, width: 420};
+  // Each widget starts below the one before it, so two new ones never sit on top of each other.
+  const i = Math.max(0, (ovState.league.widgets || []).findIndex(w => 'league-widget-' + w.id === id));
+  if (place) ovState.layout.slots[id] = {left: 1400, top: Math.min(70 + i * 150, 900), width: 420};
   else delete ovState.layout.slots[id];
   ovReloadCanvasFromLayout(); ovCommit(); leagueWidgetsList();
 }
