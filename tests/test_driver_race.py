@@ -107,6 +107,31 @@ def t_a_lap_count_entered_after_the_final_switch_reaches_the_final_lobby():
     assert early._race.lap_count is None, "before the final lobby the count waits"
 
 
+def t_a_race_reset_on_the_last_row_keeps_the_final_lobbys_lap_count():
+    team, clock = _service([{"id": "good"}], multi=True)
+    clock[0] = 100.0
+    team.stint_switch(final_laps=4, final_row=True)
+    clock[0] = 200.0
+    team.reset()
+    assert team._current().lap_count == 4, "the last row is still on air: its lobby still runs 4 laps"
+    assert team._current()._final_at == 200.0, "every car of the restarted race is a final car"
+    team.set_settings({"lap_count": 6})
+    assert team._current().lap_count == 6, "a count entered after the reset reaches the final lobby"
+    team.new_event()
+    assert team._current().lap_count is None, "a new event waits for its own final lobby"
+
+
+def t_a_switch_back_from_the_last_row_ends_the_final_lobby():
+    team, clock = _service([{"id": "good"}], multi=True)
+    team.stint_switch(final_laps=4, final_row=True)
+    clock[0] = 50.0
+    team.stint_switch(final_laps=None, final_row=False)    # the director went back a row
+    team.reset()
+    assert team._current().lap_count is None, "a reset off the last row builds no final lobby"
+    team.set_settings({"lap_count": 6})
+    assert team._current().lap_count is None, "a count waits for the last row again"
+
+
 def t_qualifying_mode_feeds_no_race():
     path = os.path.join(tempfile.mkdtemp(), "driver-race.json")
     dr.write_settings(path, {"formation": False})

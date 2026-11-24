@@ -27,7 +27,9 @@ RATE_HZ = 20              # how often a sender posts; the reply tells the sender
 SAMPLE_EVERY = 6          # decrypt every 6th packet whole: 10 Hz samples at 60 Hz
 PACKET_HZ = 60.0          # GT7's send rate: back-dates a sample within its batch
 SENDER_STAT_KEYS = ("received", "forwarded", "posted", "dropped", "post_failed",
-                    "interruptions", "heartbeats")
+                    "interruptions", "heartbeats", "post_ms_p50", "post_ms_p95")
+LATENCY_KEYS = ("post_ms_p50", "post_ms_p95")
+MAX_POST_MS = 60000
 COUNTERS = ("received", "lost", "reordered", "decrypt_failed", "parse_failed")
 RECENT = 4 * MAX_BATCH    # a sender posts a batch again only while it is still queued
 _NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")
@@ -141,6 +143,9 @@ class Probe:
             if isinstance(sender_stats, dict):
                 sender.sender_stats = {k: sender_stats[k] for k in SENDER_STAT_KEYS
                                        if type(sender_stats.get(k)) is int}
+                for k in LATENCY_KEYS:
+                    if k in sender.sender_stats:
+                        sender.sender_stats[k] = min(MAX_POST_MS, max(0, sender.sender_stats[k]))
             accepted = 0
             new = []
             for (kind, _head, raw), pid in zip(decoded, pids, strict=True):
