@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import league_service as ls  # noqa: E402
 import league_sim  # noqa: E402
 import league_widgets as lw  # noqa: E402
+import driver_race  # noqa: E402
 import overlay_build as ob  # noqa: E402
 
 KEY = "fixture-league-key-5"
@@ -495,6 +496,156 @@ def t_the_director_sees_a_dropped_widget_that_stays_placed():
         assert rows["standings"]["reason"].startswith("not placed"), rows["standings"]
         assert rows["match-score"]["reason"] == "" and rows["match-score"]["placed"] == ["hud"]
         assert not live.set("old-table", "show")[0], "an unlisted widget cannot go on air"
+
+
+# The public timing page (#1256)
+
+def _timing_env(d, value):
+    env = os.path.join(d, "profile.env")
+    with open(env, "w", encoding="utf-8") as fh:
+        fh.write(f"NAME=x\n{lw.TIMING_KEY}={value}\n" if value is not None else "NAME=x\n")
+    return env
+
+
+def t_the_profile_switch_decides_the_timing_block_independent_of_the_director():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        env = _timing_env(d, None)
+        live, _snap = _live(d, sim, env_path=env)
+        live.client.step()
+        assert live.public(0) is None, "default off: no block"
+        for value in ("0", "off", "maybe", ""):
+            _timing_env(d, value)
+            os.utime(env, ns=(len(value) + 1, len(value) + 1))
+            assert live.public(0) is None, f"{value!r} is off"
+        _timing_env(d, "1")
+        os.utime(env, ns=(9, 9))
+        block = live.public(0)
+        assert [w["id"] for w in block] == ["match-score", "standings"], \
+            f"every widget of the event, none shown by the Director: {block}"
+        assert live.data()["widgets"] == [], "the timing page switch never puts a widget on air"
+        os.remove(env)
+        assert live.public(0) is None, "an unreadable profile.env is off"
+
+
+def t_the_timing_block_is_an_allowlist_of_id_form_title_and_value():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        live, _snap = _live(d, sim, env_path=_timing_env(d, "1"))
+        sim.answer("live", body={"v": 1, "widgets": {
+            "match-score": {"provisional": True, "values": [{"label": "A", "value": "1"}]},
+            "standings": {"value_title": "Pts", "rows": [{"rank": 1, "name": "Ann", "value": "25"}]}}})
+        live.client.step()
+        live.set("1", "show")
+        score, table = live.public(0)
+        assert score == {"id": "match-score", "form": "score", "title": "Match",
+                         "value": {"provisional": True, "values": [{"label": "A", "value": "1"}]}}, score
+        assert table == {"id": "standings", "form": "table", "title": "Championship",
+                         "value": {"value_title": "Pts", "rows": [{"rank": 1, "name": "Ann", "value": "25"}]}}, table
+        assert json.dumps(live.public(0)) == json.dumps(live.public(0)), \
+            "nothing in the block counts down, so an unchanged value keeps the body's ETag"
+        assert KEY not in json.dumps(live.public(0))
+
+
+def t_a_widget_value_reaches_the_timing_page_delay_s_after_it_arrived():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        live.client.step()                                      # t=100: Ann leads
+        first = live.public(0)[0]["value"]
+        snap[0] = dict(SNAP, entries=[dict(SNAP["entries"][1], pos=1), dict(SNAP["entries"][0], pos=2)])
+        clock.t = 110.0
+        live.client.step()                                      # t=110: Bob leads
+        second = live.public(0)[0]["value"]
+        assert first != second, (first, second)
+        clock.t = 159.9
+        assert live.public(60) == [], "no answer is 60 s old yet: nothing ahead of the delayed timing"
+        clock.t = 160.0
+        assert live.public(60)[0]["value"] == first, "60 s after it arrived"
+        clock.t = 169.9
+        assert live.public(60)[0]["value"] == first, "the overtake waits for the picture"
+        clock.t = 170.0
+        assert live.public(60)[0]["value"] == second
+
+
+def t_the_hold_shifts_with_the_delay_when_the_service_dies():
+    with tempfile.TemporaryDirectory() as d:
+        clock = _Clock()
+        with league_sim.LeagueSim(key=KEY) as sim:
+            live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+            live.client.step()                                  # last good answer at t=100
+            sim.stop()
+            clock.t = 105.0
+            live.client.step()
+        clock.t = 100.0 + 60 + ls.HOLD_S
+        assert live.public(60), "the delayed page holds the value as long as the live one did"
+        clock.t = 100.0 + 60 + ls.HOLD_S + 0.1
+        assert live.public(60) == [], "then it hides, delay_s after the live pages"
+        clock.t = 100.0 + 200
+        assert live.public(driver_race.MAX_DELAY_S) == [], "never older than its hold, whatever the delay"
+
+
+def t_a_new_event_forgets_the_delayed_values_too():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock, env_path=_timing_env(d, "1"))
+        live.client.step()
+        clock.t += 30
+        assert live.public(30), "held"
+        ls.store(ls.path_in(d), REF, ls.fetch_event(_cfg(sim), REF), now=4e9)
+        assert live.public(30) == [], "a reload of the event drops what the old one answered"
+
+
+def t_the_answer_history_covers_the_longest_delay_and_stays_bounded():
+    assert ls.HISTORY_S >= driver_race.MAX_DELAY_S + ls.HOLD_S, "the longest timing delay plus the hold"
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        live, _snap = _live(d, sim, clock=clock)
+        for _ in range(400):
+            clock.t += ls.MIN_GAP_S
+            live.client._last_sent = None
+            live.client.step()
+        kept = max(len(h) for h in live.client._history.values())
+        assert kept <= ls.HISTORY_S / ls.MIN_GAP_S + 1, f"{kept} answers kept per widget"
+
+
+def _timing_data(live, delay_s, publisher=None):
+    """(public timing body, timing host body) of a relay whose delayed snapshot carries `delay_s`."""
+    import test_driver_routes as dr
+    pub = dr._FakePublisher() if publisher else None
+    srv, port, _lp, link, _hub = dr._timing_server(league_live=live, **(
+        {"timing_publisher": pub.make, "funnel_host": dr.FUNNEL_HOST} if pub else {}))
+    srv.race_svc.dashboard = lambda: {"v": 1, "mode": "race", "delay_s": delay_s, "entries": []}
+    try:
+        st, body, _h = dr._req(port, f"/console/timing/data?l={link}")
+        assert st == 200, (st, body)
+        return json.loads(body), json.loads(pub.fns["body_fn"]()[0]) if pub else None
+    finally:
+        srv.shutdown()
+
+
+def t_the_public_timing_body_carries_the_delayed_block_and_the_host_the_same():
+    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+        clock = _Clock()
+        env = _timing_env(d, "1")
+        live, _snap = _live(d, sim, clock=clock, env_path=env)
+        live.client.step()
+        clock.t += 20
+        body, hosted = _timing_data(live, 20, publisher=True)
+        assert [w["id"] for w in body["league"]] == ["match-score", "standings"], body
+        assert hosted == body, "the timing host carries the same body, block included"
+        body, _ = _timing_data(live, 30)
+        assert "league" not in body, f"a value newer than the delay stays off the page: {body}"
+        _timing_env(d, "0")
+        os.utime(env, ns=(5, 5))
+        body, _ = _timing_data(live, 20)
+        assert "league" not in body, "switch off: the body is the timing alone"
+
+
+def t_a_failing_block_never_freezes_the_timing():
+    class Broken:
+        def public(self, _delay):
+            raise RuntimeError("widget bug")
+    body, _ = _timing_data(Broken(), 0)
+    assert body["mode"] == "race" and "league" not in body, body
 
 
 # The relay routes

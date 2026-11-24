@@ -39,6 +39,7 @@ BACKOFF_MIN_S = 2.0
 BACKOFF_MAX_S = 30.0
 HOLD_S = 30.0                   # a widget value outlives its last good answer this long
 MIN_GAP_S = 1.0                 # a wake on a position change sends no sooner after the last send
+HISTORY_S = 150.0               # the public timing page's longest delay (120 s) plus HOLD_S
 
 MAX_REF = 128
 MAX_RACES = 16
@@ -457,6 +458,7 @@ class Client:
         self._reload = True
         self._settings = None
         self._values = {}               # widget id -> (value, monotonic time of the answer)
+        self._history = {}              # widget id -> deque of (monotonic time of the answer, value)
         self._backoff = 0.0
         self._next_attempt = 0.0
         self._last_sent = None
@@ -476,7 +478,7 @@ class Client:
     def forget(self):
         """Drop every value, e.g. when another event is loaded."""
         with self._lock:
-            self._values = {}
+            self._values, self._history = {}, {}
 
     def values(self):
         """{widget id: value} answered within the last HOLD_S."""
@@ -489,6 +491,20 @@ class Client:
         now = self._clock()
         with self._lock:
             return {k: (v, HOLD_S - (now - t)) for k, (v, t) in self._values.items() if now - t <= HOLD_S}
+
+    def delayed(self, delay_s):
+        """{widget id: value} as held `delay_s` seconds ago: the newest answer at least that
+        old, while its hold lasted then. Nothing before an answer is that old."""
+        at = self._clock() - max(0.0, min(float(delay_s), HISTORY_S - HOLD_S))
+        out = {}
+        with self._lock:
+            for wid, answers in self._history.items():
+                for t, value in reversed(answers):
+                    if t <= at:
+                        if at - t <= HOLD_S:
+                            out[wid] = value
+                        break
+        return out
 
     def status(self):
         with self._lock:
@@ -514,7 +530,7 @@ class Client:
             cfg = self._settings_fn()
             with self._lock:
                 if cfg != self._settings:
-                    self._values, self._backoff, self._next_attempt = {}, 0.0, 0.0
+                    self._values, self._history, self._backoff, self._next_attempt = {}, {}, 0.0, 0.0
                 self._settings = cfg
         if self._settings is None:
             return TICK_S
@@ -536,11 +552,22 @@ class Client:
             done = self._clock()
             for wid, value in values.items():
                 self._values[wid] = (value, done)
+                self._remember(wid, value, done)
             self._last_ok, self._backoff, self._last_error = done, 0.0, None
         if self._logged_error:
             self._log.info("league service: reachable again")
             self._logged_error = None
         return max(0.1, self._last_sent + TICK_S - self._clock())
+
+    def _remember(self, wid, value, done):
+        answers = self._history.get(wid)
+        if answers is None:
+            answers = self._history[wid] = collections.deque(maxlen=int(HISTORY_S / MIN_GAP_S) + 1)
+        if answers and answers[-1][1] == value:
+            value = answers[-1][1]      # an unchanged value is kept once
+        answers.append((done, value))
+        while done - answers[0][0] > HISTORY_S:
+            answers.popleft()
 
     def _fail(self, message, now):
         self._backoff = min(BACKOFF_MAX_S, max(BACKOFF_MIN_S, self._backoff * 2))

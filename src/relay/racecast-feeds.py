@@ -12465,10 +12465,29 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         url = pub.host_url() if pub is not None else None
         return timing_host.viewer_url(url, link_id) if url and link_id else None
 
+    _league_error = [None]              # last league block error, logged once
+
+    def _league_block(view):
+        """The league widgets for the timing page with the timing's own delay (#1256)."""
+        if league_live is None or "delay_s" not in view:
+            return None
+        try:
+            block = league_live.public(view["delay_s"])
+        except Exception as e:  # noqa: BLE001  a widget fault never stops the timing
+            if _league_error[0] != repr(e):
+                _league_error[0] = repr(e)
+                LOG.warning("public timing: the league widgets failed: %r", e)
+            return None
+        _league_error[0] = None
+        return block
+
     def _timing_public():
         view = driver_race.public_brands(driver_race.public_view(
             driver_race_svc.dashboard() if driver_race_svc is not None else None),
             lambda key: _brand_png(key) is not None)
+        league = _league_block(view)
+        if league:
+            view = dict(view, league=league)
         hosted = _timing_hosted_url()
         # Funnel viewers move to the host only while it is the served path, live, and not
         # about to hit its daily request quota.
