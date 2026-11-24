@@ -2633,6 +2633,7 @@ def _relay_spawn_stubs(http_ok_seq, starting=False):
         (None, "_write_relay_profile_stamp", lambda: None),
         (None, "_append_tailscale_snapshot", lambda: None),
         (None, "_refresh_obs_pages", lambda *a, **k: None),
+        (None, "_record_relay_start", lambda pid: None),
         (None, "wait_for", lambda probe, wait, **k: calls["waits"].append(wait) or probe()),
     ]
     originals = []
@@ -2873,6 +2874,19 @@ def t_relay_start_joins_a_relay_that_is_starting():
     finally:
         m.wait_for, m.sv.start_detached, m.pt.kill_pid, m.relay_status = saved
         restore()
+
+
+def t_the_relay_start_marker_creates_its_directory():
+    with tempfile.TemporaryDirectory() as td:
+        saved = (m._runtime_base_dir, m.simulation.process_started)
+        m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+        m.simulation.process_started = lambda pid: "marker"
+        try:
+            m._record_relay_start(4242)
+            with open(os.path.join(td, "runtime", "relay.started"), encoding="utf-8") as fh:
+                assert fh.read() == "marker", "the start marker lands in a runtime dir that did not exist yet"
+        finally:
+            m._runtime_base_dir, m.simulation.process_started = saved
 
 
 def t_relay_start_refreshes_the_obs_pages():
