@@ -162,9 +162,22 @@ function setDot(area, level, why) {
     tab.classList.toggle('dot-ok', level === 'ok' && !b.hasAttribute('data-ok-quiet'));
   }
 }
+// A chat log follows its newest message unless the reader scrolled up in it, also while it is
+// hidden behind another phone tab; such a log opens at its newest message.
+function chatFollows(log) { return log.dataset.held !== '1'; }
 (function () {
   var nav = document.getElementById('areaNav');
   if (!nav) return;
+  ['chatlog', 'bchatlog'].forEach(function (id) {
+    var log = document.getElementById(id);
+    if (!log) return;
+    log.addEventListener('scroll', function () {
+      if (log.clientHeight) log.dataset.held = log.scrollHeight - log.scrollTop - log.clientHeight < 24 ? '' : '1';
+    });
+    if (window.ResizeObserver) new ResizeObserver(function () {
+      if (log.clientHeight && chatFollows(log)) log.scrollTop = log.scrollHeight;
+    }).observe(log);
+  });
   var btns = nav.querySelectorAll('.navbtn');
   DESK_AREAS = [].map.call(btns, function (b) { return b.dataset.area; });
   deskArea = DESK_AREAS[0];

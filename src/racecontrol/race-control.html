@@ -308,6 +308,12 @@
 </div>
 </div>
 
+<!-- The crew frame comes before the page script, so its area and dot functions exist
+     before the first poll answers. -->
+<!--__EVENT_INFO__-->
+<nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
+     data-tabs='[["live","Live"],["race","Race"],["drivers","Drivers"],["corrections","Fix"],["qualifying","Quali"],["dashboard","Tyres"],["graphics","Gfx"],["note","Note"],["setup","Setup"],["trouble","!"],["chat","Chat"]]'></nav>
+<!--__CREW_FRAME__-->
 <script>
 const $ = (id) => document.getElementById(id);
 
@@ -327,9 +333,6 @@ function fmtTs(ts) {
   if (typeof ts !== 'number' || !isFinite(ts)) return '';
   try { return new Date(ts * 1000).toLocaleTimeString(); } catch (e) { return ''; }
 }
-// True when a scroll container is at or near its bottom, so a new message only
-// auto-scrolls when the reader has not scrolled up to read back.
-function atBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
 // Source label for the handover overlap badge: "TW:<login>" for Twitch,
 // "YT:<last4>" for a YouTube videoId.
 function srcBadge(source) {
@@ -625,7 +628,7 @@ async function pollChat() {
   try {
     const d = await j('/cockpit/chat/data');
     const log = $('chatlog');
-    const stick = atBottom(log);            // only auto-scroll if already at the bottom
+    const stick = chatFollows(log);         // only auto-scroll unless the reader scrolled up
     log.textContent = '';
     (d.messages || []).forEach(msg => {
       const row = document.createElement('div');
@@ -701,7 +704,7 @@ function bchatTarget(target) {
 }
 function renderBroadcastChat(msgs) {
   const log = $('bchatlog');
-  const stick = atBottom(log);             // preserve scroll-back position
+  const stick = chatFollows(log);          // preserve scroll-back position
   log.textContent = '';
   if (!msgs.length) {
     const e = document.createElement('div');
@@ -762,10 +765,6 @@ async function refreshBroadcastChat() {
 pollSchedule(); pollProgram(); pollTimer(); pollChat(); pollBroadcastChat(); loadRcPresets();
 pgmAudioInit("/cockpit/program-audio");
 </script>
-<!--__EVENT_INFO__-->
-<nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
-     data-tabs='[["live","Live"],["race","Race"],["drivers","Drivers"],["corrections","Fix"],["qualifying","Quali"],["dashboard","Tyres"],["graphics","Gfx"],["note","Note"],["setup","Setup"],["trouble","!"],["chat","Chat"]]'></nav>
-<!--__CREW_FRAME__-->
 <script>
 /* Driver telemetry controls (#1114), shared with the Director Panel; RED FLAG here is
    the full one: banner, Standby Cover and the race's red flag mode. */

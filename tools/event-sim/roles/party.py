@@ -227,8 +227,9 @@ class LiveColumn:
     scrolling the column reaches every control, so nothing clips one. The page may still
     settle its layout (the panel's program tile shrinks a frame later), so it measures
     again until the controls fit or the time is up. `rows` (a count) also asks that the
-    page shows at least that many of its `rows` (the cockpit's timing cars) whole, every
-    column included, without scrolling. `view` (area) opens one of its areas, so a screenshot shows it."""
+    page shows at least that many of its `rows` (the cockpit's timing cars) and that every
+    row it shows fits whole, every column included, without scrolling: the count proves
+    the cars are there, and no shown car may hide. `view` (area) opens one of its areas, so a screenshot shows it."""
     live_required = ()
 
     def area(self, name):

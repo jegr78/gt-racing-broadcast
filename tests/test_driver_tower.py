@@ -437,6 +437,35 @@ def t_the_public_page_flags_a_finished_row_with_its_gap():
         "a finish is final: the flag and gap stay when the car parks or leaves"
 
 
+
+class SlowScript:
+    """A local server that answers /slow.js after `seconds`, off the browser's route thread,
+    so a page's other requests answer while its parser waits on the script. A test routes
+    every other path of `base` and lets /slow.js through, so the page stays same-origin."""
+    def __init__(self, seconds=1.5):
+        import http.server
+        import threading
+        import time as _time
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                _time.sleep(seconds)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.end_headers()
+                self.wfile.write(b"window.slowDone = true;")
+
+            def log_message(self, *a):
+                pass
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+        self.url = "/slow.js"
+
+    def close(self):
+        self.srv.shutdown()
+
+
 def _function(path, name):
     """The source of one top-level JS function in a page or script, by brace matching."""
     with open(path, encoding="utf-8") as fh:

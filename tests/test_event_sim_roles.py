@@ -1795,8 +1795,10 @@ def t_the_desk_fit_scenario_measures_the_tallest_states():
         f"a laptop window still reaches every live control: {laptop}"
     timed = [s.id for s in loaded.steps if s.at.kind == "time" or s.at.seconds]
     assert not timed, f"a fit waits for its state, not for a fixed time: {timed}"
-    laps = [s.id for s in loaded.steps if any("lap.leader" in e for e in s.expect)]
-    assert not laps, f"no state waits on a lap: {laps}"
+    on_laps = re.compile(r"\blaps?\b|\blap\.")
+    laps = [s.id for s in loaded.steps if (s.at.kind == "race" and "lap" in s.at.condition)
+            or any(on_laps.search(e) for e in s.expect)]
+    assert not laps, f"no step waits on a lap, by its trigger or a lap count in an expect: {laps}"
     cockpit = [s for s in loaded.steps if s.role.startswith("commentator") and s.do == "fit" and not s.args.get("viewport")]
     assert cockpit and cockpit[0].args.get("rows") == loaded.event["cars"] == 14, \
         f"the cockpit shows all 14 cars of the timing at 1440x900: {[s.args for s in cockpit]}"

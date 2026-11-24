@@ -12,7 +12,8 @@ The cockpit uses the frame of the [Race Control desk](Console#race-control-desk)
 
 - **Areas** on the left: **Timing** (the default), **My stint**, **Graphics** and **Notes**.
   A dot on **My stint** shows while one of your stints still to come has no link or its
-  link waits for the director's approval; the line under it names the stint.
+  link waits for the director's approval; the line under it names the stint. During
+  qualifying it covers your qualifying stints and every one of your race stints.
 - **The live column** stays on screen whichever area is open: the tally, the program
   preview, the race timer, **Message director** and the **Race Control** notes. In a short
   window the column scrolls on its own.

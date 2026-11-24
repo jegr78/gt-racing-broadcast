@@ -170,6 +170,49 @@ def t_event_info_keeps_the_slow_period_for_a_definite_answer():
     assert out["delays"][:2] == [30000, 30000], out
 
 
+def _inline_after(answer):
+    """The inline mount's texts after one poll answered with `answer` ('fail' or 'ok')."""
+    import json, shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return None
+    with open(os.path.join(ROOT, "src", "console", "event-info.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    start = page.index("<script>") + len("<script>")
+    script = page[start:page.index("</script>", start)]
+    harness = r"""
+const mk = tag => ({tagName: (tag || 'div').toUpperCase(), hidden: false, tabIndex: 0, children: [], textContent: '',
+  className: '', setAttribute() {}, addEventListener() {}, focus() {}, showModal() {}, close() {},
+  replaceChildren(...c) { this.children = c; }, append(...c) { this.children.push(...c); }});
+const els = {eventInfoInline: mk()};
+els.eventInfoInline.children = [Object.assign(mk(), {textContent: 'Loading…'})];
+const document = {getElementById: id => els[id] || (els[id] = mk()), createElement: mk};
+const window = {addEventListener() {}};
+global.setTimeout = () => 0; global.clearTimeout = () => {};
+global.AbortController = class { constructor() { this.signal = {}; } abort() {} };
+global.fetch = async () => { if (ANSWER === 'fail') throw new Error('network');
+  return {ok: true, status: 200, json: async () => ({notes: [], documents: []})}; };
+const flat = n => [n].concat(...(n.children || []).map(flat));
+(async () => {
+%s
+  for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r));
+  console.log(JSON.stringify(flat(els.eventInfoInline).map(c => c.textContent).filter(Boolean)));
+})();
+""".replace("ANSWER", json.dumps(answer)) % script
+    return json.loads(subprocess.run([node, "-"], input=harness, capture_output=True, text=True, encoding="utf-8",
+                                     errors="replace", check=True, timeout=30).stdout)
+
+
+def t_the_inline_notes_never_stay_on_loading():
+    failed, empty = _inline_after("fail"), _inline_after("ok")
+    if failed is None:
+        return
+    assert failed == ["Could not load the event notes. Trying again…"], \
+        f"an unanswered first poll says so instead of Loading…: {failed}"
+    assert empty == ["Notes", "No event notes.", "Documents", "No documents."], empty
+
+
 def t_event_info_renders_inline_where_a_page_asks():
     import json, shutil, subprocess
     node = shutil.which("node")

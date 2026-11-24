@@ -104,8 +104,8 @@
     #timingWrap { max-height: 70vh; }
   }
   #timing { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  #timing th { position: sticky; top: 0; background: #14171c; text-align: left; font-weight: 600;
-               opacity: .7; padding: 4px 4px; white-space: nowrap; }
+  #timing th { position: sticky; top: 0; z-index: 1; background: var(--panel); color: var(--muted);
+               text-align: left; font-weight: 600; padding: 4px 4px; white-space: nowrap; }
   #timing td { padding: 4px 4px; border-top: 1px solid #232830; white-space: nowrap; }
   #timing td.num span { display: inline-block; min-width: 26px; text-align: center; border-radius: 4px;
                         padding: 1px 4px; font-weight: 700; background: #39414d; color: #fff; }
@@ -408,6 +408,12 @@
 </div>
 </div>
 
+<!-- The crew frame comes before the page script, so its area and dot functions exist
+     before the first poll answers. -->
+<!--__EVENT_INFO__-->
+<nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
+     data-tabs='[["live","Live"],["timing","Timing"],["stint","Stint"],["graphics","Graphics"],["notes","Notes"],["chat","Chat"]]'></nav>
+<!--__CREW_FRAME__-->
 <script>
 const $ = (id) => document.getElementById(id);
 
@@ -428,9 +434,6 @@ function fmtTs(ts) {
   if (typeof ts !== 'number' || !isFinite(ts)) return '';
   try { return new Date(ts * 1000).toLocaleTimeString(); } catch (e) { return ''; }
 }
-// True when a scroll container is at or near its bottom, so a new message only
-// auto-scrolls when the reader has not scrolled up to read back.
-function atBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
 // Source label for the handover overlap badge: "TW:<login>" for Twitch,
 // "YT:<last4>" for a YouTube videoId.
 function srcBadge(source) {
@@ -493,14 +496,17 @@ async function pollTally() {
 }
 
 // My stint's dot: an own stint still to come (the one on air included) whose link is
-// missing or waits for the director's approval. Without an on-air row every own stint counts.
+// missing or waits for the director's approval. Past the schedule's end no row is on air and
+// nothing is to come; in qualifying every own race stint (race_stints) is still to come.
 function stintDot(d) {
   const off = {level: '', why: ''};
-  const stints = d && d.submit_enabled && Array.isArray(d.my_stints) ? d.my_stints : [];
-  if (!stints.length) return off;
+  if (!d || !d.submit_enabled) return off;
+  const stints = Array.isArray(d.my_stints) ? d.my_stints : [];
   const rows = Array.isArray(d.schedule) ? d.schedule : [];
   const live = rows.findIndex(s => s && s.on_air);
-  const ahead = stints.filter(s => live < 0 || s.row - 1 >= live);
+  const ahead = stints.filter(s => live >= 0 && s.row - 1 >= live)
+    .concat(Array.isArray(d.race_stints) ? d.race_stints : []);
+  if (!ahead.length) return off;
   const pending = new Set((d.my_pending || []).map(p => p.stint));
   const missing = ahead.find(s => !s.has_link && !pending.has(s.stint));
   if (missing) return {level: 'warn', why: missing.stint + ': link missing'};
@@ -509,7 +515,7 @@ function stintDot(d) {
 }
 function renderStintDot(d) {
   const dot = stintDot(d);
-  if (typeof setDot === 'function') setDot('stint', dot.level, dot.why);
+  setDot('stint', dot.level, dot.why);
 }
 
 let lastStintPlanSig = null;   // signature of last rendered d.schedule; skip rebuild when unchanged
@@ -562,8 +568,7 @@ function renderSubmit(d) {
   const sig = JSON.stringify(stints.map(s => s.stint + ':' + s.has_link));
   if (sel.dataset.sig !== sig) {
     const cur = sel.value;
-    sel.innerHTML = stints.map(s =>
-      `<option value="${s.stint}">${s.stint}${s.has_link ? ' (replace)' : ''}</option>`).join('');
+    sel.replaceChildren(...stints.map(s => new Option(s.stint + (s.has_link ? ' (replace)' : ''), s.stint)));
     sel.dataset.sig = sig;
     if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
   }
@@ -615,7 +620,7 @@ async function submitLink() {
 
 // Program monitor: cache-busted JPEG stills; none while hidden. Hide lasts for this tab
 // only, so a reload never starts an event with the picture off.
-const PV_KEY = 'rc_preview';
+const PV_KEY = 'cockpit_preview';
 function previewShown() { return !$('pgmBody').hidden; }
 function setPreview(on) {
   $('pgmBody').hidden = !on;
@@ -702,7 +707,7 @@ async function pollChat() {
   try {
     const d = await j('/cockpit/chat/data');
     const log = $('chatlog');
-    const stick = atBottom(log);            // only auto-scroll if already at the bottom
+    const stick = chatFollows(log);         // only auto-scroll unless the reader scrolled up
     log.textContent = '';
     (d.messages || []).forEach(msg => {
       const row = document.createElement('div');
@@ -761,7 +766,7 @@ function bchatBody(row, msg) {
 }
 function renderBroadcastChat(msgs) {
   const log = $('bchatlog');
-  const stick = atBottom(log);             // preserve scroll-back position
+  const stick = chatFollows(log);          // preserve scroll-back position
   log.textContent = '';
   if (!msgs.length) {
     const e = document.createElement('div');
@@ -1197,29 +1202,27 @@ async function sendCueBack(text) {
 
 { const br = $('bchatRefresh'); if (br) br.addEventListener('click', refreshBroadcastChat); }
 
-// A critical cue spans the page above the frame on a desktop and rides in the sticky live
-// strip on a phone, above the tally.
-(function placeCue() {
-  const mq = window.matchMedia('(max-width: 820px)'), cue = $('cueCritical');
-  const place = () => { if (mq.matches) $('liveStrip').prepend(cue); else $('ckFrame').before(cue); };
-  place();
-  mq.addEventListener('change', place);
-})();
 // The Notes area counts what the event notes component shows.
 window.onEventInfo = function (notes, docs) {
   const parts = [];
   if (notes) parts.push(notes + ' note' + (notes === 1 ? '' : 's'));
   if (docs) parts.push(docs + ' document' + (docs === 1 ? '' : 's'));
-  if (typeof setDot === 'function') setDot('notes', '', parts.join(' · '));
+  setDot('notes', '', parts.join(' · '));
 };
+if (window.eventInfoCounts) window.onEventInfo.apply(null, window.eventInfoCounts);
 
 pollTally(); pollProgram(); pollTimer(); pollChat(); pollCues(); pollRcNotes();
 pgmAudioInit("/cockpit/program-audio");
 pollBroadcastChat();
+
+// A critical cue spans the page above the frame on a desktop and rides in the sticky live
+// strip on a phone, above the tally. It runs after the polls start, so nothing here stops them.
+(function placeCue() {
+  const mq = window.matchMedia('(max-width: 820px)'), cue = $('cueCritical');
+  const place = () => { if (mq.matches) $('liveStrip').prepend(cue); else $('ckFrame').before(cue); };
+  place();
+  if (mq.addEventListener) mq.addEventListener('change', place); else mq.addListener(place);
+})();
 </script>
-<!--__EVENT_INFO__-->
-<nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
-     data-tabs='[["live","Live"],["timing","Timing"],["stint","Stint"],["graphics","Graphics"],["notes","Notes"],["chat","Chat"]]'></nav>
-<!--__CREW_FRAME__-->
 </body>
 </html>

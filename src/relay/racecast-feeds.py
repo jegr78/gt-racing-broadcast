@@ -7338,6 +7338,16 @@ def cockpit_own_stints(rows, me_key):
     return out
 
 
+def cockpit_race_stints(mode, race_rows, me_key):
+    """In qualifying, *me_key*'s own race stints as {"row", "stint", "has_link"}, so the
+    cockpit's My stint dot covers the race while the feeds serve qualifying; no URL.
+    [] in a race, where /cockpit/data's my_stints are the race stints already. Pure."""
+    if mode != "qualifying":
+        return []
+    return [{"row": s["row"], "stint": s["stint"], "has_link": s["has_link"]}
+            for s in cockpit_own_stints(race_rows, me_key)]
+
+
 def schedule_rows(relay):
     """The relay's active schedule rows; [] in solo, which has no schedule source."""
     src = relay.source
@@ -14489,6 +14499,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       # (#193); empty -> the cockpit hides the form.
                                       "submit_enabled": submission_store is not None,
                                       "my_stints": cockpit_own_stints(rows, me),
+                                      "race_stints": cockpit_race_stints(
+                                          relay.mode, relay.race_source.get_rows()
+                                          if getattr(relay, "race_source", None) else [], me),
                                       # read-only redacted stint plan for the
                                       # My stint area (no stream URLs).
                                       "schedule": cockpit_schedule(rows, live_idx, me),

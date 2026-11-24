@@ -1197,6 +1197,55 @@ def t_an_answer_shows_in_the_part_it_was_asked_from():
     assert ".dd>.msg.part{position:sticky;top:0" in js, "a long part keeps its line in view"
 
 
+def t_a_first_poll_that_answers_while_the_desk_loads_finds_the_frame():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  (Playwright unavailable; the desk's load order is measured with visual acceptance)")
+        return
+    page = _src("racecontrol", "race-control.html")
+    i = page.index("</script>", page.index('pgmAudioInit("/cockpit/program-audio");')) + len("</script>")
+    slow = tower.SlowScript()
+    page = page[:i] + f'<script src="{slow.url}"></script>' + page[i:]
+    for token, value in (("__RC_API_BASE__", ""), ("__RC_VERSION__", "dev"),
+                         ("<!--__CREW_FRAME__-->", _src("console", "crew-frame.html")),
+                         ("<!--__EVENT_INFO__-->", _src("console", "event-info.html"))):
+        page = page.replace(token, value)
+
+    def serve(route):
+        path = route.request.url.split("://", 1)[1].split("/", 1)[1].split("?", 1)[0]
+        if path == "slow.js":
+            return route.continue_()
+        if path == "rc":
+            return route.fulfill(body=page, content_type="text/html")
+        if path == "driver-desk.js":
+            return route.fulfill(body=_src("console", "driver-desk.js"), content_type="application/javascript")
+        if path == "race-control/data":
+            return route.fulfill(body=json.dumps({"mode": "qualifying", "schedule": []}), content_type="application/json")
+        if path == "race-control/drivers/readiness":
+            return route.fulfill(body='{"rows": []}', content_type="application/json")
+        return route.fulfill(body="{}", content_type="application/json")
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as exc:  # noqa: BLE001  no browser binary on this machine
+            print(f"  (no Chromium: {type(exc).__name__})")
+            return
+        try:
+            tab = browser.new_page(viewport={"width": 1440, "height": 900})
+            errors = []
+            tab.on("pageerror", lambda e: errors.append(str(e) + " " + (e.stack or "")[:300]))
+            tab.route(slow.base + "/**", serve)
+            tab.goto(slow.base + "/rc", wait_until="load")
+            tab.wait_for_timeout(1000)
+            area = tab.evaluate("[...document.querySelectorAll('.area.active')].map(a => a.dataset.area)")
+        finally:
+            browser.close()
+            slow.close()
+    assert errors == [] and area == ["qualifying"], \
+        f"a first poll answered before the page finished loading still opens Qualifying: {errors} {area}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
