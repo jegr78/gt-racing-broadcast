@@ -244,23 +244,36 @@ def parse_widget_values(doc, forms=None):
     return out
 
 
-def _https_link(v, host=None):
-    if not isinstance(v, str) or len(v) > 2048:
-        return None
+def _origin(url):
+    """(scheme, host, port) of `url` with the scheme's default port, or None."""
     try:
-        u = urlsplit(v)
+        u = urlsplit(url)
+        port = u.port or {"https": 443, "http": 80}.get(u.scheme)
     except ValueError:
         return None
-    if u.scheme != "https" or not u.hostname or "@" in u.netloc:
+    if not u.hostname or "@" in u.netloc or port is None:
         return None
-    if host is not None and u.hostname != host:
+    return u.scheme, u.hostname.lower(), port
+
+
+def _https_link(v):
+    if not isinstance(v, str) or len(v) > 2048:
         return None
-    return v
+    origin = _origin(v)
+    return v if origin is not None and origin[0] == "https" else None
+
+
+def same_origin(url, service_url):
+    """`url` when it has the service URL's own scheme, host and port, else None."""
+    if not isinstance(url, str) or len(url) > 2048 or _has_control(url):
+        return None
+    origin = _origin(url)
+    return url if origin is not None and origin == _origin(service_url) else None
 
 
 def parse_result_status(doc, service_url):
     """ResultStatus as {status, message, link, graphic_url}, or None. The graphic is
-    kept only on the service's own host."""
+    kept only on the service's own scheme, host and port."""
     if not _version_ok(doc) or doc.get("status") not in STATUSES:
         return None
     message = _optional(doc, "message", MAX_MESSAGE)
@@ -268,7 +281,7 @@ def parse_result_status(doc, service_url):
         return None
     return {"status": doc["status"], "message": message,
             "link": _https_link(doc.get("link")),
-            "graphic_url": _https_link(doc.get("graphic_url"), urlsplit(service_url).hostname)}
+            "graphic_url": same_origin(doc.get("graphic_url"), service_url)}
 
 
 def ref_problem(ref):

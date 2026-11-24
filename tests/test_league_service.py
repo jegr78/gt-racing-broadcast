@@ -150,6 +150,18 @@ def t_result_status_keeps_the_graphic_only_on_the_service_host():
     s = ls.parse_result_status({"v": 1, "status": "pending", "link": "http://league.example/r",
                                 "graphic_url": "https://evil.example/x.png"}, url)
     assert s == {"status": "pending", "message": "", "link": None, "graphic_url": None}, s
+    for other in ("https://league.example:8443/r/1.png", "http://league.example/r/1.png",
+                  "https://league.example:99999/x.png", "https://LEAGUE.example.evil/x.png"):
+        s = ls.parse_result_status({"v": 1, "status": "stored", "graphic_url": other}, url)
+        assert s["graphic_url"] is None, f"{other} is not the service's own scheme, host and port"
+    s = ls.parse_result_status({"v": 1, "status": "stored",
+                                "graphic_url": "https://League.Example:443/r/1.png"}, url)
+    assert s["graphic_url"] == "https://League.Example:443/r/1.png", "the default port is the service's port"
+    sim = "http://127.0.0.1:5123/racecast"
+    s = ls.parse_result_status({"v": 1, "status": "stored", "graphic_url": "http://127.0.0.1:5123/g.png"}, sim)
+    assert s["graphic_url"] == "http://127.0.0.1:5123/g.png", "the loopback simulation serves its own graphic"
+    s = ls.parse_result_status({"v": 1, "status": "stored", "graphic_url": "http://127.0.0.1:5124/g.png"}, sim)
+    assert s["graphic_url"] is None, "another port on the same host is another service"
     assert ls.parse_result_status({"v": 1, "status": "stored", "message": "m" * 201}, url) is None, \
         "a status with an over-long message does not parse"
     assert ls.parse_result_status({"v": 1, "status": "done"}, url) is None
