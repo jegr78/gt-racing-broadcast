@@ -114,7 +114,13 @@ TELEMETRY_RECORD=
   fastest lap, and the red flags, corrections and confirmed disconnects. The section shows
   the service's answer per race; see [Control Center](Control-Center).
 
-  ![Control Center. Profile view: the League service section with a loaded event, its races, the result sent per race and the recording picker](images/cc-profile-league-service.png)
+  ![Control Center. Profile view: the League service section with a loaded event, its races and widgets, the Timing page switch and the result picker](images/cc-profile-league-service.png)
+
+- **`LEAGUE_WIDGETS_TIMING`** *(optional)*: `1` shows the league service's widgets above
+  the table of the [public live timing](Driver-Telemetry#public-live-timing) page, each
+  value with the timing's delay, whatever the Director has on air. Default off. The
+  Control Center's League service section switches it with **Timing page**, and a
+  running relay picks the change up within seconds.
 
 - **`TELEMETRY_RECORD`** *(optional, solo POV)*: `1` records the GT7 telemetry trace from
   relay start. The Director Panel `REC` key and `racecast telemetry record` toggle it live.

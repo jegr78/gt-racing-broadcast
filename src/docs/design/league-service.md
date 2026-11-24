@@ -1,8 +1,8 @@
 # League service
 
 Design agreed 2026-11-22. Contract, configuration, client and the simulated service
-(#1253), the result export (#1254) and the live state with its widgets and Director control
-(#1255) are implemented; the widgets on the timing page follow.
+(#1253), the result export (#1254), the live state with its widgets and Director control
+(#1255) and the widgets on the timing page (#1256) are implemented.
 
 A league runs its own management service (the Community Team Cup runs CTC Manager,
 Community League Racing runs CLR). During a race the relay sends the live race state
@@ -59,7 +59,8 @@ names the next race to send: it clears the `finished` and `done` marks, so a res
 the picked race comes from the recording, never from the live race just run.
 
 Whether the widgets appear on the public timing page is a separate profile switch,
-default off.
+`LEAGUE_WIDGETS_TIMING` in `profile.env`, default off, also a checkbox in the Control
+Center's League service section. A running relay picks a change up within a tick.
 
 ## Contract
 
@@ -257,7 +258,9 @@ The tick hands it the standings and never waits for it.
 - Timing page: the profile switch decides, independent of the on-air state. The block
   sits above the table. The league timing host stores and broadcasts the relay's state
   body unparsed, so the block reaches hosted viewers without a Worker change; the
-  hosted viewer page gets the same rendering.
+  hosted viewer page gets the same rendering. The block lists every widget of the loaded event
+  that held a value `delay_s` ago, each as id, form, title and value, nothing else. A
+  value newer than the delay, or one whose hold ended before it, stays off the page.
 - Result: sent automatically at `finished` and retried after a failure. "Send result"
   is also an action in the Control Center and a `racecast` verb (`racecast event result
   send [RACE]`), for the current event or for a recording file chosen after the event

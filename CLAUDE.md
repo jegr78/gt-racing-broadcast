@@ -229,7 +229,8 @@ Security boundaries that apply everywhere:
   both only accept encrypted GT7 packets and count them. The third is the public live
   timing page `/console/timing` and its `/data` (#1128), authorized by the event's
   separate timing link (`timing_link`): GET only, the delayed timing allowlist
-  (`driver_race.public_view`), one upload budget for all viewers that stretches their
+  (`driver_race.public_view`, plus the league widgets' id, form, title and value with the
+  same delay when the profile's `LEAGUE_WIDGETS_TIMING` is on, #1256), one upload budget for all viewers that stretches their
   poll interval instead of turning anyone away, plus the roster's brand logos
   (`/console/timing/brand/<key>`, PNG only).
 - The `race_control` role reaches exactly one program change: the full `RED FLAG`
@@ -239,8 +240,8 @@ Security boundaries that apply everywhere:
   dashboard on air. Race data the desks maintain (corrections, tyre compound, the
   dashboard's compound and fuel columns) is not a program change.
 - The optional league timing host (#1161) is an outbound fan-out: it sends
-  only the delayed public timing body (`driver_race.public_view`) and the roster's brand
-  logos to the league's own
+  only the delayed public timing body (`driver_race.public_view` and its league widget
+  block) and the roster's brand logos to the league's own
   Cloudflare Worker over an authenticated WebSocket. Nothing new is funnelled, and the
   host never reaches back into the relay.
 - The optional league service (#1252, `src/scripts/league_service.py`) is the second
