@@ -150,11 +150,8 @@ def t_event_league_verb_parses():
     assert m.route(["event", "league"])["verb"] == "league"
     assert m.route(["event", "league", "M1"])["rest"] == ["M1"]
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        try:
-            m.event_league_cmd(["--help"])
-        except SystemExit:
-            pass
+    with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):   # --help exits
+        m.event_league_cmd(["--help"])
     assert out.getvalue().isascii() and "REF" in out.getvalue()
 
 
