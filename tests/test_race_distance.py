@@ -3657,7 +3657,7 @@ def t_a_counter_step_while_standing_in_the_box_moves_nothing():
     assert len(dist) == 1 and {r["laps"] for *_x, r in seen} == {1}, \
         f"standing in the box the distance and the laps stay: {sorted(dist)[:2]}..{sorted(dist)[-1:]}"
     t = _go(race, car, t, 300 / 15, 15, pit=True, seen=seen)
-    t = _go(race, car, t, 40, 50, seen=seen)
+    _go(race, car, t, 40, 50, seen=seen)
     laps = [r["laps"] for *_x, r in seen]
     assert all(b >= a for a, b in zip(laps, laps[1:], strict=False)) and laps[-1] == 2, \
         f"out of the box past the line the count goes on, never back: {sorted(set(laps))}"
@@ -3674,7 +3674,7 @@ def t_only_a_crossing_on_track_marks_the_line():
     t = _go(race, car, t, 100 / 15, 15, pit=True, step_after=2)     # 1 -> 2 in the pit lane
     assert race._cars["a"].line_s is None, "a step in the pit lane is no crossing"
     t = _go(race, car, t, 150 / 15, 15, pit=True)
-    t = _go(race, car, t, L / 50, 50)                               # 2 -> 3 on the line
+    _go(race, car, t, L / 50, 50)                               # 2 -> 3 on the line
     s = race._cars["a"].line_s
     assert s is not None and race._circ(s, 0.0) < 10, f"the crossing on track marks the line: {s}"
     off = rd.Race(TRACE, formation=True)
@@ -3842,7 +3842,7 @@ def t_moving_a_car_away_and_back_restores_how_it_counts():
     moved = race._cars["a"]
     assert not moved.provisional and moved.line_s is not None, "on X the car crossed and moved its line"
     car.entry = "A"
-    t = _go(race, car, t, 1, 50)
+    _go(race, car, t, 1, 50)
     back = race._cars["a"]
     assert (back.provisional, back.from_line, back.line, back.lap_off) == (True, True, 0.0, 0), \
         f"back on A it counts as A did: {(back.provisional, back.from_line, back.line, back.lap_off)}"
@@ -3863,7 +3863,7 @@ def t_a_rebase_after_a_red_flag_moves_every_kept_distance():
     ent.stint_end = ent.change_anchor = ent.halted = held
     ent.crossed, ent.resumed = (t_red, t_red, held), (1, t_red, held)
     frozen = ent.frozen
-    t = _go(race, car, t, 600 / 50, 50)
+    _go(race, car, t, 600 / 50, 50)
     assert not race._cars["a"].provisional, "rebased after the release"
     now = rd.Race._distance_at(ent, t_red)
     assert abs((now - held) - CHORD_M) < 10, f"the history moved by the chord: {now - held}"
