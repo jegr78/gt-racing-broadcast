@@ -17,6 +17,7 @@ def t_every_platform_sheet_has_the_download_the_check_and_the_stop():
         assert SCRIPT in text and INVITE in text, f"{platform}: the sheet links the script and the invite"
         assert "--check" in text and "RESULT: OK" in text, f"{platform}: the sheet has the self-check"
         assert "## Stop it" in text, f"{platform}: the sheet says how to stop the sender"
+        assert "leave out the command line" in text, f"{platform}: the code stays out of what a driver posts"
         assert text.isascii(), f"{platform}: plain ASCII for every console and chat"
     assert "py racecast-sender.py" in ps.kit(INVITE, SCRIPT, "windows")
     assert "curl.exe -o" in ps.kit(INVITE, SCRIPT, "windows"), "PowerShell's curl is an alias"
@@ -291,6 +292,54 @@ def t_the_cli_writes_the_kit_marks_and_the_report():
     assert "## Driver changes" in report and "block 1 start" in report, report
     assert analysis["facts"]["changes"] == 1, analysis["facts"]
     assert "invite link" in out.getvalue() and "No event invite" in out.getvalue(), out.getvalue()
+
+
+def _cli():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("probe_stage2_cli", os.path.join(ROOT, "tools", "probe-stage2.py"))
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    return cli
+
+
+def t_race_reset_posts_the_reset_and_marks_it():
+    cli, posted = _cli(), []
+    with tempfile.TemporaryDirectory() as d:
+        out = io.StringIO()
+        old, sys.stdout = sys.stdout, out
+        try:
+            code = cli.main(["race-reset", "--out", d], fetch=lambda p: None,
+                            post=lambda path, body: posted.append((path, body)) or (200, {"ok": True}))
+            refused = cli.main(["race-reset", "--out", d], fetch=lambda p: None,
+                               post=lambda path, body: (403, {"error": "forbidden"}))
+        finally:
+            sys.stdout = old
+        _polls, marks = ps.load(d)
+    assert code == 0 and posted == [("/drivers/race/reset", {})], posted
+    assert refused == 1 and "forbidden" in out.getvalue(), out.getvalue()
+    assert [m["text"] for m in marks] == ["race reset"], "only a done reset is marked"
+
+
+def t_collect_keeps_the_audit_log_and_the_recording_apart_as_private():
+    cli = _cli()
+    with tempfile.TemporaryDirectory() as d:
+        runtime, out_dir = os.path.join(d, "runtime"), os.path.join(d, "results")
+        os.makedirs(runtime)
+        for name in ("driver-race-audit.jsonl", "race-recording-1.sqlite", "race-recording-1.sqlite-wal"):
+            with open(os.path.join(runtime, name), "w", encoding="utf-8") as fh:
+                fh.write("x")
+        sink = io.StringIO()
+        old, sys.stdout = sys.stdout, sink
+        try:
+            assert cli.main(["collect", "--out", out_dir, "--runtime", runtime], fetch=lambda p: None,
+                            get_bytes=lambda path: (_ for _ in ()).throw(OSError("relay stopped"))) == 0
+        finally:
+            sys.stdout = old
+        private = sorted(os.listdir(os.path.join(out_dir, "private")))
+        top = sorted(os.listdir(out_dir))
+    assert private == ["driver-race-audit.jsonl", "race-recording-1.sqlite", "race-recording-1.sqlite-wal"], private
+    assert top == ["private"], f"nothing private lands beside the shareable files: {top}"
+    assert "relay stopped" in sink.getvalue() and "private" in sink.getvalue(), sink.getvalue()
 
 
 if __name__ == "__main__":

@@ -118,7 +118,8 @@ def kit(invite_url, script_url, platform):
               "self-check, the copied command with `--check` at the end:\n\n"
               f"  `{cmd} --check`\n\n"
               "It takes 12 seconds, sends no telemetry and ends with `RESULT: OK` or "
-              "`RESULT: FAIL`. Send the whole output to the producer either way."]
+              "`RESULT: FAIL`. Send the lines from `checking for 12 s` to `RESULT` to the producer "
+              "either way, and leave out the command line: it carries your code."]
     lines += [f"{n}. {s}" for n, s in enumerate(steps, 1)]
     lines += ["", "## For the session", "",
               f"Run the copied command without `--check`:\n\n  `{cmd}`\n",

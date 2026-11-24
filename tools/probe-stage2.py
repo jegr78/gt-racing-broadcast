@@ -5,11 +5,13 @@ Maintainer tool; the runbook is docs/superpowers/plans/2026-11-24-telemetry-prob
     python3 tools/probe-stage2.py kit --out KIT          # one setup sheet per platform from the invite
     python3 tools/probe-stage2.py watch --out RESULTS    # live table per sender, writes RESULTS/
     python3 tools/probe-stage2.py mark --out RESULTS "block 3 change"
-    python3 tools/probe-stage2.py collect --out RESULTS --runtime runtime/<profile>
+    python3 tools/probe-stage2.py race-reset --out RESULTS   # start the race over between blocks
+    python3 tools/probe-stage2.py collect --out RESULTS [--runtime runtime/<profile>]
     python3 tools/probe-stage2.py report RESULTS         # RESULTS/report.md and analysis.json
 
 The relay is read on its tailnet routes (default http://127.0.0.1:8088). Run it on the
-producer machine. Nothing is written to the relay.
+producer machine. Only `race-reset` changes the relay: `POST /drivers/race/reset`, a
+tailnet route no desk offers.
 """
 import argparse
 import glob
@@ -47,6 +49,24 @@ def _get_bytes(relay, path, timeout=30.0):
     req = urllib.request.Request(relay.rstrip("/") + path, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+
+
+def poster(relay, timeout=10.0):
+    """POST JSON to `relay + path`: (status, decoded reply)."""
+    def post(path, body):
+        req = urllib.request.Request(relay.rstrip("/") + path, data=json.dumps(body).encode(), method="POST",
+                                     headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, json.loads(r.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            try:
+                return exc.code, json.loads(exc.read().decode("utf-8") or "{}")
+            except ValueError:
+                return exc.code, {}
+        except (OSError, ValueError) as exc:
+            return None, {"error": str(exc)}
+    return post
 
 
 def cmd_kit(args, fetch):
@@ -87,27 +107,43 @@ def cmd_mark(args, fetch):
     return 0
 
 
-def cmd_collect(args, fetch):
+def cmd_race_reset(args, fetch, post):
+    status, reply = post("/drivers/race/reset", {})
+    if status != 200:
+        print(f"The race was not reset: {reply.get('error') or status}")
+        return 1
+    rec = ps.mark(args.out, "race reset")
+    print(f"{time.strftime('%H:%M:%S', time.localtime(rec['t']))} race reset, state {reply.get('state')}")
+    return 0
+
+
+def cmd_collect(args, fetch, get_bytes):
+    """The relay's reads first; with --runtime, after `event stop`, the files the relay wrote."""
     os.makedirs(args.out, exist_ok=True)
     probe = fetch("/telemetry/probe")
     if isinstance(probe, dict) and probe.get("senders") is not None:
         ps.Monitor(args.out, fetch).snapshot_probe(probe, "final")
     try:
+        body = get_bytes("/drivers/race/recording/csv")
         with open(os.path.join(args.out, "race-recording.csv"), "wb") as fh:
-            fh.write(_get_bytes(args.relay, "/drivers/race/recording/csv"))
+            fh.write(body)
         print("race-recording.csv saved.")
     except (OSError, urllib.error.HTTPError) as exc:
         print(f"race-recording.csv: {exc}")
     if args.runtime:
-        audit = os.path.join(args.runtime, "driver-race-audit.jsonl")
-        if os.path.isfile(audit):
-            shutil.copy2(audit, args.out)
+        private = os.path.join(args.out, "private")
+        files = [os.path.join(args.runtime, "driver-race-audit.jsonl")]
         recordings = sorted(glob.glob(os.path.join(args.runtime, "race-recording-*.sqlite")),
                             key=os.path.getmtime)
         if recordings:
-            shutil.copy2(recordings[-1], args.out)
-        print(f"copied {'the audit log, ' if os.path.isfile(audit) else ''}"
-              f"{os.path.basename(recordings[-1]) if recordings else 'no race recording'}")
+            files += [recordings[-1] + tail for tail in ("", "-wal", "-shm")]
+        files = [f for f in files if os.path.isfile(f)]
+        if files:
+            os.makedirs(private, exist_ok=True)
+        for f in files:
+            shutil.copy2(f, private)
+        print(f"copied {len(files)} files to {private}: the audit log and the recording carry "
+              "connection ids and crew names, so keep private/ out of a public issue")
     return 0
 
 
@@ -125,7 +161,7 @@ def cmd_report(args, fetch):
     return 0
 
 
-def main(argv=None, fetch=None):
+def main(argv=None, fetch=None, post=None, get_bytes=None):
     logsetup.harden_stdio()
     ap = argparse.ArgumentParser(description="Probe stage 2: setup sheets, live watch, report.")
     ap.add_argument("--relay", default=RELAY, help="the relay's control URL on this machine")
@@ -140,6 +176,8 @@ def main(argv=None, fetch=None):
     m = sub.add_parser("mark", help="note a block start or an observation in the timeline")
     m.add_argument("--out", required=True)
     m.add_argument("text", nargs="+")
+    x = sub.add_parser("race-reset", help="start the relay's race over (between blocks) and mark it")
+    x.add_argument("--out", required=True)
     c = sub.add_parser("collect", help="save the race recording, the audit log and a probe snapshot")
     c.add_argument("--out", required=True)
     c.add_argument("--runtime", help="the profile's runtime folder, e.g. runtime/<profile>")
@@ -147,8 +185,11 @@ def main(argv=None, fetch=None):
     r.add_argument("dir")
     args = ap.parse_args(argv)
     fetch = fetch or fetcher(args.relay)
-    return {"kit": cmd_kit, "watch": cmd_watch, "mark": cmd_mark, "collect": cmd_collect,
-            "report": cmd_report}[args.cmd](args, fetch)
+    if args.cmd == "race-reset":
+        return cmd_race_reset(args, fetch, post or poster(args.relay))
+    if args.cmd == "collect":
+        return cmd_collect(args, fetch, get_bytes or (lambda path: _get_bytes(args.relay, path)))
+    return {"kit": cmd_kit, "watch": cmd_watch, "mark": cmd_mark, "report": cmd_report}[args.cmd](args, fetch)
 
 
 if __name__ == "__main__":
