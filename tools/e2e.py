@@ -768,6 +768,41 @@ def _check_league_service(binary, tmp, stub_bin, sheet_url, procs, timeout):
         print("  [PASS] event stop clears the loaded league event")
 
 
+def _check_league_live(base, sim, home, until):
+    """The relay posts the live state every two seconds, the Director shows a widget and
+    the Intermission page carries the placed one (#1255)."""
+    import league_sim
+    until("the relay never sent the live state", lambda: len(sim.calls(call="live")) >= 3)
+    calls = sim.calls(call="live")
+    gaps = [round(calls[i + 1]["time"] - calls[i]["time"], 2) for i in range(len(calls) - 1)]
+    assert all(1.5 <= g <= 3.0 for g in gaps[-2:]), f"one live state every two seconds: {gaps}"
+    body = calls[-1]["body"]
+    assert (body["ref"], body["race"], body["mode"]) == (league_sim.DEFAULT_REF, "leg-1", "race"), body
+    for row in body["entries"]:
+        assert not {"fuel_l", "compound", "x", "z"} & set(row), row
+    assert calls[-1]["user_agent"].startswith("racecast/"), calls[-1]
+    print(f"  [PASS] the relay posts the live state every two seconds (gaps {gaps[-2:]})")
+    status, d = E._get_json(base + "/league/widgets")
+    assert status == 200 and [(w["id"], w["shown"]) for w in d["widgets"]] == \
+        [("match-score", False), ("standings", False)], d
+    assert E._get_json(base + "/league-widgets/data")[1]["widgets"] == [], "default hidden"
+    status, d = E._get_json(base + "/league/widget/1/show")
+    assert status == 200 and d["id"] == "match-score", d
+    until("the shown widget never reached the pages",
+          lambda: [w["id"] for w in E._get_json(base + "/league-widgets/data")[1]["widgets"]] == ["match-score"])
+    overlay = os.path.join(home, "profiles", "demo", "overlay")
+    assert os.path.isfile(os.path.join(home, "profiles", "demo", "league-widgets.json")), \
+        "loading the event keeps its widgets in the profile"
+    os.makedirs(overlay, exist_ok=True)
+    with open(os.path.join(overlay, "layout-intermission.json"), "w", encoding="utf-8") as fh:
+        json.dump({"version": 1, "page": "intermission", "slots": {"league-widget-match-score": {"left": 40}}}, fh)
+    st, raw, _h = E.http_request(base + "/intermission")
+    page = raw.decode("utf-8", "replace")
+    assert st == 200 and 'data-league-widget="match-score"' in page and "/league-widgets.js" in page, st
+    assert E._get_json(base + "/league/widget/match-score/hide")[0] == 200
+    print("  [PASS] the Director shows and hides a league widget and the Intermission page carries the placed one")
+
+
 def _check_league_result(launcher, home, env, cli, sim, sheet_url, ui_url, procs, timeout):
     """A relay of the league-app home sends the result when the race finishes, the
     Director's resend replaces it, and after the relay stops the CLI sends it again from
@@ -818,6 +853,7 @@ def _check_league_result(launcher, home, env, cli, sim, sheet_url, ui_url, procs
             assert time.monotonic() < deadline, f"{what}\n{relay_log()}"
             time.sleep(0.2)
     until("the relay never watched the race state", lambda: E._get_json(base + "/league/status")[1]["watching"])
+    _check_league_live(base, sim, home, until)
     for action in ("final-lap", "finish"):
         st, body = post("/drivers/race/" + action)
         assert st == 200 and body.get("ok"), (action, st, body)

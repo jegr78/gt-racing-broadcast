@@ -144,6 +144,7 @@ def t_live_pages_carry_the_placed_widgets_and_survive_a_broken_layout():
         page = lw.live_html(BASE, overlay, "hud")
         assert "league-widget-standings" in page and "league-widget-match-score" not in page
         assert lw.live_html(BASE, overlay, "intermission") == BASE, "a scene without a layout is untouched"
+        _place(overlay, "drivers", "standings")
         assert lw.live_html(BASE, overlay, "drivers") == BASE, "the driver dashboard has no league widgets"
         with open(os.path.join(overlay, "layout-hud.json"), "w", encoding="utf-8") as fh:
             fh.write("{broken")
