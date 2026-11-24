@@ -97,11 +97,16 @@ def t_dry_run_sends_nothing_and_the_file_stays_unchanged():
         rec = _recording(d, n=2)
         before = os.stat(rec).st_mtime_ns
         code, out, _ = _run([rec, "--url", sim.url, "--ref", "R", "--race", "leg-1", "--dry-run"])
-        assert code == 0 and '"entries"' in out and sim.calls() == []
+        assert code == 0 and '"entries"' in out and sim.calls() == [], f"a path with {d!r} must open: {out}"
         assert os.stat(rec).st_mtime_ns == before, "the recording is opened read-only"
         code, out, _ = _run([os.path.join(d, "missing.sqlite"), "--url", sim.url, "--ref", "R", "--race", "r"])
         assert code == 2 and not os.path.exists(os.path.join(d, "missing.sqlite")), \
             "a missing recording is never created"
+        broken = os.path.join(d, "broken.sqlite")
+        with open(broken, "wb") as fh:
+            fh.write(b"not a database")
+        code, out, _ = _run([broken, "--url", sim.url, "--ref", "R", "--race", "r"])
+        assert code == 2 and "cannot read" in out, out
 
 
 if __name__ == "__main__":

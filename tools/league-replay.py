@@ -111,7 +111,11 @@ def main(argv=None, sleep=time.sleep, out=sys.stdout):
     if not os.path.isfile(args.recording):
         print(f"no such recording: {args.recording}", file=out)
         return 2
-    items = paced(samples(args.recording), league_service.TICK_S)
+    try:
+        items = paced(samples(args.recording), league_service.TICK_S)
+    except (sqlite3.Error, ValueError) as e:
+        print(f"cannot read the recording: {e}", file=out)
+        return 2
     if args.limit:
         items = items[:args.limit]
     if not items:
