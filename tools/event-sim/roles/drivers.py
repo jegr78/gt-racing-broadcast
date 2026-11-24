@@ -15,7 +15,7 @@ UNGAPPED_STEP_S = 1.0    # cars without a gap (lapped) leave after the last, thi
 
 @register
 class DriversRole(Role):
-    """`register` (cars, stints), `start`, `pit` (entry, seconds), `box` (order: "race",
+    """`register` (cars, stints, positions: GT7's 0x84 position from the road order), `start`, `pit` (entry, seconds), `box` (order: "race",
     "grid" or a list of entries), `lobby` (stint), `release` (gaps), `drop` (entry),
     `rejoin` (entry, seconds), `stop` (entries). An entry is its team label or its grid slot."""
     kind = "drivers"
@@ -70,7 +70,7 @@ class DriversRole(Role):
             stints = int(args.get("stints") or len(segments) or 1)
             length = float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
             field = drive.Field(drive.trace(drive.synthetic_path(length)), self.client.ingest,
-                                seed=int(event.get("seed", 7)))
+                                seed=int(event.get("seed", 7)), positions=bool(args.get("positions")))
             for k, entry in enumerate(entries):
                 field.add(entry, [drive.driver_name(entry, s) for s in range(stints)])
                 for s in range(stints):

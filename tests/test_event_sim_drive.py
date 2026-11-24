@@ -41,7 +41,8 @@ class Wire:
             self.samples.setdefault(code, []).append(
                 {"t": self.now, "lap": pkt.lap, "speed_kmh": pkt.speed_mps * 3.6, "x": pkt.pos_x,
                  "z": pkt.pos_z, "last_ms": pkt.last_ms, "best_ms": pkt.best_ms, "pid": pkt.packet_id,
-                 "kind": kind, "fuel": pkt.fuel_level})
+                 "kind": kind, "fuel": pkt.fuel_level, "position": pkt.race_position,
+                 "cars": pkt.car_count})
 
     def last(self, code):
         return self.samples[code][-1]
@@ -156,6 +157,24 @@ def t_the_lap_counter_reads_0_on_the_grid_and_steps_at_the_line():
     assert wire.last("c0s0")["best_ms"] == min(lap_ms, wire.last("c0s0")["last_ms"]), "the best lap is the quicker one"
     pids = [s["pid"] for s in wire.samples["c0s0"]]
     assert pids == sorted(set(pids)), "packet ids rise, one per packet"
+
+
+def t_gt7_positions_are_opt_in_and_follow_the_running_order():
+    wire = Wire()
+    plain = field(wire, cars=2)
+    run(plain, wire, 1.0)
+    assert wire.last("c0s0")["position"] is None, "without positions the field leaves 0x84 empty"
+    wire = Wire()
+    f = drive.Field(drive.trace(drive.synthetic_path(LENGTH)), wire, seed=7, positions=True)
+    for k, entry in enumerate(TEAMS[:3]):
+        f.add(entry, [f"D{k}"])
+        f.set_code(entry, 0, f"c{k}s0")
+    f.start()
+    run(f, wire, 30.0)
+    order = sorted(range(3), key=lambda k: -f.cars[k].odo)
+    got = [wire.last(f"c{k}s0")["position"] for k in order]
+    assert got == [1, 2, 3], f"0x84 names each car's place on the road: {got}"
+    assert {wire.last(f"c{k}s0")["cars"] for k in range(3)} == {3}, "and the cars in the session"
 
 
 def t_a_sender_without_a_code_sends_nothing():

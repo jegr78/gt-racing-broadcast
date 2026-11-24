@@ -297,7 +297,8 @@ def t_the_registry_has_every_party_and_its_actions():
                              "note", "fit", "confirm_dc", "class_laps", "view"},
             "commentator": {"open", "submit_link", "chat"},
             "viewer": {"open", "read"},
-            "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"}}
+            "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"},
+            "probe": {"watch", "mark", "spectator", "stop_spectator", "check", "report"}}
     for kind, actions in want.items():
         assert kind in REG, f"role {kind} is not registered"
         assert set(REG[kind].action_names()) == actions, f"{kind}: {sorted(REG[kind].action_names())}"
@@ -1381,6 +1382,34 @@ def t_drivers_need_the_invite_and_a_track():
     fails(lambda: drivers_role().do("start", {}), "not registered yet")
 
 
+def t_the_probe_role_needs_its_watch_and_the_invite():
+    probe_role = roles.probe
+    with tempfile.TemporaryDirectory() as d:
+        ctx = engine.RunContext(urls={"relay": BASE}, out_dir=d, event={"track_length_m": 1200},
+                                event_link=lambda kind: None)
+        role = probe_role.ProbeRole(ctx, "probe")
+        role.open()
+        try:
+            fails(lambda: role.do("report", {}), "watch never started")
+            fails(lambda: role.do("check", {"entry": "Apex Works #11"}), "no invite link")
+            role.do("mark", {"text": "block 1"})
+            _polls, marks = probe_role.probe_stage2.load(os.path.join(d, probe_role.RESULTS))
+            assert [m["text"] for m in marks] == ["block 1"], marks
+        finally:
+            left = role.close()
+        assert left == [], left
+
+
+def t_the_simulated_spectator_laps_the_synthetic_line_with_its_0x84_position():
+    import gt7_telemetry
+    probe_role = roles.probe
+    replay = probe_role.synthetic_packets(1200.0, position=4, cars=9, seconds=70.0)
+    pkts = [gt7_telemetry.parse_packet(plain) for _t, plain in replay]
+    assert len(pkts) == 70 * probe_role.HZ and replay[probe_role.HZ - 1][0] == 1.0, "60 packets a second"
+    assert [pkts[probe_role.HZ * s].lap for s in (15, 45, 65)] == [0, 1, 2], "the counter steps once a lap"
+    assert {(p.race_position, p.car_count) for p in pkts} == {(4, 9)}, "0x84 as asked"
+
+
 def t_driver_actions_reach_the_field():
     role = drivers_role()
     role.do("register", {"stints": 2})
@@ -1752,6 +1781,24 @@ def t_the_bundled_events_run_three_lobbies_and_check_each_commentator_on_program
         assert free == [], f"{name}: without a browser these steps would not be skipped with their chain: {free}"
         assert loaded.steps[-1].do == "stop_event", f"{name}: Stop event ends the relay, so it is the last step"
         assert all(s.expect for s in loaded.steps if s.role == "api"), f"{name}: every probe step asserts something"
+
+
+def t_the_probe_rehearsal_changes_drivers_twice_and_asserts_the_report():
+    path = os.path.join(SIM, "scenarios", "probe-stage2.toml")
+    loaded = scenario.load(path, REG)
+    assert loaded.event.get("probe") is True, "the spectator needs the relay's probe ingest"
+    lobbies = [s.args.get("stint") for s in loaded.steps if s.role == "drivers" and s.do == "lobby"]
+    assert lobbies == [2, 3], f"two driver changes per team: {lobbies}"
+    report = [s for s in loaded.steps if s.role == "probe" and s.do == "report"]
+    checks = " ".join(report[0].expect) if report else ""
+    for fact in ("changes == 6", "anchors_carried == 6", "changes_in_window == 6", "probe_senders == 1"):
+        assert fact in checks, f"the report step asserts {fact}: {checks}"
+    with open(path, "rb") as fh:
+        raw = tomllib.load(fh)
+    free = [s.get("id") for s in raw["step"] if s["role"].split(":")[0] not in ("api", "obs", "stream", "relay")
+            and not str(s.get("at", "")).startswith("after:")]
+    assert free == [], f"without a browser these steps would not be skipped with their chain: {free}"
+    assert loaded.steps[-1].do == "stop_event", "Stop event ends the relay, so it is the last step"
 
 
 if __name__ == "__main__":

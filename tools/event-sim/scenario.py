@@ -35,7 +35,7 @@ MAX_MAX_MINUTES = 120              # the spec's CI timeout for the longest scena
 STEP_KEYS = {"id", "at", "role", "do", "args", "expect", "soft", "timeout", "wait", "shot"}
 TOP_KEYS = {"name", "description", "max_minutes", "wait", "event", "sheet", "tolerances", "step"}
 EVENT_KEYS = {"stints", "track", "track_length_m", "cars", "classes", "parts", "qualifying_part", "seed",
-              "commentators"}
+              "commentators", "probe"}
 COMMENTATOR_KEYS = {"name", "channel", "stint", "scheduled"}
 
 
@@ -169,6 +169,8 @@ def _event(event):
         raise ScenarioError(f"event.stints is a whole number 1-255, not {stints!r}")
     if type(event.get("seed", 7)) is not int:
         raise ScenarioError(f"event.seed is a whole number, not {event['seed']!r}")
+    if not isinstance(event.get("probe", False), bool):
+        raise ScenarioError(f"event.probe is true or false, not {event['probe']!r}")
     if not isinstance(event.get("qualifying_part", False), bool):
         raise ScenarioError(f"event.qualifying_part is true or false, not {event['qualifying_part']!r}")
     try:

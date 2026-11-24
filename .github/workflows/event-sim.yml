@@ -21,6 +21,7 @@ on:
           - dc-rejoin
           - relay-crash
           - red-flag
+          - probe-stage2
       profile:
         description: "Time budget: quick = 30 min, full = 120 min (the full scenario always gets 120)"
         type: choice

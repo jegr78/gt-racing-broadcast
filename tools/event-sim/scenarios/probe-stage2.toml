@@ -1,0 +1,243 @@
+# The probe stage 2 dress rehearsal (#1116): the runbook's producer side against simulated
+# drivers. The producer's watch (tools/probe_stage2.py) records the run into
+# OUT/probe-stage2/, three teams race three lobbies with GT7 positions in their packets,
+# the real racecast-sender.py sends as the spectator through the probe ingest and runs its
+# self-check through the invite, and the report must find both driver changes of every
+# team inside the change window with the anchor carried. One commentator link on all three
+# Schedule rows makes each stint switch (`/next`) a continuation that needs no feed: the
+# rehearsal measures the telemetry, not the program. Real lobbies, the real spectator slot
+# and a real Android device are what it cannot rehearse (see the runbook).
+description = "Probe stage 2 rehearsal: watch, spectator sender, sender self-check, two driver changes, report."
+max_minutes = 10
+
+[event]
+stints = 3
+track = "6e378b"
+track_length_m = 1200
+cars = 3
+seed = 11
+probe = true
+
+[[event.commentators]]
+name = "Comms 1"
+channel = "comms1"
+scheduled = true
+
+[sheet.tabs]
+Schedule = [["URL", "Streamer", "Stint"], ["sim://comms1", "Comms 1", "Stint 1"],
+            ["sim://comms1", "Comms 1", "Stint 2"], ["sim://comms1", "Comms 1", "Stint 3"]]
+
+[[step]]
+id = "relay_up"
+role = "api"
+do = "get"
+args = { path = "/status" }
+expect = ["relay.up"]
+
+[[step]]
+id = "track"
+at = "after:relay_up"
+role = "producer"
+do = "pick_track"
+
+[[step]]
+id = "race_settings"
+at = "after:track"
+role = "producer"
+do = "race_settings"
+args = { formation = false, finish_mode = "laps", laps = 2 }
+expect = ["race.settings.lap_count == 2"]
+
+[[step]]
+id = "start_event"
+at = "after:race_settings"
+role = "producer"
+do = "start_event"
+expect = ["obs.scene == 'Standby'", "relay.up"]
+
+[[step]]
+id = "watch"
+at = "after:start_event"
+role = "probe"
+do = "watch"
+
+[[step]]
+id = "register"
+at = "after:watch"
+role = "drivers"
+do = "register"
+args = { positions = true }
+expect = ["result('register').registered == 9"]
+
+[[step]]
+id = "approve_drivers"
+at = "after:register"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 9"]
+
+[[step]]
+id = "mark_race"
+at = "after:approve_drivers"
+role = "probe"
+do = "mark"
+args = { text = "block 2 lobby race" }
+
+[[step]]
+id = "green"
+at = "after:mark_race"
+role = "drivers"
+do = "start"
+expect = ["race.state == 'racing'"]
+timeout = "60s"
+
+[[step]]
+id = "spectator"
+at = "after:green"
+role = "probe"
+do = "spectator"
+args = { name = "Spectator" }
+
+[[step]]
+id = "check"
+at = "after:spectator"
+role = "probe"
+do = "check"
+args = { entry = "Apex Works #11", name = "Check" }
+expect = ["result('check').ok"]
+timeout = "60s"
+
+[[step]]
+id = "lap2"
+at = "after:check"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.lap.leader >= 2"]
+timeout = "3m"
+
+[[step]]
+id = "mark_change2"
+at = "after:lap2"
+role = "probe"
+do = "mark"
+args = { text = "block 3 change into lobby 2" }
+
+[[step]]
+id = "box1"
+at = "after:mark_change2"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 3"]
+timeout = "90s"
+
+[[step]]
+id = "next2"
+at = "after:box1"
+role = "api"
+do = "get"
+args = { path = "/next" }
+expect = ["race.change_window"]
+timeout = "20s"
+
+[[step]]
+id = "lobby2"
+at = "after:next2"
+role = "drivers"
+do = "lobby"
+args = { stint = 2 }
+
+[[step]]
+id = "release2"
+at = "after:lobby2+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 3"]
+timeout = "60s"
+
+[[step]]
+id = "stint2_lap"
+at = "after:release2+15s"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-2'"]
+
+[[step]]
+id = "mark_change3"
+at = "after:stint2_lap"
+role = "probe"
+do = "mark"
+args = { text = "block 3 change into lobby 3" }
+
+[[step]]
+id = "box2"
+at = "after:mark_change3"
+role = "drivers"
+do = "box"
+expect = ["page('drivers').standing == 3"]
+timeout = "90s"
+
+[[step]]
+id = "next3"
+at = "after:box2"
+role = "api"
+do = "get"
+args = { path = "/next" }
+expect = ["race.change_window"]
+timeout = "20s"
+
+[[step]]
+id = "lobby3"
+at = "after:next3"
+role = "drivers"
+do = "lobby"
+args = { stint = 3 }
+
+[[step]]
+id = "release3"
+at = "after:lobby3+5s"
+role = "drivers"
+do = "release"
+expect = ["page('drivers').driving == 3"]
+timeout = "60s"
+
+[[step]]
+id = "finished"
+at = "after:release3"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["race.state == 'finished'", "row(race.entries, 'entry', 'Apex Works #11').driver == 'Driver 11-3'"]
+timeout = "3m"
+
+[[step]]
+id = "chequered"
+at = "after:finished"
+role = "drivers"
+do = "stop"
+
+[[step]]
+id = "stop_spectator"
+at = "after:chequered"
+role = "probe"
+do = "stop_spectator"
+
+[[step]]
+id = "report"
+at = "after:stop_spectator"
+role = "probe"
+do = "report"
+expect = ["result('report').changes == 6", "result('report').anchors_carried == 6",
+          "result('report').changes_in_window == 6", "result('report').windows >= 2",
+          "result('report').probe_senders == 1", "result('report').with_0x84 > 0",
+          "result('report').laps_back == 0", "result('report').csv == 200"]
+timeout = "30s"
+
+[[step]]
+id = "stop_event"
+at = "after:report"
+role = "producer"
+do = "stop_event"
+expect = ["not relay.up"]
+timeout = "30s"
