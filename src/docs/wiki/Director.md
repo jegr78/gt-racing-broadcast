@@ -655,13 +655,14 @@ Scenes, feeds and per-feed quality: the live production controls.
 
 Every graphic overlay in one place: the race-condition flags, the flag graphics,
 the pre-race info and starting-grid boards, the standings/results/weather overlays,
-and the per-row grid reveals. The flag rows are colour-coded; the overlay toggles
+the league widget switches and the per-row grid reveals. The flag rows are colour-coded; the overlay toggles
 stay dark and light up while their graphic is on air.
 
 | Row | Buttons |
 |-----|---------|
 | **Flag** | `FLAG GREEN`, `FLAG YELLOW`, `SAFETY CAR`, `FCY` (Full Course Yellow), `RED FLAG`, `CLEAR FLAG`, each sets (or clears) the colour-coded **race-condition flag** HUD element (`/setup/set/flag/<state>`, `CLEAR FLAG` → `/setup/clear/flag`). The flag's vocabulary comes from the sheet's Configuration **Flag** column; these buttons cover the canonical states |
 | **Flag Gfx** | `GFX GREEN`, `GFX YELLOW`, `GFX SC`, `GFX VSC`, `GFX RED`, `GFX CLEAR`: toggles a full-screen flag-status **graphic overlay** in the Stint and Splitscreen scenes, or in Program in solo (`/obs/flag/set/<key>`, `GFX CLEAR` → `/obs/flag/clear`). Exactly one is active at a time; pressing a new one hides the previous. These are the *graphic* alternative to the Flag row above, the two controls are independent |
+| **League widgets** (end of the Flag Gfx row) | `LEAGUE WIDGET 1`, `LEAGUE WIDGET 2`: show or hide the first and second widget of the loaded league event (`/league/widget/<n>/toggle`), like **SHOW**/**HIDE** in the Director Panel's League service card. Without a loaded event or that many widgets the key does nothing |
 | **Info + grid** | `Weekend Info`, `Race Info`, `Next Event`: pre-race full-screen Stint graphics, each an independent toggle like Standings, plus `Starting Grid`, the full starting-grid board |
 | **Graphics & weather** | `Standings`, `Schedule`, `Race Results`, `Quali Results`, `Standby Toggle` (incident cover: see [The race](#through-the-broadcast-scene--hud-cues)), `Weather Race (1) Toggle`, `Weather Race (2) Toggle`, `Weather Quali Toggle`, the three weather buttons are full-screen Stint overlays, each an independent toggle like Standings/Results. Every button in this row and the next two goes through the relay (`/obs/graphic/toggle/<source>`), which picks the Stint scene, or Program in solo |
 | **Grid rows** | `Grid R1`…`Grid R8`: one full-screen graphic per starting-grid row, each an independent toggle. Each shows the two cars of its row on its own; the `Starting Grid` board shows the whole field |

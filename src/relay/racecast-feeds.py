@@ -12562,7 +12562,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 ok, out = league_live.set(sub[1], sub[2])
                 if not ok:
                     return self._send({"ok": False, "error": out}, 400)
-                LOG.info("league widget %s: %s", out, sub[2])
+                LOG.info("league widget %s: %s", out.replace("\r", "").replace("\n", ""),
+                         sub[2].replace("\r", "").replace("\n", ""))
                 return self._send({"ok": True, "id": out, "action": sub[2]}, no_store=True)
             if league_exporter is None:
                 return self._send({"error": "league result export unavailable"}, 404)

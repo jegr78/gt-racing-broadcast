@@ -11,6 +11,7 @@ text: the markup carries no service text but the escaped builder label. Stdlib o
 import html
 import json
 import os
+import re
 import tempfile
 import threading
 
@@ -160,6 +161,7 @@ def placements(overlay_dir):
 
 
 ACTIONS = ("show", "hide", "toggle")
+PLACE_RE = re.compile(r"[1-9]")      # ASCII only: str.isdigit() also takes "²"
 
 
 def order_key(snap):
@@ -237,7 +239,7 @@ class Live:
         if action not in ACTIONS:
             return False, "action must be show, hide or toggle"
         ids = [w["id"] for w in self._event_widgets()]
-        if isinstance(target, str) and target.isdigit() and len(target) <= 2:
+        if isinstance(target, str) and PLACE_RE.fullmatch(target):
             n = int(target)
             if not 1 <= n <= len(ids):
                 return False, f"the event lists {len(ids)} widget(s)"

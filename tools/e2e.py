@@ -778,6 +778,7 @@ def _check_league_live(base, sim, home, until):
     assert all(1.5 <= g <= 3.0 for g in gaps[-2:]), f"one live state every two seconds: {gaps}"
     body = calls[-1]["body"]
     assert (body["ref"], body["race"], body["mode"]) == (league_sim.DEFAULT_REF, "leg-1", "race"), body
+    assert body["entries"], f"the roster stands in the live state: {body}"
     for row in body["entries"]:
         assert not {"fuel_l", "compound", "x", "z"} & set(row), row
     assert calls[-1]["user_agent"].startswith("racecast/"), calls[-1]

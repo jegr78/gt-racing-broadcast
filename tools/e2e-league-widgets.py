@@ -22,7 +22,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "tools" / "event-sim" / "fakes"))
-import e2e_safety  # noqa: E402,F401  local runs take the e2e resource boundary
+import e2e_safety  # noqa: E402
 import test_console_gate as gate  # noqa: E402
 import test_racecast as cli  # noqa: E402
 import test_ui_server as ui  # noqa: E402
@@ -34,6 +34,7 @@ from test_league_result import _Source  # noqa: E402
 
 KEY = "e2e-league-widgets-key"
 HOSTILE = '<img src=x onerror="window.__pwned=1">'
+SCENES = (("hud", 1460, "/hud"), ("intermission", 300, "/intermission"), ("splitscreen", 700, "/splitscreen/hud"))
 SNAP = {"mode": "race", "state": "racing", "lap": 12, "entries": [
     {"pos": 1, "entry": "e1", "driver": "Ann Weber", "team": "Red Bulls", "laps": 12},
     {"pos": 2, "entry": "e2", "driver": "Bo Lind", "team": "Blue Sharks", "laps": 12},
@@ -78,11 +79,27 @@ def builder(page, overlay, shots):
     assert "#league-widget-standings { left: 1460px; top: 330px; width: 420px; height: 330px; font-size: 24px;" in css, css
     if shots:
         page.locator("#ov-modal .ovmodal-card").screenshot(path=str(ROOT / "src/docs/wiki/images/cc-league-widgets.png"))
+    for scene, left, _path in SCENES[1:]:
+        page.select_option("#ov-scene", scene)
+        page.wait_for_function("(s) => ovState.page === s", arg=scene)
+        placed = page.evaluate("ovState.slots.some(s => s.id === 'league-widget-match-score')")
+        assert placed == (scene == "splitscreen"), f"{scene}: a new Split layout starts from the HUD's, {placed}"
+        if not placed:
+            page.click("#league-open")
+            dialog.get_by_role("button", name="Place in this scene").first.click()
+            dialog.get_by_role("button", name="Close", exact=True).click()
+        page.select_option("#ov-slotpick", "league-widget-match-score")
+        page.evaluate("(v) => { const f = ovState.fields.left; f.value = v; f.dispatchEvent(new Event('input'));"
+                      " f.dispatchEvent(new Event('change')); }", left)
+        page.evaluate("saveOverlay()")
+        page.wait_for_function("() => document.getElementById('overlay-save').textContent.includes('Saved')")
+    page.select_option("#ov-scene", "hud")
+    page.wait_for_function("() => ovState.page === 'hud' && ovState.shadow.getElementById('league-widget-match-score')")
     page.evaluate("(label) => RacecastLeague.render(ovState.shadow, {widgets: [{id: 'match-score', form: 'score',"
                   " title: 'Match', holdFor: null, value: {values: [{label, value: '1'}]}}]})", HOSTILE)
     assert score.locator(".lw-label").text_content() == HOSTILE, "the canvas sets a label as text"
     assert score.locator("img").count() == 0 and not page.evaluate("window.__pwned")
-    print("  [PASS] the builder places both widgets with their sample values and saves their style")
+    print("  [PASS] the builder places the widgets per scene with their sample values and saves their style")
 
 
 def live_pages(browser, relay_port, sim, shots):
@@ -109,6 +126,16 @@ def live_pages(browser, relay_port, sim, shots):
     assert hud.locator("#league-widget-match-score .lw-label").text_content() == HOSTILE
     assert hud.locator("#league-widget-match-score img").count() == 0 and not hud.evaluate("window.__pwned")
     sim.clear_answers()
+    for _scene, left, path in SCENES[1:]:
+        view = browser.new_page(viewport={"width": 1920, "height": 1080})
+        view.on("pageerror", lambda error: errors.append(str(error)))
+        view.goto(f"http://127.0.0.1:{relay_port}{path}")
+        view.wait_for_function("() => !document.getElementById('league-widget-match-score').hidden")
+        box = view.locator("#league-widget-match-score").bounding_box()
+        assert box["x"] == left, f"{path}: each scene keeps its own placement: {box}"
+        placed = 2 if path == "/splitscreen/hud" else 1      # the Split layout started from the HUD's
+        assert view.locator("[data-league-widget]").count() == placed, f"{path}: only the placed widgets"
+        view.close()
     panel.wait_for_function("() => document.querySelector('#leagueWidgets .lwrow .lwstate').textContent.startsWith('On air')")
     if shots:
         panel.locator("#leagueSec").screenshot(path=str(ROOT / "src/docs/wiki/images/director-panel-league.png"))
@@ -164,7 +191,8 @@ def main():
 
         def handler(*a, **kw):
             kw.update(overlay_dir=str(overlay), hud_source=SimpleNamespace(data=lambda: {}),
-                      hud_path=str(ROOT / "src/obs/hud.html"), league_live=live, league_exporter=exporter)
+                      hud_path=str(ROOT / "src/obs/hud.html"), intermission_path=str(ROOT / "src/obs/intermission.html"),
+                      league_live=live, league_exporter=exporter)
             return original_handler(*a, **kw)
 
         with patch.object(gate.m, "make_handler", side_effect=handler):
@@ -191,4 +219,7 @@ def main():
 
 
 if __name__ == "__main__":
+    contained = e2e_safety.enter(__file__, sys.argv[1:])
+    if contained is not None:
+        raise SystemExit(contained)
     main()

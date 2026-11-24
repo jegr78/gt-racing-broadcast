@@ -269,7 +269,8 @@ def t_the_switch_refuses_a_widget_the_event_does_not_list():
     with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
         live, _snap = _live(d, sim)
         for target, action in (("3", "show"), ("0", "show"), ("other", "show"), ("../x", "show"),
-                               ("match-score", "flip"), ("x" * 40, "show")):
+                               ("match-score", "flip"), ("x" * 40, "show"), ("\u00b2", "show"),
+                               ("\u0661", "show"), ("01", "show")):
             ok, why = live.set(target, action)
             assert not ok and why, (target, action)
 
