@@ -797,7 +797,9 @@ def _relay_start_path():
 def _record_relay_start(pid):
     marker = simulation.process_started(pid)
     if marker:
-        with open(_relay_start_path(), "w", encoding="utf-8") as fh:
+        path = _relay_start_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write(marker)
 
 
