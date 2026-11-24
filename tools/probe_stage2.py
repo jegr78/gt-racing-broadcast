@@ -59,7 +59,7 @@ _PREPARE = {
         "Download the sender: `curl.exe -o racecast-sender.py \"{script}\"`",
     ],
     "macos": [
-        "Python 3.8 or newer: `python3 --version` in Terminal. If it is missing, install it "
+        "Python 3.8 or newer: `python3 --version` in Terminal. If it is missing, install it " +
         "from python.org.",
         "Open Terminal in a folder of your choice.",
         "Download the sender: `curl -o racecast-sender.py \"{script}\"`",
@@ -72,18 +72,18 @@ _PREPARE = {
     "iphone": [
         "Install a-Shell from the App Store and open it. Allow Local Network access when asked.",
         "Download the sender: `curl -o racecast-sender.py \"{script}\"`",
-        "Find your PlayStation's IP address: Settings, Network, View Connection Status. "
+        "Find your PlayStation's IP address: Settings, Network, View Connection Status. " +
         "The iPhone cannot find the console by itself, so the command needs it.",
         "Keep a-Shell in front with the screen on and the iPhone charging.",
     ],
     "android": [
         "Install Termux from F-Droid (the Play Store version is outdated) and open it.",
-        "`pkg install python`, then `termux-wake-lock` (keeps Termux running with the "
+        "`pkg install python`, then `termux-wake-lock` (keeps Termux running with the " +
         "screen off; `termux-wake-unlock` releases it).",
         "Download the sender: `curl -o racecast-sender.py \"{script}\"`",
-        "Keep the device charging and on Wi-Fi. In the system settings set Termux's battery "
+        "Keep the device charging and on Wi-Fi. In the system settings set Termux's battery " +
         "use to unrestricted (the name differs per vendor) and write down what you changed.",
-        "Note your PlayStation's IP address (Settings, Network, View Connection Status) in "
+        "Note your PlayStation's IP address (Settings, Network, View Connection Status) in " +
         "case the sender does not find it.",
     ],
 }
@@ -109,7 +109,7 @@ def kit(invite_url, script_url, platform):
     console = " --console <PlayStation IP>" if platform == "iphone" else ""
     cmd = f"{py} racecast-sender.py --url ... --code ...{console}"
     lines = [f"# Telemetry sender: {_TITLE[platform]}", "",
-             "The sender runs on a device on the same network as your PlayStation and sends "
+             "The sender runs on a device on the same network as your PlayStation and sends " +
              "your car's GT7 telemetry to the broadcast. It sends nothing else.", "",
              "## Before the session", ""]
     steps = [s.format(script=script_url) for s in _PREPARE[platform]]
@@ -126,18 +126,18 @@ def kit(invite_url, script_url, platform):
     lines += [f"{n}. {s}" for n, s in enumerate(steps, 1)]
     lines += ["", "## For the session", "",
               f"Run the copied command without `--check`:\n\n  `{cmd}`\n",
-              "Until Race Control approves you it prints `waiting for approval by Race "
-              "Control` and asks again every 10 seconds. Leave it running for the whole "
+              "Until Race Control approves you it prints `waiting for approval by Race " +
+              "Control` and asks again every 10 seconds. Leave it running for the whole " +
               "session. Every 10 seconds it prints a status line.", "",
               "## Stop it", "", _STOP[platform], "",
               "## If the check fails", "",
-              "- `receive: FAIL`: is GT7 in a session? Add `--console <PlayStation IP>`. Allow "
+              "- `receive: FAIL`: is GT7 in a session? Add `--console <PlayStation IP>`. Allow " +
               "inbound UDP 33740 if a firewall asks or is on.",
-              "- `relay: FAIL ... 403` or `410`: register again on the invite page and use the "
+              "- `relay: FAIL ... 403` or `410`: register again on the invite page and use the " +
               "new command.",
-              "- `cannot receive on UDP 33740`: another app on this device receives the "
+              "- `cannot receive on UDP 33740`: another app on this device receives the " +
               "telemetry (a dashboard app, SimHub). Run the sender on another device.",
-              "", "The driver guide in the GT Racing Broadcast wiki (Driver Telemetry) covers "
+              "", "The driver guide in the GT Racing Broadcast wiki (Driver Telemetry) covers " +
               "SimHub and GT Race Engineer setups.", ""]
     return "\n".join(lines)
 
@@ -681,9 +681,9 @@ def report_md(a):
          f"Final race state: {a['final_state'] or '-'}.", ""]
     L += ["## Timeline (marks)", ""] + _table(["time", "mark"], [(_clock(m["t"]), m["text"]) for m in a["marks"]])
     L += ["## Senders", "",
-          "Hz over the time each sender sent; `device` is what the device received, `relay` what "
-          "reached the relay; `duplicates` are packets a sender posted twice. Post latency "
-          "min/median/max of the sender's reported p50 and p95. The whole session first, then "
+          "Hz over the time each sender sent; `device` is what the device received, `relay` what " +
+          "reached the relay; `duplicates` are packets a sender posted twice. Post latency " +
+          "min/median/max of the sender's reported p50 and p95. The whole session first, then " +
           "per block (a mark starting with \"block\").", ""]
     L += _senders_table(a["senders"])
     for b in a.get("blocks") or []:
@@ -706,10 +706,10 @@ def report_md(a):
                     [(r["minute"], r["block"], r["device_hz"], r["relay_hz"], r["idle_s"], r["interruptions"],
                       mark(r)) for r in h["rows"]])
     L += ["## 0x84 race position against the relay's order", "",
-          "Per entry over the polls in which it was ranked: how often its packets named a "
-          "position, how often the order of the named positions matched the relay's order of "
-          "the same entries, and how often the relay itself marked a mismatch; then per sender "
-          "the positions and car counts its packets carried. Per block when the session has "
+          "Per entry over the polls in which it was ranked: how often its packets named a " +
+          "position, how often the order of the named positions matched the relay's order of " +
+          "the same entries, and how often the relay itself marked a mismatch; then per sender " +
+          "the positions and car counts its packets carried. Per block when the session has " +
           "block marks.", ""]
     for b in a.get("blocks") or [{"block": "", "positions": a["positions"], "car_counts": a["car_counts"]}]:
         if b["block"]:
@@ -728,7 +728,7 @@ def report_md(a):
     L += _table(["time", "entry", "kind", "before", "after", "status"],
                 [(_clock(j["t"]), j["entry"], j["kind"], j["before"], j["after"], j.get("status"))
                  for j in a["jumps"]]) if a["jumps"] else ["None.", ""]
-    L += ["## Best lap (0x78)", "", "`before a lap` marks a best that appeared before the sender's "
+    L += ["## Best lap (0x78)", "", "`before a lap` marks a best that appeared before the sender's " +
           "first lap time in that stream: a best carried over from qualifying or an earlier lobby.", ""]
     for b in a["best_laps"].values():
         if not b["rows"]:

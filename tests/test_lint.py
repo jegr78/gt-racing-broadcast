@@ -193,6 +193,27 @@ def t_import_both_ways_repo_is_clean():
     assert lint.check_import_both_ways(ROOT) == [], lint.check_import_both_ways(ROOT)
 
 
+def t_implicit_concat_flags_adjacent_strings_in_a_list():
+    assert lint.find_implicit_concat_in_lists('xs = ["a" "b", "c"]\n') == [1], "a list element"
+    assert lint.find_implicit_concat_in_lists('xs = [\n    "a",\n    "b"\n    "c",\n]\n') == [3], \
+        "an element over two lines, reported at its first line"
+
+
+def t_implicit_concat_leaves_what_codeql_leaves_alone():
+    assert lint.find_implicit_concat_in_lists('xs = ["a" + "b", "c"]\n') == [], "an explicit +"
+    assert lint.find_implicit_concat_in_lists('xs = [("a"\n       "b"), "c"]\n') == [], "its own parentheses"
+    assert lint.find_implicit_concat_in_lists('xs = ["a" "b", 1]\n') == [], "no other string in the list"
+    assert lint.find_implicit_concat_in_lists('xs = ["a" f"{b}", "c"]\n') == [], "an f-string is no plain string"
+    assert lint.find_implicit_concat_in_lists('xs = "x", "a" "b"\n') == [], "a tuple"
+    assert lint.find_implicit_concat_in_lists('f("a" "b", "c")\n') == [], "call arguments"
+    assert lint.find_implicit_concat_in_lists('xs = ["a", "b"]\n') == [], "separate elements"
+    assert lint.find_implicit_concat_in_lists('xs = [\n') == [], "unparseable source is skipped"
+
+
+def t_implicit_concat_repo_is_clean():
+    assert lint.check_implicit_concat_in_lists(ROOT) == [], lint.check_implicit_concat_in_lists(ROOT)
+
+
 def _dead(src):
     return lint.find_unused_last_assignments(src)
 
