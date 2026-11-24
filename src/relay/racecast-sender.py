@@ -61,6 +61,7 @@ CHECK_S = 12.0            # below DISCOVERY_HINT_S: the check prints its own hin
 CHECK_POSTS = 3
 CHECK_MIN_HZ = 50.0       # GT7 sends about 60 packets per second
 LATENCY_WINDOW = 200      # the posts the latency stats cover
+MAX_POST_MS = 60000
 USER_AGENT = "racecast-sender/" + VERSION
 ROUTE_PROBE = "192.0.2.1"   # TEST-NET-1: picks the default-route interface, never contacted
 NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")   # the relay accepts these names only
@@ -320,7 +321,7 @@ class Uploader:
         if not recent:
             return {}
         def ms(q):
-            return round(recent[min(len(recent) - 1, int(q * len(recent)))] * 1000)
+            return min(MAX_POST_MS, max(0, round(recent[min(len(recent) - 1, int(q * len(recent)))] * 1000)))
         return {"post_ms_p50": ms(0.5), "post_ms_p95": ms(0.95)}
 
     def check(self, posts=CHECK_POSTS):
@@ -389,6 +390,9 @@ class Sender:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if listen is None:
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            # Windows lets a second program bind the same UDP port unless it is exclusive.
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         bind = bind or default_bind(console, listen)
         if not bind:
             raise OSError("no network interface found: pass --bind <this device's LAN address>")
@@ -401,6 +405,7 @@ class Sender:
         self._last_rx = None
         self._quiet = False
         self.heartbeat_failed = 0
+        self.first_rx = None            # (clock, received) at the first packet
 
     def heartbeat(self):
         target = self.console or "255.255.255.255"
@@ -481,7 +486,8 @@ class Sender:
                 hinted = True
                 self.say("no console found: pass --console <PlayStation IP> and allow "
                          "inbound UDP %d in the firewall" % self.sock.getsockname()[1])
-            self.receive_once()
+            if self.receive_once() and self.first_rx is None:
+                self.first_rx = (self.clock(), self.stats["received"])
             self.check_quiet()
             self.check_relatch()
             if status and now >= next_status:
@@ -511,6 +517,7 @@ def self_check(sender, up, duration=CHECK_S, say=_say):
     sender.up = sink
     say("checking for %.0f s: heartbeat, receive and upload, no telemetry is sent" % duration)
     sender.run(threading.Event(), duration=duration, status=False)
+    ended = sender.clock()
     port = sender.sock.getsockname()[1]
     results = []
     if sender.listen is not None:
@@ -521,7 +528,9 @@ def self_check(sender, up, duration=CHECK_S, say=_say):
     else:
         results.append(("heartbeat", "FAIL", "%d failed: pass --console <PlayStation IP>" % sender.heartbeat_failed))
     received = sender.stats["received"]
-    rate = received / duration if duration else 0.0
+    first_t, first_n = sender.first_rx or (ended, received)
+    span = ended - first_t
+    rate = (received - first_n) / span if span > 0 else 0.0     # from the first packet on
     if not received:
         fix = ("check that the other app forwards to UDP %d" % port if sender.listen is not None else
                "start a session in GT7 (on track or in the pits), pass --console <PlayStation IP> "

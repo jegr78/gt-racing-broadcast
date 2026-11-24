@@ -59,7 +59,7 @@ serves the sender script of the running relay.
 - optional header `X-Sender-Stats`: a JSON object of integer counters the sender
   reports (`received`, `forwarded`, `posted`, `dropped`, `post_failed`,
   `interruptions`, `heartbeats`) and the median and 95th percentile of its last 200
-  post round trips in milliseconds (`post_ms_p50`, `post_ms_p95`); other keys are
+  post round trips in milliseconds (`post_ms_p50`, `post_ms_p95`, kept within 0 to 60000); other keys are
   ignored
 - body, batch format v1: the four bytes `RCT1`, then for each packet a big-endian
   uint16 length and the packet exactly as the console sent it, still encrypted. At

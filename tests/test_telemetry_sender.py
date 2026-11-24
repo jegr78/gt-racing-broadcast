@@ -1106,6 +1106,77 @@ def t_a_check_that_receives_too_few_packets_fails():
         f"10 packets/s is not what GT7 sends: {text}"
 
 
+
+def t_the_check_rate_counts_from_the_first_packet():
+    said, clock = [], [0.0]
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append, clock=lambda: clock[0])
+
+    def receive_once():
+        clock[0] = round(clock[0] + 0.1, 6)
+        if clock[0] <= 4.0:                       # the console answers after 4 s
+            return False
+        sender.stats["received"] += 6
+        return True
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=snd.CHECK_S, say=said.append)
+    finally:
+        sender.sock.close()
+    line = [x for x in said if "receive:" in x][0]
+    assert code == 0 and ", 60.0/s," in line, f"a late first packet is no low rate: {line}"
+
+
+def t_on_windows_the_receive_port_is_bound_exclusively():
+    calls = []
+
+    class Fake:
+        def __init__(self, *a):
+            pass
+
+        def setsockopt(self, level, opt, value):
+            calls.append(("opt", opt))
+
+        def bind(self, addr):
+            calls.append(("bind", addr))
+
+        def settimeout(self, t):
+            pass
+
+        def getsockname(self):
+            return ("127.0.0.1", 1)
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None)   # before the patch: ssl reads the OS
+    old_socket, old_platform = snd.socket.socket, snd.sys.platform
+    had = hasattr(snd.socket, "SO_EXCLUSIVEADDRUSE")
+    old_opt = getattr(snd.socket, "SO_EXCLUSIVEADDRUSE", None)
+    snd.socket.socket, snd.sys.platform, snd.socket.SO_EXCLUSIVEADDRUSE = Fake, "win32", -5
+    try:
+        snd.Sender(up, console="127.0.0.1", bind="127.0.0.1", receive_port=33740, say=lambda line: None)
+        win = list(calls)
+        calls.clear()
+        snd.sys.platform = "linux"
+        snd.Sender(up, console="127.0.0.1", bind="127.0.0.1", receive_port=33740, say=lambda line: None)
+    finally:
+        snd.socket.socket, snd.sys.platform = old_socket, old_platform
+        if had:
+            snd.socket.SO_EXCLUSIVEADDRUSE = old_opt
+        else:
+            del snd.socket.SO_EXCLUSIVEADDRUSE
+    assert ("opt", -5) in win and win.index(("opt", -5)) < win.index(("bind", ("127.0.0.1", 33740))), \
+        f"Windows lets a second program share UDP 33740 unless the port is exclusive: {win}"
+    assert ("opt", -5) not in calls, calls
+
+
+def t_post_latency_stats_stay_within_a_minute():
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None)
+    up.latencies.extend([500.0, 600.0])
+    assert up._latency_stats() == {"post_ms_p50": 60000, "post_ms_p95": 60000}
+    probe = tp.Probe("k")
+    probe.ingest("L", tp.encode_batch([]), {"post_ms_p50": 10 ** 12, "post_ms_p95": -4, "received": 3})
+    kept = probe.snapshot()["senders"]["L"]["sender_stats"]
+    assert kept["post_ms_p50"] == 60000 and kept["post_ms_p95"] == 0 and kept["received"] == 3, kept
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
