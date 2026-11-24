@@ -6862,10 +6862,13 @@ def league_result_refresh_data(race=None, ref=None, rc=None, runtime=None, get=N
     return {"ok": True, "status": status}
 
 
-def league_event_load_data(ref, rc=None, path=None, fetch=None):
-    """Load the event behind `ref` from the league service into league-event.json.
-    {ok, event} or {ok: false, error}. `rc`, `path` and `fetch` are test seams."""
+def league_event_load_data(ref, rc=None, path=None, fetch=None, widgets_path=None):
+    """Load the event behind `ref` from the league service into league-event.json, and its
+    widget list into the profile's league-widgets.json for the scene builders.
+    {ok, event} or {ok: false, error}. `rc`, `path`, `fetch` and `widgets_path` are test
+    seams."""
     import league_service
+    import league_widgets
     rc = _active_config() if rc is None else rc
     cfg, problem = _league_settings(rc)
     if cfg is None:
@@ -6880,6 +6883,9 @@ def league_event_load_data(ref, rc=None, path=None, fetch=None):
         return {"ok": False, "error": str(exc)}
     try:
         doc = league_service.store(path or league_service.path_in(_runtime_dir()), ref, event)
+        widgets_path = widgets_path or (league_widgets.path_in(rc.profile_dir) if rc.profile_dir else None)
+        if widgets_path:
+            league_widgets.remember(widgets_path, event["widgets"])
     except OSError as exc:
         return {"ok": False, "error": f"could not save the league event: {exc}"}
     return {"ok": True, "event": doc}
@@ -9661,13 +9667,35 @@ def audience_write_data(body):
         return {"ok": False, "error": "Could not save audience configuration"}
 
 
-def _overlay_base_html(page, audience=None):
+def league_widgets_read_data():
+    """The league service widgets the active profile keeps for the scene builders, with
+    the scenes each is placed in. {ok, active, widgets, placements}; never raises."""
+    import league_widgets
+    try:
+        active = _active_profile_name()
+        if not active:
+            return {"ok": False, "error": "No active profile"}
+        root = _env_base(IS_FROZEN, _real_executable(), HERE)
+        folder = os.path.join(pcfg.profiles_dir(root), active)
+        return {"ok": True, "active": active, "widgets": league_widgets.read(league_widgets.path_in(folder)),
+                "placements": league_widgets.placements(os.path.join(folder, "overlay"))}
+    except OSError:
+        return {"ok": False, "error": "Could not read the league widgets"}
+
+
+def _overlay_base_html(page, audience=None, league=None):
+    import league_widgets
     base = _overlay_raw_html(page)
     if not base:
         return base
     data = audience_read_data() if audience is None else audience
     widgets = data.get("widgets", []) if data.get("ok") else []
-    return audience_widgets.enhance_html(base, widgets, {widget["id"]: {} for widget in widgets})
+    base = audience_widgets.enhance_html(base, widgets, {widget["id"]: {} for widget in widgets})
+    if page not in league_widgets.PAGES:
+        return base
+    league = league_widgets_read_data() if league is None else league
+    kept = league.get("widgets", []) if league.get("ok") else []
+    return league_widgets.enhance_html(base, kept, {league_widgets.slot_id(w["id"]): {} for w in kept})
 
 
 def _overlay_layout_path(page):
@@ -9717,7 +9745,8 @@ def overlay_slots_data(page):
         if page not in OVERLAY_BUILDER_PAGES or (page == "splitscreen" and _profile_is_solo()):
             return {"ok": False, "error": "invalid page"}
         audience = audience_read_data()
-        html = _overlay_base_html(page, audience)
+        league = league_widgets_read_data()
+        html = _overlay_base_html(page, audience, league)
         if not html:
             return {"ok": False, "error": "base page not bundled"}
         active = _active_profile_name()
@@ -9731,8 +9760,8 @@ def overlay_slots_data(page):
                 if active and profile_logo() else None)
         return {"ok": True, "page": page, "background": frame, "slots": [slot for slot in ob.extract_slots(html)
                           if page != "intermission" or _profile_is_solo()
-                          or slot["id"] == "ichat" or slot["id"].startswith("audience-")],
-                "audience": audience,
+                          or slot["id"] == "ichat" or slot["id"].startswith(("audience-", "league-widget-"))],
+                "audience": audience, "league": league,
                 "css": ob.base_style(html), "body": ob.canvas_logo(
                     re.sub(r'<div[^>]*data-solo="true"[^>]*></div>', '', ob.base_body(html))
                     if page == "intermission" and not _profile_is_solo() else ob.base_body(html), logo),

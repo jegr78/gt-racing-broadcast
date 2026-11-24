@@ -478,6 +478,12 @@ class Client:
         with self._lock:
             return {k: v for k, (v, t) in self._values.items() if now - t <= HOLD_S}
 
+    def held(self):
+        """{widget id: (value, seconds it may still be shown)} within the hold."""
+        now = self._clock()
+        with self._lock:
+            return {k: (v, HOLD_S - (now - t)) for k, (v, t) in self._values.items() if now - t <= HOLD_S}
+
     def status(self):
         with self._lock:
             now = self._clock()

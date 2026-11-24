@@ -260,6 +260,14 @@ def _brand(info):
     return key, name[:MAX_ENTRY] if isinstance(name, str) else ""
 
 
+def _best_lap(best, fastest, entry):
+    """A car's best counted lap; a fastest lap Race Control set by hand counts as its own."""
+    own = best.get(entry)
+    if fastest and fastest["entry"] == entry and (own is None or fastest["ms"] < own):
+        own = fastest["ms"]
+    return own
+
+
 def _viewer_entry(row, roster):
     info = roster.get(row["entry"]) or {}
     brand, brand_name = _brand(info)
@@ -1175,6 +1183,20 @@ class Service:
                    league=read_league(self._league), last_action=self._last_action)
         return out
 
+    def live(self):
+        """The newest dashboard snapshot, undelayed, each race row with its best counted
+        lap; None before the first tick. The league service's live state is cut from it."""
+        with self._lock:
+            if not self._snapshots:
+                return None
+            snap = self._snapshots[-1][1]
+            if snap.get("mode") == "qualifying":
+                return snap
+            best = self._current().best_laps()
+            fastest = self._race.fastest
+        return dict(snap, entries=[dict(r, best_ms=_best_lap(best, fastest, r["entry"]))
+                                   for r in snap.get("entries") or ()])
+
     def race_state(self):
         """The race state of the newest dashboard snapshot; None before one or in qualifying."""
         with self._lock:
@@ -1195,11 +1217,9 @@ class Service:
         rows = []
         for i, r in enumerate(st["entries"]):
             info = roster.get(r["entry"]) or {}
-            own = best.get(r["entry"])
-            if fastest and fastest["entry"] == r["entry"] and (own is None or fastest["ms"] < own):
-                own = fastest["ms"]
             row = {"pos": i + 1, "entry": r["entry"], "number": info.get("number") or "",
-                   "driver": r["driver"], "team": info.get("cupTeam") or "", "best_ms": own}
+                   "driver": r["driver"], "team": info.get("cupTeam") or "",
+                   "best_ms": _best_lap(best, fastest, r["entry"])}
             row.update({k: r.get(k) for k in _RESULT_ROW})
             if st["classes"]:
                 row.update({"class": r.get("class"), "class_pos": r.get("class_pos")})
