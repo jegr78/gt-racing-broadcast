@@ -1211,7 +1211,11 @@ def make_handler(ctx):
                 ref = body.get("ref")
                 if not isinstance(ref, str):
                     return self._json({"ok": False, "error": "ref must be a string"}, code=400)
-                result = ctx["league_event_load"](ref)
+                try:
+                    result = ctx["league_event_load"](ref)
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not load the league event: {exc}"},
+                                      code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/profile/use":
                 body = self._body_json()

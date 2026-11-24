@@ -90,7 +90,9 @@ def t_errors_are_reported_and_the_key_stays_off_argv():
 
 
 def t_dry_run_sends_nothing_and_the_file_stays_unchanged():
-    with tempfile.TemporaryDirectory() as d, league_sim.LeagueSim(key=KEY) as sim:
+    with tempfile.TemporaryDirectory() as base, league_sim.LeagueSim(key=KEY) as sim:
+        d = os.path.join(base, "odd #1 ?50%")
+        os.makedirs(d)
         rec = _recording(d, n=2)
         before = os.stat(rec).st_mtime_ns
         code, out, _ = _run([rec, "--url", sim.url, "--ref", "R", "--race", "leg-1", "--dry-run"])

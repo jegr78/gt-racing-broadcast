@@ -19,6 +19,7 @@ The file is opened read-only.
 import argparse
 import json
 import os
+import pathlib
 import sqlite3
 import sys
 import time
@@ -34,7 +35,7 @@ ROW_KEYS = ("entry", "driver", "laps", "lapped", "status", "pit_stops", "finishe
 
 def samples(path):
     """(t, doc) of every recording sample, oldest first."""
-    uri = "file:" + os.path.abspath(path).replace("\\", "/") + "?mode=ro"
+    uri = pathlib.Path(path).resolve().as_uri() + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     try:
         return [(t, json.loads(doc)) for t, doc in conn.execute("SELECT t, doc FROM samples ORDER BY t")]

@@ -185,6 +185,31 @@ def t_an_answer_off_the_contract_raises():
                 assert needle in str(e), (needle, str(e))
 
 
+def t_a_broken_http_answer_raises_a_service_error():
+    import socket
+    for answer in (b"garbage\r\n\r\n", b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{\"v\": 1"):
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+
+        def serve(s=srv, a=answer):
+            conn, _ = s.accept()
+            conn.recv(65536)
+            conn.sendall(a)
+            conn.close()
+        t = threading.Thread(target=serve, daemon=True)
+        t.start()
+        cfg = ls.Settings(f"http://127.0.0.1:{srv.getsockname()[1]}/racecast", KEY)
+        try:
+            ls.fetch_event(cfg, "REF", timeout=2.0)
+            raise AssertionError(f"{answer!r} must raise")
+        except ls.ServiceError as e:
+            assert KEY not in str(e), str(e)
+        finally:
+            t.join(2)
+            srv.close()
+
+
 def t_an_unreachable_service_raises():
     sim = _sim()
     cfg = _cfg(sim)
@@ -216,6 +241,19 @@ def t_live_state_is_an_allowlist():
     assert row["driver_ref"] == "" and row["pit_stops"] == 1 and row["number"] == "7"
     for banned in ("delay_s", "visible", "lobby_lap"):
         assert banned not in body, banned
+
+
+def t_live_state_sends_null_only_where_the_contract_allows_it():
+    snap = {"track_name": None, "state": None, "lap": None,
+            "fastest": {"entry": "e1", "driver": "Ann", "team": None, "ms": 90000},
+            "entries": [{"pos": 1, "entry": "e1", "driver": "Ann", "class": None, "laps": None,
+                         "gap_s": None, "best_ms": None}]}
+    body = ls.live_state("REF", "leg-1", snap)
+    assert "track_name" not in body and "state" not in body, "a missing track is left out, not null"
+    assert body["lap"] is None and body["fastest"] == {"entry": "e1", "driver": "Ann", "ms": 90000}
+    (row,) = body["entries"]
+    assert "class" not in row and "laps" not in row
+    assert row["gap_s"] is None and row["best_ms"] is None, "nullable fields keep their null"
 
 
 def t_live_state_rows_are_entries_in_qualifying():

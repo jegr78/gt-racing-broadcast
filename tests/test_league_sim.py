@@ -108,7 +108,8 @@ def t_cli_writes_a_ready_file_and_removes_it():
         finally:
             p.terminate()
             p.communicate(timeout=10)
-        assert not os.path.exists(ready), "the ready-file goes with the fake"
+        if os.name != "nt":   # TerminateProcess leaves no chance to clean up
+            assert not os.path.exists(ready), "the ready-file goes with the fake"
 
 
 if __name__ == "__main__":

@@ -98,3 +98,24 @@ paths = ['''src/scripts/simulation\.py''']
 regexes = [
   '''DISCORD_WEBHOOK_URL = "RACECAST_SIM_DISCORD_WEBHOOK_URL"''',
 ]
+
+# The league service tests (#1253) use obviously fake bearer keys against the simulated
+# league service; the real key is issued per league by its own service.
+[[allowlists]]
+description = "Fake league service keys in the league service tests, fakes and e2e harness"
+condition = "AND"
+paths = [
+  '''tests/test_league_[a-z_]+\.py''',
+  '''tests/test_(profile|config)\.py''',
+  '''tools/e2e\.py''',
+  '''tools/event-sim/fakes/league_sim\.py''',
+]
+regexes = [
+  '''fixture-league-key-[0-9]''',
+  '''fixture-key''',
+  '''leaky-key-123''',
+  '''wrong-key-value''',
+  '''LEAGUEKEY77''',
+  '''e2e-league-key''',
+  '''sim-league-key''',
+]

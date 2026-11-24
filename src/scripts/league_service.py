@@ -12,6 +12,7 @@ failure. The event the producer loaded lives in runtime/<profile>/league-event.j
 """
 import collections
 import datetime
+import http.client
 import json
 import logging
 import os
@@ -270,8 +271,8 @@ def call(cfg, method, path, query=None, body=None, opener=None, timeout=SOCKET_T
         raise ServiceError(_explain_http(e.code)) from None
     except http_util.URLError as e:
         raise ServiceError(f"cannot reach the league service: {e.reason}") from None
-    except (OSError, ValueError) as e:
-        raise ServiceError(f"cannot reach the league service: {e}") from None
+    except (OSError, ValueError, http.client.HTTPException) as e:
+        raise ServiceError(f"cannot reach the league service: {type(e).__name__}") from None
     if len(raw) > MAX_BODY:
         raise ServiceError(f"the league service answered more than {MAX_BODY // 1024} KiB")
     try:
@@ -321,6 +322,13 @@ LIVE_ROW = ("pos", "entry", "number", "driver", "team", "class", "class_pos", "l
             "interval_s", "gap_ms", "interval_ms", "lapped", "status", "pit_stops", "last_lap_ms",
             "best_ms", "finished")
 LIVE_LAP = ("entry", "driver", "team", "ms")
+LIVE_NULLABLE = {"stint", "lap", "remaining", "fastest", "gap_s", "interval_s", "gap_ms", "interval_ms",
+                 "last_lap_ms", "best_ms"}
+
+
+def _present(doc, keys):
+    """The `keys` of `doc` it holds, a None only where the contract allows null."""
+    return {k: doc[k] for k in keys if k in doc and (doc[k] is not None or k in LIVE_NULLABLE)}
 
 
 def live_state(ref, race, snap):
@@ -329,14 +337,14 @@ def live_state(ref, race, snap):
     snap = snap or {}
     mode = snap.get("mode") if snap.get("mode") in MODES else "race"
     out = {"v": V, "ref": ref, "race": race, "mode": mode}
-    out.update({k: snap[k] for k in LIVE_TOP if k in snap})
+    out.update(_present(snap, LIVE_TOP))
     out["red_flag"] = bool(snap.get("red_flag"))
     stint = snap.get("stint")
     out["stint"] = stint if _int(stint) is not None else None
     fl = snap.get("fastest")
-    out["fastest"] = {k: fl.get(k) for k in LIVE_LAP} if isinstance(fl, dict) else None
+    out["fastest"] = _present(fl, LIVE_LAP) if isinstance(fl, dict) else None
     rows = snap.get("qualifying") if mode == "qualifying" else snap.get("entries")
-    out["entries"] = [dict({k: r[k] for k in LIVE_ROW if k in r}, driver_ref="")
+    out["entries"] = [dict(_present(r, LIVE_ROW), driver_ref="")
                       for r in rows or () if isinstance(r, dict)]
     return out
 

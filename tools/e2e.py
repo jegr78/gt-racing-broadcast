@@ -721,6 +721,7 @@ def _check_league_service(binary, tmp, stub_bin, sheet_url, procs, timeout):
             return r.returncode, r.stdout + r.stderr
         code, out = cli("event", "league", league_sim.DEFAULT_REF)
         assert code == 0 and "<- current" in out and "match-score" in out, out
+        assert sim.key not in out, "the key reached the CLI output"
         with open(stored, encoding="utf-8") as fh:
             doc = json.load(fh)
         assert doc["current"] == "leg-1" and [r["race"] for r in doc["races"]] == ["leg-1", "leg-2"], doc
@@ -743,11 +744,26 @@ def _check_league_service(binary, tmp, stub_bin, sheet_url, procs, timeout):
                                       data=json.dumps({"ref": league_sim.DEFAULT_REF,
                                                        "expectedProfile": "demo"}).encode())
         assert st == 200 and json.loads(body)["event"]["current"] == "leg-1", (st, body)
+        env_file = os.path.join(home, "profiles", "demo", "profile.env")
+        with open(env_file, encoding="utf-8") as fh:
+            before = fh.read()
+        st, body, _h = E.http_request(ui_url + "/api/profile/env", method="POST",
+                                      headers={"Content-Type": "application/json"},
+                                      data=json.dumps({"expectedProfile": "demo", "entries": [
+                                          {"key": "LEAGUE_SERVICE_URL", "value": "http://league.example/r"}]}).encode())
+        with open(env_file, encoding="utf-8") as fh:
+            assert st == 400 and "https" in json.loads(body)["error"] and fh.read() == before, (st, body)
+        print("  [PASS] the profile editor refuses a league service URL that is not https")
         print("  [PASS] the Control Center loads the league event and never shows the key")
         code, out = cli("event", "stop", "--no-report")
         assert code == 0 and not os.path.exists(stored), out
         code, out = cli("event", "league")
         assert code == 0 and "No league event loaded" in out, out
+        logs = [log] + [os.path.join(dp, f) for dp, _d, fs in os.walk(os.path.join(home, "runtime"))
+                        for f in fs if f.endswith(".log")]
+        for path in logs:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                assert sim.key not in fh.read(), f"the key reached {path}"
         print("  [PASS] event stop clears the loaded league event")
 
 
