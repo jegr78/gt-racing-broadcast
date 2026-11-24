@@ -1,11 +1,14 @@
 """Per-event race recording: one SQLite file per event plus a bounded writer thread.
 
 Stdlib only. A pointer file names the current recording; `rotate` clears it so the
-next `open_current` starts a fresh file. Samples are one JSON document per second."""
+next `open_current` starts a fresh file. Samples are one JSON document per second.
+The meta key `results` holds each finished race's league result (#1254), so a result
+can be sent again from the file after the event."""
 import datetime
 import json
 import logging
 import os
+import pathlib
 import queue
 import sqlite3
 import threading
@@ -34,6 +37,43 @@ CREATE TABLE IF NOT EXISTS samples (t REAL PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
+
+
+RESULTS_KEY = "results"
+
+
+def _result_key(doc):
+    return (doc.get("ref"), doc.get("race")) if doc.get("race") else ("", doc.get("finished_at"))
+
+
+def _results(raw):
+    try:
+        docs = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    return [d for d in docs if isinstance(d, dict)] if isinstance(docs, list) else []
+
+
+def merged_results(raw, doc):
+    """The results meta value with `doc` added; it replaces the result of its own race."""
+    docs = [d for d in _results(raw) if _result_key(d) != _result_key(doc)] + [doc]
+    return json.dumps(sorted(docs, key=lambda d: d.get("finished_at") or 0))
+
+
+def stored_results(path):
+    """The league results a recording file holds, oldest first. Opens the file read-only;
+    OSError when it cannot be read."""
+    if not os.path.isfile(path):
+        raise OSError(f"no such recording: {path}")
+    try:
+        conn = sqlite3.connect(pathlib.Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key=?", (RESULTS_KEY,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        raise OSError(f"cannot read the recording: {e}") from None
+    return _results(row[0] if row else None)
 
 
 def rotate(runtime_dir):
@@ -411,6 +451,11 @@ class Recorder:
 
     def csv_rows(self):
         return self._store.csv_rows()
+
+    def store_result(self, doc):
+        """Keep a finished race's league result {ref, race, finished_at, body}; False
+        when the write queue was full."""
+        return self._writer.put(lambda s: s.set_meta(RESULTS_KEY, merged_results(s.meta(RESULTS_KEY), doc)))
 
     def _status_head(self):
         return {"running": self._running, "started_by": self._started_by,

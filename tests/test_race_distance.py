@@ -2120,6 +2120,15 @@ def t_voiding_the_fastest_lap_brings_back_the_next_counted_one():
         f"then B's counted best lap: {race.fastest}"
 
 
+def t_each_entry_best_lap_is_its_fastest_counted_lap_and_follows_a_void():
+    race, a, b, t = _two_cars_with_laps()
+    best = race.best_laps()
+    assert best == {"A": race.fastest["ms"], "B": b.best_ms}, best
+    race.void_fastest()
+    assert race.best_laps()["A"] == race.fastest["ms"] > best["A"], \
+        f"a voided lap is no entry's best lap any more: {race.best_laps()}"
+
+
 def t_voiding_a_class_fastest_lap_brings_back_the_next_one_of_that_class():
     race, a, b, t = _two_cars_with_laps({"A": "H", "B": "H"})
     assert race.fastest_by_class["H"]["entry"] == "A", race.fastest_by_class

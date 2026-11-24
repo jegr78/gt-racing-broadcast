@@ -624,6 +624,9 @@ RECORDING_RETRY_S = 30.0
 _STORE_ERRORS = (OSError, sqlite3.Error)
 
 
+_RESULT_ROW = ("laps", "gap_s", "interval_s", "lapped", "status", "pit_stops", "last_lap_ms", "finished")
+
+
 class NotRaceMode(Exception):
     """A manual recording start while the relay is not in race mode."""
 
@@ -1171,6 +1174,53 @@ class Service:
                    class_laps=class_laps,
                    league=read_league(self._league), last_action=self._last_action)
         return out
+
+    def race_state(self):
+        """The race state of the newest dashboard snapshot; None before one or in qualifying."""
+        with self._lock:
+            return self._snapshots[-1][1].get("state") if self._snapshots else None
+
+    def result_source(self):
+        """What a league result is built from (#1254): the classification now with the
+        roster's number and team and each car's best counted lap, the confirmed fastest
+        lap with its team, the track, the recording's start and its confirmed disconnects."""
+        st = self.standings()
+        roster = self._context().get("roster") or {}
+        with self._lock:
+            best = self._current().best_laps()
+            fastest = self._race.fastest
+        shown = None
+        if st["fastest"]:
+            shown = dict(st["fastest"], team=(roster.get(st["fastest"]["entry"]) or {}).get("cupTeam") or "")
+        rows = []
+        for i, r in enumerate(st["entries"]):
+            info = roster.get(r["entry"]) or {}
+            own = best.get(r["entry"])
+            if fastest and fastest["entry"] == r["entry"] and (own is None or fastest["ms"] < own):
+                own = fastest["ms"]
+            row = {"pos": i + 1, "entry": r["entry"], "number": info.get("number") or "",
+                   "driver": r["driver"], "team": info.get("cupTeam") or "", "best_ms": own}
+            row.update({k: r.get(k) for k in _RESULT_ROW})
+            if st["classes"]:
+                row.update({"class": r.get("class"), "class_pos": r.get("class_pos")})
+            rows.append(row)
+        try:
+            rec = self.recording_status()
+        except RuntimeError:
+            rec = {"started_at": None, "events": []}
+        pick = self._pick() or {}
+        return {"state": st["state"], "track_name": pick.get("track") or None, "entries": rows,
+                "fastest": shown, "started_at": rec["started_at"],
+                "disconnects": [e for e in rec["events"] if e.get("state") == "confirmed"],
+                "audit_path": audit_path_for(self._path)}
+
+    def store_result(self, doc):
+        """Keep a league result in the open recording; False without one or when it failed."""
+        try:
+            rec = self._open_recorder()
+            return bool(rec and rec.store_result(doc))
+        except RuntimeError:
+            return False
 
     def red_flag(self, who, mode=None):
         """Hold the race. Without `mode` a race already held keeps its restart mode;

@@ -807,6 +807,64 @@ def t_a_recording_with_one_class_sample_carries_the_class_columns():
             f"a sample before class mode leaves the class cells empty: {rows}"
 
 
+def _result(ref, race, finished_at, laps=3):
+    return {"ref": ref, "race": race, "finished_at": finished_at,
+            "body": {"v": 1, "ref": ref, "race": race, "entries": [{"pos": 1, "entry": "7", "laps": laps}]}}
+
+
+def t_results_are_kept_per_race_and_a_resend_replaces_its_own():
+    with tempfile.TemporaryDirectory() as d:
+        h = _Rec(d)
+        try:
+            assert h.rec.store_result(_result("M", "leg-1", 100.0)) is True
+            assert h.rec.store_result(_result("M", "leg-2", 200.0))
+            assert h.rec.store_result(_result("M", "leg-1", 100.0, laps=4))
+            assert h.rec.store_result(_result(None, None, 300.0))
+            assert h.rec.store_result(_result(None, None, 400.0))
+            h.flush()
+            path = h.store.path
+        finally:
+            h.close()
+        got = rr.stored_results(path)
+        assert [(r["ref"], r["race"], r["finished_at"]) for r in got] == [
+            ("M", "leg-1", 100.0), ("M", "leg-2", 200.0), (None, None, 300.0), (None, None, 400.0)], got
+        assert got[0]["body"]["entries"][0]["laps"] == 4, "the newer result of a race replaces its draft"
+
+
+def t_stored_results_of_an_old_or_broken_recording_are_empty():
+    with tempfile.TemporaryDirectory() as d:
+        s = rr.open_current(d, 1.0)
+        s.add_sample(1, _doc("1"))
+        path = s.path
+        s.set_meta("results", "{not json")
+        s.close()
+        assert rr.stored_results(path) == [], "a broken results value reads as none"
+        try:
+            rr.stored_results(os.path.join(d, "missing.sqlite"))
+        except OSError:
+            pass  # expected
+        else:
+            raise AssertionError("a missing recording is an OSError, never a new empty file")
+        assert not os.path.exists(os.path.join(d, "missing.sqlite")), "the read never creates a file"
+
+
+def t_a_full_writer_queue_reports_a_result_it_could_not_store():
+    with tempfile.TemporaryDirectory() as d:
+        store = rr.open_current(d, 1.0)
+        gate, busy = threading.Event(), threading.Event()
+        w = rr.Writer(store, maxsize=1)
+        w.put(lambda _s: (busy.set(), gate.wait(5)))
+        assert busy.wait(5)
+        assert w.put(lambda _s: None), "the queue's one place"
+        rec = rr.Recorder(store, w, lambda: 1.0)
+        try:
+            assert rec.store_result(_result("M", "leg-1", 1.0)) is False, "a dropped write says so"
+        finally:
+            gate.set()
+            w.stop()
+            store.close()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
