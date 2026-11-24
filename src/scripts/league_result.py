@@ -314,7 +314,7 @@ class Exporter:
     thread."""
 
     def __init__(self, runtime_dir, settings_fn, source, wall=time.time, clock=time.monotonic,
-                 log=LOG, post=None, fetch=None):
+                 log=LOG, post=None, fetch=None, armed=True):
         self._dir = runtime_dir
         self._event_path = league_service.path_in(runtime_dir)
         self._settings_fn, self._source = settings_fn, source
@@ -325,6 +325,11 @@ class Exporter:
         self._jobs = {}                # (ref, race) -> {"doc", "next", "tries"}
         self._last = None
         self._previous_finish = None
+        self._armed = armed
+
+    def arm(self):
+        """Start acting on the race state; the relay arms it once it owns its port."""
+        self._armed = True
 
     # The tick ---------------------------------------------------------------------
 
@@ -332,7 +337,7 @@ class Exporter:
         """Act on the race state of one tick: a finish exports, a race that starts
         counting after a finish moves the event to its next race. The first state seen
         is the baseline, so a relay restart never sends again."""
-        if state is None:
+        if state is None or not self._armed:
             return
         last, self._last = self._last, state
         if state in COUNTING and last not in COUNTING:
@@ -427,6 +432,14 @@ class Exporter:
             out["note"] = (f"The event's {len(ev['races'])} listed races are over: "
                            "a further race sends no result.")
         return out
+
+    def staged_graphic(self, race):
+        """The fetched graphic of `race` in the loaded event, or None."""
+        ev = league_service.read(self._event_path)
+        if ev is None or not isinstance(race, str) or race not in [r["race"] for r in ev["races"]]:
+            return None
+        path = os.path.join(self._dir, GRAPHICS, graphic_name(ev["ref"], race))
+        return path if os.path.isfile(path) else None
 
     # The sender -------------------------------------------------------------------
 
