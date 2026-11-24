@@ -1,6 +1,6 @@
 # Event walkthrough video
 
-Status: draft for review. Decided with the user on 2026-11-24: crew onboarding as the
+Status: approved by the user on 2026-11-24. Decided: crew onboarding as the
 audience, the `full` scenario as the base (extended, not copied), a real OBS for the
 program picture, generated title clips as feeds, text captions from the scenario, no
 length limit, reproducible by one command outside the normal CI.
@@ -94,8 +94,7 @@ The order is the order of `full`. New steps are marked **new**.
 | 11 | The finish | Final lap called, chequered flag, result, fastest lap | Race Control, Timing |
 | 12 | Off air | **new:** outro, end of the part, the producer stops the event | Director, Program, Control Center |
 
-Open for review: `full` retires a car in stint 1 (the deck's images depend on it). The
-outline asked for the retirement in stint 2. The spec keeps `full`'s order.
+The retirement stays in stint 1, as in `full`: the deck's images depend on it.
 
 ## Design
 
