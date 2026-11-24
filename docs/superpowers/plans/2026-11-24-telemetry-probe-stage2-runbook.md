@@ -105,8 +105,11 @@ sheets cover the stage 1 findings:
   rates and latencies predate it, so this run's "Senders" table is the first measurement
   of real drivers through Funnel with it. A packet a sender posts twice after a lost
   reply shows in the `duplicates` column.
-- #1264: the fastest race lap can take a lap GT7 marked invalid. Block F records the
-  0x78 data the fix needs; the desk's fastest lap is not judged.
+- #1264, fixed in #1289: a lap counts for the fastest race lap only when GT7 takes it as
+  its best lap (0x78). That makes block F's question practical: a best GT7 carries over
+  from qualifying or keeps across a restart lobby decides what the relay accepts there.
+  The report's "Fastest race lap" line shows what the relay took; compare it with GT7's
+  lap list.
 
 ## 4. Session timeline
 
