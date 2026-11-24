@@ -71,9 +71,10 @@ program can receive it. Pick the line that matches what you already run:
 
 - **Nothing else receives your telemetry:** run the command as shown, on a PC, laptop,
   tablet or phone.
-- **A dashboard app on your phone:** run the sender on a second device on the same
-  network. It cannot share the phone with the app, unless the app takes forwarded
-  packets as GT Race Engineer does below.
+- **A dashboard app on your phone, or any app not listed below:** run the sender on a
+  second device on the same network. GT7 sends to both devices. gt7dashboard, AI Race
+  Engineer, Sim Dashboard, Telemetry Racing, Victory Dash, D-BOX and GT7Proxy document
+  no way to pass GT7 packets on or take them in, so they need this setup.
 - **SimHub on the same PC:** SimHub's GT7 game configuration has a **Game telemetry UDP
   port** and **Forward UDP packets to**, and no heartbeat switch. Two setups work:
   - The sender reads what SimHub forwards: add `--listen PORT` with the port SimHub
@@ -86,6 +87,13 @@ program can receive it. Pick the line that matches what you already run:
   Forwarding" in the German app, makes it receive forwarded telemetry. Its console entry
   then reads "FORWARDED". It does not forward. Add `--forward 127.0.0.1:PORT` to the
   sender and enter the same address and port in GT Race Engineer.
+- **Coach Dave Delta on the same PC:** turn on "Enable Custom Port" in Delta and enter a
+  port, then add `--forward 127.0.0.1:PORT` with that port to the sender.
+- **Sim-to-Motec on the same PC:** start it on a port other than 33740, which makes it
+  wait for forwarded packets, and add `--forward 127.0.0.1:PORT` to the sender.
+- **EzioDash on the same iPhone or iPad:** the app documents an experimental listening
+  port for forwarded packets. This was not tested with the sender, so prefer a second
+  device.
 
 The sender finds the PlayStation by itself, except on an iPhone. There its search
 broadcast to 255.255.255.255 fails with "No route to host". An iPad was not tested.
