@@ -3088,7 +3088,7 @@ function showLeagueEvent(d) {
   if (!ev) return;
   $('ls-title').textContent = ev.ref + (ev.title ? ' · ' + ev.title : '');
   $('ls-races').textContent = ev.races.map((r, i) => (i + 1) + '. ' + (r.title || r.race)
-    + (r.race === ev.current ? ' (current)' : '')).join('   ');
+    + (r.race === ev.current ? ' (current)' : '')).join(' · ');
   $('ls-widgets').textContent = ev.widgets.length
     ? ev.widgets.map(w => w.title + ' (' + w.form + ')').join(', ') : 'none offered';
 }

@@ -105,6 +105,9 @@ TELEMETRY_RECORD=
   service shows on its match or event page and **Load** fetches the event's races and
   widgets (`racecast event league REF` does the same). `racecast event stop` clears the
   loaded event. Without these keys nothing changes.
+
+  ![Control Center. Profile view: the League service section with a loaded event, its races and widgets](images/cc-profile-league-service.png)
+
 - **`TELEMETRY_RECORD`** *(optional, solo POV)*: `1` records the GT7 telemetry trace from
   relay start. The Director Panel `REC` key and `racecast telemetry record` toggle it live.
   See [Relay mode](Relay-Mode).
