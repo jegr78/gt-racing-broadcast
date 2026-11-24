@@ -952,6 +952,14 @@ class Race:
         if cls not in self.fastest_by_class or last_ms < self.fastest_by_class[cls]["ms"]:
             self.fastest_by_class[cls] = lap
 
+    def best_laps(self):
+        """{entry: ms} of each entry's fastest lap that counted for the fastest lap."""
+        out = {}
+        for e in list(self._entries.values()) + list(self._parked.values()):
+            for c in e.counted:
+                out[e.entry] = min(out.get(e.entry, c["ms"]), c["ms"])
+        return out
+
     def void_fastest(self, cls=None):
         """Race Control voids the fastest lap, or with `cls` that class's: the fastest of
         the other counted laps takes its place, in every class that held the voided lap."""

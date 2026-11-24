@@ -150,6 +150,18 @@ def t_result_status_keeps_the_graphic_only_on_the_service_host():
     s = ls.parse_result_status({"v": 1, "status": "pending", "link": "http://league.example/r",
                                 "graphic_url": "https://evil.example/x.png"}, url)
     assert s == {"status": "pending", "message": "", "link": None, "graphic_url": None}, s
+    for other in ("https://league.example:8443/r/1.png", "http://league.example/r/1.png",
+                  "https://league.example:99999/x.png", "https://LEAGUE.example.evil/x.png"):
+        s = ls.parse_result_status({"v": 1, "status": "stored", "graphic_url": other}, url)
+        assert s["graphic_url"] is None, f"{other} is not the service's own scheme, host and port"
+    s = ls.parse_result_status({"v": 1, "status": "stored",
+                                "graphic_url": "https://League.Example:443/r/1.png"}, url)
+    assert s["graphic_url"] == "https://League.Example:443/r/1.png", "the default port is the service's port"
+    sim = "http://127.0.0.1:5123/racecast"
+    s = ls.parse_result_status({"v": 1, "status": "stored", "graphic_url": "http://127.0.0.1:5123/g.png"}, sim)
+    assert s["graphic_url"] == "http://127.0.0.1:5123/g.png", "the loopback simulation serves its own graphic"
+    s = ls.parse_result_status({"v": 1, "status": "stored", "graphic_url": "http://127.0.0.1:5124/g.png"}, sim)
+    assert s["graphic_url"] is None, "another port on the same host is another service"
     assert ls.parse_result_status({"v": 1, "status": "stored", "message": "m" * 201}, url) is None, \
         "a status with an over-long message does not parse"
     assert ls.parse_result_status({"v": 1, "status": "done"}, url) is None
@@ -485,6 +497,68 @@ def t_event_file_round_trip_keeps_the_current_race():
         ls.clear(path)
         ls.clear(path)
         assert not os.path.exists(path)
+
+
+def t_the_finished_and_done_marks_survive_a_reload_of_the_same_event_only():
+    with tempfile.TemporaryDirectory() as d:
+        path = ls.path_in(d)
+        assert ls.update(path, current="leg-2") is None, "no event, nothing to change"
+        event = ls.parse_event(_event(races=[{"race": "leg-1"}, {"race": "leg-2"}]))
+        doc = ls.store(path, "REF", event)
+        assert (doc["finished"], doc["done"], doc["finished_at"]) == (False, False, None), doc
+        doc = ls.update(path, current="leg-2", finished=True, finished_at=1700.5)
+        assert (doc["current"], doc["finished"], doc["finished_at"]) == ("leg-2", True, 1700.5), doc
+        try:
+            ls.update(path, current="leg-9")
+        except ValueError:
+            pass  # expected
+        else:
+            raise AssertionError("a race outside the event is refused")
+        ls.update(path, done=True)
+        again = ls.store(path, "REF", event)
+        assert again["finished"] and again["done"] and again["finished_at"] == 1700.5, \
+            f"reloading the event keeps where it stands: {again}"
+        other = ls.store(path, "OTHER", event)
+        assert not other["finished"] and not other["done"] and other["current"] == "leg-1", other
+
+
+def t_the_relay_reads_the_service_from_the_profile_or_the_simulation():
+    with tempfile.TemporaryDirectory() as d:
+        env_file = os.path.join(d, "profile.env")
+        with open(env_file, "w", encoding="utf-8") as fh:
+            fh.write("LEAGUE_SERVICE_URL=https://league.example/r\nLEAGUE_SERVICE_KEY='fixture-key'\n")
+        cfg, problem = ls.relay_settings(env_file, {})
+        assert cfg == ls.Settings("https://league.example/r", "fixture-key") and problem == "", (cfg, problem)
+        assert ls.relay_settings(os.path.join(d, "missing.env"), {}) == (None, "")
+        assert ls.relay_settings("", {}) == (None, "")
+        sim = {"RACECAST_SIMULATION": "1", "RACECAST_SIM_LEAGUE_SERVICE_URL": "http://127.0.0.1:9/racecast",
+               "RACECAST_SIM_LEAGUE_SERVICE_KEY": "sim-key"}
+        assert ls.relay_settings(env_file, sim)[0] == ls.Settings("http://127.0.0.1:9/racecast", "sim-key"), \
+            "simulation replaces the profile's service"
+        assert ls.relay_settings(env_file, {"RACECAST_SIMULATION": "1"}) == (None, ""), \
+            "simulation never reaches the real service"
+
+
+def t_the_event_file_lock_waits_and_breaks_a_stale_lock():
+    with tempfile.TemporaryDirectory() as d:
+        path = ls.path_in(d)
+        ls.store(path, "REF", ls.parse_event(_event(races=[{"race": "leg-1"}, {"race": "leg-2"}])))
+        open(path + ".lock", "w").close()
+        orig = ls.LOCK_WAIT_S
+        ls.LOCK_WAIT_S = 0.2
+        try:
+            ls.update(path, current="leg-2")
+        except OSError as e:
+            assert "held" in str(e)
+        else:
+            raise AssertionError("a held lock keeps the update out")
+        finally:
+            ls.LOCK_WAIT_S = orig
+        assert ls.read(path)["current"] == "leg-1"
+        old = time.time() - ls.LOCK_STALE_S - 5
+        os.utime(path + ".lock", (old, old))
+        assert ls.update(path, current="leg-2")["current"] == "leg-2", "a crashed holder's lock is broken"
+        assert not os.path.exists(path + ".lock")
 
 
 def t_client_logs_carry_no_key():

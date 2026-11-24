@@ -70,7 +70,19 @@ Config comes from **two layers** and one resolver:
   cap and a 10 s deadline per request, the `live_state` allowlist, the `Client` sender thread (2 s tick, backoff to 30 s,
   values held 30 s) and `runtime/<profile>/league-event.json` (`racecast event league REF`,
   Control Center Profile view, cleared by `event stop` in `_stop_driver_invite`). In
-  simulation `RACECAST_SIM_LEAGUE_SERVICE_URL`/`_KEY` replace both values.
+  simulation `RACECAST_SIM_LEAGUE_SERVICE_URL`/`_KEY` replace both values. The relay
+  reads both from `RACECAST_PROFILE_ENV_FILE` per send (`league_service.relay_settings`).
+  `league_result.py` (#1254) is the result export: `Exporter` watches the race state on
+  the dashboard tick (`finished` builds and queues the Result, a race that starts counting
+  after a finish moves `league-event.json` to the next race or marks it `done`), keeps the
+  Result in the race recording's `meta` `results` (`race_recording.stored_results`), sends
+  on its own thread (a refusal, `league_service.FINAL_CODES`, is final with the service's
+reason; 408, 429, 5xx and network failures retry 2 s doubling to 60 s), files every answer in
+  `league-results.json` (both JSON files under `league_service.file_lock`, an O_EXCL lock
+file) and a returned PNG (same scheme, host and port as the service,
+  4 MB) under `league-graphics/`. `racecast event result [send|refresh]` sends through
+  the running relay for the current event, else from a recording
+  (`league_result_send_data`). Spec: `src/docs/design/league-service.md` ("Result").
   The shipped `profiles/example/` is a template, excluded from the usable-league list.
   One install hosts several leagues this way.
 

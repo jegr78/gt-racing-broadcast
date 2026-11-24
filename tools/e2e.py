@@ -755,6 +755,7 @@ def _check_league_service(binary, tmp, stub_bin, sheet_url, procs, timeout):
             assert st == 400 and "https" in json.loads(body)["error"] and fh.read() == before, (st, body)
         print("  [PASS] the profile editor refuses a league service URL that is not https")
         print("  [PASS] the Control Center loads the league event and never shows the key")
+        _check_league_result(launcher, home, env, cli, sim, sheet_url, ui_url, procs, timeout)
         code, out = cli("event", "stop", "--no-report")
         assert code == 0 and not os.path.exists(stored), out
         code, out = cli("event", "league")
@@ -765,6 +766,94 @@ def _check_league_service(binary, tmp, stub_bin, sheet_url, procs, timeout):
             with open(path, encoding="utf-8", errors="replace") as fh:
                 assert sim.key not in fh.read(), f"the key reached {path}"
         print("  [PASS] event stop clears the loaded league event")
+
+
+def _check_league_result(launcher, home, env, cli, sim, sheet_url, ui_url, procs, timeout):
+    """A relay of the league-app home sends the result when the race finishes, the
+    Director's resend replaces it, and after the relay stops the CLI sends it again from
+    the race recording (#1254)."""
+    import league_sim
+    sys.path.insert(0, os.path.join(ROOT, "tools", "event-sim"))
+    import drive
+    drive.write_track_data(os.path.join(home, "runtime"), "e2e-league-track", 3000.0)
+    runtime = os.path.join(home, "runtime", "demo")
+    cookies = os.path.join(home, "yt-cookies.txt")
+    with open(cookies, "w", encoding="utf-8") as fh:
+        fh.write("# Netscape HTTP Cookie File\n")
+    port = env["RACECAST_SIM_RELAY_PORT"]
+    log = os.path.join(home, "relay-league.log")
+    relay = _spawn(launcher + ["--simulation", "relay", "run"] + _synthetic_relay_args()
+                   + ["--bind", "127.0.0.1", "--http-port", port, "--sheet-csv-url", sheet_url + "/schedule.csv",
+                      "--cookies", cookies, "--runtime-dir", runtime], env, log, cwd=home)
+    procs.append(relay)
+    base = f"http://127.0.0.1:{port}"
+    _wait_ready(base + "/status", timeout, relay, log)
+    st, _b, _h = E.http_request(base + "/event/track", method="POST", headers={"Content-Type": "application/json"},
+                                data=json.dumps({"id": "e2e-league-track"}).encode())
+    assert st == 200, (st, _b)
+
+    def post(path, body=None):
+        st, raw, _h = E.http_request(base + path, method="POST", headers={"Content-Type": "application/json"},
+                                     data=json.dumps(body or {}).encode())
+        return st, json.loads(raw or b"{}")
+
+    def relay_log():
+        with open(log, encoding="utf-8", errors="replace") as fh:
+            return fh.read()[-3000:]
+
+    def results(n):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            calls = sim.calls(call="result")
+            if len(calls) >= n:
+                return calls
+            time.sleep(0.2)
+        _st, panel = E._get_json(base + "/league/status")
+        raise AssertionError(f"the league service got {len(sim.calls(call='result'))} results, not {n}; "
+                             f"panel {panel}\n{relay_log()}")
+
+    def until(what, check):
+        deadline = time.monotonic() + 15
+        while not check():
+            assert time.monotonic() < deadline, f"{what}\n{relay_log()}"
+            time.sleep(0.2)
+    until("the relay never watched the race state", lambda: E._get_json(base + "/league/status")[1]["watching"])
+    for action in ("final-lap", "finish"):
+        st, body = post("/drivers/race/" + action)
+        assert st == 200 and body.get("ok"), (action, st, body)
+    until("the race never stood finished", lambda: E._get_json(base + "/drivers/race")[1].get("state") == "finished")
+    (first,) = results(1)
+    body = first["body"]
+    assert (body["ref"], body["race"]) == (league_sim.DEFAULT_REF, "leg-1") and "finished_at" in body, body
+    assert first["user_agent"].startswith("racecast/"), first
+    print("  [PASS] the relay sends the result to the league service when the race finishes")
+    deadline = time.monotonic() + 10
+    while True:
+        _st, panel = E._get_json(base + "/league/status")
+        mine = [r for r in panel["results"] if r["race"] == "leg-1"]
+        if mine and mine[0]["state"] == "sent" or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert mine and mine[0]["status"] == "pending" and panel["event"]["finished"], panel
+    assert sim.key not in json.dumps(panel), "the key reached the panel status"
+    st, body = post("/league/result/send", {})
+    assert st == 200 and body["rebuilt"] is True, (st, body)
+    results(2)
+    print("  [PASS] the Director's resend replaces the draft from the live race")
+    code, out = cli("event", "result")
+    assert code == 0 and "leg-1: pending" in out, out
+    _kill(relay)
+    procs.remove(relay)
+    code, out = cli("event", "result", "send", "leg-1")
+    assert code == 0 and "Sent leg-1" in out and "from race-recording-" in out, out
+    assert len(sim.calls(call="result")) == 3 and sim.key not in out
+    status, d = E._get_json(ui_url + "/api/league-event")
+    assert d["recordings"] and d["recordings"][0]["results"][0]["race"] == "leg-1", d["recordings"]
+    st, raw, _h = E.http_request(ui_url + "/api/league-result/refresh", method="POST",
+                                 headers={"Content-Type": "application/json"},
+                                 data=json.dumps({"race": "leg-1", "expectedProfile": "demo"}).encode())
+    assert st == 200 and json.loads(raw)["status"]["status"] == "pending", (st, raw)
+    print("  [PASS] after the relay stopped, racecast event result sends from the race recording")
 
 
 def _start_pov_ui(binary, tmp, env, timeout):

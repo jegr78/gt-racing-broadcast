@@ -11,6 +11,7 @@ appears in a message, a log line or a status. Stdlib only.
 failure. The event the producer loaded lives in runtime/<profile>/league-event.json.
 """
 import collections
+import contextlib
 import datetime
 import http.client
 import json
@@ -25,6 +26,7 @@ from urllib.parse import urlencode, urlsplit
 import atomic_replace
 import http_util
 import simulation
+import timing_host
 
 V = 1
 FILENAME = "league-event.json"
@@ -66,7 +68,30 @@ LOG = logging.getLogger("racecast.league_service")
 
 
 class ServiceError(Exception):
-    """A failed call, worded for the producer; it never carries the key."""
+    """A failed call, worded for the producer; it never carries the key. `code` is the
+    HTTP status of a refusal, else None."""
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
+
+
+FINAL_CODES = (400, 401, 403, 404, 409, 422)   # a refusal a retry cannot change
+
+
+def _reason(e):
+    """The service's own `error` or `message` from a refusal's JSON body, or ""."""
+    try:
+        doc = json.loads(e.read(4096).decode("utf-8"))
+    except (OSError, ValueError, http.client.HTTPException):
+        return ""
+    if not isinstance(doc, dict):
+        return ""
+    for key in ("error", "message"):
+        text = _text(doc.get(key), MAX_MESSAGE)
+        if text:
+            return text
+    return ""
 
 
 def url_problem(url, environ=None):
@@ -244,23 +269,36 @@ def parse_widget_values(doc, forms=None):
     return out
 
 
-def _https_link(v, host=None):
-    if not isinstance(v, str) or len(v) > 2048:
-        return None
+def _origin(url):
+    """(scheme, host, port) of `url` with the scheme's default port, or None."""
     try:
-        u = urlsplit(v)
+        u = urlsplit(url)
+        port = u.port or {"https": 443, "http": 80}.get(u.scheme)
     except ValueError:
         return None
-    if u.scheme != "https" or not u.hostname or "@" in u.netloc:
+    if not u.hostname or "@" in u.netloc or port is None:
         return None
-    if host is not None and u.hostname != host:
+    return u.scheme, u.hostname.lower(), port
+
+
+def _https_link(v):
+    if not isinstance(v, str) or len(v) > 2048:
         return None
-    return v
+    origin = _origin(v)
+    return v if origin is not None and origin[0] == "https" else None
+
+
+def same_origin(url, service_url):
+    """`url` when it has the service URL's own scheme, host and port, else None."""
+    if not isinstance(url, str) or len(url) > 2048 or _has_control(url):
+        return None
+    origin = _origin(url)
+    return url if origin is not None and origin == _origin(service_url) else None
 
 
 def parse_result_status(doc, service_url):
     """ResultStatus as {status, message, link, graphic_url}, or None. The graphic is
-    kept only on the service's own host."""
+    kept only on the service's own scheme, host and port."""
     if not _version_ok(doc) or doc.get("status") not in STATUSES:
         return None
     message = _optional(doc, "message", MAX_MESSAGE)
@@ -268,7 +306,7 @@ def parse_result_status(doc, service_url):
         return None
     return {"status": doc["status"], "message": message,
             "link": _https_link(doc.get("link")),
-            "graphic_url": _https_link(doc.get("graphic_url"), urlsplit(service_url).hostname)}
+            "graphic_url": same_origin(doc.get("graphic_url"), service_url)}
 
 
 def ref_problem(ref):
@@ -321,8 +359,9 @@ def call(cfg, method, path, query=None, body=None, opener=None, timeout=SOCKET_T
                     allow_redirects=False) as r:
             raw = _read_bounded(r, deadline)
     except http_util.HTTPError as e:
+        reason = _reason(e) if 400 <= e.code < 500 else ""
         e.close()
-        raise ServiceError(_explain_http(e.code)) from None
+        raise ServiceError(_explain_http(e.code) + (f": {reason}" if reason else ""), e.code) from None
     except http_util.URLError as e:
         raise ServiceError(f"cannot reach the league service: {e.reason}") from None
     except (OSError, ValueError, http.client.HTTPException) as e:
@@ -506,20 +545,56 @@ def path_in(runtime_dir):
     return os.path.join(runtime_dir, FILENAME)
 
 
+LOCK_WAIT_S = 2.0
+LOCK_STALE_S = 10.0       # a lock older than this was left by a crashed process
+
+
+@contextlib.contextmanager
+def file_lock(path):
+    """Serialize a read-modify-write of `path` across processes with an O_EXCL lock
+    file next to it. OSError when another holder keeps it past LOCK_WAIT_S."""
+    lock = path + ".lock"
+    os.makedirs(os.path.dirname(os.path.abspath(lock)), exist_ok=True)
+    deadline = time.monotonic() + LOCK_WAIT_S
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(lock) > LOCK_STALE_S:
+                    os.remove(lock)
+                    continue
+            if time.monotonic() >= deadline:
+                raise OSError(f"{lock} is held by another process") from None
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(lock)
+
+
 def _stored(doc):
-    """A league-event.json document checked again, or None."""
+    """A league-event.json document checked again, or None. `finished` says the current
+    race has finished and waits for the next one to start counting, `done` that the
+    event's last race lay behind it then."""
     if not isinstance(doc, dict) or ref_problem(doc.get("ref")):
         return None
     event = parse_event(dict(doc, v=V))
     if event is None or doc.get("current") not in [r["race"] for r in event["races"]]:
         return None
     loaded = doc.get("loaded_at")
+    at = doc.get("finished_at")
     return dict(event, ref=doc["ref"], current=doc["current"],
-                loaded_at=loaded if isinstance(loaded, str) and len(loaded) <= 40 else "")
+                loaded_at=loaded if isinstance(loaded, str) and len(loaded) <= 40 else "",
+                finished=doc.get("finished") is True, done=doc.get("done") is True,
+                finished_at=at if isinstance(at, (int, float)) and not isinstance(at, bool) else None)
 
 
 def read(path):
-    """The loaded event {ref, title, races, widgets, current, loaded_at}, or None."""
+    """The loaded event {ref, title, races, widgets, current, loaded_at, finished, done,
+    finished_at}, or None."""
     try:
         with open(path, encoding="utf-8") as fh:
             return _stored(json.load(fh))
@@ -527,14 +602,7 @@ def read(path):
         return None
 
 
-def store(path, ref, event, now=None):
-    """Write the loaded event. The current race stays when the reloaded event still
-    lists it, else it is the first race. Returns what was written."""
-    old = read(path)
-    races = [r["race"] for r in event["races"]]
-    current = old["current"] if old and old["ref"] == ref and old["current"] in races else races[0]
-    stamp = datetime.datetime.fromtimestamp(time.time() if now is None else now, datetime.timezone.utc)
-    doc = dict(event, ref=ref, current=current, loaded_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
+def _write(path, doc):
     folder = os.path.dirname(os.path.abspath(path))
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=".league-event-", suffix=".tmp")
@@ -546,6 +614,52 @@ def store(path, ref, event, now=None):
         if os.path.exists(tmp):
             os.remove(tmp)
     return _stored(doc)
+
+
+def store(path, ref, event, now=None):
+    """Write the loaded event. The current race and its finished and done marks stay
+    when the reloaded event still lists it, else it is the first race. Returns what was
+    written."""
+    with file_lock(path):
+        old = read(path)
+        races = [r["race"] for r in event["races"]]
+        keep = old is not None and old["ref"] == ref and old["current"] in races
+        stamp = datetime.datetime.fromtimestamp(time.time() if now is None else now, datetime.timezone.utc)
+        doc = dict(event, ref=ref, current=old["current"] if keep else races[0],
+                   loaded_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        if keep:
+            doc.update({k: old[k] for k in ("finished", "done", "finished_at")})
+        return _write(path, doc)
+
+
+def update(path, **fields):
+    """Change the loaded event's `current`, `finished`, `done` or `finished_at`; the
+    stored event, or None without one. ValueError for a race the event does not list."""
+    with file_lock(path):
+        old = read(path)
+        if old is None:
+            return None
+        if "current" in fields and fields["current"] not in [r["race"] for r in old["races"]]:
+            raise ValueError("the event does not list that race")
+        return _write(path, dict(old, **fields))
+
+
+def relay_settings(profile_env_path, environ=None):
+    """(Settings or None, problem) for the relay: the simulated service in simulation
+    mode, else LEAGUE_SERVICE_URL and LEAGUE_SERVICE_KEY from the league's profile.env,
+    read on every call so an edit applies without a restart."""
+    environ = os.environ if environ is None else environ
+    if simulation.active(environ):
+        url = simulation.endpoint(simulation.LEAGUE_SERVICE_URL, environ)
+        return settings(url, environ.get(simulation.LEAGUE_SERVICE_KEY, "") if url else "", environ)
+    env = {}
+    if profile_env_path:
+        try:
+            with open(profile_env_path, encoding="utf-8") as fh:
+                env = timing_host._parse_env(fh.read())
+        except OSError:
+            env = {}
+    return settings(env.get("LEAGUE_SERVICE_URL", ""), env.get("LEAGUE_SERVICE_KEY", ""), environ)
 
 
 def clear(path):

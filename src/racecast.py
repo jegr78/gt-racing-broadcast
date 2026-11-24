@@ -17,6 +17,7 @@
   racecast event timing [--new] [--serve hosted|funnel]  # public live timing link (event start creates it, stop ends it)
   racecast event race [--formation on|off] [--laps N|--time] [--restart keep|neutralise] [--last-lap-seconds N]  # driver telemetry race
   racecast event league [REF]                # load the event REF from the league service (LEAGUE_SERVICE_URL), or show the loaded one; stop clears it
+  racecast event result show|send|refresh [RACE] [--recording FILE] [--index N] [--ref REF]  # the race result for the league service: show, send again (replaces the draft), refresh a pending status
   racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
@@ -1147,7 +1148,7 @@ EXTRA_VERBS = {
 # Internal verbs: routed but never advertised (frozen feed children use run-feed).
 HIDDEN_VERBS = {"streams": ("run-feed",)}
 ONESHOTS = ("preflight", "speedtest", "cookies", "graphics", "media", "brands", "setup", "install-tools", "install-apps", "obs-browser", "update")
-EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite", "timing", "race", "league")
+EVENT_VERBS = ("status", "start", "stop", "takeover", "track", "invite", "timing", "race", "league", "result")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
@@ -6692,18 +6693,173 @@ def _league_settings(rc):
 
 
 def league_event_data(rc=None, path=None):
-    """The league service and the event loaded from it, for `racecast event league` and
-    the Control Center. Names the URL, never the key. Never raises."""
+    """The league service, the event loaded from it, the result statuses and the race
+    recordings that hold a result, for `racecast event league`/`result` and the Control
+    Center. Names the URL, never the key. Never raises."""
+    import league_result
     import league_service
     rc = _active_config() if rc is None else rc
     cfg, problem = _league_settings(rc)
+    path = path or league_service.path_in(_runtime_dir())
+    runtime = os.path.dirname(os.path.abspath(path))
     try:
-        event = league_service.read(path or league_service.path_in(_runtime_dir()))
+        event = league_service.read(path)
+        results = league_result.read_statuses(league_result.results_path(runtime))
+        recordings = _league_recordings(runtime)
     except Exception:  # noqa: BLE001  a status read never fails the page
-        event = None
+        event, results, recordings = None, [], []
     return {"ok": True, "configured": cfg is not None, "problem": problem,
             "url": (rc.league_service_url if rc is not None else "") or "",
-            "key_set": bool(rc is not None and rc.league_service_key), "event": event}
+            "key_set": bool(rc is not None and rc.league_service_key), "event": event,
+            "results": results[:LEAGUE_RESULTS_SHOWN], "recordings": recordings}
+
+
+LEAGUE_RESULTS_SHOWN = 12
+LEAGUE_RECORDINGS_SHOWN = 10
+
+
+def _league_recordings(runtime):
+    """The newest race recordings that hold a league result: [{file, results}], each
+    result {index, ref, race, finished_at}."""
+    import glob
+    import race_recording
+    files = sorted(glob.glob(os.path.join(glob.escape(runtime), "race-recording-*.sqlite")),
+                   key=os.path.getmtime, reverse=True)
+    out = []
+    for path in files:
+        try:
+            docs = race_recording.stored_results(path)
+        except OSError:
+            continue
+        if docs:
+            out.append({"file": os.path.basename(path), "results": [
+                {"index": i, "ref": d.get("ref"), "race": d.get("race"), "finished_at": d.get("finished_at")}
+                for i, d in enumerate(docs, 1)]})
+        if len(out) >= LEAGUE_RECORDINGS_SHOWN:
+            break
+    return out
+
+
+def _league_recording_path(recording, runtime):
+    """A recording named by the operator: a path, or a file name in the profile's runtime
+    folder; without one the current recording. (path, error)."""
+    import race_recording
+    if not recording:
+        path = race_recording.current_path(runtime)
+        return (path, "") if path and os.path.isfile(path) else (None, "no current race recording")
+    path = os.path.join(runtime, recording) if recording == os.path.basename(recording) else recording
+    if os.path.isfile(path):
+        return path, ""
+    return None, f"no such recording: {recording}"
+
+
+def _pick_stored_result(docs, race=None, index=None):
+    """(doc, error) of the result to send from a recording's stored results."""
+    if not docs:
+        return None, "this recording holds no finished race result"
+    if index is not None:
+        if not 1 <= index <= len(docs):
+            return None, f"the recording holds {len(docs)} results: pick 1 to {len(docs)}"
+        return docs[index - 1], ""
+    if race:
+        named = [d for d in docs if d.get("race") == race]
+        if named:
+            return named[-1], ""
+        loose = [d for d in docs if not d.get("race")]
+        if len(loose) == 1:
+            return loose[0], ""
+        return None, f"no result of race {race} in this recording: pick one with --index"
+    return docs[-1], ""
+
+
+def _relay_league_send(race):
+    """The relay's answer to a resend, its refusal reason included."""
+    try:
+        return _relay_post_json(f"http://127.0.0.1:{_relay_port()}/league/result/send",
+                                {"race": race} if race else {}, timeout=5)
+    except http_util.HTTPError as e:
+        try:
+            reply = json.loads(e.read().decode("utf-8"))
+        except ValueError:
+            reply = None
+        finally:
+            e.close()
+        if isinstance(reply, dict) and reply.get("error"):
+            return {"ok": False, "error": str(reply["error"])}
+        raise
+
+
+def league_result_send_data(race=None, recording=None, index=None, ref=None, rc=None, runtime=None,
+                            relay_running=None, relay_send=None, post=None, fetch=None):
+    """Send a race's result to the league service; a resend replaces its draft. For the
+    current event a running relay rebuilds and sends it (it holds the corrections made
+    since the finish); otherwise, or with `recording`, the result a race recording keeps
+    goes out. {ok, ...} or {ok: false, error}. The keywords after `ref` are test seams."""
+    import league_result
+    import league_service
+    import race_recording
+    rc = _active_config() if rc is None else rc
+    cfg, problem = _league_settings(rc)
+    if cfg is None:
+        return {"ok": False, "error": problem or NO_LEAGUE_SERVICE}
+    if race is not None and not isinstance(race, str):
+        return {"ok": False, "error": "race must be text"}
+    runtime = runtime or _runtime_dir()
+    if not recording and index is None and not ref and \
+            (relay_running or _relay_already_running_for_active_profile)():
+        try:
+            reply = (relay_send or _relay_league_send)(race)
+        except Exception as exc:  # noqa: BLE001  the relay's answer is reported, never raised
+            return {"ok": False, "error": f"the relay did not take the result: {exc}"}
+        return dict(reply, via="relay") if reply.get("ok") else reply
+    path, problem = _league_recording_path(recording, runtime)
+    if path is None:
+        return {"ok": False, "error": problem}
+    try:
+        docs = race_recording.stored_results(path)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    doc, problem = _pick_stored_result(docs, race, index)
+    if doc is None:
+        return {"ok": False, "error": problem}
+    event = league_service.read(league_service.path_in(runtime))
+    ref = ref or doc.get("ref") or (event or {}).get("ref")
+    race = race or doc.get("race") or (event or {}).get("current")
+    if not ref or not race:
+        return {"ok": False, "error": "this result names no league race: give the race and the reference"}
+    problem = league_service.ref_problem(ref)
+    if problem or not league_service.RACE_RE.fullmatch(race):
+        return {"ok": False, "error": problem or f"{race} is no race id"}
+    body = dict(league_result.clean_body(doc.get("body")), ref=ref, race=race)
+    try:
+        status = league_result.send(cfg, body, runtime, post=post, fetch=fetch)
+    except league_service.ServiceError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "via": os.path.basename(path), "ref": ref, "race": race, "status": status}
+
+
+def league_result_refresh_data(race=None, ref=None, rc=None, runtime=None, get=None, fetch=None):
+    """Ask the league service again for the status of a result sent earlier (default:
+    the loaded event's current race)."""
+    import league_result
+    import league_service
+    rc = _active_config() if rc is None else rc
+    cfg, problem = _league_settings(rc)
+    if cfg is None:
+        return {"ok": False, "error": problem or NO_LEAGUE_SERVICE}
+    runtime = runtime or _runtime_dir()
+    event = league_service.read(league_service.path_in(runtime)) or {}
+    ref, race = ref or event.get("ref"), race or event.get("current")
+    if not isinstance(ref, str) or not isinstance(race, str) or not ref or not race:
+        return {"ok": False, "error": "no league event loaded: give the race and the reference"}
+    problem = league_service.ref_problem(ref)
+    if problem or not league_service.RACE_RE.fullmatch(race):
+        return {"ok": False, "error": problem or f"{race} is no race id"}
+    try:
+        status = league_result.refresh(cfg, ref, race, runtime, get=get, fetch=fetch)
+    except league_service.ServiceError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "status": status}
 
 
 def league_event_load_data(ref, rc=None, path=None, fetch=None):
@@ -6744,6 +6900,75 @@ def _league_event_lines(d):
     for w in event["widgets"]:
         lines.append(f"  widget {w['id']} ({w['form']}): {w['title']}")
     return lines
+
+
+def _league_result_lines(d):
+    if not d["configured"]:
+        return [d["problem"] or NO_LEAGUE_SERVICE]
+    lines = []
+    for r in d["results"]:
+        head = f"  {r.get('ref')} / {r['race']}: "
+        if r.get("state") == "failed":
+            head += f"not sent ({r.get('error') or 'failed'})"
+        elif r.get("state") == "sending":
+            head += "sending"
+        else:
+            head += r.get("status") or "sent"
+            if r.get("message"):
+                head += f", {r['message']}"
+        lines.append(head)
+        if r.get("link"):
+            lines.append(f"    {r['link']}")
+        if r.get("graphic"):
+            lines.append(f"    graphic ready for the Director: {r['graphic']}")
+        elif r.get("graphic_error"):
+            lines.append(f"    graphic refused: {r['graphic_error']}")
+    lines.insert(0, "Results:" if lines else "No result sent yet.")
+    for rec in d["recordings"]:
+        lines.append(f"Recording {rec['file']}:")
+        for r in rec["results"]:
+            lines.append(f"  {r['index']}. {r['race'] or '(no league race)'}"
+                         f"{' of ' + r['ref'] if r['ref'] else ''}")
+    return lines
+
+
+def event_result_cmd(rest):
+    """racecast event result [send|refresh] [RACE]: the league result export (#1254)."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="racecast event result",
+        description="The race result for the league service. The relay sends it when the race "
+                    "finishes and retries after a failure. Without an action, show what was sent "
+                    "and which race recordings hold a result. `send` sends a race's result again "
+                    "(a resend replaces the draft): through the running relay for the current "
+                    "event, or from a race recording with --recording. `refresh` asks the service "
+                    "for the status of a result sent earlier.")
+    parser.add_argument("action", nargs="?", choices=("show", "send", "refresh"), default="show")
+    parser.add_argument("race", nargs="?", help="the race id from the event's list (default: the current race)")
+    parser.add_argument("--recording", help="a race-recording-*.sqlite file, or its name in the profile's runtime folder")
+    parser.add_argument("--index", type=int, help="which result of the recording, as `racecast event result` lists it")
+    parser.add_argument("--ref", help="the event reference, when the result names none")
+    args = parser.parse_args(rest)
+    _apply_active_profile_env()
+    if args.action == "send":
+        r = league_result_send_data(args.race, args.recording, args.index, args.ref)
+        if not r["ok"]:
+            print(r["error"])
+            sys.exit(1)
+        if r.get("via") == "relay":
+            print(f"The relay sends the result of {r['race']} now"
+                  f"{' (rebuilt from the live race)' if r.get('rebuilt') else ' (from the race recording)'}.")
+        else:
+            st = r["status"]
+            print(f"Sent {r['race']} of {r['ref']} from {r['via']}: {st.get('status')}"
+                  f"{', ' + st['message'] if st.get('message') else ''}")
+    elif args.action == "refresh":
+        r = league_result_refresh_data(args.race, args.ref)
+        if not r["ok"]:
+            print(r["error"])
+            sys.exit(1)
+    for line in _league_result_lines(league_event_data()):
+        print(line)
 
 
 def event_league_cmd(rest):
@@ -7903,6 +8128,7 @@ DISPATCH = {
     ("event", "timing"): event_timing_cmd,
     ("event", "race"): event_race_cmd,
     ("event", "league"): event_league_cmd,
+    ("event", "result"): event_result_cmd,
     ("tailscale", "up"): tailscale_up_cmd, ("tailscale", "down"): tailscale_down_cmd,
     ("tailscale", "status"): tailscale_status_cmd,
     ("obs", "refresh"): obs_refresh_cmd, ("obs", "collection"): obs_collection_cmd,
@@ -10959,6 +11185,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "timing_host_status": timing_host_status_data,
         "league_event": league_event_data,
         "league_event_load": league_event_load_data,
+        "league_result_send": league_result_send_data,
+        "league_result_refresh": league_result_refresh_data,
         "backup_list": backup_list_data,
         "backup_create": backup_create_data,
         "backup_restore": backup_restore_data,

@@ -208,6 +208,8 @@ import timing_link      # the event's public live timing link (#1128)
 import timing_feed      # its shared body and upload budget
 import timing_host      # optional external fan-out of the public timing (#1161)
 import timing_publish
+import league_result
+import league_service
 import driver_ingest    # driver telemetry connections behind the invite (#1111)
 import driver_race      # race distance, gaps and finish from driver telemetry (#1112)
 import brand_logos      # the timing pages' brand logos
@@ -12349,7 +12351,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  drive_page_path=None, sender_script_path=None, driver_segments=None,
                  driver_desk_path=None, race_snapshot_page_path=None,
                  driver_race_svc=None, timing_link_path=None, timing_page_path=None,
-                 timing_publisher=None, funnel_host=None):
+                 timing_publisher=None, funnel_host=None, league_exporter=None):
     # No DNS lookup in a request: only configured names and literal IP addresses
     # may be browser origins. Otherwise DNS rebinding could make a foreign Host
     # look same-origin to the origin comparison below.
@@ -12543,6 +12545,46 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if no_store:
                 self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
+        def _league_get(self, sub):
+            """The league result export (#1254): its status, and a staged graphic."""
+            if league_exporter is None:
+                return self._send({"error": "league result export unavailable"}, 404)
+            if sub == ["status"]:
+                return self._send(league_exporter.status(), no_store=True)
+            if sub == ["graphic"]:
+                path = league_exporter.staged_graphic((parse_qs(urlparse(self.path).query).get("race") or [""])[0])
+                if path is None:
+                    return self._send({"error": "no graphic"}, 404)
+                return self._send_file(path, "image/png")
+            return self._send({"error": "unknown", "path": self.path}, 404)
+
+        def _league_post(self, sub, body):
+            """Director actions: set the current race, send a result again, take a graphic."""
+            if league_exporter is None:
+                return self._send({"ok": False, "error": "league result export unavailable"}, 404)
+            race = body.get("race")
+            if race is not None and not isinstance(race, str):
+                return self._send({"ok": False, "error": "race must be text"}, 400)
+            if sub == ["race"]:
+                out = league_exporter.set_race(race)
+            elif sub == ["result", "send"]:
+                out = league_exporter.resend(race or None)
+            elif sub == ["graphic", "take"]:
+                staged = league_exporter.staged_graphic(race)
+                if staged is None:
+                    return self._send({"ok": False, "error": "no graphic for that race"}, 404)
+                if not graphics_dir:
+                    return self._send({"ok": False, "error": "no graphics folder"}, 503)
+                dest = league_result.install_graphic(staged, graphics_dir)
+                ok, note = (relay._obs.set_input_file(league_result.GRAPHIC_TARGET, dest)
+                            if relay._obs is not None else (False, "OBS control unavailable"))
+                LOG.info("league result graphic of %s is the %s graphic now",
+                         race.replace("\r", "").replace("\n", ""), league_result.GRAPHIC_TARGET)
+                out = {"ok": True, "obs": bool(ok), "note": "" if ok else str(note or "")}
+            else:
+                return self._send({"ok": False, "error": "unknown", "path": self.path}, 404)
+            return self._send(out, 200 if out.get("ok") else 400)
+
         def _recording_get(self, sub):
             """The race recording reads: status, a sample at a wall time, the CSV export."""
             svc = driver_race_svc
@@ -14563,6 +14605,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         for (n, d, pr, c, rc, x, re) in (CrewSource._member(row) for row in rows)]})
                 if p == ["event", "track"]:
                     return self._track_pick_get()
+                if p and p[0] == "league":
+                    return self._league_get(p[1:])
                 if p == ["drivers", "data"] and driver_hub is not None:
                     # Tailnet only: every driver sender with its entry and counters (#1111).
                     invite = self._drive_invite()
@@ -15490,6 +15534,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"enabled": False}, 404)
                     telemetry_probe_obj.reset()
                     return self._send({"ok": True})
+                if p and p[0] == "league":
+                    return self._league_post(p[1:], body)
                 if p == ["event", "title"]:
                     # Director live-edit of the free-text event title (#207). Tailnet
                     # trust boundary like the rest of the panel; persisted to
@@ -15930,15 +15976,23 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     return store
 
 
-def dashboard_ticks(relay, race_svc, stop_evt, every):
-    """Advance the driver dashboard snapshots until stop_evt; a failure warns once per
-    distinct error and never touches the broadcast."""
+def dashboard_ticks(relay, race_svc, stop_evt, every, league=None):
+    """Advance the driver dashboard snapshots and hand the race state to the league
+    result export until stop_evt; a failure warns once per distinct error and never
+    touches the broadcast."""
     while not stop_evt.wait(every):
         try:
             race_svc.tick()
             relay._tick_ok("driver dashboard")
         except Exception as e:  # noqa: BLE001
             relay._warn_tick_error("driver dashboard", e)
+        if league is None:
+            continue
+        try:
+            league.observe(race_svc.race_state())
+            relay._tick_ok("league result")
+        except Exception as e:  # noqa: BLE001
+            relay._warn_tick_error("league result", e)
 
 
 ON_AIR_ALIVE_S = 60.0   # how often an event relay refreshes its last-alive stamp
@@ -17001,8 +17055,13 @@ def main():
     _hub_invite = driver_invite.Cache(driver_invite.path_in(runtime))
     driver_hub = driver_ingest.Hub(multi_lobby=lambda: not relay.solo, on_sample=race_svc.update,
                                    invite_id=lambda: (_hub_invite.get() or {}).get("id"))
+    # League result export (#1254): the service settings are read per send, so a
+    # profile edit applies without a restart.
+    league_exporter = league_result.Exporter(
+        runtime, lambda: league_service.relay_settings(os.environ.get("RACECAST_PROFILE_ENV_FILE", "")),
+        race_svc, log=LOG, armed=False)
     threading.Thread(target=dashboard_ticks, daemon=True,
-                     args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S)).start()
+                     args=(relay, race_svc, stop_evt, driver_race.SNAPSHOT_EVERY_S, league_exporter)).start()
     threading.Thread(target=stint_switch_watch, daemon=True, args=(
         relay, race_svc, stop_evt,
         lambda: driver_race.read_settings(driver_race.path_in(runtime))["lap_count"]),
@@ -17116,7 +17175,7 @@ def main():
         driver_hub=driver_hub, driver_invite_path=driver_invite.path_in(runtime),
         drive_page_path=drive_page_path, sender_script_path=sender_script_path,
         driver_desk_path=driver_desk_path, race_snapshot_page_path=race_snapshot_page_path,
-        driver_segments=driver_segments, driver_race_svc=race_svc,
+        driver_segments=driver_segments, driver_race_svc=race_svc, league_exporter=league_exporter,
         timing_link_path=timing_link.path_in(runtime), timing_page_path=timing_page_path,
         timing_publisher=lambda **fns: timing_pubs.append(
             _start_timing_publisher(timing_go, stop_evt, **fns)) or timing_pubs[-1],
@@ -17130,6 +17189,8 @@ def main():
     relay.keep_awake = keep_awake.KeepAwake(os.getpid(), environ=os.environ, log=LOG)
     relay.keep_awake.start()
     race_svc.open_recording()   # the port is ours, so the recording file is too
+    league_exporter.arm()
+    threading.Thread(target=league_exporter.run, args=(stop_evt,), daemon=True, name="league-result").start()
     timing_go.set()             # ... and the timing host's link
     radio_service.start()
     if coach_service is not None:coach_service.start()

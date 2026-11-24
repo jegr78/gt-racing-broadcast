@@ -2,6 +2,9 @@
 """Run the ruff linter over the repo (config: ruff.toml at the repo root), plus five
 in-house guards that mirror CodeQL classes ruff has no rule for.
 
+The mixed-tuple guard (find_mixed_tuple_returns) reproduces py/mixed-tuple-returns for
+tuple literals in one function's own returns.
+
     python3 tools/lint.py          # check only (what CI runs)
     python3 tools/lint.py --fix    # auto-fix what ruff can (e.g. unused imports)
 
@@ -334,6 +337,39 @@ def find_unused_last_assignments(source):
     return sorted(hits)
 
 
+def find_mixed_tuple_returns(source):
+    """(lineno, name) of each function whose own `return a, b` tuple literals differ in
+    length (CodeQL py/mixed-tuple-returns). A starred tuple, a call result and a nested
+    scope's returns do not count. Returns [] for unparseable source."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    hits = []
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            rets, _ = _scope_returns_yields(fn)
+            lengths = {len(r.value.elts) for r in rets if isinstance(r.value, ast.Tuple)
+                       and not any(isinstance(e, ast.Starred) for e in r.value.elts)}
+            if len(lengths) > 1:
+                hits.append((fn.lineno, fn.name))
+    return sorted(hits)
+
+
+def check_mixed_tuple_returns(root):
+    """(relpath, lineno, name) for every function in the repo that returns tuples of
+    different lengths."""
+    bad = []
+    for path in _python_files(root):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+        except OSError:
+            continue
+        bad += [(os.path.relpath(path, root), ln, name) for ln, name in find_mixed_tuple_returns(src)]
+    return sorted(bad)
+
+
 def _python_files(root):
     """Tracked .py files (git, so dist/runtime/incoming stay excluded); a plain
     walk is the fallback when git is unavailable."""
@@ -527,6 +563,13 @@ def main():
               "or build the string outside the list, so a missing comma cannot hide:")
         for relpath, lineno in concat:
             print(f"  {relpath}:{lineno}: adjacent strings joined inside a list")
+        rc = rc or 1
+    mixed = check_mixed_tuple_returns(ROOT)
+    if mixed:
+        print("\nmixed-tuple-returns (CodeQL py/mixed-tuple-returns): return tuples of one "
+              "length from a function:")
+        for relpath, lineno, name in mixed:
+            print(f"  {relpath}:{lineno}: {name}() returns tuples of different lengths")
         rc = rc or 1
     dead = check_unused_last_assignments(ROOT)
     if dead:

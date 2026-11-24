@@ -107,7 +107,14 @@ Everything that belongs to a **league**, gathered in one view (the model behind 
   apply the next time you (re)start the relay.
 - **League service** *(optional)*: with `LEAGUE_SERVICE_URL` and `LEAGUE_SERVICE_KEY` set,
   enter the reference the league's own service shows and **Load** the event's races and
-  widgets. See [Configuration](Configuration).
+  widgets. See [Configuration](Configuration). The relay sends each race's result to the
+  service when the race finishes and retries after a failure. The section lists what the
+  service answered per race: its status, message and an **Open ↗** link, with
+  **Refresh** while the status is `pending`. A refusal (for example an unknown race) is
+  final and shows the service's reason; a timeout or server error is retried. **Send result** sends the picked race again
+  and replaces the draft on the service; **Recording** sends the result a race recording
+  keeps, also after the event. Same as `racecast event result send` and
+  `racecast event result refresh`.
 - **Overlay CSS**: per-profile CSS for the relay-served **HUD** and **Timer** pages
   (`profiles/<active>/overlay/`; see [HUD overlays](HUD-Overlays)). **Save** writes the file;
   **Apply in OBS** reloads the browser sources (same as `obs refresh`). The first override on

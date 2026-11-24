@@ -2228,6 +2228,60 @@ def t_class_fastest_laps_show_the_driver_name_override():
         "the file keeps the registered name"
 
 
+def t_the_result_source_carries_roster_teams_best_laps_and_the_confirmed_fastest_lap():
+    ctx = {"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"}
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "driver-race.json")
+    dr.write_settings(path, {"formation": False})
+    clock = [0.0]
+    svc = dr.Service(path, pick=lambda: {"id": "good", "track": "Spa"}, trace_for=lambda _i: TRACE,
+                     multi_lobby=lambda: False, clock=lambda: clock[0], wall=lambda: 5000.0 + clock[0],
+                     context=lambda: ctx, recording_dir=d)
+    svc.open_recording()
+    _feed(svc, clock, "A", "a", -20.0, 6.0)
+    svc.tick()
+    _feed(svc, clock, "B", "b", -60.0, 9.0)
+    svc.set_fastest("rc:Anna", "B", "Max B", 61234)
+    svc.finish()
+    svc.tick()
+    assert svc.race_state() == "finished"
+    src = svc.result_source()
+    assert src["state"] == "finished" and src["track_name"] == "Spa", src
+    assert src["fastest"] == {"entry": "B", "driver": "Max B", "team": "", "ms": 61234}, src["fastest"]
+    a, b = src["entries"]
+    assert (a["pos"], a["entry"], a["number"], a["team"]) == (1, "A", "1", "Red Bulls"), a
+    assert b["best_ms"] == 61234 and a["best_ms"] is None, "a hand-set fastest lap is its car's best lap"
+    assert src["audit_path"].endswith(dr.AUDIT) and src["started_at"] is not None, src
+    flat = json.dumps(src["entries"])
+    for leak in ("conn", "quiet_s", "distance_m", "fuel_l", "compound", "x", "z"):
+        assert '"%s"' % leak not in flat, f"{leak} is no part of a result row"
+    assert svc.store_result({"ref": "M", "race": "leg-1", "finished_at": 1.0, "body": {}}) is True
+    _flush(svc)
+    import race_recording
+    assert race_recording.stored_results(svc._recorder()._store.path)[0]["race"] == "leg-1"
+
+
+def t_without_a_recording_the_result_source_still_has_the_classification():
+    ctx = {"roster": ROSTER, "stint": None, "remaining": None, "mode": "race"}
+    svc, clock, _path = _dash_service(ctx)
+    _feed(svc, clock, "A", "a", -20.0, 3.0)
+    src = svc.result_source()
+    assert [r["entry"] for r in src["entries"]] == ["A", "B"] and src["disconnects"] == [], \
+        "every roster entry stands in the classification"
+    assert src["started_at"] is None
+    assert svc.store_result({"ref": "M", "race": "leg-1", "finished_at": 1.0, "body": {}}) is False, \
+        "no recording to keep it in"
+    assert svc.race_state() is None, "no dashboard tick yet"
+
+
+def t_a_race_start_is_noted_in_the_audit_log():
+    svc, _clock, path = _dash_service({"roster": ROSTER, "mode": "race"})
+    svc.mark_race_start()
+    with open(dr.audit_path_for(path), encoding="utf-8") as fh:
+        last = json.loads(fh.read().splitlines()[-1])
+    assert (last["action"], last["who"]) == ("race_start", "race"), last
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

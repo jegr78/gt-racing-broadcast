@@ -212,4 +212,4 @@ components:
         status: { type: string, enum: [stored, pending] }
         message: { type: string, maxLength: 200 }
         link: { type: string, format: uri }
-        graphic_url: { type: string, format: uri, description: PNG on the service's own host }
+        graphic_url: { type: string, format: uri, description: "PNG up to 4 MB on the service URL's own scheme, host and port" }

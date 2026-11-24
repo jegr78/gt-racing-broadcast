@@ -1752,6 +1752,45 @@ def t_api_league_event_routes():
         httpd.shutdown()
 
 
+def t_api_league_result_routes():
+    sends, refreshes = [], []
+    ctx = _ctx()
+    ctx["active_profile"] = lambda: "demo"
+    ctx["league_result_send"] = lambda **kw: sends.append(kw) or (
+        {"ok": True, "race": kw["race"]} if kw["race"] != "bad" else {"ok": False, "error": "no result"})
+    ctx["league_result_refresh"] = lambda **kw: refreshes.append(kw) or {"ok": True, "status": {"status": "stored"}}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/league-result/send", {"race": "leg-1", "expectedProfile": "demo"})
+        assert code == 200 and json.loads(body)["race"] == "leg-1", body
+        code, body = _post_json(port, "/api/league-result/send",
+                                {"race": "leg-2", "recording": "race-recording-x.sqlite", "index": 2,
+                                 "expectedProfile": "demo"})
+        assert code == 200, body
+        code, body = _post_json(port, "/api/league-result/send", {"race": "bad", "expectedProfile": "demo"})
+        assert code == 400 and json.loads(body)["error"] == "no result", body
+        code, _b = _post_json(port, "/api/league-result/send", {"race": "leg-1", "expectedProfile": "other"})
+        assert code == 409, "a send for a league that is no longer active is refused"
+        for bad in ({"race": 5}, {"recording": 5}, {"index": "2"}, {"index": True}, {"ref": ["x"]}):
+            code, _b = _post_json(port, "/api/league-result/send", dict(bad, expectedProfile="demo"))
+            assert code == 400, bad
+        for rec in ("../race-recording-x.sqlite", "/tmp/race-recording-x.sqlite", "sub\\x.sqlite", ".."):
+            code, _b = _post_json(port, "/api/league-result/send", {"recording": rec, "expectedProfile": "demo"})
+            assert code == 400, f"{rec} is no file name in the runtime folder"
+        code, body = _post_json(port, "/api/league-result/send", ["leg-1"])
+        assert code == 400 and "malformed" in json.loads(body)["error"], "a body that is no object is refused"
+        code, body = _post_json(port, "/api/league-result/refresh", {"race": "leg-1", "expectedProfile": "demo"})
+        assert code == 200 and json.loads(body)["status"]["status"] == "stored", body
+        code, _b = _post_json(port, "/api/league-result/refresh", {"race": "leg-1", "expectedProfile": "x"})
+        assert code == 409
+        assert sends == [{"race": "leg-1", "recording": None, "index": None, "ref": None},
+                         {"race": "leg-2", "recording": "race-recording-x.sqlite", "index": 2, "ref": None},
+                         {"race": "bad", "recording": None, "index": None, "ref": None}], sends
+        assert refreshes == [{"race": "leg-1", "ref": None}], refreshes
+    finally:
+        httpd.shutdown()
+
+
 def t_gt7_data_routes():
     httpd, port = _serve(_ctx())
     try:

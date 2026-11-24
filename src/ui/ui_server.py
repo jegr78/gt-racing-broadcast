@@ -1217,6 +1217,31 @@ def make_handler(ctx):
                     return self._json({"ok": False, "error": f"could not load the league event: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path in ("/api/league-result/send", "/api/league-result/refresh"):
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error}, code=400)
+                if (body.get("expectedProfile") or None) != (ctx.get("active_profile", lambda: None)() or None):
+                    return self._json({"ok": False, "error": "Active league changed. Reload and try again"},
+                                      code=409)
+                args = {k: body.get(k) for k in ("race", "ref")}
+                if path.endswith("/send"):
+                    args.update(recording=body.get("recording"), index=body.get("index"))
+                if any(v is not None and not isinstance(v, str) for k, v in args.items() if k != "index") or \
+                        (args.get("index") is not None and (isinstance(args["index"], bool)
+                                                            or not isinstance(args["index"], int))):
+                    return self._json({"ok": False, "error": "race, ref and recording are text, index a number"},
+                                      code=400)
+                rec = args.get("recording")
+                if rec is not None and (rec != os.path.basename(rec) or "\\" in rec or rec in ("", ".", "..")):
+                    return self._json({"ok": False, "error": "recording is a file name in the profile's runtime folder"},
+                                      code=400)
+                key = "league_result_send" if path.endswith("/send") else "league_result_refresh"
+                try:
+                    result = ctx[key](**args)
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"the league result action failed: {exc}"}, code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/profile/use":
                 body = self._body_json()
                 if body is None:

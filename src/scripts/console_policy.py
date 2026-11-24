@@ -123,6 +123,8 @@ def min_capability(segments, method="GET"):
         return Requirement(DIRECTOR, False)
     if p in (["event", "title"], ["event", "track"]):
         return Requirement(DIRECTOR, False)
+    if p and p[0] == "league":                  # league result status and actions (#1254)
+        return Requirement(DIRECTOR, False)
     # Driver telemetry: connections, readiness and the race with its actions (#1114).
     # The delayed dashboard and its track line: the cockpit's view, no controls.
     if method == "GET" and (p in (["drivers", "dashboard"], ["drivers", "line"])

@@ -93,6 +93,9 @@ Ctrl+C ends inspection; never use broad `pkill` commands to stop test services.
   already runs `tests/test_e2e.py` via `run-tests.py`. After the checks it loads the league
   event in a `--simulation` app home of its own (`profiles/demo`) against the simulated
   league service: `racecast event league`, the Control Center routes and `event stop`.
+  A relay of that home then finishes a race and sends the result, the Director's resend
+  replaces it, and after the relay stops `racecast event result send` sends it from the
+  race recording (#1254).
 - **Solo coaching** (`--coach-only`, **CI-runnable on Linux, Windows and macOS**):
   copies the committed `solo-pov` profile into an owned temporary app home, clears inherited
   `RACECAST_*` configuration and uses a loopback OBS stand-in and synthetic replay.
@@ -413,7 +416,9 @@ Assets tab, the Discord payload builders, the relay's own `Relay._discord_post`,
 `league_sim.py` answers every call of `src/docs/design/league-service.openapi.yaml` under
 `/racecast`: `GET /v1/event?ref=` (one two-leg event, ref `SIM-MATCH-1`, a `score` and a
 `table` widget), `POST /v1/live` (a stand-in league computation from the posted rows),
-`POST /v1/result` (stores the draft, a resend replaces it) and `GET /v1/result?ref=&race=`.
+`POST /v1/result` (stores the draft, a resend replaces it), `GET /v1/result?ref=&race=`
+and, with `graphic=True` (`--graphic`), a `graphic_url` in every status served as
+`GET /v1/graphic/<race>.png` (`graphic_body`, call `graphic`).
 A wrong or missing bearer key gets 401 and counts in `unauthorized`; a body off the
 contract gets 400 with the reason and counts in `rejected`. Accepted calls land in
 `calls(since, call)` with the User-Agent and the body, never the key. `answer(call,
