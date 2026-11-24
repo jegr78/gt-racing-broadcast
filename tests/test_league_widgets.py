@@ -600,11 +600,10 @@ def t_the_answer_history_covers_the_longest_delay_and_stays_bounded():
         clock = _Clock()
         live, _snap = _live(d, sim, clock=clock)
         for _ in range(400):
-            clock.t += ls.MIN_GAP_S
-            live.client._last_sent = None
+            clock.t += ls.TICK_S
             live.client.step()
         kept = max(len(h) for h in live.client._history.values())
-        assert kept <= ls.HISTORY_S / ls.MIN_GAP_S + 1, f"{kept} answers kept per widget"
+        assert kept <= ls.HISTORY_S / ls.TICK_S + 1, f"{kept} answers kept per widget, older than HISTORY_S"
 
 
 def _timing_data(live, delay_s, publisher=None):
@@ -630,7 +629,8 @@ def t_the_public_timing_body_carries_the_delayed_block_and_the_host_the_same():
         live.client.step()
         clock.t += 20
         body, hosted = _timing_data(live, 20, publisher=True)
-        assert [w["id"] for w in body["league"]] == ["match-score", "standings"], body
+        assert [w["id"] for w in body.get("league", [])] == ["match-score", "standings"], \
+            f"the switch puts every event widget in the public body: {body}"
         assert hosted == body, "the timing host carries the same body, block included"
         body, _ = _timing_data(live, 30)
         assert "league" not in body, f"a value newer than the delay stays off the page: {body}"
