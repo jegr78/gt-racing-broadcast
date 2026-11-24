@@ -491,6 +491,8 @@ pulls run: it writes each stand-in to a temporary file and replaces it, moving a
 missing. A relative `--ffmpeg` path is made absolute.
 The CI e2e job sets `OBS_SIM_REQUIRE_FFMPEG=1`, so the real-ffmpeg tests cannot skip there,
 and only there do they also require drawtext to find a default font.
+CI gets that ffmpeg from `.github/actions/install-ffmpeg`, a pinned and checksummed static
+build, never from the runner's apt mirror.
 
 ## Event simulation engine (`tools/event-sim/event_sim.py`, #1232)
 

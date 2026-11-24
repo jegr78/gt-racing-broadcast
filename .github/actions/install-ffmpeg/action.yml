@@ -1,0 +1,28 @@
+name: Install ffmpeg
+description: >-
+  Puts a pinned, checksum-verified static Linux ffmpeg build on PATH for the
+  following steps. It downloads from a GitHub release, not the runner's apt mirror.
+  Callers set a step timeout-minutes of at least 6. Three 90 s attempts fit into it.
+runs:
+  using: composite
+  steps:
+    - name: Download, verify and unpack ffmpeg
+      shell: bash
+      env:
+        # BtbN keeps its month-end autobuilds; the daily ones are pruned.
+        FFMPEG_RELEASE: autobuild-2026-10-31-12-59
+        FFMPEG_BUILD: ffmpeg-n8.1.3-27-g8dca1586f4-linux64-gpl-8.1
+        FFMPEG_SHA256: 41e9c565594c390622cf968d82fa4135d9e9a11d06c1515644288cbc844e3380
+      run: |
+        dir="$RUNNER_TEMP/ffmpeg"
+        mkdir -p "$dir/bin"
+        url="https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_RELEASE}/${FFMPEG_BUILD}.tar.xz"
+        if ! curl -sSfL --retry 2 --retry-delay 5 --retry-all-errors --connect-timeout 20 --max-time 90 -o "$dir/ffmpeg.tar.xz" "$url"; then
+          echo "::error::ffmpeg download failed or was too slow: $url"
+          exit 1
+        fi
+        echo "${FFMPEG_SHA256}  $dir/ffmpeg.tar.xz" | sha256sum -c -
+        tar -xJf "$dir/ffmpeg.tar.xz" -C "$dir/bin" --strip-components=2 "${FFMPEG_BUILD}/bin/ffmpeg"
+        rm "$dir/ffmpeg.tar.xz"
+        "$dir/bin/ffmpeg" -hide_banner -version | sed -n 1p
+        echo "$dir/bin" >> "$GITHUB_PATH"

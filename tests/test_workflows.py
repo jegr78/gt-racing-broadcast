@@ -9,6 +9,8 @@ import glob, os, re
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 WF_DIR = os.path.join(ROOT, ".github", "workflows")
+ACTIONS_DIR = os.path.join(ROOT, ".github", "actions")
+FFMPEG_ACTION = os.path.join(ACTIONS_DIR, "install-ffmpeg", "action.yml")
 
 _USES_RE = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
 _SHA_RE = re.compile(r"@[0-9a-f]{40}$")
@@ -85,10 +87,10 @@ def t_workflow_downloads_retry_transient_server_errors():
     # #1097: one GitHub 504 on the pinned gitleaks download failed a required check.
     # The checksum still guards the artifact, so a bounded retry is safe.
     found = 0
-    for name in sorted(os.listdir(WF_DIR)):
-        if not name.endswith((".yml", ".yaml")):
-            continue
-        with open(os.path.join(WF_DIR, name), encoding="utf-8") as fh:
+    paths = sorted(glob.glob(os.path.join(WF_DIR, "*.yml")) + glob.glob(os.path.join(ACTIONS_DIR, "*", "action.yml")))
+    for path in paths:
+        name = os.path.relpath(path, ROOT)
+        with open(path, encoding="utf-8") as fh:
             for line in fh:
                 if re.search(r"(^|[\s;|&(])curl\s", line):
                     found += 1
@@ -103,6 +105,39 @@ def t_plain_scalars_have_no_bare_colon():
     assert not offenders, ("an unquoted value containing ': ' breaks the YAML parser "
                            "and the workflow never runs; quote it or reword: "
                            + "; ".join(offenders))
+
+
+def _workflow_steps(base):
+    """Step bodies of one workflow, split on the step-level `- name:` / `- uses:` lines."""
+    with open(os.path.join(WF_DIR, base), encoding="utf-8") as fh:
+        return re.split(r"\n(?=      - (?:name|uses):)", fh.read())[1:]
+
+
+def t_ffmpeg_never_comes_from_the_apt_mirror():
+    for base in sorted(os.listdir(WF_DIR)):
+        if not base.endswith(".yml"):
+            continue
+        with open(os.path.join(WF_DIR, base), encoding="utf-8") as fh:
+            for i, line in enumerate(fh, 1):
+                assert not ("apt-get install" in line and "ffmpeg" in line), (
+                    f"{base}:{i} installs ffmpeg from the runner's apt mirror; use ./.github/actions/install-ffmpeg")
+
+
+def t_the_ffmpeg_download_is_pinned_and_checksummed():
+    with open(FFMPEG_ACTION, encoding="utf-8") as fh:
+        text = fh.read()
+    assert re.search(r"FFMPEG_RELEASE: autobuild-\d{4}-\d{2}-\d{2}-", text), "the ffmpeg build must come from a dated release tag"
+    assert "latest" not in text.lower(), "the ffmpeg build must not follow a moving 'latest'"
+    assert re.search(r"\b[0-9a-f]{64}\b", text) and "sha256sum -c" in text, "the ffmpeg download must be sha256-checked"
+    assert "--max-time" in text, "a throttled download must fail inside the step timeout, not hang"
+
+
+def t_both_ffmpeg_workflows_use_the_shared_action_under_a_step_timeout():
+    for base in ("ci.yml", "event-sim.yml"):
+        steps = [body for body in _workflow_steps(base) if "uses: ./.github/actions/install-ffmpeg" in body]
+        assert len(steps) == 1, f"{base} installs ffmpeg through the shared action exactly once"
+        assert re.search(r"^\s+timeout-minutes:\s*\d+\s*$", steps[0], re.M), (
+            f"{base}: the ffmpeg install needs a step timeout-minutes so a slow download fails fast")
 
 
 def _preview_step(name):
