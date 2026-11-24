@@ -171,6 +171,17 @@ def t_a_sender_that_stopped_is_measured_over_the_time_it_sent():
     assert all(r["device_hz"] == 60.0 for r in rows), f"no low minute after the sender stopped: {rows}"
 
 
+def t_a_restarted_sender_counts_from_zero_again():
+    polls = []
+    for i, dev in enumerate([716, 30, 90, 150, 20, 80]):          # a check, then two sender runs
+        polls.append(ps.compact(1000.0 + i, {"connections": [_conn("ca", "Ann", "Team A", 60 * i, dev)]},
+                                None, None))
+    ann = ps.sender_summary(polls)[0]
+    assert ann["device_hz"] == 46.0, f"(150 + 80) packets in 5 s, not the check's count: {ann}"
+    rows = ps.hz_by_minute(polls)[ps.tag("ca")]["rows"]
+    assert rows[0]["device_hz"] == 46.0, rows
+
+
 def t_the_sender_summary_reports_device_and_relay_rates_and_latency():
     rows = {r["name"]: r for r in ps.sender_summary(_polls())}
     ann = rows["Ann"]

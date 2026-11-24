@@ -9,6 +9,7 @@ race recording CSV and writes `report.md` and `analysis.json`; its result is
 `probe_stage2.facts`. Needs `[event] probe = true` for the spectator."""
 import http.client
 import importlib.util
+import io
 import os
 import shutil
 import socket
@@ -153,7 +154,7 @@ class ProbeRole(Role):
         ps5 = _Ps5(synthetic_packets(self._length(), args.get("position"), args.get("cars")), rx)
         name = str(args.get("name") or "Spectator")
         os.makedirs(self.out, exist_ok=True)
-        log = open(os.path.join(self.out, "spectator-sender.log"), "w", encoding="utf-8")  # noqa: SIM115  kept open for the process
+        log = io.open(os.path.join(self.out, "spectator-sender.log"), "w", encoding="utf-8")  # noqa: SIM115  kept open for the process
         proc = subprocess.Popen([sys.executable, SENDER, "--url", self.ctx.url("relay") + "/console/probe/ingest",
                                  "--key", probe["key"], "--name", name] + _sender_args(ps5, rx),
                                 stdout=log, stderr=subprocess.STDOUT)
@@ -199,7 +200,7 @@ class ProbeRole(Role):
             ps5.close()
         lines = [line for line in done.stdout.splitlines() if " check " in line or "RESULT" in line]
         os.makedirs(self.out, exist_ok=True)
-        with open(os.path.join(self.out, "check.log"), "w", encoding="utf-8") as fh:
+        with io.open(os.path.join(self.out, "check.log"), "w", encoding="utf-8") as fh:
             fh.write(done.stdout)
         return {"ok": done.returncode == 0, "lines": lines, "result": lines[-1] if lines else ""}
 
@@ -213,7 +214,7 @@ class ProbeRole(Role):
         finally:
             conn.close()
         if resp.status == 200:
-            with open(os.path.join(self.out, "race-recording.csv"), "wb") as fh:
+            with io.open(os.path.join(self.out, "race-recording.csv"), "wb") as fh:
                 fh.write(body)
         return resp.status
 
@@ -228,7 +229,7 @@ class ProbeRole(Role):
             csv_status = str(exc)
         polls, marks = probe_stage2.load(self.out)
         a = probe_stage2.analyse(polls, marks)
-        with open(os.path.join(self.out, "report.md"), "w", encoding="utf-8") as fh:
+        with io.open(os.path.join(self.out, "report.md"), "w", encoding="utf-8") as fh:
             fh.write(probe_stage2.report_md(a))
         facts = probe_stage2.facts(a)
         return dict(facts, csv=csv_status)

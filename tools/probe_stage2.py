@@ -325,6 +325,16 @@ def _active(series):
     return series[:end + 1]
 
 
+def _rise(series, sub, key):
+    """How much a counter rose over `series`; a drop is a restarted sender, which counts
+    from zero again. None when the counter never appears."""
+    vals = [_num((c.get(sub) or {}).get(key)) for _t, c in series]
+    vals = [v for v in vals if v is not None]
+    if not vals:
+        return None
+    return sum(b - a if b >= a else b for a, b in zip(vals, vals[1:], strict=False))
+
+
 def _spread(values):
     vals = sorted(v for v in values if v is not None)
     if not vals:
@@ -338,23 +348,21 @@ def sender_summary(polls):
         active = _active(s["series"])
         first, last = active[0], active[-1]
         span = last[0] - first[0]
-        pk0, pk1 = first[1].get("packets") or {}, last[1].get("packets") or {}
-        sd0, sd1 = first[1].get("sender") or {}, last[1].get("sender") or {}
 
-        def delta(a, b, k):
-            x, y = _num(a.get(k)), _num(b.get(k))
-            return None if x is None or y is None else max(0, y - x)
-        rx, dev = delta(pk0, pk1, "received"), delta(sd0, sd1, "received")
-        lost = delta(pk0, pk1, "lost")
+        def pk(k, active=active):
+            return _rise(active, "packets", k)
+
+        def sd(k, active=active):
+            return _rise(active, "sender", k)
+        rx, dev, lost = pk("received"), sd("received"), pk("lost")
         rows.append({
             "key": key, "name": s["name"], "entry": s["entry"], "segment": s["segment"], "kind": s["kind"],
             "seconds": round(span, 1), "polls": len(active),
             "relay_hz": None if rx is None or span <= 0 else round(rx / span, 1),
             "device_hz": None if dev is None or span <= 0 else round(dev / span, 1),
             "lost": lost, "lost_pct": None if not rx or lost is None else round(100.0 * lost / (rx + lost), 3),
-            "reordered": delta(pk0, pk1, "reordered"), "decrypt_failed": delta(pk0, pk1, "decrypt_failed"),
-            "interruptions": delta(sd0, sd1, "interruptions"), "post_failed": delta(sd0, sd1, "post_failed"),
-            "dropped": delta(sd0, sd1, "dropped"),
+            "reordered": pk("reordered"), "decrypt_failed": pk("decrypt_failed"),
+            "interruptions": sd("interruptions"), "post_failed": sd("post_failed"), "dropped": sd("dropped"),
             "post_ms_p50": _spread(p[1].get("sender", {}).get("post_ms_p50") for p in active),
             "post_ms_p95": _spread(p[1].get("sender", {}).get("post_ms_p95") for p in active),
             "max_idle_s": max((_num(p[1].get("idle_s")) or 0.0 for p in active), default=None),
@@ -375,12 +383,16 @@ def hz_by_minute(polls, marks=()):
             buckets.setdefault(int((t - t0) // 60), []).append((t, c))
         for minute in sorted(buckets):
             pts = buckets[minute]
-            prev = next((p for p in reversed(series) if p[0] < pts[0][0]), None) or pts[0]
-            end = pts[-1]
+            prev = [p for p in series if p[0] < pts[0][0]][-1:]
+            span = prev + pts
+            dt = span[-1][0] - span[0][0]
+
+            def hz(sub, span=span, dt=dt):
+                n = _rise(span, sub, "received")
+                return None if n is None or dt <= 0 else round(n / dt, 1)
             rows.append({"minute": minute, "block": _block_at(marks, pts[0][0]),
-                         "device_hz": _rnd(_rate(prev, end, "received", "sender")),
-                         "relay_hz": _rnd(_rate(prev, end, "received", "packets")),
-                         "interruptions": (end[1].get("sender") or {}).get("interruptions")})
+                         "device_hz": hz("sender"), "relay_hz": hz("packets"),
+                         "interruptions": _rise(span, "sender", "interruptions")})
         out[key] = {"name": s["name"], "entry": s["entry"], "rows": rows}
     return out
 
