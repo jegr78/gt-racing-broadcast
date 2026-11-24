@@ -357,10 +357,10 @@ a disconnect, a rejection) ask for a second press within four seconds.
 
 ![Director Panel: the Race area with the race controls, the desk tabs and the race order](images/director-panel-drivers.png)
 
-### League result
+### League service
 
 With a league event loaded from the league service, the **Race** area shows a **League
-result** card under the race desk. The relay sends the race's result when it finishes;
+service** card under the race desk. The relay sends the race's result when it finishes;
 the card shows what the service answered and **SEND AGAIN** sends it once more after a
 correction (it replaces the draft). The select is the current race: the next race
 becomes current when a new race starts counting after the finish. Picking a race by hand
@@ -369,7 +369,17 @@ result is sent. When the service returns a result graphic, the card shows it;
 **USE AS RACE RESULTS** copies it over the Race Results graphic and the **RACE RESULTS**
 key then puts it on air. The graphic never goes on air by itself.
 
-![Director Panel: the League result card with the current race, the service's answer and its graphic](images/director-panel-league.png)
+The card also lists the event's **widgets**, for example a team score or a championship
+table that the league service computes from the live race. Each one starts hidden;
+**SHOW** puts it on air and **HIDE** takes it off. A widget appears only in the scenes
+where the producer placed it in the Overlay builder, and only while the service answers:
+30 seconds after the last good answer it hides by itself, and the card says why (for
+example "no good answer from the league service for 31 s" with the service's error). A
+widget the service no longer lists stays in the list without a switch. A relay restart
+hides every widget again. On the Companion board, **LEAGUE WIDGET 1** and **LEAGUE
+WIDGET 2** (page 3) switch the first and second widget of the event's list.
+
+![Director Panel: the League service card with the current race, the result line and the two widgets, one on air](images/director-panel-league.png)
 
 ### Warning banners
 
@@ -667,7 +677,7 @@ stay dark and light up while their graphic is on air.
 > link answers an error and OBS stays unchanged. The panel's **Flag Gfx** row is the
 > equivalent control; it shows only the linked flags, Checkered included.
 
-![Companion page 3, flags & graphics: the race-condition flag and flag-graphic rows, the pre-race info and starting-grid toggles, the standings/results/weather overlays, and the per-row grid reveals](images/companion-page3-flags-graphics.png)
+![Companion page 3, flags & graphics: the race-condition flag and flag-graphic rows, the pre-race info and starting-grid toggles, the standings/results/weather overlays, the two league widget switches, and the per-row grid reveals](images/companion-page3-flags-graphics.png)
 
 How the board is imported and built: [Companion](Companion).
 

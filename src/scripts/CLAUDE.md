@@ -72,6 +72,9 @@ Config comes from **two layers** and one resolver:
   Control Center Profile view, cleared by `event stop` in `_stop_driver_invite`). In
   simulation `RACECAST_SIM_LEAGUE_SERVICE_URL`/`_KEY` replace both values. The relay
   reads both from `RACECAST_PROFILE_ENV_FILE` per send (`league_service.relay_settings`).
+  `league_widgets.py` (#1255) keeps the event's widget list in
+  `profiles/<name>/league-widgets.json` (an unlisted widget stays, marked), injects placed
+  widgets into the overlay pages and holds the relay's `Live` sender and on-air switch.
   `league_result.py` (#1254) is the result export: `Exporter` watches the race state on
   the dashboard tick (`finished` builds and queues the Result, a race that starts counting
   after a finish moves `league-event.json` to the next race or marks it `done`), keeps the

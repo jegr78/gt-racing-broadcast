@@ -323,6 +323,30 @@ naming convention is **`GT Racing Endurance: <league>`** (set via the profile's
 > [main repository](https://github.com/jegr78/gt-racing-broadcast): don't edit it
 > here by hand. See [Build & maintenance](Build-and-maintenance).
 
+## League service widgets
+
+With a league service configured (see [Configuration](Configuration)), loading the
+league's event also loads its **widgets**: values the service computes from the live
+race, either a **score** (up to eight labelled values, for example two teams and their
+points) or a **table** (ranked rows with a name and a value). racecast draws both itself
+in the scene's look and shows every text from the service as plain text.
+
+Open **Profile → Overlay Builder → League widgets** and click **Place in this scene** for
+each widget the scene should carry. The canvas shows the widget with the sample values
+the service sent with the event, so the layout works without a running race. Move,
+resize and restyle it like any other slot (position, size, font, colours, border), then
+**Save** and **Apply in OBS**. Each scene keeps its own placement: the HUD, Intermission
+and the Split HUD can show the same widget in different places. The driver dashboard has
+no league widgets.
+
+A placed widget stays hidden on air until the Director shows it
+([Director → League service](Director#league-service)). If the league service stops
+listing a widget, the builder keeps it dimmed and marked "no longer listed": its placement
+stays, and it stays hidden on air until the service lists it again. The widget list lives
+in `profiles/<name>/league-widgets.json` and travels with a profile export.
+
+![Overlay builder: the HUD with the league's Match score and Championship table placed, filled with the service's sample values](images/cc-league-widgets.png)
+
 ## Audience counters and goals
 
 Open **Profile → Overlay Builder → Audience widgets**. Create a named manual
