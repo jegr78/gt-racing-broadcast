@@ -95,6 +95,12 @@ def _read_pointer(runtime_dir):
     return None
 
 
+def current_path(runtime_dir):
+    """The path of the recording the pointer names, or None."""
+    name = _read_pointer(runtime_dir)
+    return os.path.join(runtime_dir, name) if name else None
+
+
 def open_current(runtime_dir, wall):
     """Open the recording the pointer names, or create a new file and pointer."""
     os.makedirs(runtime_dir, exist_ok=True)

@@ -211,6 +211,11 @@
   #trackNote{color:#ffd361}
   #trackSec .fld{min-width:0}
   #trackPick{width:100%;min-width:0}
+  #leagueSec .fld{min-width:0}
+  #leagueRace{width:100%;min-width:0}
+  #leagueNote{color:#ffd361}
+  #leagueState.failed{color:#ff8080}
+  #leagueGfx img{max-width:100%;max-height:160px;border:1px solid var(--edge);border-radius:6px;display:block;margin:8px 0}
   #feedHealth .downline{color:#ff8080;font-weight:600}
 
   /* Setup dropdowns (sheet-backed) */
@@ -937,6 +942,22 @@
           <div class="desksub" id="deskPane-qualifying" data-sub="qualifying" role="tabpanel" aria-labelledby="deskTab-qualifying"><div data-desk="qualifying"></div></div>
           <div class="desksub" id="deskPane-dashboard" data-sub="dashboard" role="tabpanel" aria-labelledby="deskTab-dashboard"><div data-desk="dashboard"></div></div>
           <div class="desksub" id="deskPane-setup" data-sub="setup" role="tabpanel" aria-labelledby="deskTab-setup"><div data-desk="setup"></div></div>
+        </section>
+        <section class="bus" id="leagueSec" hidden><div class="cap">League result</div>
+          <div class="body">
+            <div class="setrow"><div class="fld" style="flex:1 1 260px">
+              <label for="leagueRace" id="leagueEvent">Current race</label>
+              <select id="leagueRace"></select>
+            </div>
+            <button class="k" id="leagueSend" title="Send this race's result to the league service again; it replaces the draft">SEND AGAIN</button></div>
+            <div class="hint" id="leagueState"></div>
+            <div class="hint" id="leagueNote" hidden></div>
+            <div id="leagueGfx" hidden>
+              <img id="leagueGfxImg" alt="Result graphic from the league service">
+              <button class="k" id="leagueTake" title="Copy this graphic over the Race Results graphic; RACE RESULTS then puts it on air">USE AS RACE RESULTS</button>
+            </div>
+            <div class="hint">The relay sends each race's result when it finishes. The next race becomes current when a new race starts counting after the finish. A graphic from the league service never goes on air by itself.</div>
+          </div>
         </section>
       </div>
       <div class="area" data-area="broadcast">
@@ -2391,6 +2412,64 @@ $("#trackPick").addEventListener("change", async (e)=>{
     renderTrackPick(d);
   }catch(err){ log("Track layout failed (relay reachable?): " + err, "err"); toast("Track layout failed: relay unreachable"); }
 });
+
+/* League result export (#1254) */
+let leagueGfxRace = null;
+function leagueResultLine(r){
+  if (!r) return "No result sent for this race yet.";
+  if (r.state === "failed") return "Not sent: " + (r.error || "failed") + ". The relay retries.";
+  if (r.state === "sending") return "Sending…";
+  return "League service: " + (r.status || "sent") + (r.message ? " · " + r.message : "")
+    + (r.graphic_error ? " · graphic refused: " + r.graphic_error : "");
+}
+function renderLeague(d){
+  const sec = $("#leagueSec");
+  const ev = d && d.event;
+  sec.hidden = !ev;
+  if (!ev) return;
+  const sel = $("#leagueRace");
+  const opts = ev.races.map(r => r.race).join("\n");
+  if (sel.dataset.races !== opts){
+    sel.textContent = "";
+    for (const r of ev.races) sel.appendChild(new Option(r.title ? r.title + " (" + r.race + ")" : r.race, r.race));
+    sel.dataset.races = opts;
+  }
+  if (document.activeElement !== sel) sel.value = ev.current;
+  $("#leagueEvent").textContent = "Current race of " + ev.ref + (ev.finished ? " · finished" : "");
+  const res = (d.results || []).find(r => r.race === ev.current);
+  const queued = (d.queued || []).find(q => q.race === ev.current);
+  const st = $("#leagueState");
+  st.textContent = leagueResultLine(res) + (queued && queued.tries ? " (" + queued.tries + " tries)" : "");
+  st.classList.toggle("failed", !!res && res.state === "failed");
+  $("#leagueNote").textContent = d.note || (!d.configured ? (d.problem || "No league service configured.") : "");
+  $("#leagueNote").hidden = !$("#leagueNote").textContent;
+  const gfx = res && res.graphic ? ev.current : null;
+  $("#leagueGfx").hidden = !gfx;
+  if (gfx && (gfx !== leagueGfxRace || res.updated_at !== $("#leagueGfxImg").dataset.at)){
+    $("#leagueGfxImg").src = "/league/graphic?race=" + encodeURIComponent(gfx) + "&t=" + (res.updated_at || 0);
+    $("#leagueGfxImg").dataset.at = res.updated_at;
+  }
+  leagueGfxRace = gfx;
+}
+async function leaguePoll(){
+  try{
+    const r = await fetch("/league/status", {cache:"no-store"});
+    renderLeague(r.ok ? await r.json() : null);
+  }catch(e){ /* relay unreachable: the relay poll says so */ }
+}
+async function leaguePost(path, body, what){
+  try{
+    const r = await fetch(path, {method:"POST", cache:"no-store",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!d.ok){ log(what + ": " + (d.error || "refused"), "err"); toast(what + ": " + (d.error || "refused")); return; }
+    log(what + " ok");
+    leaguePoll();
+  }catch(err){ log(what + " failed (relay reachable?): " + err, "err"); toast(what + " failed: relay unreachable"); }
+}
+$("#leagueRace").addEventListener("change", e => leaguePost("/league/race", {race: e.target.value}, "League race → " + e.target.value));
+$("#leagueSend").addEventListener("click", () => leaguePost("/league/result/send", {race: $("#leagueRace").value}, "League result sent again"));
+$("#leagueTake").addEventListener("click", () => leaguePost("/league/graphic/take", {race: leagueGfxRace}, "League graphic is the Race Results graphic"));
 
 async function relayPoll(){
   try{
@@ -4071,6 +4150,7 @@ relayPoll(); timerPoll();
 setInterval(relayPoll, 2000);
 setInterval(timerPoll, 2000);
 setupPoll(); setInterval(setupPoll, 2000);
+leaguePoll(); setInterval(() => { if (!document.hidden) leaguePoll(); }, 3000);
 chatPoll(); setInterval(chatPoll, 2000);
 bchatPoll(); bchatTimer = setInterval(bchatPoll, 4000);
 loadGraphics(); setInterval(() => { if(!document.hidden) loadGraphics(); },3000);

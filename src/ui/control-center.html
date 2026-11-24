@@ -359,7 +359,7 @@
 
         <section>
           <div class="viewhead"><h3>League service</h3>
-            <span class="sub">the league's own management service: event, races, widgets</span></div>
+            <span class="sub">the league's own management service: event, races, widgets, results</span></div>
           <div class="row"><span class="name">Service</span>
             <span class="dim grow" id="ls-status">…</span></div>
           <div class="row"><span class="name">Event</span>
@@ -371,8 +371,17 @@
             <div class="row"><span class="name">Loaded</span><span class="grow" id="ls-title"></span></div>
             <div class="row"><span class="name">Races</span><span class="dim grow" id="ls-races"></span></div>
             <div class="row"><span class="name">Widgets</span><span class="dim grow" id="ls-widgets"></span></div>
+            <div class="row"><span class="name">Result</span>
+              <select id="ls-result-race" class="grow" aria-label="Race whose result to send"></select>
+              <button id="ls-send" onclick="sendLeagueResult()" title="Send this race's result again; it replaces the draft on the league service">Send result</button></div>
           </div>
-          <p class="envhint">Set <b>LEAGUE_SERVICE_URL</b> (https only) and <b>LEAGUE_SERVICE_KEY</b> above, then enter the reference the league service shows for the match or event and <b>Load</b>. racecast keeps the races and the current race until <b>Stop event</b>. Same as <code>racecast event league REF</code>.</p>
+          <div class="row" id="ls-rec-row" hidden><span class="name">Recording</span>
+            <select id="ls-rec" class="grow" aria-label="Race result kept in a race recording"></select>
+            <button id="ls-rec-send" onclick="sendLeagueResultFromRecording()" title="Send the result this race recording keeps, also after the event">Send</button></div>
+          <div class="enverr" id="ls-result-err" hidden></div>
+          <div id="ls-results"></div>
+          <p class="envhint">Set <b>LEAGUE_SERVICE_URL</b> (https only) and <b>LEAGUE_SERVICE_KEY</b> above, then enter the reference the league service shows for the match or event and <b>Load</b>. racecast keeps the races and the current race until <b>Stop event</b>. Same as <code>racecast event league REF</code>.
+            The relay sends each race's result when it finishes and retries after a failure. <b>Send result</b> sends it again, <b>Recording</b> sends the result a race recording keeps, also after the event. Same as <code>racecast event result send</code>.</p>
         </section>
 
         <section>
@@ -3091,12 +3100,97 @@ function showLeagueEvent(d) {
     + (r.race === ev.current ? ' (current)' : '')).join(' · ');
   $('ls-widgets').textContent = ev.widgets.length
     ? ev.widgets.map(w => w.title + ' (' + w.form + ')').join(', ') : 'none offered';
+  const sel = $('ls-result-race'), keep = sel.value;
+  sel.textContent = '';
+  ev.races.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r.race;
+    o.textContent = (r.title || r.race) + (r.race === ev.current ? ' (current)' : '');
+    sel.appendChild(o);
+  });
+  sel.value = ev.races.some(r => r.race === keep) ? keep : ev.current;
+  $('ls-send').disabled = !d.configured;
+}
+function leagueResultText(r) {
+  if (r.state === 'failed') return 'not sent: ' + (r.error || 'failed') + ' (retrying while the relay runs)';
+  if (r.state === 'sending') return 'sending…';
+  let t = r.status || 'sent';
+  if (r.message) t += ' · ' + r.message;
+  if (r.graphic) t += ' · graphic ready for the Director';
+  else if (r.graphic_error) t += ' · graphic refused: ' + r.graphic_error;
+  return t;
+}
+function showLeagueResults(d) {
+  const box = $('ls-results');
+  box.textContent = '';
+  (d.results || []).forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = r.race;
+    name.title = r.ref || '';
+    const text = document.createElement('span');
+    text.className = 'grow' + (r.state === 'failed' ? ' enverr' : '');
+    text.textContent = leagueResultText(r);
+    row.append(name, text);
+    if (r.link && /^https:\/\//.test(r.link)) {
+      const a = document.createElement('a');
+      a.href = r.link; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'Open ↗';
+      row.appendChild(a);
+    }
+    if (r.status === 'pending' && d.configured) {
+      const b = document.createElement('button');
+      b.textContent = 'Refresh';
+      b.title = 'Ask the league service for the current status';
+      b.onclick = () => refreshLeagueResult(r.race, r.ref, b);
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+  });
+  const recs = d.recordings || [];
+  $('ls-rec-row').hidden = !recs.length || !d.configured;
+  const sel = $('ls-rec'), keep = sel.value;
+  sel.textContent = '';
+  recs.forEach(f => f.results.forEach(r => {
+    const o = document.createElement('option');
+    o.value = JSON.stringify({recording: f.file, index: r.index});
+    const when = r.finished_at ? new Date(r.finished_at * 1000).toLocaleString() : '';
+    o.textContent = (r.race || 'no league race') + (r.ref ? ' of ' + r.ref : '') + ' · finished ' + when
+      + ' · ' + f.file;
+    sel.appendChild(o);
+  }));
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+async function leagueResultAction(path, payload, button) {
+  $('ls-result-err').hidden = true;
+  if (button) button.disabled = true;
+  let d;
+  try {
+    d = await (await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(Object.assign({expectedProfile: activeProfile}, payload))})).json();
+  } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  if (button) button.disabled = false;
+  if (!d.ok) { $('ls-result-err').hidden = false; $('ls-result-err').textContent = d.error || 'failed'; }
+  await loadLeagueEvent();
+}
+function sendLeagueResult() {
+  return leagueResultAction('/api/league-result/send', {race: $('ls-result-race').value}, $('ls-send'));
+}
+function sendLeagueResultFromRecording() {
+  let pick;
+  try { pick = JSON.parse($('ls-rec').value); } catch (e) { return; }
+  return leagueResultAction('/api/league-result/send', pick, $('ls-rec-send'));
+}
+function refreshLeagueResult(race, ref, button) {
+  return leagueResultAction('/api/league-result/refresh', {race, ref}, button);
 }
 async function loadLeagueEvent() {
   let d;
   try { d = await (await fetch('/api/league-event', {cache: 'no-store'})).json(); }
   catch (e) { $('ls-status').textContent = 'Control Center not reachable.'; return; }
   showLeagueEvent(d);
+  showLeagueResults(d);
 }
 async function loadLeagueEventRef() {
   const ref = $('ls-ref').value.trim();

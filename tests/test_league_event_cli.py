@@ -82,6 +82,138 @@ def t_event_stop_clears_the_league_event():
         assert not os.path.exists(path), "event stop clears league-event.json"
 
 
+def _recording_with(d, *docs):
+    import race_recording
+    store = race_recording.open_current(d, 1700000000.0)
+    for doc in docs:
+        store.set_meta(race_recording.RESULTS_KEY, race_recording.merged_results(
+            store.meta(race_recording.RESULTS_KEY), doc))
+    path = store.path
+    store.close()
+    return path
+
+
+def _kept(ref, race, laps=10, at=1700000100.0):
+    return {"ref": ref, "race": race, "finished_at": at,
+            "body": {"v": 1, "ref": ref, "race": race, "finished_at": "2023-11-14T22:15:00Z",
+                     "entries": [{"pos": 1, "entry": "A", "driver": "Ann", "team": "Red Bulls", "laps": laps}],
+                     "events": [], "fastest": None}}
+
+
+def _no_relay():
+    return False
+
+
+def t_send_after_the_event_from_a_recording_replaces_the_draft():
+    REF = league_sim.DEFAULT_REF
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        rec = _recording_with(d, _kept(REF, "leg-1"), _kept(None, None, laps=7, at=1700000200.0))
+        rc = _rc(sim.url)
+        r = m.league_result_send_data(recording=os.path.basename(rec), index=1, rc=rc, runtime=d,
+                                      relay_running=_no_relay)
+        assert r["ok"] and r["status"]["status"] == "pending" and r["via"] == os.path.basename(rec), r
+        assert sim.results[(REF, "leg-1")]["entries"][0]["team"] == "Red Bulls"
+        r = m.league_result_send_data("leg-1", recording=rec, index=2, rc=rc, runtime=d, relay_running=_no_relay)
+        assert not r["ok"] and "give the race and the reference" in r["error"], \
+            "a race run without a loaded event names no reference"
+        r = m.league_result_send_data("leg-1", recording=rec, index=2, ref=REF, rc=rc, runtime=d,
+                                      relay_running=_no_relay)
+        assert r["ok"] and sim.results[(REF, "leg-1")]["entries"][0]["laps"] == 7, "the resend replaced the draft"
+        data = m.league_event_data(rc=rc, path=ls.path_in(d))
+        assert [x["race"] for x in data["results"]] == ["leg-1"] and data["results"][0]["state"] == "sent"
+        assert data["recordings"] == [{"file": os.path.basename(rec), "results": [
+            {"index": 1, "ref": REF, "race": "leg-1", "finished_at": 1700000100.0},
+            {"index": 2, "ref": None, "race": None, "finished_at": 1700000200.0}]}], data["recordings"]
+        lines = "\n".join(m._league_result_lines(data))
+        assert "leg-1: pending, Draft waits for a steward." in lines and "2. (no league race)" in lines, lines
+        assert KEY not in json.dumps(data) and KEY not in lines
+
+
+def t_send_errors_name_the_problem():
+    REF = league_sim.DEFAULT_REF
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        rc = _rc(sim.url)
+        r = m.league_result_send_data(rc=_rc("", ""), runtime=d, relay_running=_no_relay)
+        assert r == {"ok": False, "error": m.NO_LEAGUE_SERVICE}
+        r = m.league_result_send_data(rc=rc, runtime=d, relay_running=_no_relay)
+        assert r == {"ok": False, "error": "no current race recording"}
+        r = m.league_result_send_data(recording="nope.sqlite", rc=rc, runtime=d, relay_running=_no_relay)
+        assert r == {"ok": False, "error": "no such recording: nope.sqlite"}
+        empty = _recording_with(d)
+        r = m.league_result_send_data(rc=rc, runtime=d, relay_running=_no_relay)
+        assert r == {"ok": False, "error": "this recording holds no finished race result"}, r
+        os.remove(empty)
+        rec = _recording_with(d, _kept(REF, "leg-1"))
+        r = m.league_result_send_data(recording=rec, index=3, rc=rc, runtime=d, relay_running=_no_relay)
+        assert "pick 1 to 1" in r["error"], r
+        sim.answer("result", status=503, body={})
+        r = m.league_result_send_data(recording=rec, rc=rc, runtime=d, relay_running=_no_relay)
+        assert not r["ok"] and "503" in r["error"], r
+        import league_result
+        st = league_result.status_of(league_result.results_path(d), REF, "leg-1")
+        assert st["state"] == "failed" and "503" in st["error"], st
+
+
+def t_send_for_the_current_event_goes_through_the_running_relay():
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        asked = []
+        r = m.league_result_send_data("leg-2", rc=_rc(sim.url), runtime=d, relay_running=lambda: True,
+                                      relay_send=lambda race: asked.append(race) or {"ok": True, "race": race,
+                                                                                    "rebuilt": False})
+        assert r == {"ok": True, "race": "leg-2", "rebuilt": False, "via": "relay"} and asked == ["leg-2"], r
+        r = m.league_result_send_data(rc=_rc(sim.url), runtime=d, relay_running=lambda: True,
+                                      relay_send=lambda race: {"ok": False, "error": "race leg-1 has no result"})
+        assert r == {"ok": False, "error": "race leg-1 has no result"}
+        boom = m.league_result_send_data(rc=_rc(sim.url), runtime=d, relay_running=lambda: True,
+                                         relay_send=lambda race: (_ for _ in ()).throw(OSError("refused")))
+        assert not boom["ok"] and "refused" in boom["error"], boom
+
+
+def t_refresh_asks_the_service_for_the_current_race():
+    REF = league_sim.DEFAULT_REF
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        rc = _rc(sim.url)
+        r = m.league_result_refresh_data(rc=rc, runtime=d)
+        assert not r["ok"] and "no league event loaded" in r["error"], r
+        m.league_event_load_data(REF, rc=rc, path=ls.path_in(d))
+        r = m.league_result_refresh_data(rc=rc, runtime=d)
+        assert not r["ok"] and "404" in r["error"], "nothing sent yet"
+        rec = _recording_with(d, _kept(REF, "leg-1"))
+        m.league_result_send_data(recording=rec, rc=rc, runtime=d, relay_running=_no_relay)
+        sim.result_status = "stored"
+        r = m.league_result_refresh_data(rc=rc, runtime=d)
+        assert r["ok"] and r["status"]["status"] == "stored", r
+
+
+def t_event_result_verb_sends_and_prints():
+    REF = league_sim.DEFAULT_REF
+    with tempfile.TemporaryDirectory() as d, _simulation(), league_sim.LeagueSim(key=KEY) as sim:
+        rec = _recording_with(d, _kept(REF, "leg-2"))
+        rc = _rc(sim.url)
+        orig = (m._active_config, m._runtime_dir, m._apply_active_profile_env,
+                m._relay_already_running_for_active_profile)
+        m._active_config, m._runtime_dir = (lambda: rc), (lambda: d)
+        m._apply_active_profile_env = lambda: None
+        m._relay_already_running_for_active_profile = _no_relay
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.event_result_cmd(["send", "--recording", rec])
+            with contextlib.redirect_stdout(io.StringIO()) as err:
+                try:
+                    m.event_result_cmd(["send", "--recording", rec, "--index", "4"])
+                except SystemExit as e:
+                    assert e.code == 1
+                else:
+                    raise AssertionError("a failed send exits 1")
+        finally:
+            (m._active_config, m._runtime_dir, m._apply_active_profile_env,
+             m._relay_already_running_for_active_profile) = orig
+        text = out.getvalue()
+        assert f"Sent leg-2 of {REF}" in text and "leg-2: pending" in text, text
+        assert "pick 1 to 1" in err.getvalue()
+
+
 def _profile_home(td, text):
     prof = os.path.join(td, "profiles", "demo")
     os.makedirs(prof)
