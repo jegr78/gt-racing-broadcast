@@ -57,7 +57,7 @@ def t_status_and_the_current_race_on_the_tailnet():
             code, body = g._post(port, "/league/race", body={"race": "leg-9"})
             assert code == 400 and "does not list" in json.loads(body)["error"], body
             code, body = g._post(port, "/league/race", body={"race": 5})
-            assert code == 400, body
+            assert code == 400 and json.loads(body)["error"] == "race must be text", body
         finally:
             srv.shutdown()
 
