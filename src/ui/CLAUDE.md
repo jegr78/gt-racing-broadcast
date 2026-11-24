@@ -17,7 +17,9 @@ Loaded when working under `src/ui/`.
   page); without them roles degrade gracefully and the editor surfaces an
   outdated-script banner. Routes:
   `/api/profiles`, `/api/profile/{use,new,env}`, `/api/overlay`,
-  `/api/overlay/{slots,layout,fonts,bg,font/<name>}`, `/api/crew`, `/api/crew/delete`.
+  `/api/overlay/{slots,layout,fonts,bg,font/<name>}`, `/api/crew`, `/api/crew/delete`,
+  `/api/league-event` and `POST /api/league-event/load` (the League service section,
+  `league_event_data`/`league_event_load_data`; the status names the URL, never the key).
 - **General Settings**, machine-wide knobs: the `.env` editor (`RACECAST_*` vars),
   cookie refresh, and the **overlay font library** (`runtime/fonts/`, shared across
   leagues). A curated baseline set (`overlay_build.GOOGLE_FONTS`) is downloaded at build

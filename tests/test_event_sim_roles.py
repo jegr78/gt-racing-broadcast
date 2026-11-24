@@ -1589,6 +1589,23 @@ def t_the_runs_ports_reach_every_relay_start_as_simulation_variables():
         assert '"--ports"' not in fh.read(), "the feed ports travel in the environment, so a restart keeps them"
 
 
+def t_the_stack_stops_its_league_service_with_the_other_fakes():
+    tmp = tempfile.mkdtemp(prefix="racecast-roles-test-")
+    try:
+        import league_sim
+        st = stack.Stack(scn({}), tmp)
+        st.league = league_sim.LeagueSim().start()
+        url = st.league.http_url
+        assert st.stop() == []
+        try:
+            league_sim.fetch(url, "/_sim/state", timeout=1.0)
+            raise AssertionError("the league service still answers after stop()")
+        except OSError:
+            pass  # stopped
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def t_the_stack_stops_a_relay_the_control_center_restarted():
     tmp = tempfile.mkdtemp(prefix="racecast-roles-test-")
     try:

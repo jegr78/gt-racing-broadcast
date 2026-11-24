@@ -187,6 +187,8 @@ class ResolvedConfig:
     timing_host_api_token: str = ""
     timing_host_publish_key: str = ""
     timing_host_url: str = ""
+    league_service_url: str = ""       # optional league service (#1253), HTTPS only
+    league_service_key: str = ""       # a secret like console_secret
     event_title: str = ""        # optional free-text event title (Panel/Cockpit/Discord, #207)
     graphics_take: str = ""      # crew graphic takes: off (blank) | request | direct
     telemetry_record: str = ""   # solo POV: record GT7 telemetry from relay start
@@ -257,6 +259,8 @@ def resolve_config(root, *, override=None, runtime_root=None, environ=None):
         timing_host_api_token=prof.get("TIMING_HOST_API_TOKEN", ""),
         timing_host_publish_key=prof.get("TIMING_HOST_PUBLISH_KEY", ""),
         timing_host_url=prof.get("TIMING_HOST_URL", ""),
+        league_service_url=prof.get("LEAGUE_SERVICE_URL", ""),
+        league_service_key=prof.get("LEAGUE_SERVICE_KEY", ""),
         event_title=prof.get("EVENT_TITLE", ""),
         graphics_take=prof.get("GRAPHICS_TAKE", ""),
         telemetry_record=prof.get("TELEMETRY_RECORD", ""),

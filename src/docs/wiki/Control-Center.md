@@ -105,6 +105,9 @@ Everything that belongs to a **league**, gathered in one view (the model behind 
   are **masked**: click the eye to reveal one. **Open Sheet ↗** opens this league's Google
   Sheet (built from `SHEET_ID`) in a new tab, no need to keep the raw link around. Changes
   apply the next time you (re)start the relay.
+- **League service** *(optional)*: with `LEAGUE_SERVICE_URL` and `LEAGUE_SERVICE_KEY` set,
+  enter the reference the league's own service shows and **Load** the event's races and
+  widgets. See [Configuration](Configuration).
 - **Overlay CSS**: per-profile CSS for the relay-served **HUD** and **Timer** pages
   (`profiles/<active>/overlay/`; see [HUD overlays](HUD-Overlays)). **Save** writes the file;
   **Apply in OBS** reloads the browser sources (same as `obs refresh`). The first override on

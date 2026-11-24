@@ -63,6 +63,12 @@ def t_keyboardinterrupt_swallow_needs_comment():
     assert lint.find_empty_excepts(KBD_COMMENT) == []
 
 
+def t_systemexit_swallow_needs_comment():
+    src = "try:\n    main()\nexcept SystemExit:\n    pass\n"
+    assert lint.find_empty_excepts(src) == [3], "CodeQL flags a silent SystemExit swallow"
+    assert lint.find_empty_excepts(src.replace("pass\n", "pass  # --help exits\n")) == []
+
+
 def t_bare_except_is_flagged():
     assert lint.find_empty_excepts(BARE_EXCEPT) == [3]
 

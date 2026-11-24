@@ -690,6 +690,83 @@ def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, ti
     print("  [PASS] relay telemetry replay advances all consumers and stops without recording")
 
 
+def _check_league_service(binary, tmp, stub_bin, sheet_url, procs, timeout):
+    """The league event loads from the simulated league service through `racecast event
+    league` and the Control Center, and `event stop` clears it (#1253)."""
+    import subprocess as sp
+    sys.path.insert(0, os.path.join(ROOT, "tools", "event-sim", "fakes"))
+    import league_sim
+    home = os.path.join(tmp, "league-app")
+    if binary:
+        os.makedirs(home)
+        launcher = E.service_launcher(shutil.copy2(binary, os.path.join(home, os.path.basename(binary))))
+    else:
+        shutil.copytree(os.path.join(ROOT, "src"), os.path.join(home, "src"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        launcher = E.service_launcher(None, sys.executable, os.path.join(home, "src", "racecast.py"))
+    shutil.copytree(os.path.join(ROOT, "profiles", "demo"), os.path.join(home, "profiles", "demo"))
+    stored = os.path.join(home, "runtime", "demo", "league-event.json")
+    ui_port = E.free_port()
+    feeds = _free_feed_ports()
+    with league_sim.LeagueSim(key="e2e-league-key") as sim:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("RACECAST_")}
+        env.update(sim.env(), RACECAST_PROFILE="demo", RACECAST_UPDATE_CHECK="0",
+                   RACECAST_UI_PORT=str(ui_port), RACECAST_SIM_SHEET_URL=sheet_url,
+                   RACECAST_SIM_STREAM_BIN=stub_bin, RACECAST_SIM_RELAY_PORT=str(E.free_port()),
+                   RACECAST_SIM_FEED_PORTS=",".join(map(str, feeds)))
+
+        def cli(*args):
+            r = sp.run(launcher + ["--simulation", *args], cwd=home, env=env, capture_output=True,
+                       text=True, errors="replace", timeout=timeout)
+            return r.returncode, r.stdout + r.stderr
+        code, out = cli("event", "league", league_sim.DEFAULT_REF)
+        assert code == 0 and "<- current" in out and "match-score" in out, out
+        assert sim.key not in out, "the key reached the CLI output"
+        with open(stored, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        assert doc["current"] == "leg-1" and [r["race"] for r in doc["races"]] == ["leg-1", "leg-2"], doc
+        assert sim.calls(call="event")[0]["user_agent"].startswith("racecast/"), sim.calls()
+        print("  [PASS] racecast event league loads the event from the simulated league service")
+        log = os.path.join(tmp, "ui-league.log")
+        ui = _spawn(launcher + ["--simulation", "ui", "--no-browser"], env, log, cwd=home)
+        procs.append(ui)
+        ui_url = f"http://127.0.0.1:{ui_port}"
+        _wait_ready(ui_url + "/api/ping", timeout, ui, log)
+        status, d = E._get_json(ui_url + "/api/league-event")
+        assert status == 200 and d["configured"] and d["event"]["ref"] == league_sim.DEFAULT_REF, d
+        assert sim.key not in json.dumps(d), "the key reached a status response"
+        st, body, _h = E.http_request(ui_url + "/api/league-event/load", method="POST",
+                                      headers={"Content-Type": "application/json"},
+                                      data=json.dumps({"ref": "NO-SUCH", "expectedProfile": "demo"}).encode())
+        assert st == 400 and "404" in json.loads(body)["error"], (st, body)
+        st, body, _h = E.http_request(ui_url + "/api/league-event/load", method="POST",
+                                      headers={"Content-Type": "application/json"},
+                                      data=json.dumps({"ref": league_sim.DEFAULT_REF,
+                                                       "expectedProfile": "demo"}).encode())
+        assert st == 200 and json.loads(body)["event"]["current"] == "leg-1", (st, body)
+        env_file = os.path.join(home, "profiles", "demo", "profile.env")
+        with open(env_file, encoding="utf-8") as fh:
+            before = fh.read()
+        st, body, _h = E.http_request(ui_url + "/api/profile/env", method="POST",
+                                      headers={"Content-Type": "application/json"},
+                                      data=json.dumps({"expectedProfile": "demo", "entries": [
+                                          {"key": "LEAGUE_SERVICE_URL", "value": "http://league.example/r"}]}).encode())
+        with open(env_file, encoding="utf-8") as fh:
+            assert st == 400 and "https" in json.loads(body)["error"] and fh.read() == before, (st, body)
+        print("  [PASS] the profile editor refuses a league service URL that is not https")
+        print("  [PASS] the Control Center loads the league event and never shows the key")
+        code, out = cli("event", "stop", "--no-report")
+        assert code == 0 and not os.path.exists(stored), out
+        code, out = cli("event", "league")
+        assert code == 0 and "No league event loaded" in out, out
+        logs = [log] + [os.path.join(dp, f) for dp, _d, fs in os.walk(os.path.join(home, "runtime"))
+                        for f in fs if f.endswith(".log")]
+        for path in logs:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                assert sim.key not in fh.read(), f"the key reached {path}"
+        print("  [PASS] event stop clears the loaded league event")
+
+
 def _start_pov_ui(binary, tmp, env, timeout):
     """Seed and index the demo telemetry, then start the solo POV Control Center.
     Returns (process, url)."""
@@ -883,6 +960,8 @@ def run_synthetic(args):
                 code = 1
         print(E.summarize(results))
         _check_relay_replay(launcher, env, tmp, dummy_cookies, run_cwd, procs, servers, args.timeout)
+        _check_league_service(binary if args.binary is not None else None, tmp, stub_bin, csv_base,
+                              procs, args.timeout)
         pov_url = None
         if args.visual:
             pov_ui, pov_url = _start_pov_ui(binary if args.binary is not None else None,
