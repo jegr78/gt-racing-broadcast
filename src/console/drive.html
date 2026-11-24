@@ -58,10 +58,10 @@ li{margin-bottom:6px}
       telemetry. Start the sender anyway: until then it prints <code>waiting for approval by
       Race Control</code> and asks again every 10 seconds.</p>
     <label for="console">PlayStation IP address</label>
-    <input id="console" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Needed on iPhone and iPad">
-    <p class="dim">On an iPhone or iPad the sender cannot find the PlayStation by itself, so
-      enter its address here (the PlayStation's network settings show it) and the commands
-      below include it. Elsewhere leave it empty.</p>
+    <input id="console" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Needed on an iPhone">
+    <p class="dim">On an iPhone the sender's search for the PlayStation fails, so enter its
+      address here and the commands below include it. The PlayStation's network settings
+      show the address. An iPad was not tested. Elsewhere leave the field empty.</p>
     <div id="consoleErr" class="err" role="alert" hidden></div>
     <p>With Python 3.8 or newer: download
       <a id="script" download="racecast-sender.py">racecast-sender.py</a>, open a terminal in
@@ -83,17 +83,18 @@ li{margin-bottom:6px}
     <ul>
       <li><b>Nothing else receives your telemetry:</b> run the command as shown.</li>
       <li><b>A dashboard app on your phone:</b> run the sender on a second device on the same
-        network (PC, laptop, tablet). Two programs cannot share one device's telemetry port.</li>
+        network, such as a PC, laptop or tablet. Two programs cannot share one device's
+        telemetry port, unless the app takes forwarded packets like GT Race Engineer below.</li>
       <li><b>SimHub on the same PC:</b> if SimHub forwards its UDP packets, add
         <code>--listen PORT</code> with its forwarding port and leave SimHub as it is. Or add
         <code>--forward 127.0.0.1:PORT</code> and set SimHub's game telemetry port to that
         port, then restart SimHub.</li>
       <li><b>GT Race Engineer on the same device:</b> add <code>--forward 127.0.0.1:PORT</code>
-        and enter the same address and port under its telemetry forwarding, which makes it
-        receive from the sender.</li>
+        and enter the same address and port in its forwarding setting. That setting makes
+        it receive from the sender.</li>
     </ul>
-    <p class="dim">A firewall that filters inbound UDP must allow port 33740: the console
-      answers from a port of its own. On iOS keep a-Shell in front and the device charging.
+    <p class="dim">A firewall that filters inbound UDP must allow port 33740, because the
+      console answers from a port of its own. On iOS keep a-Shell in front and the device charging.
       The driver guide in the GT Racing Broadcast wiki covers every platform.</p>
   </section>
 </main>

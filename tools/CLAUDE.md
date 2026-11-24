@@ -914,8 +914,8 @@ approve themselves on the tailnet route `/drivers/requests/approve` (so the rela
 listen on the tailnet or loopback, as the default `--relay` does) and post encrypted GT7 packets along the picked layout's line through the real ingest
 route, with lap times, best laps and fuel. `--gap` sets the start spacing (small values
 give a dense pack for the track map). Needs a running event, whose `racecast event start`
-creates the invite (`event invite --new` only renews it and refuses with "No event is
-running" otherwise), and the same `racecast event track ID`; screenshots of the dashboard, desks and cockpit use it with
+creates the invite, and the same `racecast event track ID`. `event invite --new` only
+renews the invite and otherwise refuses with "No event is running". The screenshots of the dashboard, desks and cockpit use it with
 the demo profile. Never point it at a league during an event: its senders take real
 entries and its laps reach the race and the fastest lap; a profile other than `demo`
 needs `--force`. `--pending N` registers N more drivers for the second stint and leaves
