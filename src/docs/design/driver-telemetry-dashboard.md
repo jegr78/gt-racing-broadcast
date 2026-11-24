@@ -247,6 +247,9 @@ is valid; Race Control and the director correct the time.
     new session. Whether a lobby carries the qualifying best into the race, or the
     race best into a restart lobby, was not measured; Race Control corrects the fastest lap then.
   - Qualifying ranks by `best_ms` directly and needs no such check.
+  - Known limit: when two consecutive laps have exactly the same time to the
+    millisecond, the second does not show as a new last lap. The fastest lap is not
+    affected.
 - Qualifying shows the ranking of the running segment by GT7 best lap with gaps
   between best laps. Elimination and grid stay with the league and the Sheet.
 - A readiness list shows per entry whether a sender is connected before the start;
