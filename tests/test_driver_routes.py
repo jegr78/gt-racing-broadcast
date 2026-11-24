@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The driver telemetry routes under /console/drive and on the tailnet (#1111).
 Run: python3 tests/test_driver_routes.py"""
-import gzip, json, os, struct, sys, tempfile, threading, time, urllib.error, urllib.request
+import gzip, json, math, os, struct, sys, tempfile, threading, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -929,6 +929,45 @@ def t_ingested_telemetry_becomes_the_race_order_on_the_tailnet():
     finally:
         srv.shutdown()
 
+
+def _lap_two_with_a_resent_batch(resend):
+    """One car drives from the grid into lap 2; the batch across that line is posted, its
+    reply is lost, and five seconds later the sender posts it again with what it queued
+    since. Returns the car's distance after that post."""
+    from test_race_distance import L
+    sim = [100.0]
+    srv, port, path, _hub = _serve(clock=lambda: sim[0])
+    try:
+        invite = driver_invite.create(path)["id"]
+        _req(port, "/drivers/race/settings", json.dumps({"formation": False}).encode(),
+             {"Content-Type": "application/json"})
+        code = _approved(port, path, invite, entry=ENTRIES[0], name="N")
+
+        def wire(i):
+            along = 50.0 * i / 60 - 25.0
+            return _wire_at(6 + i, along, max(0, math.floor(along / L) + 1))
+
+        def deliver(wires):
+            assert _req(port, "/console/drive/ingest", tp.encode_batch(wires), {"X-Driver-Code": code})[0] == 200
+        cross = math.ceil((L + 25.0) * 60 / 50.0 / 6) * 6
+        for i in range(0, cross - 36, 6):           # one sampled packet per post
+            sim[0] = 100.0 + i / 60
+            deliver([wire(i)])
+        crossing = [wire(i) for i in range(cross - 36, cross + 36, 6)]
+        sim[0] = 100.0 + (cross + 30) / 60
+        deliver(crossing)
+        sim[0] += 5.0
+        deliver((crossing if resend else []) + [wire(i) for i in range(cross + 36, cross + 36 + 300, 6)])
+        race = json.loads(_req(port, "/drivers/race")[1])
+        return race["entries"][0]["distance_m"]
+    finally:
+        srv.shutdown()
+
+
+def t_a_batch_posted_twice_never_restarts_the_race():
+    clean, twice = _lap_two_with_a_resent_batch(False), _lap_two_with_a_resent_batch(True)
+    assert clean > 3000, f"the car is in lap 2: {clean}"
+    assert twice == clean, f"a resent batch must not cost the team its distance: {twice} != {clean}"
 
 def t_both_desks_set_and_clear_an_estimate_and_bad_input_is_refused():
     sim = [100.0]

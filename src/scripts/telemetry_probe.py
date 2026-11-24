@@ -29,6 +29,7 @@ PACKET_HZ = 60.0          # GT7's send rate: back-dates a sample within its batc
 SENDER_STAT_KEYS = ("received", "forwarded", "posted", "dropped", "post_failed",
                     "interruptions", "heartbeats")
 COUNTERS = ("received", "lost", "reordered", "decrypt_failed", "parse_failed")
+RECENT = 4 * MAX_BATCH    # a sender posts a batch again only while it is still queued
 _NAME = re.compile(r"[A-Za-z0-9 _.\-]{1,32}\Z")
 
 
@@ -83,6 +84,20 @@ class _Sender:
         self.first_at = self.last_at = None
         self.max_gap = 0.0
         self.sender_stats = {}
+        self.recent = collections.deque(maxlen=RECENT)   # the packets it posted lately, as sent
+        self.recent_set = set()
+        self.duplicates = 0
+        self.sampled = None                         # (stream, newest packet id) it was sampled at
+
+    def seen(self, raw):
+        """True for a packet this sender already posted: a batch whose reply it lost."""
+        if raw in self.recent_set:
+            return True
+        if len(self.recent) == self.recent.maxlen:
+            self.recent_set.discard(self.recent[0])
+        self.recent.append(raw)
+        self.recent_set.add(raw)
+        return False
 
 
 class Probe:
@@ -110,7 +125,6 @@ class Probe:
         decoded = [gt7_crypto.decrypt_head(raw) + (raw,) for raw in packets]
         pids = [gt7_packet_stats.packet_id(head) if head is not None else None
                 for _kind, head, _raw in decoded]
-        newest = max((p for p in pids if p is not None), default=None)
         fresh = []
         with self._lock:
             sender = self._senders.get(name)
@@ -128,17 +142,26 @@ class Probe:
                 sender.sender_stats = {k: sender_stats[k] for k in SENDER_STAT_KEYS
                                        if type(sender_stats.get(k)) is int}
             accepted = 0
-            sampled = set()          # a repeated packet id is one sample, never two
+            new = []
             for (kind, _head, raw), pid in zip(decoded, pids, strict=True):
                 if pid is None:
                     sender.stats.on_decrypt_failure(now)
-                    continue
+                elif sender.seen(raw):
+                    sender.duplicates += 1
+                else:
+                    new.append((kind, raw, pid))
+            newest = max((pid for _k, _r, pid in new), default=None)
+            for kind, raw, pid in new:
                 sender.stats.on_packet(pid, now)
                 self._bank(sender)
                 sender.kinds[kind] += 1
                 accepted += 1
-                if (pid % SAMPLE_EVERY == 0 or not sender.samples) and pid not in sampled:
-                    sampled.add(pid)
+                # Within a stream a sample never goes back: a late packet dates newer than it is.
+                last = sender.sampled
+                if last is not None and last[0] == sender.stats.stream and pid <= last[1]:
+                    continue
+                if pid % SAMPLE_EVERY == 0 or not sender.samples:
+                    sender.sampled = (sender.stats.stream, pid)
                     try:
                         sample = _sample(kind, pid, gt7_crypto.decrypt_typed(raw)[1], wall)
                     except (struct.error, ValueError, IndexError, TypeError):
@@ -184,6 +207,6 @@ class Probe:
                     "batches": s.batches, "bytes": s.bytes, "kinds": dict(s.kinds),
                     "seconds": round(span, 3), "idle_s": round(now - s.last_at, 3),
                     "packets_per_s": round(packets["received"] / span, 2) if span > 0 else None,
-                    "max_batch_gap_s": round(s.max_gap, 3),
+                    "max_batch_gap_s": round(s.max_gap, 3), "duplicates": s.duplicates,
                     "sender_stats": dict(s.sender_stats), "samples": list(s.samples)}
         return {"rate_hz": self.rate_hz, "senders": senders}
