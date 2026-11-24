@@ -283,6 +283,23 @@ class WindowsTree:
             self.kernel.CloseHandle(handle)
 
 
+def _reap(proc, timeout):
+    """Wait for the owned leader without Popen's waitpid lock, which a KeyboardInterrupt
+    raised inside Popen.poll() or wait() leaves held."""
+    deadline = time.monotonic() + timeout
+    while proc.returncode is None:
+        try:
+            pid, status = os.waitpid(proc.pid, os.WNOHANG)
+        except ChildProcessError:
+            return  # Popen reaped it.
+        if pid:
+            proc.returncode = os.waitstatus_to_exitcode(status)
+            return
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        time.sleep(0.01)
+
+
 def terminate_tree(proc, tree=None):
     """Terminate only the owned process group/Job Object, never a saved PID."""
     pid = proc.pid
@@ -309,7 +326,7 @@ def terminate_tree(proc, tree=None):
             # a new process could have reused the released group identity.
             deadline = time.monotonic() + 10
             try:
-                proc.wait(timeout=10)
+                _reap(proc, 10)
             except (OSError, subprocess.TimeoutExpired) as reap_error:
                 raise JobError("cleanup_failed", "Could not reap the owned analysis process") from reap_error
             while True:
@@ -328,7 +345,10 @@ def terminate_tree(proc, tree=None):
                 else:
                     raise JobError("cleanup_failed", "The analysis process group remains after termination")
     try:
-        proc.wait(timeout=10)
+        if os.name == "nt":
+            proc.wait(timeout=10)
+        else:
+            _reap(proc, 10)
     except subprocess.TimeoutExpired:
         raise JobError(
             "cleanup_failed", "The analysis process tree did not terminate"
@@ -561,14 +581,19 @@ _BACKGROUND = BackgroundJobs()
 
 
 def interrupt_on_termination():
-    """POSIX: SIGTERM and SIGHUP raise KeyboardInterrupt in the main thread, so the
-    caller's cleanup ends a provider tree in its own session before the process exits."""
+    """POSIX: the first SIGTERM or SIGHUP raises KeyboardInterrupt in the main thread and
+    later ones are ignored, so the caller's cleanup ends a provider tree in its own session
+    before the process exits."""
     if os.name == "nt" or threading.current_thread() is not threading.main_thread():
         return
 
+    signals = (signal.SIGTERM, signal.SIGHUP)
+
     def interrupt(_sig, _frame):
+        for sig in signals:
+            signal.signal(sig, lambda *_: None)  # A second signal must not cut the cleanup short.
         raise KeyboardInterrupt
-    for sig in (signal.SIGTERM, signal.SIGHUP):
+    for sig in signals:
         signal.signal(sig, interrupt)
 
 

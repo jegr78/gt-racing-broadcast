@@ -197,31 +197,29 @@ def t_cleanup_rejects_unsafe_or_untyped_process_ids_before_any_signal():
 def t_darwin_zombie_group_is_only_accepted_after_reap_and_absence_probe():
     proc = mock.Mock(pid=12345)
     proc.poll.return_value = None
-    proc.wait.return_value = 0
     def signal_group(_pid, sig):
         if sig == 9:
             raise PermissionError(1, 'zombie-only group')
-        assert proc.wait.called, 'Probe must follow the owned leader reap'
+        assert reap.called, 'Probe must follow the owned leader reap'
         raise ProcessLookupError()
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill:
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill, mock.patch.object(j, '_reap') as reap:
         j.terminate_tree(proc)
     assert kill.call_args_list == [mock.call(proc.pid, 9), mock.call(proc.pid, 0)]
-    assert proc.wait.called
+    assert reap.called
 
 
 def t_darwin_cleanup_waits_for_transient_zombie_group_absence_without_resignalling():
     proc = mock.Mock(pid=12345)
-    proc.wait.return_value = 0
     clock = [100.0]
     probes = iter([PermissionError(1, 'zombie-only group'), PermissionError(1, 'zombie-only group'), ProcessLookupError()])
     def signal_group(_pid, sig):
         if sig == 9:
             raise PermissionError(1, 'zombie-only group')
-        assert proc.wait.called, 'Group absence must follow leader reap'
+        assert reap.called, 'Group absence must follow leader reap'
         raise next(probes)
     def sleep(seconds):
         clock[0] += seconds
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill, mock.patch.object(j.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(j.time, 'sleep', side_effect=sleep):
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill, mock.patch.object(j, '_reap') as reap, mock.patch.object(j.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(j.time, 'sleep', side_effect=sleep):
         j.terminate_tree(proc)
     assert kill.call_args_list == [mock.call(proc.pid, 9)] + [mock.call(proc.pid, 0)] * 3, 'Only read-only probes may repeat after reaping'
     assert 100 < clock[0] < 110, 'Transient absence must resolve within the existing cleanup budget'
@@ -231,8 +229,7 @@ def t_darwin_cleanup_does_not_accept_a_remaining_or_unsignalable_group():
     for probe in (None, PermissionError(1, 'group exists')):
         proc = mock.Mock(pid=12345)
         proc.poll.return_value = None
-        proc.wait.return_value = 0
-        with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=[PermissionError(1, 'group exists'), probe]) as kill, mock.patch.object(j.time, 'monotonic', side_effect=[100.0, 110.0]):
+        with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=[PermissionError(1, 'group exists'), probe]) as kill, mock.patch.object(j, '_reap'), mock.patch.object(j.time, 'monotonic', side_effect=[100.0, 110.0]):
             error(lambda owned=proc: j.terminate_tree(owned), 'cleanup_failed')
         assert kill.call_args_list == [mock.call(proc.pid, 9), mock.call(proc.pid, 0)]
 
@@ -240,13 +237,12 @@ def t_darwin_cleanup_does_not_accept_a_remaining_or_unsignalable_group():
 def t_darwin_group_probe_uses_the_remaining_leader_reap_budget():
     proc = mock.Mock(pid=12345)
     clock = [100.0]
-    def reap(timeout):
+    def reap(_proc, timeout):
         assert timeout == 10
         clock[0] += 9.999
     def sleep(seconds):
         clock[0] += seconds
-    proc.wait.side_effect = reap
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'group exists')) as kill, mock.patch.object(j.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(j.time, 'sleep', side_effect=sleep):
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'group exists')) as kill, mock.patch.object(j, '_reap', side_effect=reap), mock.patch.object(j.time, 'monotonic', side_effect=lambda: clock[0]), mock.patch.object(j.time, 'sleep', side_effect=sleep):
         error(lambda: j.terminate_tree(proc), 'cleanup_failed')
     assert abs(clock[0] - 110) < 0.000001, 'Group probes must share the existing ten-second leader reap budget'
     assert [call for call in kill.call_args_list if call.args[1] != 0] == [mock.call(proc.pid, 9)], 'Never signal a potentially reused group again'
@@ -254,8 +250,7 @@ def t_darwin_group_probe_uses_the_remaining_leader_reap_budget():
 
 def t_darwin_cleanup_timeout_stays_a_failure():
     proc = mock.Mock(pid=12345)
-    proc.wait.side_effect = subprocess.TimeoutExpired('provider', 10)
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'denied')) as kill:
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.os, 'getpgrp', return_value=24680, create=True), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=PermissionError(1, 'denied')) as kill, mock.patch.object(j, '_reap', side_effect=subprocess.TimeoutExpired('provider', 10)):
         error(lambda owned=proc: j.terminate_tree(owned), 'cleanup_failed')
     assert kill.call_count == 1
 
@@ -469,38 +464,94 @@ def t_a_crash_left_job_record_stops_costing_the_lease():
             assert runner.status('p')['busy'] is False
 
 
+TERMINATED_PARENT = """
+import os, signal, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+import ai_jobs
+ai_jobs.interrupt_on_termination()
+p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+SETUP
+try:
+    print(p.pid, flush=True)
+    while p.poll() is None:
+        time.sleep(0.05)
+except KeyboardInterrupt:
+    INTERRUPTED
+    ai_jobs.terminate_tree(p)
+    assert p.returncode is not None, 'cleanup returned without reaping the provider'
+"""
+
+
+def assert_parent_ends_provider(sig=None, setup='', interrupted='pass'):
+    """Run a parent that polls its provider like Runner.run, optionally signal it, and require both gone."""
+    import signal
+    child = TERMINATED_PARENT.replace('SETUP', setup).replace('INTERRUPTED', interrupted)
+    parent = subprocess.Popen([sys.executable, '-c', child, str(Path(j.__file__).parent)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace')
+    provider = None
+    try:
+        provider = int(parent.stdout.readline())
+        if sig is not None:
+            parent.send_signal(sig)
+        _out, err = parent.communicate(timeout=30)
+        assert parent.returncode == 0, f'the parent failed its cleanup: {err.strip()}'
+        try:
+            os.kill(provider, 0)
+        except ProcessLookupError:
+            provider = None
+        assert provider is None, 'the provider outlived its parent'
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait()
+        if provider is not None:
+            try:
+                os.kill(provider, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # already gone
+
+
 def t_a_terminated_parent_still_ends_its_provider_tree():
     if os.name == 'nt':
         return                                    # the kill-on-close Job Object covers Windows
     import signal
-    child = textwrap.dedent("""
-        import subprocess, sys
-        sys.path.insert(0, sys.argv[1])
-        import ai_jobs
-        ai_jobs.interrupt_on_termination()
-        p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
-        try:
-            print(p.pid, flush=True)
-            p.wait()
-        except KeyboardInterrupt:
-            ai_jobs.terminate_tree(p)
-    """)
     for sig in (signal.SIGTERM, signal.SIGHUP):
-        parent = subprocess.Popen([sys.executable, '-c', child, str(Path(j.__file__).parent)],
-                                  stdout=subprocess.PIPE, text=True, errors='replace')
-        provider = int(parent.stdout.readline())
-        parent.send_signal(sig)
-        parent.wait(10)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            try:
-                os.kill(provider, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            os.kill(provider, signal.SIGKILL)
-            raise AssertionError(f'the provider outlived a {sig.name} of its parent')
+        assert_parent_ends_provider(sig)
+
+
+def t_an_interrupt_inside_popen_bookkeeping_does_not_stall_the_cleanup():
+    if os.name == 'nt':
+        return
+    # The signal lands while poll() holds Popen's waitpid lock, which the KeyboardInterrupt then leaves held.
+    setup = textwrap.dedent("""
+        class InterruptOnce:
+            def __init__(self, lock):
+                self.lock, self.fired = lock, False
+            def acquire(self, *args, **kwargs):
+                got = self.lock.acquire(*args, **kwargs)
+                if got and not self.fired:
+                    self.fired = True
+                    os.kill(os.getpid(), signal.SIGTERM)
+                return got
+            def release(self):
+                self.lock.release()
+            def __enter__(self):
+                return self.acquire()
+            def __exit__(self, *exc):
+                self.release()
+        p._waitpid_lock = InterruptOnce(p._waitpid_lock)
+    """)
+    started = time.monotonic()
+    assert_parent_ends_provider(setup=setup)
+    assert time.monotonic() - started < 5, 'cleanup waited out its reap budget behind a held Popen lock'
+
+
+def t_a_second_termination_signal_does_not_skip_the_cleanup():
+    if os.name == 'nt':
+        return
+    import signal
+    assert_parent_ends_provider(signal.SIGTERM, interrupted='os.kill(os.getpid(), signal.SIGHUP)')
 
 
 if __name__=='__main__':
