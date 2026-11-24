@@ -251,7 +251,9 @@ def t_refresh_refuses_a_race_or_reference_outside_the_contract():
         asked = []
         for race, ref in (("a/../../../graphics/Race Results", "R"), ("leg-1", "x\u0007")):
             r = m.league_result_refresh_data(race, ref, rc=_rc(sim.url), runtime=d,
-                                             get=lambda *a, **k: asked.append(a))
+                                             get=lambda *a, **k: asked.append(a) or {
+                                                 "status": "stored", "message": "", "link": None,
+                                                 "graphic_url": None})
             assert not r["ok"] and asked == [], (race, ref, r)
 
 
