@@ -97,7 +97,9 @@ Ctrl+C ends inspection; never use broad `pkill` commands to stop test services.
   replaces it, and after the relay stops `racecast event result send` sends it from the
   race recording (#1254). Before the finish the same relay must post the live state every
   two seconds, and a widget the Director shows reaches `/league-widgets/data` and the
-  Intermission page (#1255).
+  Intermission page (#1255). Then a timing link carries no league block until
+  `LEAGUE_WIDGETS_TIMING=1` lands in the profile, after which `/console/timing/data` lists
+  every event widget while none is on air (#1256).
 - **Solo coaching** (`--coach-only`, **CI-runnable on Linux, Windows and macOS**):
   copies the committed `solo-pov` profile into an owned temporary app home, clears inherited
   `RACECAST_*` configuration and uses a loopback OBS stand-in and synthetic replay.

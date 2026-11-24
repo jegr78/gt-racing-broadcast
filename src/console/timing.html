@@ -61,7 +61,8 @@
   #feed div { font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--edge); }
   #feed time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
   #state { color: var(--muted); font-size: 13px; padding: 14px; text-align: center; }
-  #league { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  #league { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-bottom: 12px;
+            align-items: start; }
   #league[hidden] { display: none; }
   .lw { border: 1px solid var(--edge); border-left: 3px solid var(--accent); border-radius: 10px;
         background: var(--panel); padding: 8px 12px; min-width: 0; }
@@ -430,11 +431,30 @@
     return cell("tyre", el("span", "tyre" + (code ? " " + code : ""), code));
   }
 
+  // Rebuilt only when a value changed; a table keeps the reader's scroll position.
+  let leagueShown = "";
+  function leagueCards(league) {
+    const key = JSON.stringify(league);
+    if (key === leagueShown) return;
+    leagueShown = key;
+    const scrolled = {};
+    $("league").querySelectorAll(".lw").forEach(function (c) {
+      const rows = c.querySelector(".lw-rows");
+      if (rows) scrolled[c.dataset.id] = rows.scrollTop;
+    });
+    const cards = LOGIC.leagueBlock(document, league);
+    cards.forEach(function (c, i) { c.dataset.id = league[i].id; });
+    $("league").replaceChildren(...cards);
+    cards.forEach(function (c) {
+      const rows = c.querySelector(".lw-rows");
+      if (rows && scrolled[c.dataset.id]) rows.scrollTop = scrolled[c.dataset.id];
+    });
+    $("league").hidden = !league.length;
+  }
+
   function render(d) {
     last = d;
-    const league = LOGIC.leagueWidgets(d);
-    $("league").replaceChildren(...LOGIC.leagueBlock(document, league));
-    $("league").hidden = !league.length;
+    leagueCards(LOGIC.leagueWidgets(d));
     const quali = d.mode === "qualifying";
     const allowed = function (key) { return !hidden.has(key); };
     const cols = (quali ? QUALI : RACE).filter(function (c) { return allowed(c[0]); });

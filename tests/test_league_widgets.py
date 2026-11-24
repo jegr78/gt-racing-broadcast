@@ -515,10 +515,10 @@ def t_the_profile_switch_decides_the_timing_block_independent_of_the_director():
         assert live.public(0) is None, "default off: no block"
         for value in ("0", "off", "maybe", ""):
             _timing_env(d, value)
-            os.utime(env, ns=(len(value) + 1, len(value) + 1))
+            os.utime(env, (len(value) + 1, len(value) + 1))
             assert live.public(0) is None, f"{value!r} is off"
         _timing_env(d, "1")
-        os.utime(env, ns=(9, 9))
+        os.utime(env, (90, 90))
         block = live.public(0)
         assert [w["id"] for w in block] == ["match-score", "standings"], \
             f"every widget of the event, none shown by the Director: {block}"
@@ -543,6 +543,16 @@ def t_the_timing_block_is_an_allowlist_of_id_form_title_and_value():
         assert json.dumps(live.public(0)) == json.dumps(live.public(0)), \
             "nothing in the block counts down, so an unchanged value keeps the body's ETag"
         assert KEY not in json.dumps(live.public(0))
+
+
+def t_the_public_cut_keeps_only_the_allowlisted_fields():
+    score = {"provisional": True, "extra": "x", "values": [{"label": "A", "value": "1", "color": "#f00"}]}
+    table = {"value_title": "Pts", "note": "x", "rows": [{"rank": 1, "name": "Ann", "value": "2", "ref": "d1"}],
+             "values": [{"label": "A", "value": "1"}]}
+    assert lw.public_value("score", score) == {"provisional": True, "values": [{"label": "A", "value": "1"}]}
+    assert lw.public_value("table", table) == {"value_title": "Pts", "rows": [{"rank": 1, "name": "Ann", "value": "2"}]}, \
+        "a field the parser might keep one day never reaches the public body"
+    assert lw.public_value("chart", score) == {}
 
 
 def t_a_widget_value_reaches_the_timing_page_delay_s_after_it_arrived():
@@ -635,7 +645,7 @@ def t_the_public_timing_body_carries_the_delayed_block_and_the_host_the_same():
         body, _ = _timing_data(live, 30)
         assert "league" not in body, f"a value newer than the delay stays off the page: {body}"
         _timing_env(d, "0")
-        os.utime(env, ns=(5, 5))
+        os.utime(env, (50, 50))
         body, _ = _timing_data(live, 20)
         assert "league" not in body, "switch off: the body is the timing alone"
 
