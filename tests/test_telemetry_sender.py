@@ -1086,6 +1086,26 @@ def t_a_check_whose_heartbeats_all_fail_names_the_console_option():
     assert code == 1 and "heartbeat: FAIL 1 failed: pass --console" in text, text
 
 
+def t_a_check_that_receives_too_few_packets_fails():
+    said, clock = [], [0.0]
+    up = snd.Uploader("http://x/ingest", "K", "L", say=lambda line: None,
+                      opener=lambda req, timeout: _Reply(b'{"ok": true}'))
+    sender = snd.Sender(up, listen=0, bind="127.0.0.1", say=said.append, clock=lambda: clock[0])
+
+    def receive_once():
+        sender.stats["received"] += 1
+        clock[0] = round(clock[0] + 0.1, 6)
+        return True
+    sender.receive_once = receive_once
+    try:
+        code = snd.self_check(sender, up, duration=3.0, say=said.append)
+    finally:
+        sender.sock.close()
+    text = "\n".join(said)
+    assert code == 1 and "receive: FAIL" in text and "about 60/s" in text, \
+        f"10 packets/s is not what GT7 sends: {text}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
