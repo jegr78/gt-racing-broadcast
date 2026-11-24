@@ -73,19 +73,36 @@ program can receive it. Pick the line that matches what you already run:
   tablet or phone.
 - **A dashboard app on your phone:** run the sender on a second device on the same
   network. It cannot share the phone with the app.
-- **SimHub on the same PC:** add `--forward 127.0.0.1:PORT`. The sender then passes every
-  packet to that port; point SimHub's GT7 input at it and turn SimHub's own heartbeat off.
-- **GT Race Engineer with "Telemetry Forwarding":** let it forward to a port on the same
-  device and add `--listen PORT`. The sender then sends no heartbeat of its own.
+- **SimHub on the same PC:** SimHub's GT7 game configuration has a **Game telemetry UDP
+  port** and **Forward UDP packets to**, and no heartbeat switch. Two setups work:
+  - The sender reads what SimHub forwards: add `--listen PORT` with the port SimHub
+    forwards to on this PC (`127.0.0.1`). The sender sends no heartbeat, and a SimHub that
+    already forwards stays as it is.
+  - The sender forwards to SimHub: add `--forward 127.0.0.1:PORT` and set SimHub's game
+    telemetry port to the same port, then restart SimHub so it takes the new port. The
+    sender keeps 33740 and passes every packet on.
+- **GT Race Engineer on the same device:** its "Telemetrie Forwarding" setting makes it
+  receive forwarded telemetry (its console entry then reads "FORWARDED"); it does not
+  forward. Add `--forward 127.0.0.1:PORT` to the sender and enter the same address and
+  port in GT Race Engineer.
 
-The sender finds the PlayStation by itself. If it reports "no console found", add
-`--console <PlayStation IP>`; the PlayStation's network settings show its IP address.
+The sender finds the PlayStation by itself, except on an iPhone or iPad, where iOS does
+not let it search the network. There, and wherever the sender reports "no console
+found", type the PlayStation's IP address into the invite page's **PlayStation IP
+address** field: the commands then end with `--console <PlayStation IP>`. The
+PlayStation's network settings show the address.
 
 ## Your platform
 
-Every platform needs the same thing from its firewall: **allow inbound UDP 33740** for
-the sender (or the `--listen` port). The console sends from a port of its own, so its
-packets do not count as an answer to the sender and a firewall drops them by default.
+The console sends from a port of its own, so its packets do not count as an answer to
+the sender, and a firewall that filters inbound UDP drops them. Whether you have to do
+anything depends on the platform: Windows asks once when the sender first listens,
+macOS asks only with its firewall switched on, and only Linux with an active firewall
+needs a rule for UDP 33740 (or the `--listen` port when another app forwards from a
+second device). The upload to the relay is one outgoing HTTPS connection, which the
+sender keeps open through Funnel and opens again after an error. A proxy set in the
+system or in `HTTPS_PROXY` carries it through a tunnel, and the sender still checks the
+relay's certificate.
 
 - **Windows.** With Python 3.8 or newer from python.org, download
   `racecast-sender.py` from the invite page and run the Windows Python command (`py
@@ -93,27 +110,36 @@ packets do not count as an answer to the sender and a firewall drops them by def
   Windows program and run the `.\racecast-sender-windows.exe ...` command in its folder.
   The program is not signed: SmartScreen shows
   "Windows protected your PC", choose **More info → Run anyway**. When Windows asks
-  whether to allow the program on networks, allow **private networks**.
+  whether to allow the program on networks, allow **private networks**. It asks only
+  once.
 - **macOS.** Python 3 from python.org with the `python3 racecast-sender.py ...` command,
   or the macOS program: run `chmod +x racecast-sender-macos` once, then the
   `./racecast-sender-macos ...` command. The program is not signed: macOS refuses the
   first start, then open **System Settings → Privacy & Security** and choose **Open
-  Anyway**. Allow incoming connections when the firewall asks.
-- **Linux.** Run the Python command. With ufw: `sudo ufw allow 33740/udp`.
+  Anyway**. With the macOS firewall on, allow incoming connections when it asks; with
+  it off, nothing asks.
+- **Linux.** Run the Python command. Only an active firewall needs a rule, with ufw:
+  `sudo ufw allow 33740/udp`.
 - **Android (Termux).** Install Termux, run `pkg install python`, download the script
   with `curl -o racecast-sender.py "<script link from the invite page>"` (the quotes
   matter), then run the Python command. Run `termux-wake-lock` first so Android does not
-  pause Termux.
+  pause Termux; `termux-wake-unlock` in Termux releases it after the race.
 - **iPhone and iPad (a-Shell).** Download the script with
-  `curl -o racecast-sender.py "<script link>"` and run the Python command. iOS runs a-Shell only in the foreground: keep the screen on,
-  a-Shell in front and the device charging.
+  `curl -o racecast-sender.py "<script link>"` and run the Python command with the
+  PlayStation's IP address in it (see above). Without `--console` the sender cannot find
+  the console: its search fails with "No route to host", also with Local Network access
+  granted, and the sender says to add `--console`. iOS runs a-Shell only in the
+  foreground: keep a-Shell in front and the device charging. a-Shell keeps the screen on
+  while the sender runs, so Auto-Lock needs no change. The probe ran 15 minutes this way
+  at 59.9 packets per second without a loss.
 
 ## While it runs
 
 The sender prints a status line every ten seconds: packets per second received from the
 console and batches sent to the relay. It says when the console goes quiet (menus,
 replays, network) and when the upload is interrupted, and it catches up after a short
-outage. Stop it with Ctrl+C.
+outage. Stop it with Ctrl+C. In a-Shell tap **ctrl** in the bar above the keyboard,
+then `c`, or close the app.
 
 The relay accepts one sender per entry in a single-lobby race and two per team in an
 endurance race (the driver on track and the one waiting for the next stint). If the

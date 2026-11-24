@@ -50,12 +50,12 @@ On one device only one program can receive GT7 telemetry. Pick the line that mat
 
 - **Nothing else receives it:** run the command as shown, on a PC, laptop, tablet or phone.
 - **A dashboard app on your phone:** run the sender on a **second device** on the same network.
-- **SimHub on the same PC:** add `--forward 127.0.0.1:PORT` and point SimHub's GT7 input at that port, its own heartbeat off.
-- **GT Race Engineer forwards packets to a port:** add `--listen PORT`.
+- **SimHub on the same PC:** add `--listen PORT` with SimHub's forwarding port, or `--forward 127.0.0.1:PORT` with SimHub's game telemetry port moved there (restart SimHub).
+- **GT Race Engineer on the same device:** add `--forward 127.0.0.1:PORT` and enter the same address and port in its telemetry forwarding.
 
-No console found? Add `--console <PlayStation IP>`.
+iPhone, iPad or no console found? Type the PlayStation's IP into the invite page: the command then ends with `--console <PlayStation IP>`.
 
-Note: GT7 sends telemetry to every device that asks, but on one device only one program can receive it. So pick the line that matches what you already run. If nothing else receives your telemetry, run the command as shown, on a PC, a laptop, a tablet or a phone. If you use a dashboard app on your phone, run the sender on a second device on the same network, because it cannot share the phone with the app. With SimHub on the same PC, add the forward option with a local port, point SimHub's GT7 input at that port and turn SimHub's own heartbeat off. If an app such as GT Race Engineer already forwards the packets to a port, add the listen option with that port. The sender finds the PlayStation by itself. If it reports that no console was found, add the console option with the PlayStation's IP address.
+Note: GT7 sends telemetry to every device that asks, but on one device only one program can receive it. So pick the line that matches what you already run. If nothing else receives your telemetry, run the command as shown, on a PC, a laptop, a tablet or a phone. If you use a dashboard app on your phone, run the sender on a second device on the same network, because it cannot share the phone with the app. With SimHub on the same PC there are two ways. The sender can read what SimHub forwards, with the listen option and SimHub's forwarding port, and SimHub stays as it is. Or the sender forwards to SimHub, with the forward option and SimHub's game telemetry port moved to that port, and SimHub restarted. GT Race Engineer's forwarding setting receives telemetry, so the sender forwards to it with the forward option and the same address and port in the app. The sender finds the PlayStation by itself, except on an iPhone or iPad. There, or when it reports that no console was found, type the PlayStation's IP address into the invite page and the command includes it.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -77,13 +77,13 @@ Note: Every platform runs the same sender with your link and your code, and the 
 
 <section data-markdown><script type="text/template">
 ## Firewall and first start
-- Every device: **allow inbound UDP 33740**, or your `--listen` port. The console answers from a port of its own, so a firewall drops it by default.
-- **Windows:** SmartScreen blocks the unsigned program. Choose **More info**, then **Run anyway**. Allow **private networks** when asked.
-- **macOS:** the first start is refused. Open **System Settings, Privacy & Security** and choose **Open Anyway**.
-- **Linux (ufw):** `sudo ufw allow 33740/udp`
-- **Android:** run `termux-wake-lock` first. **iOS:** keep a-Shell in front, the screen on, the device charging.
+- The console answers from a port of its own, so a firewall that filters inbound UDP drops it.
+- **Windows:** SmartScreen blocks the unsigned program. Choose **More info**, then **Run anyway**. Allow **private networks** when asked, once.
+- **macOS:** the first start is refused. Open **System Settings, Privacy & Security** and choose **Open Anyway**. Only a switched-on firewall asks.
+- **Linux:** only an active firewall needs a rule, with ufw `sudo ufw allow 33740/udp`
+- **Android:** run `termux-wake-lock` first. **iOS:** `--console` is needed; keep a-Shell in front and the device charging, it keeps the screen on.
 
-Note: Every platform needs one thing from its firewall. Allow inbound UDP on port 33740, or on your listen port. The console sends from a port of its own, so its packets do not count as an answer and a firewall drops them by default. On Windows the program is not signed. SmartScreen shows a warning, so choose More info and then Run anyway, and allow private networks when Windows asks. On macOS the first start is refused. Open Privacy and Security in the System Settings and choose Open Anyway. On Linux with ufw, allow the port with one command. On Android, run termux-wake-lock first so Android does not pause Termux. On an iPhone or iPad, a-Shell only runs in the foreground, so keep it in front, keep the screen on and keep the device charging.
+Note: The console sends from a port of its own, so its packets do not count as an answer, and a firewall that filters inbound UDP drops them. Windows asks once, and you allow private networks. On Windows the program is not signed. SmartScreen shows a warning, so choose More info and then Run anyway. On macOS the first start is refused. Open Privacy and Security in the System Settings and choose Open Anyway. The macOS firewall asks only when it is switched on. On Linux only an active firewall needs a rule, one ufw command. On Android, run termux-wake-lock first so Android does not pause Termux. On an iPhone or iPad the sender needs the PlayStation's IP address, and a-Shell only runs in the foreground, so keep it in front and keep the device charging. a-Shell keeps the screen on by itself.
 </script></section>
 
 <section data-markdown><script type="text/template">

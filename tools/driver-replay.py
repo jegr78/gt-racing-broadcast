@@ -10,7 +10,7 @@ readable. The cars and senders are the event simulation's (tools/event-sim/drive
 
   python3 tools/driver-replay.py --profile demo --track 6e378b --cars 15 --gap 4
 
-The relay must run with the event's invite (racecast event invite --new) and the
+The relay must run an event (racecast event start creates its invite) and have the
 same track picked (racecast event track ID). Never run it against a league during an
 event: its senders take real entries and its laps reach the real race, fastest lap
 included. Any profile but demo needs --force.
