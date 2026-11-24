@@ -276,6 +276,8 @@ def t_dead_assignment_leaves_a_redefined_store_alone():
     assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    for x in xs:\n        pass\n") == [], \
         "a loop target redefines it"
     assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    import x\n") == [], "an import redefines it"
+    assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    try:\n        g()\n    except OSError as x:\n"
+                 "        pass\n") == [], "an except-as name redefines it"
     assert _dead("def f():\n    x = 1\n    use(x)\n    x = 2\n    def x():\n        pass\n") == [], \
         "a def redefines it"
 

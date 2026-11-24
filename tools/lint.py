@@ -33,7 +33,8 @@ fails here instead of on main after the merge. The import guard
 
 The unread-store guard (find_unused_last_assignments) covers the part of
 py/unused-local-variable ruff F841 misses: a store nobody reads afterwards although
-the name is read elsewhere in the function, typically a trailing `t = step(t)`.
+the name is read elsewhere in the function, typically a trailing `t = step(t)`,
+and an unpacked tuple none of whose names is read afterwards.
 """
 import ast, io, os, shutil, subprocess, sys, tokenize
 
@@ -313,8 +314,8 @@ def _dead_stores_in(fn):
 def find_unused_last_assignments(source):
     """(lineno, name) for each store in a function that nothing reads afterwards, the
     part of CodeQL's py/unused-local-variable that ruff F841 misses. A plain
-    `name = value` counts when the name is read elsewhere in the function; F841 has
-    the never-read case and _-prefixed names. In tuple unpacking, CodeQL's rule
+    `name = value` counts when the name is read elsewhere in the function and does not
+    start with `_`; F841 has the never-read case. In tuple unpacking, CodeQL's rule
     applies: each immediate tuple's names are flagged only when none of them is
     read later, and a bare `_` or a starred element exempts the tuple. Augmented
     and annotated stores are left out. Skipped everywhere: global/nonlocal
@@ -461,7 +462,8 @@ def main():
     dead = check_unused_last_assignments(ROOT)
     if dead:
         print("\nunused-local-variable (CodeQL py/unused-local-variable): nothing reads "
-              "this value; drop the assignment and keep the call, or use the value:")
+              "this value; drop the assignment and keep the call, or use the value. In an "
+              "unpacked tuple only a bare `_` is a placeholder, or read one of its names:")
         for relpath, lineno, name in dead:
             print(f"  {relpath}:{lineno}: the value stored in '{name}' is never read")
         rc = rc or 1
