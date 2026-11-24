@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the ruff linter over the repo (config: ruff.toml at the repo root), plus four
+"""Run the ruff linter over the repo (config: ruff.toml at the repo root), plus five
 in-house guards that mirror CodeQL classes ruff has no rule for.
 
     python3 tools/lint.py          # check only (what CI runs)
@@ -30,6 +30,10 @@ The assert guard (find_assert_side_effects) reproduces py/side-effect-in-assert 
 CodeQL's own name list, so a test that calls `.append`/`.close`/... inside an assert
 fails here instead of on main after the merge. The import guard
 (find_import_both_ways) does the same for py/import-and-import-from.
+
+The unread-store guard (find_unused_last_assignments) covers the part of
+py/unused-local-variable ruff F841 misses: a store nobody reads afterwards although
+the name is read elsewhere in the function, typically a trailing `t = step(t)`.
 """
 import ast, io, os, shutil, subprocess, sys, tokenize
 
@@ -231,6 +235,77 @@ def find_import_both_ways(source, local):
                   if name in froms and name.split(".")[0] in local)
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+           ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_LOOPS = (ast.For, ast.AsyncFor, ast.While)
+
+
+def _dead_stores_in(fn):
+    """(lineno, name) for the plain `name = value` stores in *fn*'s own scope that no
+    later Load reads, skipping every shape where source order is not enough."""
+    stores, loads, nested_loads, skip = [], [], set(), set()
+
+    def walk(node, loops):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, _SCOPES):
+                nested_loads.update(n.id for n in ast.walk(child) if isinstance(n, ast.Name))
+                for decl in ast.walk(child):
+                    if isinstance(decl, (ast.Global, ast.Nonlocal)):
+                        skip.update(decl.names)
+                continue
+            if isinstance(child, (ast.Global, ast.Nonlocal)):
+                skip.update(child.names)
+            elif isinstance(child, ast.Delete):
+                skip.update(n.id for t in child.targets for n in ast.walk(t) if isinstance(n, ast.Name))
+            elif isinstance(child, ast.Call) and getattr(child.func, "id", None) in ("locals", "vars", "eval", "exec"):
+                return None
+            elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+                loads.append((child.id, (child.lineno, child.col_offset), loops))
+            elif (isinstance(child, ast.Assign) and len(child.targets) == 1
+                  and isinstance(child.targets[0], ast.Name)):
+                stores.append((child.targets[0].id, child, loops))
+            inner = loops + (child,) if isinstance(child, _LOOPS) else loops
+            if walk(child, inner) is None:
+                return None
+        return True
+
+    if walk(fn, ()) is None:
+        return []
+    hits = []
+    for name, stmt, loops in stores:
+        if name.startswith("_") or name in skip or name in nested_loads:
+            continue
+        reads = [(pos, lps) for n, pos, lps in loads if n == name]
+        if not reads:
+            continue                       # never read at all: ruff F841 covers it
+        end = (stmt.end_lineno, stmt.end_col_offset)
+        if any(pos > end for pos, _ in reads):
+            continue
+        if loops and any(loops[0] in lps for _, lps in reads):
+            continue                       # a later iteration of the loop may read it
+        hits.append((stmt.lineno, name))
+    return hits
+
+
+def find_unused_last_assignments(source):
+    """(lineno, name) for each `name = value` in a function whose name is read
+    elsewhere in that function but never after this store, the case of CodeQL's
+    py/unused-local-variable that ruff F841 misses. Plain Name targets only (tuple
+    unpacking, augmented and annotated stores are left out). It skips underscore
+    names, global/nonlocal/del names, names read in a nested scope, functions that
+    call locals()/vars()/eval()/exec(), and a store inside a loop whose outermost
+    loop also reads the name. Returns [] for unparseable source."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    hits = []
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            hits += _dead_stores_in(fn)
+    return sorted(hits)
+
+
 def _python_files(root):
     """Tracked .py files (git, so dist/runtime/incoming stay excluded); a plain
     walk is the fallback when git is unavailable."""
@@ -307,6 +382,20 @@ def check_import_both_ways(root):
     return sorted(bad)
 
 
+def check_unused_last_assignments(root):
+    """(relpath, lineno, name) for every unread last store in the repo (CodeQL
+    py/unused-local-variable)."""
+    bad = []
+    for path in _python_files(root):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+        except OSError:
+            continue
+        bad += [(os.path.relpath(path, root), ln, name) for ln, name in find_unused_last_assignments(src)]
+    return sorted(bad)
+
+
 def main():
     if not shutil.which("ruff"):
         sys.exit("lint: ruff not found on PATH.\n"
@@ -341,6 +430,13 @@ def main():
               "module one way only:")
         for relpath, lineno, name in both:
             print(f"  {relpath}:{lineno}: '{name}' is imported with both import and from-import")
+        rc = rc or 1
+    dead = check_unused_last_assignments(ROOT)
+    if dead:
+        print("\nunused-local-variable (CodeQL py/unused-local-variable): nothing reads "
+              "this value; drop the assignment and keep the call, or use the value:")
+        for relpath, lineno, name in dead:
+            print(f"  {relpath}:{lineno}: the value stored in '{name}' is never read")
         rc = rc or 1
     return rc
 
