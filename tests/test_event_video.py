@@ -804,6 +804,18 @@ def t_the_film_is_never_written_into_the_recording():
         assert sorted(os.listdir(rec)) == ["timeline.json"], os.listdir(rec)
 
 
+def t_a_run_with_the_obs_stand_in_has_no_program_and_still_plans_a_film():
+    tl = timeline()
+    tl["recordings"] = [r for r in tl["recordings"] if r["kind"] != "program"]
+    p = fp.Plan(tl)
+    assert "program" not in p.views, "without --obs real no program view is on the stage"
+    f = _at(p, 61.0)
+    assert f["large"] == ["director"], f"a focus on the missing program keeps only the director: {f['large']}"
+    assert set(f["rects"]) == set(p.views) and "program" not in f["sources"], "no frame places the program"
+    a, b = p.frame_range(0, 5)
+    assert (a, b) == (0, 5 * p.fps), f"a five-second partial film from the stand-in run: {(a, b)}"
+
+
 def t_a_timeline_without_steps_is_refused():
     try:
         fp.Plan({"scenario": "x", "steps": [], "recordings": []})

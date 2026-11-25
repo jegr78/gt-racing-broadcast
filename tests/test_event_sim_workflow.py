@@ -68,6 +68,32 @@ def t_it_cannot_write_to_the_repository():
     assert re.search(r"^permissions:\n  contents: read\n", _text(), re.M), "token must be read-only"
 
 
+def _job(text, name):
+    """The body of job `name` under jobs:, up to the next job."""
+    m = re.search(r"^  %s:\n((?:    .*\n|\n)+)" % re.escape(name), text, re.M)
+    assert m, "job %r not found" % name
+    return m.group(1)
+
+
+def t_every_dispatch_records_smoke_with_the_obs_stand_in_and_renders_a_few_seconds():
+    job = _job(_text(), "event-video")
+    assert "if:" not in job.split("steps:")[0], "the film pipeline check runs on every dispatch"
+    rec = re.search(r"run: python tools/event-sim/event_sim\.py (.*)\n", job)
+    assert rec, "the job records a scenario"
+    argv = rec.group(1).split()
+    assert argv[argv.index("--scenario") + 1] == "smoke", "it records the short smoke scenario: %s" % argv
+    assert "--record" in argv and argv[argv.index("--obs") + 1] == "sim", "record mode with the OBS stand-in: %s" % argv
+    render = re.search(r"run: python tools/build-event-video\.py (.*)\n", job)
+    assert render, "the job renders the recording"
+    rargv = render.group(1).split()
+    assert rargv[0] == argv[argv.index("--record") + 1], "it renders the dir it recorded: %s" % rargv
+    assert "--to" in rargv and float(rargv[rargv.index("--to") + 1]) <= 10, "a partial film of a few seconds: %s" % rargv
+    assert re.search(r"timeout-minutes: \d+", job.split("steps:")[0]), "the job has its own time limit"
+    upload = re.search(r"uses: actions/upload-artifact@[0-9a-f]{40}.*\n((?:\s{8,}.*\n)+)", job)
+    assert upload and "if: ${{ always() }}" in job, "the film and the report are uploaded even after a failure"
+    assert "*.mp4" in upload.group(1) and "retention-days: 14" in upload.group(1), upload and upload.group(1)
+
+
 if __name__ == "__main__":
     tests = [f for n, f in sorted(globals().items()) if n.startswith("t_") and callable(f)]
     for fn in tests:
