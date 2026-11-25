@@ -40,16 +40,19 @@ in the normal CI, real league data or real race footage.
 | Program | the real OBS instance's own recording | 16:9 |
 | Director Panel | `director` page | 16:10 |
 | Race Control desk | `race_control` page | 16:10 |
-| Commentator Cockpit | the cockpit of the commentator on air or up next | 16:10 |
+| Commentator Cockpits | the cockpit of the commentator on air and, at a handover, the one up next | 16:10 |
 | Public live timing | `viewer` page | 16:10 |
 | Control Center | `producer` page, at the start and the end | 16:10 |
-| Driver | the invite page in a phone viewport, at registration and at the sender failure | 9:19 |
+| Driver | the invite page in a phone viewport, at registration, before each driver swap and at the sender failure | 9:19 |
 
 ### Stage
 
 - The canvas is 2560x1440 at 30 fps.
 - At most two views are large. The others sit in a rail as live previews with the role
   name and a highlight ring while something happens there.
+- The one exception is the switch at a driver swap: Director, Program and both
+  commentator cockpits share the canvas as four equal quarters, so the change of the
+  On Air banner in both cockpits is readable at the moment the program switches.
 - The stage follows the scenario: the role of the running step takes the large slot. A
   step can name its own focus, for example Director and Program together at a driver
   swap.
@@ -88,9 +91,9 @@ The order is the order of `full`. New steps are marked **new**.
 | 5 | Race start | Director switches to race mode. Formation lap, start | Program, Timing |
 | 6 | Stint 1 at the desk | Pit stop and **new:** tyre compound confirmed. A disconnect: suspected, confirmed, marked for rejoin. A sender stops: estimate behind another car. A retirement | Race Control, Timing |
 | 7 | Next commentator | Comms 2 submits late, the director approves and arms | Cockpit, Director |
-| 8 | Driver swap 1 | Cars box, splitscreen, new lobby, release, switch to stint 2 | Director, Program |
+| 8 | Driver swap 1 | **new:** the next driver requests telemetry for stint 2 on the invite page and Race Control approves it. Cars box, splitscreen, new lobby, release, switch to stint 2 | Driver, Race Control; at the switch the four quarters: Director, Program, Cockpit Comms 1, Cockpit Comms 2 |
 | 9 | Stint 2 at the desk | The disconnected car rejoins a lap down. Red flag, cars to the box, restart with kept gaps. **new:** pit stop with a compound change | Race Control, Program |
-| 10 | Driver swap 2 | As chapter 8, to stint 3 | Director, Program |
+| 10 | Driver swap 2 | As chapter 8, to stint 3, with Comms 2 handing over to Comms 3 | as chapter 8 |
 | 11 | The finish | Final lap called, chequered flag, result, fastest lap | Race Control, Timing |
 | 12 | Off air | **new:** outro, end of the part, the producer stops the event | Director, Program, Control Center |
 
@@ -103,12 +106,15 @@ Three stages, each usable on its own.
 ### 1. Record: `event_sim.py --scenario full --record DIR`
 
 - **Pages.** Every page role records its page for the whole run. Which mechanism
-  (Playwright's video recording or CDP screencast frames) is decided by gate G2.
+  is Playwright's video recording (gate G2).
 - **Pointer.** In record mode an init script draws the pointer and the click mark. It is
   not injected in any other mode, so tests and deck screenshots stay as they are.
 - **Driver page.** A new `driver` page role opens `/console/drive` with the invite link in
   a phone viewport and registers through the form. The other drivers keep registering
-  over HTTP.
+  over HTTP. Before each driver swap the page registers one seat of the next stint, which
+  the HTTP registration leaves out (`drivers register` with `skip`). A seat the desk
+  corrects is not one that drives afterwards: the page's code stays under the seat the
+  form sent.
 - **Program.** `--obs real` starts OBS as a separate instance: its own configuration
   directory inside the run's work dir, the localized demo scene collection, its
   WebSocket on a free port, no stream target. The run starts and stops OBS's recording
@@ -129,7 +135,8 @@ New step keys, all optional and ignored outside record mode:
 
 - `caption`: the line shown while the step runs. A step without one is waiting time.
 - `chapter`: starts a chapter with this title.
-- `focus`: the views to enlarge, when it is not the step's own role.
+- `focus`: the views to enlarge, when it is not the step's own role. Four views lay out
+  as quarters (the swap switch only).
 
 New actions:
 
@@ -162,7 +169,7 @@ shot names before and after, and the new steps carry no deck shot names.
 ### Limits and safety
 
 - Recording needs a machine with a display and OBS, and more memory than the local E2E
-  unit's 2 GiB (`full` already exceeds it). `--record` states its own limit, checked
+  unit's 2 GiB (`full` already exceeds it). It runs on the maintainer's Mac (gate G4). `--record` states its own limit, checked
   before the stack starts, and fails closed like the other runs. An OOM kill is a hard
   failure.
 - The demo profile only. Ports 8088 and 8089 stay untouched, as in every simulation.
@@ -181,13 +188,51 @@ user before anything else is built.
 | G3 | How long does frame-by-frame rendering take? | a 60 s test film with six views renders in a time that makes the whole film practical (target: under two hours for the film) |
 | G4 | Does the run fit the machine? | six recordings plus OBS stay under the stated memory limit for the whole run |
 
+### Results
+
+- **G1 passed.** A second OBS starts next to the user's with `XDG_CONFIG_HOME` pointing
+  into the run's work dir and `--multi --minimize-to-tray --disable-missing-files-check
+  --profile Sim --collection Sim`, plus its own `plugin_config/obs-websocket/config.json`.
+  It records the demo collection with the HUD browser source, and none of the user's OBS
+  configuration files changed. The only changed files under the user's configuration
+  directory were browser caches (`plugin_config/obs-browser/**/GPUCache`,
+  `DawnWebGPUCache`, `GraphiteDawnCache`), written by the user's own running OBS, so the
+  byte comparison excludes them. Two requirements follow for #1310: the run stops the
+  recording and quits OBS over the WebSocket, because a SIGTERM kills the browser's GPU
+  process and can leave the recording unfinished; and the run never kills the user's OBS.
+- **G2 passed with Playwright's video recording** (`record_video_dir`, recorded at the
+  page's viewport size). Text in a large slot is readable. In a rail preview the views
+  are recognizable, not readable, so the rail serves orientation and the readable text
+  always sits in one of the two large views.
+- **G3 passed.** Seeking a VP8 recording with keyframes far apart dominates the frame
+  time. Transcoding each recording once to all-keyframe VP8 (`-c:v libvpx -g 1 -b:v 4M
+  -deadline realtime -cpu-used 8`) and rendering with four parallel workers, each on its
+  own slice of frames, brings a 30-minute film to about 80 minutes on the 6-core
+  workstation.
+- **G4 passed on the Mac, failed on the Linux box.** On the box (6 cores, 15 GB), `full`
+  with page videos broke every limit of the local E2E unit: the 200% CPU quota throttled
+  it into timeouts, the per-page ffmpeg encoders exhausted the 512 tasks, and memory grew
+  about 100 MB per minute to an OOM kill at 5 GiB after 40 minutes. On the Mac (Apple M3,
+  8 cores, 16 GB) the same run passed: 121 steps, no hard finding, 37 minutes; the whole
+  process tree of the simulation peaked at 2.75 GB and stayed flat, the second OBS at
+  0.74 GB, and the system kept about 35% of its memory free. The page videos took
+  1.14 GB. Recording therefore runs on the Mac. macOS has no cgroups, so the run needs its
+  own watchdog over its whole process tree (Playwright, the browsers and their encoders
+  run in process groups of their own).
+- **G1 on macOS.** OBS there ignores `HOME` and `XDG_CONFIG_HOME` and always uses
+  `~/Library/Application Support/obs-studio`. The run refuses while any OBS runs, copies
+  that folder, runs OBS with its own Sim profile, collection and WebSocket port, and
+  restores the folder afterwards; all 5507 files compared equal after both test runs.
+  OBS 32.2.2 crashes at launch on macOS 27.2 (a Qt bug fixed in OBS 33.0), so recording
+  needs OBS 33.
+
 ## Tests
 
 - **Scenario:** the new actions get role tests as the existing ones have. `full --check`
   stays valid. The deck shot names are unchanged.
 - **Timeline:** unit tests for the pace rules (a captioned step is never sped up, waiting
   is, no source time is skipped) and for the focus rules (own role, override, at most two
-  large views).
+  large views, four quarters only for a step that names four).
 - **Stage:** a rendering test lays out a fixed timeline and checks that no view overlaps
   a caption and that every view is inside the canvas.
 - **End to end:** a short scenario (`smoke`) records and renders a few seconds in the
