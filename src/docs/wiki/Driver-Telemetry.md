@@ -534,6 +534,12 @@ It never carries connection ids, corrections or who made them.
 - **Commentator Cockpit**: the **Timing** area, its default, shows the same delayed data
   with every column at once, logos included; in qualifying best lap, gap, interval and last lap,
   per class with classes. The desks show the same columns live, without the delay.
+- **Track map on the desks**: the Race Control desk shows the overlay's track map as the
+  first card of the right column, above the crew chat, from its race table's live data
+  without the delay. In the cockpit, **Map** in the crew chat's header lays it over the
+  crew chat, from the same delayed data as its timing; it starts hidden. Both draw the
+  line only in qualifying, as the overlay, and stay hidden until the layout's racing line
+  is there.
 
 ### Public live timing
 

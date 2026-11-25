@@ -357,6 +357,15 @@
     return s.approval === "pending" ? ["pending", "amb"] : ["approved, no data", "amb"];
   }
 
+  // The track map's cars: the race rows in running order; qualifying shows the line only, as the overlay.
+  function mapCars(r) {
+    if (r.mode === "qualifying") return [];
+    var colors = r.class_colors || {};
+    return (r.entries || []).map(function (e, i) {
+      return Object.assign({}, e, {pos: i + 1, class_color: colors[e.class] || ""});
+    });
+  }
+
   // The desk's parts, each rendered into the page's [data-desk="<part>"] mount point.
   var SLOTS = ["live", "race", "drivers", "corrections", "qualifying", "dashboard", "setup", "trouble"];
   function deskSlots(root) {
@@ -397,6 +406,9 @@
       document.head.appendChild(el("style", {id: "dd-style", text: CSS}));
     }
     var state = {race: null, ready: null, invite: null};
+    // The track map (track-map.js), only on a page with an [data-track-map] SVG.
+    var mapSvg = root.querySelector("[data-track-map]");
+    var map = mapSvg && window.TrackMap ? window.TrackMap.create(mapSvg) : null;
     var seen = {race: null, rec: null, reqs: null};
     // A status line per part: an action's answer shows in the part it was pressed in.
     var msgs = {}, part = "live";
@@ -1266,7 +1278,9 @@
         : "Relay not answering since " + state.staleSince.toLocaleTimeString() + ".";
       if (stale) staleNote.textContent = "Relay not reachable since " + state.staleSince.toLocaleTimeString() +
         ": the tables below are not current.";
-      [raceTable, qualiTable, evTable, readyTable, sendTable, reqList].forEach(function (t) { t.classList.toggle("stale", stale); });
+      [raceTable, qualiTable, evTable, readyTable, sendTable, reqList].concat(map ? [mapSvg] : []).forEach(function (t) {
+        t.classList.toggle("stale", stale);
+      });
     }
     async function refresh() {
       // Both start at once; a slow recording call never holds back the race table.
@@ -1276,6 +1290,7 @@
       var r = await raceCall;
       markStale(!!r);
       if (r) renderRace(r);
+      if (r && map) map.sync(r.track || null).then(function () { map.draw(mapCars(r)); });
       var rec = await recCall;
       if (renderRecording(rec) && r) renderRace(r);
       var rd = await call("/drivers/readiness", undefined, true);

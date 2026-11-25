@@ -1636,6 +1636,8 @@ def t_both_desks_act_with_their_identity():
         assert st == 200 and _json.loads(text)["ok"], (st, text)
         assert _audit_of(srv)[-1]["action"] == "new_event", "the tailnet starts a new event"
         srv.race_svc.tick()
+        st, text, _h = _req(port, f"/console/drivers/line?t={rc}")
+        assert st == 200 and _json.loads(text)["points"], f"Race Control reads the line its map draws: {st}"
         alice = g._tok("alice")                                   # a commentator
         st, text, _h = _req(port, f"/console/drivers/dashboard?t={alice}")
         dash = _json.loads(text)
@@ -1645,6 +1647,10 @@ def t_both_desks_act_with_their_identity():
         assert _req(port, f"/console/drivers/readiness?t={alice}")[0] == 403, "controls stay crew-only"
         st, text, h = _req(port, "/console/driver-desk.js")
         assert st == 200 and "javascript" in h.get("Content-Type", ""), (st, h)
+        for path in ("/track-map.js", "/console/track-map.js"):
+            st, text, h = _req(port, path)
+            assert st == 200 and "TrackMap" in text and "javascript" in h.get("Content-Type", ""), \
+                f"the shared map module is public static code at {path}: {st} {h}"
     finally:
         srv.shutdown()
 

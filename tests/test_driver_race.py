@@ -973,8 +973,11 @@ def t_the_public_view_names_a_brand_only_with_a_logo():
 
 def t_the_desk_standings_carry_each_entrys_brand():
     st = {"state": "racing", "entries": [{"entry": "A", "laps": 1}, {"entry": "Z", "laps": 0}]}
-    out = dr.with_brands(st, {"A": {"brandKey": "bmw", "brandName": "BMW"}})
+    out = dr.with_brands(st, {"A": {"brandKey": "bmw", "brandName": "BMW", "number": "7",
+                                    "bgColor": "#c00000", "textColor": "#fff"}})
     assert [(e["brand"], e["brand_name"]) for e in out["entries"]] == [("bmw", "BMW"), ("", "")], out
+    assert [(e["number"], e["color"], e["text_color"]) for e in out["entries"]] == \
+        [("7", "#c00000", "#fff"), ("", "", "")], f"the desk's map labels each car as the overlay does: {out}"
     assert "brand" not in st["entries"][0], "the standings themselves stay untouched"
 
 

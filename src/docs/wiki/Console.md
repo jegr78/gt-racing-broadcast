@@ -87,6 +87,11 @@ so the race controls never scroll away:
   up), what is on air, and the race controls: the finish mode and lap count, **Final
   lap**, **Finish**, **RED FLAG**, and while the red flag is out the restart mode and
   **Restart released**. The desk's status line and its last change sit below them.
+- **Track map** on top of the right column, above the crew chat: each car as a numbered
+  dot on the layout's racing line, from the race table's own live data without the
+  dashboard delay; in qualifying only the line. It stays hidden until the relay has the
+  line for the picked layout, and dims with the tables while the relay does not answer.
+  On a phone it sits in the **Chat** tab above the chats.
 - **Race start** in the Race area takes two clicks. Pressed once the cars stand on the
   grid, it clears the lobby laps and arms the race timer, which then starts by itself
   on the first race lap. It is locked, with the reason, while the race timer has

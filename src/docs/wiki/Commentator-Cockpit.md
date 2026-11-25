@@ -18,7 +18,12 @@ The cockpit uses the frame of the [Race Control desk](Console#race-control-desk)
   preview, the race timer, **Message director** and the **Race Control** notes. In a short
   window the column scrolls on its own.
 - **The selected area** fills the middle. Timing gets the full width with every column.
-- **The chats** sit on the right: the crew chat, and the broadcast chat below it.
+- **The chats** sit on the right: the crew chat, and the broadcast chat below it. Once
+  the relay has the racing line for the picked layout, **Map** in the crew chat's header
+  lays the **track map** over the crew chat: each car as a numbered dot on the line, from
+  the same delayed data as the timing; in qualifying only the line. **Hide map** brings
+  the crew chat back. The broadcast chat never moves. The map starts hidden, and the
+  browser remembers your choice. On a phone the same button sits in the **Chat** tab.
 - **Below 1440 px** the areas show as letters (T, S, G, N), so the timing keeps every
   column. Between 821 and 1279 px the chats also move under the area. In a short window
   the timing table scrolls inside its card and keeps its column header in view.
