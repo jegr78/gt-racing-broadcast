@@ -105,6 +105,7 @@ class RunContext:
         self._event_link = event_link
         self._kill_relay = kill_relay
         self.secrets = set(secrets)      # every credential of the run, for `scrub`
+        self.driver_codes = {}           # (entry, stint label or "") -> the code a driver page showed
         self._clock, self._learned_at = clock, None
         self.findings = []
 

@@ -1,6 +1,6 @@
 """The drivers of an event: senders that register on the event's invite and post GT7
 telemetry through the relay's ingest route, as `racecast-sender.py` does for a real
-driver. No page: a driver's registration form adds nothing a sender does not do.
+driver. No page: the `driver` page role shows the registration form for one of them.
 
 `register` only asks; Race Control approves on its desk. The other actions are what
 happens on track: `start`, `pit`, `box`, `lobby`, `release`, `drop`, `rejoin`, `stop`."""
@@ -15,7 +15,8 @@ UNGAPPED_STEP_S = 1.0    # cars without a gap (lapped) leave after the last, thi
 
 @register
 class DriversRole(Role):
-    """`register` (cars, stints, positions: GT7's 0x84 position from the road order), `start`, `pit` (entry, seconds), `box` (order: "race",
+    """`register` (cars, stints, positions: GT7's 0x84 position from the road order, skip:
+    [{entry, stint}] seats the `driver` page registers), `start`, `pit` (entry, seconds), `box` (order: "race",
     "grid" or a list of entries), `lobby` (stint), `release` (gaps), `drop` (entry),
     `rejoin` (entry, seconds), `stop` (entries). An entry is its team label or its grid slot."""
     kind = "drivers"
@@ -25,6 +26,7 @@ class DriversRole(Role):
     def open(self):
         self.field = self.runner = self.client = None
         self.registered = 0
+        self.waiting = {}        # (entry, 0-based stint) -> its key in ctx.driver_codes
 
     def _field(self):
         if self.field is None:
@@ -68,6 +70,7 @@ class DriversRole(Role):
             if not entries:
                 raise StepError("the invite lists no entries: the roster ([event] cars) is empty")
             stints = int(args.get("stints") or len(segments) or 1)
+            skip = self._skips(args.get("skip", []), entries, stints)
             length = float(event.get("track_length_m", drive.DEFAULT_TRACK_M))
             field = drive.Field(drive.trace(drive.synthetic_path(length)), self.client.ingest,
                                 seed=int(event.get("seed", 7)), positions=bool(args.get("positions")))
@@ -75,6 +78,9 @@ class DriversRole(Role):
                 field.add(entry, [drive.driver_name(entry, s) for s in range(stints)])
                 for s in range(stints):
                     segment = segments[s] if s < len(segments) else None
+                    if (entry, s) in skip:
+                        self.waiting[(entry, s)] = (entry, segment or "")
+                        continue
                     field.set_code(entry, s, self.client.register(
                         invite, entry, drive.driver_name(entry, s), segment, drive.device_address(k, s)))
                     self.registered += 1
@@ -85,11 +91,39 @@ class DriversRole(Role):
             left = f" {made} registrations were already made and stay waiting at the relay." if made else ""
             raise StepError(why + "." + left + " No driver of this role is registered.") from None
         self.field = field
-        return {"registered": self.registered, "entries": entries, "stints": stints}
+        return {"registered": self.registered, "skipped": len(self.waiting), "entries": entries, "stints": stints}
+
+    @staticmethod
+    def _skips(skip, entries, stints):
+        """The seats `skip` names as {(entry, 0-based stint)}."""
+        if not isinstance(skip, list) or not all(isinstance(s, dict) for s in skip):
+            raise StepError("skip is a list of {entry, stint}")
+        out = set()
+        for seat in skip:
+            entry, stint = seat.get("entry"), seat.get("stint", 1)
+            if entry not in entries:
+                raise StepError(f"skip: no entry {entry!r} on the invite")
+            if type(stint) is not int or not 1 <= stint <= stints:
+                raise StepError(f"skip: {entry} has no stint {stint!r} (stints 1-{stints})")
+            out.add((entry, stint - 1))
+        return out
+
+    def _seats_of(self, stint):
+        """Give the page-registered seats of 0-based `stint` the code their page showed;
+        a seat still without one fails, as its car would send nothing."""
+        for (entry, s), key in list(self.waiting.items()):
+            code = self.ctx.driver_codes.get(key)
+            if code:
+                self.field.set_code(entry, s, code)
+                del self.waiting[(entry, s)]
+            elif s == stint:
+                raise drive.DriveError(f"{entry} has no sender code for stint {s + 1}: "
+                                       "the driver page has not registered that seat")
 
     def act_start(self, args):
         """The senders start and the cars leave the grid."""
         field = self._field()
+        self._do(lambda: self._seats_of(field.stint), "start")
         if self.runner is None:
             self.runner = self.runner_factory(field)
             self.runner.start()
@@ -129,7 +163,7 @@ class DriversRole(Role):
         stint = args.get("stint")
         if type(stint) is not int or stint < 1:
             raise StepError("lobby needs args.stint, counted from 1")
-        self._do(lambda: self._field().lobby(stint - 1), "open the lobby")
+        self._do(lambda: (self._seats_of(stint - 1), self._field().lobby(stint - 1)), "open the lobby")
 
     def act_release(self, args):
         """The held cars leave the box; with `gaps` (the rows of a race reading, such as

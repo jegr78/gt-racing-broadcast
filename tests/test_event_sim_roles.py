@@ -112,6 +112,9 @@ class Locator:
     def bounding_box(self):
         return self._el().box
 
+    def focus(self, timeout=None):
+        self.page.focused = self.selector
+
     def scroll_into_view_if_needed(self, timeout=None):
         el = self.page.els.get(self.selector)
         if el is not None and getattr(el, "rerenders", 0):
@@ -169,6 +172,7 @@ class Page:
         self.handlers = {}
         self.fit = {}            # live column selector -> what FIT_SCRIPT measured there
         self.size = (1440, 900)
+        self.focused = None
 
     def add(self, selector, **kw):
         self.els[selector] = El(**kw)
@@ -252,12 +256,13 @@ class Browser:
 
     def __init__(self, page=None):
         self.page, self.problem = page, "" if page else "Playwright is not installed"
-        self.contexts = []
+        self.contexts, self.viewports = [], []
 
     def get(self):
         return self if self.page else None
 
     def new_context(self, viewport=None):
+        self.viewports.append(viewport)
         self.contexts.append(Context(self.page))
         return self.contexts[-1]
 
@@ -292,12 +297,14 @@ def t_the_registry_has_every_party_and_its_actions():
     want = {"producer": {"open", "pick_track", "race_settings", "start_event", "stop_event", "relay_restart"},
             "director": {"open", "approve_link", "arm_feed", "arm", "next", "scene", "red_flag",
                          "show_dashboard", "cue", "chat", "graphic", "pov", "hud", "mode", "start_part",
-                         "end_part", "fit", "view"},
+                         "end_part", "fit", "view", "play"},
             "race_control": {"open", "approve_driver", "approve_drivers", "final_lap", "finish", "red_flag",
                              "release", "retire", "rejoin", "estimate", "add_lap", "set_time", "correction",
-                             "note", "fit", "confirm_dc", "class_laps", "view"},
+                             "note", "fit", "confirm_dc", "class_laps", "view", "reject_driver",
+                             "correct_driver", "compound"},
             "commentator": {"open", "submit_link", "chat", "fit", "view"},
             "viewer": {"open", "read"},
+            "driver": {"open", "register"},
             "drivers": {"register", "start", "pit", "box", "lobby", "release", "drop", "rejoin", "stop"},
             "probe": {"watch", "mark", "kit", "race_reset", "spectator", "stop_spectator", "check", "report"}}
     for kind, actions in want.items():
@@ -1028,7 +1035,7 @@ def t_cue_and_chat_send_what_was_typed():
 
 
 # -- race control ---------------------------------------------------------------------
-RC_AREAS = ("race", "drivers", "corrections", "qualifying", "note")
+RC_AREAS = ("race", "drivers", "corrections", "qualifying", "dashboard", "note")
 
 
 def desk_areas(page):
@@ -1199,10 +1206,14 @@ def t_corrections_times_and_notes_go_through_their_forms():
     fails(lambda: role.do("note", {"text": "x"}), "no commentator on air")
 
 
-def waiting_desk(names):
+def waiting_desk(names, multi=False):
+    """A desk with waiting requests: Approve takes the row's entry and stint selects,
+    Reject is armed and acts on its second click, and an approved row lists what it got."""
     role, page, ctx = desk()
     left = list(names)
-    page.entries = {}
+    page.entries, page.stints, page.rejected, page.approved = {}, {}, [], {}
+    page.keep_registered = None    # (entry, stint) the page approves whatever the selects say
+    status = page.els['.dd .msg.cur[role="status"]']
 
     def render():
         page.add(".dd .req.waiting", count=len(left))
@@ -1211,15 +1222,40 @@ def waiting_desk(names):
             n = left.count(name)
             row = f'.dd .req.waiting:has(strong[title="{name}"])'
             page.add(row, count=n)
+            entry = page.els.get(f'.dd .req.waiting select[aria-label="Entry of {name}"]')
+            stint = page.els.get(f'.dd .req.waiting select[aria-label="Stint of {name}"]')
 
             def approve(name=name):
                 page.respond("/console/race-control/drivers/requests/approve")
-                page.entries[name] = page.els[f'.dd .req.waiting select[aria-label="Entry of {name}"]'].value
+                got = page.els[f'.dd .req.waiting select[aria-label="Entry of {name}"]'].value
+                seg = page.els[f'.dd .req.waiting select[aria-label="Stint of {name}"]'].value if multi else ""
+                if page.keep_registered:
+                    got, seg = page.keep_registered
+                page.entries[name], page.stints[name] = got, seg
+                page.approved.setdefault(name, []).append(" \u00b7 ".join(filter(None, [got, seg])))
+                status.text, status.attrs["class"] = "Driver approved", "msg"
+                left.remove(name)
+                render()
+
+            def reject(name=name):
+                button = page.els[f'.dd .req.waiting:has(strong[title="{name}"]) button[data-label="Reject"]']
+                if button.text == "Reject":
+                    button.text = "Confirm Reject"
+                    return
+                page.respond("/console/race-control/drivers/requests/reject")
+                status.text, status.attrs["class"] = "Driver rejected: the code is revoked", "msg"
+                page.rejected.append(name)
                 left.remove(name)
                 render()
             page.add(row + ' button[data-label="Approve"]', count=n, on_click=approve)
+            page.add(row + ' button[data-label="Reject"]', count=n, text="Reject", on_click=reject)
             page.add(f'.dd .req.waiting select[aria-label="Entry of {name}"]', count=n,
-                     options=["A #1", "B #2"])
+                     options=["A #1", "A #12", "B #2"], value=entry.value if entry and n else "")
+            if multi:
+                page.add(f'.dd .req.waiting select[aria-label="Stint of {name}"]', count=n,
+                         options=["Stint 1", "Stint 2"], value=stint.value if stint and n else "")
+            done = page.approved.get(name, [])
+            page.add(f'.dd .reqs-ok .req:has(strong[title="{name}"]) span.grow', count=len(done), texts=done)
     render()
     return role, page, left
 
@@ -1234,6 +1270,196 @@ def t_race_control_approves_one_driver_or_every_waiting_one():
     assert role.do("approve_drivers", {}) == {"approved": 2, "names": ["Ann", "Ann"]}, \
         "a second request of the same name is approved as its own click"
     assert role.page()["waiting"] == 0
+
+
+def t_race_control_rejects_one_waiting_request_with_a_confirmed_click():
+    role, page, left = waiting_desk(["Ann", "Bo", "Ann"])
+    key = '.dd .req.waiting:has(strong[title="Bo"]) button[data-label="Reject"]'
+    assert role.do("reject_driver", {"name": "Bo"}) == {"name": "Bo", "status": "Driver rejected: the code is revoked"}
+    assert page.clicks.count(key) == 2, "Reject is armed: arm, then confirm"
+    assert left == ["Ann", "Ann"] and page.rejected == ["Bo"] and "Bo" not in page.entries, \
+        "Bo is rejected, not approved"
+    fails(lambda: role.do("reject_driver", {"name": "Bo"}), "no waiting request of 'Bo'")
+    assert role.do("reject_driver", {"name": "Ann"})["name"] == "Ann", "one of two requests of a name is rejected"
+    assert left == ["Ann"], "a second request of the same name stays waiting"
+
+
+def t_race_control_corrects_a_waiting_request_before_it_approves_it():
+    role, page, left = waiting_desk(["Ann", "Bo", "Cy"], multi=True)
+    out = role.do("correct_driver", {"name": "Ann", "entry": "B #2", "stint": 2})
+    assert out == {"name": "Ann", "entry": "B #2", "stint": "Stint 2", "status": "Driver approved"}, \
+        f"the correction as the desk approved it: {out}"
+    assert (page.entries["Ann"], page.stints["Ann"]) == ("B #2", "Stint 2"), "the corrected entry and stint are approved"
+    assert left == ["Bo", "Cy"], "only the corrected request left the waiting list"
+    fails(lambda: role.do("correct_driver", {"name": "Bo"}), "args.entry or args.stint")
+    fails(lambda: role.do("correct_driver", {"name": "Bo", "entry": "Z #9"}), "Entry of Bo", "no option")
+    page.keep_registered = ("A #12", "Stint 1")
+    fails(lambda: role.do("correct_driver", {"name": "Cy", "entry": "A #1", "stint": 1}), "Cy approved as", "A #1")
+    assert left == ["Bo"], "the page approved Cy, though not as corrected"
+    role, page, left = waiting_desk(["Ann", "Ann"], multi=True)
+    role.do("correct_driver", {"name": "Ann", "entry": "B #2", "stint": 2})
+    page.keep_registered = ("A #1", "Stint 1")
+    fails(lambda: role.do("correct_driver", {"name": "Ann", "entry": "B #2", "stint": 2}), "Ann approved as"), \
+        "an older approved row of the same name is not this correction's result"
+    role, page, left = waiting_desk(["Dee"])
+    fails(lambda: role.do("correct_driver", {"name": "Dee", "stint": 2}), "Stint of Dee")
+    assert left == ["Dee"], "a correction that cannot be made approves nothing"
+
+
+def t_race_control_sets_a_tyre_compound_in_the_dashboard_area():
+    role, page, _ = desk()
+    key = '.dd select[aria-label="Tyre compound of B #2"]'
+    box = _desk_change(page, key, "/drivers/race/compound", "Compound set", options=["", "RS", "RM", "RH"])
+    assert role.do("compound", {"entry": "B #2", "code": "RM"}) == \
+        {"entry": "B #2", "code": "RM", "status": "Compound set"}
+    assert box.value == "RM", "the entry's select holds the compound"
+    assert '.navbtn[data-area="dashboard"]' in page.clicks, "the tyre table is in the Dashboard area"
+    assert page.focused == key, "the desk answers in the part that holds the focus"
+    fails(lambda: role.do("compound", {"entry": "B #2", "code": "XX"}), "no option")
+    fails(lambda: role.do("compound", {"entry": "Z #9", "code": "RS"}), "Tyre compound of Z #9")
+    box.on_change = lambda: page.respond("/console/race-control/drivers/race/compound", status=400)
+    fails(lambda: role.do("compound", {"entry": "B #2", "code": "RS"}), "HTTP 400")
+
+
+class MediaObs:
+    """The run's OBS as `play` reads it: one clip's GetMediaInputStatus."""
+
+    def __init__(self, duration=9000, cursor=2000, state="OBS_MEDIA_STATE_PLAYING"):
+        self.state, self.duration, self.cursor, self.media_state, self.asked = self, duration, cursor, state, []
+
+    def request(self, kind, data=None, origin="ws"):
+        assert kind == "GetMediaInputStatus", f"play only reads the media status, not {kind}"
+        self.asked.append(data["inputName"])
+        return {"mediaState": self.media_state, "mediaDuration": self.duration, "mediaCursor": self.cursor}
+
+
+def media_panel(source="Intro Video", lag=0.3):
+    role, page, ctx = make(party.DirectorRole)
+    key = f'#pgmBus button.k[title="{source}"]'
+    el = page.add(key, text="Season opener", attrs={"class": "k"})
+
+    def take():
+        page.respond("/obs/scene")
+        page.after(lag, lambda: el.attrs.update({"class": "k air"}))
+    el.on_click = take
+    ctx.obs = MediaObs()
+    return role, page, ctx, key
+
+
+def t_play_takes_a_clip_by_its_source_and_returns_at_the_end_of_its_loop():
+    role, page, ctx, key = media_panel()
+    start = page.clock.t
+    out = role.do("play", {"media": "intro"})
+    assert out == {"media": "intro", "source": "Intro Video", "length_s": 9.0, "left_s": 7.0}, out
+    assert page.clicks == [key], "the key is found by the source it plays, not by its caption"
+    took = page.clock.t - start
+    assert 0.3 + 7.0 <= took < 0.3 + 7.5, f"play waits what is left of the clip after the air light, not {took:.1f}s"
+    assert set(ctx.obs.asked) == {"Intro Video"}, "the end is read from the clip the key plays"
+    ctx.obs.duration, ctx.obs.cursor = 60000, 125000
+    assert role.do("play", {"media": "Intro"})["left_s"] == 55.0, "a cursor past the length counts within its loop"
+    fails(lambda: role.do("play", {"media": "credits"}), "intro, trailer or outro")
+    fails(lambda: role.do("play", {"media": "outro"}), "outro key", "0 matching keys")
+    ctx.obs.media_state = "OBS_MEDIA_STATE_ENDED"
+    fails(lambda: role.do("play", {"media": "intro"}), "Intro Video playing")
+    ctx.obs.media_state, ctx.obs.duration = "OBS_MEDIA_STATE_PLAYING", None
+    fails(lambda: role.do("play", {"media": "intro"}), "Intro Video playing")
+    ctx.obs = None
+    fails(lambda: role.do("play", {"media": "intro"}), "no OBS")
+
+
+def t_the_stand_in_obs_plays_each_clip_of_the_collection_with_a_length():
+    import obs_state
+    role, _, ctx = make(party.DirectorRole)
+    ctx.obs = type("Sim", (), {"state": obs_state.ObsState(
+        collection=os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json"))})()
+    for source in roles.selectors.MEDIA.values():
+        length, left = role._playing(source)
+        assert length == obs_state.FILE_DURATION / 1000 and 0 < left <= length, \
+            f"the stand-in OBS plays {source} as a clip with a length, so play ends: {length}, {left}"
+
+
+def t_the_media_sources_are_the_ones_the_panel_titles_its_program_keys_with():
+    with open(os.path.join(ROOT, "src", "director", "director-panel.html"), encoding="utf-8") as fh:
+        panel = fh.read()
+    found = re.search(r"const MEDIA_SCENE_ASSETS = \{([^}]*)\}", panel)
+    assert found, "the panel maps its media scenes to their sources"
+    assets = dict(re.findall(r"(\w+):'([^']+)'", found.group(1)))
+    assert {scene.lower(): source for scene, source in assets.items()} == roles.selectors.MEDIA, \
+        f"play's media map is the panel's: {assets}"
+    for scene in assets:
+        assert f'{{label:"{scene.upper()}", scene:"{scene}"' in panel, f"a program macro takes the {scene} scene"
+    assert 'b._m = m; macroKeys.push(b); $("#pgmBus").appendChild(b);' in panel, "the macros are the #pgmBus keys"
+    assert "macroKeys.forEach(b => { const source = MEDIA_SCENE_ASSETS[b._m.scene]; " \
+           "if(source) { b._caption.nodeValue = assetLabel(source,b._m.label); b.title = source; } });" in panel, \
+        "relabelAssetControls titles each media macro key with its source"
+
+
+def drive_page(segments=()):
+    """The invite page as drive.html behaves: a click hides the old error, the answer
+    arrives, and a moment later the page shows the new code or the error; the commands
+    stay visible after a registration."""
+    role, page, ctx = make(party.DriverRole, links={"invite": "INV id/1"})
+    page.add('#entry option[value="B #2"]')
+    page.add("#entry", options=["A #1", "B #2"])
+    page.add("#segment", options=list(segments), visible=bool(segments))
+    page.add('#segment option:not([value=""])', count=len(segments), texts=list(segments))
+    page.add("#name")
+    err = page.add("#err", text="", visible=False)
+    command = page.add("#cmdPy", text="", visible=False)
+    page.issued, page.answer = [], {"status": 200, "error": ""}
+
+    def register():
+        err.visible = False
+        if page.answer["status"] >= 400:
+            page.respond("/console/drive/register", status=page.answer["status"], body={"error": page.answer["error"]})
+            page.after(0.2, lambda: (setattr(err, "text", page.answer["error"]), setattr(err, "visible", True)))
+            return
+        code = page.answer.get("code", f"D1:code{len(page.issued) + 1}.sig")
+        page.issued.append(code)
+        page.respond("/console/drive/register", body={"ok": True, "code": code} if code else {"ok": True})
+        page.after(0.2, lambda: (setattr(command, "text", f"python3 racecast-sender.py --code {code}"),
+                                 setattr(command, "visible", True)))
+    page.add("#register", on_click=register)
+    return role, page, ctx
+
+
+def t_a_driver_registers_through_the_invite_page_on_a_phone():
+    role, page, ctx = drive_page()
+    out = role.do("register", {"entry": "B #2", "name": "Ann"})
+    assert out == {"entry": "B #2", "name": "Ann", "stint": ""}, f"the registration as the form sent it: {out}"
+    assert page.gotos == [BASE + "/console/drive?i=INV%20id%2F1"], "the invite page, no console token"
+    assert ctx._browser.viewports == [{"width": 390, "height": 844}], "a phone viewport"
+    assert (page.els["#entry"].value, page.els["#name"].value) == ("B #2", "Ann"), "the form carries entry and name"
+    assert "D1:" not in json.dumps(out), "the driver code never reaches a result"
+    assert ctx.driver_codes == {("B #2", ""): "D1:code1.sig"}, "the page's code is handed to the drivers' field"
+    assert "D1:code1.sig" in ctx.secrets, "the code is a credential the run redacts"
+    role.shot("x.png")
+    assert page.shots[-1][2] == ["#runSec code"], "a screenshot blacks out the sender commands"
+    assert "#runSec code" in roles.selectors.LINKS, "a plain page's screenshot blacks out the sender commands too"
+    role.do("register", {"entry": "B #2", "name": "Bo"})
+    assert ctx.driver_codes[("B #2", "")] == "D1:code2.sig", \
+        "a second registration keeps the code the page shows for it, not the one still on screen"
+    assert "D1:code2.sig" in page.els["#cmdPy"].text, \
+        "register returns once the page shows this registration's code, not the one still on screen"
+    page.answer = {"status": 429, "error": "Too many registrations from this device."}
+    fails(lambda: role.do("register", {"entry": "B #2", "name": "Cy"}), "HTTP 429", "Too many registrations")
+    assert ctx.driver_codes[("B #2", "")] == "D1:code2.sig", "a refused registration hands over no code"
+    page.answer = {"status": 200, "code": ""}
+    fails(lambda: role.do("register", {"entry": "B #2", "name": "Cy"}), "issued no sender code")
+    fails(lambda: role.do("register", {"entry": "B #2", "name": "Ann", "stint": 1}), "asks for no stint")
+    fails(lambda: role.do("register", {"entry": "Z #9", "name": "Ann"}), "no entry 'Z #9'")
+    fails(lambda: role.do("register", {"entry": "B #2"}), "entry and args.name")
+    fails(lambda: make(party.DriverRole, "driver:Ann"), "no console identity")
+
+
+def t_a_driver_registers_for_a_stint_under_the_invites_own_label():
+    role, page, ctx = drive_page(["Heat A", "Heat B"])
+    fails(lambda: role.do("register", {"entry": "B #2", "name": "Bo"}), "needs args.stint")
+    out = role.do("register", {"entry": "B #2", "name": "Bo", "stint": 2})
+    assert out["stint"] == "Heat B" and page.els["#segment"].value == "Heat B", \
+        f"stint 2 is the invite's second segment, whatever its label: {out}"
+    assert ctx.driver_codes == {("B #2", "Heat B"): "D1:code1.sig"}, "the code is kept under the invite's label"
+    fails(lambda: role.do("register", {"entry": "B #2", "name": "Bo", "stint": 3}), "no stint 3")
 
 
 # -- commentator and viewer -------------------------------------------------------------
@@ -1368,7 +1594,7 @@ def drivers_role(event=None, manual=True, links=True):
 def t_drivers_register_each_stint_as_its_own_device_and_keep_the_codes():
     role = drivers_role()
     out = role.do("register", {"stints": 2})
-    assert out == {"registered": 6, "entries": drive.roster(3), "stints": 2}, out
+    assert out == {"registered": 6, "skipped": 0, "entries": drive.roster(3), "stints": 2}, out
     assert "code" not in json.dumps(out) and "INVITE" not in json.dumps(out), "codes and invite stay inside"
     relay = Relay.made[-1]
     assert relay.registered[0][:4] == ("INVITE", drive.roster(3)[0], "Driver 11-1", "Stint 1")
@@ -1378,6 +1604,33 @@ def t_drivers_register_each_stint_as_its_own_device_and_keep_the_codes():
     assert role.page()["registered"] == 6 and role.page()["sending"] == 3
     fails(lambda: role.do("register", {}), "registered already")
     assert "code" not in json.dumps(role.page())
+
+
+class HeatRelay(Relay):
+    def data(self, invite):
+        return {"entries": drive.roster(3), "segments": ["Heat A", "Heat B", "Heat C"]}
+
+
+def t_drivers_leave_out_the_seat_the_driver_page_registers_and_take_its_code():
+    role = drivers_role()
+    role.client_factory = HeatRelay
+    a, b, _ = drive.roster(3)
+    out = role.do("register", {"stints": 2, "skip": [{"entry": b, "stint": 2}]})
+    assert (out["registered"], out["skipped"]) == (5, 1), f"one seat is left to the driver page: {out}"
+    relay = Relay.made[-1]
+    assert (b, "Heat B") not in [(r[1], r[3]) for r in relay.registered], "the page's seat gets no HTTP request"
+    role.do("start", {})
+    fails(lambda: role.do("lobby", {"stint": 2}), b, "stint 2", "no sender code")
+    role.ctx.driver_codes[(b, "Heat B")] = "D1:page.code"   # the driver role's key: the invite's label
+    role.do("lobby", {"stint": 2})
+    assert role.field.car(b).senders[1].code == "D1:page.code", "the seat sends with the code the page showed"
+    assert "D1:page.code" not in json.dumps(role.page()), "the code never reaches a result"
+    early = drivers_role()
+    early.do("register", {"skip": [{"entry": a, "stint": 1}]})
+    fails(lambda: early.do("start", {}), a, "stint 1", "no sender code")
+    for bad, needle in (([{"entry": "Z #9", "stint": 1}], "no entry 'Z #9'"), ([{"entry": a, "stint": 4}], "stint 4"),
+                        ("x", "skip is a list")):
+        fails(lambda bad=bad: drivers_role().do("register", {"stints": 3, "skip": bad}), needle)
 
 
 def t_drivers_need_the_invite_and_a_track():

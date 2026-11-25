@@ -775,18 +775,19 @@ action and acts on the controls a person uses; the drivers have no page.
 | Role (`role =`) | Surface | Actions (`do =`) |
 |---|---|---|
 | `producer` | Control Center `/` | `open`, `pick_track` (track), `race_settings` (formation, finish_mode, laps), `start_event` (stint, qualifying), `stop_event`, `relay_restart` |
-| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `view` (area) |
-| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
+| `director` | Director Panel `/panel` | `open`, `approve_link` (stint), `arm_feed` (feed), `arm`, `next`, `scene` (scene: a program key such as Stint, Split, Standby, Intermission), `graphic` (name, scene, on), `pov` (on), `hud` (field, value), `mode` (mode), `start_part`, `end_part`, `red_flag` (on), `show_dashboard` (on), `cue` (text, target, level), `chat` (text, name), `play` (media: intro, trailer or outro; returns at the end of the loop the clip plays, from OBS's `mediaDuration` and `mediaCursor` read after the air light: the panel shows no media state and the clips loop), `view` (area) |
+| `race_control` | `/console/race-control` as `Sim Race Control` | `open`, `approve_driver` (name, entry), `approve_drivers`, `reject_driver` (name), `correct_driver` (name, entry, stint: changed on the waiting request, then approved), `compound` (entry, code), `final_lap`, `finish`, `red_flag`, `release`, `retire` (entry), `rejoin` (entry), `estimate` (entry, ref, seconds, ahead), `correction` (entry, metres, pits, reason), `set_time` and `add_lap` (entry, time; qualifying mode), `note` (text, target), `confirm_dc` (entry), `class_laps` (class, laps), `view` (area) |
 | `commentator:<crew name>` | `/cockpit` with that person's token; the name must be in `[[event.commentators]]` or a Commentator of a `[sheet.tabs] Crew`, checked at load | `open`, `submit_link` (url, stint), `chat` (text) |
 | `viewer` | `/console/timing` on the event's timing link | `open`, `read` (cars) |
+| `driver` | `/console/drive` on the event's invite link, 390x844, no console token | `open`, `register` (entry, name, stint when the event registers per stint: its number picks the invite's segment label, the key the `drivers` role uses too; the code the page shows goes to the `drivers` role through `ctx.driver_codes`, never into a result) |
 | `probe` | `tools/probe-stage2.py` as the runbook runs it, and the real `racecast-sender.py` (#1116) | `watch`, `mark` (text), `kit` (sheets into the role's temporary folder), `race_reset`, `spectator` (name, position, cars: the sender with the probe key against a simulated PS5; needs `[event] probe = true`), `stop_spectator`, `check` (entry, segment, name: registers and runs `--check`), `report` (`collect` and `report`; its result is `probe_stage2.facts`) |
-| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints, positions: 0x84 from the road order), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
+| `drivers` | API: invite registration and `/console/drive/ingest` | `register` (cars, stints, positions: 0x84 from the road order, skip: `[{entry, stint}]` seats the `driver` page registers; such a seat sends with the code that page showed, and `start` or `lobby` fails while it has none), `start`, `pit` (entry, seconds), `box` (order), `lobby` (stint), `release` (gaps: the rows of a race reading, for a keep restart), `drop` (entry), `rejoin` (entry, seconds), `stop` (entries) |
 
 An action is a mechanism. Which one follows which is the scenario's business, never a
 role's: `box`, the director's `next`, `lobby` and `release` are four steps, not one "swap".
 
 UI or API:
-- Producer, director, Race Control, commentator and viewer act through their page only.
+- Producer, director, Race Control, commentator, viewer and driver act through their page only.
   `Surface.control` requires a control to be visible and enabled (else `StepError`), notes
   one outside the 1440x900 viewport as a soft finding and scrolls it into view.
   `Surface.answered` waits for the page's own request to be answered (HTTP 400 and up is
@@ -811,8 +812,8 @@ UI or API:
   back on the stint that was on air, on Feed A, with the feeds stopped (#1270): arm Feed A.
 - `view` opens a desk or panel area, so a screenshot of an element in it can be taken.
 - Not offered: switching the profile (the app home holds the demo profile only).
-- Drivers act through the API, as `racecast-sender.py` does for a real driver: the
-  registration form adds nothing a sender does not do. Each driver registers as its own
+- Drivers act through the API, as `racecast-sender.py` does for a real driver. The
+  `driver` role registers one driver through the invite page's form, so the page is seen. Each driver registers as its own
   device (`X-Forwarded-For` from 198.51.100.0/24, which the relay honours from loopback as
   behind Funnel), since one client may hold 8 waiting requests and register 30 times a
   minute. `register` only asks: Race Control approves on its desk.
