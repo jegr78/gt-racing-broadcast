@@ -1,15 +1,21 @@
 # Full: the race day of the slide deck, in real time, over three stints in three
 # lobbies with one commentator each. 14 cars on a Suzuka-length lap (about 1:45).
-# Start event, then qualifying mode: every driver of the three stints registers and Race Control
-# approves them, the desk adds qualifying laps, the director switches to race mode and
-# goes live. A formation lap, the start, a pit stop; in stint 1 a car disconnects (confirmed
-# DC, rejoin mark), another one's sender stops (an estimate 3 s behind another car, rejoin
-# mark), a third retires. Comms 2 sends the stint 2 link late. At each stint change every
-# running team's driver swaps in the new lobby; the DC team rejoins a lap down. A red flag
-# in stint 2 ends in a keep-gaps restart. In stint 3 Race Control calls the final lap.
+# Start event, then qualifying mode: Comms 1 submits the qualifying link, the director
+# approves and arms it. One driver registers on the invite page, the others over the API;
+# Race Control corrects one request, rejects one and approves the rest. Intro and trailer,
+# then the desk adds qualifying laps, the director switches to race mode and goes live. A
+# formation lap, the start, a pit stop with its tyre compound; in stint 1 a car disconnects
+# (confirmed DC, rejoin mark), another one's sender stops (an estimate 3 s behind another
+# car, rejoin mark), a third retires. Comms 2 sends the stint 2 link late. Before each stint
+# change the invite page registers one driver of the next stint and Race Control approves
+# it; the splitscreen is on program while the cars box, the director cuts back to the stint
+# after NEXT, and every running team's driver swaps in the new lobby; the DC team rejoins
+# a lap down. A red flag in stint 2 ends in a keep-gaps restart, then a pit stop with a
+# compound change. In stint 3 Race Control calls the final lap; the outro ends the broadcast.
 # Its 50 screenshots carry deck image names (`<slide>-<n>`): the race-day subset of the
-# deck, see tools/CLAUDE.md for the families it does not produce. It runs in the
-# workflow (about 36 min there); it exceeds the local 2 GiB E2E unit.
+# deck, see tools/CLAUDE.md for the families it does not produce. The captions, chapters and
+# focus are the walkthrough film's storyboard (spec 2026-11-24-event-walkthrough-video-design).
+# It runs in the workflow (about 36 min there); it exceeds the local 2 GiB E2E unit.
 description = "The deck's race day in real time: qualifying, approval, three stints, DC, estimate, DNF, red flag, finish."
 max_minutes = 75
 
@@ -36,7 +42,8 @@ channel = "comms3"
 scheduled = true
 
 [sheet.tabs]
-Qualifying = [["URL", "Streamer", "Stint"], ["sim://comms1", "Comms 1", "Qualifying"]]
+# Empty until Comms 1 submits it in the cockpit and the director approves it.
+Qualifying = [["URL", "Streamer", "Stint"], ["", "Comms 1", "Qualifying"]]
 
 [[step]]
 id = "relay_up"
@@ -50,6 +57,8 @@ id = "track"
 at = "after:relay_up"
 role = "producer"
 do = "pick_track"
+chapter = "Start the event"
+caption = "The producer picks the track in the Control Center"
 
 [[step]]
 id = "race_settings"
@@ -59,6 +68,7 @@ do = "race_settings"
 args = { formation = true, finish_mode = "time" }
 expect = ["race.settings.formation",
           "race.settings.finish_mode == 'time'"]
+caption = "The producer sets the race: a formation lap and a timed finish"
 
 [[step]]
 id = "start_event"
@@ -67,6 +77,7 @@ role = "producer"
 do = "start_event"
 expect = ["obs.scene == 'Standby'",
           "relay.up"]
+caption = "The producer starts the event"
 
 [[step]]
 id = "quali_mode"
@@ -76,22 +87,166 @@ do = "mode"
 args = { mode = "qualifying" }
 expect = ["relay.status.mode == 'qualifying'"]
 timeout = "20s"
+chapter = "First link"
+caption = "The director switches the relay to qualifying"
+
+[[step]]
+id = "submit_first"
+at = "after:quali_mode"
+role = "commentator:Comms 1"
+do = "submit_link"
+args = { url = "sim://comms1", stint = "Qualifying" }
+expect = ["webhook.count('submission') == 1",
+          "sheet.qualifying[0].url == ''"]
+timeout = "15s"
+caption = "Comms 1 submits the qualifying stream link in the cockpit"
+focus = ["commentator:Comms 1", "director"]
+
+[[step]]
+id = "approve_first"
+at = "after:submit_first"
+role = "director"
+do = "approve_link"
+args = { stint = "Qualifying", area = "schedule" }
+expect = ["sheet.qualifying[0].url == 'sim://comms1'",
+          "webhook.count('stream link approved') == 1"]
+timeout = "40s"
+caption = "The director approves the link of Comms 1"
+focus = ["director", "commentator:Comms 1"]
+
+# The cockpit keeps the area it shows; back to Timing for the cockpit shots.
+[[step]]
+id = "cockpit1_timing"
+at = "after:approve_first"
+role = "commentator:Comms 1"
+do = "view"
+args = { area = "timing" }
 
 [[step]]
 id = "arm_a"
-at = "after:quali_mode"
+at = "after:cockpit1_timing"
 role = "director"
 do = "arm_feed"
 args = { feed = "A" }
+caption = "The director arms feed A with the qualifying stream"
+
+[[step]]
+id = "driver_signup"
+at = "after:arm_a"
+role = "driver"
+do = "register"
+args = { entry = "Juniper Motorsport #10", name = "Driver 10-1", stint = 1 }
+expect = ["page('driver').registered"]
+timeout = "20s"
+chapter = "Drivers sign up"
+caption = "A driver registers for stint 1 on the invite page"
+
+[[step]]
+id = "driver_wrong_team"
+at = "after:driver_signup"
+role = "driver"
+do = "register"
+args = { entry = "Cedar Motorsport #33", name = "Reserve 44", stint = 1 }
+expect = ["page('driver').registered"]
+timeout = "20s"
+caption = "Reserve 44 registers under the wrong team"
+
+[[step]]
+id = "driver_guest"
+at = "after:driver_wrong_team"
+role = "driver"
+do = "register"
+args = { entry = "Echo Racing #55", name = "Guest Driver", stint = 1 }
+expect = ["page('driver').registered"]
+timeout = "20s"
+caption = "Guest Driver registers for Echo Racing #55"
+
+[[step]]
+id = "register"
+at = "after:driver_guest"
+role = "drivers"
+do = "register"
+args = { stints = 3, skip = [{ entry = "Juniper Motorsport #10", stint = 1 }, { entry = "Kestrel Sim Racing #12", stint = 2 }, { entry = "Lakeside Racing #14", stint = 3 }] }
+expect = ["result('register').registered == 39"]
+caption = "The other drivers register for their stints"
+focus = ["driver"]
+
+[[step]]
+id = "desk_waiting"
+at = "after:register"
+role = "race_control"
+do = "open"
+expect = ["page('race_control').waiting == 42"]
+timeout = "20s"
+
+[[step]]
+id = "correct_reserve"
+at = "after:desk_waiting"
+role = "race_control"
+do = "correct_driver"
+args = { name = "Reserve 44", entry = "Delta Sim Team #44" }
+timeout = "20s"
+caption = "Race Control corrects the team of Reserve 44 to Delta Sim Team #44 and approves it"
+focus = ["race_control", "driver"]
+
+[[step]]
+id = "reject_guest"
+at = "after:correct_reserve"
+role = "race_control"
+do = "reject_driver"
+args = { name = "Guest Driver" }
+expect = ["page('race_control').waiting == 40"]
+timeout = "20s"
+caption = "Race Control rejects the request of Guest Driver"
+
+[[step]]
+id = "desk_requests"
+at = "after:reject_guest"
+role = "race_control"
+do = "view"
+args = { area = "drivers" }
+shot = { name = "approval-requests-1", role = "race_control", element = ".area[data-area=\"drivers\"]" }
+
+[[step]]
+id = "approve_drivers"
+at = "after:desk_requests"
+role = "race_control"
+do = "approve_drivers"
+expect = ["result('approve_drivers').approved == 40",
+          "page('race_control').waiting == 0"]
+timeout = "20s"
+shot = { name = "approval-approved-1", role = "race_control", element = ".area[data-area=\"drivers\"]" }
+caption = "Race Control approves the waiting requests"
+
+[[step]]
+id = "intro"
+at = "after:approve_drivers"
+role = "director"
+do = "play"
+args = { media = "intro" }
+chapter = "On air: qualifying"
+caption = "The director plays the intro"
+focus = ["program", "director"]
+
+[[step]]
+id = "trailer"
+at = "after:intro"
+role = "director"
+do = "play"
+args = { media = "trailer" }
+caption = "The director plays the trailer"
+focus = ["program", "director"]
 
 [[step]]
 id = "quali_on_air"
-at = "after:arm_a"
+at = "after:trailer"
 role = "director"
 do = "scene"
 args = { scene = "Stint" }
 expect = ["'comms1' in obs.program_channels"]
 timeout = "90s"
+caption = "The director puts Comms 1 on program for qualifying"
+focus = ["program", "director"]
 
 [[step]]
 id = "dashboard"
@@ -101,6 +256,8 @@ do = "show_dashboard"
 args = { on = true }
 expect = ["race.settings.visible"]
 timeout = "10s"
+caption = "The director shows the driver dashboard"
+focus = ["director", "program"]
 
 [[step]]
 id = "overlay"
@@ -134,45 +291,19 @@ expect = ["not page('commentator:Comms 3').on_air"]
 timeout = "20s"
 
 [[step]]
-id = "register"
+id = "timing_open"
 at = "after:cockpit3"
-role = "drivers"
-do = "register"
-args = { stints = 3 }
-expect = ["result('register').registered == 42"]
-
-[[step]]
-id = "desk_waiting"
-at = "after:register"
-role = "race_control"
+role = "viewer"
 do = "open"
-expect = ["page('race_control').waiting == 42"]
-timeout = "20s"
-
-[[step]]
-id = "desk_requests"
-at = "after:desk_waiting"
-role = "race_control"
-do = "view"
-args = { area = "drivers" }
-shot = { name = "approval-requests-1", role = "race_control", element = ".area[data-area=\"drivers\"]" }
-
-[[step]]
-id = "approve_drivers"
-at = "after:desk_requests"
-role = "race_control"
-do = "approve_drivers"
-expect = ["result('approve_drivers').approved == 42",
-          "page('race_control').waiting == 0"]
-timeout = "20s"
-shot = { name = "approval-approved-1", role = "race_control", element = ".area[data-area=\"drivers\"]" }
 
 [[step]]
 id = "quali_lap1"
-at = "after:approve_drivers"
+at = "after:timing_open"
 role = "race_control"
 do = "add_lap"
 args = { entry = "Blue Harbor Racing #22", time = "1:45.312" }
+caption = "Race Control adds a qualifying lap of Blue Harbor Racing #22"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "quali_lap2"
@@ -180,6 +311,8 @@ at = "after:quali_lap1"
 role = "race_control"
 do = "add_lap"
 args = { entry = "Apex Works #11", time = "1:44.208" }
+caption = "Race Control adds a qualifying lap of Apex Works #11"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "quali_lap3"
@@ -187,6 +320,8 @@ at = "after:quali_lap2"
 role = "race_control"
 do = "add_lap"
 args = { entry = "Cedar Motorsport #33", time = "1:44.951" }
+caption = "Race Control adds a qualifying lap of Cedar Motorsport #33"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "quali_desk"
@@ -207,6 +342,8 @@ expect = ["'Apex Works' in page('viewer').rows[0]",
           "'Blue Harbor' in page('viewer').rows[2]"]
 timeout = "20s"
 shot = "quali-public-1"
+caption = "The public timing ranks the qualifying laps"
+focus = ["viewer", "race_control"]
 
 [[step]]
 id = "shot_quali_cockpit_1"
@@ -235,6 +372,9 @@ args = { mode = "race" }
 expect = ["relay.status.mode == 'race'",
           "'comms1' in obs.program_channels"]
 timeout = "90s"
+chapter = "Race start"
+caption = "The director switches the relay to race mode"
+focus = ["director", "program"]
 
 [[step]]
 id = "go_live"
@@ -242,6 +382,8 @@ at = "after:race_mode+3s"
 role = "director"
 do = "start_part"
 expect = ["obs.streaming"]
+caption = "The director starts Part 1 of the broadcast"
+focus = ["director", "program"]
 
 [[step]]
 id = "formation"
@@ -250,6 +392,8 @@ role = "drivers"
 do = "start"
 expect = ["page('drivers').driving == 14"]
 timeout = "60s"
+caption = "The cars leave the grid for the formation lap"
+focus = ["program", "viewer"]
 
 [[step]]
 id = "shot_formation_1"
@@ -286,6 +430,8 @@ do = "get"
 args = { path = "/status" }
 expect = ["relay.up"]
 shot = { name = "start-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+caption = "The race starts"
+focus = ["program", "viewer"]
 
 [[step]]
 id = "desk_race"
@@ -313,28 +459,8 @@ expect = ["relay.up"]
 shot = { name = "new-cockpit-timing-1", role = "commentator:Comms 1", element = "#timingCard" }
 
 [[step]]
-id = "submit"
-at = "after:shot_new_cockpit_timing_1"
-role = "commentator:Comms 2"
-do = "submit_link"
-args = { url = "sim://comms2", stint = 2 }
-expect = ["webhook.count('submission') == 1",
-          "sheet.schedule[1].url == ''"]
-timeout = "15s"
-
-[[step]]
-id = "approve_link"
-at = "after:submit"
-role = "director"
-do = "approve_link"
-args = { stint = 2 }
-expect = ["sheet.schedule[1].url == 'sim://comms2'",
-          "webhook.count('stream link approved') == 1"]
-timeout = "40s"
-
-[[step]]
 id = "lap2"
-at = "after:approve_link"
+at = "after:shot_new_cockpit_timing_1"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -347,6 +473,9 @@ at = "after:lap2"
 role = "drivers"
 do = "pit"
 args = { entry = "Blue Harbor Racing #22", seconds = 20 }
+chapter = "Stint 1 at the desk"
+caption = "Blue Harbor Racing #22 comes in for a pit stop"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "in_pits"
@@ -395,8 +524,25 @@ expect = ["relay.up"]
 shot = { name = "tower-full-1", role = "page:overlay", element = "#drivers-tower" }
 
 [[step]]
-id = "lap3"
+id = "compound"
 at = "after:shot_tower_full_1"
+role = "race_control"
+do = "compound"
+args = { entry = "Blue Harbor Racing #22", code = "RM" }
+expect = ["race.compounds['Blue Harbor Racing #22'].code == 'RM'"]
+timeout = "15s"
+caption = "Race Control confirms the tyre compound of Blue Harbor Racing #22"
+
+[[step]]
+id = "desk_race_back"
+at = "after:compound"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+
+[[step]]
+id = "lap3"
+at = "after:desk_race_back"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -411,6 +557,8 @@ do = "drop"
 args = { entry = "Falcon Engineering #66" }
 expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').status == 'no_data'"]
 timeout = "20s"
+caption = "Falcon Engineering #66 loses its connection"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "shot_dc_suspected_1"
@@ -456,6 +604,7 @@ do = "confirm_dc"
 args = { entry = "Falcon Engineering #66" }
 expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').status == 'dc'"]
 timeout = "15s"
+caption = "Race Control confirms the disconnect of Falcon Engineering #66"
 
 [[step]]
 id = "desk_events"
@@ -484,6 +633,8 @@ expect = ["page('viewer').cars >= 14",
           "len(having(page('viewer').rows, 'Falcon', 'DC')) == 1"]
 timeout = "30s"
 shot = "dc-onair-3"
+caption = "The public timing shows Falcon Engineering #66 as DC"
+focus = ["viewer", "race_control"]
 
 [[step]]
 id = "dc_mark"
@@ -493,6 +644,7 @@ do = "rejoin"
 args = { entry = "Falcon Engineering #66" }
 expect = ["row(race.entries, 'entry', 'Falcon Engineering #66').rejoin"]
 timeout = "10s"
+caption = "Race Control marks Falcon Engineering #66 for a rejoin"
 
 [[step]]
 id = "lap4"
@@ -511,6 +663,8 @@ do = "drop"
 args = { entry = "Harbor Lights #88" }
 expect = ["row(race.entries, 'entry', 'Harbor Lights #88').status == 'no_data'"]
 timeout = "20s"
+caption = "The sender of Harbor Lights #88 stops"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "shot_est_onair_1"
@@ -532,6 +686,7 @@ expect = ["row(race.entries, 'entry', 'Harbor Lights #88').estimate.ref == 'Gran
           "row(race.entries, 'entry', 'Harbor Lights #88').estimate.seconds == 3"]
 timeout = "15s"
 shot = { name = "est-desk-1", role = "race_control", element = ".area[data-area=\"corrections\"]" }
+caption = "Race Control places Harbor Lights #88 3 s behind Granite GP #77"
 
 [[step]]
 id = "shot_est_onair_2"
@@ -568,6 +723,7 @@ do = "rejoin"
 args = { entry = "Harbor Lights #88" }
 expect = ["row(race.entries, 'entry', 'Harbor Lights #88').rejoin"]
 timeout = "10s"
+caption = "Race Control marks Harbor Lights #88 for a rejoin"
 
 [[step]]
 id = "lap5"
@@ -587,6 +743,8 @@ args = { entry = "Ion Racing #9" }
 expect = ["row(race.entries, 'entry', 'Ion Racing #9').status == 'retired'",
           "pluck(race.entries, 'entry')[13] == 'Ion Racing #9'"]
 timeout = "15s"
+caption = "Race Control retires Ion Racing #9"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "desk_dnf"
@@ -615,8 +773,33 @@ expect = ["relay.up"]
 shot = { name = "new-dnf-tower-1", role = "page:overlay", element = "#drivers-tower" }
 
 [[step]]
-id = "lap6"
+id = "submit"
 at = "after:shot_new_dnf_tower_1"
+role = "commentator:Comms 2"
+do = "submit_link"
+args = { url = "sim://comms2", stint = 2 }
+expect = ["webhook.count('submission') == 2",
+          "sheet.schedule[1].url == ''"]
+timeout = "15s"
+chapter = "Next commentator"
+caption = "Comms 2 submits the stream link for stint 2"
+focus = ["commentator:Comms 2", "director"]
+
+[[step]]
+id = "approve_link"
+at = "after:submit"
+role = "director"
+do = "approve_link"
+args = { stint = 2 }
+expect = ["sheet.schedule[1].url == 'sim://comms2'",
+          "webhook.count('stream link approved') == 2"]
+timeout = "40s"
+caption = "The director approves the link of Comms 2"
+focus = ["director", "commentator:Comms 2"]
+
+[[step]]
+id = "lap6"
+at = "after:approve_link"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -624,12 +807,43 @@ expect = ["race.lap.leader >= 6"]
 timeout = "12m"
 
 [[step]]
-id = "box2"
+id = "swap1_driver"
 at = "after:lap6"
+role = "driver"
+do = "register"
+args = { entry = "Kestrel Sim Racing #12", name = "Driver 12-2", stint = 2 }
+expect = ["page('driver').registered"]
+timeout = "20s"
+chapter = "Driver swap 1"
+caption = "The stint 2 driver of Kestrel Sim Racing #12 registers on the invite page"
+focus = ["driver", "race_control"]
+
+[[step]]
+id = "swap1_approve"
+at = "after:swap1_driver"
+role = "race_control"
+do = "approve_driver"
+args = { name = "Driver 12-2" }
+timeout = "20s"
+caption = "Race Control approves Driver 12-2 for stint 2"
+focus = ["race_control", "driver"]
+
+[[step]]
+id = "swap1_desk"
+at = "after:swap1_approve"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+
+[[step]]
+id = "box2"
+at = "after:swap1_desk"
 role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 12"]
 timeout = "4m"
+caption = "The cars come into the box for the driver swap"
+focus = ["program", "race_control"]
 
 [[step]]
 id = "shot_swaps_1"
@@ -641,27 +855,53 @@ expect = ["relay.up"]
 shot = { name = "swaps-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
 
 [[step]]
-id = "arm2"
+id = "split2"
 at = "after:shot_swaps_1"
 role = "director"
+do = "scene"
+args = { scene = "Split" }
+expect = ["obs.scene == 'Splitscreen'"]
+timeout = "20s"
+caption = "The director puts the splitscreen on program while the cars box"
+focus = ["program", "director"]
+
+[[step]]
+id = "arm2"
+at = "after:split2"
+role = "director"
 do = "arm"
+caption = "The director arms the feed of stint 2"
 
 [[step]]
 id = "next2"
 at = "after:arm2"
 role = "director"
 do = "next"
-expect = ["'comms2' in obs.program_channels",
-          "'comms1' not in obs.program_channels",
-          "page('commentator:Comms 2').on_air"]
+expect = ["page('commentator:Comms 2').on_air"]
 timeout = "90s"
+caption = "The director switches to stint 2: Comms 2 goes on air"
+focus = ["director", "program", "commentator:Comms 1", "commentator:Comms 2"]
+
+[[step]]
+id = "stint2_cut"
+at = "after:next2"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms2' in obs.program_channels",
+          "'comms1' not in obs.program_channels"]
+timeout = "90s"
+caption = "The director cuts back to the stint: Comms 2 alone on program"
+focus = ["program", "director"]
 
 [[step]]
 id = "lobby2"
-at = "after:next2"
+at = "after:stint2_cut"
 role = "drivers"
 do = "lobby"
 args = { stint = 2 }
+caption = "The stint 2 drivers join the new lobby"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "release2"
@@ -670,6 +910,8 @@ role = "drivers"
 do = "release"
 expect = ["page('drivers').driving == 12"]
 timeout = "4m"
+caption = "The cars leave the box with their stint 2 drivers"
+focus = ["program", "viewer"]
 
 [[step]]
 id = "shot_swaps_2"
@@ -686,6 +928,9 @@ at = "after:shot_swaps_2"
 role = "drivers"
 do = "rejoin"
 args = { entry = "Falcon Engineering #66", seconds = 130 }
+chapter = "Stint 2 at the desk"
+caption = "Falcon Engineering #66 rejoins in the new lobby"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "rejoin_est"
@@ -693,6 +938,8 @@ at = "after:rejoin_dc"
 role = "drivers"
 do = "rejoin"
 args = { entry = "Harbor Lights #88", seconds = 5 }
+caption = "Harbor Lights #88 sends again"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "swapped"
@@ -726,6 +973,7 @@ expect = ["relay.up"]
 shot = { name = "director-1", role = "director" }
 
 # Every team now races with its stint 2 driver; the retired car may keep its last one.
+
 [[step]]
 id = "dc_back"
 at = "after:shot_director_1"
@@ -811,9 +1059,12 @@ expect = ["result('red_flag').status == 'RED FLAG: banner, cover and race held'"
           "'comms2' not in obs.program_channels"]
 timeout = "20s"
 shot = { name = "restart-1", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+caption = "Race Control raises the red flag"
+focus = ["race_control", "program"]
 
 # The race as it froze, up to 3 s after before_red: cars more than 0.2 s apart keep their
 # order, level ones may swap in between, so the exact order is soft.
+
 [[step]]
 id = "frozen"
 at = "after:red_flag+3s"
@@ -850,6 +1101,8 @@ role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 14"]
 timeout = "4m"
+caption = "The cars return to the box"
+focus = ["race_control", "program"]
 
 [[step]]
 id = "restart_lobby"
@@ -857,6 +1110,8 @@ at = "after:to_box"
 role = "drivers"
 do = "lobby"
 args = { stint = 2 }
+caption = "The drivers join the restart lobby"
+focus = ["race_control", "program"]
 
 [[step]]
 id = "restart_released"
@@ -867,6 +1122,8 @@ expect = ["not race.red_flag",
           "relay.get('/setup/data').fields.racecontrol != 'Red Flag - Race Suspended'"]
 timeout = "15s"
 shot = { name = "restart-2", role = "race_control", element = ".area[data-area=\"race\"] .tbl" }
+caption = "Race Control releases the restart"
+focus = ["race_control", "program"]
 
 [[step]]
 id = "leave_box"
@@ -876,11 +1133,14 @@ do = "release"
 args = { gaps = "${before_red.entries}" }
 expect = ["page('drivers').driving == 14"]
 timeout = "4m"
+caption = "The cars leave the box with the gaps they had before the flag"
+focus = ["program", "viewer"]
 
 # The release of 14 cars takes 37-39 s and the simulated paces differ by up to about
 # 4.7 %, so gaps move about 2 s by themselves; red-flag checks the restart within 1 s.
 # The paces also change the order, not only cars closer than the drivers' 0.2 s tick:
 # the exact order is soft.
+
 [[step]]
 id = "kept"
 at = "after:leave_box+3s"
@@ -919,8 +1179,52 @@ expect = ["relay.up"]
 shot = { name = "restart-tower-1", role = "page:overlay", element = "#drivers-tower" }
 
 [[step]]
-id = "lap11"
+id = "pit2"
 at = "after:shot_restart_tower_1"
+role = "drivers"
+do = "pit"
+args = { entry = "Blue Harbor Racing #22", seconds = 20 }
+caption = "Blue Harbor Racing #22 comes in for a pit stop"
+focus = ["race_control", "viewer"]
+
+[[step]]
+id = "in_pits2"
+at = "after:pit2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Blue Harbor Racing #22').status == 'box'"]
+timeout = "5m"
+
+[[step]]
+id = "out_of_pits2"
+at = "after:in_pits2"
+role = "api"
+do = "get"
+args = { path = "/drivers/race" }
+expect = ["row(race.entries, 'entry', 'Blue Harbor Racing #22').status == 'racing'"]
+timeout = "2m"
+
+[[step]]
+id = "compound2"
+at = "after:out_of_pits2"
+role = "race_control"
+do = "compound"
+args = { entry = "Blue Harbor Racing #22", code = "RH" }
+expect = ["race.compounds['Blue Harbor Racing #22'].code == 'RH'"]
+timeout = "15s"
+caption = "Race Control sets the new tyre compound of Blue Harbor Racing #22"
+
+[[step]]
+id = "desk_race_back2"
+at = "after:compound2"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+
+[[step]]
+id = "lap11"
+at = "after:desk_race_back2"
 role = "api"
 do = "get"
 args = { path = "/drivers/race" }
@@ -928,35 +1232,92 @@ expect = ["race.lap.leader >= 11"]
 timeout = "12m"
 
 [[step]]
-id = "box3"
+id = "swap2_driver"
 at = "after:lap11"
+role = "driver"
+do = "register"
+args = { entry = "Lakeside Racing #14", name = "Driver 14-3", stint = 3 }
+expect = ["page('driver').registered"]
+timeout = "20s"
+chapter = "Driver swap 2"
+caption = "The stint 3 driver of Lakeside Racing #14 registers on the invite page"
+focus = ["driver", "race_control"]
+
+[[step]]
+id = "swap2_approve"
+at = "after:swap2_driver"
+role = "race_control"
+do = "approve_driver"
+args = { name = "Driver 14-3" }
+timeout = "20s"
+caption = "Race Control approves Driver 14-3 for stint 3"
+focus = ["race_control", "driver"]
+
+[[step]]
+id = "swap2_desk"
+at = "after:swap2_approve"
+role = "race_control"
+do = "view"
+args = { area = "race" }
+
+[[step]]
+id = "box3"
+at = "after:swap2_desk"
 role = "drivers"
 do = "box"
 expect = ["page('drivers').standing == 14"]
 timeout = "4m"
+caption = "The cars come into the box for the driver swap"
+focus = ["program", "race_control"]
+
+[[step]]
+id = "split3"
+at = "after:box3"
+role = "director"
+do = "scene"
+args = { scene = "Split" }
+expect = ["obs.scene == 'Splitscreen'"]
+timeout = "20s"
+caption = "The director puts the splitscreen on program while the cars box"
+focus = ["program", "director"]
 
 [[step]]
 id = "arm3"
-at = "after:box3"
+at = "after:split3"
 role = "director"
 do = "arm"
+caption = "The director arms the feed of stint 3"
 
 [[step]]
 id = "next3"
 at = "after:arm3"
 role = "director"
 do = "next"
-expect = ["'comms3' in obs.program_channels",
-          "'comms2' not in obs.program_channels",
-          "page('commentator:Comms 3').on_air"]
+expect = ["page('commentator:Comms 3').on_air"]
 timeout = "90s"
+caption = "The director switches to stint 3: Comms 3 goes on air"
+focus = ["director", "program", "commentator:Comms 2", "commentator:Comms 3"]
+
+[[step]]
+id = "stint3_cut"
+at = "after:next3"
+role = "director"
+do = "scene"
+args = { scene = "Stint" }
+expect = ["'comms3' in obs.program_channels",
+          "'comms2' not in obs.program_channels"]
+timeout = "90s"
+caption = "The director cuts back to the stint: Comms 3 alone on program"
+focus = ["program", "director"]
 
 [[step]]
 id = "lobby3"
-at = "after:next3"
+at = "after:stint3_cut"
 role = "drivers"
 do = "lobby"
 args = { stint = 3 }
+caption = "The stint 3 drivers join the new lobby"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "release3"
@@ -965,6 +1326,8 @@ role = "drivers"
 do = "release"
 expect = ["page('drivers').driving == 14"]
 timeout = "4m"
+caption = "The cars leave the box with their stint 3 drivers"
+focus = ["program", "viewer"]
 
 [[step]]
 id = "stint3"
@@ -992,6 +1355,9 @@ role = "race_control"
 do = "final_lap"
 expect = ["race.state in ['final_lap', 'finishing', 'finished']"]
 timeout = "30s"
+chapter = "The finish"
+caption = "Race Control calls the final lap"
+focus = ["race_control", "viewer"]
 
 [[step]]
 id = "shot_finallap_2"
@@ -1072,6 +1438,8 @@ role = "viewer"
 do = "read"
 expect = ["'Fastest lap' in page('viewer').fastest"]
 timeout = "20s"
+caption = "The public timing shows the result and the fastest lap"
+focus = ["viewer", "program"]
 
 [[step]]
 id = "shot_new_cockpit_finished"
@@ -1087,13 +1455,27 @@ id = "chequered"
 at = "after:shot_new_cockpit_finished"
 role = "drivers"
 do = "stop"
+caption = "The drivers stop after the chequered flag"
+focus = ["program", "viewer"]
+
+[[step]]
+id = "outro"
+at = "after:chequered"
+role = "director"
+do = "play"
+args = { media = "outro" }
+chapter = "Off air"
+caption = "The director plays the outro"
+focus = ["program", "director"]
 
 [[step]]
 id = "off_air"
-at = "after:chequered"
+at = "after:outro"
 role = "director"
 do = "end_part"
 expect = ["not obs.streaming"]
+caption = "The director ends Part 1 of the broadcast"
+focus = ["director", "program"]
 
 [[step]]
 id = "stop_event"
@@ -1102,3 +1484,4 @@ role = "producer"
 do = "stop_event"
 expect = ["not relay.up"]
 timeout = "30s"
+caption = "The producer stops the event"

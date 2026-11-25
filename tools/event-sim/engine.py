@@ -74,6 +74,7 @@ class StepResult:
     status: str = "pending"          # ok, failed, skipped
     started: float = None            # seconds since the run started
     duration: float = 0.0
+    acted: float = None              # when the action returned, before the expects were awaited
     error: str = ""
     checks: list = field(default_factory=list)
     shot: str = ""
@@ -498,6 +499,7 @@ class Engine:
             res.status, res.error = "failed", str(exc)
         except Exception as exc:  # a role bug must not hide the rest of the report
             res.status, res.error = "failed", f"{type(exc).__name__}: {exc}"
+        res.acted = round(self.now(), 3)
         if res.status == "failed":
             self.findings.append(Finding(HARD, res.error, step.id, step.role))
         elif res.status == "ok":

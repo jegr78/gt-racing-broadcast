@@ -27,6 +27,7 @@ class Unavailable(Exception):  # noqa: N818  a soft outcome, not a bug
 class Role:
     kind = ""
     by_commentator = False   # each instance is a commentator's crew name, checked at load
+    recorded = False         # a record run records its page: a view a step's focus can name
 
     def __init__(self, ctx, name):
         self.ctx = ctx
