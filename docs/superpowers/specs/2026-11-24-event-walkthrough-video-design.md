@@ -169,7 +169,7 @@ shot names before and after, and the new steps carry no deck shot names.
 ### Limits and safety
 
 - Recording needs a machine with a display and OBS, and more memory than the local E2E
-  unit's 2 GiB (`full` already exceeds it). `--record` states its own limit, checked
+  unit's 2 GiB (`full` already exceeds it). It runs on the maintainer's Mac (gate G4). `--record` states its own limit, checked
   before the stack starts, and fails closed like the other runs. An OOM kill is a hard
   failure.
 - The demo profile only. Ports 8088 and 8089 stay untouched, as in every simulation.
@@ -209,6 +209,22 @@ user before anything else is built.
   -deadline realtime -cpu-used 8`) and rendering with four parallel workers, each on its
   own slice of frames, brings a 30-minute film to about 80 minutes on the 6-core
   workstation.
+- **G4 passed on the Mac, failed on the Linux box.** On the box (6 cores, 15 GB), `full`
+  with page videos broke every limit of the local E2E unit: the 200% CPU quota throttled
+  it into timeouts, the per-page ffmpeg encoders exhausted the 512 tasks, and memory grew
+  about 100 MB per minute to an OOM kill at 5 GiB after 40 minutes. On the Mac (Apple M3,
+  8 cores, 16 GB) the same run passed: 121 steps, no hard finding, 37 minutes; the whole
+  process tree of the simulation peaked at 2.75 GB and stayed flat, the second OBS at
+  0.74 GB, and the system kept about 35% of its memory free. The page videos took
+  1.14 GB. Recording therefore runs on the Mac. macOS has no cgroups, so the run needs its
+  own watchdog over its whole process tree (Playwright, the browsers and their encoders
+  run in process groups of their own).
+- **G1 on macOS.** OBS there ignores `HOME` and `XDG_CONFIG_HOME` and always uses
+  `~/Library/Application Support/obs-studio`. The run refuses while any OBS runs, copies
+  that folder, runs OBS with its own Sim profile, collection and WebSocket port, and
+  restores the folder afterwards; all 5507 files compared equal after both test runs.
+  OBS 32.2.2 crashes at launch on macOS 27.2 (a Qt bug fixed in OBS 33.0), so recording
+  needs OBS 33.
 
 ## Tests
 
