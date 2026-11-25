@@ -1806,6 +1806,15 @@ def t_the_sheet_carries_the_roster_and_the_red_flag_banner():
         raise AssertionError("more cars than the grid holds must be refused")
 
 
+def t_the_sheet_carries_every_hud_text_the_panel_macros_set():
+    with open(os.path.join(ROOT, "src", "director", "director-panel.html"), encoding="utf-8") as fh:
+        texts = {t for t in re.findall(r'\brc:"([^"]*)"', fh.read()) if t}
+    assert texts, "the panel's scene macros set a HUD race control text"
+    config = stack.sheet_tabs(scn({"stints": 3, "cars": 4}))["Configuration"]
+    vocab = {row[config[0].index("Race Control")] for row in config[1:]}
+    assert texts <= vocab, f"a macro text missing from the Race Control vocabulary is refused: {texts - vocab}"
+
+
 def t_event_classes_give_each_team_a_class_in_turn():
     config = stack.sheet_tabs(scn({"stints": 3, "cars": 4, "classes": ["GT3", "GT4"]}))["Configuration"]
     col = config[0].index("Class")
