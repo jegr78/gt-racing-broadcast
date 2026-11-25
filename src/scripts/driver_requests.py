@@ -64,6 +64,37 @@ def _valid(rec):
     return rec.get("who") is None or isinstance(rec.get("who"), str)
 
 
+REFUSED = {"entry": "pick an entry from the list", "segment": "pick a stint or segment from the list"}
+
+
+def approval_values(fields, roster, segments):
+    """`fields` as an approval takes them: (values, None), or (None, "entry") or
+    (None, "segment") for a value outside the roster or the stint labels. Without
+    stint labels an approval keeps no stint."""
+    values = dict(fields)
+    if not isinstance(values.get("entry"), str) or (roster and values["entry"] not in roster):
+        return None, "entry"
+    if segments and values.get("segment") not in segments:
+        return None, "segment"
+    if not segments:
+        values["segment"] = None
+    return values, None
+
+
+def approval_batch(body):
+    """The desk's `{"requests": [{conn, entry?, segment?, name?}]}` as a list of those
+    fields; unknown keys are dropped. Raises ValueError for a malformed body."""
+    items = body.get("requests") if isinstance(body, dict) else None
+    if not isinstance(items, list) or not 0 < len(items) <= MAX_PENDING:
+        raise ValueError(f"send requests as a list of 1 to {MAX_PENDING}")
+    out = []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("conn"), str):
+            raise ValueError("each request needs its conn")
+        out.append({k: item[k] for k in ("conn", "entry", "segment", "name") if k in item})
+    return out
+
+
 def _record(rec):
     reg = rec["registered"]
     return {"conn": rec["conn"], "entry": rec["entry"], "segment": rec.get("segment"),
@@ -247,6 +278,37 @@ class Store:
         """(before, after) of an approved request with corrected values."""
         return self._decide(conn, who, ("approved",), "approved",
                             {"entry": entry, "segment": segment, "name": name})
+
+    def approve_pending(self, who, roster, segments, shown):
+        """Approve the requests in `shown` (`approval_batch`) in its order, each as a single
+        approval with those values would; a missing value keeps the request's. One that
+        approval refuses, or no longer waiting, is skipped. Returns (approved [(before,
+        after)], skipped [(request, reason)]); a failed write raises OSError and approves none."""
+        with self._lock:
+            reqs = self._reqs if self._current() else {}
+            now, done, skipped, snapshot = self._wall(), [], [], copy.deepcopy(self._reqs)
+            for item in shown:
+                rec = reqs.get(item["conn"])
+                if rec is None:
+                    skipped.append(({k: item.get(k) for k in ("conn", "entry", "segment", "name")},
+                                    "unknown request"))
+                    continue
+                if rec["status"] != "pending":
+                    skipped.append((copy.deepcopy(rec), f"this request is {rec['status']}"))
+                    continue
+                values, bad = approval_values({k: item.get(k, rec[k]) for k in ("entry", "segment", "name")},
+                                              roster, segments)
+                problem = (REFUSED[bad] if bad
+                           else driver_invite._problem(values["entry"], values["name"], values["segment"]))
+                if problem:
+                    skipped.append((copy.deepcopy(rec), problem))
+                    continue
+                before = copy.deepcopy(rec)
+                rec.update(values, status="approved", who=str(who)[:80], decided=now)
+                done.append((before, copy.deepcopy(rec)))
+            if done:
+                self._commit(snapshot)
+            return done, skipped
 
     def reject_pending(self, who):
         """Reject every waiting request; returns them as they were."""

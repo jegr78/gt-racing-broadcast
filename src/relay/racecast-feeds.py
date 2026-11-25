@@ -15083,8 +15083,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             rec = _requests.get(conn) if _requests and isinstance(conn, str) else None
             return bool(rec) and rec["status"] == "rejected"
 
+        def _approval_lists(self):
+            """The roster and the stint labels an approval checks against."""
+            return (hud_source.roster_names() if hud_source else [],
+                    driver_segments() if (driver_segments and not relay.solo) else [])
+
         def _driver_request(self, action, body, who):
-            """Approve, correct or reject a driver's registration from a desk."""
+            """Approve, correct or reject a driver's registration, or every waiting one, from a desk."""
             if action == "reject-pending":
                 try:
                     gone = _requests.reject_pending(who)     # never in the hub: nothing to revoke there
@@ -15094,6 +15099,23 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     driver_race_svc.log(who, "driver_reject_pending", conns=[r["conn"] for r in gone],
                                         names=[r["name"] for r in gone])
                 return self._send({"ok": True, "rejected": len(gone)})
+            if action == "approve-pending":
+                try:
+                    shown = driver_requests.approval_batch(body)
+                except ValueError as exc:
+                    return self._send({"ok": False, "error": str(exc)}, 400)
+                try:
+                    done, skipped = _requests.approve_pending(who, *self._approval_lists(), shown)
+                except OSError:
+                    return self._send({"ok": False, "error": "the decision could not be saved"}, 500)
+                keys = ("conn", "entry", "segment", "name")
+                for before, after in done:
+                    driver_hub.update(after["conn"], **{k: after[k] for k in keys[1:]})
+                    if driver_race_svc is not None:
+                        driver_race_svc.log(who, "driver_approve", **{k: after[k] for k in keys},
+                                            before={k: before[k] for k in keys[1:]})
+                return self._send({"ok": True, "approved": [{k: a[k] for k in keys} for _b, a in done],
+                                   "skipped": [dict({k: r[k] for k in keys}, reason=why) for r, why in skipped]})
             if action not in ("approve", "correct", "reject"):
                 return self._send({"error": "not found"}, 404)
             conn = body.get("conn")
@@ -15102,15 +15124,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._send({"ok": False, "error": "unknown request"}, 404)
             fields = {}
             if action != "reject":
-                fields = {k: body.get(k, rec[k]) for k in ("entry", "segment", "name")}
-                roster = hud_source.roster_names() if hud_source else []
-                segments = driver_segments() if (driver_segments and not relay.solo) else []
-                if not isinstance(fields["entry"], str) or (roster and fields["entry"] not in roster):
-                    return self._send({"ok": False, "error": "pick an entry from the list"}, 400)
-                if segments and fields["segment"] not in segments:
-                    return self._send({"ok": False, "error": "pick a stint or segment from the list"}, 400)
-                if not segments:
-                    fields["segment"] = None
+                fields, bad = driver_requests.approval_values(
+                    {k: body.get(k, rec[k]) for k in ("entry", "segment", "name")}, *self._approval_lists())
+                if bad:
+                    return self._send({"ok": False, "error": driver_requests.REFUSED[bad]}, 400)
             try:
                 if action == "reject":
                     _requests.reject(conn, who)

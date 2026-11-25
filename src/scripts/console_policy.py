@@ -46,7 +46,7 @@ _DRIVER_DESK_GET = {("race",), ("readiness",), ("requests",), ("invite",), ("tim
                     ("race", "recording"), ("race", "recording", "at"), ("race", "recording", "csv")}
 _DRIVER_DESK_POST = {("reassign",), ("disconnect",), ("race", "recording"),
                      ("requests", "approve"), ("requests", "correct"), ("requests", "reject"),
-                     ("requests", "reject-pending"),
+                     ("requests", "reject-pending"), ("requests", "approve-pending"),
                      ("race", "recording", "event")} | {
     ("race", a) for a in ("settings", "start", "unlock-start", "final-lap", "finish", "red-flag", "restart-mode",
                           "release", "rejoin", "correct", "change", "fastest", "quali", "quali-lap", "compound",

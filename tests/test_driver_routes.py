@@ -671,8 +671,8 @@ def t_a_decision_survives_a_renewed_invite_and_a_failed_write_cleanly():
         def broken(self):
             raise OSError("disk full")
         driver_requests.Store._save = broken
-        for route in ("approve", "reject", "reject-pending"):
-            code, text, _h = _post(port, f"/drivers/requests/{route}", {"conn": conn})
+        for route in ("approve", "reject", "reject-pending", "approve-pending"):
+            code, text, _h = _post(port, f"/drivers/requests/{route}", {"conn": conn, "requests": [{"conn": conn}]})
             assert code == 500 and "could not be saved" in text and "disk full" not in text, (route, code, text)
         code, text, _h = _register(port, invite, entry="Team B #2", name="Ann")
         assert code == 500 and "could not be saved" in text, (code, text)
@@ -732,6 +732,69 @@ def t_both_desks_reject_every_waiting_request_at_once():
         last = _audit_of(srv)[-1]
         assert last["action"] == "driver_reject_pending" and last["who"] == "race_control:dave" \
             and len(last["conns"]) == 2, last
+    finally:
+        srv.shutdown()
+
+
+def _waiting(port):
+    reqs = json.loads(_req(port, "/drivers/requests")[1])["requests"]
+    return [{k: r[k] for k in ("conn", "entry", "segment", "name")} for r in reqs if r["status"] == "pending"]
+
+
+def t_both_desks_approve_the_waiting_requests_on_screen():
+    srv, port, path, hub = _serve()
+    try:
+        invite = driver_invite.create(path)["id"]
+        kept = _approved(port, path, invite, entry="Team A #1", name="Max")
+        ENTRIES.append("Team Z #3")
+        waiting = {n: json.loads(_register(port, invite, entry=e, name=n)[1])["code"]
+                   for e, n in (("Team B #2", "Ann"), ("Team Z #3", "Lea"))}
+        ENTRIES.remove("Team Z #3")
+        shown = _waiting(port)
+        shown[0]["name"] = "Ann K"
+        late = json.loads(_register(port, invite, entry="Team B #2", name="Late")[1])["code"]
+        rc, alice = g._tok("dave"), g._tok("alice")
+        for route in (f"/console/drive/requests/approve-pending?i={invite}",
+                      f"/console/drivers/requests/approve-pending?t={alice}"):
+            assert _post(port, route, {"requests": shown})[0] in (403, 404), route
+        for bad in ({}, {"requests": "all"}, {"requests": [{"name": "Ann"}]}):
+            st, text, _h = _post(port, f"/console/race-control/drivers/requests/approve-pending?t={rc}", bad)
+            assert st == 400, f"a malformed body is refused: {bad} -> {st} {text}"
+        st, text, _h = _post(port, f"/console/race-control/drivers/requests/approve-pending?t={rc}",
+                             {"requests": shown})
+        reply = json.loads(text)
+        assert st == 200 and [a["name"] for a in reply["approved"]] == ["Ann K"], \
+            f"the desk's edit is what gets approved: {text}"
+        assert [(x["name"], x.get("reason")) for x in reply["skipped"]] == \
+            [("Lea", "pick an entry from the list")], f"a request the single approve refuses stays waiting: {text}"
+        batch = tp.encode_batch([_wire(1)])
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": waiting["Ann"]})[0] == 200
+        assert [_req(port, "/console/drive/ingest", batch, {"X-Driver-Code": c})[0]
+                for c in (waiting["Lea"], late)] == [423, 423], "skipped and late requests stay waiting"
+        assert _req(port, "/console/drive/ingest", batch, {"X-Driver-Code": kept})[0] == 200
+        last = _audit_of(srv)[-1]
+        assert (last["action"], last["who"], last["name"], last["entry"]) == \
+            ("driver_approve", "race_control:dave", "Ann K", "Team B #2") and last["before"]["name"] == "Ann", \
+            f"each approval is logged like a single one: {last}"
+        again = json.loads(_post(port, "/drivers/requests/approve-pending", {"requests": shown})[1])
+        assert again["approved"] == [] and [x["reason"] for x in again["skipped"]] == \
+            ["this request is approved", "pick an entry from the list"], f"a decided request is skipped: {again}"
+    finally:
+        del ENTRIES[2:]
+        srv.shutdown()
+
+
+def t_approve_all_waiting_hands_the_hub_the_approved_values():
+    srv, port, path, hub = _serve(solo=False, segments=["Stint 1", "Stint 2"])
+    try:
+        invite = driver_invite.create(path)["id"]
+        issued = json.loads(_register(port, invite, entry="Team A #1", name="Max", segment="Stint 2")[1])["code"]
+        seen = []
+        hub.update = lambda conn, **values: seen.append((conn, values))
+        reply = json.loads(_post(port, "/drivers/requests/approve-pending", {"requests": _waiting(port)})[1])
+        assert [(a["entry"], a["segment"]) for a in reply["approved"]] == [("Team A #1", "Stint 2")], reply
+        assert seen == [(_conn_of(path, issued), {"entry": "Team A #1", "segment": "Stint 2", "name": "Max"})], \
+            f"the hub counts the approved values, like a single approval: {seen}"
     finally:
         srv.shutdown()
 

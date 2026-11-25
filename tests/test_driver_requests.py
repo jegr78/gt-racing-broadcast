@@ -175,6 +175,73 @@ def t_reject_all_waiting_requests_at_once():
     assert store.reject_pending("x") == []
 
 
+def _shown(store, **edits):
+    """The waiting requests as the desk sends them, with `edits` per conn."""
+    return [dict({k: r[k] for k in ("conn", "entry", "segment", "name")}, **edits.get(r["conn"], {}))
+            for r in store.all() if r["status"] == "pending"]
+
+
+def t_approve_all_takes_the_requests_on_screen_as_approve_on_each_would():
+    store, _inv, clock = _store()
+    roster, stints = ["Team A #1", "Team B #2"], ["Stint 1", "Stint 2"]
+    for conn, entry, seg, name in (("conn0001", "Team A #1", "Stint 1", "Max"),
+                                   ("conn0002", "Team Z #9", "Stint 1", "Zed"),
+                                   ("conn0003", "Team B #2", "Q9", "Qui"),
+                                   ("conn0004", "Team B #2", "Stint 1", "Ann"),
+                                   ("conn0005", "Team B #2", "Stint 1", "Bea"),
+                                   ("conn0006", "Team B #2", "Stint 2", "Old")):
+        clock[0] += 1
+        store.add(_reg(conn=conn, entry=entry, segment=seg, name=name), client=conn)
+    shown = _shown(store, conn0002={"entry": "Team B #2", "name": "Zed K"})
+    shown.reverse()
+    store.approve("conn0006", "x", entry="Team B #2", segment="Stint 2", name="Old")
+    store.add(_reg(conn="conn0009", name="Late"), client="late")
+    shown.append({"conn": "conn9999", "name": "Gone"})
+    clock[0] = 2000.0
+    done, skipped = store.approve_pending("race_control:dave", roster, stints, shown)
+    assert [(a["conn"], a["entry"], a["name"], a["who"], a["decided"]) for _b, a in done] == [
+        ("conn0005", "Team B #2", "Bea", "race_control:dave", 2000.0),
+        ("conn0004", "Team B #2", "Ann", "race_control:dave", 2000.0),
+        ("conn0002", "Team B #2", "Zed K", "race_control:dave", 2000.0),
+        ("conn0001", "Team A #1", "Max", "race_control:dave", 2000.0)], \
+        ("in the list's order, each with the desk's values, edits included", done)
+    assert done[2][0]["entry"] == "Team Z #9", "before holds the request as it was"
+    assert [(r["conn"], why) for r, why in skipped] == [
+        ("conn0006", "this request is approved"),
+        ("conn0003", "pick a stint or segment from the list"),
+        ("conn9999", "unknown request")], \
+        ("only what the single approve refuses stays waiting, with its reason", skipped)
+    assert {r["conn"] for r in store.all() if r["status"] == "pending"} == {"conn0003", "conn0009"}, \
+        "a request the desk did not show stays waiting"
+
+
+def t_approve_all_checks_like_a_single_approval():
+    store, _inv, _clock = _store()
+    store.add(_reg(conn="conn0001", segment="Stint 1"))
+    store.add(_reg(conn="conn0002", entry="Team B #2", name="A" * 30))
+    store.add(_reg(conn="conn0003", entry="Team B #2", name="Ann"))
+    done, skipped = store.approve_pending("x", [], [], _shown(store, conn0003={"name": "B" * 30}))
+    assert [(a["conn"], a["segment"]) for _b, a in done] == [("conn0001", None)], \
+        ("without stint labels an approval keeps no stint, like the single approve", done)
+    assert [(r["conn"], why) for r, why in skipped] == [
+        ("conn0002", "the name takes up to 24 ASCII letters, digits, spaces, _ . -"),
+        ("conn0003", "the name takes up to 24 ASCII letters, digits, spaces, _ . -")], \
+        ("an edited name meets the same rule", skipped)
+
+
+def t_approve_all_reads_only_a_well_formed_list():
+    for body in (None, [], {}, {"requests": {}}, {"requests": [{"name": "x"}]}, {"requests": ["conn0001"]},
+                 {"requests": [{"conn": 5}]}, {"requests": [{"conn": "c"}] * (dr.MAX_PENDING + 1)}):
+        try:
+            dr.approval_batch(body)
+            raise AssertionError(f"a malformed body is refused: {body!r}"[:120])
+        except ValueError:
+            pass
+    got = dr.approval_batch({"requests": [{"conn": "conn0001", "name": "Max", "extra": 1}, {"conn": "conn0002"}]})
+    assert got == [{"conn": "conn0001", "name": "Max"}, {"conn": "conn0002"}], \
+        f"unknown keys are dropped, missing ones keep the request's value: {got}"
+
+
 def t_a_failed_write_leaves_memory_as_it_was():
     store, _inv, _clock = _store()
     store.add(_reg())
@@ -185,6 +252,7 @@ def t_a_failed_write_leaves_memory_as_it_was():
     store._save = broken
     for fn in (lambda: store.approve("conn0001", "x", entry="Team B #2", segment=None, name="Max"),
                lambda: store.reject("conn0001", "x"), lambda: store.reject_pending("x"),
+               lambda: store.approve_pending("x", [], [], [{"conn": "conn0001"}]),
                lambda: store.add(_reg(conn="conn0002", name="Ann"))):
         try:
             fn()

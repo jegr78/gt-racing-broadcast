@@ -119,9 +119,15 @@ there was none); a cover or banner the director raised stays until the director 
 
 The **Drivers** area's **Driver requests** lists the drivers who registered on the invite
 link and wait for approval. Compare each with the car in the GT7 lobby, correct the
-name, team or stint if needed and press **Approve**, or **Reject** it. The relay uses no
+name, team or stint if needed and press **Approve**, or **Reject** it. **Approve all
+waiting** approves the waiting requests on screen exactly as **Approve** on each would,
+including your edits, and names the ones that stay waiting, for example one whose team
+left the roster. A request that arrived after the list was shown stays waiting. The
+relay uses no
 telemetry of a driver before the approval. Details are in
 [Driver telemetry](Driver-Telemetry#approving-drivers).
+
+![Race Control desk, Drivers area: five waiting driver requests with Approve all waiting and Reject all waiting above them, each request with its name, entry and stint fields](images/console-race-control-drivers.png)
 
 **Setup** holds the **race recording** (start and stop, a CSV download) and **Race** its
 disconnect events: the event list with **Confirm DC** and **Dismiss**, and **Show
